@@ -1,0 +1,239 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { ItemType } from "@prisma/client";
+import { bulkUpdateItems } from "@/actions/item";
+import { itemTypeValues, itemTypeLabels } from "@/lib/validation/item";
+import { formatItemId } from "@/lib/order-id";
+import { formatCurrency } from "@/lib/utils";
+import { Badge, Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/input";
+import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
+import type { BrandOption } from "@/components/items/item-fields";
+
+const TYPE_TONE: Record<ItemType, "default" | "blue" | "green" | "amber"> = {
+  GOOD: "default",
+  SERVICE: "blue",
+  SUBSCRIPTION: "green",
+  PERPETUAL: "amber",
+};
+
+export type ItemRow = {
+  id: string;
+  itemSeq: number;
+  name: string;
+  sku: string;
+  type: ItemType;
+  category: string | null;
+  sellingPrice: number;
+  trackInventory: boolean;
+  stockQuantity: number;
+  reorderLevel: number | null;
+  active: boolean;
+  brand: { id: string; name: string } | null;
+  productFamily: { id: string; name: string } | null;
+};
+
+export function ItemsTable({ items, brands }: { items: ItemRow[]; brands: BrandOption[] }) {
+  const router = useRouter();
+  const selection = useRowSelection(items);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const [brandId, setBrandId] = useState("");
+  const [productFamilyId, setProductFamilyId] = useState("");
+  const [type, setType] = useState("");
+  const [category, setCategory] = useState("");
+  const [active, setActive] = useState("");
+
+  const selectedBrand = brands.find((b) => b.id === brandId);
+
+  function resetChanges() {
+    setBrandId("");
+    setProductFamilyId("");
+    setType("");
+    setCategory("");
+    setActive("");
+  }
+
+  function apply() {
+    setError(null);
+    setDone(null);
+    startTransition(async () => {
+      const result = await bulkUpdateItems({
+        itemIds: selection.ids,
+        brandId,
+        productFamilyId,
+        type,
+        category,
+        active,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setDone(`Updated ${result.data.count} item(s).`);
+      selection.clear();
+      resetChanges();
+      router.refresh();
+    });
+  }
+
+  return (
+    <div>
+      <BulkBar count={selection.count} onClear={selection.clear} error={error} notice={done}>
+        <div className="flex w-full flex-wrap items-center gap-2">
+            {/* The bulk bar has no captions — the "no change" option is the only visible cue, and an
+                option is not a name. Each control carries its own. */}
+            <Select
+              value={brandId}
+              onChange={(e) => {
+                setBrandId(e.target.value);
+                setProductFamilyId("");
+              }}
+              className="h-9 w-44"
+              aria-label="Brand"
+            >
+              <option value="">Brand — no change</option>
+              <option value="clear">Remove brand</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={productFamilyId}
+              onChange={(e) => setProductFamilyId(e.target.value)}
+              disabled={!selectedBrand}
+              className="h-9 w-44"
+              aria-label="Product family"
+            >
+              <option value="">{selectedBrand ? "Family — no change" : "Family — pick a brand"}</option>
+              {selectedBrand?.families.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </Select>
+            <Select value={type} onChange={(e) => setType(e.target.value)} className="h-9 w-44" aria-label="Type">
+              <option value="">Type — no change</option>
+              {itemTypeValues.map((t) => (
+                <option key={t} value={t}>
+                  {itemTypeLabels[t]}
+                </option>
+              ))}
+            </Select>
+            <Input
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Category — no change"
+              className="h-9 w-48"
+              aria-label="Category"
+            />
+            <Select value={active} onChange={(e) => setActive(e.target.value)} className="h-9 w-44" aria-label="Status">
+              <option value="">Status — no change</option>
+              <option value="true">Mark active</option>
+              <option value="false">Mark inactive</option>
+            </Select>
+          <Button size="sm" disabled={isPending} onClick={apply}>
+            {isPending ? "Applying…" : `Apply to ${selection.count}`}
+          </Button>
+        </div>
+        <p className="w-full text-xs text-muted">
+          Only the fields you change are applied — everything left on &ldquo;no change&rdquo; is untouched.
+        </p>
+      </BulkBar>
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="w-10 px-4 py-2.5">
+                  <Checkbox
+                    checked={selection.allSelected}
+                    onChange={selection.toggleAll}
+                    aria-label="Select all items on this page"
+                  />
+                </th>
+                <th className="px-4 py-2.5">Item ID</th>
+                <th className="px-4 py-2.5">Item</th>
+                <th className="px-4 py-2.5">Type</th>
+                <th className="px-4 py-2.5">SKU</th>
+                <th className="px-4 py-2.5">Brand / family</th>
+                <th className="px-4 py-2.5">Category</th>
+                <th className="px-4 py-2.5">Selling price</th>
+                <th className="px-4 py-2.5">Stock</th>
+                <th className="px-4 py-2.5">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const lowStock =
+                  item.trackInventory && item.reorderLevel !== null && item.stockQuantity <= item.reorderLevel;
+                return (
+                  <tr key={item.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
+                    <td className="px-4 py-2.5">
+                      <Checkbox
+                        checked={selection.isSelected(item.id)}
+                        onChange={() => selection.toggle(item.id)}
+                        aria-label={`Select ${item.name}`}
+                      />
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted">{formatItemId(item.itemSeq)}</td>
+                    <td className="px-4 py-2.5">
+                      <Link href={`/items/${item.id}`} className="font-medium text-text hover:underline">
+                        {item.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <Badge tone={TYPE_TONE[item.type]}>{itemTypeLabels[item.type]}</Badge>
+                    </td>
+                    <td className="px-4 py-2.5 text-muted">{item.sku}</td>
+                    <td className="px-4 py-2.5 text-muted">
+                      {item.brand ? (
+                        <>
+                          {item.brand.name}
+                          {item.productFamily && <span className="text-subtle"> · {item.productFamily.name}</span>}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted">{item.category ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-muted">{formatCurrency(String(item.sellingPrice))}</td>
+                    <td className="px-4 py-2.5 text-muted">
+                      {item.trackInventory ? (
+                        <span className={lowStock ? "font-medium text-warning" : undefined}>
+                          {item.stockQuantity}
+                          {lowStock && " (low)"}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {item.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-8 text-center text-subtle">
+                    No items found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}

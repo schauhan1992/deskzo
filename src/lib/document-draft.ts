@@ -1,0 +1,165 @@
+/**
+ * The shape the document form edits, before the GST engine and the database get involved. It lives
+ * outside the form component because a server page builds the starting draft, and a server
+ * component can't call a function exported from a "use client" module.
+ *
+ * Every numeric field is a string: these come straight from text inputs, and keeping them as typed
+ * means a half-entered "1." doesn't become NaN mid-keystroke.
+ */
+export type LineDraft = {
+  key: string;
+  itemId: string;
+  name: string;
+  description: string;
+  hsnCode: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string;
+  /** "PERCENT" or "AMOUNT" — which way the discount value is read. */
+  discountMode: string;
+  discountValue: string;
+  taxRatePercent: string;
+};
+
+export type AddressDraft = {
+  attention: string;
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  stateCode: string;
+  pincode: string;
+  country: string;
+  phone: string;
+};
+
+export type DocumentFormDefaults = {
+  id?: string;
+  docNumber: string;
+  companyId: string;
+  locationId: string;
+  placeOfSupplyCode: string;
+  gstTreatment: string;
+  buyerGstin: string;
+  reverseCharge: boolean;
+  /** What the customer is quoted in. The ledger stays in rupees whatever this is. */
+  currency: string;
+  /** Rupees per unit of `currency`. Always 1 on a rupee document — the schema insists. */
+  exchangeRate: number;
+  issueDate: string;
+  dueDate: string;
+  validUntil: string;
+  reference: string;
+  /** Empty means "whoever owns the account" — resolved on the server when the document is created. */
+  salespersonId: string;
+  notes: string;
+  terms: string;
+
+  dispatchFromAddress: string;
+  billing: AddressDraft;
+  shippingSameAsBilling: boolean;
+  shipping: AddressDraft;
+  shippingGstin: string;
+
+  shippingCharge: string;
+  shippingTaxRatePercent: string;
+  withholdingMode: string;
+  withholdingSection: string;
+  withholdingRatePercent: string;
+  adjustmentLabel: string;
+  adjustment: string;
+
+  sourceDocumentId: string;
+  againstDocumentId: string;
+  /** Set when the form was opened from a lead, so the document remembers which deal it serves. */
+  leadId: string;
+  lines: LineDraft[];
+};
+
+export function emptyAddress(): AddressDraft {
+  return { attention: "", line1: "", line2: "", city: "", state: "", stateCode: "", pincode: "", country: "India", phone: "" };
+}
+
+/**
+ * Keys are for React's benefit only — a line's identity has to survive reordering and removal.
+ * They're random rather than sequential because this module is instantiated twice, once on the
+ * server (which builds the starting draft) and once in the browser (which adds lines afterwards):
+ * a per-module counter restarts at 1 in the browser and collides with the server's first line, and
+ * two lines sharing a key means editing one edits both.
+ */
+export function blankLine(): LineDraft {
+  return {
+    key: crypto.randomUUID(),
+    itemId: "",
+    name: "",
+    description: "",
+    hsnCode: "",
+    unit: "",
+    quantity: "1",
+    unitPrice: "0",
+    discountMode: "PERCENT",
+    discountValue: "0",
+    // 18% covers most of what Wroffy sells; the catalogue overrides it as soon as an item is picked.
+    taxRatePercent: "18",
+  };
+}
+
+export function emptyDefaults(): DocumentFormDefaults {
+  return {
+    docNumber: "",
+    companyId: "",
+    locationId: "",
+    placeOfSupplyCode: "",
+    gstTreatment: "UNREGISTERED",
+    buyerGstin: "",
+    reverseCharge: false,
+    currency: BASE_CURRENCY,
+    exchangeRate: 1,
+    issueDate: new Date().toISOString().slice(0, 10),
+    dueDate: "",
+    validUntil: "",
+    reference: "",
+    salespersonId: "",
+    notes: "",
+    terms: "",
+    dispatchFromAddress: "",
+    billing: emptyAddress(),
+    shippingSameAsBilling: true,
+    shipping: emptyAddress(),
+    shippingGstin: "",
+    shippingCharge: "",
+    shippingTaxRatePercent: "18",
+    withholdingMode: "NONE",
+    withholdingSection: "",
+    withholdingRatePercent: "",
+    adjustmentLabel: "Adjustment",
+    adjustment: "",
+    sourceDocumentId: "",
+    againstDocumentId: "",
+    leadId: "",
+    lines: [blankLine()],
+  };
+}
+
+/** Renders a stored address back into the block a printed document shows. */
+export function formatAddress(parts: {
+  attention?: string | null;
+  line1?: string | null;
+  line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  country?: string | null;
+}) {
+  return [
+    parts.attention,
+    parts.line1,
+    parts.line2,
+    [parts.city, parts.pincode].filter(Boolean).join(" "),
+    parts.state,
+    parts.country,
+  ]
+    .map((line) => line?.trim())
+    .filter(Boolean) as string[];
+}
+import { BASE_CURRENCY } from "@/lib/currency";

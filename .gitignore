@@ -39,3 +39,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.next-build
+
+# database backups
+# A dump is the entire system — every order, every password hash, every encrypted secret.
+# Committing one puts all of it in the history of a repository that gets cloned.
+backups/
+*.dump
+*.dump.json
+
+# Generated from whatever demo data this machine happens to hold — regenerate with
+# npm run db:seed:reconcile rather than committing one machines copy.
+public/sample-vendor-statement.csv
+
+# Review artefacts — lists of findings passed between agents during a code review.
+# Useful while a review is open, meaningless once its fixes have landed, and they
+# collide between runs. Kept out of history rather than deleted.
+/confirmed.json
+/fix-groups.json
+/followups.json

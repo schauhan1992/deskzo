@@ -1,0 +1,48 @@
+import { listCompanyOptions } from "@/actions/company";
+import { listCompanyOrderOptions, listSupportAgents } from "@/actions/ticket";
+import { isModuleEnabled } from "@/actions/module";
+import { hasEffectivePermission } from "@/actions/permission";
+import { currentUser } from "@/lib/session";
+import { NewTicketForm } from "@/components/tickets/new-ticket-form";
+
+export default async function NewTicketPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ companyId?: string }>;
+}) {
+  const sessionUser = await currentUser();
+  const userId = sessionUser!.id;
+  const canCreate = await hasEffectivePermission(userId, "tickets.create");
+  if (!canCreate) {
+    return (
+      <div className="max-w-md">
+        <h1 className="text-xl font-semibold text-text">New ticket</h1>
+        <p className="mt-2 text-sm text-muted">You don&apos;t have permission to create tickets.</p>
+      </div>
+    );
+  }
+
+  const itemsEnabled = await isModuleEnabled("items");
+  const [{ companyId }, companies, users] = await Promise.all([
+    searchParams,
+    listCompanyOptions(),
+    listSupportAgents(),
+  ]);
+  const initialOrders = companyId && itemsEnabled ? await listCompanyOrderOptions(companyId) : [];
+
+  return (
+    <div>
+      <h1 className="text-xl font-semibold text-text">New ticket</h1>
+      <p className="mt-1 text-sm text-muted">Log a support request against a company.</p>
+      <div className="mt-6">
+        <NewTicketForm
+          companies={companies}
+          initialCompanyId={companyId}
+          itemsEnabled={itemsEnabled}
+          initialOrders={initialOrders}
+          users={users}
+        />
+      </div>
+    </div>
+  );
+}

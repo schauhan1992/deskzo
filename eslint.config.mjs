@@ -9,6 +9,9 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // This project builds to .next-build (see scripts/build-check.mjs), which the default ignore
+    // list doesn't know about. Without this, generated chunks bury real findings in src.
+    ".next-build/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

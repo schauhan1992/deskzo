@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wroffy-crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wroffy
+      POSTGRES_PASSWORD: wroffy
+      POSTGRES_DB: wroffy_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - wroffy_crm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wroffy -d wroffy_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  wroffy_crm_pgdata:

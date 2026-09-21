@@ -1,0 +1,636 @@
+import { SYSTEM_ACCOUNTS, type SystemAccountKey } from "@/lib/ledger/chart";
+
+/**
+ * A line the posting engine wants written, before account ids are resolved.
+ *
+ * Accounts are named by system key rather than id so these stay pure functions: they can be reasoned
+ * about and tested without a database, and the caller resolves the keys once.
+ */
+export type DraftLine = {
+  /**
+   * A real account id, for the places where the account comes from data rather than from a key — an
+   * asset's own account, or each P&L account in a closing entry. When set it wins over `account`.
+   */
+  accountIdOverride?: string | null;
+  /** The cost centre this line belongs to, where one is known. */
+  departmentId?: string | null;
+  account: SystemAccountKey;
+  debit: number;
+  credit: number;
+  /** The sub-ledger party, set on receivable and payable lines. */
+  companyId?: string;
+  narration?: string;
+};
+
+export type DraftEntry = {
+  narration: string;
+  lines: DraftLine[];
+};
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Drops the noise lines a real document produces — a zero-rated item, an unused adjustment. */
+function clean(lines: DraftLine[]): DraftLine[] {
+  return lines
+    .map((l) => ({ ...l, debit: round2(l.debit), credit: round2(l.credit) }))
+    .filter((l) => l.debit !== 0 || l.credit !== 0);
+}
+
+export function entryTotals(lines: { debit: number; credit: number }[]) {
+  return {
+    debit: round2(lines.reduce((t, l) => t + l.debit, 0)),
+    credit: round2(lines.reduce((t, l) => t + l.credit, 0)),
+  };
+}
+
+/** Whether an entry balances. A rounding difference of a paisa is still an unbalanced entry. */
+export function isBalanced(lines: { debit: number; credit: number }[]) {
+  const { debit, credit } = entryTotals(lines);
+  return debit === credit && debit > 0;
+}
+
+/**
+ * A line carrying both a debit and a credit is meaningless — it's two lines that happen to share a
+ * row, and it makes every report that sums one column wrong.
+ */
+export function hasOneSidedLines(lines: { debit: number; credit: number }[]) {
+  return lines.every((l) => (l.debit === 0) !== (l.credit === 0));
+}
+
+/**
+ * The financial shape of a document, independent of how Prisma happens to return it.
+ *
+ * `withholdingAmount` is the signed figure the GST engine stores: negative for TDS, which the other
+ * side withholds, positive for TCS, which they pay on top. Deriving the sign from the mode instead
+ * would be a second place for the two to disagree.
+ */
+export type DocumentFinancials = {
+  companyId: string;
+  docNumber: string;
+  taxableValue: number;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+  shippingCharge: number;
+  withholdingAmount: number;
+  adjustment: number;
+  adjustmentLabel: string | null;
+  roundOff: number;
+  total: number;
+};
+
+/**
+ * A sales invoice.
+ *
+ *   Dr  Accounts Receivable            <- what the customer will actually pay
+ *   Dr  TDS Receivable                 <- only when they withheld tax (see below)
+ *       Cr  Sales                      <- revenue, net of the freight shown separately
+ *       Cr  Freight Recovered
+ *       Cr  Output CGST / SGST / IGST  <- collected on the government's behalf, not income
+ *       Cr  Round Off
+ *
+ * TDS is the part worth understanding: the customer withholds it and pays it to the government on
+ * our behalf, so less cash arrives but the debt is settled in full. It becomes an asset we later
+ * claim, and AR is debited only for what will actually turn up. TCS is the mirror — the customer
+ * pays extra and we owe it onwards.
+ */
+export function postSalesInvoice(doc: DocumentFinancials): DraftEntry {
+  // Freight is taxed with the goods but reported separately, so revenue isn't inflated by delivery.
+  const revenue = round2(doc.taxableValue - doc.shippingCharge);
+  const tds = doc.withholdingAmount < 0 ? Math.abs(doc.withholdingAmount) : 0;
+  const tcs = doc.withholdingAmount > 0 ? doc.withholdingAmount : 0;
+
+  const lines: DraftLine[] = [
+    { account: SYSTEM_ACCOUNTS.AR, debit: doc.total, credit: 0, companyId: doc.companyId },
+    { account: SYSTEM_ACCOUNTS.TDS_RECEIVABLE, debit: tds, credit: 0, narration: "Tax deducted by customer" },
+    { account: SYSTEM_ACCOUNTS.SALES, debit: 0, credit: revenue },
+    { account: SYSTEM_ACCOUNTS.FREIGHT_RECOVERED, debit: 0, credit: doc.shippingCharge },
+    { account: SYSTEM_ACCOUNTS.OUTPUT_CGST, debit: 0, credit: doc.cgstAmount },
+    { account: SYSTEM_ACCOUNTS.OUTPUT_SGST, debit: 0, credit: doc.sgstAmount },
+    { account: SYSTEM_ACCOUNTS.OUTPUT_IGST, debit: 0, credit: doc.igstAmount },
+    { account: SYSTEM_ACCOUNTS.TCS_PAYABLE, debit: 0, credit: tcs, narration: "TCS collected from customer" },
+  ];
+
+  // On a sale, a positive adjustment or round-off is more money coming to us — income, so a credit.
+  pushSigned(lines, SYSTEM_ACCOUNTS.ADJUSTMENTS, doc.adjustment, "credit", doc.adjustmentLabel ?? "Adjustment");
+  pushSigned(lines, SYSTEM_ACCOUNTS.ROUND_OFF, doc.roundOff, "credit", "Round off");
+
+  return { narration: `Sales invoice ${doc.docNumber}`, lines: clean(lines) };
+}
+
+/**
+ * A credit note — the invoice reversed, with the return booked to its own account rather than
+ * netted off Sales, so gross sales and returns both stay visible on the P&L.
+ */
+export function postCreditNote(doc: DocumentFinancials): DraftEntry {
+  const revenue = round2(doc.taxableValue - doc.shippingCharge);
+  const tds = doc.withholdingAmount < 0 ? Math.abs(doc.withholdingAmount) : 0;
+  const tcs = doc.withholdingAmount > 0 ? doc.withholdingAmount : 0;
+
+  const lines: DraftLine[] = [
+    { account: SYSTEM_ACCOUNTS.SALES_RETURNS, debit: revenue, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.FREIGHT_RECOVERED, debit: doc.shippingCharge, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.OUTPUT_CGST, debit: doc.cgstAmount, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.OUTPUT_SGST, debit: doc.sgstAmount, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.OUTPUT_IGST, debit: doc.igstAmount, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.TCS_PAYABLE, debit: tcs, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.TDS_RECEIVABLE, debit: 0, credit: tds },
+    { account: SYSTEM_ACCOUNTS.AR, debit: 0, credit: doc.total, companyId: doc.companyId },
+  ];
+
+  pushSigned(lines, SYSTEM_ACCOUNTS.ADJUSTMENTS, doc.adjustment, "debit", doc.adjustmentLabel ?? "Adjustment");
+  pushSigned(lines, SYSTEM_ACCOUNTS.ROUND_OFF, doc.roundOff, "debit", "Round off");
+
+  return { narration: `Credit note ${doc.docNumber}`, lines: clean(lines) };
+}
+
+/**
+ * A vendor bill.
+ *
+ *   Dr  Purchases                      <- the cost
+ *   Dr  Input CGST / SGST / IGST       <- reclaimable, so an asset rather than part of the cost
+ *       Cr  Accounts Payable           <- what we now owe the vendor
+ *       Cr  TDS Payable                <- only when we withheld tax from them
+ *
+ * TDS runs the other way here: we withhold it from the vendor, so we owe them less and owe the
+ * government instead. It's a liability, not the receivable a sales invoice creates.
+ */
+export function postVendorBill(doc: DocumentFinancials): DraftEntry {
+  const cost = round2(doc.taxableValue - doc.shippingCharge);
+  const tdsWithheld = doc.withholdingAmount < 0 ? Math.abs(doc.withholdingAmount) : 0;
+  const tcsCharged = doc.withholdingAmount > 0 ? doc.withholdingAmount : 0;
+
+  const lines: DraftLine[] = [
+    { account: SYSTEM_ACCOUNTS.PURCHASES, debit: cost, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.PURCHASES, debit: doc.shippingCharge, credit: 0, narration: "Freight inward" },
+    { account: SYSTEM_ACCOUNTS.INPUT_CGST, debit: doc.cgstAmount, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.INPUT_SGST, debit: doc.sgstAmount, credit: 0 },
+    { account: SYSTEM_ACCOUNTS.INPUT_IGST, debit: doc.igstAmount, credit: 0 },
+    // TCS the vendor charged us is claimable, same as tax deducted from our own sales.
+    { account: SYSTEM_ACCOUNTS.TDS_RECEIVABLE, debit: tcsCharged, credit: 0, narration: "TCS charged by vendor" },
+    { account: SYSTEM_ACCOUNTS.AP, debit: 0, credit: doc.total, companyId: doc.companyId },
+    { account: SYSTEM_ACCOUNTS.TDS_PAYABLE, debit: 0, credit: tdsWithheld, narration: "TDS withheld from vendor" },
+  ];
+
+  // On a purchase, a positive adjustment or round-off is more money going out — a cost, so a debit.
+  pushSigned(lines, SYSTEM_ACCOUNTS.ADJUSTMENTS, doc.adjustment, "debit", doc.adjustmentLabel ?? "Adjustment");
+  pushSigned(lines, SYSTEM_ACCOUNTS.ROUND_OFF, doc.roundOff, "debit", "Round off");
+
+  return { narration: `Vendor bill ${doc.docNumber}`, lines: clean(lines) };
+}
+
+/** Money in from a customer: cash goes up, what they owe goes down. */
+export function postPaymentReceived(params: {
+  companyId: string;
+  amount: number;
+  reference: string | null;
+  intoCash: boolean;
+  partyName: string;
+}): DraftEntry {
+  return {
+    narration: `Payment received from ${params.partyName}${params.reference ? ` (${params.reference})` : ""}`,
+    lines: clean([
+      { account: params.intoCash ? SYSTEM_ACCOUNTS.CASH : SYSTEM_ACCOUNTS.BANK, debit: params.amount, credit: 0 },
+      { account: SYSTEM_ACCOUNTS.AR, debit: 0, credit: params.amount, companyId: params.companyId },
+    ]),
+  };
+}
+
+/** Money out to a vendor: what we owe goes down, cash goes down with it. */
+export function postPaymentMade(params: {
+  companyId: string;
+  amount: number;
+  reference: string | null;
+  fromCash: boolean;
+  partyName: string;
+}): DraftEntry {
+  return {
+    narration: `Payment made to ${params.partyName}${params.reference ? ` (${params.reference})` : ""}`,
+    lines: clean([
+      { account: SYSTEM_ACCOUNTS.AP, debit: params.amount, credit: 0, companyId: params.companyId },
+      { account: params.fromCash ? SYSTEM_ACCOUNTS.CASH : SYSTEM_ACCOUNTS.BANK, debit: 0, credit: params.amount },
+    ]),
+  };
+}
+
+/**
+ * An approved expense claim.
+ *
+ *   Dr  <the category's account>       <- the cost, net of any tax we can reclaim
+ *   Dr  Input CGST / SGST              <- only where the claim records tax paid
+ *       Cr  Employee Payable           <- what we now owe whoever paid
+ *       Cr  Bank / Cash                <- unless the company paid it directly
+ *
+ * The cost is recognised when the claim is approved, not when the money leaves — that is the whole
+ * point of accruing it to a payable, and it is why a month's P&L is right before payday.
+ *
+ * On the tax: a claim records what was paid, not where it was supplied from, so the intra-state
+ * split is assumed and the amount is halved between CGST and SGST. That is the right guess for
+ * almost every staff claim — fuel, hotels, meals, local services — and an interstate one is
+ * reclassified with a journal. Assuming IGST instead would be wrong far more often.
+ */
+export function postExpenseClaim(params: {
+  /** The claim total, tax included. */
+  amount: number;
+  /** The GST inside that total, where it can be reclaimed. Zero when it can't. */
+  taxAmount: number;
+  categoryAccount: SystemAccountKey;
+  claimant: string;
+  description: string;
+  reference: string;
+  /** Settled by the company directly, so there is nothing to reimburse. */
+  companyPaid: boolean;
+  fromCash: boolean;
+  departmentId?: string | null;
+}): DraftEntry {
+  const tax = Math.max(0, Math.min(params.taxAmount, params.amount));
+  const net = round2(params.amount - tax);
+  const half = round2(tax / 2);
+  // The second half is taken from the total rather than doubled, so an odd paisa lands somewhere
+  // instead of leaving the entry a paisa out of balance.
+  const otherHalf = round2(tax - half);
+
+  const credit = params.companyPaid
+    ? params.fromCash
+      ? SYSTEM_ACCOUNTS.CASH
+      : SYSTEM_ACCOUNTS.BANK
+    : SYSTEM_ACCOUNTS.EMPLOYEE_PAYABLE;
+
+  return {
+    narration: params.reference + " — " + params.description + " (" + params.claimant + ")",
+    lines: clean([
+      { account: params.categoryAccount, debit: net, credit: 0, departmentId: params.departmentId ?? null },
+      { account: SYSTEM_ACCOUNTS.INPUT_CGST, debit: half, credit: 0, narration: "Assumed intra-state" },
+      { account: SYSTEM_ACCOUNTS.INPUT_SGST, debit: otherHalf, credit: 0, narration: "Assumed intra-state" },
+      { account: credit, debit: 0, credit: round2(params.amount) },
+    ]),
+  };
+}
+
+/** Paying a claim out: the debt to the employee goes, and so does the cash. */
+export function postExpenseReimbursement(params: {
+  amount: number;
+  claimant: string;
+  reference: string;
+  fromCash: boolean;
+}): DraftEntry {
+  return {
+    narration: "Reimbursed " + params.claimant + " — " + params.reference,
+    lines: clean([
+      { account: SYSTEM_ACCOUNTS.EMPLOYEE_PAYABLE, debit: round2(params.amount), credit: 0 },
+      {
+        account: params.fromCash ? SYSTEM_ACCOUNTS.CASH : SYSTEM_ACCOUNTS.BANK,
+        debit: 0,
+        credit: round2(params.amount),
+      },
+    ]),
+  };
+}
+
+// ─── Payroll ──────────────────────────────────────────────────────────────────
+
+/** One month's payroll, already totalled across every payslip in the run. */
+export type PayrollTotals = {
+  grossEarnings: number;
+  pfEmployee: number;
+  pfEmployer: number;
+  esiEmployee: number;
+  esiEmployer: number;
+  professionalTax: number;
+  incomeTax: number;
+  otherDeduction: number;
+  netPay: number;
+};
+
+/**
+ * A month's payroll.
+ *
+ *   Dr  Salaries & Wages                  <- the gross, which is what the employment cost in pay
+ *   Dr  Employer PF & ESI Contributions   <- the employer's own share, which is never on a payslip
+ *       Cr  Salaries Payable              <- the net, owed to staff until payday
+ *       Cr  PF / ESI Payable              <- both halves, owed to the authorities by the 15th
+ *       Cr  Professional Tax Payable
+ *       Cr  TDS Payable                   <- withheld from staff, owed to the government
+ *       Cr  Other Income                  <- recoveries deducted from pay, e.g. a staff loan
+ *
+ * Gross is debited rather than net, because what the company spent is what the employee earned —
+ * the deductions are money the company holds on somebody else's behalf, not money it kept. Posting
+ * net would understate the wage bill by the whole PF and tax line and leave nothing owed to EPFO.
+ *
+ * It balances because gross already contains every employee-side deduction, so the only figures on
+ * the debit side that are not inside gross are the employer's own contributions.
+ */
+export function postPayrollRun(params: {
+  totals: PayrollTotals;
+  monthLabel: string;
+  byDepartment?: { departmentId: string | null; grossEarnings: number }[];
+}): DraftEntry {
+  const t = params.totals;
+  const lines: DraftLine[] = [];
+
+  // Split the wage line per team where we know it, so a P&L can be read by department without a
+  // separate salary account for each one.
+  const split = params.byDepartment?.filter((d) => round2(d.grossEarnings) > 0) ?? [];
+  if (split.length > 0) {
+    for (const d of split) {
+      lines.push({
+        account: SYSTEM_ACCOUNTS.SALARIES,
+        debit: round2(d.grossEarnings),
+        credit: 0,
+        departmentId: d.departmentId,
+      });
+    }
+  } else {
+    lines.push({ account: SYSTEM_ACCOUNTS.SALARIES, debit: round2(t.grossEarnings), credit: 0 });
+  }
+
+  lines.push(
+    { account: SYSTEM_ACCOUNTS.EMPLOYER_CONTRIBUTIONS, debit: round2(t.pfEmployer + t.esiEmployer), credit: 0 },
+    { account: SYSTEM_ACCOUNTS.SALARY_PAYABLE, debit: 0, credit: round2(t.netPay) },
+    { account: SYSTEM_ACCOUNTS.PF_PAYABLE, debit: 0, credit: round2(t.pfEmployee + t.pfEmployer) },
+    { account: SYSTEM_ACCOUNTS.ESI_PAYABLE, debit: 0, credit: round2(t.esiEmployee + t.esiEmployer) },
+    { account: SYSTEM_ACCOUNTS.PT_PAYABLE, debit: 0, credit: round2(t.professionalTax) },
+    { account: SYSTEM_ACCOUNTS.TDS_PAYABLE, debit: 0, credit: round2(t.incomeTax) },
+    {
+      account: SYSTEM_ACCOUNTS.ADJUSTMENTS,
+      debit: 0,
+      credit: round2(t.otherDeduction),
+      narration: "Recoveries deducted from pay",
+    },
+  );
+
+  return { narration: "Payroll for " + params.monthLabel, lines: clean(lines) };
+}
+
+/** Payday: the debt to staff is settled. */
+export function postPayrollPayment(params: { netPay: number; monthLabel: string; fromCash: boolean }): DraftEntry {
+  return {
+    narration: "Salaries paid for " + params.monthLabel,
+    lines: clean([
+      { account: SYSTEM_ACCOUNTS.SALARY_PAYABLE, debit: round2(params.netPay), credit: 0 },
+      {
+        account: params.fromCash ? SYSTEM_ACCOUNTS.CASH : SYSTEM_ACCOUNTS.BANK,
+        debit: 0,
+        credit: round2(params.netPay),
+      },
+    ]),
+  };
+}
+
+// ─── Fixed assets ─────────────────────────────────────────────────────────────
+
+/**
+ * A period's depreciation.
+ *
+ * Credited to accumulated depreciation rather than to the asset itself, so the balance sheet can
+ * still say what the thing cost. An asset written straight down loses that, and "what did we pay
+ * for it" is a question people ask years later.
+ */
+export function postDepreciation(params: {
+  amount: number;
+  periodLabel: string;
+  assetName: string;
+  departmentId?: string | null;
+}): DraftEntry {
+  return {
+    narration: "Depreciation — " + params.assetName + ", " + params.periodLabel,
+    lines: clean([
+      {
+        account: SYSTEM_ACCOUNTS.DEPRECIATION,
+        debit: round2(params.amount),
+        credit: 0,
+        departmentId: params.departmentId ?? null,
+      },
+      { account: SYSTEM_ACCOUNTS.ACCUMULATED_DEPRECIATION, debit: 0, credit: round2(params.amount) },
+    ]),
+  };
+}
+
+/**
+ * Selling or scrapping an asset.
+ *
+ *   Dr  Bank / Cash                       <- what was got for it, if anything
+ *   Dr  Accumulated Depreciation          <- everything written off it so far, now cleared
+ *       Cr  <the asset's own account>     <- the original cost, now off the books
+ *   … and the difference is the gain or loss, which falls out rather than being typed.
+ *
+ * The asset's account is passed as a real id rather than a system key: assets sit in whichever
+ * account the register says, and a laptop and a van do not share one.
+ */
+export function postAssetDisposal(params: {
+  cost: number;
+  accumulated: number;
+  proceeds: number;
+  assetAccountId: string;
+  assetName: string;
+  fromCash: boolean;
+}): { lines: DraftLine[]; gainOrLoss: number; narration: string } {
+  const cost = round2(params.cost);
+  const accumulated = round2(params.accumulated);
+  const proceeds = round2(params.proceeds);
+  // Positive is a gain — sold for more than it was worth on the books.
+  const gainOrLoss = round2(proceeds - round2(cost - accumulated));
+
+  const lines: DraftLine[] = [];
+  if (proceeds > 0) {
+    lines.push({
+      account: params.fromCash ? SYSTEM_ACCOUNTS.CASH : SYSTEM_ACCOUNTS.BANK,
+      debit: proceeds,
+      credit: 0,
+    });
+  }
+  if (accumulated > 0) {
+    lines.push({ account: SYSTEM_ACCOUNTS.ACCUMULATED_DEPRECIATION, debit: accumulated, credit: 0 });
+  }
+  lines.push({
+    account: SYSTEM_ACCOUNTS.ADJUSTMENTS,
+    accountIdOverride: params.assetAccountId,
+    debit: 0,
+    credit: cost,
+    narration: "Cost removed",
+  });
+  pushSigned(lines, SYSTEM_ACCOUNTS.ADJUSTMENTS, gainOrLoss, "credit", "Gain / (loss) on disposal");
+
+  return { lines: clean(lines), gainOrLoss, narration: "Disposal — " + params.assetName };
+}
+
+// ─── Cheques ──────────────────────────────────────────────────────────────────
+
+/**
+ * A cheque clearing.
+ *
+ * Until this happens the money is promised, not moved. Posting a cheque straight to the bank on the
+ * day it was written is the single most common reason a book balance never agrees with a statement.
+ */
+export function postChequeClearing(params: {
+  amount: number;
+  received: boolean;
+  partyName: string;
+  reference: string | null;
+}): DraftEntry {
+  const amount = round2(params.amount);
+  const label =
+    "Cheque " +
+    (params.received ? "from " : "to ") +
+    params.partyName +
+    (params.reference ? " (" + params.reference + ")" : "") +
+    " cleared";
+  return {
+    narration: label,
+    lines: clean(
+      params.received
+        ? [
+            { account: SYSTEM_ACCOUNTS.BANK, debit: amount, credit: 0 },
+            { account: SYSTEM_ACCOUNTS.CHEQUES_IN_HAND, debit: 0, credit: amount },
+          ]
+        : [
+            { account: SYSTEM_ACCOUNTS.CHEQUES_ISSUED, debit: amount, credit: 0 },
+            { account: SYSTEM_ACCOUNTS.BANK, debit: 0, credit: amount },
+          ],
+    ),
+  };
+}
+
+// ─── Foreign currency ─────────────────────────────────────────────────────────
+
+/**
+ * The difference between the rate a document was raised at and the rate it settled at.
+ *
+ * Real money: an invoice for $1,000 raised at ₹83 and paid at ₹85 brings in ₹2,000 more than the
+ * receivable said. Without this the AR account never clears and somebody eventually writes the
+ * remainder off as a mystery difference.
+ */
+export function postExchangeDifference(params: {
+  companyId: string;
+  /** Positive when more rupees moved than the document was raised at. */
+  difference: number;
+  receivable: boolean;
+  partyName: string;
+  docNumber: string;
+}): DraftEntry | null {
+  const diff = round2(params.difference);
+  if (diff === 0) return null;
+  const magnitude = Math.abs(diff);
+
+  // Worked through, because the direction is easy to get backwards and a wrong sign leaves the
+  // party account permanently out by twice the difference:
+  //
+  //   A $1,000 invoice raised at ₹83 debits AR 83,000. Received at ₹85, the payment credits AR
+  //   85,000 — so AR is over-cleared by 2,000 and needs a *debit* to close, with the 2,000 taken to
+  //   exchange gain. Received at ₹81.50 instead, AR is under-cleared and needs a credit, and the
+  //   difference is a loss.
+  //
+  //   A payable is the mirror: paying more rupees than the bill was raised at over-clears AP, so AP
+  //   is credited and the extra rupees are a loss, not a gain.
+  const debitParty = params.receivable ? diff > 0 : diff < 0;
+  const isGain = params.receivable ? diff > 0 : diff < 0;
+
+  return {
+    narration:
+      "Exchange " + (isGain ? "gain" : "loss") + " on " + params.docNumber + " — " + params.partyName,
+    lines: clean([
+      {
+        account: params.receivable ? SYSTEM_ACCOUNTS.AR : SYSTEM_ACCOUNTS.AP,
+        debit: debitParty ? magnitude : 0,
+        credit: debitParty ? 0 : magnitude,
+        companyId: params.companyId,
+      },
+      {
+        // Always the opposite side of the party line, which is what makes the entry balance.
+        account: SYSTEM_ACCOUNTS.FX_GAIN_LOSS,
+        debit: debitParty ? 0 : magnitude,
+        credit: debitParty ? magnitude : 0,
+      },
+    ]),
+  };
+}
+
+// ─── Year end ─────────────────────────────────────────────────────────────────
+
+/**
+ * The closing entry: every income and expense account back to nil, the difference into reserves.
+ *
+ * This is what makes the next year start from zero while the balance sheet carries forward, and it
+ * is what lets the balance sheet then show last year's reserves separately from this year's profit.
+ *
+ * Each account is closed at its own balance rather than by posting one net figure, because a
+ * closing entry that does not actually zero each account leaves the next year's P&L opening with
+ * last year's numbers still in it.
+ */
+export function postYearEndClose(params: {
+  label: string;
+  /**
+   * Signed balances in each account's natural direction, exactly as the trial balance reports them:
+   * income positive when it carries its usual credit balance, expense positive when debit.
+   */
+  accounts: { accountId: string; type: "INCOME" | "EXPENSE"; balance: number }[];
+}): { lines: DraftLine[]; netProfit: number; narration: string } {
+  const lines: DraftLine[] = [];
+  let income = 0;
+  let expense = 0;
+
+  for (const a of params.accounts) {
+    const balance = round2(a.balance);
+    if (balance === 0) continue;
+    if (a.type === "INCOME") {
+      income = round2(income + balance);
+      // Income sits on the credit side, so it is closed with a debit of the same size. A negative
+      // balance — a contra-income account — closes the other way, which the sign handles.
+      lines.push({
+        account: SYSTEM_ACCOUNTS.RETAINED_EARNINGS,
+        accountIdOverride: a.accountId,
+        debit: balance > 0 ? balance : 0,
+        credit: balance < 0 ? -balance : 0,
+      });
+    } else {
+      expense = round2(expense + balance);
+      lines.push({
+        account: SYSTEM_ACCOUNTS.RETAINED_EARNINGS,
+        accountIdOverride: a.accountId,
+        debit: balance < 0 ? -balance : 0,
+        credit: balance > 0 ? balance : 0,
+      });
+    }
+  }
+
+  const netProfit = round2(income - expense);
+  // The balancing side: a profit is credited to reserves, a loss debited.
+  if (netProfit !== 0) {
+    lines.push({
+      account: SYSTEM_ACCOUNTS.RETAINED_EARNINGS,
+      debit: netProfit < 0 ? -netProfit : 0,
+      credit: netProfit > 0 ? netProfit : 0,
+    });
+  }
+
+  return {
+    lines,
+    netProfit,
+    narration: "Year end " + params.label + " — profit and loss closed to reserves",
+  };
+}
+
+/** Flips every line, which is what a reversal is. */
+export function reverseLines<T extends { debit: number; credit: number }>(lines: T[]): T[] {
+  return lines.map((l) => ({ ...l, debit: l.credit, credit: l.debit }));
+}
+
+/**
+ * Posts a figure that can legitimately go either way — a round-off of +0.50 or −0.30, an adjustment
+ * that's a discount on one document and a surcharge on the next.
+ *
+ * `positiveSide` is which way a positive figure goes, and it differs by document: on a sale more
+ * money is income, on a purchase it's cost.
+ */
+function pushSigned(
+  lines: DraftLine[],
+  account: SystemAccountKey,
+  amount: number,
+  positiveSide: "debit" | "credit",
+  narration: string,
+) {
+  if (!amount) return;
+  const onDebit = positiveSide === "debit" ? amount > 0 : amount < 0;
+  const value = Math.abs(amount);
+  lines.push(onDebit ? { account, debit: value, credit: 0, narration } : { account, debit: 0, credit: value, narration });
+}

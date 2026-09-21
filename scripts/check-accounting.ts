@@ -1,0 +1,710 @@
+/**
+ * The accounting engine, checked against hand-worked cases.
+ *
+ * Everything here is arithmetic that somebody eventually files a return against, so a wrong answer
+ * is not a rounding difference — it is understating a wage bill, over-claiming input credit, or
+ * depreciating an asset into a negative book value. Each case states the figure and where it comes
+ * from.
+ *
+ *   npm run check:accounting
+ */
+import {
+  entryTotals,
+  isBalanced,
+  hasOneSidedLines,
+  postAssetDisposal,
+  postChequeClearing,
+  postDepreciation,
+  postExchangeDifference,
+  postExpenseClaim,
+  postExpenseReimbursement,
+  postPayrollPayment,
+  postPayrollRun,
+  postYearEndClose,
+  type DraftLine,
+  type PayrollTotals,
+} from "../src/lib/ledger/posting";
+import { EXPENSE_CATEGORY_ACCOUNT, SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
+import { bookValue, depreciableAmount, monthlyCharge, schedule } from "../src/lib/ledger/depreciation";
+import { buildGstr1, buildGstr3b, buildTdsSummary, countsForReturn, type ReturnDocument } from "../src/lib/ledger/gst-returns";
+import { buildCashFlow, sectionFor, type AccountMovement } from "../src/lib/ledger/cashflow";
+import {
+  parseStatementCsv,
+  reconcile,
+  statementFingerprint,
+  suggestMatches,
+  type BookRow,
+  type StatementRow,
+} from "../src/lib/ledger/reconcile";
+
+let failures = 0;
+function ok(label: string, pass: boolean, detail: string | number | null = "") {
+  console.log(`${pass ? "  ok  " : " FAIL "} ${label}${detail !== "" && detail !== null ? ` — ${detail}` : ""}`);
+  if (!pass) failures += 1;
+}
+function eq(label: string, actual: number, expected: number, why = "") {
+  const pass = Math.abs(actual - expected) < 0.005;
+  console.log(`${pass ? "  ok  " : " FAIL "} ${label} — ${actual.toFixed(2)}${pass ? "" : ` (expected ${expected.toFixed(2)})`}${why ? ` · ${why}` : ""}`);
+  if (!pass) failures += 1;
+}
+function balanced(label: string, lines: DraftLine[]) {
+  const { debit, credit } = entryTotals(lines);
+  const pass = isBalanced(lines) && hasOneSidedLines(lines) && lines.length >= 2;
+  console.log(
+    `${pass ? "  ok  " : " FAIL "} ${label} balances — Dr ${debit.toFixed(2)} / Cr ${credit.toFixed(2)}${pass ? "" : " ← OUT"}`,
+  );
+  if (!pass) failures += 1;
+}
+const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const sumOn = (lines: DraftLine[], account: string, side: "debit" | "credit") =>
+  lines.filter((l) => l.account === account).reduce((t, l) => t + l[side], 0);
+
+console.log("\n— Expenses —\n");
+
+// A ₹11,800 hotel bill with ₹1,800 of GST inside it: ₹10,000 of cost, ₹1,800 reclaimable, and
+// ₹11,800 owed to whoever paid.
+const hotel = postExpenseClaim({
+  amount: 11800,
+  taxAmount: 1800,
+  categoryAccount: EXPENSE_CATEGORY_ACCOUNT.ACCOMMODATION,
+  claimant: "Rohit Bhandari",
+  description: "Hotel, Pune",
+  reference: "EXP-0042",
+  companyPaid: false,
+  fromCash: false,
+});
+balanced("A claim with input tax", hotel.lines);
+eq("  cost is net of the tax", sumOn(hotel.lines, EXPENSE_CATEGORY_ACCOUNT.ACCOMMODATION, "debit"), 10000, "11,800 less 1,800");
+eq("  input CGST", sumOn(hotel.lines, SYSTEM_ACCOUNTS.INPUT_CGST, "debit"), 900, "half of 1,800");
+eq("  input SGST", sumOn(hotel.lines, SYSTEM_ACCOUNTS.INPUT_SGST, "debit"), 900);
+eq("  owed to the claimant is the full bill", sumOn(hotel.lines, SYSTEM_ACCOUNTS.EMPLOYEE_PAYABLE, "credit"), 11800);
+
+// An odd paisa must not leave the entry out of balance.
+const oddTax = postExpenseClaim({
+  amount: 1000.01,
+  taxAmount: 152.55,
+  categoryAccount: EXPENSE_CATEGORY_ACCOUNT.MEALS,
+  claimant: "Meera Krishnan",
+  description: "Client lunch",
+  reference: "EXP-0043",
+  companyPaid: false,
+  fromCash: true,
+});
+balanced("A claim with an odd paisa of tax", oddTax.lines);
+eq(
+  "  the two halves add back to the tax",
+  sumOn(oddTax.lines, SYSTEM_ACCOUNTS.INPUT_CGST, "debit") + sumOn(oddTax.lines, SYSTEM_ACCOUNTS.INPUT_SGST, "debit"),
+  152.55,
+  "76.28 + 76.27",
+);
+
+const noTax = postExpenseClaim({
+  amount: 500,
+  taxAmount: 0,
+  categoryAccount: EXPENSE_CATEGORY_ACCOUNT.TOLL_PARKING,
+  claimant: "Manoj Pawar",
+  description: "Tolls",
+  reference: "EXP-0044",
+  companyPaid: false,
+  fromCash: true,
+});
+balanced("A claim with no reclaimable tax", noTax.lines);
+ok("  and no GST lines at all", noTax.lines.length === 2, `${noTax.lines.length} lines`);
+
+const cardSpend = postExpenseClaim({
+  amount: 2360,
+  taxAmount: 360,
+  categoryAccount: EXPENSE_CATEGORY_ACCOUNT.SOFTWARE_SUBSCRIPTION,
+  claimant: "Ananya Deshpande",
+  description: "Company card — Figma",
+  reference: "EXP-0045",
+  companyPaid: true,
+  fromCash: false,
+});
+balanced("Company-card spend", cardSpend.lines);
+eq("  goes straight out of the bank", sumOn(cardSpend.lines, SYSTEM_ACCOUNTS.BANK, "credit"), 2360, "nobody is owed it");
+eq("  and nothing is owed to anybody", sumOn(cardSpend.lines, SYSTEM_ACCOUNTS.EMPLOYEE_PAYABLE, "credit"), 0);
+
+// Tax cannot exceed the claim: a typo must not produce a negative cost.
+const absurd = postExpenseClaim({
+  amount: 1000,
+  taxAmount: 5000,
+  categoryAccount: EXPENSE_CATEGORY_ACCOUNT.OTHER,
+  claimant: "Test",
+  description: "Typo",
+  reference: "EXP-0046",
+  companyPaid: false,
+  fromCash: false,
+});
+balanced("A claim whose tax exceeds its total", absurd.lines);
+ok(
+  "  never produces a negative cost line",
+  absurd.lines.every((l) => l.debit >= 0 && l.credit >= 0),
+  "clamped to the claim",
+);
+
+balanced(
+  "Reimbursement",
+  postExpenseReimbursement({ amount: 11800, claimant: "Rohit Bhandari", reference: "EXP-0042", fromCash: false }).lines,
+);
+
+ok(
+  "every expense category has an account",
+  Object.values(EXPENSE_CATEGORY_ACCOUNT).every(Boolean) && Object.keys(EXPENSE_CATEGORY_ACCOUNT).length === 16,
+  `${Object.keys(EXPENSE_CATEGORY_ACCOUNT).length} categories mapped`,
+);
+
+console.log("\n— Payroll —\n");
+
+// One month, hand-worked. Gross 1,00,000; PF 1,800 each side; ESI nil (over the limit);
+// PT 200; TDS 5,000. Net = 1,00,000 − 1,800 − 200 − 5,000 = 93,000.
+const month: PayrollTotals = {
+  grossEarnings: 100000,
+  pfEmployee: 1800,
+  pfEmployer: 1800,
+  esiEmployee: 0,
+  esiEmployer: 0,
+  professionalTax: 200,
+  incomeTax: 5000,
+  otherDeduction: 0,
+  netPay: 93000,
+};
+const payroll = postPayrollRun({ totals: month, monthLabel: "September 2026" });
+balanced("A month's payroll", payroll.lines);
+eq("  wages are the gross, not the net", sumOn(payroll.lines, SYSTEM_ACCOUNTS.SALARIES, "debit"), 100000, "posting net would understate the wage bill");
+eq("  employer's own share is separate", sumOn(payroll.lines, SYSTEM_ACCOUNTS.EMPLOYER_CONTRIBUTIONS, "debit"), 1800);
+eq("  owed to staff is the net", sumOn(payroll.lines, SYSTEM_ACCOUNTS.SALARY_PAYABLE, "credit"), 93000);
+eq("  PF payable carries both halves", sumOn(payroll.lines, SYSTEM_ACCOUNTS.PF_PAYABLE, "credit"), 3600, "1,800 + 1,800");
+eq("  TDS withheld is a liability", sumOn(payroll.lines, SYSTEM_ACCOUNTS.TDS_PAYABLE, "credit"), 5000);
+eq("  professional tax too", sumOn(payroll.lines, SYSTEM_ACCOUNTS.PT_PAYABLE, "credit"), 200);
+
+// With ESI on both sides, and a recovery deducted from pay.
+const withEsi: PayrollTotals = {
+  grossEarnings: 20000,
+  pfEmployee: 1800,
+  pfEmployer: 1800,
+  esiEmployee: 150,
+  esiEmployer: 650,
+  professionalTax: 200,
+  incomeTax: 0,
+  otherDeduction: 1000,
+  netPay: 20000 - 1800 - 150 - 200 - 1000,
+};
+const esiRun = postPayrollRun({ totals: withEsi, monthLabel: "September 2026" });
+balanced("A month with ESI and a recovery", esiRun.lines);
+eq("  ESI payable carries both halves", sumOn(esiRun.lines, SYSTEM_ACCOUNTS.ESI_PAYABLE, "credit"), 800, "150 + 650");
+eq("  the recovery is not treated as pay", sumOn(esiRun.lines, SYSTEM_ACCOUNTS.ADJUSTMENTS, "credit"), 1000);
+
+// Split across teams: the wage line must still total the gross.
+const split = postPayrollRun({
+  totals: month,
+  monthLabel: "September 2026",
+  byDepartment: [
+    { departmentId: "d-sales", grossEarnings: 60000 },
+    { departmentId: "d-support", grossEarnings: 40000 },
+  ],
+});
+balanced("Payroll split by cost centre", split.lines);
+eq("  the split still totals the gross", sumOn(split.lines, SYSTEM_ACCOUNTS.SALARIES, "debit"), 100000);
+ok(
+  "  and every wage line carries its team",
+  split.lines.filter((l) => l.account === SYSTEM_ACCOUNTS.SALARIES).every((l) => !!l.departmentId),
+  "2 teams",
+);
+
+balanced("Payday", postPayrollPayment({ netPay: 93000, monthLabel: "September 2026", fromCash: false }).lines);
+
+console.log("\n— Depreciation —\n");
+
+// A ₹60,000 laptop, 3-year life, no salvage: 60,000 / 36 = 1,666.67 a month.
+const laptop = {
+  cost: 60000,
+  salvageValue: 0,
+  usefulLifeYears: 3,
+  method: "STRAIGHT_LINE" as const,
+  ratePercent: null,
+  purchasedOn: d("2025-04-01"),
+  disposedOn: null,
+  accumulated: 0,
+};
+eq("Straight line, monthly", monthlyCharge(laptop, d("2025-04-30")), 1666.67, "60,000 over 36 months");
+eq("  with a salvage value", monthlyCharge({ ...laptop, salvageValue: 6000 }, d("2025-04-30")), 1500, "54,000 over 36 months");
+eq("  depreciable amount", depreciableAmount({ cost: 60000, salvageValue: 6000 }), 54000);
+
+// The final month is whatever is left, so it lands exactly on salvage.
+eq(
+  "The last month tops up exactly to salvage",
+  monthlyCharge({ ...laptop, salvageValue: 6000, accumulated: 53500 }, d("2028-03-31")),
+  500,
+  "not another 1,500",
+);
+ok(
+  "  and never goes past it",
+  monthlyCharge({ ...laptop, salvageValue: 6000, accumulated: 54000 }, d("2028-03-31")) === 0,
+  "fully written down",
+);
+
+// Written down value: 40% a year on what is left. First month on 60,000 is 60,000 × 0.4 / 12 = 2,000.
+const wdv = { ...laptop, method: "WRITTEN_DOWN_VALUE" as const, ratePercent: 40 };
+eq("Written down value, first month", monthlyCharge(wdv, d("2025-04-30")), 2000, "40% of 60,000, over 12");
+eq(
+  "  and it shrinks as the asset does",
+  monthlyCharge({ ...wdv, accumulated: 24000 }, d("2026-04-30")),
+  1200,
+  "40% of the remaining 36,000, over 12",
+);
+
+ok("Nothing before it was bought", monthlyCharge(laptop, d("2025-03-31")) === 0);
+ok("Nothing after it was sold", monthlyCharge({ ...laptop, disposedOn: d("2025-06-30") }, d("2025-07-31")) === 0);
+eq("Book value", bookValue({ cost: 60000, accumulated: 20000 }), 40000);
+
+const full = schedule(laptop, 48);
+eq("A full schedule writes off exactly the cost", full[full.length - 1].accumulated, 60000, `${full.length} months`);
+ok("  and ends at nil", Math.abs(full[full.length - 1].closing) < 0.01, full[full.length - 1].closing);
+
+balanced("A depreciation charge", postDepreciation({ amount: 1666.67, periodLabel: "April 2025", assetName: "WRF-01 Laptop" }).lines);
+
+// Disposal: cost 60,000, written off 40,000, so book value 20,000. Sold for 25,000 = 5,000 gain.
+const disposal = postAssetDisposal({
+  cost: 60000,
+  accumulated: 40000,
+  proceeds: 25000,
+  assetAccountId: "acct-computers",
+  assetName: "WRF-01 Laptop",
+  fromCash: false,
+});
+balanced("Disposal at a gain", disposal.lines);
+eq("  the gain falls out of the figures", disposal.gainOrLoss, 5000, "25,000 less a book value of 20,000");
+
+const atLoss = postAssetDisposal({
+  cost: 60000,
+  accumulated: 40000,
+  proceeds: 12000,
+  assetAccountId: "acct-computers",
+  assetName: "WRF-01 Laptop",
+  fromCash: false,
+});
+balanced("Disposal at a loss", atLoss.lines);
+eq("  and a loss is negative, not an error", atLoss.gainOrLoss, -8000);
+
+const scrapped = postAssetDisposal({
+  cost: 60000,
+  accumulated: 60000,
+  proceeds: 0,
+  assetAccountId: "acct-computers",
+  assetName: "WRF-02 Laptop",
+  fromCash: false,
+});
+balanced("Scrapping a fully written-down asset", scrapped.lines);
+eq("  no gain, no loss", scrapped.gainOrLoss, 0);
+
+console.log("\n— Cheques —\n");
+
+balanced("A cheque received clearing", postChequeClearing({ amount: 50000, received: true, partyName: "Acme", reference: "112233" }).lines);
+balanced("A cheque paid clearing", postChequeClearing({ amount: 50000, received: false, partyName: "Vendor", reference: "445566" }).lines);
+const cin = postChequeClearing({ amount: 50000, received: true, partyName: "Acme", reference: "112233" });
+eq("  money arrives in the bank", sumOn(cin.lines, SYSTEM_ACCOUNTS.BANK, "debit"), 50000);
+eq("  and leaves cheques in hand", sumOn(cin.lines, SYSTEM_ACCOUNTS.CHEQUES_IN_HAND, "credit"), 50000);
+
+console.log("\n— Foreign currency —\n");
+
+// $1,000 invoiced at ₹83 and received at ₹85: ₹2,000 more than the receivable said.
+const gain = postExchangeDifference({
+  companyId: "c1",
+  difference: 2000,
+  receivable: true,
+  partyName: "Northwind Inc",
+  docNumber: "INV/2026/0007",
+});
+ok("A gain on a receivable is posted", !!gain);
+balanced("  and balances", gain!.lines);
+eq("  AR is debited to close the over-clearing", sumOn(gain!.lines, SYSTEM_ACCOUNTS.AR, "debit"), 2000, "raised at 83,000, cleared by a 85,000 receipt");
+eq("  and it is income", sumOn(gain!.lines, SYSTEM_ACCOUNTS.FX_GAIN_LOSS, "credit"), 2000);
+
+const loss = postExchangeDifference({
+  companyId: "c1",
+  difference: -1500,
+  receivable: true,
+  partyName: "Northwind Inc",
+  docNumber: "INV/2026/0008",
+});
+balanced("A loss on a receivable", loss!.lines);
+eq("  AR is credited to close the shortfall", sumOn(loss!.lines, SYSTEM_ACCOUNTS.AR, "credit"), 1500);
+eq("  and the loss is an expense against income", sumOn(loss!.lines, SYSTEM_ACCOUNTS.FX_GAIN_LOSS, "debit"), 1500);
+
+const payableGain = postExchangeDifference({
+  companyId: "c2",
+  difference: 3000,
+  receivable: false,
+  partyName: "Foreign Vendor",
+  docNumber: "BILL/2026/0003",
+});
+balanced("A movement on a payable", payableGain!.lines);
+eq("  AP is credited", sumOn(payableGain!.lines, SYSTEM_ACCOUNTS.AP, "credit"), 3000, "paying more rupees than billed over-clears it");
+eq("  and paying more is a loss, not a gain", sumOn(payableGain!.lines, SYSTEM_ACCOUNTS.FX_GAIN_LOSS, "debit"), 3000);
+
+ok(
+  "No difference, no entry",
+  postExchangeDifference({ companyId: "c1", difference: 0, receivable: true, partyName: "X", docNumber: "Y" }) === null,
+  "a domestic settlement writes nothing",
+);
+
+console.log("\n— Year end —\n");
+
+// Income 10,00,000, expenses 7,50,000 → profit 2,50,000.
+const close = postYearEndClose({
+  label: "2025-26",
+  accounts: [
+    { accountId: "sales", type: "INCOME", balance: 950000 },
+    { accountId: "other-income", type: "INCOME", balance: 50000 },
+    { accountId: "purchases", type: "EXPENSE", balance: 600000 },
+    { accountId: "salaries", type: "EXPENSE", balance: 150000 },
+  ],
+});
+balanced("The closing entry", close.lines);
+eq("  net profit", close.netProfit, 250000, "10,00,000 less 7,50,000");
+ok(
+  "  every P&L account is closed at its own balance",
+  close.lines.filter((l) => l.accountIdOverride).length === 4,
+  "4 accounts",
+);
+eq(
+  "  sales is debited by exactly its balance",
+  close.lines.filter((l) => l.accountIdOverride === "sales").reduce((t, l) => t + l.debit, 0),
+  950000,
+  "so next year opens at nil",
+);
+eq(
+  "  and the profit is credited to reserves",
+  close.lines.filter((l) => !l.accountIdOverride).reduce((t, l) => t + l.credit, 0),
+  250000,
+);
+
+const lossYear = postYearEndClose({
+  label: "2024-25",
+  accounts: [
+    { accountId: "sales", type: "INCOME", balance: 400000 },
+    { accountId: "purchases", type: "EXPENSE", balance: 500000 },
+  ],
+});
+balanced("Closing a loss-making year", lossYear.lines);
+eq("  a loss is negative", lossYear.netProfit, -100000);
+
+const nothing = postYearEndClose({ label: "2023-24", accounts: [] });
+ok("A year with no activity writes nothing", nothing.lines.length === 0);
+
+console.log("\n— GST returns —\n");
+
+const line = (over: Partial<ReturnDocument["lines"][number]> = {}) => ({
+  hsnCode: "8471",
+  name: "Laptop",
+  unit: "NOS",
+  quantity: 1,
+  taxableValue: 100000,
+  taxRatePercent: 18,
+  cgstAmount: 9000,
+  sgstAmount: 9000,
+  igstAmount: 0,
+  ...over,
+});
+const doc = (over: Partial<ReturnDocument> = {}): ReturnDocument => ({
+  docNumber: "INV/2026/0001",
+  docType: "INVOICE",
+  issueDate: d("2026-09-10"),
+  status: "ISSUED",
+  partyName: "Acme Pvt Ltd",
+  partyGstin: "27AABCA1234A1Z5",
+  placeOfSupplyCode: "27",
+  taxableValue: 100000,
+  cgstAmount: 9000,
+  sgstAmount: 9000,
+  igstAmount: 0,
+  total: 118000,
+  lines: [line()],
+  ...over,
+});
+
+const returns = buildGstr1([
+  doc(),
+  doc({ docNumber: "INV/2026/0002", partyGstin: null, partyName: "Walk-in" }),
+  doc({ docNumber: "INV/2026/0003", status: "DRAFT" }),
+  doc({ docNumber: "INV/2026/0004", status: "CANCELLED" }),
+]);
+eq("B2B lists the registered customer", returns.b2b.length, 1, "one invoice with a GSTIN");
+eq("B2C is summarised, not listed", returns.b2c.length, 1, "by place of supply and rate");
+ok("A draft is not a supply", !returns.b2b.some((b) => b.docNumber === "INV/2026/0003"), "excluded");
+ok("Nor is a cancelled invoice", !returns.b2b.some((b) => b.docNumber === "INV/2026/0004"), "excluded");
+eq("Taxable value covers both", returns.totals.taxableValue, 200000, "B2B + B2C");
+eq("  B2B half", returns.totals.b2bTaxable, 100000);
+eq("  B2C half", returns.totals.b2cTaxable, 100000);
+eq("HSN summary groups by code", returns.hsn.length, 1, "8471");
+eq("  and totals the quantity", returns.hsn[0].quantity, 2);
+
+// A credit note reduces what was supplied.
+const withCredit = buildGstr1([
+  doc(),
+  doc({ docNumber: "CN/2026/0001", docType: "CREDIT_NOTE", taxableValue: 20000, cgstAmount: 1800, sgstAmount: 1800, total: 23600, lines: [line({ taxableValue: 20000, cgstAmount: 1800, sgstAmount: 1800 })] }),
+]);
+eq("A credit note reduces the taxable value", withCredit.totals.taxableValue, 80000, "1,00,000 less 20,000");
+eq("  and the tax with it", withCredit.totals.cgst, 7200, "9,000 less 1,800");
+eq("  it is counted separately", withCredit.totals.creditNoteCount, 1);
+
+const problems = buildGstr1([
+  doc({ docNumber: "INV/2026/0005", partyGstin: "NOTAGSTIN" }),
+  doc({ docNumber: "INV/2026/0006", partyGstin: null, lines: [line({ hsnCode: null })] }),
+]);
+ok("An invalid GSTIN is caught before the portal does", problems.problems.some((p) => p.issue.includes("valid GSTIN")), "flagged");
+ok("A missing HSN code too", problems.problems.some((p) => p.issue.includes("HSN")), "flagged");
+
+const threeB = buildGstr3b({
+  outwardDocs: [doc()],
+  inwardDocs: [doc({ docNumber: "BILL/1", docType: "BILL", taxableValue: 50000, cgstAmount: 4500, sgstAmount: 4500, total: 59000 })],
+  ledger: { outputCgst: 9000, outputSgst: 9000, outputIgst: 0, inputCgst: 4500, inputSgst: 4500, inputIgst: 0 },
+});
+eq("3B nets output against input", threeB.netPayable.cgst, 4500, "9,000 collected less 4,500 reclaimable");
+eq("  total payable", threeB.netPayable.total, 9000, "CGST + SGST");
+ok("  and the output agrees with the ledger", threeB.discrepancies.length === 0, "no differences");
+eq("  all the credit came from bills", threeB.inward.fromBills.cgst, 4500);
+eq("  and none from anywhere else", threeB.inward.fromOther.cgst, 0);
+
+// The case the seeded books actually hit: input tax on expense claims, with no vendor bill behind
+// it. That credit is claimable, so it belongs in the return rather than being flagged as a problem.
+const claimsOnly = buildGstr3b({
+  outwardDocs: [doc()],
+  inwardDocs: [],
+  ledger: { outputCgst: 9000, outputSgst: 9000, outputIgst: 0, inputCgst: 2316.74, inputSgst: 2316.73, inputIgst: 0 },
+});
+eq("Credit from expense claims is claimed", claimsOnly.inward.cgst, 2316.74, "not left behind because no bill exists");
+eq("  and shown as its own source", claimsOnly.inward.fromOther.cgst, 2316.74);
+eq("  with nothing attributed to bills", claimsOnly.inward.fromBills.cgst, 0);
+eq(
+  "  so the liability is reduced by it",
+  claimsOnly.netPayable.cgst,
+  round2(9000 - 2316.74),
+  "filing the bills-only figure would overpay",
+);
+ok(
+  "  and it is NOT reported as a discrepancy",
+  claimsOnly.discrepancies.length === 0,
+  "under-claiming your own credit is not an audit risk",
+);
+
+// The dangerous direction: output tax on the return that the books cannot support.
+const unsupported = buildGstr3b({
+  outwardDocs: [doc()],
+  inwardDocs: [],
+  // An invoice was raised but never posted, so the ledger holds less output tax than the return.
+  ledger: { outputCgst: 5000, outputSgst: 9000, outputIgst: 0, inputCgst: 0, inputSgst: 0, inputIgst: 0 },
+});
+eq("An unsupported output figure is caught", unsupported.discrepancies.length, 1);
+ok(
+  "  and marked as the direction that matters",
+  unsupported.discrepancies[0].direction === "UNSUPPORTED",
+  unsupported.discrepancies[0].direction,
+);
+eq("  by the right amount", unsupported.discrepancies[0].difference, 4000, "9,000 on the return, 5,000 in the books");
+
+// The other direction on output: a journal posted tax no invoice accounts for.
+const strayOutput = buildGstr3b({
+  outwardDocs: [doc()],
+  inwardDocs: [],
+  ledger: { outputCgst: 12000, outputSgst: 9000, outputIgst: 0, inputCgst: 0, inputSgst: 0, inputIgst: 0 },
+});
+ok(
+  "Output in the books that no invoice explains is flagged differently",
+  strayOutput.discrepancies[0]?.direction === "UNDER_CLAIMED",
+  strayOutput.discrepancies[0]?.direction,
+);
+
+// A ledger holding *less* input than the bills means a bill didn't post — that must never be
+// subtracted from the credit, or a posting failure would quietly reduce what you claim.
+const billUnposted = buildGstr3b({
+  outwardDocs: [doc()],
+  inwardDocs: [doc({ docType: "BILL", cgstAmount: 4500, sgstAmount: 4500 })],
+  ledger: { outputCgst: 9000, outputSgst: 9000, outputIgst: 0, inputCgst: 0, inputSgst: 0, inputIgst: 0 },
+});
+eq("A bill that never posted doesn't reduce the credit", billUnposted.inward.cgst, 4500, "the bill still exists");
+eq("  and nothing negative is attributed elsewhere", billUnposted.inward.fromOther.cgst, 0);
+
+const creditCarried = buildGstr3b({
+  outwardDocs: [],
+  inwardDocs: [doc({ docType: "BILL", cgstAmount: 4500, sgstAmount: 4500 })],
+});
+eq("More credit than liability is carried forward", creditCarried.carriedForward.cgst, 4500);
+eq("  and nothing is payable", creditCarried.netPayable.total, 0, "it is not a refund");
+
+const noLedger = buildGstr3b({ outwardDocs: [doc()], inwardDocs: [] });
+eq("Without a ledger the bills are all there is", noLedger.inward.cgst, 0);
+ok("  and nothing is claimed that isn't there", noLedger.discrepancies.length === 0);
+
+ok("A draft never counts for a return", !countsForReturn({ status: "DRAFT" }));
+ok("Nor does a cancelled document", !countsForReturn({ status: "CANCELLED" }));
+ok("An issued one does", countsForReturn({ status: "ISSUED" }));
+ok("And a paid one does", countsForReturn({ status: "PAID" }));
+
+console.log("\n— TDS —\n");
+
+const tds = buildTdsSummary({
+  docs: [],
+  withholdings: [
+    { docNumber: "BILL/1", issueDate: d("2026-09-05"), partyName: "Contractor", partyPan: "ABCDE1234F", taxableValue: 100000, withholdingAmount: -2000, isPurchase: true },
+    { docNumber: "BILL/2", issueDate: d("2026-09-15"), partyName: "Consultant", partyPan: null, taxableValue: 50000, withholdingAmount: -5000, isPurchase: true },
+    { docNumber: "INV/1", issueDate: d("2026-09-20"), partyName: "Big Customer", partyPan: "ZZZZZ9999Z", taxableValue: 200000, withholdingAmount: -4000, isPurchase: false },
+    { docNumber: "INV/2", issueDate: d("2026-09-21"), partyName: "TCS Customer", partyPan: "YYYYY8888Y", taxableValue: 100000, withholdingAmount: 1000, isPurchase: false },
+  ],
+  month: 9,
+  year: 2026,
+});
+eq("TDS we deducted and owe", tds.totals.payable, 7000, "2,000 + 5,000");
+eq("TDS customers withheld from us", tds.totals.receivable, 4000, "an asset, not a liability");
+ok("TCS is not TDS", !tds.payable.some((r) => r.docNumber === "INV/2") && !tds.receivable.some((r) => r.docNumber === "INV/2"), "positive withholding excluded");
+ok("It is due on the 7th of the next month", tds.dueOn === "2026-10-07", tds.dueOn);
+ok("A missing PAN is flagged before the deadline", tds.problems.some((p) => p.issue.includes("PAN")), "20% rate applies");
+
+console.log("\n— Cash flow —\n");
+
+const mv = (over: Partial<AccountMovement>): AccountMovement => ({
+  accountId: "a",
+  code: "1000",
+  name: "Account",
+  type: "ASSET",
+  systemKey: null,
+  opening: 0,
+  movement: 0,
+  closing: 0,
+  ...over,
+});
+
+ok("Bank is cash", sectionFor({ type: "ASSET", code: "1110", systemKey: "BANK" }) === "CASH");
+ok("Cheques in hand are cash too", sectionFor({ type: "ASSET", code: "1115", systemKey: "CHEQUES_IN_HAND" }) === "CASH");
+ok("Receivables are operating", sectionFor({ type: "ASSET", code: "1130", systemKey: "AR" }) === "OPERATING");
+ok("Fixed assets are investing", sectionFor({ type: "ASSET", code: "1210", systemKey: null }) === "INVESTING");
+ok("Equity is financing", sectionFor({ type: "EQUITY", code: "3100", systemKey: null }) === "FINANCING");
+ok("Income is already in the profit", sectionFor({ type: "INCOME", code: "4100", systemKey: "SALES" }) === "PROFIT");
+
+// Profit 2,50,000; depreciation 50,000 added back; receivables up 1,00,000 (cash not yet in);
+// payables up 30,000 (cash not yet out); a 2,00,000 laptop purchase. Cash should move by
+// 250,000 + 50,000 − 100,000 + 30,000 − 200,000 = 30,000.
+const cf = buildCashFlow({
+  from: d("2026-04-01"),
+  to: d("2027-03-31"),
+  netProfit: 250000,
+  depreciationCharged: 50000,
+  movements: [
+    mv({ accountId: "bank", code: "1110", name: "Bank", systemKey: "BANK", opening: 500000, movement: 30000, closing: 530000 }),
+    mv({ accountId: "ar", code: "1130", name: "Accounts Receivable", systemKey: "AR", opening: 0, movement: 100000, closing: 100000 }),
+    mv({ accountId: "ap", code: "2110", name: "Accounts Payable", type: "LIABILITY", systemKey: "AP", opening: 0, movement: 30000, closing: 30000 }),
+    mv({ accountId: "fa", code: "1210", name: "Computers", opening: 0, movement: 200000, closing: 200000 }),
+    mv({ accountId: "acc", code: "1290", name: "Accumulated Depreciation", systemKey: "ACCUMULATED_DEPRECIATION", opening: 0, movement: -50000, closing: -50000 }),
+  ],
+});
+eq("Cash flow: net change", cf.netChange, 30000);
+eq("  and it agrees with the bank", cf.closingCash - cf.openingCash, 30000);
+ok("  so the statement reconciles", cf.reconciles, `difference ${cf.difference}`);
+eq("  receivables going up consume cash", cf.operating.lines.find((l) => l.label.includes("Receivable"))!.amount, -100000, "profit that hasn't arrived");
+eq("  payables going up release it", cf.operating.lines.find((l) => l.label.includes("Payable"))!.amount, 30000);
+eq("  buying an asset is investing", cf.investing.total, -200000, "the cash that left; the depreciation on it is not a second cash flow");
+eq("  depreciation is added back", cf.operating.lines.find((l) => l.label.includes("depreciation"))!.amount, 50000, "it moved no cash");
+
+console.log("\n— Bank reconciliation —\n");
+
+const statementRow = (over: Partial<StatementRow>): StatementRow => ({
+  id: "s1",
+  date: d("2026-09-10"),
+  narration: "NEFT ACME",
+  reference: "UTR112233",
+  amount: 50000,
+  ...over,
+});
+const bookRow = (over: Partial<BookRow>): BookRow => ({
+  id: "b1",
+  date: d("2026-09-10"),
+  narration: "Payment received from Acme",
+  reference: "UTR112233",
+  amount: 50000,
+  ...over,
+});
+
+const byRef = suggestMatches([statementRow({})], [bookRow({})]);
+eq("A matching reference is matched", byRef.length, 1);
+ok("  with confidence", byRef[0].confidence === "EXACT", byRef[0].why);
+
+const nearDate = suggestMatches(
+  [statementRow({ id: "s2", reference: null, date: d("2026-09-12") })],
+  [bookRow({ id: "b2", reference: null })],
+);
+eq("A near date and an exact amount is matched", nearDate.length, 1);
+ok("  but only as likely", nearDate[0].confidence === "LIKELY", nearDate[0].why);
+
+// The case that matters: two identical amounts in the same week must not be guessed.
+const ambiguous = suggestMatches(
+  [statementRow({ id: "s3", reference: null })],
+  [bookRow({ id: "b3", reference: null }), bookRow({ id: "b4", reference: null, date: d("2026-09-11") })],
+);
+eq("Two candidates of the same amount are left alone", ambiguous.length, 0, "guessing here is worse than not matching");
+
+const differentAmount = suggestMatches(
+  [statementRow({ id: "s5", amount: 50000, reference: null })],
+  [bookRow({ id: "b5", amount: 49000, reference: null })],
+);
+eq("A different amount is never matched", differentAmount.length, 0);
+
+const oneToOne = suggestMatches(
+  [statementRow({ id: "s6", reference: null }), statementRow({ id: "s7", reference: null, date: d("2026-09-11") })],
+  [bookRow({ id: "b6", reference: null })],
+);
+ok("One book line can't satisfy two statement rows", oneToOne.length <= 1, `${oneToOne.length} match(es)`);
+
+// An uncleared cheque is the classic reconciling item.
+const rec = reconcile({
+  statementBalance: 100000,
+  bookBalance: 75000,
+  statement: [statementRow({ id: "s8", amount: 100000 })],
+  book: [bookRow({ id: "b8", amount: 100000 }), bookRow({ id: "b9", amount: -25000, narration: "Cheque to vendor" })],
+  matchedStatementIds: new Set(["s8"]),
+  matchedBookIds: new Set(["b8"]),
+});
+eq("An unpresented cheque explains the difference", rec.adjustedBalance, 75000, "1,00,000 at the bank less a 25,000 cheque in flight");
+ok("  so the reconciliation agrees", rec.reconciled, `difference ${rec.difference}`);
+eq("  and it is listed as in flight", rec.unmatchedBook.length, 1);
+
+const charges = reconcile({
+  statementBalance: 99500,
+  bookBalance: 100000,
+  statement: [statementRow({ id: "s9", amount: -500, narration: "BANK CHARGES" })],
+  book: [],
+  matchedStatementIds: new Set(),
+  matchedBookIds: new Set(),
+});
+eq("Bank charges nobody recorded show up", charges.unmatchedStatement.length, 1);
+ok("  and the books still agree once adjusted", charges.reconciled, `difference ${charges.difference}`);
+
+console.log("\n— Statement import —\n");
+
+const csv = [
+  "Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt,Closing Balance",
+  "10/09/2026,NEFT-ACME PVT LTD,UTR112233,,50000.00,5,50,000.00",
+  "12/09/2026,CHQ PAID VENDOR,445566,\"25,000.00\",,5,25,000.00",
+  "13/09/2026,BANK CHARGES,,118.00,,5,24,882.00",
+  "OPENING BALANCE,,,,,",
+].join("\n");
+const parsed = parseStatementCsv(csv);
+eq("Three transactions read from a bank CSV", parsed.rows.length, 3);
+eq("  a deposit is positive", parsed.rows[0].amount, 50000);
+eq("  a withdrawal is negative", parsed.rows[1].amount, -25000, "commas and quotes handled");
+eq("  and header junk is skipped", parsed.skipped, 1, "the opening-balance line");
+ok("  dates are normalised", parsed.rows[0].date === "2026-09-10", parsed.rows[0].date);
+
+const signedCsv = ["Date,Description,Amount", "2026-09-10,Transfer,-1500.50"].join("\n");
+const signedParsed = parseStatementCsv(signedCsv);
+eq("A single signed amount column works too", signedParsed.rows[0].amount, -1500.5);
+
+const fp1 = statementFingerprint({ date: "2026-09-10", amount: 50000, reference: "UTR112233", narration: "NEFT ACME" });
+const fp2 = statementFingerprint({ date: "2026-09-10", amount: 50000, reference: "utr-112233", narration: "NEFT  ACME " });
+ok("Re-importing the same row is recognised", fp1 === fp2, "so an overlapping statement is a no-op");
+const fp3 = statementFingerprint({ date: "2026-09-10", amount: 50001, reference: "UTR112233", narration: "NEFT ACME" });
+ok("  but a different amount is a different row", fp1 !== fp3);
+
+console.log(failures === 0 ? "\nAll accounting checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
+process.exit(failures === 0 ? 0 : 1);

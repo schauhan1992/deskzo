@@ -1,0 +1,94 @@
+import { listAllContactsPaged } from "@/actions/contact";
+import { listIndustries } from "@/actions/industry";
+import { isModuleEnabled } from "@/actions/module";
+import { SearchParamInput } from "@/components/ui/search-param-input";
+import { SelectParamFilter } from "@/components/ui/select-param-filter";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { ContactsTable } from "@/components/contacts/contacts-table";
+import { Pagination } from "@/components/ui/pagination";
+import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
+import { contactDesignationValues, relationshipTypeValues, relationshipTypeLabels } from "@/lib/validation/company";
+import type { ContactDesignation, CompanyRelationshipType } from "@prisma/client";
+
+export default async function ContactsLibraryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    q?: string;
+    designation?: string;
+    relationshipType?: string;
+    industryId?: string;
+    primaryOnly?: string;
+    page?: string;
+    pageSize?: string;
+  }>;
+}) {
+  const enabled = await isModuleEnabled("contacts_library");
+  if (!enabled) {
+    return <ModuleDisabledNotice moduleKey="contacts_library" />;
+  }
+
+  const params = await searchParams;
+  const page = resolvePage(params.page);
+  const pageSize = resolvePageSize(params.pageSize);
+  const [result, industries] = await Promise.all([
+    listAllContactsPaged({
+      page,
+      pageSize,
+      search: params.q,
+      designation: params.designation as ContactDesignation | undefined,
+      relationshipType: params.relationshipType as CompanyRelationshipType | undefined,
+      industryId: params.industryId,
+      primaryOnly: params.primaryOnly === "yes",
+    }),
+    listIndustries(),
+  ]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Contacts</h1>
+          <p className="mt-1 text-sm text-muted">{result.total} contact(s) across every company</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <SearchParamInput paramName="q" placeholder="Search name, email, phone, or company…" />
+        <SelectParamFilter
+          paramName="relationshipType"
+          label="Relationship"
+          options={relationshipTypeValues.map((t) => ({ value: t, label: relationshipTypeLabels[t] }))}
+        />
+        <SelectParamFilter
+          paramName="designation"
+          label="Designation"
+          options={contactDesignationValues.map((d) => ({ value: d, label: d.replaceAll("_", " ") }))}
+        />
+        <SelectParamFilter
+          paramName="industryId"
+          label="Industry"
+          options={industries.map((i) => ({ value: i.id, label: i.name }))}
+        />
+        <SelectParamFilter
+          paramName="primaryOnly"
+          label="Primary only"
+          allLabel="All contacts"
+          options={[{ value: "yes", label: "Primary only" }]}
+        />
+      </div>
+
+      <div className="mt-6">
+        <ContactsTable contacts={result.rows} />
+      </div>
+
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={result.total}
+        totalPages={totalPages(result.total, pageSize)}
+        pageSizes={PAGE_SIZES}
+      />
+    </div>
+  );
+}

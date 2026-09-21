@@ -1,26 +1,273 @@
 @import "tailwindcss";
 
+/*
+ * Semantic design tokens. Components never name a raw colour — they use `bg-surface`,
+ * `text-muted`, `border-line` and so on, which is what makes both dark mode and white-labelling
+ * work without touching a single component.
+ *
+ * --brand is injected per-deployment from BrandingSettings (see src/lib/branding.ts); every tint
+ * of it is derived with color-mix() rather than being stored, so changing the brand colour in
+ * Settings recolours the whole app instantly.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --brand: #4f46e5;
+  --brand-contrast: #ffffff;
+  /*
+   * The focus indicator, which is NOT simply the brand colour.
+   *
+   * WCAG 1.4.11 wants 3:1 between the indicator and what it sits on. Indigo #4f46e5 manages that
+   * against a white field and only 2.92:1 against the dark surface #15181d — so on dark mode the
+   * ring was both invisible and non-conforming. Redefined per theme below rather than tinted at
+   * the call site, so every field gets the same treatment.
+   */
+  --focus: #4f46e5;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f1f3f5;
+  --line: #e4e7eb;
+  --line-strong: #d3d8de;
+
+  --text: #16191d;
+  --text-muted: #646c76;
+  --text-subtle: #8b939d;
+
+  --success: #12805c;
+  --success-bg: #e7f6f0;
+  --warning: #9a6200;
+  --warning-bg: #fdf3e2;
+  --danger: #c0343a;
+  --danger-bg: #fdeceb;
+  --info: #2563a8;
+  --info-bg: #e8f1fb;
+
+  --shadow-sm: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.06);
+  --shadow-md: 0 2px 4px -1px rgb(16 24 40 / 0.06), 0 4px 12px -2px rgb(16 24 40 / 0.08);
+  --shadow-lg: 0 8px 24px -4px rgb(16 24 40 / 0.12), 0 16px 40px -8px rgb(16 24 40 / 0.10);
+
+  --radius: 0.5rem;
+}
+
+.dark {
+  --brand-contrast: #ffffff;
+
+  --bg: #0d0f12;
+  --surface: #15181d;
+  --surface-raised: #1b1f25;
+  --surface-sunken: #101317;
+  --line: #262b32;
+  --line-strong: #363d46;
+
+  --text: #e8eaed;
+  --text-muted: #9aa3ad;
+  --text-subtle: #6f7882;
+
+  --success: #43c59e;
+  --success-bg: #12291f;
+  --warning: #e0a03a;
+  --warning-bg: #2a2114;
+  --danger: #f2696e;
+  --danger-bg: #2d1618;
+  --info: #6aa5e8;
+  --info-bg: #14212f;
+
+  /* Indigo-300: 8.2:1 against the dark surface, where the brand indigo manages 2.92:1. */
+  --focus: #a5b4fc;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-md: 0 2px 6px -1px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-brand: var(--brand);
+  --color-focus: var(--focus);
+  --color-brand-contrast: var(--brand-contrast);
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+
+  --radius-base: var(--radius);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * One consistent focus ring, instead of the browser default.
+   *
+   * Every form field used to opt out of this with `focus:outline-none` and then fail to replace it:
+   * `focus:ring-brand` sets a ring *colour* and Tailwind draws no ring without a width, so the only
+   * remaining signal was a 1px border changing to a colour 1.75:1 away from the one it replaced. On
+   * 827 fields across 162 files, a keyboard user could not tell which field they were in.
+   */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--brand) 24%, transparent);
+  }
+
+  /* Scrollbars that don't look out of place in dark mode. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  /* Brand tints, all derived so they follow the configured colour. */
+  .bg-brand-subtle {
+    background-color: color-mix(in srgb, var(--brand) 10%, transparent);
+  }
+  .bg-brand-hover:hover {
+    background-color: color-mix(in srgb, var(--brand) 88%, black);
+  }
+  .text-brand {
+    color: var(--brand);
+  }
+  .border-brand {
+    border-color: var(--brand);
+  }
+  .ring-brand {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent);
+  }
+}
+
+/* Entry animations. Kept short — this is a tool people use all day, not a landing page. */
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.animate-fade-rise {
+  animation: fade-rise 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out;
+}
+.animate-scale-in {
+  animation: scale-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-slide-in-left {
+  animation: slide-in-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Respect the OS setting — animation should never be the reason someone can't use the app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Set on <html> by the DLP guard when the policy blocks text selection.
+ *
+ * Deliberately carved out for fields and for anything explicitly marked selectable: a blanket
+ * `user-select: none` also stops somebody selecting the text they are in the middle of typing,
+ * which reads as a broken app rather than a policy and is the fastest route to the whole feature
+ * being switched off.
+ */
+.dlp-no-select,
+.dlp-no-select * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.dlp-no-select input,
+.dlp-no-select textarea,
+.dlp-no-select [contenteditable="true"],
+.dlp-no-select [data-allow-select] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/*
+ * Printing with the print block on. The dashboard's own print views live under (print) and are
+ * rendered outside this layout, so an invoice still prints — this only blanks the app chrome.
+ */
+@media print {
+  .dlp-no-print {
+    display: none !important;
+  }
 }

@@ -1,0 +1,242 @@
+"use server";
+
+import { db } from "@/lib/db";
+import { requireUser } from "@/lib/session";
+import { revalidatePath } from "next/cache";
+import type { NotificationType } from "@prisma/client";
+import { syncSystemNotifications } from "@/lib/notify";
+import { NOTIFICATION_CATALOGUE, describeNotification, wants } from "@/lib/notifications/catalogue";
+import { dateRangeFilter } from "@/lib/utils";
+import type { ActionResult } from "@/actions/company";
+
+export async function getNotifications(params?: { unreadOnly?: boolean; limit?: number }) {
+  const user = await requireUser();
+  await syncSystemNotifications(user.id);
+  return db.notification.findMany({
+    where: { userId: user.id, ...(params?.unreadOnly ? { read: false } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: params?.limit ?? 20,
+  });
+}
+
+export async function getUnreadNotificationCount() {
+  const user = await requireUser();
+  await syncSystemNotifications(user.id);
+  return db.notification.count({ where: { userId: user.id, read: false } });
+}
+
+export async function markNotificationRead(id: string): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  const notification = await db.notification.findUnique({ where: { id } });
+  if (!notification || notification.userId !== user.id) {
+    return { ok: false, error: "Notification not found." };
+  }
+  await db.notification.update({ where: { id }, data: { read: true, readAt: new Date() } });
+  return { ok: true, data: null };
+}
+
+export async function markAllNotificationsRead(): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  await db.notification.updateMany({ where: { userId: user.id, read: false }, data: { read: true, readAt: new Date() } });
+  return { ok: true, data: null };
+}
+
+/**
+ * The history page.
+ *
+ * Every query here is scoped by `user.id` taken from the session and never from an argument, which
+ * is the property that makes the rest safe: a notification is addressed to one person, and there is
+ * no parameter on any of these that could name somebody else's.
+ */
+
+export type NotificationRow = {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string | null;
+  link: string | null;
+  read: boolean;
+  createdAt: Date;
+  archivedAt: Date | null;
+};
+
+export type NotificationPage = {
+  rows: NotificationRow[];
+  total: number;
+  unread: number;
+  archived: number;
+  /** Types this person has actually received, for the filter — not all thirty-nine. */
+  presentTypes: NotificationType[];
+};
+
+export async function listNotifications(params: {
+  page: number;
+  pageSize: number;
+  /** "inbox" hides what has been archived; "archived" shows only that. */
+  view?: "inbox" | "archived";
+  unreadOnly?: boolean;
+  type?: string;
+  from?: string;
+  to?: string;
+}): Promise<NotificationPage> {
+  const user = await requireUser();
+  await syncSystemNotifications(user.id);
+
+  const view = params.view === "archived" ? "archived" : "inbox";
+  const where = {
+    userId: user.id,
+    ...(view === "archived" ? { archivedAt: { not: null } } : { archivedAt: null }),
+    ...(params.unreadOnly ? { read: false } : {}),
+    ...(params.type && params.type !== "all" ? { type: params.type as NotificationType } : {}),
+    ...dateRangeFilter(params.from, params.to),
+  };
+
+  const [rows, total, unread, archived, present] = await Promise.all([
+    db.notification.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (params.page - 1) * params.pageSize,
+      take: params.pageSize,
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        message: true,
+        link: true,
+        read: true,
+        createdAt: true,
+        archivedAt: true,
+      },
+    }),
+    db.notification.count({ where }),
+    db.notification.count({ where: { userId: user.id, archivedAt: null, read: false } }),
+    db.notification.count({ where: { userId: user.id, archivedAt: { not: null } } }),
+    // Offering all thirty-nine types in the filter, most of which this person will never have seen,
+    // is a dropdown nobody can find anything in.
+    db.notification.groupBy({ by: ["type"], where: { userId: user.id } }),
+  ]);
+
+  return { rows, total, unread, archived, presentTypes: present.map((p) => p.type) };
+}
+
+export async function archiveNotification(input: { ids: string[] }): Promise<ActionResult<{ archived: number }>> {
+  const user = await requireUser();
+  if (input.ids.length === 0) return { ok: true, data: { archived: 0 } };
+
+  // Scoped by userId as well as by id, so an id from anywhere else matches nothing rather than
+  // archiving somebody else's notification.
+  const result = await db.notification.updateMany({
+    where: { id: { in: input.ids }, userId: user.id },
+    data: { archivedAt: new Date(), read: true, readAt: new Date() },
+  });
+
+  revalidatePath("/notifications");
+  return { ok: true, data: { archived: result.count } };
+}
+
+export async function unarchiveNotification(input: { ids: string[] }): Promise<ActionResult<{ restored: number }>> {
+  const user = await requireUser();
+  if (input.ids.length === 0) return { ok: true, data: { restored: 0 } };
+
+  const result = await db.notification.updateMany({
+    where: { id: { in: input.ids }, userId: user.id },
+    data: { archivedAt: null },
+  });
+
+  revalidatePath("/notifications");
+  return { ok: true, data: { restored: result.count } };
+}
+
+/**
+ * Deletes for good.
+ *
+ * Offered because an archive that only ever grows is a second list nobody reads. Nothing else in
+ * the app depends on a notification row — it is a message, not a record — so this is a real delete
+ * rather than another flag on top of a flag.
+ */
+export async function deleteNotifications(input: { ids: string[] }): Promise<ActionResult<{ deleted: number }>> {
+  const user = await requireUser();
+  if (input.ids.length === 0) return { ok: true, data: { deleted: 0 } };
+
+  const result = await db.notification.deleteMany({ where: { id: { in: input.ids }, userId: user.id } });
+
+  revalidatePath("/notifications");
+  return { ok: true, data: { deleted: result.count } };
+}
+
+/** Empties the archive. The one bulk action worth asking about, so the UI confirms first. */
+export async function emptyNotificationArchive(): Promise<ActionResult<{ deleted: number }>> {
+  const user = await requireUser();
+  const result = await db.notification.deleteMany({ where: { userId: user.id, archivedAt: { not: null } } });
+  revalidatePath("/notifications");
+  return { ok: true, data: { deleted: result.count } };
+}
+
+export type PreferenceRow = { type: NotificationType; inApp: boolean; email: boolean; alwaysOn: boolean };
+
+/**
+ * What this person has chosen, merged over the defaults.
+ *
+ * Every catalogued type comes back whether or not a row exists, because the screen has to show all
+ * of them — and "no row" means on, not missing.
+ */
+export async function notificationPreferences(): Promise<ActionResult<PreferenceRow[]>> {
+  const user = await requireUser();
+  const stored = await db.notificationPreference.findMany({
+    where: { userId: user.id },
+    select: { type: true, inApp: true, email: true },
+  });
+  const byType = new Map(stored.map((s) => [s.type, s]));
+
+  return {
+    ok: true,
+    data: NOTIFICATION_CATALOGUE.map((d) => ({
+      type: d.type,
+      inApp: wants(d.type, "inApp", byType.get(d.type)),
+      email: wants(d.type, "email", byType.get(d.type)),
+      alwaysOn: d.alwaysOn === true,
+    })),
+  };
+}
+
+export async function setNotificationPreference(input: {
+  type: string;
+  inApp: boolean;
+  email: boolean;
+}): Promise<ActionResult<{ type: string }>> {
+  const user = await requireUser();
+
+  const definition = describeNotification(input.type as NotificationType);
+  if (!definition) return { ok: false, error: "That isn't a notification we send." };
+
+  /**
+   * Refused rather than accepted and ignored.
+   *
+   * `wants` already forces these on whatever the row says, so storing a mute would be harmless —
+   * and that is exactly the problem: the screen would show it as off while the notifications kept
+   * arriving, which reads as a bug and takes the credibility of every other switch with it.
+   */
+  if (definition.alwaysOn) {
+    return {
+      ok: false,
+      error: "This one can't be switched off — it exists so somebody is told whether or not they want to be.",
+    };
+  }
+
+  await db.notificationPreference.upsert({
+    where: { userId_type: { userId: user.id, type: definition.type } },
+    create: { userId: user.id, type: definition.type, inApp: input.inApp, email: input.email },
+    update: { inApp: input.inApp, email: input.email },
+  });
+
+  revalidatePath("/notifications");
+  return { ok: true, data: { type: definition.type } };
+}
+
+/** Back to the defaults — every type on — by deleting the opinions rather than rewriting them. */
+export async function resetNotificationPreferences(): Promise<ActionResult<{ cleared: number }>> {
+  const user = await requireUser();
+  const result = await db.notificationPreference.deleteMany({ where: { userId: user.id } });
+  revalidatePath("/notifications");
+  return { ok: true, data: { cleared: result.count } };
+}
