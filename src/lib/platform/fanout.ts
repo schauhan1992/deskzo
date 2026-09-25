@@ -42,7 +42,7 @@ class JobTimeout extends Error {}
  * Takes the lease, or says somebody holds it. Without a control plane (an installation from before
  * workspaces, or a check suite) there is one scheduler per workspace and nothing to lease.
  */
-async function takeLease(tenantId: string, job: string, holdMs: number): Promise<boolean> {
+export async function takeLease(tenantId: string, job: string, holdMs: number): Promise<boolean> {
   if (!controlConfigured()) return true;
   const now = new Date();
   const until = new Date(now.getTime() + holdMs);
@@ -56,7 +56,7 @@ async function takeLease(tenantId: string, job: string, holdMs: number): Promise
   return taken === 1;
 }
 
-async function releaseLease(tenantId: string, job: string, ok: boolean, error: string | null): Promise<void> {
+export async function releaseLease(tenantId: string, job: string, ok: boolean, error: string | null): Promise<void> {
   if (!controlConfigured()) return;
   const now = new Date();
   await controlDb()
@@ -124,4 +124,21 @@ export async function tickTargets(headers: Headers): Promise<{ scope: "workspace
   const here = await tenantForKind(kind);
   if (here) return { scope: "workspace", tenants: here.status === "ACTIVE" ? [here] : [] };
   return { scope: "platform", tenants: kind.kind === "root" || kind.kind === "console" ? await activeTenants() : [] };
+}
+
+/**
+ * Runs `work` under a lease that belongs to no workspace — "platform" and a job name — or skips it
+ * when somebody else holds it. For the platform's own chores: topping up the warm pool, a migration
+ * run.
+ */
+export async function withPlatformLease<T>(job: string, holdMs: number, work: () => Promise<T>): Promise<{ ran: true; value: T } | { ran: false }> {
+  if (!(await takeLease("platform", job, holdMs))) return { ran: false };
+  try {
+    const value = await work();
+    await releaseLease("platform", job, true, null);
+    return { ran: true, value };
+  } catch (err) {
+    await releaseLease("platform", job, false, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
 }

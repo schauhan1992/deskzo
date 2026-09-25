@@ -245,6 +245,12 @@ const PUBLIC_ACTIONS = new Set([
   "src/actions/intake.ts",
   // Sign-in itself.
   "src/actions/auth.ts",
+  // "Forgot your password?" — asked by somebody who cannot sign in, by definition. It answers the
+  // same whether or not the address has an account, and a reset needs the emailed one-time link.
+  "src/actions/password-reset.ts",
+  // Signing up for a workspace, on the platform's own address, where there are no accounts yet. By
+  // invitation, limited per address, and it touches only the control plane.
+  "src/actions/platform/signup.ts",
   // The access page: a person held at the door shares their location or signs out. `requireUser`
   // refuses exactly these people by design, so the session is read directly — and each action does
   // one narrow thing to the caller's own session. See src/actions/access-gate.ts.
@@ -294,7 +300,9 @@ const PUBLIC_ACTIONS = new Set([
 ]);
 
 const actionsDir = join(process.cwd(), "src", "actions");
-const files = readdirSync(actionsDir).filter((f) => f.endsWith(".ts"));
+// Every action file, in subfolders too (src/actions/platform/…): one the scan cannot see is one it
+// would wrongly pass.
+const files = (readdirSync(actionsDir, { recursive: true }) as string[]).filter((f) => f.endsWith(".ts")).map((f) => f.split("\\").join("/"));
 const ungated: string[] = [];
 let examined = 0;
 

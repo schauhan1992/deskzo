@@ -1,0 +1,226 @@
+"use server";
+
+import { spawn } from "node:child_process";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import path from "node:path";
+import bcrypt from "bcryptjs";
+import { cookies, headers } from "next/headers";
+import { WORLD_COUNTRIES } from "@/lib/geo/world-countries";
+import { isDisposableDomain, parseEmailAddress } from "@/lib/email-verification";
+import { controlDb } from "@/lib/platform/control-db";
+import { createHandoffTicket } from "@/lib/platform/handoff";
+import { sendPlatformMail } from "@/lib/platform/mailer";
+import { ProvisioningRefused, slugProblem, startProvisioning } from "@/lib/platform/provisioning";
+import { lockoutState, recordFailure } from "@/lib/security/lockout";
+import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
+import { subdomainHost } from "@/lib/tenancy/registry";
+
+/**
+ * Signing up for a workspace — the public site on the platform's own address (src/app/platform-site).
+ *
+ *   1. `startSignup`: the form. By invitation only for now. Refuses a disposable address, a name that
+ *      is taken or reserved, a short password. Emails a six-digit code and remembers the browser (a
+ *      cookie whose secret only this browser has).
+ *   2. `verifySignup`: the code. Spends the invitation, reserves the name, queues the workspace
+ *      (src/lib/platform/provisioning.ts) and starts the worker.
+ *   3. `signupProgress`: what the progress page polls. Once the workspace is up, it hands the owner
+ *      a one-time pass to it — once, to this browser only — and the page follows it straight in.
+ *
+ * None of this touches a workspace's database: there is none yet. Attempts are limited per address
+ * (src/lib/security/lockout.ts, under "platform|"), codes per signup.
+ */
+
+const COOKIE = "wroffy.signup";
+const CODE_TTL_MS = 15 * 60_000;
+const MAX_CODE_ATTEMPTS = 5;
+const MIN_PASSWORD = 10;
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+export type SignupResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
+
+async function callerKey(): Promise<string> {
+  const head = await headers();
+  const ip = head.get("x-forwarded-for")?.split(",")[0]?.trim() || head.get("x-real-ip") || "unknown";
+  return `platform|signup:${ip}`;
+}
+
+async function limited(): Promise<string | null> {
+  const key = await callerKey();
+  const state = lockoutState([key]);
+  if (state.lockedOut) return `Too many attempts from here. Try again in ${Math.ceil(state.retryInSeconds / 60)} minute(s).`;
+  recordFailure([key]);
+  return null;
+}
+
+/** The live check beside the address field. */
+export async function checkWorkspaceName(input: string): Promise<SignupResult<{ host: string }>> {
+  const slug = String(input ?? "").trim().toLowerCase();
+  const problem = await slugProblem(slug);
+  return problem ? { ok: false, error: problem } : { ok: true, data: { host: subdomainHost(slug) } };
+}
+
+export type SignupForm = {
+  companyName: string;
+  slug: string;
+  ownerName: string;
+  email: string;
+  password: string;
+  country: string;
+  invite: string;
+};
+
+async function inviteProblem(code: string): Promise<string | null> {
+  const invite = await controlDb().signupInvite.findUnique({ where: { codeHash: sha256(code.trim()) } });
+  if (!invite || invite.uses >= invite.maxUses || (invite.expiresAt && invite.expiresAt < new Date())) {
+    return "That invitation code isn't valid. Signing up is by invitation for now.";
+  }
+  return null;
+}
+
+export async function startSignup(form: SignupForm): Promise<SignupResult<{ email: string }>> {
+  const slow = await limited();
+  if (slow) return { ok: false, error: slow };
+
+  const companyName = String(form.companyName ?? "").trim();
+  const ownerName = String(form.ownerName ?? "").trim();
+  const slug = String(form.slug ?? "").trim().toLowerCase();
+  const parsed = parseEmailAddress(form.email);
+  const email = parsed ? { ...parsed, address: `${parsed.local}@${parsed.domain}` } : null;
+  const country = WORLD_COUNTRIES.find((c) => c.code === String(form.country ?? "").toUpperCase());
+  const password = String(form.password ?? "");
+
+  if (companyName.length < 2 || companyName.length > 120) return { ok: false, error: "Give your company's name." };
+  if (ownerName.length < 2 || ownerName.length > 120) return { ok: false, error: "Give your name." };
+  if (!email) return { ok: false, error: "That doesn't look like an email address." };
+  if (isDisposableDomain(email.domain)) return { ok: false, error: "Use your work address — throwaway addresses can't own a workspace." };
+  if (!country) return { ok: false, error: "Choose your country." };
+  if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
+  const nameProblem = await slugProblem(slug);
+  if (nameProblem) return { ok: false, error: nameProblem };
+  const badInvite = await inviteProblem(String(form.invite ?? ""));
+  if (badInvite) return { ok: false, error: badInvite };
+
+  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const secret = randomBytes(24).toString("base64url");
+  const head = await headers();
+  const pending = await controlDb().pendingSignup.create({
+    data: {
+      email: email.address,
+      ownerName,
+      companyName,
+      slug,
+      country: country.code,
+      passwordHash: await bcrypt.hash(password, 10),
+      inviteCodeHash: sha256(String(form.invite).trim()),
+      codeHash: sha256(code),
+      codeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
+      browserSecretHash: sha256(secret),
+      ip: head.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
+    },
+    select: { id: true },
+  });
+
+  const host = requestHost(head);
+  (await cookies()).set(COOKIE, `${pending.id}.${secret}`, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: typeof host === "string" && protocolFor(host) === "https",
+    maxAge: 24 * 60 * 60,
+  });
+
+  await sendPlatformMail({
+    to: email.address,
+    subject: `Your code for ${slug}.${PLATFORM_DOMAIN}: ${code}`,
+    text: [`Hello ${ownerName},`, "", `Your code to finish setting up ${companyName} is ${code}.`, "", "It works for 15 minutes. If you didn't ask for this, ignore it."].join("\n"),
+  });
+  return { ok: true, data: { email: email.address } };
+}
+
+/** The signup this browser started, when its cookie is genuine. */
+async function thisBrowsersSignup() {
+  const raw = (await cookies()).get(COOKIE)?.value ?? "";
+  const [id, secret] = raw.split(".");
+  if (!id || !secret) return null;
+  const pending = await controlDb().pendingSignup.findUnique({ where: { id } });
+  if (!pending) return null;
+  const a = Buffer.from(pending.browserSecretHash);
+  const b = Buffer.from(sha256(secret));
+  return a.length === b.length && timingSafeEqual(a, b) ? pending : null;
+}
+
+const WORKER = path.join(process.cwd(), "scripts", "platform-worker.ts");
+const TSX_CLI = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+
+export async function verifySignup(input: string): Promise<SignupResult> {
+  const pending = await thisBrowsersSignup();
+  if (!pending) return { ok: false, error: "This signup has expired. Start again." };
+  if (pending.verifiedAt) return { ok: true, data: null };
+  if (pending.attempts >= MAX_CODE_ATTEMPTS || pending.codeExpiresAt < new Date()) return { ok: false, error: "That code has expired. Start again." };
+
+  const code = String(input ?? "").replace(/\s+/g, "");
+  if (sha256(code) !== pending.codeHash) {
+    await controlDb().pendingSignup.update({ where: { id: pending.id }, data: { attempts: { increment: 1 } } });
+    return { ok: false, error: "That isn't the code we sent." };
+  }
+
+  // The invitation is spent now — conditionally, so two signups on one single-use code get one workspace.
+  const spent = await controlDb().$executeRaw`
+    UPDATE "signup_invites" SET "uses" = "uses" + 1
+    WHERE "codeHash" = ${pending.inviteCodeHash} AND "uses" < "maxUses" AND ("expiresAt" IS NULL OR "expiresAt" > now())`;
+  if (spent !== 1) return { ok: false, error: "That invitation has been used in the meantime." };
+
+  let tenantId: string;
+  try {
+    ({ tenantId } = await startProvisioning({
+      slug: pending.slug,
+      companyName: pending.companyName,
+      ownerName: pending.ownerName,
+      ownerEmail: pending.email,
+      ownerPasswordHash: pending.passwordHash,
+      country: pending.country,
+    }));
+  } catch (err) {
+    // The invitation goes back: nothing was made with it.
+    await controlDb().signupInvite.update({ where: { codeHash: pending.inviteCodeHash }, data: { uses: { decrement: 1 } } });
+    if (err instanceof ProvisioningRefused) return { ok: false, error: err.message };
+    throw err;
+  }
+  // The password now lives only on the job, which clears it once the owner exists.
+  await controlDb().pendingSignup.update({ where: { id: pending.id }, data: { verifiedAt: new Date(), tenantId, passwordHash: "" } });
+
+  // A worker for this job now, so nobody has to have set one up; a running one finds nothing left.
+  try {
+    spawn(process.execPath, [TSX_CLI, WORKER, "--once"], { cwd: process.cwd(), detached: true, stdio: "ignore", env: process.env }).unref();
+  } catch (err) {
+    console.error("[signup] could not start the worker; a running one will take the job", err);
+  }
+  return { ok: true, data: null };
+}
+
+export type SignupProgress =
+  | { state: "setting-up"; step: string }
+  | { state: "ready"; url: string }
+  | { state: "failed"; message: string }
+  | { state: "gone" };
+
+export async function signupProgress(): Promise<SignupProgress> {
+  const pending = await thisBrowsersSignup();
+  if (!pending?.tenantId) return { state: "gone" };
+  const control = controlDb();
+  const [tenant, job] = await Promise.all([
+    control.tenant.findUnique({ where: { id: pending.tenantId }, select: { id: true, slug: true, status: true } }),
+    control.provisioningJob.findFirst({ where: { tenantId: pending.tenantId }, orderBy: { createdAt: "desc" }, select: { status: true, step: true } }),
+  ]);
+  if (!tenant) return { state: "gone" };
+  if (job?.status === "FAILED") return { state: "failed", message: job.step };
+  if (tenant.status !== "ACTIVE") return { state: "setting-up", step: job?.step ?? "Waiting to start" };
+
+  const host = subdomainHost(tenant.slug);
+  const origin = `${protocolFor(host)}://${host}`;
+  // The pass, once: a second look (a refresh) is sent to the sign-in page instead.
+  const claimed = await control.pendingSignup.updateMany({ where: { id: pending.id, handedOffAt: null }, data: { handedOffAt: new Date() } });
+  if (claimed.count !== 1) return { state: "ready", url: `${origin}/login` };
+  const ticket = await createHandoffTicket(tenant.id, pending.email, "owner-signup");
+  return { state: "ready", url: `${origin}/handoff?t=${encodeURIComponent(ticket)}` };
+}

@@ -164,6 +164,9 @@ export async function keysFor(tenant: Tenant): Promise<TenantKeys> {
   const { keys } = tenancyState();
   const hit = keys.get(tenant.id);
   if (hit && hit.cipher === tenant.keyBundleCipher && Date.now() - hit.at < KEYS_MS) return hit.keys as TenantKeys;
+  // A workspace in the control plane with no bundle has had its keys wiped (deprovisioned and
+  // purged): it has none, and must never be handed keys derived from anything else.
+  if (tenant.source === "control" && !tenant.keyBundleCipher) throw new Error(`Workspace ${tenant.slug} has no keys — it was closed.`);
   const opened = tenant.keyBundleCipher ? fromBundle(openKeyBundle(tenant.id, tenant.keyBundleCipher)) : environmentKeys(tenant);
   keys.set(tenant.id, { cipher: tenant.keyBundleCipher, keys: opened, at: Date.now() });
   return opened;

@@ -80,3 +80,6 @@ public/sample-vendor-statement.csv
 # that changes monthly: replaced from Settings, never committed. Anchored for the reason /backups/ is.
 /geoip/
 
+
+# Platform mail written instead of sent, in development (src/lib/platform/mailer.ts)
+/platform-outbox/

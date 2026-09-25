@@ -106,6 +106,19 @@ export async function checkCredentials(email: string, password: string): Promise
   return { ok: true, needsTotp: !!user.twoFactorEnabledAt };
 }
 
+/**
+ * Signs in with a handoff pass — the /handoff page, straight after a signup. A pass that is spent,
+ * stale or for another workspace lands on the sign-in page instead, with nothing said about why.
+ */
+export async function handoffAction(ticket: string): Promise<{ error: string } | void> {
+  try {
+    await signIn("handoff", { ticket: String(ticket ?? ""), redirectTo: "/dashboard?tab=getting-started" });
+  } catch (error) {
+    if (error instanceof AuthError) return { error: "That sign-in link has expired. Sign in with your email and password." };
+    throw error;
+  }
+}
+
 export async function loginAction(input: {
   email: string;
   password: string;

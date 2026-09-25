@@ -5,13 +5,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { LoginForm } from "@/components/auth/login-form";
 import { currentMaintenance } from "@/lib/maintenance";
 import { formatIstDateTime } from "@/lib/india-time";
+import { getBranding } from "@/actions/branding";
 
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ callbackUrl?: string }>;
 }) {
-  const [params, security, maintenance] = await Promise.all([searchParams, getCachedSecuritySettings(), currentMaintenance()]);
+  const [params, security, maintenance, branding] = await Promise.all([searchParams, getCachedSecuritySettings(), currentMaintenance(), getBranding()]);
   const callbackUrl = params.callbackUrl || "/dashboard";
   const ssoEnabled = !!security?.ssoEnabled;
   const enforceSso = !!security?.enforceSso;
@@ -20,7 +21,8 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
       <Card className="w-full max-w-sm">
         <CardContent className="pt-6">
-          <h1 className="text-lg font-semibold text-text">Wroffy ERP</h1>
+          {/* The workspace's own name — each customer signs in to theirs, not to the platform. */}
+          <h1 className="text-lg font-semibold text-text">{branding.appName}</h1>
           <p className="mt-1 text-sm text-muted">Sign in to continue</p>
 
           {/* Open during maintenance so an admin can get in — and saying so, so nobody else signs in

@@ -1,0 +1,109 @@
+/**
+ * Looking after workspaces from the server, until the platform console does it.
+ *
+ *   npm run platform:tenant -- list
+ *   npm run platform:tenant -- invite [--note "Acme, via Ravi"] [--uses 1] [--days 14]
+ *   npm run platform:tenant -- create --slug acme --company "Acme Ltd" --owner-name "Asha" --owner-email asha@acme.com --country IN
+ *   npm run platform:tenant -- suspend <slug> --reason "unpaid"
+ *   npm run platform:tenant -- resume <slug>
+ *   npm run platform:tenant -- deprovision <slug> [--no-backup]
+ *   npm run platform:tenant -- purge <slug> [--force]
+ *
+ * `create` sets a workspace up without the signup form; the owner's password comes from the
+ * environment (OWNER_PASSWORD), never the command line, and the worker does the rest. `invite` prints
+ * a signup code once — only its hash is kept.
+ */
+import "dotenv/config";
+import { createHash, randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
+import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
+import { deprovisionTenant, purgeTenant, resumeTenant, suspendTenant } from "../src/lib/platform/lifecycle";
+import { startProvisioning } from "../src/lib/platform/provisioning";
+
+const args = process.argv.slice(2);
+const flag = (name: string) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args[i + 1] : undefined;
+};
+const ACTOR = "platform:tenant";
+
+async function bySlug(slug: string | undefined) {
+  if (!slug) throw new Error("Which workspace? Give its slug.");
+  const tenant = await controlDb().tenant.findUnique({ where: { slug } });
+  if (!tenant) throw new Error(`There is no workspace "${slug}".`);
+  return tenant;
+}
+
+async function main() {
+  const [command, target] = args;
+  switch (command) {
+    case "list": {
+      const rows = await controlDb().tenant.findMany({ orderBy: { createdAt: "asc" }, select: { slug: true, name: true, status: true, isDefault: true, schemaVersion: true } });
+      for (const r of rows) console.log(`${r.slug.padEnd(24)} ${r.status.padEnd(14)} ${r.isDefault ? "first " : "      "}${r.name}  (${r.schemaVersion ?? "—"})`);
+      return;
+    }
+    case "invite": {
+      const code = randomBytes(9).toString("base64url");
+      const days = Number(flag("days") ?? 14);
+      await controlDb().signupInvite.create({
+        data: {
+          codeHash: createHash("sha256").update(code).digest("hex"),
+          note: flag("note") ?? null,
+          maxUses: Number(flag("uses") ?? 1),
+          expiresAt: days > 0 ? new Date(Date.now() + days * 86_400_000) : null,
+          createdBy: ACTOR,
+        },
+      });
+      console.log(`Invitation code (shown once): ${code}`);
+      return;
+    }
+    case "create": {
+      const password = process.env.OWNER_PASSWORD;
+      if (!password || password.length < 10) throw new Error("Put the owner's password in OWNER_PASSWORD (10 characters or more) — never on the command line.");
+      const created = await startProvisioning({
+        slug: flag("slug") ?? "",
+        companyName: flag("company") ?? "",
+        ownerName: flag("owner-name") ?? "",
+        ownerEmail: flag("owner-email") ?? "",
+        ownerPasswordHash: await bcrypt.hash(password, 10),
+        country: flag("country") ?? "IN",
+      });
+      console.log(`Queued ${flag("slug")} (${created.tenantId}). npm run platform:worker -- --once sets it up now.`);
+      return;
+    }
+    case "suspend": {
+      const t = await bySlug(target);
+      await suspendTenant(t.id, ACTOR, flag("reason") ?? "held from the server");
+      console.log(`${t.slug} is suspended.`);
+      return;
+    }
+    case "resume": {
+      const t = await bySlug(target);
+      await resumeTenant(t.id, ACTOR);
+      console.log(`${t.slug} is open again.`);
+      return;
+    }
+    case "deprovision": {
+      const t = await bySlug(target);
+      const { backup } = await deprovisionTenant(t.id, ACTOR, { finalBackup: !args.includes("--no-backup") });
+      console.log(`${t.slug} is closed.${backup ? ` Final backup: ${backup}.` : ""} Its keys are kept for the retention period; purge wipes them.`);
+      return;
+    }
+    case "purge": {
+      const t = await bySlug(target);
+      await purgeTenant(t.id, ACTOR, { force: args.includes("--force") });
+      console.log(`${t.slug}: keys wiped and backups deleted.`);
+      return;
+    }
+    default:
+      console.log("Commands: list, invite, create, suspend, resume, deprovision, purge — see the top of scripts/platform-tenant.ts.");
+      process.exitCode = 1;
+  }
+}
+
+main()
+  .catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
+  })
+  .finally(() => closeControlDb());

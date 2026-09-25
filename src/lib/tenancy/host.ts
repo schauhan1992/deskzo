@@ -62,6 +62,9 @@ export function classifyHost(host: string): HostKind {
   if (!name.endsWith(suffix)) return { kind: "other", host };
   const sub = name.slice(0, -suffix.length);
   if (sub === "admin") return { kind: "console", host };
+  // The public site answers on www. as well as the bare domain — and in development only there, the
+  // bare localhost:3000 being the first workspace's old address.
+  if (sub === "www") return { kind: "root", host };
   if (sub.includes(".") || RESERVED_SLUGS.has(sub) || !SLUG_PATTERN.test(sub)) return { kind: "invalid", host };
   return { kind: "tenant", slug: sub, host };
 }

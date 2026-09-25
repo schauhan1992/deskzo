@@ -83,7 +83,7 @@ const MAINTENANCE_PAGE = `<!doctype html>
 /** API paths answered on the platform's own address — the scheduled ticks, which fan out over every workspace. */
 const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick)\/?$/;
 
-const PUBLIC_PREFIXES = ["/login", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
+const PUBLIC_PREFIXES = ["/login", "/handoff", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -143,6 +143,20 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   if (!tenant && api) {
     // A machine asking the wrong address: a plain answer, not a page and not a stack trace.
     return NextResponse.json({ error: "No such workspace." }, { status: 404, headers: { "cache-control": "no-store" } });
+  }
+  /**
+   * The public site — signing up — on the platform's own address (the bare domain, www.). Served from
+   * src/app/platform-site, which reads no workspace's data; nothing under that path answers on any
+   * other address.
+   */
+  const platformSitePath = pathname === "/platform-site" || pathname.startsWith("/platform-site/");
+  if (!tenant && kind?.kind === "root" && !platformSitePath) {
+    const url = req.nextUrl.clone();
+    url.pathname = `/platform-site${pathname === "/" ? "" : pathname}`;
+    return harden(NextResponse.rewrite(url) as NextResponse, pathname);
+  }
+  if (platformSitePath && kind?.kind !== "root") {
+    return harden(new NextResponse("Not found.", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }) as NextResponse, pathname);
   }
   if (!tenant) {
     return harden(

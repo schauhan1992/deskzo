@@ -661,6 +661,7 @@ model User {
   devices                  UserDevice[]               @relation("DeviceOwner")
   devicesDecided           UserDevice[]               @relation("DeviceDecidedBy")
   signIns                  SignIn[]                   @relation("SignInUser")
+  passwordResetTokens      PasswordResetToken[]       @relation("PasswordResetTokenUser")
   signInsEnded             SignIn[]                   @relation("SignInEndedBy")
   ipRulesCreated           IpRule[]                   @relation("IpRuleCreatedBy")
   accessPoliciesChanged    RoleAccessPolicy[]         @relation("AccessPolicyUpdatedBy")
@@ -10377,3 +10378,20 @@ model DocumentRenderGrant {
 }
 
 /** Towns and cities outside India with at least 1,000 people, from GeoNames' cities1000 — for suggestions. */
+/**
+ * A link to set a new password, emailed by the platform when somebody asks from the sign-in page
+ * (src/actions/password-reset.ts). Good for an hour, once. Only its SHA-256 is kept; the link itself
+ * exists in the email alone.
+ */
+model PasswordResetToken {
+  tokenHash String    @id
+  userId    String
+  user      User      @relation("PasswordResetTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}

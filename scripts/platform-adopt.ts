@@ -112,7 +112,7 @@ async function main() {
     if (existing) {
       say(`  already adopted as ${existing.id} — keys kept; addresses and terminals brought up to date`);
       if (existing.slug !== slug) say(`  (its address name is "${existing.slug}"; TENANCY_DEFAULT_SLUG "${slug}" is ignored once adopted)`);
-      const dbUrl = openForTenant(existing.id, "db-url", existing.dbUrlCipher);
+      const dbUrl = existing.dbUrlCipher ? openForTenant(existing.id, "db-url", existing.dbUrlCipher) : null;
       if (dbUrl !== databaseUrl) say("  NOTE: DATABASE_URL differs from the one recorded. The recorded one is kept — change it from the console.");
     }
 
@@ -169,7 +169,7 @@ async function main() {
     // Read back, through the same functions the app uses.
     const saved = await control.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { domains: true } });
     const reopened = openKeyBundle(saved.id, saved.keyBundleCipher);
-    const addressReadsBack = existing ? true : openForTenant(saved.id, "db-url", saved.dbUrlCipher) === databaseUrl;
+    const addressReadsBack = existing ? true : !!saved.dbUrlCipher && openForTenant(saved.id, "db-url", saved.dbUrlCipher) === databaseUrl;
     if (reopened.data !== bundle.data || !addressReadsBack) {
       fail("The recorded workspace does not read back as written. Check the control plane before going on.");
     }

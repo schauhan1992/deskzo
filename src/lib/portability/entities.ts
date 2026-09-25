@@ -606,6 +606,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   IpRule: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   NetworkAddress: { disposition: "excluded", reason: "A cache of addresses and their looked-up places, rebuilt as people sign in. Nothing in it is a record of anything." },
   RoleAccessPolicy: { disposition: "specification", reason: "Who may sign in on what and from where, per role. Configuration, and keyed on roles by id — rebuilt deliberately rather than loaded." },
+  PasswordResetToken: { disposition: "excluded", reason: "One-hour links to set a new password — secrets, and gone within the hour anyway." },
   SignIn: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   UserDevice: { disposition: "excluded", reason: "A device is a hash of a cookie in one of this installation's browsers. It identifies nothing anywhere else, and carrying it over would only carry over approvals nobody can re-check." },
   ActivityAward: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },

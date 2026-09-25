@@ -17,6 +17,9 @@
     "reference:migrate": "prisma migrate deploy --config prisma.reference.config.ts",
     "reference:move": "tsx scripts/reference-move.ts",
     "platform:adopt": "tsx scripts/platform-adopt.ts",
+    "platform:worker": "tsx scripts/platform-worker.ts",
+    "platform:tenant": "tsx scripts/platform-tenant.ts",
+    "tenants:migrate": "tsx scripts/tenants-migrate.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:reference": "tsx prisma/reference/load.ts",
@@ -119,6 +122,7 @@
     "check:tenancy-isolation": "tsx scripts/check-tenancy-isolation.ts",
     "check:auth-tenancy": "tsx scripts/check-auth-tenancy.ts",
     "check:fanout": "tsx scripts/check-fanout.ts",
+    "check:provisioning": "tsx scripts/check-provisioning.ts",
     "check:access-lock": "tsx scripts/check-access-lock.ts"
   },
   "dependencies": {

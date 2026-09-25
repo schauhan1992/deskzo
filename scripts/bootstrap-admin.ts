@@ -18,7 +18,8 @@
  * Clear the variables afterwards, or your shell history keeps the password.
  */
 import bcrypt from "bcryptjs";
-import { db } from "../src/lib/db";
+import { db, getTenantDb } from "../src/lib/db";
+import { bootstrapOwner } from "../src/lib/platform/bootstrap-owner";
 
 async function main() {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -66,20 +67,9 @@ async function main() {
     process.exit(1);
   }
 
-  const user = await db.user.create({
-    data: {
-      name,
-      email,
-      passwordHash: await bcrypt.hash(password, 10),
-      role: "ADMIN",
-      isSuperAdmin: true,
-      active: true,
-      // Deliberately false: the password was chosen by the person running this, not issued to them,
-      // so forcing an immediate change would only teach them to pick a worse one.
-      mustChangePassword: false,
-    },
-    select: { id: true, name: true, email: true },
-  });
+  // The same account a signup's owner gets (src/lib/platform/bootstrap-owner.ts). Not forced to
+  // change the password: it was chosen by the person running this, not issued to them.
+  const user = await bootstrapOwner(await getTenantDb(), { name, email, passwordHash: await bcrypt.hash(password, 10) });
 
   console.log(`\nCreated super admin: ${user.name} <${user.email}>`);
   console.log("Sign in at /login. Nothing else was created — no demo data, no other accounts.");

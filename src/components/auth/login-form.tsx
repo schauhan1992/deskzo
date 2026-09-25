@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
+import Link from "next/link";
 import { checkCredentials, loginAction } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -103,6 +104,11 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
       <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? "Signing in…" : "Sign in"}
       </Button>
+      <p className="text-center text-xs">
+        <Link href="/forgot-password" className="text-muted hover:text-text hover:underline">
+          Forgot your password?
+        </Link>
+      </p>
     </form>
   );
 }

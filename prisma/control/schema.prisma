@@ -51,10 +51,14 @@ model Tenant {
   isDefault Boolean @default(false)
 
   region String @default("in")
-  /// The database's name on its server, for the operator. The URL itself is only ever sealed.
-  dbName      String
-  /// The database URL, sealed under the platform key with the tenant id as associated data.
-  dbUrlCipher String
+  /// The database's name on its server, for the operator. The URL itself is only ever sealed. Empty
+  /// while the workspace is being set up.
+  dbName      String?
+  /// The database URL, sealed under the platform key with the tenant id as associated data. Empty
+  /// while the workspace is being set up, and after it is deprovisioned.
+  dbUrlCipher String?
+  /// The database's own login role, for the operator and for dropping it.
+  dbRole      String?
 
   /// The workspace's keys (stored secrets, fingerprints, links, render passes, cookies, sessions),
   /// sealed under the platform key with the tenant id as associated data — see src/lib/tenancy/keys.ts.
@@ -76,9 +80,12 @@ model Tenant {
   suspendedAt     DateTime?
   deprovisionedAt DateTime?
 
-  domains      TenantDomain[]
-  deviceRoutes BiometricDeviceRoute[]
-  auditLog     PlatformAuditLog[]
+  domains          TenantDomain[]
+  deviceRoutes     BiometricDeviceRoute[]
+  auditLog         PlatformAuditLog[]
+  provisioningJobs ProvisioningJob[]
+  handoffTickets   PlatformHandoffTicket[]
+  migrationRuns    TenantMigrationRun[]
 
   @@map("tenants")
 }
@@ -157,4 +164,141 @@ model TenantJobLease {
 
   @@id([tenantId, job])
   @@map("tenant_job_leases")
+}
+
+enum ProvisioningStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Setting one workspace up: its database, its first owner, its organisation. Taken by the platform
+/// worker (scripts/platform-worker.ts), one at a time per job, with SKIP LOCKED.
+model ProvisioningJob {
+  id         String             @id @default(cuid())
+  tenantId   String
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  status     ProvisioningStatus @default(PENDING)
+  /// Where it has got to, in words — what the signup progress page shows.
+  step       String             @default("Waiting to start")
+  attempts   Int                @default(0)
+  runAfter   DateTime           @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+  error      String?
+
+  /// The first owner. The password arrives already hashed, and the hash is cleared once they exist.
+  ownerName         String
+  ownerEmail        String
+  ownerPasswordHash String?
+  /// The organisation's legal name, and its country (ISO 3166-1 alpha-2).
+  companyName String
+  country     String
+
+  createdAt DateTime @default(now())
+
+  @@index([status, runAfter])
+  @@index([tenantId])
+  @@map("provisioning_jobs")
+}
+
+/// A database made and migrated ahead of time, so a signup does not wait for either.
+model WarmDatabase {
+  id                String    @id @default(cuid())
+  dbName            String    @unique
+  dbRole            String
+  /// Its address, sealed for the platform until a workspace takes it and it is sealed for that one.
+  dbUrlCipher       String
+  schemaVersion     String?
+  createdAt         DateTime  @default(now())
+  claimedAt         DateTime?
+  claimedByTenantId String?
+
+  @@index([claimedAt])
+  @@map("warm_databases")
+}
+
+/// An invitation to sign up — the only way in until billing is live.
+model SignupInvite {
+  /// SHA-256 of the code; the code itself is shown once, to whoever made it.
+  codeHash  String    @id
+  note      String?
+  maxUses   Int       @default(1)
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  createdBy String?
+  createdAt DateTime  @default(now())
+
+  @@map("signup_invites")
+}
+
+/// A signup between the form and the workspace: waiting for its email code, then provisioning.
+model PendingSignup {
+  id           String    @id @default(cuid())
+  email        String
+  ownerName    String
+  companyName  String
+  slug         String
+  country      String
+  /// bcrypt, as the owner's account will hold it.
+  passwordHash String
+  inviteCodeHash String
+  /// SHA-256 of the code emailed to prove the address.
+  codeHash      String
+  codeExpiresAt DateTime
+  attempts      Int       @default(0)
+  /// SHA-256 of the secret in the signing-up browser's cookie: only that browser follows the progress
+  /// and is signed in at the end.
+  browserSecretHash String
+  verifiedAt DateTime?
+  tenantId   String?   @unique
+  /// When the owner was handed to their workspace — once.
+  handedOffAt DateTime?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([email])
+  @@index([slug])
+  @@map("pending_signups")
+}
+
+/// A one-time pass that signs somebody into a workspace without a password: the owner straight after
+/// signing up, and later support staff. Good for sixty seconds, once.
+model PlatformHandoffTicket {
+  /// SHA-256 of the ticket; the ticket itself travels once, in a redirect.
+  tokenHash String    @id
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email     String
+  /// "owner-signup" or "support".
+  purpose   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId])
+  @@map("platform_handoff_tickets")
+}
+
+/// One migration of one database in one run of `npm run tenants:migrate`.
+model TenantMigrationRun {
+  id          String    @id @default(cuid())
+  /// Groups one invocation.
+  runId       String
+  /// "reference", "warm:<database>", or the workspace's slug.
+  target      String
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  ok          Boolean?
+  fromVersion String?
+  toVersion   String?
+  /// The tail of Prisma's output, for a failure.
+  output      String?
+
+  @@index([runId])
+  @@index([tenantId, startedAt])
+  @@map("tenant_migration_runs")
 }

@@ -78,7 +78,7 @@ type ControlRow = {
   name: string;
   status: Tenant["status"];
   isDefault: boolean;
-  dbUrlCipher: string;
+  dbUrlCipher: string | null;
   keyBundleCipher: string;
   domains: { host: string; isPrimary: boolean }[];
 };
@@ -102,7 +102,8 @@ function fromControl(row: ControlRow): Tenant {
     slug: row.slug,
     name: row.name,
     status: row.status,
-    dbUrl: openForTenant(row.id, "db-url", row.dbUrlCipher),
+    // None while it is being set up or after it is closed; the proxy serves only an active one.
+    dbUrl: row.dbUrlCipher ? openForTenant(row.id, "db-url", row.dbUrlCipher) : "",
     primaryHost: primary,
     hosts: [own, ...row.domains.map((d) => d.host)],
     source: "control",

@@ -168,7 +168,7 @@ async function main() {
     const rowA = await control.tenant.findUniqueOrThrow({ where: { id: idA } });
     ok("A's sealed keys copied onto B's row do not open as B's", await throws(() => keys.openKeyBundle(idB, rowA.keyBundleCipher)));
     const { openForTenant } = require("../src/lib/platform/kek") as typeof import("../src/lib/platform/kek");
-    ok("  nor does A's database address", await throws(() => openForTenant(idB, "db-url", rowA.dbUrlCipher)));
+    ok("  nor does A's database address", await throws(() => openForTenant(idB, "db-url", rowA.dbUrlCipher ?? "")));
     ok("  nor A's keys read as a database address", await throws(() => openForTenant(idA, "db-url", rowA.keyBundleCipher)));
 
     section("Sign-in sessions");

@@ -38,6 +38,8 @@ const PRISMA_CLIENTS: Record<string, Allowed> = {
   "src/lib/tenancy/clients.ts": { reason: "the per-workspace client pool — every db call goes through it" },
   "src/lib/platform/control-db.ts": { reason: "the control plane's own client — which workspaces exist, never workspace data" },
   "src/lib/platform/reference-db.ts": { reason: "the shared reference database — facts about the world, the same for every workspace" },
+  "src/lib/platform/provisioner.ts": { reason: "the provisioner's connection to the server's maintenance database — makes and drops workspace databases" },
+  "src/lib/platform/provisioning.ts": { reason: "a new workspace's database before the registry serves it — to create its owner and organisation" },
 };
 
 /** Reads of the install's own identity: its database, its secret, its public address. */
@@ -45,6 +47,7 @@ const PLATFORM_ENV = /process\.env\.(DATABASE_URL|AUTH_SECRET|NEXTAUTH_URL|AUTH_
 const ENV_READS: Record<string, Allowed> = {
   "src/lib/tenancy/registry.ts": { reason: "DATABASE_URL is the first workspace until it is adopted into the control plane" },
   "src/lib/tenancy/keys.ts": { reason: "AUTH_SECRET: the first workspace's keys before adoption, and check-suite workspaces'" },
+  "src/lib/platform/provisioner.ts": { reason: "DATABASE_URL: in development, the provisioner is the same server's maintenance database" },
   "src/lib/tenancy/render-target.ts": { reason: "INTERNAL_APP_URL: where the server's own browser reaches the app, used with the workspace's hostname" },
 };
 
@@ -54,6 +57,8 @@ const FORWARDED_HOST: Record<string, Allowed> = {};
 /** Worker processes: each must be told its workspace (WROFFY_TENANT_ID) rather than inherit the install's. */
 const SPAWNS: Record<string, Allowed> = {
   "src/actions/reference-data.ts": { reason: "PIN and GeoNames sync workers write the shared reference database, which belongs to no workspace" },
+  "src/lib/platform/migrate.ts": { reason: "prisma migrate deploy, told the one database it migrates — not a workspace" },
+  "src/actions/platform/signup.ts": { reason: "the platform worker, which sets workspaces up — it belongs to none of them" },
 };
 
 /**
@@ -94,6 +99,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/copilot/settings.ts:testSettings": { reason: "test override, set only by check scripts" },
   "src/lib/documents/pdf.ts:testRenderer": { reason: "test override, set only by check scripts" },
   "src/lib/mail/microsoft.ts:endpoints": { reason: "test override of Microsoft's addresses, set only by check scripts" },
+  "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },
 };
 
 // ─── The scan ────────────────────────────────────────────────────────────────────────────────────
