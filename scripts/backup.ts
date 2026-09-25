@@ -8,6 +8,9 @@
  *   npm run db:backup                 take one now, whatever the schedule says
  *   npm run db:backup -- --if-due     take one only if the stored schedule says it is time
  *
+ * Of the first workspace, unless `--workspace <slug>` names another or `--all-workspaces` asks for
+ * every active one (each on its own schedule, into its own folder).
+ *
  * ## Which of those to put in the scheduler
  *
  * `--if-due`, every five or ten minutes. It looks wasteful and is the opposite: the scheduled task
@@ -30,6 +33,10 @@ import { runScheduledBackup } from "../src/lib/backup/scheduled";
 import { formatBytes } from "../src/lib/backup/policy";
 import { formatTimeOfDay } from "../src/lib/backup/schedule";
 import { db } from "../src/lib/db";
+import { closeControlDb } from "../src/lib/platform/control-db";
+import { forEachTenant } from "../src/lib/platform/fanout";
+import { activeTenants, legacyTenant, tenantBySlug } from "../src/lib/tenancy/registry";
+import type { Tenant } from "../src/lib/tenancy/state";
 
 function report(result: Awaited<ReturnType<typeof runBackup>>, seconds: number): void {
   if (!result.ok) {
@@ -48,8 +55,44 @@ function report(result: Awaited<ReturnType<typeof runBackup>>, seconds: number):
   );
 }
 
+/**
+ * Which workspaces: the first, unless told otherwise.
+ *
+ *   --workspace <slug>    that one
+ *   --all-workspaces      every active one, two at a time, each under the same lease the backup tick
+ *                         takes — so this and a scheduler calling /api/backup/tick never overlap
+ */
+async function targets(args: string[]): Promise<Tenant[]> {
+  if (args.includes("--all-workspaces")) return activeTenants();
+  const named = args.indexOf("--workspace");
+  const tenant = named >= 0 ? await tenantBySlug(args[named + 1] ?? "") : await legacyTenant();
+  if (!tenant) throw new Error(named >= 0 ? `There is no workspace "${args[named + 1]}".` : "There is no first workspace.");
+  return [tenant];
+}
+
 async function main() {
-  const ifDue = process.argv.slice(2).includes("--if-due");
+  const args = process.argv.slice(2);
+  const tenants = await targets(args);
+  const outcomes = await forEachTenant(
+    "backup-tick",
+    tenants,
+    async (tenant) => {
+      if (tenants.length > 1) console.log(`\n— ${tenant.name} (${tenant.slug}) —`);
+      await backupOne(args);
+    },
+    { concurrency: 2, timeoutMs: 45 * 60_000 },
+  );
+  for (const o of outcomes) {
+    if ("skipped" in o) console.log(`${o.slug}: skipped — a backup of it is already running`);
+    else if (!o.ok) {
+      console.error(`${o.slug}: ${o.error}`);
+      process.exitCode = 1;
+    }
+  }
+}
+
+async function backupOne(args: string[]) {
+  const ifDue = args.includes("--if-due");
   const started = Date.now();
 
   if (ifDue) {
@@ -74,4 +117,7 @@ main()
     console.error(err);
     process.exitCode = 1;
   })
-  .finally(() => db.$disconnect());
+  .finally(async () => {
+    await db.$disconnect();
+    await closeControlDb();
+  });

@@ -80,6 +80,9 @@ const MAINTENANCE_PAGE = `<!doctype html>
  * grant. Bouncing a customer to a sign-in they can never pass would make the link useless, which
  * is why an unsubscribe link behind a login is not an unsubscribe link.
  */
+/** API paths answered on the platform's own address — the scheduled ticks, which fan out over every workspace. */
+const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick)\/?$/;
+
 const PUBLIC_PREFIXES = ["/login", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
 
 function isPublicPath(pathname: string): boolean {
@@ -126,8 +129,17 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   if (host === HOST_MISMATCH) {
     return harden(new NextResponse("Misdirected request.", { status: 421, headers: { "content-type": "text/plain; charset=utf-8" } }) as NextResponse, pathname);
   }
-  const tenant = host ? await tenantForKind(classifyHost(host)) : null;
+  const kind = host ? classifyHost(host) : null;
+  const tenant = kind ? await tenantForKind(kind) : null;
   const api = pathname === "/api" || pathname.startsWith("/api/");
+  /**
+   * The platform's own address (the bare domain, admin.) is no workspace, but the scheduled ticks are
+   * called there to run for every workspace (src/lib/platform/fanout.ts). They authenticate
+   * themselves with the operator's secret; nothing else is let through.
+   */
+  if (!tenant && api && (kind?.kind === "root" || kind?.kind === "console") && PLATFORM_API.test(pathname)) {
+    return NextResponse.next();
+  }
   if (!tenant && api) {
     // A machine asking the wrong address: a plain answer, not a page and not a stack trace.
     return NextResponse.json({ error: "No such workspace." }, { status: 404, headers: { "cache-control": "no-store" } });

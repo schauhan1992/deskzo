@@ -136,3 +136,25 @@ model PlatformAuditLog {
   @@index([tenantId, at])
   @@map("platform_audit_log")
 }
+
+/// A scheduled job running for one workspace — so two schedulers (the platform's fan-out and an
+/// older per-workspace cron) never run the same job for the same workspace at once, and the
+/// console can see when each last ran and how it went. Not tied to a Tenant row: workspaces read
+/// from the environment (check suites) are leased the same way.
+model TenantJobLease {
+  tenantId       String
+  /// e.g. "marketing-tick", "backup-tick".
+  job            String
+  /// Nobody else may start it before this. Longer than the job's own time limit.
+  leasedUntil    DateTime
+  /// Which process holds it: host and pid, for the log.
+  holder         String
+  lastStartedAt  DateTime?
+  lastFinishedAt DateTime?
+  lastOk         Boolean?
+  /// The failure, in a line. Cleared by the next success.
+  lastError      String?
+
+  @@id([tenantId, job])
+  @@map("tenant_job_leases")
+}

@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ACK, handshakeResponse, parseAttlog, tableOf } from "@/lib/hr/iclock";
 import { linkPunchesToUsers, rollupPunches } from "@/lib/hr/punch-rollup";
+import { tenantForDeviceSerial, touchDeviceRoute } from "@/lib/platform/device-routes";
+import { HOST_MISMATCH, requestHost } from "@/lib/tenancy/host";
+import { tenantForHost } from "@/lib/tenancy/registry";
+import { runAsTenant } from "@/lib/tenancy/resolve";
+import type { Tenant } from "@/lib/tenancy/state";
 
 /**
  * Where eSSL / ZKTeco terminals push their attendance.
@@ -12,6 +17,14 @@ import { linkPunchesToUsers, rollupPunches } from "@/lib/hr/punch-rollup";
  * uploading, and the firmware offers no way to add a header, a token or a client certificate. That
  * is the protocol, not an oversight here, and it means this endpoint must be treated as a
  * LAN-facing one: reachable from the office network or over a VPN, never published to the internet.
+ *
+ * On the hosted platform that is not always possible — a customer's terminal reaches the server over
+ * the internet, at its workspace's address or the platform's `devices.` host. Then the serial number
+ * is the only thing identifying it, and a serial is printed on the device. Everything below still
+ * holds, and a serial is only ever routed to the one workspace that registered it
+ * (src/lib/platform/device-routes.ts); what is missing is proof the sender *is* that terminal. Until
+ * there is one (an address allowlist per terminal is the likely next step), punches arriving this way
+ * are as trustworthy as the network they came over.
  *
  * Given that, the defences that are actually available are used:
  *
@@ -60,7 +73,46 @@ async function authenticateDevice(serial: string | null) {
   return { device };
 }
 
+/**
+ * Which workspace a terminal's request is for.
+ *
+ * The address it came in on, when that names a workspace — a terminal set up with the workspace's
+ * own host. Otherwise (a bare IP on the office network, the platform's `devices.` host) its serial
+ * number, through the route written when HR registered it (src/lib/platform/device-routes.ts).
+ * /iclock is outside the proxy, so this is also where a workspace that is not active is refused.
+ */
+type Routed = { tenant: Tenant } | { error: NextResponse };
+
+async function workspaceFor(request: Request): Promise<Routed> {
+  const serial = new URL(request.url).searchParams.get("SN");
+  const host = requestHost(request.headers);
+  if (host === HOST_MISMATCH) return { error: text("Misdirected request", 421) };
+  let tenant = host ? await tenantForHost(host) : null;
+  if (!tenant && serial) {
+    tenant = await tenantForDeviceSerial(serial);
+    if (tenant) await touchDeviceRoute(serial);
+  }
+  if (!tenant) {
+    if (serial) console.warn(`[biometric] no workspace for terminal serial=${serial}`);
+    return { error: text("Device not registered", 401) };
+  }
+  if (tenant.status !== "ACTIVE") return { error: text("Unavailable", 503) };
+  return { tenant };
+}
+
 export async function GET(request: Request, context: { params: Promise<{ path?: string[] }> }) {
+  const routed = await workspaceFor(request);
+  if ("error" in routed) return routed.error;
+  return runAsTenant(routed.tenant, () => handleGet(request, context));
+}
+
+export async function POST(request: Request, context: { params: Promise<{ path?: string[] }> }) {
+  const routed = await workspaceFor(request);
+  if ("error" in routed) return routed.error;
+  return runAsTenant(routed.tenant, () => handlePost(request, context));
+}
+
+async function handleGet(request: Request, context: { params: Promise<{ path?: string[] }> }) {
   const { path } = await context.params;
   const url = new URL(request.url);
   const serial = url.searchParams.get("SN");
@@ -94,7 +146,7 @@ export async function GET(request: Request, context: { params: Promise<{ path?: 
   return text(ACK);
 }
 
-export async function POST(request: Request, context: { params: Promise<{ path?: string[] }> }) {
+async function handlePost(request: Request, context: { params: Promise<{ path?: string[] }> }) {
   const { path } = await context.params;
   const url = new URL(request.url);
   const serial = url.searchParams.get("SN");

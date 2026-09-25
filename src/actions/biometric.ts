@@ -9,6 +9,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { parseAttlog } from "@/lib/hr/iclock";
 import { linkPunchesToUsers, rollupPunches } from "@/lib/hr/punch-rollup";
 import { dateOnly } from "@/lib/hr/calendar";
+import { claimDeviceSerial, releaseDeviceSerial } from "@/lib/platform/device-routes";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -61,10 +62,21 @@ export async function saveBiometricDevice(input: {
     active: input.active ?? true,
   };
 
+  /**
+   * The serial is claimed for this workspace first (src/lib/platform/device-routes.ts): a terminal on
+   * a bare IP address reaches its workspace by it, so one registered in another workspace is refused
+   * here rather than silently sharing its punches. The serial it replaces, if any, is let go only once
+   * the change is saved — until then the terminal still sends under the old one.
+   */
+  const claim = await claimDeviceSerial(serialNumber);
+  if (!claim.ok) return claim;
+  const before = input.id ? await db.biometricDevice.findUnique({ where: { id: input.id }, select: { serialNumber: true } }) : null;
+
   try {
     const row = input.id
       ? await db.biometricDevice.update({ where: { id: input.id }, data: payload, select: { id: true } })
       : await db.biometricDevice.create({ data: payload, select: { id: true } });
+    if (before && before.serialNumber !== serialNumber) await releaseDeviceSerial(before.serialNumber);
 
     await recordAudit({
       userId: user.id,
