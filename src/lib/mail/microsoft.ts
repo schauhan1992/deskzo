@@ -37,9 +37,9 @@ export async function microsoftApp(): Promise<MicrosoftApp | null> {
   const s = await getCachedSecuritySettings();
   if (!s?.microsoftTenantId || !s.microsoftClientId || !s.microsoftClientSecretCipher) return null;
   try {
-    return { tenantId: s.microsoftTenantId, clientId: s.microsoftClientId, clientSecret: decryptSecret(s.microsoftClientSecretCipher) };
+    return { tenantId: s.microsoftTenantId, clientId: s.microsoftClientId, clientSecret: await decryptSecret(s.microsoftClientSecretCipher) };
   } catch {
-    // A secret encrypted under a different AUTH_SECRET — as good as none.
+    // A secret encrypted under different keys — as good as none.
     return null;
   }
 }
@@ -137,8 +137,8 @@ export async function saveConnection(userId: string, mailbox: string, displayNam
   const data = {
     mailbox,
     displayName,
-    refreshTokenCipher: encryptSecret(tokens.refreshToken),
-    accessTokenCipher: encryptSecret(tokens.accessToken),
+    refreshTokenCipher: await encryptSecret(tokens.refreshToken),
+    accessTokenCipher: await encryptSecret(tokens.accessToken),
     accessTokenExpiresAt: tokens.expiresAt,
     scopes: tokens.scope,
     brokenAt: null,
@@ -175,7 +175,7 @@ async function accessTokenFor(userId: string, force = false): Promise<{ ok: true
   const fresh = connection.accessTokenCipher && connection.accessTokenExpiresAt && connection.accessTokenExpiresAt.getTime() > Date.now() + 60_000;
   if (fresh && !force) {
     try {
-      return { ok: true, token: decryptSecret(connection.accessTokenCipher!), mailbox: connection.mailbox };
+      return { ok: true, token: await decryptSecret(connection.accessTokenCipher!), mailbox: connection.mailbox };
     } catch {
       /* fall through to a refresh */
     }
@@ -185,7 +185,7 @@ async function accessTokenFor(userId: string, force = false): Promise<{ ok: true
   if (!app) return { ok: false, error: "The Microsoft app isn't set up any more (Settings → Security). Ask an admin.", reconnect: false };
   let refreshToken: string;
   try {
-    refreshToken = decryptSecret(connection.refreshTokenCipher);
+    refreshToken = await decryptSecret(connection.refreshTokenCipher);
   } catch {
     await markBroken(userId, "The stored token could not be read.");
     return { ok: false, error: "Your Outlook connection can't be read any more. Connect it again from My profile.", reconnect: true };
@@ -201,11 +201,11 @@ async function accessTokenFor(userId: string, force = false): Promise<{ ok: true
   await db.mailConnection.update({
     where: { userId },
     data: {
-      accessTokenCipher: encryptSecret(refreshed.tokens.accessToken),
+      accessTokenCipher: await encryptSecret(refreshed.tokens.accessToken),
       accessTokenExpiresAt: refreshed.tokens.expiresAt,
       // Microsoft usually hands back a new refresh token; the old one keeps working for a while, but
       // the newest is the one to keep.
-      ...(refreshed.tokens.refreshToken ? { refreshTokenCipher: encryptSecret(refreshed.tokens.refreshToken) } : {}),
+      ...(refreshed.tokens.refreshToken ? { refreshTokenCipher: await encryptSecret(refreshed.tokens.refreshToken) } : {}),
     },
   });
   return { ok: true, token: refreshed.tokens.accessToken, mailbox: connection.mailbox };

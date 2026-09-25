@@ -51,7 +51,7 @@ export async function providerKey(provider: AiProvider): Promise<string | null> 
   const cipher = r?.[CIPHER_FIELD[provider]];
   if (!cipher) return null;
   try {
-    return decryptSecret(cipher);
+    return await decryptSecret(cipher);
   } catch {
     return null;
   }

@@ -11,7 +11,7 @@ import { CONNECT_COOKIE, CONNECT_COOKIE_PATH, openState, publicOrigin } from "@/
  */
 export async function GET(req: NextRequest) {
   const origin = await publicOrigin();
-  const saved = openState(req.cookies.get(CONNECT_COOKIE)?.value);
+  const saved = await openState(req.cookies.get(CONNECT_COOKIE)?.value);
   const next = saved?.next ?? "/profile";
   const back = (outcome: string) => {
     const res = NextResponse.redirect(new URL(`${next}${next.includes("?") ? "&" : "?"}outlook=${outcome}`, origin));

@@ -18,14 +18,14 @@ export function newState(): string {
   return randomBytes(24).toString("base64url");
 }
 
-export function sealState(s: ConnectState): string {
-  return encryptSecret(JSON.stringify(s));
+export async function sealState(s: ConnectState): Promise<string> {
+  return await encryptSecret(JSON.stringify(s));
 }
 
-export function openState(sealed: string | undefined): ConnectState | null {
+export async function openState(sealed: string | undefined): Promise<ConnectState | null> {
   if (!sealed) return null;
   try {
-    const s = JSON.parse(decryptSecret(sealed)) as ConnectState;
+    const s = JSON.parse(await decryptSecret(sealed)) as ConnectState;
     if (typeof s.state !== "string" || typeof s.verifier !== "string" || typeof s.userId !== "string") return null;
     return s.expires > Date.now() ? s : null;
   } catch {

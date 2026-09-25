@@ -15,7 +15,8 @@ type Settings = {
   hasClientSecret: boolean;
 };
 
-export function SecuritySettingsForm({ settings }: { settings: Settings }) {
+/** `origin`: this workspace's address, to show the exact redirect addresses Microsoft must be given. */
+export function SecuritySettingsForm({ settings, origin }: { settings: Settings; origin: string }) {
   const router = useRouter();
   const [enforceTwoFactor, setEnforceTwoFactor] = useState(settings.enforceTwoFactor);
   const [ssoEnabled, setSsoEnabled] = useState(settings.ssoEnabled);
@@ -75,13 +76,13 @@ export function SecuritySettingsForm({ settings }: { settings: Settings }) {
           <h3 className="text-sm font-medium text-text">Microsoft sign-in (SSO)</h3>
           <p className="mt-0.5 text-sm text-muted">
             Register an app in your Microsoft Entra ID (Azure AD) admin center, then paste its details here.
-            Redirect URI (append to this site&rsquo;s URL):{" "}
-            <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">/api/auth/callback/microsoft-entra-id</code>
+            Redirect URI:{" "}
+            <code className="break-all rounded bg-surface-sunken px-1 py-0.5 text-xs">{origin}/api/auth/callback/microsoft-entra-id</code>
           </p>
           {/* The same app sends documents from people's own Outlook — src/lib/mail/microsoft.ts. */}
           <p className="mt-2 text-sm text-muted">
             To let people email invoices and proposals from their own Outlook, add to the same app a second redirect URI,{" "}
-            <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">/api/mail/microsoft/callback</code>, and the delegated Microsoft Graph
+            <code className="break-all rounded bg-surface-sunken px-1 py-0.5 text-xs">{origin}/api/mail/microsoft/callback</code>, and the delegated Microsoft Graph
             permissions <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">Mail.Send</code>,{" "}
             <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">User.Read</code> and{" "}
             <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">offline_access</code>. Each person then connects their own mailbox from My

@@ -79,3 +79,4 @@ public/sample-vendor-statement.csv
 # The IP location database (DB-IP City Lite, CC BY 4.0). ~125 MB of downloadable reference data
 # that changes monthly: replaced from Settings, never committed. Anchored for the reason /backups/ is.
 /geoip/
+

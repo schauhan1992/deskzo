@@ -6,10 +6,11 @@ import { db } from "@/lib/db";
 import { writeSidecar, sidecarPath } from "@/lib/backup/sidecar";
 import { collectGarbage, manifestExists, manifestPath, storeDump, writeManifest } from "@/lib/backup/chunks";
 import type { BackupKind } from "@prisma/client";
-import { secretFingerprint } from "@/lib/backup/fingerprint";
+import { backupRoot } from "@/lib/backup/maintenance";
+import { currentKeys } from "@/lib/tenancy/keys";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import { RUNNING_PRESUMED_DEAD_MINUTES } from "@/lib/backup/schedule";
 import {
-  DEFAULT_BACKUP_DIR,
   backupFilename,
   parseDatabaseUrl,
   prunable,
@@ -127,8 +128,10 @@ export async function runBackup(options?: {
   kind?: BackupKind;
 }): Promise<BackupOutcome> {
   const kind: BackupKind = options?.kind ?? "FULL";
-  const connection = parseDatabaseUrl(process.env.DATABASE_URL);
-  if (!connection) return { ok: false, id: null, error: "DATABASE_URL is missing or not a Postgres URL." };
+  // The workspace's own database, into the workspace's own folder, marked with its own keys.
+  const [tenant, keys] = await Promise.all([currentTenant(), currentKeys()]);
+  const connection = parseDatabaseUrl(tenant.dbUrl);
+  if (!connection) return { ok: false, id: null, error: "This workspace's database address is not a Postgres URL." };
 
   const tool = await resolveDumpTool("pg_dump");
   if (!tool) {
@@ -140,7 +143,7 @@ export async function runBackup(options?: {
     };
   }
 
-  const directory = path.resolve(process.env.BACKUP_DIR?.trim() || DEFAULT_BACKUP_DIR);
+  const directory = await backupRoot();
   await mkdir(directory, { recursive: true });
 
   const startedAt = new Date();
@@ -163,7 +166,7 @@ export async function runBackup(options?: {
       startedAt,
       via: tool.via,
       schemaVersion: await latestMigration(),
-      secretFingerprint: secretFingerprint(process.env.AUTH_SECRET),
+      secretFingerprint: keys.fingerprint,
       triggeredById: options?.triggeredById ?? null,
     },
     select: { id: true },
@@ -210,7 +213,7 @@ export async function runBackup(options?: {
         filename,
         takenAt: startedAt.toISOString(),
         schemaVersion: await latestMigration(),
-        secretFingerprint: secretFingerprint(process.env.AUTH_SECRET),
+        secretFingerprint: keys.fingerprint,
         via: tool.via,
         sizeBytes: size,
         app: "Wroffy ERP",

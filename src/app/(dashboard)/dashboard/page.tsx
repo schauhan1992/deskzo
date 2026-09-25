@@ -565,7 +565,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   );
 
   const items: GridItem[] = visibleKeys
-    .filter((key) => widgets[key])
+    .filter((key) => Boolean(widgets[key]))
     .map((key) => {
       const def = getDashboardWidgetDefinition(key);
       return { key, label: def?.label ?? key, size: def?.size ?? "stat", node: widgets[key] };

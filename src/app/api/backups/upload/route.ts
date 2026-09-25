@@ -7,8 +7,9 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
-import { secretFingerprint } from "@/lib/backup/fingerprint";
-import { ArchiveFormatError, readArchiveHeader } from "@/lib/backup/archive";
+import { ArchiveFormatError, readArchiveHeader, verifyArchiveSignature } from "@/lib/backup/archive";
+import { backupFingerprints, currentKeys } from "@/lib/tenancy/keys";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import { ensureRestoreDir, restoreInProgress, stagingPath } from "@/lib/backup/maintenance";
 
 /**
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "You don't have access to restore backups." }, { status: 403 });
   }
 
-  if (restoreInProgress()) {
+  if (await restoreInProgress()) {
     return NextResponse.json({ error: "A restore is already running. Wait for it to finish." }, { status: 409 });
   }
 
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
 
   await ensureRestoreDir();
   const id = randomUUID();
-  const target = stagingPath(id, ".wbak");
+  const target = await stagingPath(id, ".wbak");
 
   let received = 0;
   try {
@@ -112,7 +113,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  const running = secretFingerprint(process.env.AUTH_SECRET);
+  /**
+   * Only a backup the platform signed for this workspace, unless this is the first workspace.
+   *
+   * A restore runs the SQL in the dump, and a passphrase proves only that the uploader can read the
+   * file — not that the platform made it (src/lib/backup/archive.ts). The first workspace is the
+   * installation's own, whose owner also runs the server, and whose older backups predate signatures.
+   */
+  const tenant = await currentTenant();
+  const signed = await verifyArchiveSignature(target, tenant.id);
+  if (!signed && !tenant.isDefault) {
+    await rm(target, { force: true }).catch(() => {});
+    const elsewhere = header.signature && header.signature.tenantId !== tenant.id;
+    return NextResponse.json(
+      {
+        error: elsewhere
+          ? "That backup was downloaded from a different workspace. Only this workspace's own backups can be restored here — contact support to move data between workspaces."
+          : "That file was not downloaded from this workspace, or has been changed since. Only this workspace's own backups can be restored here — contact support for anything else.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const ours = backupFingerprints(await currentKeys());
   const onSchema = await currentMigration();
 
   return NextResponse.json({
@@ -128,13 +151,14 @@ export async function POST(request: Request) {
       /** Whether the file carries the key to its own encrypted columns. */
       carriesSecret: header.secret !== null,
       /**
-       * Whether this archive was written by this installation.
+       * Whether this archive's data is encrypted under this workspace's keys.
        *
-       * Null when either side has no fingerprint to compare — an archive from before fingerprints,
-       * or a server with no AUTH_SECRET set. "Cannot tell" and "does not match" are different
-       * answers and the screen says so differently.
+       * Null when the archive has no fingerprint to compare — one from before fingerprints. "Cannot
+       * tell" and "does not match" are different answers and the screen says so differently.
        */
-      sameInstance: header.secretFingerprint && running ? header.secretFingerprint === running : null,
+      sameInstance: header.secretFingerprint ? ours.includes(header.secretFingerprint) : null,
+      /** Whether the platform signed it for this workspace. */
+      signed,
     },
     database: {
       schemaVersion: onSchema,

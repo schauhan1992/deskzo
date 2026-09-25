@@ -1,0 +1,138 @@
+// The control plane: the platform's own database, apart from every workspace's.
+//
+// Which workspaces exist, where each one's database is, the keys its secrets are sealed under,
+// which addresses reach it. One per installation, at CONTROL_DATABASE_URL. Workspace data never
+// lives here, and nothing here is readable from a workspace's database.
+//
+//   npm run control:generate   the client, into node_modules/@wroffy/control-client — a package of
+//                              its own, like Prisma's main client, so Next loads it as-is instead
+//                              of bundling it (next.config.ts, serverExternalPackages)
+//   npm run control:migrate    apply migrations to CONTROL_DATABASE_URL
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/@wroffy/control-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CONTROL_DATABASE_URL")
+}
+
+enum TenantStatus {
+  /// Being set up: its database is not ready yet. Reaches nothing.
+  PROVISIONING
+  ACTIVE
+  /// Held — unpaid, or by staff. Reaches a notice, not the app.
+  SUSPENDED
+  /// A migration is running or failed on it. Held at the maintenance page until retried.
+  MIGRATING
+  /// Its database is gone. Kept for the record.
+  DEPROVISIONED
+}
+
+enum DomainKind {
+  /// An address of the customer's own, pointed at the platform.
+  CUSTOM
+  /// An address from before workspaces existed, kept reaching the first one.
+  LEGACY
+}
+
+/// A customer of the SaaS: one database, one set of keys, one or more addresses.
+model Tenant {
+  id     String       @id @default(cuid())
+  /// The subdomain: `<slug>.<PLATFORM_DOMAIN>`. Lower-case, 3–40, never reserved.
+  slug   String       @unique
+  name   String
+  status TenantStatus @default(PROVISIONING)
+
+  /// The workspace scripts and check suites act as when nothing else says — the one adopted from
+  /// the installation that existed before workspaces. At most one (a partial unique index).
+  isDefault Boolean @default(false)
+
+  region String @default("in")
+  /// The database's name on its server, for the operator. The URL itself is only ever sealed.
+  dbName      String
+  /// The database URL, sealed under the platform key with the tenant id as associated data.
+  dbUrlCipher String
+
+  /// The workspace's keys (stored secrets, fingerprints, links, render passes, cookies, sessions),
+  /// sealed under the platform key with the tenant id as associated data — see src/lib/tenancy/keys.ts.
+  keyBundleCipher  String
+  keyBundleVersion Int    @default(1)
+
+  /// The newest migration applied to its database, as last seen.
+  schemaVersion String?
+
+  /// Defaults for its legal entities, until those exist.
+  country  String @default("IN")
+  currency String @default("INR")
+  timezone String @default("Asia/Kolkata")
+
+  ownerEmail String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  suspendedAt     DateTime?
+  deprovisionedAt DateTime?
+
+  domains      TenantDomain[]
+  deviceRoutes BiometricDeviceRoute[]
+  auditLog     PlatformAuditLog[]
+
+  @@map("tenants")
+}
+
+/// An address other than the workspace's own subdomain.
+model TenantDomain {
+  id        String     @id @default(cuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Normalised: lower-case, with the port when there is one ("erp.acme.com", "localhost:3000").
+  host      String     @unique
+  kind      DomainKind
+  /// Links in emails and documents are built on this one, when set; otherwise on the subdomain.
+  isPrimary Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  @@index([tenantId])
+  @@map("tenant_domains")
+}
+
+/// Which workspace a biometric terminal belongs to, by its serial number — for terminals that
+/// reach the server on a bare IP address, which names no workspace.
+model BiometricDeviceRoute {
+  serial     String    @id
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime?
+
+  @@index([tenantId])
+  @@map("biometric_device_routes")
+}
+
+enum PlatformActorKind {
+  /// A script run by the operator on the server.
+  SCRIPT
+  /// The platform itself: a job, a webhook.
+  SYSTEM
+  /// A member of staff, in the console.
+  STAFF
+}
+
+/// What was done to a workspace from outside it.
+model PlatformAuditLog {
+  id        String            @id @default(cuid())
+  at        DateTime          @default(now())
+  actorKind PlatformActorKind
+  /// Who: a staff member's id, a script's name.
+  actor     String
+  action    String
+  tenantId  String?
+  tenant    Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  detail    Json?
+
+  @@index([tenantId, at])
+  @@map("platform_audit_log")
+}

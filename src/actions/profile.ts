@@ -123,7 +123,7 @@ export async function beginTwoFactorSetup(input?: unknown): Promise<ActionResult
   const secret = generateTotpSecret();
   await db.user.update({
     where: { id: user.id },
-    data: { twoFactorPendingCipher: encryptSecret(secret) },
+    data: { twoFactorPendingCipher: await encryptSecret(secret) },
   });
   const qrCodeDataUrl = await totpQrCodeDataUrl(user.email, secret);
   return { ok: true, data: { secret, qrCodeDataUrl } };
@@ -144,7 +144,7 @@ export async function confirmTwoFactorSetup(input: unknown): Promise<ActionResul
   if (!dbUser.twoFactorPendingCipher) {
     return { ok: false, error: "Start setup again — no pending authenticator to confirm." };
   }
-  const secret = decryptSecret(dbUser.twoFactorPendingCipher);
+  const secret = await decryptSecret(dbUser.twoFactorPendingCipher);
   if (!verifyTotpCode(secret, parsed.data.code)) {
     return { ok: false, error: "That code didn't match. Check the time on your phone and try again." };
   }

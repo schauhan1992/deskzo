@@ -5,14 +5,15 @@ import { classifyUserAgent, isMachineEndpoint, shouldBlockBot, ROBOTS_HEADER } f
 import { permissionsPolicyFor } from "@/lib/security/headers";
 import { getSecurityPolicy } from "@/lib/security/store";
 import { recordBotHit } from "@/lib/security/bot-log";
-import { restoreInProgress } from "@/lib/backup/maintenance";
+import { restoreInProgressFor } from "@/lib/backup/maintenance";
 import { currentMaintenance, maintenanceAppName, maintenancePage, maintenanceVerdict, mayBypassMaintenance } from "@/lib/maintenance";
 import { evaluateAccess } from "@/lib/access/gate";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, newDeviceToken, validDeviceToken } from "@/lib/access/device-token";
 import { HOST_MISMATCH, classifyHost, requestHost } from "@/lib/tenancy/host";
 import { tenantForKind } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
-import { noWorkspacePage } from "@/lib/tenancy/pages";
+import type { Tenant } from "@/lib/tenancy/state";
+import { noWorkspacePage, unavailableWorkspacePage } from "@/lib/tenancy/pages";
 
 /**
  * Served from the proxy while a restore is running, so it depends on nothing.
@@ -108,7 +109,7 @@ function harden(response: NextResponse, pathname: string): NextResponse {
   return response;
 }
 
-export default edgeAuth(async (req: NextRequest & { auth: unknown }) => {
+const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   const { pathname } = req.nextUrl;
 
   // --- Which workspace ---------------------------------------------------------------------
@@ -125,7 +126,7 @@ export default edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   if (host === HOST_MISMATCH) {
     return harden(new NextResponse("Misdirected request.", { status: 421, headers: { "content-type": "text/plain; charset=utf-8" } }) as NextResponse, pathname);
   }
-  const tenant = host ? tenantForKind(classifyHost(host)) : null;
+  const tenant = host ? await tenantForKind(classifyHost(host)) : null;
   const api = pathname === "/api" || pathname.startsWith("/api/");
   if (!tenant && api) {
     // A machine asking the wrong address: a plain answer, not a page and not a stack trace.
@@ -138,15 +139,39 @@ export default edgeAuth(async (req: NextRequest & { auth: unknown }) => {
     );
   }
   /**
+   * A workspace being set up, held, mid-migration or closed is not served — not its pages and not its
+   * API. The console runs migrations and provisioning as the workspace explicitly, never through here.
+   */
+  if (tenant.status !== "ACTIVE") {
+    if (api) return NextResponse.json({ error: "This workspace is unavailable." }, { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } });
+    return harden(
+      new NextResponse(unavailableWorkspacePage(tenant.name), { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "retry-after": "60" } }) as NextResponse,
+      pathname,
+    );
+  }
+  /**
    * API routes are only asked *which workspace*. Everything below — the session, the crawler block,
    * maintenance, the access gate — is for pages: the cron jobs, webhooks, the lead API and the
    * maintenance status endpoint authenticate themselves and must keep answering while pages are held.
    */
   if (api) return NextResponse.next();
-  return runAsTenant(tenant, () => handle(req, pathname));
+  // A session counts only in the workspace that issued it (its cookie also only decrypts there).
+  const sessionTenant = (req.auth as { user?: { tid?: string } } | null)?.user?.tid;
+  if (req.auth && sessionTenant !== tenant.id) req.auth = null;
+  return runAsTenant(tenant, () => handle(req, pathname, tenant));
 });
 
-async function handle(req: NextRequest & { auth: unknown }, pathname: string): Promise<NextResponse> {
+/**
+ * The proxy itself. `edgeAuth` is configured per request (the session secret is the workspace's own —
+ * src/lib/auth-session.ts), and a per-request NextAuth hands back its wrapped handler as a promise,
+ * which Next does not accept as the export. So the export is a plain function that waits for it.
+ */
+export default async function proxy(...args: Parameters<Awaited<typeof withSession>>) {
+  const handler = await withSession;
+  return handler(...args);
+}
+
+async function handle(req: NextRequest & { auth: unknown }, pathname: string, tenant: Tenant): Promise<NextResponse> {
 
   // --- 0. Maintenance ----------------------------------------------------------------------
   /**
@@ -162,7 +187,7 @@ async function handle(req: NextRequest & { auth: unknown }, pathname: string): P
    * the database cannot. `/api` is outside the matcher, which is what keeps the status endpoint the
    * screen polls reachable while everything else is held here.
    */
-  if (restoreInProgress()) {
+  if (restoreInProgressFor(tenant)) {
     return harden(
       new NextResponse(MAINTENANCE_PAGE, {
         status: 503,
@@ -185,7 +210,7 @@ async function handle(req: NextRequest & { auth: unknown }, pathname: string): P
    * stale pass falls through to the checks below exactly as before.
    */
   const renderingDocument = printPathDocumentId(pathname);
-  if (renderingDocument && verifyRenderToken(req.nextUrl.searchParams.get(RENDER_PARAM), renderingDocument)) {
+  if (renderingDocument && (await verifyRenderToken(req.nextUrl.searchParams.get(RENDER_PARAM), renderingDocument))) {
     const response = harden(NextResponse.next() as NextResponse, pathname);
     // A pass is in the address, so the page must be neither cached nor sent anywhere as a referrer.
     response.headers.set("cache-control", "no-store");

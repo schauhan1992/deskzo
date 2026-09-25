@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SecurityPolicyForm } from "@/components/settings/security-policy-form";
 import { SecuritySettingsForm } from "@/components/settings/security-settings-form";
 import { can } from "@/lib/authz/resolve";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 export default async function SecuritySettingsPage() {
   const sessionUser = await currentUser();
@@ -20,7 +21,7 @@ export default async function SecuritySettingsPage() {
     );
   }
 
-  const [policy, loginSettings] = await Promise.all([getSecurityPolicyForAdmin(), getSecuritySettings()]);
+  const [policy, loginSettings, origin] = await Promise.all([getSecurityPolicyForAdmin(), getSecuritySettings(), tenantOrigin()]);
 
   return (
     <div>
@@ -31,7 +32,7 @@ export default async function SecuritySettingsPage() {
 
       <Card className="mt-6">
         <CardHeader className="text-sm font-medium text-text">Sign-in</CardHeader>
-        <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} />}</CardContent>
+        <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} origin={origin} />}</CardContent>
       </Card>
 
       <Link href="/settings/security/access" className="mt-6 block">

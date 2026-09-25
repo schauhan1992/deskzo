@@ -24,7 +24,14 @@ const nextConfig: NextConfig = {
    * and hot reload to any origin not listed here, which would leave every workspace but the bare
    * `localhost` a page that never finishes loading in development.
    */
-  allowedDevOrigins: ["*.localhost"],
+  allowedDevOrigins: ["*.localhost", "127.0.0.1"],
+
+  /**
+   * The control plane's Prisma client (prisma/control/schema.prisma), loaded by Node as it is rather
+   * than bundled — the same treatment Next gives Prisma's main client. Bundled, its search for its
+   * own query engine on disk makes the build trace the entire project.
+   */
+  serverExternalPackages: ["@wroffy/control-client"],
 
   /**
    * eSSL / ZKTeco terminals post to a fixed path.

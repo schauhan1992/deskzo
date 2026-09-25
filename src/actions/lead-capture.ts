@@ -69,7 +69,7 @@ export async function createCaptureKey(input: unknown): Promise<ActionResult<{ k
       name: parsed.data.name,
       sourceLabel: parsed.data.sourceLabel || null,
       keyId,
-      secretDigest: digestSecret(secret),
+      secretDigest: await digestSecret(secret),
       createdById: user.id,
     },
     select: { id: true },

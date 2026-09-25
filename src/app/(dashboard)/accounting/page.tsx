@@ -184,7 +184,7 @@ export default async function AccountingOverviewPage() {
 
   const definition = getPageLayoutDefinition("accounting");
   const items: GridItem[] = order
-    .filter((key) => cards[key])
+    .filter((key) => Boolean(cards[key]))
     .map((key) => {
       const w = definition?.widgets.find((x) => x.key === key);
       return { key, label: w?.label ?? key, size: w?.size ?? "stat", node: cards[key] };

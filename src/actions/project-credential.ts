@@ -16,7 +16,7 @@ import type { ActionResult } from "@/actions/company";
  *
  * ## Three separate protections, because one is not enough
  *
- *   1. **Encrypted at rest.** AES-256-GCM via `encryptSecret`, keyed from `AUTH_SECRET`. This is
+ *   1. **Encrypted at rest.** AES-256-GCM via `encryptSecret`, under the workspace's data key. This is
  *      the same mechanism the e-invoice credentials use.
  *   2. **The viewer's own password.** Revealing requires re-entering it. A walk-up on an unlocked
  *      laptop, or a stolen session cookie, is then not enough to harvest a customer's passwords.
@@ -26,7 +26,7 @@ import type { ActionResult } from "@/actions/company";
  *
  * ## What none of this protects against
  *
- * Somebody with access to the running server has `AUTH_SECRET`, and therefore has every secret in
+ * Somebody with access to the running server has the platform key, and therefore has every secret in
  * this table. That is worth being plain about: this defeats a database dump, a stolen backup and a
  * curious colleague. It is not a vault, and a customer's bank or registrar credentials still belong
  * in one.
@@ -158,13 +158,13 @@ export async function saveCredential(input: {
     note: input.note?.trim() || null,
     expiresAt: input.expiresAt ? new Date(`${input.expiresAt}T00:00:00.000Z`) : null,
     // A new secret is a rotation, and dating it is what makes "last changed in 2023" visible.
-    ...(secret ? { secretCipher: encryptSecret(secret), rotatedAt: new Date() } : {}),
+    ...(secret ? { secretCipher: await encryptSecret(secret), rotatedAt: new Date() } : {}),
   };
 
   const saved = input.id
     ? await db.projectCredential.update({ where: { id: input.id }, data: common, select: { id: true } })
     : await db.projectCredential.create({
-        data: { ...common, secretCipher: encryptSecret(secret!), projectId: input.projectId, createdById: user.id },
+        data: { ...common, secretCipher: await encryptSecret(secret!), projectId: input.projectId, createdById: user.id },
         select: { id: true },
       });
 
@@ -220,11 +220,11 @@ export async function revealCredential(
 
   let secret: string;
   try {
-    secret = decryptSecret(credential.secretCipher);
+    secret = await decryptSecret(credential.secretCipher);
   } catch {
     // A key that has changed since the secret was stored. Saying so is more useful than a crash,
     // because the fix is to re-enter it rather than to debug anything.
-    return { ok: false, error: "This secret can't be decrypted — AUTH_SECRET has changed since it was stored. Re-enter it." };
+    return { ok: false, error: "This secret can't be decrypted — the workspace's keys have changed since it was stored. Re-enter it." };
   }
 
   await db.credentialReveal.create({ data: { credentialId: credential.id, userId: user.id } });

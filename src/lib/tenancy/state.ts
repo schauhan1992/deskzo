@@ -4,20 +4,27 @@ import type { PrismaClient } from "@prisma/client";
 /**
  * A workspace — one customer of the SaaS, with its own database.
  *
- * `id` is what everything per-workspace is keyed by: caches, lockouts, signing. In M1 the registry
- * is static and the id is the slug; from M2 it is the control plane's own id.
+ * `id` is what everything per-workspace is keyed by: caches, lockouts, signing. For a workspace in
+ * the control plane it is the control plane's id; for one read from the environment (before the
+ * first workspace is adopted, and in check suites) it is the slug.
  */
 export type Tenant = {
   id: string;
   slug: string;
   name: string;
-  status: "ACTIVE" | "SUSPENDED" | "MIGRATING";
+  status: "PROVISIONING" | "ACTIVE" | "SUSPENDED" | "MIGRATING" | "DEPROVISIONED";
   /** The database. Never shown, never logged. */
   dbUrl: string;
   /** The address links in emails and documents are built on, e.g. "acme.example.com". */
   primaryHost: string;
   /** Every host that reaches it: its subdomain, custom domains, an old address kept alive. */
   hosts: string[];
+  /** Where it was found: the control plane, or the environment (src/lib/tenancy/registry.ts). */
+  source: "control" | "env";
+  /** The first workspace, adopted from the installation that came before — what scripts act as. */
+  isDefault: boolean;
+  /** Its key bundle, sealed under the platform key. Null for a workspace from the environment. */
+  keyBundleCipher: string | null;
 };
 
 export type ClientEntry = { client: PrismaClient; url: string; lastUsed: number };
@@ -29,6 +36,8 @@ type TenancyState = {
   registry: Map<string, { tenant: Tenant | null; at: number }>;
   /** One database client per workspace, least recently used first out. */
   clients: Map<string, ClientEntry>;
+  /** Each workspace's opened key bundle, briefly (src/lib/tenancy/keys.ts). */
+  keys: Map<string, { cipher: string | null; keys: unknown; at: number }>;
 };
 
 /**
@@ -42,6 +51,8 @@ type TenancyState = {
 export function tenancyState(): TenancyState {
   const g = globalThis as { [key: symbol]: TenancyState | undefined };
   const key = Symbol.for("wroffy.tenancy");
-  if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), clients: new Map() };
+  if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), clients: new Map(), keys: new Map() };
+  // A process that loaded an older copy of this module (a dev server across a hot reload).
+  g[key]!.keys ??= new Map();
   return g[key]!;
 }

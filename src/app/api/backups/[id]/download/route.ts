@@ -7,7 +7,8 @@ import { db } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { logActivity } from "@/lib/activity";
-import { secretFingerprint } from "@/lib/backup/fingerprint";
+import { archiveKeyMaterial, currentKeys } from "@/lib/tenancy/keys";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import { readSidecar } from "@/lib/backup/sidecar";
 import { MissingChunkError, readManifest, reassemble } from "@/lib/backup/chunks";
 import { backupRoot, ensureRestoreDir, restoreDir } from "@/lib/backup/maintenance";
@@ -61,7 +62,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: "There is no completed backup with that id." }, { status: 404 });
   }
 
-  const root = backupRoot();
+  const root = await backupRoot();
 
   /** The plaintext dump this request seals. For a chunked backup it does not exist yet. */
   let dumpPath: string;
@@ -100,7 +101,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      * once — on a shared path the first to finish deletes the file the second is still streaming,
      * and that download ends truncated with no error anywhere.
      */
-    rebuilt = path.join(restoreDir(), `.rebuilt-${randomUUID()}.dump`);
+    rebuilt = path.join(await restoreDir(), `.rebuilt-${randomUUID()}.dump`);
     try {
       await reassemble(root, manifest, rebuilt);
     } catch (err) {
@@ -134,6 +135,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // it would have carried were recorded on the row when the dump was taken.
   const sidecar = row.kind === "INCREMENTAL" ? null : await readSidecar(dumpPath);
 
+  const [tenant, keys] = await Promise.all([currentTenant(), currentKeys()]);
   let sealed;
   try {
     sealed = await sealToStream({
@@ -142,17 +144,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       meta: {
         takenAt: row.startedAt,
         schemaVersion: row.schemaVersion ?? sidecar?.schemaVersion ?? null,
-        secretFingerprint: sidecar?.secretFingerprint ?? row.secretFingerprint ?? secretFingerprint(process.env.AUTH_SECRET),
+        secretFingerprint: sidecar?.secretFingerprint ?? row.secretFingerprint ?? keys.fingerprint,
         via: row.via ?? sidecar?.via ?? null,
         /**
-         * The running secret travels inside the file, sealed under the passphrase.
+         * The workspace's keys travel inside the file, sealed under the passphrase.
          *
-         * Without it this archive restores onto a fresh server as a database of unreadable
+         * Without them this archive restores onto a fresh workspace as a database of unreadable
          * ciphertext — the vault, the two-factor secrets, the M365 and e-invoice logins all present
-         * and all gibberish. With it, the passphrase is the only thing between this file and every
+         * and all gibberish. With them, the passphrase is the only thing between this file and every
          * one of those, which is the trade the operator made when they chose a sealed archive.
          */
-        includeSecret: process.env.AUTH_SECRET ?? null,
+        includeSecret: archiveKeyMaterial(keys),
+        // Signed by the platform for this workspace: what lets it be restored here without staff.
+        signFor: tenant.id,
       },
     });
   } catch (err) {

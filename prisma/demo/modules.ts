@@ -209,9 +209,9 @@ export async function seedModules(
         email: `${username.split("@")[0]}@wroffy.com`,
         loginUrl: url,
         phone: chance(0.4) ? phone() : null,
-        secretCipher: encryptSecret(secret),
-        secretDigest: digestSecret(secret),
-        recoveryKeyCipher: chance(0.35) ? encryptSecret(randomBytes(12).toString("base64url")) : null,
+        secretCipher: await encryptSecret(secret),
+        secretDigest: await digestSecret(secret),
+        recoveryKeyCipher: chance(0.35) ? await encryptSecret(randomBytes(12).toString("base64url")) : null,
         remarks: chance(0.3) ? pick(["Two-step goes to the office mobile.", "Renewal billed annually in March.", "Shared with the vendor during onboarding — rotate after."]) : null,
         /**
          * Spread so that a handful land inside the thirty-day notice window and one or two have
@@ -344,8 +344,8 @@ export async function seedModules(
       data: {
         loginName: name,
         username: "admin",
-        secretCipher: encryptSecret(`Arch-${int(100000, 999999)}`),
-        secretDigest: digestSecret(`Arch-${int(100000, 999999)}`),
+        secretCipher: await encryptSecret(`Arch-${int(100000, 999999)}`),
+        secretDigest: await digestSecret(`Arch-${int(100000, 999999)}`),
         ownerId: owner.id,
         createdById: owner.id,
         createdAt: daysAgo(daysAgoArchived + int(200, 600)),

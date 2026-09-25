@@ -761,7 +761,7 @@ async function main() {
       const row = await db.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
       ok(
         "  encrypted, not as typed",
-        !!row?.apiKeyCipher && !row.apiKeyCipher.includes(FAKE) && decryptSecret(row.apiKeyCipher) === FAKE,
+        !!row?.apiKeyCipher && !row.apiKeyCipher.includes(FAKE) && await decryptSecret(row.apiKeyCipher) === FAKE,
         "and it decrypts back to exactly the key, trimmed",
       );
       const state = await refActions.getPinDirectory();

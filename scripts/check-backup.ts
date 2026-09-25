@@ -31,7 +31,7 @@ import {
   stalenessOf,
   type BackupFile,
 } from "../src/lib/backup/policy";
-import { secretFingerprint } from "../src/lib/backup/fingerprint";
+import { adoptedKeyBundle, archiveFingerprints, archiveKeyMaterial, keysFromArchive, legacyFingerprint, newKeyBundle, type TenantKeys } from "../src/lib/tenancy/keys";
 import {
   RETRY_AFTER_MINUTES,
   RUNNING_PRESUMED_DEAD_MINUTES,
@@ -69,6 +69,7 @@ import {
   extractArchive,
   passphraseProblem,
   readArchiveHeader,
+  verifyArchiveSignature,
   writeArchive,
 } from "../src/lib/backup/archive";
 
@@ -179,20 +180,47 @@ async function main() {
   ok("nonsense returns null rather than throwing", parseDatabaseUrl("not a url") === null);
   ok("missing DATABASE_URL returns null", parseDatabaseUrl(undefined) === null);
 
-  section("Secret fingerprint");
+  section("Key fingerprints");
 
   {
+    // The fingerprint backups carried before workspaces: an HMAC under AUTH_SECRET itself. The first
+    // workspace's keys still answer to it (src/lib/tenancy/keys.ts), so its older backups match.
     const secret = "a-real-looking-auth-secret-value";
-    const fp = secretFingerprint(secret);
-    ok("sixteen hex characters", /^[0-9a-f]{16}$/.test(fp ?? ""), fp);
-    ok("same secret, same fingerprint", fp === secretFingerprint(secret));
-    ok("a different secret gives a different fingerprint", fp !== secretFingerprint(secret + "!"));
+    const fp = legacyFingerprint(secret);
+    ok("sixteen hex characters", /^[0-9a-f]{16}$/.test(fp), fp);
+    ok("same secret, same fingerprint", fp === legacyFingerprint(secret));
+    ok("a different secret gives a different fingerprint", fp !== legacyFingerprint(secret + "!"));
     // The whole point of an HMAC rather than a prefix: this sits in a JSON file next to the dump.
-    ok("does not contain the secret", !fp!.includes(secret.slice(0, 8)) && !secret.includes(fp!));
-    ok("no secret, no fingerprint", secretFingerprint(undefined) === null && secretFingerprint("") === null);
+    ok("does not contain the secret", !fp.includes(secret.slice(0, 8)) && !secret.includes(fp));
     // A one-character difference must not survive truncation to 16 chars.
-    const near = [secretFingerprint("secret-1"), secretFingerprint("secret-2"), secretFingerprint("secret-3")];
+    const near = [legacyFingerprint("secret-1"), legacyFingerprint("secret-2"), legacyFingerprint("secret-3")];
     ok("near-identical secrets stay distinguishable", new Set(near).size === 3, near.join(" "));
+  }
+
+  section("Keys carried in an archive");
+
+  {
+    // From before workspaces: the archive carried the AUTH_SECRET, and restoring it must give the keys
+    // that secret derived — exactly the ones the first workspace adopted.
+    const secret = "the-auth-secret-of-an-older-installation";
+    const fromLegacy = keysFromArchive(secret);
+    const adopted = adoptedKeyBundle(secret);
+    ok("an older archive's AUTH_SECRET gives the keys it always derived", fromLegacy.data === adopted.data && fromLegacy.digest === adopted.digest && fromLegacy.tracking === adopted.tracking);
+    ok("  and answers to the fingerprint its backups carried", archiveFingerprints(secret).includes(legacyFingerprint(secret)));
+
+    const bundle = newKeyBundle();
+    const keys: TenantKeys = {
+      dataKey: Buffer.from(bundle.data, "base64"),
+      digestKey: Buffer.from(bundle.digest, "base64"),
+      trackingKey: Buffer.from(bundle.tracking, "base64"),
+      renderKey: Buffer.from(bundle.render, "base64"),
+      sessionSecret: bundle.session,
+      fingerprint: "unused-here",
+      legacyFingerprints: [],
+    };
+    const material = archiveKeyMaterial(keys);
+    ok("a workspace's keys go into an archive and come back", keysFromArchive(material).data === bundle.data && keysFromArchive(material).render === bundle.render);
+    ok("  without its sign-in secret — nobody is signed in by a file", !material.includes(bundle.session));
   }
 
   section("Retention — which files may be deleted");
@@ -338,7 +366,7 @@ async function main() {
       filename: "wroffy-2026-09-20-120000.dump",
       takenAt: NOW.toISOString(),
       schemaVersion: "20260920180000_backups",
-      secretFingerprint: secretFingerprint("a-secret")!,
+      secretFingerprint: legacyFingerprint("a-secret"),
       via: "docker compose (postgres)",
       sizeBytes: 1435618,
       app: "Wroffy ERP",
@@ -669,6 +697,7 @@ async function main() {
           secretFingerprint: "abc123def456",
           via: "pg_dump (host)",
           includeSecret: SECRET,
+          signFor: "zz-workspace-a",
         },
       });
 
@@ -702,6 +731,35 @@ async function main() {
       const outPath = path.join(dir, "restored.dump");
       const extracted = await extractArchive({ archivePath, outDumpPath: outPath, passphrase: PASS });
       ok("the dump comes back byte for byte", (await readFile(outPath)).equals(body), `${body.length} bytes`);
+
+      // ── The platform's signature ────────────────────────────────────────────────────────────
+      ok("the platform signed it for the workspace it came from", header.signature?.tenantId === "zz-workspace-a" && (await verifyArchiveSignature(archivePath, "zz-workspace-a")));
+      ok("  and for no other — a workspace restores by itself only its own", !(await verifyArchiveSignature(archivePath, "zz-workspace-b")));
+      {
+        const relabelled = Buffer.from(raw);
+        const at = relabelled.indexOf(Buffer.from('"tenantId":"zz-workspace-a"', "utf8"));
+        Buffer.from('"tenantId":"zz-workspace-b"', "utf8").copy(relabelled, at);
+        const relabelledPath = path.join(dir, `relabelled${ARCHIVE_EXTENSION}`);
+        await writeFile(relabelledPath, relabelled);
+        ok("  relabelling it for another workspace breaks the signature", at > 0 && !(await verifyArchiveSignature(relabelledPath, "zz-workspace-b")));
+      }
+      {
+        // A version 1 archive — from before signatures — still opens, and is not signed.
+        const headerLen = raw.readUInt32BE(9);
+        const v1Header = JSON.parse(raw.subarray(13, 13 + headerLen).toString("utf8")) as Record<string, unknown>;
+        delete v1Header.signature;
+        v1Header.format = 1;
+        const v1Json = Buffer.from(JSON.stringify(v1Header), "utf8");
+        const v1Preamble = Buffer.from(raw.subarray(0, 13));
+        v1Preamble.writeUInt8(1, 8);
+        v1Preamble.writeUInt32BE(v1Json.length, 9);
+        const v1Path = path.join(dir, `v1${ARCHIVE_EXTENSION}`);
+        await writeFile(v1Path, Buffer.concat([v1Preamble, v1Json, raw.subarray(13 + headerLen, raw.length - 32)]));
+        const v1Out = path.join(dir, "v1.dump");
+        await extractArchive({ archivePath: v1Path, outDumpPath: v1Out, passphrase: PASS });
+        ok("an archive from before signatures still opens", (await readFile(v1Out)).equals(body));
+        ok("  and counts as unsigned — for the first workspace only", !(await verifyArchiveSignature(v1Path, "zz-workspace-a")));
+      }
       ok("  and the sealed secret with it", extracted.secret === SECRET, "this is what lets a restore onto a fresh server keep the vault");
 
       // ── The three refusals ──────────────────────────────────────────────────────────────────
@@ -735,6 +793,7 @@ async function main() {
         () => extractArchive({ archivePath: tamperedPath, outDumpPath: path.join(dir, "t.dump"), passphrase: PASS }),
         "ArchiveFormatError",
       );
+      ok("  and by the signature, before any passphrase is typed", !(await verifyArchiveSignature(tamperedPath, "zz-workspace-a")));
 
       const cutPath = path.join(dir, `cut${ARCHIVE_EXTENSION}`);
       await writeFile(cutPath, raw.subarray(0, raw.length - 5000));
@@ -764,7 +823,7 @@ async function main() {
             dumpPath,
             outPath: path.join(dir, "never.wbak"),
             passphrase: "tooshort",
-            meta: { takenAt, schemaVersion: null, secretFingerprint: null, via: null, includeSecret: null },
+            meta: { takenAt, schemaVersion: null, secretFingerprint: null, via: null, includeSecret: null, signFor: "zz-workspace-a" },
           }),
         "PassphraseError",
       );

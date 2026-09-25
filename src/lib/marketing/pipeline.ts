@@ -11,7 +11,8 @@ import { canSend, type RecipientState, type SendContext, type SendVerdict } from
 import { nextSendTime, type ScheduleRules } from "@/lib/marketing/schedule";
 import { render, type MergeValues } from "@/lib/marketing/merge";
 import { composeEmail, escapeHtml } from "@/lib/marketing/html";
-import { trackedLink } from "@/lib/marketing/tracking";
+import { trackedLinkWith } from "@/lib/marketing/tracking";
+import { currentKeys } from "@/lib/tenancy/keys";
 import { postalAddressFor } from "@/lib/marketing/footer";
 import { providerByKey, routeFor, type RoutableProvider } from "@/lib/marketing/providers";
 import type { OutboundMessage } from "@/lib/marketing/providers/types";
@@ -331,7 +332,8 @@ export function buildMarketingEmail(input: {
   settings: MarketingSettings;
   token: string;
   origin: string;
-  track: boolean;
+  /** The workspace's tracking key, to track opens and clicks; null not to. */
+  trackingKey: Buffer | null;
 }): BuiltEmail {
   const { template, token, origin, settings } = input;
   const values = mergeValuesFor(input.recipient, settings, { unsubscribeUrl: `${origin}/preferences/${token}` });
@@ -355,7 +357,9 @@ export function buildMarketingEmail(input: {
       includeAddress: !body.used.includes("postalAddress"),
     },
     origin,
-    track: input.track ? { openPixelUrl: `${origin}/track/${token}`, link: (url) => trackedLink(origin, token, url) } : undefined,
+    track: input.trackingKey
+      ? { openPixelUrl: `${origin}/track/${token}`, link: (url) => trackedLinkWith(input.trackingKey!, origin, token, url) }
+      : undefined,
   });
   return { ok: true, subject: subject.text, html: email.html, text: email.text, unsubscribeUrl: `${origin}/api/marketing/unsubscribe/${token}` };
 }
@@ -428,7 +432,7 @@ export async function queueCampaign(campaignId: string, origin: string): Promise
 
     const email =
       campaign.channel === "EMAIL"
-        ? buildMarketingEmail({ template: campaign.template, recipient, settings, token, origin, track: true })
+        ? buildMarketingEmail({ template: campaign.template, recipient, settings, token, origin, trackingKey: (await currentKeys()).trackingKey })
         : null;
     // WhatsApp carries its words as they are — no HTML, no footer, no pixel.
     const values = mergeValuesFor(recipient, settings, { unsubscribeUrl: `${origin}/preferences/${token}` });
@@ -506,7 +510,7 @@ async function providerCredentials(id: string) {
     fromEmail: row.fromEmail,
     replyTo: row.replyTo,
     config: (row.config as Record<string, unknown>) ?? {},
-    secret: row.secretCipher ? decryptSecret(row.secretCipher) : null,
+    secret: row.secretCipher ? await decryptSecret(row.secretCipher) : null,
   };
 }
 

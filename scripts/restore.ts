@@ -8,6 +8,8 @@
  *
  *   npm run db:restore -- <file> --i-understand-this-replaces-everything
  *
+ * Into the first workspace, unless another is named: `--workspace <slug>`.
+ *
  * ## Why this is a script and not a button
  *
  * A restore drops the schema out from under the connection pool the application is holding. The app
@@ -19,9 +21,10 @@
  *
  * A dump restores cleanly and is still useless in two ways, neither of which pg_restore notices:
  *
- * 1. **The wrong encryption key.** Ten kinds of column here are encrypted from `AUTH_SECRET`. Under
- *    a different secret they come back byte-perfect and unreadable — the vault, e-invoice logins,
- *    two-factor secrets, all present and all gibberish. The restore reports success.
+ * 1. **The wrong encryption key.** Ten kinds of column here are encrypted under the workspace's keys
+ *    (src/lib/tenancy/keys.ts). Under different keys they come back byte-perfect and unreadable — the
+ *    vault, e-invoice logins, two-factor secrets, all present and all gibberish. The restore reports
+ *    success.
  * 2. **A newer schema.** Restoring last month's dump into a database the migrations have since
  *    moved on leaves tables the current code does not expect.
  *
@@ -33,7 +36,10 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { parseDatabaseUrl, formatBytes } from "../src/lib/backup/policy";
-import { secretFingerprint } from "../src/lib/backup/fingerprint";
+import { backupFingerprints, keysFor } from "../src/lib/tenancy/keys";
+import { legacyTenant, tenantBySlug } from "../src/lib/tenancy/registry";
+import { runAsTenant } from "../src/lib/tenancy/resolve";
+import type { Tenant } from "../src/lib/tenancy/state";
 import { resolveDumpTool } from "../src/lib/backup/run";
 import { readSidecar } from "../src/lib/backup/sidecar";
 import { db } from "../src/lib/db";
@@ -46,6 +52,19 @@ function say(line = "") {
 
 async function main() {
   const args = process.argv.slice(2);
+  const named = args.indexOf("--workspace");
+  const slug = named >= 0 ? args[named + 1] : null;
+  const tenant = slug ? await tenantBySlug(slug) : await legacyTenant();
+  if (!tenant) {
+    say(slug ? `\n  There is no workspace "${slug}".\n` : "\n  There is no first workspace — name one with --workspace <slug>.\n");
+    process.exitCode = 1;
+    return;
+  }
+  const rest = named < 0 ? args : args.filter((_, i) => i !== named && i !== named + 1);
+  await runAsTenant(tenant, () => restoreInto(tenant, rest));
+}
+
+async function restoreInto(tenant: Tenant, args: string[]) {
   const file = args.find((a) => !a.startsWith("--"));
   const confirmed = args.includes(CONFIRM);
   const force = args.includes("--force");
@@ -82,19 +101,19 @@ async function main() {
     return;
   }
 
-  const connection = parseDatabaseUrl(process.env.DATABASE_URL);
+  const connection = parseDatabaseUrl(tenant.dbUrl);
   if (!connection) {
-    say("\n  DATABASE_URL is missing or not a Postgres URL.\n");
+    say(`\n  The database address of workspace "${tenant.slug}" is not a Postgres URL.\n`);
     process.exitCode = 1;
     return;
   }
 
   const sidecar = await readSidecar(target);
-  const currentFingerprint = secretFingerprint(process.env.AUTH_SECRET);
+  const ours = backupFingerprints(await keysFor(tenant));
 
   say("");
   say(`  Restoring ${path.basename(target)} (${formatBytes(info.size)})`);
-  say(`  Into      ${connection.database} on ${connection.host}:${connection.port}`);
+  say(`  Into      workspace "${tenant.slug}" — ${connection.database} on ${connection.host}:${connection.port}`);
   if (sidecar) {
     say(`  Taken     ${sidecar.takenAt}`);
     say(`  Schema    ${sidecar.schemaVersion ?? "unknown"}`);
@@ -105,12 +124,12 @@ async function main() {
 
   const problems: string[] = [];
 
-  if (sidecar?.secretFingerprint && currentFingerprint && sidecar.secretFingerprint !== currentFingerprint) {
+  if (sidecar?.secretFingerprint && !ours.includes(sidecar.secretFingerprint)) {
     problems.push(
-      "The AUTH_SECRET differs from the one this backup was taken under.\n" +
+      "This workspace's keys are not the ones this backup was taken under.\n" +
         "    Every encrypted column — the vault, e-invoice and M365 credentials, two-factor secrets —\n" +
-        "    would restore intact and unreadable. Restore this to an instance with the original secret,\n" +
-        "    or accept losing all of them.",
+        "    would restore intact and unreadable. Restore it from a sealed archive in the app, which\n" +
+        "    carries its keys, or accept losing all of them.",
     );
   }
 

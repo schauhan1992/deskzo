@@ -374,7 +374,7 @@ async function main() {
     actorId = admin.id;
     const saveRes = await actions.saveCopilotSettings({ enabled: true, provider: "OPENAI", model: "gpt-zz", dailyTokenLimit: 200_000, keys: { OPENAI: "sk-zzcop-openai-secret-123" } });
     const row = await db.copilotSettings.findUnique({ where: { id: "global" } });
-    ok("a key is stored encrypted", saveRes.ok && !!row?.openaiKeyCipher && !row.openaiKeyCipher.includes("sk-zzcop") && decryptSecret(row.openaiKeyCipher) === "sk-zzcop-openai-secret-123");
+    ok("a key is stored encrypted", saveRes.ok && !!row?.openaiKeyCipher && !row.openaiKeyCipher.includes("sk-zzcop") && await decryptSecret(row.openaiKeyCipher) === "sk-zzcop-openai-secret-123");
     const view = await actions.getCopilotSettings();
     ok("  and never read back — the screen is told only that there is one", !!view && !JSON.stringify(view).includes("sk-zzcop") && view.hasKey.OPENAI);
     ok("  the other providers keep their keys", (row?.anthropicKeyCipher ?? null) === anthropicBefore);

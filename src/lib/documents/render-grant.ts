@@ -21,7 +21,7 @@ export async function mintRenderGrant(documentId: string, userId: string): Promi
   const now = new Date();
   // Housekeeping on the way in: nothing reads an expired pass, so there is no reason to keep one.
   await db.documentRenderGrant.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - 60_000) } } });
-  const { token, nonce, expiresAt } = newRenderToken(documentId, now.getTime());
+  const { token, nonce, expiresAt } = await newRenderToken(documentId, now.getTime());
   await db.documentRenderGrant.create({ data: { id: nonce, documentId, userId, expiresAt } });
   return token;
 }
@@ -32,7 +32,7 @@ export async function mintRenderGrant(documentId: string, userId: string): Promi
  * both get a user back.
  */
 export async function spendRenderGrant(token: string | null | undefined, documentId: string): Promise<string | null> {
-  const nonce = verifyRenderToken(token, documentId);
+  const nonce = await verifyRenderToken(token, documentId);
   if (!nonce) return null;
   const now = new Date();
   const spent = await db.documentRenderGrant.updateMany({

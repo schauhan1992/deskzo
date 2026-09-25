@@ -505,9 +505,9 @@ export async function saveCredential(input: {
     const created = await db.vaultCredential.create({
       data: {
         ...common,
-        secretCipher: encryptSecret(secret),
-        secretDigest: digestSecret(secret),
-        recoveryKeyCipher: recovery ? encryptSecret(recovery) : null,
+        secretCipher: await encryptSecret(secret),
+        secretDigest: await digestSecret(secret),
+        recoveryKeyCipher: recovery ? await encryptSecret(recovery) : null,
         passwordChangedAt: now,
         ownerId: user.id,
         createdById: user.id,
@@ -536,8 +536,8 @@ export async function saveCredential(input: {
     data: {
       ...common,
       // A new secret is a rotation, and dating it is what makes "last changed" mean anything.
-      ...(secret ? { secretCipher: encryptSecret(secret), secretDigest: digestSecret(secret), passwordChangedAt: now } : {}),
-      ...(recovery ? { recoveryKeyCipher: encryptSecret(recovery) } : {}),
+      ...(secret ? { secretCipher: await encryptSecret(secret), secretDigest: await digestSecret(secret), passwordChangedAt: now } : {}),
+      ...(recovery ? { recoveryKeyCipher: await encryptSecret(recovery) } : {}),
     },
   });
 
@@ -606,9 +606,9 @@ export async function revealSecret(
 
   let secret: string;
   try {
-    secret = decryptSecret(cipher);
+    secret = await decryptSecret(cipher);
   } catch {
-    return { ok: false, error: "This can't be decrypted — AUTH_SECRET has changed since it was stored. Re-enter it." };
+    return { ok: false, error: "This can't be decrypted — the workspace's keys have changed since it was stored. Re-enter it." };
   }
 
   await db.vaultReveal.create({ data: { credentialId: credential.id, userId: user.id, via: ent.via, field } });

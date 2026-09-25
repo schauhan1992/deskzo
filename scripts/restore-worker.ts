@@ -27,12 +27,24 @@
  * and wrote out a plain dump. That is deliberate. A passphrase passed on a command line is visible
  * in `ps` to every user on the box, and one passed in the environment is readable from
  * `/proc/<pid>/environ`. This process never has it and cannot leak it.
+ *
+ * ## Which workspace
+ *
+ * WROFFY_TENANT_ID, set by the route that spawns it, and nothing else: the worker never falls back
+ * to "the" database. Everything it does — the status file, the database it clears and rebuilds, the
+ * migrations after, the keys it installs — is that workspace's. After the data is back, the schema
+ * is brought up to this version (`prisma migrate deploy`), because a backup from before the last
+ * upgrade restores the tables as they were then.
  */
 import "dotenv/config";
 import { spawn } from "node:child_process";
-import { open, stat } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { parseDatabaseUrl } from "../src/lib/backup/policy";
+import { controlDb } from "../src/lib/platform/control-db";
+import { forgetRegistry, tenantById } from "../src/lib/tenancy/registry";
+import { runAsTenant } from "../src/lib/tenancy/resolve";
+import type { Tenant } from "../src/lib/tenancy/state";
 import { resolveDumpTool } from "../src/lib/backup/run";
 import {
   clearStaged,
@@ -47,15 +59,11 @@ import { db, getTenantDb } from "../src/lib/db";
 import { ensurePincodes } from "../prisma/reference/pincodes";
 import { ensureGeonames } from "../prisma/reference/geonames";
 
-async function main() {
-  const id = process.argv[2];
-  if (!id || !/^[a-z0-9-]{6,64}$/i.test(id)) {
-    console.error("restore-worker: a staging id is required.");
-    process.exit(1);
-  }
-
+async function main(tenant: Tenant, id: string) {
   const existing = await readRestoreStatus();
-  const dumpPath = stagingPath(id, ".dump");
+  const dumpPath = await stagingPath(id, ".dump");
+  // Read now: clearing the staging area after the restore removes it.
+  const stagedKeys = await readFile(await stagingPath(id, ".keys"), "utf8").catch(() => null);
 
   const status: RestoreStatus = {
     id,
@@ -66,6 +74,7 @@ async function main() {
     archiveName: existing?.id === id ? existing.archiveName : null,
     takenAt: existing?.id === id ? existing.takenAt : null,
     secretHandoffPath: existing?.id === id ? existing.secretHandoffPath : null,
+    keysFromBackup: false,
     error: null,
   };
 
@@ -112,9 +121,9 @@ async function main() {
     return;
   }
 
-  const connection = parseDatabaseUrl(process.env.DATABASE_URL);
+  const connection = parseDatabaseUrl(tenant.dbUrl);
   if (!connection) {
-    await fail("DATABASE_URL is missing or is not a Postgres URL. Nothing has been changed.");
+    await fail("This workspace's database address is not a Postgres URL. Nothing has been changed.");
     return;
   }
 
@@ -192,6 +201,32 @@ async function main() {
   // business, and the archive it came from was encrypted precisely so one would not be lying about.
   await clearStaged(id);
 
+  await say("restoring", "Bringing the database up to this version…");
+  try {
+    await migrateDeploy(tenant.dbUrl);
+  } catch (err) {
+    await fail(
+      `The backup was restored, but its schema could not be brought up to this version: ${(err as Error).message.split("\n").slice(-3).join(" ")} Run the migrations for this workspace before using it.`,
+    );
+    return;
+  }
+
+  /**
+   * The backup's own keys, when it was taken under different ones (staged by the restore route,
+   * sealed for this workspace). Installed only now that the data they open is back: installed
+   * earlier, a failed restore would leave the old data under keys that do not open it.
+   */
+  if (stagedKeys && tenant.source === "control") {
+    await controlDb().$transaction(async (tx) => {
+      await tx.tenant.update({ where: { id: tenant.id }, data: { keyBundleCipher: stagedKeys.trim() } });
+      await tx.platformAuditLog.create({
+        data: { actorKind: "SYSTEM", actor: "restore-worker", action: "tenant.keys.from-backup", tenantId: tenant.id, detail: { restoreId: id } },
+      });
+    });
+    forgetRegistry();
+    status.keysFromBackup = true;
+  }
+
   /**
    * Reference data comes back from the committed file, not from the backup.
    *
@@ -219,8 +254,10 @@ async function main() {
   status.phase = "done";
   status.message =
     (status.secretHandoffPath
-      ? "Restored. The backup was taken under a different AUTH_SECRET — set it and restart before trusting the vault."
-      : "Restored.") + referenceNote;
+      ? "Restored. The backup was taken under different keys — see the file named below before trusting the vault."
+      : status.keysFromBackup
+        ? "Restored, with the keys the backup was taken under."
+        : "Restored.") + referenceNote;
   status.finishedAt = new Date().toISOString();
   await writeRestoreStatus(status);
   await releaseLock();
@@ -292,6 +329,19 @@ function runRestore(
   });
 }
 
+/** `prisma migrate deploy` against this workspace's database, through the local Prisma CLI. */
+function migrateDeploy(databaseUrl: string): Promise<void> {
+  const cli = path.join(process.cwd(), "node_modules", "prisma", "build", "index.js");
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cli, "migrate", "deploy"], { shell: false, env: { ...process.env, DATABASE_URL: databaseUrl } });
+    let output = "";
+    child.stdout?.on("data", (c) => (output += String(c)));
+    child.stderr?.on("data", (c) => (output += String(c)));
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(output.trim() || `prisma migrate deploy exited ${code}`))));
+  });
+}
+
 function run(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { shell: false });
@@ -304,21 +354,40 @@ function run(command: string, args: string[]): Promise<void> {
   });
 }
 
-main().catch(async (err) => {
-  console.error(err);
-  try {
-    const status = await readRestoreStatus();
-    if (status) {
-      await writeRestoreStatus({
-        ...status,
-        phase: "failed",
-        message: "The restore did not complete.",
-        error: String((err as Error).message ?? err),
-        finishedAt: new Date().toISOString(),
-      });
-    }
-  } finally {
-    await releaseLock();
+async function start() {
+  const id = process.argv[2];
+  if (!id || !/^[a-z0-9-]{6,64}$/i.test(id)) {
+    console.error("restore-worker: a staging id is required.");
+    process.exit(1);
   }
-  process.exit(1);
-});
+  const tenantId = process.env.WROFFY_TENANT_ID?.trim();
+  const tenant = tenantId ? await tenantById(tenantId) : null;
+  if (!tenant) {
+    console.error(tenantId ? `restore-worker: no workspace ${tenantId}.` : "restore-worker: WROFFY_TENANT_ID is required — the workspace to restore.");
+    process.exit(1);
+  }
+  await runAsTenant(tenant, async () => {
+    try {
+      await main(tenant, id);
+    } catch (err) {
+      console.error(err);
+      try {
+        const status = await readRestoreStatus();
+        if (status) {
+          await writeRestoreStatus({
+            ...status,
+            phase: "failed",
+            message: "The restore did not complete.",
+            error: String((err as Error).message ?? err),
+            finishedAt: new Date().toISOString(),
+          });
+        }
+      } finally {
+        await releaseLock();
+      }
+      process.exit(1);
+    }
+  });
+}
+
+void start();

@@ -111,7 +111,7 @@ export async function savePinDirectoryApiKey(input: string): Promise<ActionResul
     return { ok: false, error: "That doesn't look like a data.gov.in API key — paste the key exactly as it is shown there." };
   }
 
-  const apiKeyCipher = encryptSecret(key);
+  const apiKeyCipher = await encryptSecret(key);
   await db.referenceSync.upsert({
     where: { key: PIN_DIRECTORY_KEY },
     create: { key: PIN_DIRECTORY_KEY, apiKeyCipher },

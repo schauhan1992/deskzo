@@ -60,9 +60,13 @@ function insideNextServer(): boolean {
 }
 
 async function requestHeaders(): Promise<Headers | null> {
+  // next/headers is CommonJS: imported this way its functions may arrive as named exports or only on
+  // `default` (a check suite's stand-in for it does the latter), so both are looked at.
+  const mod = (await import("next/headers")) as { headers?: () => Promise<Headers>; default?: { headers?: () => Promise<Headers> } };
+  const read = mod.headers ?? mod.default?.headers;
+  if (typeof read !== "function") return null;
   try {
-    const { headers } = await import("next/headers");
-    return await headers();
+    return await read();
   } catch (err) {
     if (isOutsideRequest(err)) return null;
     throw err;
@@ -78,14 +82,14 @@ export async function currentTenant(): Promise<Tenant> {
     const host = requestHost(headers);
     if (host === HOST_MISMATCH) throw new TenantHostMismatch();
     if (host) {
-      const tenant = tenantForHost(host);
+      const tenant = await tenantForHost(host);
       if (!tenant) throw new TenantNotFound(host);
       return tenant;
     }
   }
 
   if (process.env.WROFFY_TENANCY_FALLBACK === "legacy" && !insideNextServer()) {
-    const legacy = legacyTenant();
+    const legacy = await legacyTenant();
     if (legacy) return legacy;
   }
   throw new TenantNotResolved();
@@ -112,6 +116,6 @@ export async function tenantOrigin(tenant?: Tenant): Promise<string> {
   const t = tenant ?? (await currentTenant());
   const headers = explicitTenant() ? null : await requestHeaders();
   const host = headers ? requestHost(headers) : null;
-  const useHost = typeof host === "string" && tenantForHost(host)?.id === t.id ? host : t.primaryHost;
+  const useHost = typeof host === "string" && (await tenantForHost(host))?.id === t.id ? host : t.primaryHost;
   return `${protocolFor(useHost)}://${useHost}`;
 }

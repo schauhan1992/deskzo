@@ -273,9 +273,10 @@ export function BackupManager({
             <p>
               <span className="font-medium text-text">Restoring replaces everything.</span> The application goes offline
               while it runs, every record made since the backup was taken is discarded, and there is no undo. Restoring
-              a backup taken under a different{" "}
-              <code className="font-mono text-xs">AUTH_SECRET</code> leaves the vault, two-factor secrets and stored
-              credentials intact but unreadable — the screen says so before it lets you start.{" "}
+              a backup taken under different keys without them leaves the vault, two-factor secrets and stored
+              credentials intact but unreadable — the screen says so before it lets you start. A downloaded backup
+              carries its keys, sealed under its passphrase, and is signed for this workspace: only this
+              workspace&apos;s own downloads can be restored here.{" "}
               <code className="font-mono text-xs">npm run db:restore -- &lt;file&gt;</code> does the same job from a
               terminal, with the app stopped.
             </p>

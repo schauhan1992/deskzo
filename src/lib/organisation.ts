@@ -196,10 +196,10 @@ export async function getOrganisation(): Promise<Organisation> {
 export async function getEInvoiceConfig(): Promise<ProviderConfig | null> {
   const row = await db.organisationSettings.findUnique({ where: { id: "global" } });
   if (!row || !row.einvoiceEnabled) return null;
-  const decrypt = (cipher: string | null) => {
+  const decrypt = async (cipher: string | null) => {
     if (!cipher) return null;
     try {
-      return decryptSecret(cipher);
+      return await decryptSecret(cipher);
     } catch {
       return null;
     }
@@ -207,9 +207,9 @@ export async function getEInvoiceConfig(): Promise<ProviderConfig | null> {
   return {
     provider: row.einvoiceProvider,
     username: row.einvoiceUsername,
-    password: decrypt(row.einvoicePasswordCipher),
+    password: await decrypt(row.einvoicePasswordCipher),
     clientId: row.einvoiceClientId,
-    clientSecret: decrypt(row.einvoiceClientSecretCipher),
+    clientSecret: await decrypt(row.einvoiceClientSecretCipher),
     gstin: row.gstin,
   };
 }

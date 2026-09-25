@@ -65,7 +65,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
 
     // Both, in this order: an unknown token never redirects, and a known token only redirects to a
     // destination it was issued with.
-    if (message && candidate && destinationIsOurs(token, target!, query.get("s"))) {
+    if (message && candidate && (await destinationIsOurs(token, target!, query.get("s")))) {
       destination = candidate;
     }
 

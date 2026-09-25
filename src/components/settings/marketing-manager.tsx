@@ -28,9 +28,12 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h * 60);
 export function MarketingManager({
   organisation,
   providers,
+  webhookUrl,
 }: {
   organisation: Organisation;
   providers: Providers;
+  /** Where providers send delivery reports — this workspace's address and secret. */
+  webhookUrl: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -81,6 +84,16 @@ export function MarketingManager({
               const row = providers.rows.find((r) => r.key === definition.key);
               return <ProviderCard key={definition.key} definition={definition} row={row} />;
             })}
+          </div>
+
+          <div className="border-t border-line pt-3 text-sm text-muted">
+            <p>
+              <span className="font-medium text-text">Delivery reports.</span> So bounces and complaints stop the next
+              campaign reaching a dead address, set the provider&apos;s webhook to this address, with the provider&apos;s
+              name in place of <code className="font-mono text-xs">&lt;provider&gt;</code>. The key in it is this
+              workspace&apos;s own — keep it out of anything public.
+            </p>
+            <code className="mt-2 block break-all rounded bg-surface-sunken px-2 py-1.5 font-mono text-xs text-text">{webhookUrl}</code>
           </div>
         </CardContent>
       </Card>

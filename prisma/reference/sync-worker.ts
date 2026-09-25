@@ -41,7 +41,7 @@ async function main() {
 
   try {
     if (!sync.apiKeyCipher) throw new Error("No API key is saved. Add one above and sync again.");
-    const apiKey = decryptSecret(sync.apiKeyCipher);
+    const apiKey = await decryptSecret(sync.apiKeyCipher);
 
     await progress({ message: "Fetching from data.gov.in…" });
     let lastWrite = 0;

@@ -35,7 +35,7 @@ export async function GET() {
   if (!allowed) return NextResponse.json({ error: "Not for you." }, { status: 403 });
 
   return NextResponse.json({
-    running: restoreInProgress(),
+    running: await restoreInProgress(),
     status: await readRestoreStatus(),
   });
 }

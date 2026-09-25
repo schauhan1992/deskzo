@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
-import { secretFingerprint } from "@/lib/backup/fingerprint";
+import { backupFingerprints, currentKeys } from "@/lib/tenancy/keys";
 import { readSidecar } from "@/lib/backup/sidecar";
 import { MissingChunkError, readManifest, reassemble } from "@/lib/backup/chunks";
 import {
@@ -62,7 +62,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ error: "You don't have access to restore backups." }, { status: 403 });
   }
 
-  if (restoreInProgress()) {
+  if (await restoreInProgress()) {
     return NextResponse.json({ error: "A restore is already running." }, { status: 409 });
   }
 
@@ -72,7 +72,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ error: "There is no completed backup with that id." }, { status: 404 });
   }
 
-  const root = backupRoot();
+  const root = await backupRoot();
   const dumpPath = path.join(row.directory || root, row.filename);
 
   // A chunked backup never had a sidecar — there was no file for one to sit beside — so the facts it
@@ -81,7 +81,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
 
   await ensureRestoreDir();
   const stagedId = randomUUID();
-  const staged = stagingPath(stagedId, ".dump");
+  const staged = await stagingPath(stagedId, ".dump");
 
   /** What a restore of this produces, which is the size the confirmation screen quotes. */
   let dumpBytes: number;
@@ -133,7 +133,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     source: row.filename,
   });
 
-  const running = secretFingerprint(process.env.AUTH_SECRET);
+  const ours = backupFingerprints(await currentKeys());
   const onSchema = await currentMigration();
   const archiveSchema = row.schemaVersion ?? sidecar?.schemaVersion ?? null;
 
@@ -149,7 +149,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       app: "Wroffy ERP",
       /** A dump on this server is not sealed, so there is no key travelling with it — nor any need. */
       carriesSecret: false,
-      sameInstance: takenFingerprint && running ? takenFingerprint === running : null,
+      sameInstance: takenFingerprint ? ours.includes(takenFingerprint) : null,
     },
     database: {
       schemaVersion: onSchema,

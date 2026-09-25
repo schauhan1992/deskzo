@@ -3,13 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate --config prisma.control.config.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "db:generate": "prisma generate",
+    "db:generate": "prisma generate && prisma generate --config prisma.control.config.ts",
+    "control:generate": "prisma generate --config prisma.control.config.ts",
+    "control:migrate": "prisma migrate deploy --config prisma.control.config.ts",
+    "platform:adopt": "tsx scripts/platform-adopt.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:reference": "tsx prisma/reference/load.ts",
@@ -110,6 +114,7 @@
     "check:geonames": "tsx scripts/check-geonames.ts",
     "check:tenancy": "tsx scripts/check-tenancy.ts",
     "check:tenancy-isolation": "tsx scripts/check-tenancy-isolation.ts",
+    "check:auth-tenancy": "tsx scripts/check-auth-tenancy.ts",
     "check:access-lock": "tsx scripts/check-access-lock.ts"
   },
   "dependencies": {

@@ -5,8 +5,9 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { logActivity } from "@/lib/activity";
-import { secretFingerprint } from "@/lib/backup/fingerprint";
-import { ArchiveFormatError, PassphraseError, extractArchive } from "@/lib/backup/archive";
+import { ArchiveFormatError, PassphraseError, extractArchive, verifyArchiveSignature } from "@/lib/backup/archive";
+import { archiveFingerprints, backupFingerprints, currentKeys, keysFromArchive, sealKeyBundle } from "@/lib/tenancy/keys";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import { CONFIRM_PHRASE } from "@/lib/backup/archive-format";
 import {
   clearStaged,
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "You don't have access to restore backups." }, { status: 403 });
   }
 
-  if (restoreInProgress()) {
+  if (await restoreInProgress()) {
     return NextResponse.json({ error: "A restore is already running." }, { status: 409 });
   }
 
@@ -81,8 +82,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Type ${CONFIRM_PHRASE} to confirm.` }, { status: 400 });
   }
 
-  const archivePath = stagingPath(id, ".wbak");
-  const dumpPath = stagingPath(id, ".dump");
+  const archivePath = await stagingPath(id, ".wbak");
+  const dumpPath = await stagingPath(id, ".dump");
 
   /**
    * Two kinds of staging arrive here, and which one this is decides whether a passphrase is needed.
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
    * proves the person starting a restore can also read what they are restoring.
    */
   const staged = await readStagedMeta(id);
+  const tenant = await currentTenant();
 
   let takenAt: string;
   let schemaVersion: string | null;
@@ -112,6 +114,11 @@ export async function POST(request: Request) {
     schemaVersion = staged.schemaVersion;
     archiveFingerprint = staged.secretFingerprint;
   } else {
+    // Checked again here, not only at upload: this is the last moment before its SQL runs.
+    if (!tenant.isDefault && !(await verifyArchiveSignature(archivePath, tenant.id))) {
+      await clearStaged(id);
+      return NextResponse.json({ error: "Only this workspace's own backups can be restored here. Nothing has been changed." }, { status: 400 });
+    }
     let opened;
     try {
       opened = await extractArchive({ archivePath, outDumpPath: dumpPath, passphrase });
@@ -133,29 +140,39 @@ export async function POST(request: Request) {
   }
 
   /**
-   * If the archive's key is not this instance's key, the key is written out rather than shown.
+   * If the archive's keys are not this workspace's keys, the data restores encrypted under keys it is
+   * not running with — the vault, the two-factor secrets and the stored portal credentials would all
+   * come back unreadable.
    *
-   * The data restores encrypted under whatever secret wrote it, and this process is running under a
-   * different one — so the vault, the two-factor secrets and the stored portal credentials all come
-   * back unreadable until `AUTH_SECRET` is changed to match and the app restarted. The application
-   * cannot rewrite its own environment, so somebody has to.
+   * A workspace in the control plane takes the archive's keys: they are staged beside the dump,
+   * sealed for this workspace under the platform key, and the worker installs them once the restore
+   * has succeeded (keeping this workspace's own session secret — nobody is signed in by a file).
    *
-   * It goes to a file on the server, mode 0600, and the status carries only the path. Rendering it
-   * into a page would put the key to every encrypted column into a browser, a screenshot and
-   * whatever logs sit between here and there — which would undo the reason the archive was sealed.
+   * A workspace still read from the environment cannot change its own keys, so they are written to a
+   * file on the server, mode 0600, and the status carries only the path. Rendering them into a page
+   * would put the key to every encrypted column into a browser, a screenshot and whatever logs sit
+   * between here and there — which would undo the reason the archive was sealed.
    */
   let secretHandoffPath: string | null = null;
-  const running = secretFingerprint(process.env.AUTH_SECRET);
-  if (sealedSecret && secretFingerprint(sealedSecret) !== running) {
+  let keysFromBackup = false;
+  const keys = await currentKeys();
+  const ours = backupFingerprints(keys);
+  if (sealedSecret && !archiveFingerprints(sealedSecret).some((fingerprint) => ours.includes(fingerprint))) {
     await ensureRestoreDir();
-    secretHandoffPath = path.join(restoreDir(), `restore-${id}-AUTH_SECRET.txt`);
-    await writeFile(
-      secretHandoffPath,
-      `${sealedSecret}\n\n# The AUTH_SECRET this backup was taken under.\n` +
-        `# Set it in the environment and restart, or every encrypted column stays unreadable.\n` +
-        `# Delete this file once you have moved the value somewhere it belongs.\n`,
-      { mode: 0o600 },
-    );
+    if (tenant.source === "control") {
+      await writeFile(await stagingPath(id, ".keys"), sealKeyBundle(tenant.id, { ...keysFromArchive(sealedSecret), session: keys.sessionSecret }), { mode: 0o600 });
+      keysFromBackup = true;
+    } else {
+      secretHandoffPath = path.join(await restoreDir(), `restore-${id}-keys.txt`);
+      await writeFile(
+        secretHandoffPath,
+        `${sealedSecret}\n\n# The keys this backup was taken under: an AUTH_SECRET, or a workspace key bundle.\n` +
+          `# An AUTH_SECRET: set it in the environment and restart. A key bundle: adopt this workspace\n` +
+          `# into the control plane (npm run platform:adopt) and restore again — it installs them itself.\n` +
+          `# Delete this file once you have moved the value somewhere it belongs.\n`,
+        { mode: 0o600 },
+      );
+    }
   }
 
   const startedAt = new Date();
@@ -171,7 +188,8 @@ export async function POST(request: Request) {
       source: staged?.source ?? null,
       takenAt,
       schemaVersion,
-      sameInstance: archiveFingerprint === running,
+      sameInstance: archiveFingerprint ? ours.includes(archiveFingerprint) : null,
+      keysFromBackup,
     },
   });
 
@@ -185,6 +203,7 @@ export async function POST(request: Request) {
     archiveName: staged?.source ?? `uploaded backup taken ${takenAt}`,
     takenAt,
     secretHandoffPath,
+    keysFromBackup,
     error: null,
   });
 
@@ -208,7 +227,8 @@ export async function POST(request: Request) {
       cwd: process.cwd(),
       detached: true,
       stdio: "ignore",
-      env: process.env,
+      // The workspace it restores, by id: the worker looks the rest up itself (scripts/restore-worker.ts).
+      env: { ...process.env, WROFFY_TENANT_ID: tenant.id },
     });
     child.unref();
   } catch (err) {

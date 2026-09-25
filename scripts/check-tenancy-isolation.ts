@@ -98,9 +98,10 @@ async function main() {
     const lock = require("../src/lib/access/lock") as typeof import("../src/lib/access/lock");
     const gate = require("../src/lib/access/gate") as typeof import("../src/lib/access/gate");
 
-    const A = registry.tenantBySlug("zziso-a");
-    const B = registry.tenantBySlug("zziso-b");
-    const legacy = registry.legacyTenant();
+    const A = await registry.tenantBySlug("zziso-a");
+    const B = await registry.tenantBySlug("zziso-b");
+    const legacy = await registry.legacyTenant();
+    const at = (h: string) => registry.tenantForHost(h);
     ok("the registry knows both, and the first workspace", !!A && !!B && !!legacy, [A?.slug, B?.slug, legacy?.slug].join(", "));
     if (!A || !B || !legacy) throw new Error("registry");
     const dbName = async () => (await db.$queryRaw<{ name: string }[]>`select current_database() as name`)[0].name;
@@ -108,17 +109,17 @@ async function main() {
     section("Which host reaches which workspace");
     const port = process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_PORT}` : "";
     const domain = hostRules.PLATFORM_DOMAIN;
-    ok("its subdomain reaches each", registry.tenantForHost(`zziso-a.${domain}${port}`)?.id === A.id && registry.tenantForHost(`zziso-b.${domain}${port}`)?.id === B.id);
-    ok("  a name nobody has reaches none", registry.tenantForHost(`zziso-nobody.${domain}${port}`) === null);
+    ok("its subdomain reaches each", (await at(`zziso-a.${domain}${port}`))?.id === A.id && (await at(`zziso-b.${domain}${port}`))?.id === B.id);
+    ok("  a name nobody has reaches none", (await at(`zziso-nobody.${domain}${port}`)) === null);
     const bare = `${domain}${port}`;
     const bareIsLegacy = hostRules.legacyHosts().includes(bare);
-    ok("  nor does the console or a reserved name", [`admin.${domain}${port}`, `www.${domain}${port}`, `billing.${domain}${port}`].every((h) => registry.tenantForHost(h) === null));
+    ok("  nor does the console or a reserved name", (await Promise.all([`admin.${domain}${port}`, `www.${domain}${port}`, `billing.${domain}${port}`].map(at))).every((t) => t === null));
     ok(
       bareIsLegacy ? "  the bare domain is an old address kept for the first workspace, and reaches only that" : "  nor the bare domain, which is the public site",
-      bareIsLegacy ? registry.tenantForHost(bare)?.id === legacy.id : registry.tenantForHost(bare) === null,
+      bareIsLegacy ? (await at(bare))?.id === legacy.id : (await at(bare)) === null,
     );
-    ok("  and the first workspace's old addresses reach nobody else", hostRules.legacyHosts().every((h) => registry.tenantForHost(h)?.id === legacy.id));
-    ok("  nor a sub-subdomain", registry.tenantForHost(`x.zziso-a.${domain}${port}`) === null);
+    ok("  and the first workspace's old addresses reach nobody else", (await Promise.all(hostRules.legacyHosts().map(at))).every((t) => t?.id === legacy.id));
+    ok("  nor a sub-subdomain", (await at(`x.zziso-a.${domain}${port}`)) === null);
     const twoNames = new Headers({ host: `zziso-a.${domain}${port}`, "x-forwarded-host": `zziso-b.${domain}${port}` });
     ok("a request naming two workspaces is refused, not guessed", hostRules.requestHost(twoNames) === hostRules.HOST_MISMATCH);
     const sameName = new Headers({ host: `zziso-a.${domain}${port}`, "x-forwarded-host": `zziso-a.${domain}${port}` });
@@ -228,7 +229,7 @@ async function main() {
     }
 
     section("A bounded pool of clients");
-    const extras = EXTRA.map((r) => registry.tenantBySlug(`zziso-${r.toLowerCase()}`)!);
+    const extras = (await Promise.all(EXTRA.map((r) => registry.tenantBySlug(`zziso-${r.toLowerCase()}`)))).filter((t): t is NonNullable<typeof t> => !!t);
     const { clients } = tenancyState();
     // Measured before the pool is full, so nothing has been evicted yet.
     const room = MAX_CLIENTS - clients.size;

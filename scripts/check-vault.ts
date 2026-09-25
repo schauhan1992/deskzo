@@ -207,15 +207,15 @@ async function main() {
 
   section("The digest");
 
-  ok("The same password digests the same", digestSecret("hunter2") === digestSecret("hunter2"));
-  ok("  a different one does not", digestSecret("hunter2") !== digestSecret("hunter3"));
+  ok("The same password digests the same", await digestSecret("hunter2") === await digestSecret("hunter2"));
+  ok("  a different one does not", await digestSecret("hunter2") !== await digestSecret("hunter3"));
   ok(
     "  and the digest does not contain the password",
-    !digestSecret("hunter2").includes("hunter2"),
+    !(await digestSecret("hunter2")).includes("hunter2"),
     "a bare hash of a password is reversible against a wordlist — this is keyed",
   );
-  ok("Encryption round-trips", decryptSecret(encryptSecret("hunter2")) === "hunter2");
-  ok("  and the ciphertext is not the plaintext", !encryptSecret("hunter2").includes("hunter2"));
+  ok("Encryption round-trips", await decryptSecret(await encryptSecret("hunter2")) === "hunter2");
+  ok("  and the ciphertext is not the plaintext", !(await encryptSecret("hunter2")).includes("hunter2"));
 
   // ── Cast ──────────────────────────────────────────────────────────────────────────────────────
   const support = await db.department.create({ data: { name: `${PREFIX} Support` } });

@@ -61,7 +61,7 @@ export async function updateSecuritySettings(input: unknown): Promise<ActionResu
       enforceSso: data.enforceSso,
       microsoftTenantId: tenantId || null,
       microsoftClientId: clientId || null,
-      microsoftClientSecretCipher: newSecret ? encryptSecret(newSecret) : null,
+      microsoftClientSecretCipher: newSecret ? await encryptSecret(newSecret) : null,
     },
     update: {
       enforceTwoFactor: data.enforceTwoFactor,
@@ -69,7 +69,7 @@ export async function updateSecuritySettings(input: unknown): Promise<ActionResu
       enforceSso: data.enforceSso,
       microsoftTenantId: tenantId || null,
       microsoftClientId: clientId || null,
-      ...(newSecret ? { microsoftClientSecretCipher: encryptSecret(newSecret) } : {}),
+      ...(newSecret ? { microsoftClientSecretCipher: await encryptSecret(newSecret) } : {}),
     },
   });
 

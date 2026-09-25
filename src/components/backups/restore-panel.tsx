@@ -176,10 +176,10 @@ export function RestorePanel() {
                 <p className="mt-1 flex items-start gap-1.5">
                   <KeyRound aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    That backup was taken under a different <code>AUTH_SECRET</code>. It has been written to{" "}
-                    <code className="font-mono text-xs">{last.secretHandoffPath}</code> on the server. Set it in the
-                    environment and restart, then delete the file — until then the vault, two-factor secrets and stored
-                    credentials stay unreadable.
+                    That backup was taken under different keys. They have been written to{" "}
+                    <code className="font-mono text-xs">{last.secretHandoffPath}</code> on the server, with what to do
+                    with them — until then the vault, two-factor secrets and stored credentials stay unreadable. Delete
+                    the file afterwards.
                   </span>
                 </p>
               )}
@@ -234,17 +234,16 @@ export function RestorePanel() {
 
               {preflight.archive.sameInstance === false && (
                 <Warning>
-                  This backup was taken by a different installation. Its encrypted columns were written under another{" "}
-                  <code>AUTH_SECRET</code>
+                  This backup&apos;s encrypted columns were written under different keys
                   {preflight.archive.carriesSecret
-                    ? " — the archive carries that secret, so they can be recovered, but you will have to set it and restart afterwards."
-                    : ", and the archive does not carry it. The vault, two-factor secrets and stored credentials will restore unreadable."}
+                    ? " — the archive carries them, and they become this workspace's keys once the restore has finished."
+                    : ", and the archive does not carry them. The vault, two-factor secrets and stored credentials will restore unreadable."}
                 </Warning>
               )}
               {preflight.archive.sameInstance === null && (
                 <Warning>
-                  Whether this backup came from this installation cannot be determined — one side has no fingerprint to
-                  compare. Check what it is before restoring it.
+                  Whether this backup&apos;s data is encrypted under this workspace&apos;s keys cannot be determined — it
+                  has no fingerprint to compare. Check what it is before restoring it.
                 </Warning>
               )}
               {preflight.database.sameSchema === false && (

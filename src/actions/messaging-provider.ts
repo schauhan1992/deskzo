@@ -110,7 +110,7 @@ export async function saveProvider(input: {
     dailyCap: input.dailyCap ?? null,
     // A blank secret means "leave what is stored"; it never means "clear it". Clearing happens by
     // switching the provider off, which is the deliberate act.
-    ...(input.secret?.trim() ? { secretCipher: encryptSecret(input.secret.trim()) } : {}),
+    ...(input.secret?.trim() ? { secretCipher: await encryptSecret(input.secret.trim()) } : {}),
   };
 
   const saved = await db.messagingProvider.upsert({
@@ -148,7 +148,7 @@ export async function verifyProvider(key: string): Promise<ActionResult<{ detail
     fromEmail: row.fromEmail,
     replyTo: row.replyTo,
     config: (row.config as Record<string, unknown>) ?? {},
-    secret: row.secretCipher ? decryptSecret(row.secretCipher) : null,
+    secret: row.secretCipher ? await decryptSecret(row.secretCipher) : null,
   });
 
   await db.messagingProvider.update({

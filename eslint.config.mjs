@@ -31,6 +31,19 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  /**
+   * A promise where a yes/no belongs. `if (secretMatches(…))` is always true — a promise is a value —
+   * and the type checker says nothing. Found twice when stored-secret encryption went asynchronous
+   * (per-workspace keys): an API key check and a redirect guard, both of which would have let
+   * everything through.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "prisma/**/*.ts"],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: {
+      "@typescript-eslint/no-misused-promises": ["error", { checksConditionals: true, checksSpreads: true, checksVoidReturn: false }],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

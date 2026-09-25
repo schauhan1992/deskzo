@@ -96,7 +96,7 @@ export async function seedDetail(
           // Encrypted the same way the action encrypts it, so the reveal path decrypts what the seed
           // wrote. A seed that stored plain text would make the one screen whose whole purpose is
           // that nothing is stored in the clear a lie.
-          secretCipher: encryptSecret(`Dm0-${int(100000, 999999)}-${label.slice(0, 3).toLowerCase()}`),
+          secretCipher: await encryptSecret(`Dm0-${int(100000, 999999)}-${label.slice(0, 3).toLowerCase()}`),
           note: chance(0.4) ? "Two-step is on the shared mailbox." : null,
           rotatedAt,
           expiresAt: chance(0.5) ? new Date(rotatedAt.getTime() + 365 * 86400000) : null,

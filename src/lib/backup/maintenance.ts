@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_BACKUP_DIR } from "@/lib/backup/policy";
+import { currentTenant } from "@/lib/tenancy/resolve";
+import type { Tenant } from "@/lib/tenancy/state";
 
 /**
  * What a restore is doing, kept somewhere a restore cannot destroy.
@@ -25,6 +27,15 @@ import { DEFAULT_BACKUP_DIR } from "@/lib/backup/policy";
  * that clears it are different ones: the restore runs detached so it outlives the request that
  * started it, which is the only way for the web process to be allowed to go quiet while the schema
  * underneath it is replaced.
+ *
+ * ## One folder per workspace
+ *
+ * Each workspace's backups, chunk store, staging and restore lock live in a folder of its own, so a
+ * restore holds only its own workspace and a backup list shows only its own files. The first
+ * workspace keeps the folder the installation always used (BACKUP_DIR, default `backups/`), so
+ * every backup it took before workspaces — and every row pointing at one — stays where it is. Every
+ * other workspace's is `<BACKUP_DIR>/workspaces/<id>/`, which nothing in the first one's folder
+ * reads: its listing, pruning and chunk store look only at their own names.
  */
 
 export const RESTORE_DIR_NAME = ".restore";
@@ -60,29 +71,46 @@ export type RestoreStatus = {
   /** The archive this came from, for the log. */
   archiveName: string | null;
   takenAt: string | null;
-  /** Set only when the archive carried a secret this instance is not running under. */
+  /**
+   * Set only for a workspace from the environment (before adoption), when the archive carried keys
+   * it is not running under: the file on the server they were written to.
+   */
   secretHandoffPath: string | null;
+  /** Set when the archive's own keys were installed as the workspace's, after the restore. */
+  keysFromBackup?: boolean;
   error: string | null;
 };
 
-export function backupRoot(): string {
+/** Where every workspace's backups live, beneath. */
+export function backupBase(): string {
   return path.resolve(process.env.BACKUP_DIR?.trim() || DEFAULT_BACKUP_DIR);
 }
 
-export function restoreDir(): string {
-  return path.join(backupRoot(), RESTORE_DIR_NAME);
+export function backupRootFor(tenant: Pick<Tenant, "id" | "isDefault">): string {
+  return tenant.isDefault ? backupBase() : path.join(backupBase(), "workspaces", tenant.id);
 }
 
-export function lockPath(): string {
-  return path.join(restoreDir(), LOCK_FILE);
+/** The backup folder of the workspace the work in hand is for. */
+export async function backupRoot(): Promise<string> {
+  return backupRootFor(await currentTenant());
 }
 
-export function statusPath(): string {
-  return path.join(restoreDir(), STATUS_FILE);
+const restoreDirFor = (tenant: Pick<Tenant, "id" | "isDefault">) => path.join(backupRootFor(tenant), RESTORE_DIR_NAME);
+
+export async function restoreDir(): Promise<string> {
+  return restoreDirFor(await currentTenant());
+}
+
+async function lockPath(): Promise<string> {
+  return path.join(await restoreDir(), LOCK_FILE);
+}
+
+async function statusPath(): Promise<string> {
+  return path.join(await restoreDir(), STATUS_FILE);
 }
 
 export async function ensureRestoreDir(): Promise<string> {
-  const dir = restoreDir();
+  const dir = await restoreDir();
   await mkdir(dir, { recursive: true });
   return dir;
 }
@@ -96,9 +124,9 @@ export async function ensureRestoreDir(): Promise<string> {
  * as "no restore running" and let the application serve, rather than locking everybody out because
  * of a permissions problem on a folder most requests have nothing to do with.
  */
-export function restoreInProgress(now = Date.now()): boolean {
+export function restoreInProgressFor(tenant: Pick<Tenant, "id" | "isDefault">, now = Date.now()): boolean {
   try {
-    const file = lockPath();
+    const file = path.join(restoreDirFor(tenant), LOCK_FILE);
     if (!existsSync(file)) return false;
     const raw = readFileSync(file, "utf8");
     const startedAt = Date.parse(JSON.parse(raw)?.startedAt ?? "");
@@ -109,13 +137,18 @@ export function restoreInProgress(now = Date.now()): boolean {
   }
 }
 
+/** The same, for the workspace the work in hand is for. */
+export async function restoreInProgress(now = Date.now()): Promise<boolean> {
+  return restoreInProgressFor(await currentTenant(), now);
+}
+
 export async function takeLock(id: string, startedAt = new Date()): Promise<void> {
   await ensureRestoreDir();
-  await writeFile(lockPath(), JSON.stringify({ id, startedAt: startedAt.toISOString() }), "utf8");
+  await writeFile(await lockPath(), JSON.stringify({ id, startedAt: startedAt.toISOString() }), "utf8");
 }
 
 export async function releaseLock(): Promise<void> {
-  await rm(lockPath(), { force: true }).catch(() => {});
+  await rm(await lockPath(), { force: true }).catch(() => {});
 }
 
 /**
@@ -128,7 +161,7 @@ export async function releaseLock(): Promise<void> {
  */
 export async function writeRestoreStatus(status: RestoreStatus): Promise<void> {
   await ensureRestoreDir();
-  const target = statusPath();
+  const target = await statusPath();
   const temp = `${target}.${process.pid}.tmp`;
   await writeFile(temp, JSON.stringify(status, null, 2), "utf8");
   await rename(temp, target);
@@ -136,7 +169,7 @@ export async function writeRestoreStatus(status: RestoreStatus): Promise<void> {
 
 export async function readRestoreStatus(): Promise<RestoreStatus | null> {
   try {
-    const raw = await readFile(statusPath(), "utf8");
+    const raw = await readFile(await statusPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<RestoreStatus>;
     if (typeof parsed.id !== "string" || typeof parsed.phase !== "string") return null;
     return {
@@ -148,6 +181,7 @@ export async function readRestoreStatus(): Promise<RestoreStatus | null> {
       archiveName: parsed.archiveName ?? null,
       takenAt: parsed.takenAt ?? null,
       secretHandoffPath: parsed.secretHandoffPath ?? null,
+      keysFromBackup: parsed.keysFromBackup ?? false,
       error: parsed.error ?? null,
     };
   } catch {
@@ -161,8 +195,8 @@ export async function readRestoreStatus(): Promise<RestoreStatus | null> {
  * Its own folder under the restore directory so the pruner, which sweeps `backups/` by filename
  * pattern, never sees these and never deletes one out from under a confirmation screen.
  */
-export function stagingPath(id: string, suffix: string): string {
-  return path.join(restoreDir(), `staged-${id}${suffix}`);
+export async function stagingPath(id: string, suffix: string): Promise<string> {
+  return path.join(await restoreDir(), `staged-${id}${suffix}`);
 }
 
 /**
@@ -174,11 +208,9 @@ export function stagingPath(id: string, suffix: string): string {
  * is encrypted in the first place.
  */
 export async function clearStaged(id: string): Promise<void> {
-  await Promise.all([
-    rm(stagingPath(id, ".wbak"), { force: true }).catch(() => {}),
-    rm(stagingPath(id, ".dump"), { force: true }).catch(() => {}),
-    rm(stagingPath(id, ".meta.json"), { force: true }).catch(() => {}),
-  ]);
+  await Promise.all(
+    [".wbak", ".dump", ".meta.json", ".keys"].map(async (suffix) => rm(await stagingPath(id, suffix), { force: true }).catch(() => {})),
+  );
 }
 
 /**
@@ -202,12 +234,12 @@ export type StagedMeta = {
 
 export async function writeStagedMeta(id: string, meta: StagedMeta): Promise<void> {
   await ensureRestoreDir();
-  await writeFile(stagingPath(id, ".meta.json"), JSON.stringify(meta, null, 2), "utf8");
+  await writeFile(await stagingPath(id, ".meta.json"), JSON.stringify(meta, null, 2), "utf8");
 }
 
 export async function readStagedMeta(id: string): Promise<StagedMeta | null> {
   try {
-    const parsed = JSON.parse(await readFile(stagingPath(id, ".meta.json"), "utf8")) as Partial<StagedMeta>;
+    const parsed = JSON.parse(await readFile(await stagingPath(id, ".meta.json"), "utf8")) as Partial<StagedMeta>;
     if (typeof parsed.source !== "string") return null;
     return {
       takenAt: parsed.takenAt ?? null,

@@ -18,6 +18,7 @@ import {
   type MarketingSettings,
 } from "@/lib/marketing/pipeline";
 import { formatDate } from "@/lib/utils";
+import { currentKeys } from "@/lib/tenancy/keys";
 
 /**
  * Finding who should be in a journey, and moving them along it.
@@ -593,7 +594,7 @@ async function runStep(
   const token = newToken();
   // Email is built exactly as a campaign's is — footer, one-click unsubscribe, tracking. WhatsApp
   // carries its words as written.
-  const email = template.channel === "EMAIL" ? buildMarketingEmail({ template, recipient: chosen.recipient, settings, token, origin, track: true }) : null;
+  const email = template.channel === "EMAIL" ? buildMarketingEmail({ template, recipient: chosen.recipient, settings, token, origin, trackingKey: (await currentKeys()).trackingKey }) : null;
   const values = mergeValuesFor(chosen.recipient, settings, { unsubscribeUrl: `${origin}/preferences/${token}` });
   const subject = email ? null : render(template.subject ?? "", values);
   const body = email ? null : render(template.body, values);

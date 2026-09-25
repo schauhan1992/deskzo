@@ -38,8 +38,8 @@ export function parseBasicAuth(header: string | null): Credentials | null {
 }
 
 /** Whether a secret is the one a digest was made from — compared in constant time. */
-export function secretMatches(secret: string, digest: string): boolean {
-  const a = Buffer.from(digestSecret(secret));
+export async function secretMatches(secret: string, digest: string): Promise<boolean> {
+  const a = Buffer.from(await digestSecret(secret));
   const b = Buffer.from(digest);
   return a.length === b.length && timingSafeEqual(a, b);
 }

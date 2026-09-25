@@ -99,7 +99,7 @@ export async function backupOverview(): Promise<ActionResult<BackupOverview>> {
    * path by definition, and re-deriving it here is how they would drift: a store looked for beside
    * a folder it is not in reports zero chunks and marks every chunked backup missing.
    */
-  const directory = backupRoot();
+  const directory = await backupRoot();
   const [records, tool, schedule, state, store] = await Promise.all([
     db.backup.findMany({
       orderBy: { startedAt: "desc" },

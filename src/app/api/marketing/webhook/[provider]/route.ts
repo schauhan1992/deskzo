@@ -1,7 +1,7 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import type { MessageEventType, MessageStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { isMarketingWebhookSecret } from "@/lib/marketing/webhook-secret";
 
 /**
  * What the provider tells us afterwards.
@@ -12,7 +12,8 @@ import { db } from "@/lib/db";
  * hard bounce writes a suppression *and* marks the contact's address INVALID, and the next campaign
  * never tries it again.
  *
- * Authentication is a shared secret rather than a per-provider signature. Every provider signs
+ * Authentication is the workspace's own secret (src/lib/marketing/webhook-secret.ts) rather than a
+ * per-provider signature. Every provider signs
  * differently — Resend uses Svix headers, SES wraps events in SNS envelopes, Elastic posts plain
  * JSON — and a wrong signature check fails closed and silently loses delivery data. The secret goes
  * in the URL the provider is configured with, which never appears in a browser. Worth upgrading to
@@ -21,18 +22,12 @@ import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-function authorised(request: Request): boolean {
-  const expected = process.env.MARKETING_WEBHOOK_SECRET?.trim();
-  if (!expected) return false;
+async function authorised(request: Request): Promise<boolean> {
   const provided =
     new URL(request.url).searchParams.get("key")?.trim() ??
     request.headers.get("x-webhook-secret")?.trim() ??
     "";
-  if (!provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  return isMarketingWebhookSecret(provided);
 }
 
 type Normalised = {
@@ -119,7 +114,7 @@ const STATUS_FOR: Partial<Record<MessageEventType, MessageStatus>> = {
 };
 
 export async function POST(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  if (!authorised(request)) return NextResponse.json({ ok: false }, { status: 401 });
+  if (!(await authorised(request))) return NextResponse.json({ ok: false }, { status: 401 });
   const { provider } = await params;
 
   let body: Record<string, unknown>;

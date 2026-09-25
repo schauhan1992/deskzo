@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { runBackup, settleStaleRuns, type BackupOutcome } from "@/lib/backup/run";
-import { DEFAULT_BACKUP_DIR, DEFAULT_KEEP_DAYS, DEFAULT_KEEP_MINIMUM } from "@/lib/backup/policy";
-import path from "node:path";
+import { DEFAULT_KEEP_DAYS, DEFAULT_KEEP_MINIMUM } from "@/lib/backup/policy";
+import { backupRoot } from "@/lib/backup/maintenance";
 import {
   DEFAULT_HOUR,
   DEFAULT_MINUTE,
@@ -100,7 +100,7 @@ export async function runScheduledBackup(now = new Date()): Promise<ScheduledRun
    * of one is a restore rather than a crash — so this has to run on the knock, not only after a
    * successful backup, or a restored instance would have to wait for a backup it will never take.
    */
-  await settleStaleRuns(path.resolve(process.env.BACKUP_DIR?.trim() || DEFAULT_BACKUP_DIR), now);
+  await settleStaleRuns(await backupRoot(), now);
 
   const schedule = await loadSchedule();
   const state = await scheduleState();

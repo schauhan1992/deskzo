@@ -16,7 +16,7 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
  * reasons: ending the session is a cookie deletion rather than a token re-issue, and the real actor
  * is always recoverable — nothing in the request has lost the fact that it was the admin who did it.
  *
- * The ticket is AES-256-GCM encrypted with the same `AUTH_SECRET`-derived key as every other stored
+ * The ticket is AES-256-GCM encrypted with the workspace's data key, like every other stored
  * secret. GCM is authenticated, so a hand-crafted or edited cookie fails to decrypt rather than
  * being believed — a cookie is just a request header, and an httpOnly flag stops a script reading
  * it, not a determined person writing one with curl.
@@ -47,7 +47,7 @@ export type ViewAsContext = {
 export async function setViewAsCookie(actorId: string, targetId: string) {
   const ticket: Ticket = { actorId, targetId, startedAt: Date.now() };
   const store = await cookies();
-  store.set(COOKIE, encryptSecret(JSON.stringify(ticket)), {
+  store.set(COOKIE, await encryptSecret(JSON.stringify(ticket)), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -61,10 +61,10 @@ export async function clearViewAsCookie() {
   store.delete(COOKIE);
 }
 
-function readTicket(raw: string | undefined): Ticket | null {
+async function readTicket(raw: string | undefined): Promise<Ticket | null> {
   if (!raw) return null;
   try {
-    const ticket = JSON.parse(decryptSecret(raw)) as Ticket;
+    const ticket = JSON.parse(await decryptSecret(raw)) as Ticket;
     if (!ticket?.actorId || !ticket?.targetId || typeof ticket.startedAt !== "number") return null;
     return ticket;
   } catch {
@@ -85,7 +85,7 @@ function readTicket(raw: string | undefined): Ticket | null {
  */
 export async function resolveViewAs(sessionUserId: string): Promise<ViewAsContext | null> {
   const store = await cookies();
-  const ticket = readTicket(store.get(COOKIE)?.value);
+  const ticket = await readTicket(store.get(COOKIE)?.value);
   if (!ticket) return null;
 
   // Bound to the admin who started it: signing out and back in as someone else, or lifting the

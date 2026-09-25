@@ -53,13 +53,14 @@ const internals = Module as unknown as {
   _load(request: string, parent: unknown, isMain: boolean): unknown;
   _resolveFilename(request: string, parent: unknown, isMain: boolean): string;
 };
-const fakeSecurity = {
+// Encrypted when read, under whichever workspace is reading it — as the real settings row would be.
+const fakeSecurity = async () => ({
   id: "global",
   microsoftTenantId: "zz-tenant",
   microsoftClientId: "zz-client",
-  microsoftClientSecretCipher: encryptSecret("zz-secret"),
+  microsoftClientSecretCipher: await encryptSecret("zz-secret"),
   ssoEnabled: true,
-};
+});
 const substitutes = new Map<string, unknown>([
   [
     load.resolve("../src/lib/session"),
@@ -74,9 +75,9 @@ const substitutes = new Map<string, unknown>([
     },
   ],
   [load.resolve("next/cache"), { revalidatePath: () => {}, revalidateTag: () => {}, unstable_cache: <T,>(fn: T) => fn }],
-  [load.resolve("next/headers"), { headers: async () => new Headers({ host: "localhost:3999" }), cookies: async () => ({ get: () => undefined }) }],
+  [load.resolve("next/headers"), { headers: async () => new Headers({ host: "wroffy.localhost:3000" }), cookies: async () => ({ get: () => undefined }) }],
   // The Microsoft app's settings, so the suite never touches the real Security settings row.
-  [load.resolve("../src/lib/security-settings"), { getCachedSecuritySettings: async () => fakeSecurity, getSecuritySettings: async () => fakeSecurity }],
+  [load.resolve("../src/lib/security-settings"), { getCachedSecuritySettings: fakeSecurity, getSecuritySettings: fakeSecurity }],
 ]);
 const realLoad = internals._load;
 internals._load = function (this: unknown, request: string, parent: unknown, isMain: boolean) {
@@ -173,15 +174,15 @@ async function main() {
 
   const doc = "cmzzdocument0000000000001";
   const other = "cmzzdocument0000000000002";
-  const { token, nonce } = newRenderToken(doc);
-  ok("a fresh pass is good for its document", verifyRenderToken(token, doc) === nonce);
-  ok("…and for no other", verifyRenderToken(token, other) === null);
+  const { token, nonce } = await newRenderToken(doc);
+  ok("a fresh pass is good for its document", await verifyRenderToken(token, doc) === nonce);
+  ok("…and for no other", await verifyRenderToken(token, other) === null);
   const [n, e, s] = token.split(".");
-  ok("a tampered signature is refused", verifyRenderToken(`${n}.${e}.${s.slice(0, -2)}AA`, doc) === null);
-  ok("a changed expiry is refused", verifyRenderToken(`${n}.${Number(e) + 60_000}.${s}`, doc) === null);
-  ok("an expired pass is refused", verifyRenderToken(token, doc, Date.now() + RENDER_TTL_MS + 1000) === null);
-  ok("a pass dated far ahead is refused", verifyRenderToken(newRenderToken(doc, Date.now() + 3_600_000).token, doc) === null);
-  for (const bad of ["", "x", "a.b.c", `${n}.${e}`, `${n}.${e}.${s}.extra`, "x".repeat(300)]) ok(`garbage is refused (${bad.slice(0, 12) || "empty"})`, verifyRenderToken(bad, doc) === null);
+  ok("a tampered signature is refused", await verifyRenderToken(`${n}.${e}.${s.slice(0, -2)}AA`, doc) === null);
+  ok("a changed expiry is refused", await verifyRenderToken(`${n}.${Number(e) + 60_000}.${s}`, doc) === null);
+  ok("an expired pass is refused", await verifyRenderToken(token, doc, Date.now() + RENDER_TTL_MS + 1000) === null);
+  ok("a pass dated far ahead is refused", await verifyRenderToken((await newRenderToken(doc, Date.now() + 3_600_000)).token, doc) === null);
+  for (const bad of ["", "x", "a.b.c", `${n}.${e}`, `${n}.${e}.${s}.extra`, "x".repeat(300)]) ok(`garbage is refused (${bad.slice(0, 12) || "empty"})`, await verifyRenderToken(bad, doc) === null);
   ok("the print path is recognised", printPathDocumentId(`/documents/${doc}/print`) === doc);
   for (const p of [`/documents/${doc}/print/x`, `/documents/${doc}`, "/documents/../print", `/documents/${doc}/edit`, `/api/documents/${doc}/print`]) {
     ok(`no other path is (${p})`, printPathDocumentId(p) === null);
@@ -229,10 +230,10 @@ async function main() {
   const authUrl = new URL(ms.authorizeUrl({ tenantId: "t", clientId: "c", clientSecret: "s" }, { redirectUri: "https://erp.example/cb", state: "st", challenge: pair.challenge, loginHint: "a@x.com" }));
   ok("the sign-in asks for Mail.Send and a refresh token", /Mail\.Send/.test(authUrl.searchParams.get("scope") ?? "") && /offline_access/.test(authUrl.searchParams.get("scope") ?? ""));
   ok("…with S256 PKCE, the state, and the account", authUrl.searchParams.get("code_challenge_method") === "S256" && authUrl.searchParams.get("state") === "st" && authUrl.searchParams.get("login_hint") === "a@x.com");
-  const sealed = state.sealState({ state: "st", verifier: "v", userId: "u", expires: Date.now() + 60_000, next: "/profile" });
-  ok("the connect state survives the round trip", state.openState(sealed)?.userId === "u");
-  ok("…is refused once expired", state.openState(state.sealState({ state: "st", verifier: "v", userId: "u", expires: Date.now() - 1, next: "/" })) === null);
-  ok("…and when tampered with", state.openState(sealed.slice(0, -4) + "AAAA") === null);
+  const sealed = await state.sealState({ state: "st", verifier: "v", userId: "u", expires: Date.now() + 60_000, next: "/profile" });
+  ok("the connect state survives the round trip", (await state.openState(sealed))?.userId === "u");
+  ok("…is refused once expired", (await state.openState(await state.sealState({ state: "st", verifier: "v", userId: "u", expires: Date.now() - 1, next: "/" }))) === null);
+  ok("…and when tampered with", (await state.openState(sealed.slice(0, -4) + "AAAA")) === null);
   ok("only an in-app path is a place to return to", state.safeNext("https://evil.example") === "/profile" && state.safeNext("//evil.example") === "/profile" && state.safeNext("/documents/x") === "/documents/x");
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -334,7 +335,7 @@ async function main() {
     ok("the mailbox Microsoft reports is the sender's", mailbox === sender.email);
     await ms.saveConnection(sender.id, mailbox!, me!.displayName, { ...exchanged.tokens, refreshToken: exchanged.tokens.refreshToken! });
     const stored = await db.mailConnection.findUnique({ where: { userId: sender.id } });
-    ok("the refresh token is stored encrypted", !!stored && stored.refreshTokenCipher !== exchanged.tokens.refreshToken && decryptSecret(stored.refreshTokenCipher) === exchanged.tokens.refreshToken);
+    ok("the refresh token is stored encrypted", !!stored && stored.refreshTokenCipher !== exchanged.tokens.refreshToken && await decryptSecret(stored.refreshTokenCipher) === exchanged.tokens.refreshToken);
 
     // Refusals.
     ok("a bounced address is refused", !(await mail.sendDocumentEmail(input({ contactIds: [bounced.id] }))).ok);
@@ -392,7 +393,7 @@ async function main() {
     const second = await mail.sendDocumentEmail(input({ contactIds: [rahul.id] }));
     const rotated = await db.mailConnection.findUnique({ where: { userId: sender.id } });
     ok("an expired token is refreshed and the send goes", second.ok && seen.tokenGrants.includes("refresh_token"));
-    ok("…and the new refresh token is the one kept", decryptSecret(rotated!.refreshTokenCipher) === `refresh-${issued}`);
+    ok("…and the new refresh token is the one kept", await decryptSecret(rotated!.refreshTokenCipher) === `refresh-${issued}`);
 
     // One 401 from Graph: a fresh token and one more try.
     mode.send = "401-once";

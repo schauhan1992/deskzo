@@ -224,6 +224,8 @@ async function main() {
   /* eslint-disable @typescript-eslint/no-require-imports */
   const marketing = require("../src/actions/marketing") as typeof import("../src/actions/marketing");
   const pipeline = require("../src/lib/marketing/pipeline") as typeof import("../src/lib/marketing/pipeline");
+  // Mail is built on the workspace's own address, never on whatever host a request claimed.
+  const site = await (require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve")).tenantOrigin();
   const uploadTemplateRoute = require("../src/app/api/marketing/templates/upload/route") as typeof import("../src/app/api/marketing/templates/upload/route");
   const uploadListRoute = require("../src/app/api/marketing/lists/upload/route") as typeof import("../src/app/api/marketing/lists/upload/route");
   const assetRoute = require("../src/app/api/marketing/assets/[id]/[name]/route") as typeof import("../src/app/api/marketing/assets/[id]/[name]/route");
@@ -231,7 +233,7 @@ async function main() {
   const trackRoute = require("../src/app/track/[token]/route") as typeof import("../src/app/track/[token]/route");
 
   const post = (url: string, form: FormData, origin = "https://crm.zzmm.test") =>
-    new Request(`https://crm.zzmm.test${url}`, { method: "POST", headers: { origin, "x-forwarded-host": "crm.zzmm.test" }, body: form });
+    new Request(`https://crm.zzmm.test${url}`, { method: "POST", headers: { origin, host: "crm.zzmm.test" }, body: form });
 
   await cleanup();
   try {
@@ -363,10 +365,10 @@ async function main() {
     const queued = await db.marketingMessage.findMany({ where: { campaignId, status: "QUEUED" }, include: { contact: { select: { email: true } } } });
     const toColleague = queued.find((m) => m.contact?.email === "new@zzmm-colleague.example")!;
     ok("each email is its person's: their name, their company — escaped", toColleague.body.includes("Hello Colleague at ZZMM Colleague &amp; Co &lt;Ltd&gt;") && !toColleague.body.includes("<Ltd>"), toColleague.body.match(/Hello[^<]*/)?.[0]);
-    ok("  the picture at an absolute address", toColleague.body.includes(`src="${ORIGIN}/api/marketing/assets/${template.assets[0]!.id}/logo.png"`));
-    ok("  the link through its own tracker, the pixel with its own token", toColleague.body.includes(`${ORIGIN}/track/${toColleague.token}?u=`) && toColleague.body.includes(`<img src="${ORIGIN}/track/${toColleague.token}"`));
-    ok("  a footer with its own unsubscribe link and the postal address", toColleague.body.includes(`${ORIGIN}/preferences/${toColleague.token}`));
-    ok("  a text part and a one-click unsubscribe address", !!toColleague.textBody?.includes("Hello Colleague") && toColleague.unsubscribeUrl === `${ORIGIN}/api/marketing/unsubscribe/${toColleague.token}`);
+    ok("  the picture at an absolute address", toColleague.body.includes(`src="${site}/api/marketing/assets/${template.assets[0]!.id}/logo.png"`));
+    ok("  the link through its own tracker, the pixel with its own token", toColleague.body.includes(`${site}/track/${toColleague.token}?u=`) && toColleague.body.includes(`<img src="${site}/track/${toColleague.token}"`));
+    ok("  a footer with its own unsubscribe link and the postal address", toColleague.body.includes(`${site}/preferences/${toColleague.token}`));
+    ok("  a text part and a one-click unsubscribe address", !!toColleague.textBody?.includes("Hello Colleague") && toColleague.unsubscribeUrl === `${site}/api/marketing/unsubscribe/${toColleague.token}`);
     ok("  the subject filled in", toColleague.subject === "Colleague, your Diwali offer");
     const held = await db.marketingMessage.findMany({ where: { campaignId, status: "SUPPRESSED" }, include: { contact: { select: { email: true } } } });
     ok("the two held back are on record with why", held.length === 2 && held.every((h) => !!h.suppressedReason && h.body === ""), held.map((h) => `${h.contact?.email}: ${h.suppressedReason}`).join(" | "));
@@ -380,7 +382,7 @@ async function main() {
       const tick = await pipeline.sendQueued("zzmm-run");
       ok("the sender takes all five and hands them to the provider", tick.sent === 5 && sent.length === 5, `${tick.sent} / ${sent.length}`);
       const out = sent.find((m) => m.to === "new@zzmm-colleague.example");
-      ok("  with the HTML, its own text part, and the one-click unsubscribe header's address", !!out && out.html.includes("Hello Colleague") && !!out.text?.includes("Hello Colleague") && out.listUnsubscribe === `${ORIGIN}/api/marketing/unsubscribe/${toColleague.token}`);
+      ok("  with the HTML, its own text part, and the one-click unsubscribe header's address", !!out && out.html.includes("Hello Colleague") && !!out.text?.includes("Hello Colleague") && out.listUnsubscribe === `${site}/api/marketing/unsubscribe/${toColleague.token}`);
       await pipeline.settleCampaigns();
       ok("and the campaign, with nothing left to send, says Sent", (await db.campaign.findUnique({ where: { id: campaignId } }))?.status === "SENT");
     }

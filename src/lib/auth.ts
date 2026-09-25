@@ -1,4 +1,4 @@
-import NextAuth from "next-auth";
+import NextAuth, { type Session } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import bcrypt from "bcryptjs";
@@ -9,6 +9,8 @@ import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { logActivity } from "@/lib/activity";
 import { doorCheck, recordSignIn } from "@/lib/access/record";
 import type { Role } from "@/lib/roles";
+import { sessionOptions } from "@/lib/auth-session";
+import { currentTenantOrNull } from "@/lib/tenancy/resolve";
 import type { Provider } from "@auth/core/providers";
 
 declare module "next-auth" {
@@ -20,13 +22,16 @@ declare module "next-auth" {
       role: Role;
       /** This sign-in — see `SignIn.sid`. Absent on a session issued before sign-ins were recorded. */
       sid?: string;
+      /** The workspace that issued it — see src/lib/auth-session.ts. */
+      tid?: string;
     };
   }
 }
 
-type AppJWT = { id?: string; role?: Role; sid?: string; [key: string]: unknown };
+type AppJWT = { id?: string; role?: Role; sid?: string; tid?: string; [key: string]: unknown };
 
-async function buildConfig() {
+async function buildConfig(req?: Request) {
+  const { tenantId, options } = await sessionOptions(req);
   const security = await getCachedSecuritySettings();
 
   const providers: Provider[] = [
@@ -86,7 +91,7 @@ async function buildConfig() {
           if (!totpCode || !user.twoFactorSecretCipher) {
             return refuse("two-factor code not supplied", user);
           }
-          const secret = decryptSecret(user.twoFactorSecretCipher);
+          const secret = await decryptSecret(user.twoFactorSecretCipher);
           if (!verifyTotpCode(secret, totpCode)) {
             return refuse("wrong two-factor code", user);
           }
@@ -119,14 +124,14 @@ async function buildConfig() {
     providers.push(
       MicrosoftEntraID({
         clientId: security.microsoftClientId,
-        clientSecret: decryptSecret(security.microsoftClientSecretCipher),
+        clientSecret: await decryptSecret(security.microsoftClientSecretCipher),
         issuer: `https://login.microsoftonline.com/${security.microsoftTenantId}/v2.0`,
       }),
     );
   }
 
   return {
-    session: { strategy: "jwt" as const },
+    ...options,
     pages: { signIn: "/login" },
     providers,
     callbacks: {
@@ -160,6 +165,7 @@ async function buildConfig() {
             t.role = dbUser.role;
             // Only here, where `user` is present: this is the sign-in itself, not a later read.
             t.sid = await recordSignIn({ userId: dbUser.id, provider: account?.provider ?? "credentials" });
+            t.tid = tenantId ?? undefined;
           }
         }
         return t;
@@ -169,6 +175,7 @@ async function buildConfig() {
         session.user.id = t.id ?? "";
         session.user.role = t.role ?? "SALES";
         session.user.sid = t.sid;
+        session.user.tid = t.tid;
         return session;
       },
     },
@@ -204,7 +211,19 @@ async function buildConfig() {
   };
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth(buildConfig);
+const nextAuth = NextAuth(buildConfig);
+export const { handlers, signIn, signOut } = nextAuth;
+
+/**
+ * The signed-in session — only when this workspace issued it. The token already only decrypts under
+ * this workspace's session secret; this is the second check, on the workspace it names.
+ */
+export async function auth(): Promise<Session | null> {
+  const session = await nextAuth.auth();
+  if (!session?.user) return null;
+  const tenant = await currentTenantOrNull();
+  return tenant && session.user.tid === tenant.id ? session : null;
+}
 
 /** Moved to src/lib/roles.ts — a form needing the list should not import this module. */
 

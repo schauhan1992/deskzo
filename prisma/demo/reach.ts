@@ -207,7 +207,7 @@ export async function seedReach(
         fromName,
         fromEmail,
         replyTo: fromEmail ? "sales@wroffy.com" : null,
-        secretCipher: encryptSecret(`demo-not-a-real-key-${key}`),
+        secretCipher: await encryptSecret(`demo-not-a-real-key-${key}`),
         dailyCap: kind === "EMAIL" ? 2000 : 500,
         lastVerifiedAt: enabled ? daysAgo(int(1, 20)) : null,
         verifyOk: enabled,

@@ -36,20 +36,14 @@ const SRC = path.join(ROOT, "src");
 /** Files that may open a database client of their own. */
 const PRISMA_CLIENTS: Record<string, Allowed> = {
   "src/lib/tenancy/clients.ts": { reason: "the per-workspace client pool — every db call goes through it" },
+  "src/lib/platform/control-db.ts": { reason: "the control plane's own client — which workspaces exist, never workspace data" },
 };
 
 /** Reads of the install's own identity: its database, its secret, its public address. */
 const PLATFORM_ENV = /process\.env\.(DATABASE_URL|AUTH_SECRET|NEXTAUTH_URL|AUTH_URL|INTERNAL_APP_URL)\b/;
 const ENV_READS: Record<string, Allowed> = {
-  "src/lib/tenancy/registry.ts": { reason: "the static registry: the first workspace is DATABASE_URL — the control plane replaces it", pending: "M2" },
-  "src/lib/crypto.ts": { reason: "the stored-secret key — per-workspace key bundles replace it", pending: "M2" },
-  "src/lib/documents/render-token.ts": { reason: "render pass signing key — bound to the workspace", pending: "M2" },
-  "src/lib/marketing/tracking.ts": { reason: "tracking link HMAC — the workspace's tracking key", pending: "M2" },
-  "src/lib/backup/run.ts": { reason: "pg_dump target and backup fingerprint — the workspace's database and key", pending: "M2" },
-  "src/app/api/backups/[id]/download/route.ts": { reason: "download carries the secret — the workspace key bundle instead", pending: "M2" },
-  "src/app/api/backups/[id]/stage/route.ts": { reason: "fingerprint check — workspace key", pending: "M2" },
-  "src/app/api/backups/restore/route.ts": { reason: "fingerprint check — workspace key", pending: "M2" },
-  "src/app/api/backups/upload/route.ts": { reason: "fingerprint check — workspace key", pending: "M2" },
+  "src/lib/tenancy/registry.ts": { reason: "DATABASE_URL is the first workspace until it is adopted into the control plane" },
+  "src/lib/tenancy/keys.ts": { reason: "AUTH_SECRET: the first workspace's keys before adoption, and check-suite workspaces'" },
   "src/lib/tenancy/render-target.ts": { reason: "INTERNAL_APP_URL: where the server's own browser reaches the app, used with the workspace's hostname" },
 };
 
@@ -59,7 +53,6 @@ const FORWARDED_HOST: Record<string, Allowed> = {};
 /** Worker processes: each must be told its workspace (WROFFY_TENANT_ID) rather than inherit the install's. */
 const SPAWNS: Record<string, Allowed> = {
   "src/actions/reference-data.ts": { reason: "PIN and GeoNames sync workers — move to the platform console", pending: "M3" },
-  "src/app/api/backups/restore/route.ts": { reason: "restore worker — runs as the workspace", pending: "M2" },
 };
 
 /**
@@ -87,13 +80,13 @@ const STATE: Record<string, Allowed> = {
   "src/lib/performance/announce.ts:lastLazyRun": PER_WORKSPACE,
   "src/lib/wins/detect.ts:lastLazyRun": PER_WORKSPACE,
   "src/lib/wins/prize-announce.ts:lastLazyRun": PER_WORKSPACE,
-  "src/lib/documents/render-token.ts:cachedKey": { reason: "signing key — the workspace's", pending: "M2" },
 
   "src/lib/access/geo.ts:loaded": { reason: "shared: the GeoIP database file, public data, one per install" },
   "src/lib/access/geo.ts:checkedAt": { reason: "shared: when the GeoIP file was last looked at" },
   "src/lib/companies/merge.ts:cached": { reason: "shared: relation map derived from the schema, identical everywhere" },
   "src/lib/email-verification-lookup.ts:mxCache": { reason: "shared: public DNS answers" },
   "src/lib/finance/exchange-rate.ts:cache": { reason: "shared: public exchange rates" },
+  "src/lib/platform/kek.ts:cached": { reason: "shared: the platform key, derived once from PLATFORM_MASTER_KEY" },
 
   "src/lib/access/lock.ts:testLock": { reason: "test override, set only by check scripts" },
   "src/lib/copilot/providers/index.ts:override": { reason: "test override, set only by check scripts" },
@@ -112,9 +105,11 @@ const ok = (label: string, pass: boolean, detail: unknown = "") => {
 const section = (t: string) => console.log(`\n— ${t} —\n`);
 
 const walk = (dir: string): string[] =>
-  readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? walk(path.join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [path.join(dir, e.name)] : [],
-  );
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) return walk(full);
+    return /\.(ts|tsx)$/.test(e.name) ? [full] : [];
+  });
 const rel = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
 
 const files = walk(SRC).map((file) => {
@@ -138,7 +133,16 @@ const found = {
 };
 
 for (const { file, text, client } of files) {
-  if (/new PrismaClient\s*\(/.test(text)) found.clients.add(file);
+  // A client under any name: `PrismaClient` from @prisma/client or the control plane's generated client,
+  // however it is aliased on import.
+  const clientNames = new Set(["PrismaClient"]);
+  for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@prisma\/client|@wroffy\/control-client)["']/g)) {
+    for (const spec of m[1].split(",")) {
+      const alias = spec.trim().match(/^PrismaClient(?:\s+as\s+(\w+))?$/);
+      if (alias) clientNames.add(alias[1] ?? "PrismaClient");
+    }
+  }
+  if ([...clientNames].some((name) => new RegExp(`new\\s+${name}\\s*\\(`).test(text))) found.clients.add(file);
   if (PLATFORM_ENV.test(text)) found.env.add(file);
   if (/["'`]x-forwarded-host["'`]/i.test(text) && file !== "src/lib/tenancy/host.ts") found.xfh.add(file);
   if (/^\s*["']use cache["']/m.test(text) || /\bunstable_cache\b/.test(text)) found.nextCache.push(file);
@@ -256,7 +260,8 @@ section("Browser bundles");
     ];
     return specs.map((spec) => resolveImport(file, spec)).filter((r): r is string => !!r);
   };
-  const tenancyDir = path.join(SRC, "lib", "tenancy") + path.sep;
+  // The control plane's client and the platform key are server-only for the same reason.
+  const serverOnly = [path.join(SRC, "lib", "tenancy"), path.join(SRC, "lib", "platform")].map((d) => d + path.sep);
   const chains: string[] = [];
   for (const start of [...byFile.keys()].filter((f) => byFile.get(f)!.client)) {
     const seen = new Set<string>();
@@ -269,7 +274,7 @@ section("Browser bundles");
         // A "use server" module reaches the browser only as a reference, never its code.
         if (/^\s*["']use server["']/.test(byFile.get(next)?.text ?? "")) continue;
         const t = [...trail, next];
-        if (next.startsWith(tenancyDir)) {
+        if (serverOnly.some((d) => next.startsWith(d))) {
           chains.push(t.map((p) => rel(p)).join(" → "));
           continue;
         }
@@ -277,7 +282,7 @@ section("Browser bundles");
       }
     }
   }
-  ok("no client component reaches src/lib/tenancy", chains.length === 0, chains.join("; "));
+  ok("no client component reaches src/lib/tenancy or src/lib/platform", chains.length === 0, chains.join("; "));
 }
 
 section("What is left, by milestone");

@@ -207,7 +207,7 @@ export async function saveCopilotSettings(input: CopilotSettingsInput): Promise<
     const typed = input.keys?.[provider]?.trim();
     if (typed) {
       if (typed.length < 10 || typed.length > 500 || /\s/.test(typed)) return { ok: false, error: `That ${PROVIDERS[provider].label} key doesn't look right.` };
-      data[CIPHER_FIELD[provider]] = encryptSecret(typed);
+      data[CIPHER_FIELD[provider]] = await encryptSecret(typed);
       changedKeys.push(`${PROVIDERS[provider].label} key replaced`);
     } else if (input.removeKeys?.includes(provider)) {
       data[CIPHER_FIELD[provider]] = null;

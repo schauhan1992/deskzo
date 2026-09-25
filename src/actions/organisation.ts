@@ -107,8 +107,8 @@ export async function updateEInvoiceSettings(input: unknown): Promise<ActionResu
     einvoiceMinValue: data.einvoiceMinValue ?? null,
     // A blank secret means "keep what's stored" — the form is never sent the decrypted value, so
     // overwriting on blank would silently wipe working credentials every time the page is saved.
-    ...(data.einvoicePassword ? { einvoicePasswordCipher: encryptSecret(data.einvoicePassword) } : {}),
-    ...(data.einvoiceClientSecret ? { einvoiceClientSecretCipher: encryptSecret(data.einvoiceClientSecret) } : {}),
+    ...(data.einvoicePassword ? { einvoicePasswordCipher: await encryptSecret(data.einvoicePassword) } : {}),
+    ...(data.einvoiceClientSecret ? { einvoiceClientSecretCipher: await encryptSecret(data.einvoiceClientSecret) } : {}),
   };
 
   await db.organisationSettings.upsert({

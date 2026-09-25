@@ -34,7 +34,7 @@ async function authenticate(request: Request) {
   const key = await db.leadCaptureKey.findUnique({ where: { keyId: credentials.keyId } });
   // The digest is computed even when there is no such key, so a wrong ID and a wrong secret take
   // the same time — a timing difference would tell a caller which key IDs exist.
-  const ok = secretMatches(credentials.secret, key?.secretDigest ?? "x".repeat(44));
+  const ok = await secretMatches(credentials.secret, key?.secretDigest ?? "x".repeat(44));
   if (!key || !ok || !key.active || key.revokedAt) return null;
   return key;
 }

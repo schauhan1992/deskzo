@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const res = NextResponse.redirect(
     authorizeUrl(app, { redirectUri: `${origin}${CALLBACK_PATH}`, state, challenge, loginHint: user.email ?? null }),
   );
-  res.cookies.set(CONNECT_COOKIE, sealState({ state, verifier, userId: user.id, expires: Date.now() + CONNECT_TTL_SECONDS * 1000, next }), {
+  res.cookies.set(CONNECT_COOKIE, await sealState({ state, verifier, userId: user.id, expires: Date.now() + CONNECT_TTL_SECONDS * 1000, next }), {
     httpOnly: true,
     // Lax, not strict: Microsoft sends the browser back here with a top-level GET, which is exactly
     // what lax lets the cookie ride along on.

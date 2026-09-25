@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import { open, stat, rm } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { passphraseProblem } from "@/lib/backup/archive-format";
+import { platformHmac } from "@/lib/platform/kek";
 
 /**
  * One file that is the whole system, and is safe to carry.
@@ -26,6 +27,18 @@ import { passphraseProblem } from "@/lib/backup/archive-format";
  *     header     headerLen  UTF-8 JSON, PLAINTEXT
  *     body       ...        AES-256-GCM ciphertext of the pg_dump archive
  *     tag        16 bytes   the body's GCM authentication tag
+ *     signature  32 bytes   version 2 only: the platform's HMAC over everything before it
+ *
+ * ## The platform's signature (version 2)
+ *
+ * A restore runs whatever SQL the dump holds, as the workspace's database. The passphrase proves
+ * whoever uploads a file can read it, not that it is a backup this platform made: anybody can seal a
+ * dump of their own under a passphrase of their own. So an archive downloaded from a workspace ends
+ * with an HMAC over the whole file under a key derived from the platform key for that workspace
+ * (src/lib/platform/kek.ts), and a workspace restores by itself only a file signed for it. Anything
+ * else — another workspace's backup, a hand-made dump — goes through staff. The header names the
+ * workspace it was signed for, in the clear, so the refusal can say so before anybody types a
+ * passphrase.
  *
  * The header is deliberately in the clear. Somebody standing in front of a folder of these needs to
  * know which one to reach for — when it was taken, which schema it is from, which instance wrote it
@@ -46,7 +59,9 @@ import { passphraseProblem } from "@/lib/backup/archive-format";
  */
 
 export const ARCHIVE_MAGIC = Buffer.from("WROFFYBK", "latin1");
-export const ARCHIVE_VERSION = 1;
+/** Written: 2, signed by the platform. Read: 1 (from before signatures) and 2. */
+export const ARCHIVE_VERSION = 2;
+const READABLE_VERSIONS = new Set([1, 2]);
 
 /**
  * Re-exported so server code has one import to reach for.
@@ -56,7 +71,9 @@ export const ARCHIVE_VERSION = 1;
  */
 export { ARCHIVE_EXTENSION, MIN_PASSPHRASE_LENGTH, CONFIRM_PHRASE, passphraseProblem } from "@/lib/backup/archive-format";
 const TAG_BYTES = 16;
+const SIGNATURE_BYTES = 32;
 const PREAMBLE_BYTES = ARCHIVE_MAGIC.length + 1 + 4;
+const trailerBytes = (header: Pick<ArchiveHeader, "signature">) => (header.signature ? SIGNATURE_BYTES : 0);
 
 /** What `verifier` holds. Any fixed string works; this one says what it is in a hex dump. */
 const VERIFIER_PLAINTEXT = "wroffy-backup-verifier-v1";
@@ -84,7 +101,7 @@ export type ArchiveHeader = {
   takenAt: string;
   /** The migration the source database was on, for the same check the sidecar used to carry. */
   schemaVersion: string | null;
-  /** See `secretFingerprint` — identifies the AUTH_SECRET without being it. */
+  /** Identifies the keys the data was encrypted under without being them (src/lib/tenancy/keys.ts). */
   secretFingerprint: string | null;
   /** Length of the pg_dump archive inside, before encryption. */
   dumpBytes: number;
@@ -95,13 +112,17 @@ export type ArchiveHeader = {
   /** Proves the passphrase without touching the body. Always present. */
   verifier: Sealed;
   /**
-   * The AUTH_SECRET this database was encrypted under, sealed under the passphrase.
+   * The keys this database was encrypted under, sealed under the passphrase: the workspace's key
+   * bundle (src/lib/tenancy/keys.ts — `archiveKeyMaterial`), or in a version 1 archive the
+   * installation's AUTH_SECRET.
    *
    * Present when the operator chose to include it, which is what makes an archive restorable onto a
-   * server that has never seen this installation. It also makes the passphrase the only thing
-   * between this file and the vault, which is why there is no way to write one of these unsealed.
+   * server that has never seen this workspace. It also makes the passphrase the only thing between
+   * this file and the vault, which is why there is no way to write one of these unsealed.
    */
   secret: Sealed | null;
+  /** Version 2: which workspace the platform signed this for. The signature is the file's last 32 bytes. */
+  signature?: { alg: "hmac-sha256"; tenantId: string } | null;
 };
 
 /** Everything `writeArchive` needs that it cannot work out for itself. */
@@ -110,8 +131,10 @@ export type ArchiveMeta = {
   schemaVersion: string | null;
   secretFingerprint: string | null;
   via: string | null;
-  /** The AUTH_SECRET to seal into the file, or null to leave it out. */
+  /** The key material to seal into the file (`archiveKeyMaterial`), or null to leave it out. */
   includeSecret: string | null;
+  /** The workspace to sign the file for. */
+  signFor: string;
 };
 
 export class PassphraseError extends Error {
@@ -192,6 +215,7 @@ export async function sealToStream(input: {
     cipher: { name: "aes-256-gcm", iv: iv.toString("base64") },
     verifier: seal(key, VERIFIER_PLAINTEXT),
     secret: input.meta.includeSecret ? seal(key, input.meta.includeSecret) : null,
+    signature: { alg: "hmac-sha256", tenantId: input.meta.signFor },
   };
 
   const headerJson = Buffer.from(JSON.stringify(header), "utf8");
@@ -201,19 +225,25 @@ export async function sealToStream(input: {
   preamble.writeUInt32BE(headerJson.length, ARCHIVE_MAGIC.length + 1);
 
   const source = createReadStream(input.dumpPath);
+  const signer = platformHmac(input.meta.signFor, "backup-archive");
   const stream = Readable.from(
     (async function* () {
       const cipher = createCipheriv("aes-256-gcm", key, iv);
-      yield preamble;
-      yield headerJson;
-      for await (const chunk of source) yield cipher.update(chunk as Buffer);
+      const out = (bytes: Buffer) => {
+        signer.update(bytes);
+        return bytes;
+      };
+      yield out(preamble);
+      yield out(headerJson);
+      for await (const chunk of source) yield out(cipher.update(chunk as Buffer));
       const last = cipher.final();
-      if (last.length > 0) yield last;
-      yield cipher.getAuthTag();
+      if (last.length > 0) yield out(last);
+      yield out(cipher.getAuthTag());
+      yield signer.digest();
     })(),
   );
 
-  return { header, stream, totalBytes: preamble.length + headerJson.length + info.size + TAG_BYTES };
+  return { header, stream, totalBytes: preamble.length + headerJson.length + info.size + TAG_BYTES + SIGNATURE_BYTES };
 }
 
 /**
@@ -269,8 +299,8 @@ export async function readArchiveHeader(archivePath: string): Promise<ArchiveHea
     }
 
     const version = preamble.readUInt8(ARCHIVE_MAGIC.length);
-    if (version !== ARCHIVE_VERSION) {
-      throw new ArchiveFormatError(`That archive is format ${version}; this app reads format ${ARCHIVE_VERSION}.`);
+    if (!READABLE_VERSIONS.has(version)) {
+      throw new ArchiveFormatError(`That archive is format ${version}; this app reads formats ${[...READABLE_VERSIONS].join(" and ")}.`);
     }
 
     const headerLen = preamble.readUInt32BE(ARCHIVE_MAGIC.length + 1);
@@ -290,6 +320,9 @@ export async function readArchiveHeader(archivePath: string): Promise<ArchiveHea
     if (!header?.kdf?.salt || !header?.cipher?.iv || !header?.verifier) {
       throw new ArchiveFormatError("That archive's header is missing the fields needed to open it.");
     }
+    // The header's claim to a signature must match the format, or the body's end is misplaced.
+    if ((version === 2) !== !!header.signature) throw new ArchiveFormatError("That archive's header is damaged.");
+    if (PREAMBLE_BYTES + headerLen + TAG_BYTES + trailerBytes(header) > info.size) throw new ArchiveFormatError("That archive is truncated.");
     return header;
   } finally {
     await handle.close();
@@ -344,12 +377,12 @@ export async function extractArchive(input: {
     await handle.read(preamble, 0, PREAMBLE_BYTES, 0);
     bodyStart = PREAMBLE_BYTES + preamble.readUInt32BE(ARCHIVE_MAGIC.length + 1);
     tag = Buffer.alloc(TAG_BYTES);
-    await handle.read(tag, 0, TAG_BYTES, info.size - TAG_BYTES);
+    await handle.read(tag, 0, TAG_BYTES, info.size - trailerBytes(header) - TAG_BYTES);
   } finally {
     await handle.close();
   }
 
-  const bodyEnd = info.size - TAG_BYTES - 1;
+  const bodyEnd = info.size - trailerBytes(header) - TAG_BYTES - 1;
   if (bodyEnd < bodyStart) throw new ArchiveFormatError("That archive has no contents.");
 
   const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(header.cipher.iv, "base64"));
@@ -387,4 +420,31 @@ export async function extractArchive(input: {
   }
 
   return { header, secret, sha256: hash.digest("hex") };
+}
+
+/**
+ * Whether the platform signed this archive for this workspace — the whole file, checked against its
+ * last 32 bytes. False for a version 1 archive, one signed for another workspace, and one altered
+ * after it was written. Reads the file once; call it before anything is extracted.
+ */
+export async function verifyArchiveSignature(archivePath: string, tenantId: string): Promise<boolean> {
+  let header: ArchiveHeader;
+  try {
+    header = await readArchiveHeader(archivePath);
+  } catch {
+    return false;
+  }
+  if (header.signature?.alg !== "hmac-sha256" || header.signature.tenantId !== tenantId) return false;
+  const info = await stat(archivePath);
+  const signedEnd = info.size - SIGNATURE_BYTES;
+  const given = Buffer.alloc(SIGNATURE_BYTES);
+  const handle = await open(archivePath, "r");
+  try {
+    await handle.read(given, 0, SIGNATURE_BYTES, signedEnd);
+  } finally {
+    await handle.close();
+  }
+  const signer = platformHmac(tenantId, "backup-archive");
+  for await (const chunk of createReadStream(archivePath, { start: 0, end: signedEnd - 1 })) signer.update(chunk as Buffer);
+  return timingSafeEqual(signer.digest(), given);
 }
