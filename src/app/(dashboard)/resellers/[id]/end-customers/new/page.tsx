@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getCompany } from "@/actions/company";
 import { listIndustries } from "@/actions/industry";
+import { viewerHas } from "@/actions/permission";
+import { newCustomerTermsAdvice } from "@/actions/credit";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { requireUser } from "@/lib/session";
@@ -17,7 +19,13 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
   }
 
   const { id } = await params;
-  const [reseller, industries, user] = await Promise.all([getCompany(id), listIndustries(), requireUser()]);
+  const [reseller, industries, user, canAddContacts, termsAdvice] = await Promise.all([
+    getCompany(id),
+    listIndustries(),
+    requireUser(),
+    viewerHas("contacts.view"),
+    newCustomerTermsAdvice(),
+  ]);
   if (!reseller || reseller.relationshipType !== "RESELLER") notFound();
 
   // The reseller is itself a company, so its own account manager is the line — read off the record
@@ -41,6 +49,8 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
       </div>
       <NewCompanyForm
         industries={industries}
+        canAddContacts={canAddContacts}
+        termsAdvice={termsAdvice}
         defaultRelationshipType="CLIENT"
         relationshipTypeOptions={clientRelationshipTypeValues}
         managedByResellerId={reseller.id}

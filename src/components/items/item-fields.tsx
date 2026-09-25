@@ -2,6 +2,8 @@ import type { FieldErrors, FieldValues, UseFormRegister } from "react-hook-form"
 import { itemTypeValues, itemTypeLabels, billingCycleValues } from "@/lib/validation/item";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import Link from "next/link";
+import { OptionCombobox } from "@/components/ui/option-combobox";
 
 export type BrandOption = { id: string; name: string; families: { id: string; name: string }[] };
 
@@ -11,6 +13,7 @@ export function ItemDetailFields({
   itemType,
   brands = [],
   brandId,
+  onBrandChange,
   trackInventory,
   showOpeningStock,
 }: {
@@ -19,6 +22,8 @@ export function ItemDetailFields({
   itemType: string;
   brands?: BrandOption[];
   brandId?: string;
+  /** The brand picker searches rather than scrolls, so it sets the value itself rather than through `register`. */
+  onBrandChange: (brandId: string) => void;
   trackInventory: boolean;
   showOpeningStock?: boolean;
 }) {
@@ -53,15 +58,25 @@ export function ItemDetailFields({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="brandId">Brand</Label>
-            <Select id="brandId" {...register("brandId")}>
-              <option value="">Not set</option>
-              {brands.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-            {brands.length === 0 && <p className="text-xs text-subtle">Add brands from Settings.</p>}
+            {/* Searched rather than scrolled: a reseller's catalogue runs to a thousand brands. */}
+            <OptionCombobox
+              id="brandId"
+              listLabel="Brands"
+              options={brands.map((b) => ({ id: b.id, name: b.name, hint: b.families.length ? `${b.families.length} famil${b.families.length === 1 ? "y" : "ies"}` : undefined }))}
+              value={brandId ?? ""}
+              onSelect={(b) => onBrandChange(b?.id ?? "")}
+              placeholder="Search brands…"
+              emptyText="No brand by that name."
+            />
+            {brands.length === 0 && (
+              <p className="text-xs text-subtle">
+                No brands yet — add them under{" "}
+                <Link href="/items/brands" className="underline underline-offset-2">
+                  Brands &amp; families
+                </Link>
+                .
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="productFamilyId">Product family</Label>
@@ -75,12 +90,28 @@ export function ItemDetailFields({
             </Select>
             {!selectedBrand && <p className="text-xs text-subtle">Pick a brand first.</p>}
             {selectedBrand && selectedBrand.families.length === 0 && (
-              <p className="text-xs text-subtle">{selectedBrand.name} has no families yet — add them in Settings.</p>
+              <p className="text-xs text-subtle">
+                {selectedBrand.name} has no families yet — add them under{" "}
+                <Link href={`/items/brands?q=${encodeURIComponent(selectedBrand.name)}`} className="underline underline-offset-2">
+                  Brands &amp; families
+                </Link>
+                .
+              </p>
             )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="category">Category</Label>
             <Input id="category" placeholder="e.g. Laptop, Productivity Suite" {...register("category")} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="hsnCode">HSN / SAC code</Label>
+            <Input id="hsnCode" inputMode="numeric" placeholder="e.g. 8471 or 997331" {...register("hsnCode")} />
+            {errors.hsnCode ? (
+              <p className="text-xs text-danger">{String(errors.hsnCode.message)}</p>
+            ) : (
+              // What every invoice line for this item will carry, and what the GST return groups by.
+              <p className="text-xs text-subtle">HSN for goods, SAC for services — 4, 6 or 8 digits. Copied onto every document line.</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="vendor">Supplier note</Label>

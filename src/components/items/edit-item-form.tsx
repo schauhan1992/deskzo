@@ -37,6 +37,7 @@ export function EditItemForm({ item, brands }: { item: ItemWithPlainPrices; bran
       sku: item.sku,
       type: item.type,
       category: item.category ?? "",
+      hsnCode: item.hsnCode ?? "",
       vendor: item.vendor ?? "",
       brandId: item.brandId ?? "",
       productFamilyId: item.productFamilyId ?? "",
@@ -89,6 +90,7 @@ export function EditItemForm({ item, brands }: { item: ItemWithPlainPrices; bran
         itemType={itemType}
         brands={brands}
         brandId={brandId}
+        onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
         trackInventory={!!trackInventory}
       />
 

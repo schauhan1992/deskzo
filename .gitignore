@@ -44,9 +44,17 @@ next-env.d.ts
 # database backups
 # A dump is the entire system — every order, every password hash, every encrypted secret.
 # Committing one puts all of it in the history of a repository that gets cloned.
-backups/
+#
+# Anchored with a leading slash, and that slash is load-bearing. Written as `backups/` the pattern
+# matches a directory of that name at ANY depth, which silently swallowed three directories of real
+# source — src/app/api/backups/, src/app/(dashboard)/settings/backups/ and src/components/backups/.
+# Nothing reports it: `git status` omits ignored files rather than listing them as excluded, so the
+# first commit of this repository left the entire backups feature out and looked complete doing it.
+/backups/
 *.dump
 *.dump.json
+# The sealed download format. Same reasoning as a dump, and more so — it carries the AUTH_SECRET.
+*.wbak
 
 # Generated from whatever demo data this machine happens to hold — regenerate with
 # npm run db:seed:reconcile rather than committing one machines copy.
@@ -58,3 +66,16 @@ public/sample-vendor-statement.csv
 /confirmed.json
 /fix-groups.json
 /followups.json
+
+# A PIN directory download before `npm run db:reference` compresses it. The .csv.gz beside it is
+# the copy that is committed; the raw file is the same data four or five times larger.
+/prisma/reference/*.csv
+
+# GeoNames' files (states, cities and postal codes outside India, CC BY 4.0) — ~55 MB, downloaded by
+# Settings → World places or `npm run db:geonames:download`, never committed. The country list made
+# from them is committed, as src/lib/geo/world-countries.ts.
+/prisma/reference/geonames/
+
+# The IP location database (DB-IP City Lite, CC BY 4.0). ~125 MB of downloadable reference data
+# that changes monthly: replaced from Settings, never committed. Anchored for the reason /backups/ is.
+/geoip/

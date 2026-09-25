@@ -17,7 +17,12 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { leadStatusValues } from "@/lib/validation/lead";
-import type { LeadStatus } from "@prisma/client";
+import type { LeadSource, LeadStatus } from "@prisma/client";
+import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
+import { viewerReassignControls } from "@/lib/authz/reassign";
+import { requireUser } from "@/lib/session";
+import { hasEffectivePermission } from "@/actions/permission";
+import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function LeadsPage({
   searchParams,
@@ -30,10 +35,16 @@ export default async function LeadsPage({
     owner?: string;
     closeFrom?: string;
     closeTo?: string;
+    source?: string;
+    grade?: string;
+    sort?: string;
     page?: string;
     pageSize?: string;
   }>;
 }) {
+  const user = await requireUser();
+  if (!(await hasEffectivePermission(user.id, "leads.view"))) return <NoAccessNotice title="Lead pipeline" permission="leads.view" />;
+
   const params = await searchParams;
   const view = params.view === "list" ? "list" : "board";
 
@@ -45,6 +56,9 @@ export default async function LeadsPage({
     ownerUserId: params.owner,
     closeFrom: params.closeFrom,
     closeTo: params.closeTo,
+    source: (LEAD_SOURCE_VALUES as readonly string[]).includes(params.source ?? "") ? (params.source as LeadSource) : undefined,
+    grade: (["HOT", "WARM", "COLD"] as const).find((g) => g === params.grade),
+    sort: params.sort === "score" ? ("score" as const) : undefined,
   };
 
   // The board shows the whole pipeline — a kanban with a hidden page 2 would misrepresent it — so
@@ -81,6 +95,9 @@ export default async function LeadsPage({
               owner: params.owner,
               closeFrom: params.closeFrom,
               closeTo: params.closeTo,
+              source: params.source,
+              grade: params.grade,
+              sort: params.sort,
             }}
           />
           <ExportLeadsButton />
@@ -103,6 +120,27 @@ export default async function LeadsPage({
           allLabel="Everyone"
           options={[{ value: "unassigned", label: "Unassigned" }, ...assignableUsers.map((u) => ({ value: u.id, label: u.name }))]}
         />
+        <SelectParamFilter
+          paramName="source"
+          label="Source"
+          options={LEAD_SOURCE_VALUES.map((s) => ({ value: s, label: LEAD_SOURCE_LABELS[s] }))}
+        />
+        <SelectParamFilter
+          paramName="grade"
+          label="Score"
+          allLabel="Any"
+          options={[
+            { value: "HOT", label: "Hot (70+)" },
+            { value: "WARM", label: "Warm (40–69)" },
+            { value: "COLD", label: "Cold (under 40)" },
+          ]}
+        />
+        <SelectParamFilter
+          paramName="sort"
+          label="Sort"
+          allLabel="Recently updated"
+          options={[{ value: "score", label: "Highest score" }]}
+        />
         <DateRangePicker fromParam="closeFrom" toParam="closeTo" label="Expected close" />
         <ColumnPicker tableKey="leads" className="ml-auto" />
       </div>
@@ -118,7 +156,7 @@ export default async function LeadsPage({
         <div className="mt-6">
           {view === "list" ? (
             <>
-              <LeadsListTable leads={leads} assignableUsers={assignableUsers} />
+              <LeadsListTable leads={leads} assignableUsers={assignableUsers} reassign={await viewerReassignControls()} />
               <Pagination
                 page={page}
                 pageSize={pageSize}

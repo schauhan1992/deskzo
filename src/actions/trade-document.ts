@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, type TradeDocumentType, type TradeDocumentStatus } from "@prisma/client";
+import { Prisma, type TradeDocumentType, type TradeDocumentStatus, type DocumentOrigin } from "@prisma/client";
 import { db } from "@/lib/db";
+import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany, companyScope, viaCompanyScope } from "@/lib/authz/company-scope";
 import { requireUser } from "@/lib/session";
@@ -17,6 +18,7 @@ import {
   GST_STATE_CODES,
 } from "@/lib/gst-engine";
 import { isDraftNumber } from "@/lib/document-numbering";
+import { dateRangeFilter } from "@/lib/utils";
 import { nextDocumentNumber } from "@/lib/trade-number";
 import {
   documentDirection,
@@ -38,7 +40,13 @@ import {
 } from "@/lib/validation/trade-document";
 import { validateForEInvoice, type EInvoiceDocument } from "@/lib/einvoice/payload";
 import { createEInvoiceProvider, CANCELLATION_WINDOW_HOURS, isWithinCancellationWindow } from "@/lib/einvoice/provider";
+import { approvalAfterEdit, approvalRequirement, mayIssue } from "@/lib/documents/approval";
+import { approvalDocumentFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
 import type { ActionResult } from "@/actions/company";
+import { findTradeDocumentFor } from "@/lib/documents/load";
+import { OTHER_COUNTRY_CODE } from "@/lib/gst-engine";
+import { isIndia } from "@/lib/geo/countries";
+import { viewerHas } from "@/actions/permission";
 
 /**
  * Builds the next number for a type from its own prefix and serial, bumping the serial inside the
@@ -105,7 +113,10 @@ async function resolveParties(
 
   const orgState = org.stateCode ?? stateCodeFromGstin(org.gstin);
   const partyGstin = location?.gstNumber?.trim() || null;
-  const partyState = stateCodeFromGstin(partyGstin) ?? stateCodeFromName(location?.state);
+  // A location abroad is "Other Country" (96) — and its state must never reach the Indian lookup,
+  // where Pakistan's Punjab would come back as India's code 03.
+  const partyState =
+    stateCodeFromGstin(partyGstin) ?? (location && !isIndia(location.country) ? OTHER_COUNTRY_CODE : stateCodeFromName(location?.state));
 
   if (documentDirection[docType] === "SALES") {
     const destination = placeOfSupplyOverride || partyState;
@@ -318,7 +329,17 @@ async function mayWrite(key: "documents.issue" | "documents.void") {
   return { user, error: null as string | null };
 }
 
-export async function createTradeDocument(input: unknown): Promise<ActionResult<{ id: string }>> {
+/**
+ * @param origin which part of the app is raising this — see `TradeDocument.origin`.
+ *
+ * A separate parameter rather than a field on the validated input, so the document form cannot
+ * round-trip it and a caller has to state it deliberately. It is provenance for a column people
+ * read, not a security claim: nothing is authorised on the strength of it.
+ */
+export async function createTradeDocument(
+  input: unknown,
+  origin: DocumentOrigin = "MANUAL",
+): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireUser();
@@ -375,6 +396,7 @@ export async function createTradeDocument(input: unknown): Promise<ActionResult<
       ...built.scalars,
       docNumber,
       status: "DRAFT",
+      origin,
       einvoiceStatus: isEInvoiceEligible(data.docType) ? "PENDING" : "NOT_APPLICABLE",
       sourceDocumentId: data.sourceDocumentId || null,
       againstDocumentId: data.againstDocumentId || null,
@@ -409,7 +431,7 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
 
   const existing = await db.tradeDocument.findUnique({
     where: { id },
-    select: { id: true, status: true, docType: true, companyId: true, docNumber: true },
+    select: { id: true, status: true, approvalStatus: true, docType: true, companyId: true, docNumber: true },
   });
   if (!existing) return { ok: false, error: "That document no longer exists." };
   if (!isEditable(existing.status)) {
@@ -436,18 +458,30 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
   const built = await buildDocumentData(data);
   // Lines are replaced wholesale: the form submits the full set every time, and matching them up
   // row by row would only add a way for the stored totals to drift from the stored lines.
-  await db.$transaction([
-    db.tradeDocumentLine.deleteMany({ where: { documentId: id } }),
-    db.tradeDocument.update({
+  await db.$transaction(async (tx) => {
+    await tx.tradeDocumentLine.deleteMany({ where: { documentId: id } });
+    await tx.tradeDocument.update({
       where: { id },
       data: {
         ...built.scalars,
         ...(data.docNumber?.trim() ? { docNumber: data.docNumber.trim() } : {}),
         leadId: data.leadId || null,
+        /**
+         * An approved document that is then edited is not the document that was approved.
+         *
+         * Without this the whole feature is decoration: get a ₹1,000 quote signed off, edit it to
+         * ₹10,00,000, and the record still shows somebody else's name against a figure they never
+         * saw. A pending one is left alone — nothing has been agreed to yet, and knocking it back
+         * would quietly withdraw a request somebody is working through.
+         */
+        approvalStatus: approvalAfterEdit(existing.approvalStatus),
+        ...(existing.approvalStatus === "APPROVED"
+          ? { approvedById: null, approvedAt: null, approvalNote: null, submittedById: null, submittedAt: null }
+          : {}),
         lines: { create: built.lines },
       },
-    }),
-  ]);
+    });
+  });
 
   await recordAudit({
     userId: user.id,
@@ -508,6 +542,7 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
     select: {
       id: true,
       status: true,
+      approvalStatus: true,
       docType: true,
       issueDate: true,
       total: true,
@@ -518,6 +553,27 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
   if (!existing) return { ok: false, error: "That document no longer exists." };
   if (existing.status !== "DRAFT") return { ok: false, error: "This document has already been issued." };
   if (existing.lines.length === 0) return { ok: false, error: "Add at least one line before issuing." };
+
+  /**
+   * Sign-off, where this type needs it.
+   *
+   * The gate sits on issuing rather than on drafting or editing, because issuing is the irreversible
+   * half — it commits the number to a GST series and, for an invoice, files with the portal. Up to
+   * that point a document can be changed freely, which is what makes sending one back useful.
+   */
+  // Measured against the document as it stands now, so an approved small quote edited up past the
+  // limit needs approving again — its old approval was withdrawn by the edit (`approvalAfterEdit`).
+  const [approvalPolicy, approvalFacts] = await Promise.all([approvalPolicyFor(existing.docType), approvalDocumentFor(existing.id)]);
+  const approvalGate = mayIssue({
+    policy: approvalPolicy,
+    approvalStatus: existing.approvalStatus,
+    document: approvalFacts ?? undefined,
+  });
+  if (!approvalGate.may) return { ok: false, error: approvalGate.why ?? "This needs approving first." };
+  // Recorded when approval is on for the type but this one was under its limits — so "who let this
+  // through unapproved?" has an answer in the log rather than a gap.
+  const underLimits =
+    approvalPolicy.enabled && approvalFacts && existing.approvalStatus !== "APPROVED" && !approvalRequirement(approvalPolicy, approvalFacts).required;
 
   // The number was assigned at creation, so issuing only commits the document — it doesn't take a
   // new serial. A document still carrying a DRAFT- marker (created before numbering moved forward)
@@ -542,7 +598,8 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
     action: "UPDATE",
     entityType: "TradeDocument",
     entityId: id,
-    entityLabel: `Issued ${tradeDocumentLabels[existing.docType]} ${docNumber}`      + (posting ? ` · posted as ${posting.entryNumber}` : ""),
+    entityLabel: `Issued ${tradeDocumentLabels[existing.docType]} ${docNumber}`      + (posting ? ` · posted as ${posting.entryNumber}` : "")
+      + (underLimits ? " · under the approval limits, so no sign-off was needed" : ""),
   });
 
   let einvoiceError: string | undefined;
@@ -601,7 +658,7 @@ async function loadEInvoiceDocument(id: string): Promise<{ doc: EInvoiceDocument
       },
       buyer: {
         gstin: document.buyerGstin,
-        legalName: document.company.name,
+        legalName: document.partyName ?? document.company.name,
         // The document's own billing address, falling back to the location it was taken from.
         address1: document.billingLine1 ?? location?.address ?? null,
         address2: document.billingLine2,
@@ -809,6 +866,8 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
       docType: target,
       direction: documentDirection[target],
       status: "DRAFT",
+      // Not a parameter: this path exists only to convert, so the origin is a fact about the path.
+      origin: "CONVERSION",
       companyId: source.companyId,
       locationId: source.locationId,
       placeOfSupplyCode: source.placeOfSupplyCode,
@@ -957,37 +1016,8 @@ async function maySeeParty(userId: string, companyId: string): Promise<boolean> 
 /** Full document for the detail and print views, with Decimals flattened for the client. */
 export async function getTradeDocument(id: string) {
   const user = await requireUser();
-  const document = await db.tradeDocument.findFirst({
-    // `findFirst` only so the scope can travel with the id: a document belongs to whoever manages
-    // the party it was raised for, and one outside that book has to read as missing — this feeds
-    // the detail page and the printable copy, both of which render the customer's whole address
-    // and every line they were charged for.
-    where: { id, ...(await viaCompanyScope(user.id)) },
-    include: {
-      company: {
-        select: {
-          id: true,
-          name: true,
-          relationshipType: true,
-          // The fallback contact for a document nobody was named on — see `contact` in the print
-          // page. Matches what creation does and what the form's blank option says it will do.
-          owner: { select: { name: true, email: true, phone: true } },
-        },
-      },
-      location: true,
-      lines: { orderBy: { sortOrder: "asc" } },
-      createdBy: { select: { id: true, name: true } },
-      // Email and phone travel with the name because they are printed on the document itself, so
-      // the customer can reach whoever sent it without going back through the switchboard.
-      salesperson: { select: { id: true, name: true, email: true, phone: true } },
-      sourceDocument: { select: { id: true, docNumber: true, docType: true } },
-      againstDocument: { select: { id: true, docNumber: true, docType: true, issueDate: true } },
-      conversions: { select: { id: true, docNumber: true, docType: true, status: true } },
-      creditNotes: { select: { id: true, docNumber: true, docType: true, status: true } },
-      lead: { select: { id: true, title: true, status: true } },
-    },
-  });
-  return document ? toPlain(document) : null;
+  if (!(await viewerHas("documents.view"))) return null;
+  return findTradeDocumentFor(user.id, id);
 }
 
 /**
@@ -998,6 +1028,7 @@ export async function getTradeDocument(id: string) {
  */
 export async function listLeadDocuments(leadId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("documents.view"))) return [];
   const rows = await db.tradeDocument.findMany({
     // Scoped through the party rather than through the lead: a document is only ever raised for the
     // lead's own company (`validateLinkedLead` keeps the two in step), so the party is the same
@@ -1024,16 +1055,47 @@ export async function listTradeDocuments(params: {
   docType: TradeDocumentType;
   status?: TradeDocumentStatus;
   search?: string;
+  /** Issue-date window, inclusive at both ends. */
+  from?: string;
+  to?: string;
+  salespersonId?: string;
+  /** A `DocumentOrigin`, or the literal "none" for documents that never recorded one. */
+  origin?: string;
   page: number;
   pageSize: number;
 }) {
   const user = await requireUser();
+  if (!(await viewerHas("documents.view"))) return { rows: [], total: 0 };
+  const dateWindow = dateRangeFilter(params.from, params.to);
   const where: Prisma.TradeDocumentWhereInput = {
     // One `where` for the rows and the count both — a scope on the page that the pager doesn't
     // know about offers page 9 of a list that ends at page 2.
-    ...(await viaCompanyScope(user.id)),
+    //
+    /**
+     * The scope goes in `AND`, not spread into this literal.
+     *
+     * `viaCompanyScope` returns `{ company: { ownerUserId: { in: ids } } }`, so any later `company:`
+     * key in the same object literal replaces it wholesale and the access scope silently disappears.
+     * Nothing did that today, but a party filter is the obvious next addition and it would — the
+     * same reasoning, and the same fix, as `listOrders` in src/actions/order.ts.
+     */
+    AND: [(await viaCompanyScope(user.id)) as Prisma.TradeDocumentWhereInput],
     docType: params.docType,
     ...(params.status ? { status: params.status } : {}),
+    /**
+     * The window is built in the server's own timezone, which is what `dateRangeFilter` does and
+     * what all eleven other filtered lists use. Deliberately not `startOfIndianDay` here: doing it
+     * for documents alone would make this list disagree with every other one about where a day ends.
+     */
+    ...(dateWindow ? { issueDate: dateWindow } : {}),
+    ...(params.salespersonId ? { salespersonId: params.salespersonId } : {}),
+    // "none" is a real answer, not an absent filter: it finds the documents written by a path that
+    // never said where it came from, which is exactly what somebody auditing the Source column wants.
+    ...(params.origin === "none"
+      ? { origin: null }
+      : params.origin
+        ? { origin: params.origin as DocumentOrigin }
+        : {}),
     ...(params.search
       ? {
           OR: [
@@ -1062,6 +1124,10 @@ export async function listTradeDocuments(params: {
         einvoiceStatus: true,
         irn: true,
         reference: true,
+        approvalStatus: true,
+        origin: true,
+        // What a conversion came from, so the Source column can link to it rather than only name it.
+        sourceDocument: { select: { id: true, docNumber: true, docType: true } },
         company: { select: { id: true, name: true, relationshipType: true } },
         createdBy: { select: { name: true } },
         salesperson: { select: { id: true, name: true } },
@@ -1076,6 +1142,7 @@ export async function listTradeDocuments(params: {
 /** Totals for the cards above a list — what's outstanding, and what's stuck in draft. */
 export async function tradeDocumentSummary(docType: TradeDocumentType) {
   const user = await requireUser();
+  if (!(await viewerHas("documents.view"))) return [];
   // The same scope as the list under it, in both halves: a card reading "₹4.2 crore outstanding"
   // over a list of eleven invoices is the whole book by another route, and the count and the value
   // are separate queries that would each leak it on their own.
@@ -1127,7 +1194,7 @@ export async function listDocumentParties(docType: TradeDocumentType) {
       relationshipType: documentDirection[docType] === "SALES" ? salesTypes : purchaseTypes,
     },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, relationshipType: true },
+    select: { id: true, name: true, relationshipType: true, customerCategory: { select: CATEGORY_SELECT } },
   });
 }
 
@@ -1140,7 +1207,7 @@ export async function listPartyLocations(companyId: string) {
   return db.companyLocation.findMany({
     where: { companyId },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-    select: { id: true, label: true, address: true, city: true, state: true, pincode: true, gstNumber: true, gstTreatment: true, isPrimary: true },
+    select: { id: true, label: true, address: true, city: true, state: true, pincode: true, country: true, gstNumber: true, gstTreatment: true, isPrimary: true },
   });
 }
 
@@ -1162,6 +1229,7 @@ export async function listDocumentItems(search?: string) {
 /** Open invoices a credit note can be raised against, for the "against" picker. */
 export async function listCreditableInvoices(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("documents.view"))) return [];
   if (!(await maySeeParty(user.id, companyId))) return [];
   const rows = await db.tradeDocument.findMany({
     where: { companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
@@ -1179,6 +1247,7 @@ export async function listCreditableInvoices(companyId: string) {
  */
 export async function listCompanyDocuments(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("documents.view"))) return [];
   // The 360 view is only as private as the account it hangs off: every invoice ever raised for a
   // company, with its numbers and its totals, answered to whoever knew the id.
   if (!(await maySeeParty(user.id, companyId))) return [];

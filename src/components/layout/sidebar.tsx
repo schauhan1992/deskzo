@@ -9,6 +9,9 @@ import { MODULE_REGISTRY, navGroupRank , navPermissionKeys } from "@/lib/modules
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 
+/** Every module link, for working out which one is the most specific match for the current page. */
+const NAV_HREFS = MODULE_REGISTRY.flatMap((m) => m.navItems.map((i) => i.href));
+
 const COLLAPSED_STORAGE_KEY = "wroffy-sidebar-collapsed";
 const OPEN_GROUPS_STORAGE_KEY = "wroffy-sidebar-open-groups";
 
@@ -141,12 +144,20 @@ export function Sidebar({
   const groups = new Map<string, typeof MODULE_REGISTRY>();
   for (const mod of MODULE_REGISTRY) {
     if (!enabledKeys.includes(mod.key)) continue;
+    // A module this person may not see is not offered — the page would only tell them so.
+    if (mod.viewPermission && !permissions.includes(mod.viewPermission)) continue;
     const list = groups.get(mod.navGroup) ?? [];
     list.push(mod);
     groups.set(mod.navGroup, list);
   }
 
-  const isActive = (href: string) => pathname === href || pathname?.startsWith(`${href}/`);
+  const matches = (href: string) => pathname === href || pathname?.startsWith(`${href}/`);
+  /**
+   * The most specific link wins. `/items` is a prefix of `/items/brands`, and `/people` of
+   * `/people/payroll`, so a plain prefix test lit both — two "you are here" marks, one of them wrong.
+   */
+  const isActive = (href: string) =>
+    !!matches(href) && !NAV_HREFS.some((other) => other.length > href.length && other.startsWith(`${href}/`) && matches(other));
 
   const openGroups = useSyncExternalStore(openGroupsStore.subscribe, openGroupsStore.get, openGroupsStore.server);
 

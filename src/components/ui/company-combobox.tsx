@@ -6,6 +6,9 @@ import { Input } from "@/components/ui/input";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { useComboboxKeyboard } from "@/components/ui/use-combobox-keyboard";
 import { cn } from "@/lib/utils";
+import { offersCreate } from "@/lib/company-name";
+import { CategoryChip } from "@/components/customers/category-chip";
+import type { CategoryWithParent } from "@/lib/customers/categories";
 
 export type CompanyComboOption = {
   id: string;
@@ -15,6 +18,12 @@ export type CompanyComboOption = {
   contacts?: { id: string; name: string; designation: string }[];
   /** Extra context shown beside the name in the list — "(reseller)", "(linked to this customer)". */
   hint?: string;
+  /**
+   * The customer's category, shown beside the name in the list and under the field once chosen — two
+   * "Sharma Traders" are told apart before the wrong one is picked. Callers that don't load it lose
+   * nothing but the chip.
+   */
+  customerCategory?: CategoryWithParent | null;
 };
 
 /**
@@ -56,6 +65,7 @@ export function CompanyCombobox({
   const [syncedValue, setSyncedValue] = useState(value);
   const [isOpen, setIsOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const selectedCategory = value ? (companies.find((c) => c.id === value)?.customerCategory ?? null) : null;
 
   // Keep the displayed text in sync when `value` changes from outside (e.g. after creating a company
   // via the modal) — adjusted during render, per React's guidance, rather than in an effect.
@@ -91,7 +101,10 @@ export function CompanyCombobox({
     : companies;
   const results = matches.slice(0, MAX_RESULTS);
   const hiddenCount = matches.length - results.length;
-  const canCreate = Boolean(trimmed && onCreateNew);
+  // No "create new" for a name already on the list — see `offersCreate`. A name that exists outside
+  // this person's accounts is not on the list and still offers it; the dialog behind it says so
+  // before anything is saved.
+  const canCreate = Boolean(onCreateNew) && offersCreate(trimmed, companies.map((c) => c.name));
 
   function handleSelect(company: CompanyComboOption) {
     setSyncedValue(company.id);
@@ -168,6 +181,7 @@ export function CompanyCombobox({
             >
               {c.name}
               {c.hint && <span className="ml-1.5 text-xs text-subtle">{c.hint}</span>}
+              <CategoryChip category={c.customerCategory} className="ml-1.5 align-middle" />
             </button>
           ))}
           {results.length === 0 && <div className="px-3 py-2 text-sm text-subtle">No matching companies.</div>}
@@ -194,6 +208,11 @@ export function CompanyCombobox({
           )}
         </div>
       </AnchoredPopover>
+      {selectedCategory && (
+        <div className="mt-1">
+          <CategoryChip category={selectedCategory} />
+        </div>
+      )}
     </div>
   );
 }

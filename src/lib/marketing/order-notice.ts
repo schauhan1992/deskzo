@@ -243,6 +243,8 @@ export async function queueCustomerNotice(input: {
   templateId?: string;
   /** A line from whoever is sending it, put above the standard wording. */
   note?: string;
+  /** Who pressed send — kept on each message for the mail log. */
+  sentByUserId?: string;
 }): Promise<ActionResult<{ sent: number; failed: number; skipped: { name: string; reason: string }[]; product: { id: string; itemName: string; companyId: string; companyName: string } }>> {  if (input.contactIds.length === 0) return { ok: false, error: "Pick at least one person to send it to." };
 
   const loaded = await loadSubscription(input.companyProductId);
@@ -341,6 +343,10 @@ export async function queueCustomerNotice(input: {
         subject: renderedSubject.text,
         body: renderedBody.text,
         toEmail: contact.email,
+        // For the mail log: who sent it, about which order, and which notice it was.
+        sentByUserId: input.sentByUserId ?? null,
+        companyProductId: product.id,
+        noticeKind: kind,
         // Manual and transactional, so it goes now rather than waiting for the next send window.
         // Quiet hours exist to stop a *campaign* landing at 2am, not to delay somebody's own notice.
         scheduledFor: new Date(),

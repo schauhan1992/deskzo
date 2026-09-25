@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getPayslip } from "@/actions/payroll";
-import { getOrganisation } from "@/lib/organisation";
+import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { PrintButton } from "@/components/documents/print-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { amountInWords } from "@/lib/gst-engine";
@@ -62,7 +62,7 @@ export default async function PrintPayslipPage({
             <h1 className="text-lg font-bold uppercase tracking-wide">{org.legalName || "—"}</h1>
             {org.addressLine1 && <p className="mt-0.5 text-xs text-neutral-600">{org.addressLine1}</p>}
             {(org.city || org.state) && (
-              <p className="text-xs text-neutral-600">{[org.city, org.state, org.pincode].filter(Boolean).join(", ")}</p>
+              <p className="text-xs text-neutral-600">{[org.city, org.state, org.pincode, foreignCountry(org)].filter(Boolean).join(", ")}</p>
             )}
           </div>
           <div className="text-right">

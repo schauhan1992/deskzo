@@ -1,4 +1,5 @@
-import { PrismaClient, type Role } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { ROLE_PRESETS } from "../../src/lib/authz/presets";
 import {
@@ -13,6 +14,7 @@ import {
   pick,
   rnd,
   workEmail,
+  HEADCOUNT,
 } from "./shared";
 
 /**
@@ -67,12 +69,12 @@ const DEPARTMENTS = [
 ];
 
 /**
- * The roster.
+ * The roster, at full size.
  *
- * Counts add up to 100. Sales is the biggest because this business sells; Inside Sales is next
- * because somebody has to find the people Sales talks to.
+ * Written for 100 and scaled to `HEADCOUNT` below. Sales is the biggest because this business
+ * sells; Inside Sales is next because somebody has to find the people Sales talks to.
  */
-const SEATS: Seat[] = [
+const SEATS_AT_100: Seat[] = [
   { dept: "Management", title: "Director", role: "ADMIN", presets: [], manages: true, count: 2, pay: [250000, 320000] },
   { dept: "Management", title: "General Manager", role: "MANAGEMENT", presets: ["sales-manager", "operations-manager"], manages: true, count: 2, pay: [180000, 220000] },
   { dept: "Sales", title: "Head of Sales", role: "MANAGEMENT", presets: ["sales-manager"], manages: true, count: 1, pay: [160000, 190000] },
@@ -94,6 +96,32 @@ const SEATS: Seat[] = [
   { dept: "HR & Admin", title: "HR Executive", role: "MANAGEMENT", presets: ["hr-manager"], manages: false, count: 2, pay: [30000, 45000] },
   { dept: "HR & Admin", title: "Office Admin", role: "SUPPORT", presets: ["support-agent"], manages: false, count: 1, pay: [24000, 32000] },
 ];
+
+/**
+ * The roster at whatever size the company actually is.
+ *
+ * Scaled proportionally, with two rules that matter more than the arithmetic:
+ *
+ *   · **Every seat keeps at least one person.** Halving a roster by multiplication alone deletes
+ *     the Finance Controller, the Purchase Manager and the HR Manager — the single-seat roles — and
+ *     a CRM with nobody holding `accounts-manager` cannot demonstrate approvals, payments or
+ *     anything else those presets gate. The point of this data is that every role is represented.
+ *   · **The remainder lands on the largest seat.** Rounding twenty seats independently does not add
+ *     up to the target, so the difference is taken out of (or added to) Account Managers, which is
+ *     the one seat big enough to absorb it without distorting the shape.
+ */
+function rosterFor(headcount: number): Seat[] {
+  const full = SEATS_AT_100.reduce((n, s) => n + s.count, 0);
+  const scaled = SEATS_AT_100.map((s) => ({ ...s, count: Math.max(1, Math.round((s.count * headcount) / full)) }));
+
+  const biggest = scaled.reduce((a, b) => (b.count > a.count ? b : a));
+  const drift = scaled.reduce((n, s) => n + s.count, 0) - headcount;
+  // Never below one, even if that means missing the target by a head or two.
+  biggest.count = Math.max(1, biggest.count - drift);
+  return scaled;
+}
+
+const SEATS: Seat[] = rosterFor(HEADCOUNT);
 
 export type SeededPerson = {
   id: string;

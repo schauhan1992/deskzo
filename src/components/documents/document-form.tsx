@@ -1,5 +1,6 @@
 "use client";
 
+import type { CategoryWithParent } from "@/lib/customers/categories";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { TradeDocumentType, CompanyRelationshipType } from "@prisma/client";
@@ -19,7 +20,8 @@ import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { AddressEditor } from "@/components/documents/address-editor";
 import { NumberSettingsDialog, type NumberSetting } from "@/components/documents/number-settings-dialog";
 import { formatCurrency } from "@/lib/utils";
-import { computeDocument, resolveSupplyType, stateCodeFromGstin, GST_STATE_OPTIONS } from "@/lib/gst-engine";
+import { computeDocument, resolveSupplyType, stateCodeFromGstin, GST_STATE_OPTIONS, OTHER_COUNTRY_CODE } from "@/lib/gst-engine";
+import { isIndia } from "@/lib/geo/countries";
 import { gstTreatmentValues, gstTreatmentLabels } from "@/lib/gst";
 import { BASE_CURRENCY, CURRENCIES, getCurrency, isBaseCurrency, rateHint } from "@/lib/currency";
 import { lookupExchangeRate } from "@/actions/finance";
@@ -27,7 +29,7 @@ import { documentDirection, documentListPath, tradeDocumentLabels } from "@/lib/
 import { registeredTreatments } from "@/lib/validation/trade-document";
 import { blankLine, type AddressDraft, type DocumentFormDefaults, type LineDraft } from "@/lib/document-draft";
 
-type Party = { id: string; name: string; relationshipType: CompanyRelationshipType };
+type Party = { id: string; name: string; relationshipType: CompanyRelationshipType; customerCategory?: CategoryWithParent | null };
 type PartyLocation = Awaited<ReturnType<typeof listPartyLocations>>[number];
 type CatalogItem = Awaited<ReturnType<typeof listDocumentItems>>[number];
 type CreditableInvoice = Awaited<ReturnType<typeof listCreditableInvoices>>[number];
@@ -216,9 +218,11 @@ export function DocumentForm({
   /** Pulls the billing address and GST details from a location the user just chose. */
   function adoptLocation(location: PartyLocation | null) {
     if (!location) return;
+    const abroad = !isIndia(location.country);
+    // Abroad is "Other Country" (96); a foreign state name is never matched against India's list.
     const stateCode =
       stateCodeFromGstin(location.gstNumber) ??
-      GST_STATE_OPTIONS.find((s) => s.name.toLowerCase() === (location.state ?? "").trim().toLowerCase())?.code ??
+      (abroad ? OTHER_COUNTRY_CODE : GST_STATE_OPTIONS.find((s) => s.name.toLowerCase() === (location.state ?? "").trim().toLowerCase())?.code) ??
       "";
     const next: AddressDraft = {
       attention: "",
@@ -228,7 +232,8 @@ export function DocumentForm({
       state: location.state ?? "",
       stateCode,
       pincode: location.pincode ?? "",
-      country: "India",
+      // The location's own country — this said "India" whatever the address was.
+      country: abroad ? (location.country ?? "").trim() : "India",
       phone: "",
     };
     setBilling(next);

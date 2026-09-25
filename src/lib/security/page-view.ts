@@ -1,6 +1,7 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { logActivity } from "@/lib/activity";
 import { getSecurityPolicy } from "@/lib/security/store";
+import { tenantKey } from "@/lib/tenancy/cache";
 import { throttle } from "@/lib/security/throttle";
 
 /**
@@ -36,7 +37,7 @@ export async function recordPageView(input: { userId: string; userName: string; 
     // Nothing to learn from somebody looking at their own dashboard or their own profile.
     if (path === "" || path === "/dashboard" || path.startsWith("/profile")) return;
 
-    const { write, suppressedSince } = throttle(`view:${input.userId}:${path}`, WINDOW_MS);
+    const { write, suppressedSince } = throttle(`${await tenantKey()}|view:${input.userId}:${path}`, WINDOW_MS);
     if (!write) return;
 
     const repeats = suppressedSince > 0 ? ` (revisited ${suppressedSince}×)` : "";

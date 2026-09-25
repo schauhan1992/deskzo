@@ -9,7 +9,7 @@ import type { ActivityKind, ActivitySeverity } from "@prisma/client";
  * kind to the Prisma enum without adding it here is a type error, which is the point.
  */
 
-export type ActivityGroup = "SESSION" | "DATA" | "DLP" | "PERIMETER" | "ADMIN";
+export type ActivityGroup = "SESSION" | "ACCESS" | "DATA" | "DLP" | "PERIMETER" | "ADMIN";
 
 export type ActivityKindDefinition = {
   key: ActivityKind;
@@ -22,6 +22,7 @@ export type ActivityKindDefinition = {
 
 export const ACTIVITY_GROUPS: { key: ActivityGroup; label: string; description: string }[] = [
   { key: "SESSION", label: "Sessions", description: "Signing in and out, password and two-factor changes, view-as." },
+  { key: "ACCESS", label: "Where and on what", description: "New devices and networks, approvals, people held at the door, sessions ended, journeys too fast to be real." },
   { key: "DATA", label: "Data access", description: "Viewing, searching, exporting and printing records." },
   { key: "DLP", label: "Data loss prevention", description: "Copy, paste, screenshot and print attempts the policy refused." },
   { key: "PERIMETER", label: "Perimeter", description: "Blocked crawlers, refused permissions, rate limits." },
@@ -50,6 +51,15 @@ export const ACTIVITY_KINDS: ActivityKindDefinition[] = [
     description: "An admin began using the app as another user. Always worth seeing.",
   },
   { key: "IMPERSONATION_ENDED", label: "Stopped viewing as", group: "SESSION", severity: "NOTICE", description: "An admin returned to their own account." },
+
+  // --- Where and on what: src/lib/access ---
+  { key: "NEW_DEVICE", label: "New device", group: "ACCESS", severity: "INFO", description: "A browser this account had not used before — waiting for approval when the role requires it." },
+  { key: "DEVICE_APPROVED", label: "Device approved", group: "ACCESS", severity: "NOTICE", description: "An administrator approved a device." },
+  { key: "DEVICE_BLOCKED", label: "Device blocked", group: "ACCESS", severity: "WARNING", description: "A device rejected before use, or revoked after — it no longer gets in." },
+  { key: "NEW_NETWORK", label: "New network", group: "ACCESS", severity: "NOTICE", description: "Somebody arrived from an address no allow rule covers, on a role that asks to be told or to hold them." },
+  { key: "ACCESS_HELD", label: "Held at the door", group: "ACCESS", severity: "WARNING", description: "A signed-in request turned away or held by the access rules." },
+  { key: "IMPOSSIBLE_TRAVEL", label: "Impossible travel", group: "ACCESS", severity: "WARNING", description: "Two sign-ins further apart than anybody could have travelled in the time between them." },
+  { key: "SESSION_ENDED", label: "Session ended", group: "ACCESS", severity: "NOTICE", description: "An administrator ended somebody's session." },
 
   // --- Data access ---
   { key: "VIEW", label: "Viewed a record", group: "DATA", severity: "INFO", description: "Opened a record that holds customer data." },

@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/session";
 import { logActivity, alertAdmins } from "@/lib/activity";
 import { getSecurityPolicy } from "@/lib/security/store";
 import { dlpApplies, screenshotDecision, istDayKey } from "@/lib/security/policy";
+import { tenantKey } from "@/lib/tenancy/cache";
 import { throttle } from "@/lib/security/throttle";
 
 /**
@@ -63,7 +64,7 @@ export async function reportDlpEvent(input: { kind: string; path?: string; detai
 
   // One row per user per kind per two minutes, with the rest counted into the next one. Somebody
   // holding Ctrl+C down is one event worth knowing about, not four hundred.
-  const { write, suppressedSince } = throttle(`dlp:${user.id}:${input.kind}`, 120_000);
+  const { write, suppressedSince } = throttle(`${await tenantKey()}|dlp:${user.id}:${input.kind}`, 120_000);
   if (!write) return;
 
   const repeats = suppressedSince > 0 ? ` (${suppressedSince} more in the last few minutes)` : "";
@@ -125,7 +126,7 @@ export async function reportScreenshot(input: { path?: string } = {}): Promise<S
     // Every screenshot is reported, not only the refused ones — that was the ask, and a cap of two
     // is only meaningful if somebody sees the two. Throttled per user per hour so a busy day is a
     // notification rather than a stream.
-    const { write, suppressedSince } = throttle(`shot-alert:${user.id}`, 3_600_000);
+    const { write, suppressedSince } = throttle(`${await tenantKey()}|shot-alert:${user.id}`, 3_600_000);
     if (write) {
       const more = suppressedSince > 0 ? ` and ${suppressedSince} more in the last hour` : "";
       await alertAdmins({

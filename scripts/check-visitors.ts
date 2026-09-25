@@ -24,7 +24,7 @@
 import Module from "node:module";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "../src/lib/db";
 import { generateCode, inviteMessage, isWithinWindow, looksLikeCode, normaliseCode } from "../src/lib/visitors/invite-code";
 import { emailRequiredFor, isUsableCompany, looksLikeEmail, normaliseCompany } from "../src/lib/visitors/company-name";

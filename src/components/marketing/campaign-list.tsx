@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Megaphone, Send, ShieldCheck, TriangleAlert, X } from "lucide-react";
@@ -109,13 +110,15 @@ function CampaignRow({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-text">{campaign.name}</span>
+            <Link href={`/marketing/campaigns/${campaign.id}`} className="text-sm font-medium text-text hover:underline">
+              {campaign.name}
+            </Link>
             <span className="font-mono text-[11px] text-subtle">{campaign.reference}</span>
             <Badge tone={TONE[campaign.status]}>{LABEL[campaign.status]}</Badge>
             {campaign.approvedBy && <Badge tone="green">Approved by {campaign.approvedBy.name}</Badge>}
           </div>
           <p className="text-xs text-muted">
-            {campaign.audience.name} · {campaign.template.name}
+            {[campaign.audience?.name, campaign.list ? `list “${campaign.list.name}”` : null].filter(Boolean).join(" + ")} · {campaign.template.name}
             {campaign.scheduledFor && ` · from ${formatDate(campaign.scheduledFor)}`}
             {campaign._count.messages > 0 && ` · ${campaign._count.messages} recipient(s)`}
           </p>

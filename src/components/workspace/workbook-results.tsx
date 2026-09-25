@@ -4,6 +4,7 @@ import { formatDate } from "@/lib/utils";
 import { CallButton } from "@/components/calls/call-button";
 import type { runWorkbook } from "@/actions/workspace";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
+import { headcountLabel } from "@/lib/company-size";
 
 type Row = Awaited<ReturnType<typeof runWorkbook>>["rows"][number];
 
@@ -70,7 +71,7 @@ export function WorkbookResults({ rows, filters }: { rows: Row[]; filters?: Work
                     {row.stage}
                   </Badge>
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{row.employeeCount ?? "—"}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{headcountLabel(row.employeeCount) ?? "—"}</td>
                 <td className="px-4 py-2.5 text-muted">{row.owner?.name ?? "Unassigned"}</td>
                 <td className="px-4 py-2.5 text-xs text-subtle">
                   {lastCall ? (

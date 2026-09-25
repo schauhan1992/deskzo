@@ -45,7 +45,7 @@
  * database with real data in it.
  */
 import Module from "node:module";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "../src/lib/db";
 
 const PREFIX = "ZZNoteCheck";
@@ -178,14 +178,27 @@ async function buildCast(): Promise<Cast> {
     managerId: manager.id,
   });
   const loner = await makeUser("loner", "Loner", { role: "SALES", departmentId: null, managerId: manager.id });
-  // A super admin is always also an ADMIN — the schema has a CHECK constraint saying so. Given a
-  // department on purpose, so the PRIVATE assertions below rule out the strongest account in the
-  // system sitting in the same room as the author.
-  const superAdmin = await makeUser("superadmin", "Super Admin", {
-    role: "ADMIN",
-    departmentId: deptA.id,
-    isSuperAdmin: true,
+  /**
+   * Borrowed, not created — there is exactly one super admin and the database enforces it.
+   *
+   * This used to mint its own `ZZNoteCheck` super admin, which `users_one_super_admin` now refuses
+   * outright. Borrowing is also the better test: the account asserted against below is the real
+   * strongest account in this installation rather than a stand-in built to resemble one.
+   *
+   * Read only. Nothing here changes that user, so the suite cannot damage the one account that
+   * cannot be recreated from inside the app.
+   */
+  const realSuper = await db.user.findFirst({
+    where: { isSuperAdmin: true },
+    select: { id: true, name: true, email: true, role: true },
   });
+  if (!realSuper) {
+    throw new Error(
+      "This check needs the installation's super admin to assert that even it cannot read a private note. " +
+        "Run npm run db:bootstrap first.",
+    );
+  }
+  const superAdmin: Actor = realSuper;
 
   for (const user of [manager, teammate, outsider, loner]) {
     // Without this the record gate would be switched off for anyone whose role happens to carry
@@ -245,32 +258,12 @@ async function cleanup() {
     });
   }
   if (companyIds.length) await db.company.deleteMany({ where: { id: { in: companyIds } } });
-  if (userIds.length) {
-    // The database refuses to delete a super admin outright — see the trigger in
-    // 20260920090000_protect_super_admin. Revoking the flag is the documented first step, and it
-    // needs a real super admin to still be there afterwards, which `requireASuperAdminElsewhere`
-    // established before the cast was built.
-    await db.user.updateMany({ where: { id: { in: userIds }, isSuperAdmin: true }, data: { isSuperAdmin: false } });
-    await db.user.deleteMany({ where: { id: { in: userIds } } });
-  }
+  // No super-admin unpicking here any more: the cast borrows the installation's one rather than
+  // creating its own, so there is nothing in `userIds` the delete trigger will refuse. The previous
+  // version demoted-then-deleted, which meant a bug in this teardown could strip the flag from a
+  // real account — a teardown with more power than the test it cleans up after.
+  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
   await db.department.deleteMany({ where: { name: { startsWith: PREFIX } } });
-}
-
-/**
- * The fixture includes a super admin, and the database will not let the last one be removed. So an
- * installation with none of its own would gain an undeletable `ZZNoteCheck` account the first time
- * this ran — checked up front rather than discovered during teardown.
- */
-async function requireASuperAdminElsewhere() {
-  const others = await db.user.count({
-    where: { isSuperAdmin: true, active: true, role: "ADMIN", email: { not: { startsWith: EMAIL_PREFIX } } },
-  });
-  if (others === 0) {
-    throw new Error(
-      "This check creates a super admin of its own and cannot remove it unless the installation " +
-        "already has one. Run npm run db:bootstrap first.",
-    );
-  }
 }
 
 // ── The checks ──────────────────────────────────────────────────────────────────────────────────
@@ -301,7 +294,7 @@ async function run(cast: Cast) {
   ok(
     "  nor a super admin",
     !(await sees(superAdmin, privateNote)),
-    "holds every permission in the system, shares the author's department, and still cannot read it",
+    "the installation's real super admin: holds every permission there is, and still cannot read it",
   );
 
   section("TEAM is the department, not the reporting line");
@@ -321,10 +314,19 @@ async function run(cast: Cast) {
     "reports to the author — the reporting-line rule in the schema comment would have handed it over",
   );
   ok("  and not their note either", !(await sees(outsider, teammateTeamNote)));
+  /**
+   * The super admin used to stand in here, minted into the author's department to show that TEAM
+   * visibility follows the department rather than the powers. It cannot: there is exactly one super
+   * admin now and it belongs to the installation, not to this fixture, so it is not in `deptA`.
+   *
+   * `teammate` makes the same point without borrowing anybody — it is in the department and holds
+   * nothing special — and the assertion above already establishes the stronger half, that even the
+   * strongest account in the system does not get in on its powers.
+   */
   ok(
-    "  the super admin sees it, and only because they share the department",
-    await sees(superAdmin, managerTeamNote),
-    "the same account that could not read the private note",
+    "  and the super admin does not, because they are not in that department",
+    !(await sees(superAdmin, managerTeamNote)),
+    "TEAM follows the department, and holding every permission is not a department",
   );
 
   section("TEAM with no department is PRIVATE");
@@ -593,7 +595,6 @@ async function run(cast: Cast) {
 async function main() {
   console.log("\nSticky note visibility — the real actions, a real database, a throwaway cast.\n");
 
-  await requireASuperAdminElsewhere();
   await cleanup();
   const cast = await buildCast();
   try {

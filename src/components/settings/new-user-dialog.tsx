@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { createUser } from "@/actions/user";
 import { createUserSchema, type CreateUserInput } from "@/lib/validation/user";
 import { Button } from "@/components/ui/button";

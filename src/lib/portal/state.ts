@@ -20,13 +20,9 @@ import { companyMayUsePortal, linkState } from "@/lib/portal/access";
  * hiding it from the sales person who would be the one to ask for it makes the column pointless.
  */
 
-export type PortalState =
-  /** Has access and at least one link that works today. */
-  | { kind: "on"; links: number }
-  /** Allowed, but nobody has been sent a link — so nobody can actually get in. */
-  | { kind: "granted"; links: 0 }
-  /** Not allowed, for whatever reason. */
-  | { kind: "off"; links: number };
+import type { PortalState } from "@/lib/portal/state-labels";
+export type { PortalState } from "@/lib/portal/state-labels";
+export { PORTAL_STATE_LABEL } from "@/lib/portal/state-labels";
 
 export type PortalStateMap = Map<string, PortalState>;
 
@@ -75,10 +71,3 @@ export async function portalStateFor(
 
   return out;
 }
-
-/** How each state reads in a table cell. */
-export const PORTAL_STATE_LABEL: Record<PortalState["kind"], { label: string; tone: "green" | "amber" | "default"; hint: string }> = {
-  on: { label: "On", tone: "green", hint: "This customer has a working portal link." },
-  granted: { label: "No link", tone: "amber", hint: "Allowed a portal, but nobody has been sent a link — so nobody can get in." },
-  off: { label: "Off", tone: "default", hint: "No portal access." },
-};

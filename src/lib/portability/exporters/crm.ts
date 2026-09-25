@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { formatContactId } from "@/lib/order-id";
 import { ownScope, viaCompany, type Exporter, type ExportScope } from "./types";
 
 /**
@@ -69,7 +70,7 @@ export const contactsExporter: Exporter = async (scope) => {
     orderBy: { contactSeq: "asc" },
   });
   return rows.map((c) => ({
-    Key: `CON-${String(c.contactSeq).padStart(6, "0")}`,
+    Key: formatContactId(c.contactSeq),
     Name: c.name,
     Company: c.company.name,
     Designation: c.designation,

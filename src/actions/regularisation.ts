@@ -151,16 +151,14 @@ export async function decideRegularisation(input: unknown): Promise<ActionResult
         )
       : null;
 
-  await db.$transaction([
-    db.attendanceRegularisation.update({
+  await db.$transaction(async (tx) => {
+    await tx.attendanceRegularisation.update({
       where: { id },
       data: { status: approve ? "APPROVED" : "REJECTED", approverId: user.id, decidedAt: new Date(), decisionNote: note?.trim() || null },
-    }),
-    // `regularisedAt` is what marks the day as decided by a person, and is the same flag that stops
-    // a biometric terminal re-sending its buffer from quietly overwriting it later.
-    ...(approve
+    });
+    for (const op of (approve
       ? [
-          db.attendanceDay.upsert({
+          tx.attendanceDay.upsert({
             where: { userId_date: { userId: request.userId, date: request.date } },
             create: {
               userId: request.userId,
@@ -184,8 +182,8 @@ export async function decideRegularisation(input: unknown): Promise<ActionResult
             },
           }),
         ]
-      : []),
-  ]);
+      : [])) await op;
+  });
 
   await notifyUser({
     userId: request.userId,

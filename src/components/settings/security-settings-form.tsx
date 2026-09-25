@@ -78,6 +78,15 @@ export function SecuritySettingsForm({ settings }: { settings: Settings }) {
             Redirect URI (append to this site&rsquo;s URL):{" "}
             <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">/api/auth/callback/microsoft-entra-id</code>
           </p>
+          {/* The same app sends documents from people's own Outlook — src/lib/mail/microsoft.ts. */}
+          <p className="mt-2 text-sm text-muted">
+            To let people email invoices and proposals from their own Outlook, add to the same app a second redirect URI,{" "}
+            <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">/api/mail/microsoft/callback</code>, and the delegated Microsoft Graph
+            permissions <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">Mail.Send</code>,{" "}
+            <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">User.Read</code> and{" "}
+            <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">offline_access</code>. Each person then connects their own mailbox from My
+            profile; nobody can send as anybody else.
+          </p>
         </div>
 
         <div className="space-y-3">

@@ -14,8 +14,10 @@ import { Dialog } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodValues, paymentMethodLabels } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
+import { CategoryChip } from "@/components/customers/category-chip";
+import type { CategoryWithParent } from "@/lib/customers/categories";
 
-type CompanyOption = { id: string; name: string };
+type CompanyOption = { id: string; name: string; customerCategory?: CategoryWithParent | null };
 
 type OrderOption = Awaited<ReturnType<typeof listCompanyOrdersForPayment>>[number];
 
@@ -147,6 +149,7 @@ export function RecordPaymentButton({
                   className="block w-full rounded-md px-3 py-2 text-left text-sm font-medium text-text hover:bg-surface-sunken"
                 >
                   {c.name}
+                  <CategoryChip category={c.customerCategory} className="ml-1.5 align-middle" />
                 </button>
               ))}
               {companyResults.length === 0 && (

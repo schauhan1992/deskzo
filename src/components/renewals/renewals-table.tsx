@@ -13,6 +13,8 @@ import { formatOrderId } from "@/lib/order-id";
 import { getRenewalStatus } from "@/lib/renewals";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
 import { RenewButton } from "@/components/renewals/renew-button";
+import { RenewalProposalButton } from "@/components/renewals/renewal-proposal-button";
+import { RenewalStageCell, type RenewalStageCellData } from "@/components/renewals/renewal-stage-cell";
 import { CallButton } from "@/components/calls/call-button";
 import { useColumns } from "@/components/ui/table-columns";
 
@@ -39,14 +41,19 @@ type RenewalRow = {
   group?: { totalQuantity: number; addonCount: number; renewalValue: number; incomplete: boolean; note: string };
   /** Present once a renewal has been punched — the row then says so instead of asking again. */
   renewedBy?: { id: string; orderSeq: number; orderStatus: string } | null;
+  /** How far along it is — derived from the record, with room for a stage somebody pinned. */
+  stage?: RenewalStageCellData;
 };
 
 export function RenewalsTable({
   renewals,
   users,
+  canSetStage = false,
 }: {
   renewals: RenewalRow[];
   users: { id: string; name: string }[];
+  /** Whether to offer the stage picker. The action refuses regardless; this keeps the column honest. */
+  canSetStage?: boolean;
 }) {
   const cols = useColumns("renewals");
   const router = useRouter();
@@ -127,6 +134,7 @@ export function RenewalsTable({
                 {cols.show("expiryDate") && <th className="px-4 py-2.5">Expiry date</th>}
                 {cols.show("accountManager") && <th className="px-4 py-2.5">Account manager</th>}
                 {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
+                {cols.show("stage") && <th className="px-4 py-2.5">Stage</th>}
                 {cols.show("actions") && <th className="px-4 py-2.5 text-right">Actions</th>}
               </tr>
             </thead>
@@ -208,11 +216,20 @@ export function RenewalsTable({
                         )}
                       </td>
                     )}
+                    {cols.show("stage") && (
+                      <td className="px-4 py-2.5">
+                        {r.stage ? (
+                          <RenewalStageCell companyProductId={r.id} stage={r.stage} canEdit={canSetStage} />
+                        ) : (
+                          <span className="text-xs text-subtle">—</span>
+                        )}
+                      </td>
+                    )}
                     {cols.show("actions") && (
                       <td className="px-4 py-2.5">
                         <div className="flex items-center justify-end gap-1">
-                          {/* Ring them, write to them, or punch the order — the three things this
-                              list exists to lead to. */}
+                          {/* Ring them, write to them, quote them, or punch the order — the four
+                              things this list exists to lead to. */}
                           <CallButton
                             companyId={r.company.id}
                             companyName={r.company.name}
@@ -224,6 +241,11 @@ export function RenewalsTable({
                           <CustomerNoticeButton
                             companyProductId={r.id}
                             companyName={(r.endCustomer ?? r.company).name}
+                          />
+                          <RenewalProposalButton
+                            companyProductId={r.id}
+                            companyName={(r.endCustomer ?? r.company).name}
+                            alreadyRenewed={Boolean(r.renewedBy)}
                           />
                           <RenewButton companyProductId={r.id} />
                         </div>

@@ -13,6 +13,11 @@ import { auth } from "@/lib/auth";
 import { getOrganisation } from "@/lib/organisation";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { DocumentActions } from "@/components/documents/document-actions";
+import { DocumentEmailHistory } from "@/components/documents/document-email-history";
+import { viewerHas } from "@/actions/permission";
+import { isEmailable } from "@/lib/documents/email-template";
+import { DocumentApprovalBar } from "@/components/documents/document-approval-bar";
+import { approvalContext } from "@/actions/document-approval";
 import { InvoiceSettlementPanel, CreditNoteApplications } from "@/components/documents/invoice-settlement";
 import { BillSettlementPanel } from "@/components/documents/bill-settlement";
 import { getBillSettlement } from "@/actions/payable";
@@ -60,6 +65,9 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
     hasEffectivePermission(session!.user.id, "payments.delete"),
   ]);
 
+  // Only asked for once the document is loaded, because it needs the type to find the policy.
+  const approval = await approvalContext(document.id);
+
   /** Every figure on screen, in the currency the document was written in — see the print page. */
   const money = (value: number | string | null | undefined) => formatMoney(value, document.currency);
   const foreign = !isBaseCurrency(document.currency);
@@ -81,7 +89,9 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
     ? await QRCode.toDataURL(document.signedQrCode, { margin: 1, width: 160 }).catch(() => null)
     : null;
 
+  const awaitingApproval = Boolean(approval?.required) && document.approvalStatus !== "APPROVED";
   const nextStep = nextStepFor({
+    awaitingApproval,
     docType: document.docType,
     status: document.status,
     dueDate: document.dueDate,
@@ -134,6 +144,26 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
         </div>
       </div>
 
+      {/* Where the "What's next?" banner would be, and instead of it while sign-off is outstanding. */}
+      {/* Approval is on for the type, but this one is under its limits — say so, once, and quietly. */}
+      {approval?.enabled && !approval.required && document.status === "DRAFT" && (
+        <p className="mt-4 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-xs text-muted">{approval.why}</p>
+      )}
+
+      {approval?.required && (
+        <DocumentApprovalBar
+          id={document.id}
+          status={document.approvalStatus}
+          submittedBy={document.submittedBy?.name ?? null}
+          submittedAt={document.submittedAt}
+          approvedBy={document.approvedBy?.name ?? null}
+          approvedAt={document.approvedAt}
+          note={document.approvalNote}
+          mayApprove={approval.mayApprove}
+          maySubmit={approval.maySubmit}
+        />
+      )}
+
       {nextStep && (
         <div
           className={`mt-5 rounded-xl border px-4 py-3 ${
@@ -162,9 +192,17 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             hasIrn={!!document.irn}
             einvoiceEnabled={org.einvoiceEnabled}
             canCancelIrn={isWithinCancellationWindow(document.ackDate)}
+            canEmail={
+              isEmailable(document.docType) &&
+              document.status !== "DRAFT" &&
+              document.status !== "CANCELLED" &&
+              (await viewerHas("documents.send"))
+            }
           />
         </CardContent>
       </Card>
+
+      {isEmailable(document.docType) && <DocumentEmailHistory documentId={document.id} />}
 
       {eligible && document.einvoiceStatus === "FAILED" && document.einvoiceError && (
         <Card className="mt-4 border-danger/40 bg-danger-bg px-4 py-3 text-sm text-danger">

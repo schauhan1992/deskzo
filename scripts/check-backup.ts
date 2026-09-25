@@ -15,7 +15,8 @@
  * Everything is created under a temporary directory and a reserved filename prefix, and removed
  * again, so this is safe to run against a database with real data in it.
  */
-import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { db } from "../src/lib/db";
@@ -45,7 +46,31 @@ import {
   type ScheduleState,
 } from "../src/lib/backup/schedule";
 import { readSidecar, sidecarPath, writeSidecar } from "../src/lib/backup/sidecar";
-import { pruneOldBackups, filesOnDisk, resolveDumpTool, settleStaleRuns } from "../src/lib/backup/run";
+import {
+  pruneOldBackups,
+  filesOnDisk,
+  presentBackups,
+  resolveDumpTool,
+  settleStaleRuns,
+} from "../src/lib/backup/run";
+import {
+  collectGarbage,
+  manifestExists,
+  reassemble,
+  readManifest,
+  storeDump,
+  storeSize,
+  writeManifest,
+} from "../src/lib/backup/chunks";
+import { gzipSync } from "node:zlib";
+import {
+  ARCHIVE_EXTENSION,
+  checkPassphrase,
+  extractArchive,
+  passphraseProblem,
+  readArchiveHeader,
+  writeArchive,
+} from "../src/lib/backup/archive";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: unknown = "") {
@@ -75,6 +100,46 @@ function file(name: string, takenAt: Date, keep?: boolean): BackupFile {
   return { filename: name, takenAt, ...(keep === undefined ? {} : { keep }) };
 }
 const names = (files: BackupFile[]) => files.map((f) => f.filename).sort().join(",");
+
+/**
+ * Compressible, structured, and deterministic — a stand-in for a dump.
+ *
+ * Not random bytes: random data does not compress, which would make the compression comparison in
+ * the chunk section meaningless. Not a real `pg_dump` either, because this suite has to run the
+ * same way on a machine where the database holds five rows.
+ *
+ * The generator is a deterministic xorshift, so this fixture is identical on every machine and
+ * every run. A chunker test whose input varies is a test whose failures do not reproduce.
+ */
+function syntheticDump(rows: number): Buffer {
+  const words = ["invoice", "renewal", "autodesk", "kochi", "subscription", "seat", "amc", "gstin", "ledger"];
+  let x = 0x2545f491;
+  const next = () => {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    return x;
+  };
+  const parts: Buffer[] = [];
+  for (let i = 0; i < rows; i++) {
+    const filler = Array.from({ length: 12 }, () => words[next() % words.length]).join(" ");
+    parts.push(Buffer.from(`${i}\t${next()}\t${filler}\n`, "utf8"));
+  }
+  return Buffer.concat(parts);
+}
+
+/**
+ * The same dump with a row inserted near the front, so every byte after it shifts.
+ *
+ * The shift is the point. It is what tells a content-defined chunker apart from a fixed-size one,
+ * and it is what makes two dumps share most of their pieces rather than none.
+ */
+function withInsertion(dump: Buffer): Buffer {
+  const at = Math.floor(dump.length * 0.1);
+  return Buffer.concat([dump.subarray(0, at), Buffer.from("an inserted row\n".repeat(200)), dump.subarray(at)]);
+}
 
 async function main() {
   section("Filenames");
@@ -565,6 +630,452 @@ async function main() {
     // be found" is a thing to discover now rather than at 2am.
     const tool = await resolveDumpTool("pg_dump");
     ok("pg_dump resolves", true, tool ? tool.via : "not found here — backups would fail on this machine");
+  }
+
+  // ── The sealed archive ────────────────────────────────────────────────────────────────────────
+  section("The archive somebody downloads and uploads back");
+
+  /**
+   * This format exists to fix two failures the `.dump` + `.dump.json` pair could not.
+   *
+   * The pair travels as two files, and an offsite rule matching `*.dump` drops the sidecar — which
+   * is the half that says which key the data was written under. The restore then succeeds and every
+   * encrypted column comes back as noise. And the dump is readable: a complete copy of the business
+   * in a file whose whole purpose is to be carried somewhere else.
+   *
+   * So: one sealed file. These assertions are what make that claim true rather than intended —
+   * particularly the three refusals, because a backup format that accepts a damaged file is worse
+   * than one that accepts nothing.
+   */
+  {
+    const dir = await mkdtemp(path.join(tmpdir(), "wroffy-archive-check-"));
+    try {
+      const PASS = "correct horse battery staple";
+      const SECRET = "the-auth-secret-of-the-source-instance";
+      // Over a megabyte, so the body crosses stream chunk boundaries rather than fitting in one.
+      const body = Buffer.concat([Buffer.from("PGDMP", "latin1"), randomBytes(1024 * 1024)]);
+      const dumpPath = path.join(dir, "source.dump");
+      await writeFile(dumpPath, body);
+
+      const archivePath = path.join(dir, `backup${ARCHIVE_EXTENSION}`);
+      const takenAt = new Date("2026-09-21T12:00:00.000Z");
+      await writeArchive({
+        dumpPath,
+        outPath: archivePath,
+        passphrase: PASS,
+        meta: {
+          takenAt,
+          schemaVersion: "20260921120707_report_window_indexes",
+          secretFingerprint: "abc123def456",
+          via: "pg_dump (host)",
+          includeSecret: SECRET,
+        },
+      });
+
+      const header = await readArchiveHeader(archivePath);
+      ok("the header reads without the passphrase", header.takenAt === takenAt.toISOString(), header.takenAt);
+      ok(
+        "  so a folder of these can be told apart before anybody types anything",
+        header.schemaVersion === "20260921120707_report_window_indexes" && header.dumpBytes === body.length,
+        `schema ${header.schemaVersion}, ${header.dumpBytes} bytes inside`,
+      );
+
+      const raw = await readFile(archivePath);
+      ok(
+        "the sealed AUTH_SECRET is nowhere in the file in the clear",
+        !raw.includes(Buffer.from(SECRET, "utf8")),
+        "this file is the key to the vault; that is the whole reason it is sealed",
+      );
+      ok(
+        "  and neither is the dump's own content",
+        raw.indexOf(body.subarray(100, 200)) === -1,
+        "a plaintext run from the middle would mean the body was never encrypted",
+      );
+
+      ok("the right passphrase is recognised", checkPassphrase(header, PASS));
+      ok(
+        "  a near miss is not",
+        !checkPassphrase(header, "correct horse battery stapl"),
+        "checked against a sealed verifier, so this answers in microseconds rather than after a 40MB stream",
+      );
+
+      const outPath = path.join(dir, "restored.dump");
+      const extracted = await extractArchive({ archivePath, outDumpPath: outPath, passphrase: PASS });
+      ok("the dump comes back byte for byte", (await readFile(outPath)).equals(body), `${body.length} bytes`);
+      ok("  and the sealed secret with it", extracted.secret === SECRET, "this is what lets a restore onto a fresh server keep the vault");
+
+      // ── The three refusals ──────────────────────────────────────────────────────────────────
+      const refused = async (label: string, run: () => Promise<unknown>, expected: string) => {
+        let name: string | null = null;
+        try {
+          await run();
+        } catch (e) {
+          name = (e as Error).name;
+        }
+        ok(label, name === expected, name ?? "it did not throw");
+      };
+
+      await refused(
+        "a wrong passphrase is refused",
+        () => extractArchive({ archivePath, outDumpPath: path.join(dir, "no.dump"), passphrase: "a different passphrase" }),
+        "PassphraseError",
+      );
+      ok(
+        "  leaving no half-written dump behind",
+        await stat(path.join(dir, "no.dump")).then(() => false).catch(() => true),
+        "a partial file here is one somebody would later try to restore",
+      );
+
+      const tampered = Buffer.from(raw);
+      tampered[Math.floor(tampered.length / 2)] ^= 0xff;
+      const tamperedPath = path.join(dir, `tampered${ARCHIVE_EXTENSION}`);
+      await writeFile(tamperedPath, tampered);
+      await refused(
+        "one flipped byte anywhere in the body is caught",
+        () => extractArchive({ archivePath: tamperedPath, outDumpPath: path.join(dir, "t.dump"), passphrase: PASS }),
+        "ArchiveFormatError",
+      );
+
+      const cutPath = path.join(dir, `cut${ARCHIVE_EXTENSION}`);
+      await writeFile(cutPath, raw.subarray(0, raw.length - 5000));
+      await refused(
+        "a truncated archive is caught — the shape a half-finished upload takes",
+        () => extractArchive({ archivePath: cutPath, outDumpPath: path.join(dir, "c.dump"), passphrase: PASS }),
+        "ArchiveFormatError",
+      );
+
+      let rawDumpMessage = "";
+      try {
+        await readArchiveHeader(dumpPath);
+      } catch (e) {
+        rawDumpMessage = (e as Error).message;
+      }
+      ok(
+        "a raw pg_dump is refused by name, not by confusion",
+        rawDumpMessage.includes("raw pg_dump"),
+        rawDumpMessage || "it did not throw",
+      );
+
+      ok("a short passphrase is refused", passphraseProblem("short") !== null);
+      await refused(
+        "  and by the writer too, not only by the form",
+        () =>
+          writeArchive({
+            dumpPath,
+            outPath: path.join(dir, "never.wbak"),
+            passphrase: "tooshort",
+            meta: { takenAt, schemaVersion: null, secretFingerprint: null, via: null, includeSecret: null },
+          }),
+        "PassphraseError",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  // ── Deduplication ─────────────────────────────────────────────────────────────────────────────
+  section("Storing the same database many times without storing it many times");
+
+  /**
+   * `pg_dump` has no incremental mode, so the saving is made downstream of it: a dump is cut into
+   * content-defined chunks, each stored once under the hash of its contents, and a backup is the
+   * list of hashes it needs. Two dumps a day apart share nearly every chunk.
+   *
+   * Three properties make that true rather than hopeful, and each has an assertion here:
+   *
+   *   1. A change costs only the chunks it touched. Fixed-size chunks would fail this — inserting
+   *      one row shifts every later byte, so every downstream chunk would hash differently and an
+   *      "incremental" backup would quietly store 100% every time.
+   *   2. The dump must be uncompressed. Measured below, and it is not a close call.
+   *   3. Deleting one backup must not break the others, because they share their pieces.
+   */
+  {
+    const dir = await mkdtemp(path.join(tmpdir(), "wroffy-chunk-check-"));
+    try {
+      /**
+       * Comfortably past `MAX_CHUNK`, so boundaries are actually exercised.
+       *
+       * The first version of this fixture was 1.01 MB against a 1 MiB ceiling. It never had to cut,
+       * produced exactly one chunk, and every assertion below then passed or failed for a reason
+       * that had nothing to do with chunking.
+       */
+      const first = syntheticDump(40_000);
+      const a = path.join(dir, "a.dump");
+      await writeFile(a, first);
+
+      const m1 = await storeDump(dir, a);
+      await writeManifest(dir, "one", m1);
+      ok("a dump splits into chunks", m1.chunks.length > 3, `${m1.chunks.length} chunks from ${first.length} bytes`);
+      ok("  and the first one stores every piece", m1.newChunks === m1.chunks.length);
+
+      const back = path.join(dir, "back.dump");
+      await reassemble(dir, m1, back);
+      ok("it rebuilds byte for byte", (await readFile(back)).equals(first), "a backup that does not come back is not a backup");
+
+      const second = withInsertion(first);
+      const b = path.join(dir, "b.dump");
+      await writeFile(b, second);
+
+      const m2 = await storeDump(dir, b);
+      await writeManifest(dir, "two", m2);
+      ok(
+        "an insertion makes only the chunks it touched new",
+        m2.newChunks <= 2,
+        `${m2.newChunks} of ${m2.chunks.length} chunks new — with fixed-size chunks every one after the insertion would be`,
+      );
+      ok(
+        "  and the shifted dump still rebuilds exactly",
+        await (async () => {
+          const out = path.join(dir, "b-back.dump");
+          await reassemble(dir, m2, out);
+          return (await readFile(out)).equals(second);
+        })(),
+      );
+
+      /**
+       * The reason `runBackup` dumps chunked backups with `--compress=0`.
+       *
+       * Both files below are compressed *after* the change, which is the only faithful comparison:
+       * a real edit goes through the compressor and everything downstream of it comes out different.
+       * Splicing bytes into an already-compressed file instead makes compression look better than
+       * uncompressed, which is an artefact of the test rather than a property of the format.
+       */
+      const czDir = await mkdtemp(path.join(tmpdir(), "wroffy-chunk-cz-"));
+      try {
+        const ca = path.join(czDir, "a.gz");
+        const cb = path.join(czDir, "b.gz");
+        await writeFile(ca, gzipSync(first, { level: 6 }));
+        await writeFile(cb, gzipSync(second, { level: 6 }));
+        const c1 = await storeDump(czDir, ca);
+        const c2 = await storeDump(czDir, cb);
+        const compressedShare = c2.newBytes / Math.max(c1.newBytes, 1);
+        const plainShare = m2.newBytes / Math.max(m1.newBytes, 1);
+        ok(
+          "a compressed dump deduplicates to nothing, which is why chunked backups are not compressed",
+          compressedShare > plainShare * 2,
+          `compressed re-stores ${(compressedShare * 100).toFixed(0)}%, uncompressed ${(plainShare * 100).toFixed(0)}% — same change, same chunker`,
+        );
+      } finally {
+        await rm(czDir, { recursive: true, force: true });
+      }
+
+      // ── Sharing means deletion is not a local decision ────────────────────────────────────────
+      const before = await storeSize(dir);
+      const kept = await collectGarbage(dir);
+      ok(
+        "a sweep removes nothing while both backups are listed",
+        kept.removed === 0,
+        "every manifest is read before one byte is deleted, because the pieces are shared",
+      );
+
+      await rm(path.join(dir, ".manifests", "one.json"));
+      const swept = await collectGarbage(dir);
+      ok(
+        "dropping one backup frees only what nothing else needs",
+        swept.removed > 0 && swept.freedBytes < before.bytes,
+        `${swept.removed} chunks freed, ${swept.freedBytes} of ${before.bytes} bytes`,
+      );
+
+      const survivor = await readManifest(dir, "two");
+      ok(
+        "  and the backup that stayed still rebuilds",
+        await (async () => {
+          const out = path.join(dir, "survivor.dump");
+          await reassemble(dir, survivor!, out);
+          return (await readFile(out)).equals(second);
+        })(),
+        "this is the assertion that catches a sweep which deletes shared pieces",
+      );
+
+      // ── A damaged store is caught before a restore, not during one ────────────────────────────
+      const prefixes = await readdir(path.join(dir, ".chunks"));
+      const victimDir = path.join(dir, ".chunks", prefixes[0]!);
+      await rm(path.join(victimDir, (await readdir(victimDir))[0]!));
+
+      let threw: string | null = null;
+      try {
+        await reassemble(dir, survivor!, path.join(dir, "nope.dump"));
+      } catch (e) {
+        threw = (e as Error).name;
+      }
+      ok("a missing piece is refused rather than restored short", threw !== null, threw ?? "it did not throw");
+      ok(
+        "  leaving no partial dump behind",
+        await stat(path.join(dir, "nope.dump")).then(() => false).catch(() => true),
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  // ── Both kinds in one folder ──────────────────────────────────────────────────────────────────
+  section("Pruning and presence once a backup can have no file");
+
+  /**
+   * The section above proves the chunk store behaves on its own. This one proves the rest of the
+   * module knows it exists.
+   *
+   * Every part of this feature that was written when a backup *was* a file has a way of being
+   * quietly wrong about one that is not. The pruner removes a path that was never written, succeeds,
+   * and leaves the manifest behind for ever. The listing screen asks "is the file in the folder"
+   * and gets no for a backup that is perfectly restorable. Neither failure raises anything; both are
+   * found by somebody trying to restore, which is the worst possible moment.
+   *
+   * So the fixture below is both kinds in one folder — real `.dump` files, a real manifest over real
+   * chunks, real rows — and the real functions are run against it.
+   */
+  {
+    const dir = await mkdtemp(path.join(tmpdir(), "wroffy-backup-wiring-"));
+    /**
+     * The dumps the chunked backups are made from live outside the backup folder.
+     *
+     * `runBackup` writes its working copy under a hidden name inside the directory and deletes it
+     * the moment the pieces are in the store, so a `.dump` left sitting there would be a file no
+     * real run ever leaves — and the `filesOnDisk` counts below would be answering about the
+     * fixture rather than about the pruner.
+     */
+    const work = await mkdtemp(path.join(tmpdir(), "wroffy-backup-wiring-src-"));
+    try {
+      const older = syntheticDump(20_000);
+      const newer = withInsertion(older);
+
+      const rows = await db.backup.createManyAndReturn({
+        data: [
+          { filename: "zzwire-recent.dump", directory: dir, kind: "FULL", status: "SUCCEEDED", startedAt: realAgo(1 * HOUR), finishedAt: realAgo(1 * HOUR), sizeBytes: BigInt(4096), via: "check" },
+          { filename: "zzwire-recent.chunked", directory: dir, kind: "INCREMENTAL", status: "SUCCEEDED", startedAt: realAgo(2 * HOUR), finishedAt: realAgo(2 * HOUR), sizeBytes: BigInt(newer.length), via: "check" },
+          { filename: "zzwire-old.dump", directory: dir, kind: "FULL", status: "SUCCEEDED", startedAt: realAgo(400 * DAY), finishedAt: realAgo(400 * DAY), sizeBytes: BigInt(4096), via: "check" },
+          { filename: "zzwire-old.chunked", directory: dir, kind: "INCREMENTAL", status: "SUCCEEDED", startedAt: realAgo(401 * DAY), finishedAt: realAgo(401 * DAY), sizeBytes: BigInt(older.length), via: "check" },
+        ],
+        select: { id: true, filename: true },
+      });
+      /** The manifest of a chunked backup is named for its row, so the ids are the fixture. */
+      const idOf = (filename: string) => rows.find((r) => r.filename === filename)!.id;
+
+      for (const name of ["zzwire-recent.dump", "zzwire-old.dump"]) {
+        const dump = path.join(dir, name);
+        await writeFile(dump, "PGDMP not really, but a file", "utf8");
+        await writeFile(sidecarPath(dump), JSON.stringify({ takenAt: NOW.toISOString() }), "utf8");
+      }
+
+      // Stored oldest first, the order real runs happen in, so the second manifest's `newChunks` is
+      // the number a real incremental run would have reported and the guard below is measuring the
+      // thing it claims to. What matters either way is that the two overlap: pruning a backup whose
+      // pieces nothing else holds could not tell a correct sweep from a destructive one.
+      const olderSource = path.join(work, "older.dump");
+      await writeFile(olderSource, older);
+      await writeManifest(dir, idOf("zzwire-old.chunked"), await storeDump(dir, olderSource));
+
+      const newerSource = path.join(work, "newer.dump");
+      await writeFile(newerSource, newer);
+      const newerManifest = await storeDump(dir, newerSource);
+      await writeManifest(dir, idOf("zzwire-recent.chunked"), newerManifest);
+      ok(
+        "the two chunked backups really do share pieces",
+        newerManifest.newChunks < newerManifest.chunks.length,
+        `${newerManifest.newChunks} of ${newerManifest.chunks.length} chunks new — without sharing, the sweep below would prove nothing`,
+      );
+
+      ok(
+        "a chunked backup has no file of its own to delete",
+        await stat(path.join(dir, "zzwire-old.chunked")).then(() => false).catch(() => true),
+        "which is exactly how a pruner that only knows how to rm one reports success and removes nothing",
+      );
+
+      const storeBefore = await storeSize(dir);
+      const pruned = await pruneOldBackups(dir, { keepDays: DEFAULT_KEEP_DAYS, keepMinimum: 2 });
+      ok("both kinds age out under the one retention rule", pruned === 2, pruned);
+
+      const left = await filesOnDisk(dir);
+      ok("the old FULL backup's file went, the recent one stayed", !left.has("zzwire-old.dump") && left.has("zzwire-recent.dump"), [...left].sort().join(","));
+      ok(
+        "the old chunked backup's manifest went instead",
+        !(await manifestExists(dir, idOf("zzwire-old.chunked"))),
+        "a manifest outliving its row is a backup gone from the log and still pinning its chunks in the store, where nothing will ever free them",
+      );
+      ok("  and the surviving chunked backup's manifest did not", await manifestExists(dir, idOf("zzwire-recent.chunked")));
+
+      const rowsLeft = await db.backup.findMany({ where: { directory: dir }, select: { filename: true } });
+      const remainingRows = rowsLeft.map((r) => r.filename).sort().join(",");
+      ok("the rows went with the data, whichever kind", remainingRows === "zzwire-recent.chunked,zzwire-recent.dump", remainingRows);
+
+      const storeAfter = await storeSize(dir);
+      const survivor = await readManifest(dir, idOf("zzwire-recent.chunked"));
+      ok(
+        "the sweep that follows the prune frees what the pruned backup alone needed",
+        storeAfter.chunks < storeBefore.chunks && storeAfter.bytes < storeBefore.bytes,
+        `${storeBefore.chunks} chunks before, ${storeAfter.chunks} after`,
+      );
+      ok(
+        "  and keeps exactly what the surviving manifest names — no more, no less",
+        !!survivor && storeAfter.chunks === new Set(survivor.chunks).size,
+        `${storeAfter.chunks} left, ${survivor ? new Set(survivor.chunks).size : "no manifest"} named`,
+      );
+
+      /**
+       * The assertion standing between this feature and its catastrophic version.
+       *
+       * Deleting "this backup's chunks" as the backup is pruned reads as the obvious thing to do and
+       * is the one thing that must never happen: the pieces are shared, so it takes them out from
+       * under every other backup that named them — most of them. Nothing throws, nothing is logged,
+       * the settings page looks identical, and it is discovered at a restore. The only order that
+       * cannot do it is the one here: drop the doomed manifest first, then sweep whatever the
+       * survivors no longer name. So the survivor is rebuilt rather than merely listed.
+       */
+      ok(
+        "and the backup that stayed rebuilds byte for byte afterwards",
+        await (async () => {
+          if (!survivor) return false;
+          const out = path.join(work, "survivor.dump");
+          await reassemble(dir, survivor, out);
+          return (await readFile(out)).equals(newer);
+        })(),
+        `${newer.length} bytes back out of a store that has just been pruned and swept`,
+      );
+
+      // ── What the screen is allowed to offer ─────────────────────────────────────────────────────
+      /**
+       * `presentBackups` decides whether a row gets a Download and a Restore button, and it has to
+       * ask a different question per kind: a FULL backup *is* its file, a chunked one is its
+       * manifest. Both directions are checked, and the absent one is the one that matters — a row
+       * wrongly reported present is a restore offered for data that is not there, which fails after
+       * the schema has already been dropped.
+       */
+      const listed: { id: string; filename: string; kind: "FULL" | "INCREMENTAL" }[] = [
+        { id: idOf("zzwire-recent.dump"), filename: "zzwire-recent.dump", kind: "FULL" },
+        { id: idOf("zzwire-old.dump"), filename: "zzwire-old.dump", kind: "FULL" },
+        { id: idOf("zzwire-recent.chunked"), filename: "zzwire-recent.chunked", kind: "INCREMENTAL" },
+        { id: idOf("zzwire-old.chunked"), filename: "zzwire-old.chunked", kind: "INCREMENTAL" },
+      ];
+      const present = await presentBackups(dir, listed);
+
+      ok("a FULL backup whose file is in the folder is present", present.has(idOf("zzwire-recent.dump")));
+      ok(
+        "a chunked backup is present on its manifest, not on a file that was never written",
+        present.has(idOf("zzwire-recent.chunked")),
+        "asking `is the .dump there` hides every chunked backup in the list, restorable or not",
+      );
+      ok(
+        "a FULL backup whose file has gone is not present",
+        !present.has(idOf("zzwire-old.dump")),
+        "the row survives a hand-deleted file; the button must not",
+      );
+      ok("a chunked backup whose manifest has gone is not present", !present.has(idOf("zzwire-old.chunked")));
+      ok("and nothing else crept into the answer", present.size === 2, present.size);
+
+      /**
+       * The backup folder on a mount that has gone away.
+       *
+       * This is asked once for a whole page of rows, so it has to come back empty rather than throw.
+       * "Nothing is restorable right now" is a page somebody can act on; a stack trace on the
+       * settings screen is not.
+       */
+      const moved = await presentBackups(path.join(dir, "not-here"), listed);
+      ok("a backup folder that is not there reports nothing present, rather than throwing", moved.size === 0, moved.size);
+    } finally {
+      await db.backup.deleteMany({ where: { directory: dir } });
+      await rm(dir, { recursive: true, force: true });
+      await rm(work, { recursive: true, force: true });
+    }
   }
 
   console.log(failures === 0 ? "\nAll backup checks passed.\n" : `\n${failures} check(s) failed.\n`);

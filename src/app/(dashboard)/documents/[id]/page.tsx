@@ -3,9 +3,12 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { DocumentDetail } from "@/components/documents/document-detail";
+import { viewerHas } from "@/actions/permission";
+import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function DocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const [{ id }, user] = await Promise.all([params, requireUser()]);
+  if (!(await viewerHas("documents.view"))) return <NoAccessNotice title="Document" permission="documents.view" />;
 
   /**
    * `company` is the other party — the customer on a sales document, the vendor on a purchase one —

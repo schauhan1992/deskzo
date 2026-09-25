@@ -1,21 +1,26 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { detectSalesWins } from "@/lib/wins/detect";
 import { Prisma, type OrderStatus, type OrderBusinessType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireUser } from "@/lib/session";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
-import { hasEffectivePermission } from "@/actions/permission";
+import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatOrderId } from "@/lib/order-id";
 import { createOrderSchema, approveOrderSchema, processOrderSchema } from "@/lib/validation/order";
-import { isVendorRelationshipType } from "@/lib/validation/company";
+import { isCustomerRelationshipType, isVendorRelationshipType } from "@/lib/validation/company";
 import { canResellerTrade, resellerStatusLabels } from "@/lib/reseller-onboarding";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import type { ActionResult } from "@/actions/company";
+import { checkTerms, recordDecision, MIN_REASON } from "@/lib/credit/guard";
+import type { CreditAssessment } from "@/lib/credit/engine";
+import { orderCreditPosition } from "@/lib/credit/order";
 
 /**
  * A commission's payee must be a real commission party, and the account it's paid into must belong
@@ -59,9 +64,27 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
   const data = parsed.data;
 
   const company = await db.company.findUnique({ where: { id: data.companyId } });
-  if (!company) {
+  // Scoped: an order can only be punched for an account this person could open. It took any id.
+  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  /**
+   * Terms set on the order itself, longer than the customer's credit record supports, are an
+   * override. An order left on the customer's default is not — that default was its own decision
+   * — though approval still weighs both against the rating as it stands then.
+   */
+  const termsCheck = data.paymentTerms
+    ? await checkTerms({
+        userId: user.id,
+        companyId: company.id,
+        relationshipType: company.relationshipType,
+        terms: data.paymentTerms,
+        previousTerms: company.paymentTerms,
+        reason: data.creditOverrideReason,
+        subject: "Terms on a new order",
+      })
+    : ({ ok: true, decision: null } as const);
+  if (!termsCheck.ok) return { ok: false, error: termsCheck.error };
   const location = await db.companyLocation.findUnique({ where: { id: data.locationId } });
   if (!location || location.companyId !== data.companyId) {
     return { ok: false, error: "That location does not belong to this company." };
@@ -133,6 +156,16 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
   });
 
   await recordAudit({ userId: user.id, action: "CREATE", entityType: "Order", entityId: order.id, entityLabel: `Order for ${company.name}` });
+  if (termsCheck.decision) {
+    await recordDecision({
+      userId: user.id,
+      companyId: company.id,
+      orderId: order.id,
+      kind: "ORDER",
+      ...termsCheck.decision,
+      detail: termsCheck.decision.detail.replace("a new order", formatOrderId(order.orderSeq)),
+    });
+  }
 
   await Promise.all(
     data.watcherUserIds
@@ -163,7 +196,7 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { orderId, approved, notes } = parsed.data;
+  const { orderId, approved, notes, creditOverrideReason } = parsed.data;
 
   const order = await db.companyProduct.findUnique({ where: { id: orderId }, include: { company: true } });
   if (!order) {
@@ -188,6 +221,34 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
     throw err;
   }
 
+  /**
+   * Credit, weighed now rather than when the order was punched: the customer may have stopped
+   * paying in between. Terms longer than the rating supports (unless an override for this order
+   * was already recorded when it was punched), and a balance that would go over the limit, each
+   * need `credit.override` and a reason. Rejecting never does.
+   */
+  let creditDecision: { assessment: CreditAssessment; detail: string; reason: string } | null = null;
+  if (approved && isCustomerRelationshipType(order.company.relationshipType)) {
+    const position = await orderCreditPosition(order.id);
+    const concerns = position ? position.concerns.map((c) => c.text) : [];
+    if (position && concerns.length > 0) {
+      if (!(await hasEffectivePermission(user.id, "credit.override"))) {
+        return {
+          ok: false,
+          error: `This order needs a credit override — ${concerns.join("; and ")}. Ask someone who can override credit, or reject it.`,
+        };
+      }
+      if ((creditOverrideReason ?? "").trim().length < MIN_REASON) {
+        return { ok: false, error: `Say why you're approving it anyway — ${concerns.join("; and ")}.` };
+      }
+      creditDecision = {
+        assessment: position.assessment,
+        detail: `Approved ${formatOrderId(order.orderSeq)} — ${concerns.join("; ")}`,
+        reason: creditOverrideReason!,
+      };
+    }
+  }
+
   const nextStatus: OrderStatus = approved ? "APPROVED" : "REJECTED";
   await db.companyProduct.update({
     where: { id: orderId },
@@ -200,6 +261,9 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
   });
 
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: formatOrderId(order.orderSeq) });
+  if (creditDecision) {
+    await recordDecision({ userId: user.id, companyId: order.companyId, orderId, kind: "ORDER", ...creditDecision });
+  }
 
   if (order.addedByUserId !== user.id) {
     await notifyUser({
@@ -211,6 +275,8 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
     });
   }
 
+  // Booked now: a new customer's first order, or the order that tips somebody past target.
+  if (approved) await detectSalesWins().catch((err) => console.error("sales wins could not be detected", err));
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/companies/${order.companyId}`);
@@ -393,6 +459,7 @@ const orderListInclude = {
 
 export async function listOrders(params?: OrderListParams) {
   const user = await requireUser();
+  if (!(await viewerHas("orders.view"))) return [];
   return db.companyProduct.findMany({
     where: await orderListWhere(user.id, params),
     orderBy: { createdAt: "desc" },
@@ -402,6 +469,7 @@ export async function listOrders(params?: OrderListParams) {
 
 export async function listOrdersPaged(params: OrderListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
+  if (!(await viewerHas("orders.view"))) return { rows: [], total: 0, pendingApproval: 0 };
   // All three queries below take this same `where`, scope included — the page, the total the pager
   // counts against, and the badge. A scoped page with an unscoped total is a pager that walks off
   // the end of the list; a scoped page with an unscoped badge is a queue that never empties.
@@ -423,13 +491,14 @@ export async function listOrdersPaged(params: OrderListParams & { page: number; 
 
 export async function getOrder(id: string) {
   const user = await requireUser();
+  if (!(await viewerHas("orders.view"))) return null;
   // Scoped in the `where` so the include stays exactly as the detail page expects it, and so an
   // order on somebody else's account answers the same way a made-up id does. This page carries the
   // purchase price and the vendor as well as the sale, which is more than the list ever shows.
   const order = await db.companyProduct.findFirst({
     where: { id, ...(await viaCompanyScope(user.id)) },
     include: {
-      company: { select: { id: true, name: true, paymentTerms: true, relationshipType: true } },
+      company: { select: { id: true, name: true, paymentTerms: true, relationshipType: true, customerCategory: { select: CATEGORY_SELECT } } },
       endCustomer: { select: { id: true, name: true } },
       location: { select: { id: true, label: true } },
       item: {

@@ -5,6 +5,7 @@ import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationship
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
+import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { dateRangeFilter } from "@/lib/utils";
 import { pageSlice } from "@/lib/pagination";
 import { isModuleEnabled } from "@/actions/module";
@@ -14,7 +15,7 @@ import { recordAudit } from "@/lib/audit";
 import { noteRecordsRead } from "@/lib/security/bulk-read";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { toPlain } from "@/lib/serialize";
-import { formatOrderId } from "@/lib/order-id";
+import { formatCompanyId, formatOrderId } from "@/lib/order-id";
 import {
   createCompanySchema,
   updateCompanySchema,
@@ -30,8 +31,18 @@ import {
   type CreateCompanyInput,
 } from "@/lib/validation/company";
 import { addCompanyProductSchema, updateCompanyProductSchema } from "@/lib/validation/company-product";
+import { countForBand } from "@/lib/company-size";
+import { mayWorkWithContactsOf, canViewContacts, NO_CONTACTS } from "@/lib/authz/contact-access";
+import { checkTerms, recordDecision } from "@/lib/credit/guard";
+import { CATEGORY_SELECT } from "@/lib/customers/categories";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/** A category a form sent is still there — none at all is fine. */
+async function categoryExists(id: string | undefined): Promise<boolean> {
+  if (!id) return true;
+  return !!(await db.customerCategory.findUnique({ where: { id }, select: { id: true } }));
+}
 
 /** Which module owns a company — each is a separate directory, and records don't move between them. */
 function relationshipFamily(type: CompanyRelationshipType): "client" | "reseller" | "commission-party" | "vendor" {
@@ -41,17 +52,28 @@ function relationshipFamily(type: CompanyRelationshipType): "client" | "reseller
   return "vendor";
 }
 
-function companyScalarData(input: Omit<CreateCompanyInput, "contacts" | "location">) {
+/**
+ * The company's own columns, from a form.
+ *
+ * `currentEmployeeCount` is what is stored now, if anything — so choosing the band a precise count
+ * already falls in keeps that count rather than rounding it down to the band. See `countForBand`.
+ */
+function companyScalarData(
+  input: Omit<CreateCompanyInput, "contacts" | "location">,
+  currentEmployeeCount: number | null = null,
+) {
   return {
     name: input.name.trim(),
     normalizedName: normalizeCompanyName(input.name),
     industryId: input.industryId || null,
-    category: input.category || null,
+    // The old free-text category, left alone unless something still sends it — see customerCategoryId.
+    ...(input.category !== undefined ? { category: input.category || null } : {}),
+    ...(input.customerCategoryId !== undefined ? { customerCategoryId: input.customerCategoryId || null } : {}),
     companyType: input.companyType || null,
     relationshipType: input.relationshipType,
     website: input.website || null,
     linkedinUrl: input.linkedinUrl || null,
-    employeeCount: input.employeeCount ?? null,
+    employeeCount: countForBand(input.employeeBand, currentEmployeeCount),
     paymentTerms: input.paymentTerms,
     dunsNumber: input.dunsNumber || null,
     tags: input.tags,
@@ -59,7 +81,88 @@ function companyScalarData(input: Omit<CreateCompanyInput, "contacts" | "locatio
   };
 }
 
-export async function createCompany(input: unknown): Promise<ActionResult<{ id: string }>> {
+export type CompanyMatch = {
+  id: string;
+  /** The clean reference, e.g. CMP-000123 — what the link opens. */
+  ref: string;
+  name: string;
+  city: string | null;
+  relationshipType: CompanyRelationshipType;
+  owner: string | null;
+};
+
+export type CompanyMatches = {
+  /** Companies this user can open whose name contains what was typed, closest first. */
+  matches: CompanyMatch[];
+  /**
+   * The one that would make saving fail — same name once normalised. `visible: false` when it exists
+   * but is assigned to somebody else: saying so is no more than `createCompany` itself says on the
+   * way out, and it is said before the rest of the form has been filled in rather than after.
+   */
+  duplicate: { visible: true; match: CompanyMatch } | { visible: false } | null;
+};
+
+/**
+ * What is already in the CRM under a name, while it is still being typed.
+ *
+ * The create form's promise — "if it already exists, open the existing record instead" — used to be
+ * kept only at Save, after every other field had been filled in. This keeps it at the first letter,
+ * the way the company picker on a lead does.
+ *
+ * Scoped like every other company read: a rep sees their own accounts. The duplicate check is not,
+ * because `normalizedName` is unique across the whole table and the save will be refused whoever
+ * owns the other row — so the form says a duplicate exists without saying anything else about it.
+ */
+export async function findCompanyMatches(query: string): Promise<CompanyMatches> {
+  const user = await requireUser();
+  const typed = String(query ?? "").trim().slice(0, 120);
+  if (!typed) return { matches: [], duplicate: null };
+  const normalizedName = normalizeCompanyName(typed);
+
+  const [found, exact] = await Promise.all([
+    db.company.findMany({
+      // By the normalised name, the one the duplicate rule uses — searching the raw text let "acme   ltd"
+      // (extra spaces) miss "Acme Ltd", and the exact match was then reported as somebody else's.
+      where: { ...(await companyScope(user.id)), normalizedName: { contains: normalizedName } },
+      select: {
+        id: true,
+        companySeq: true,
+        name: true,
+        normalizedName: true,
+        relationshipType: true,
+        owner: { select: { name: true } },
+        locations: { select: { city: true }, take: 1, orderBy: { createdAt: "asc" } },
+      },
+      orderBy: { name: "asc" },
+      take: 40,
+    }),
+    db.company.findUnique({ where: { normalizedName }, select: { id: true } }),
+  ]);
+
+  // The same name first, then names that start with what was typed, then the rest — which is the
+  // order a person scans for "is it this one?".
+  const rank = (c: (typeof found)[number]) =>
+    c.normalizedName === normalizedName ? 0 : c.normalizedName.startsWith(normalizedName) ? 1 : 2;
+  const toMatch = (c: (typeof found)[number]): CompanyMatch => ({
+    id: c.id,
+    ref: formatCompanyId(c.companySeq),
+    name: c.name,
+    city: c.locations[0]?.city ?? null,
+    relationshipType: c.relationshipType,
+    owner: c.owner?.name ?? null,
+  });
+  const ranked = [...found].sort((a, b) => rank(a) - rank(b));
+  const visibleDuplicate = exact ? ranked.find((c) => c.id === exact.id) : undefined;
+
+  return {
+    matches: ranked.filter((c) => c.id !== exact?.id).slice(0, 8).map(toMatch),
+    duplicate: exact ? (visibleDuplicate ? { visible: true, match: toMatch(visibleDuplicate) } : { visible: false }) : null,
+  };
+}
+
+export async function createCompany(
+  input: unknown,
+): Promise<ActionResult<{ id: string; contacts: { id: string; name: string; designation: string }[] }>> {
   const user = await requireUser();
   const parsed = createCompanySchema.safeParse(input);
   if (!parsed.success) {
@@ -67,6 +170,12 @@ export async function createCompany(input: unknown): Promise<ActionResult<{ id: 
   }
 
   const { contacts, location, managedByResellerId, ...companyInput } = parsed.data;
+  if (!(await categoryExists(companyInput.customerCategoryId))) return { ok: false, error: "That customer category isn't there any more — pick another." };
+  // The form leaves the contacts section out for someone without `contacts.view`; this is the same
+  // rule for a caller that sends them anyway.
+  if (contacts.length > 0 && !(await canViewContacts(user.id))) {
+    return { ok: false, error: `${NO_CONTACTS} Create the company without them.` };
+  }
   const normalizedName = normalizeCompanyName(companyInput.name);
 
   const existing = await db.company.findUnique({ where: { normalizedName } });
@@ -76,6 +185,17 @@ export async function createCompany(input: unknown): Promise<ActionResult<{ id: 
       error: `"${existing.name}" already exists in the system — open the existing record instead of creating a duplicate.`,
     };
   }
+  // Longer terms than a new customer's (non-)record supports need an override — see src/lib/credit/guard.ts.
+  const termsCheck = await checkTerms({
+    userId: user.id,
+    companyId: null,
+    relationshipType: companyInput.relationshipType,
+    terms: companyInput.paymentTerms,
+    reason: companyInput.creditOverrideReason,
+    subject: "Default terms",
+  });
+  if (!termsCheck.ok) return { ok: false, error: termsCheck.error };
+
   if (managedByResellerId) {
     const reseller = await db.company.findUnique({ where: { id: managedByResellerId } });
     if (!reseller || reseller.relationshipType !== "RESELLER") {
@@ -115,6 +235,7 @@ export async function createCompany(input: unknown): Promise<ActionResult<{ id: 
             phone: c.phone || null,
             linkedinUrl: c.linkedinUrl || null,
             isPrimary: c.isPrimary,
+            receivesDocuments: c.receivesDocuments,
           })),
         },
         locations: {
@@ -125,21 +246,38 @@ export async function createCompany(input: unknown): Promise<ActionResult<{ id: 
               city: location.city || null,
               state: location.state || null,
               country: location.country || null,
+              // Dropped until now: the form collected a PIN and this never wrote it, so every
+              // company created from the app had an address with no PIN code at all.
+              pincode: location.pincode || null,
               gstNumber: location.gstNumber || null,
               gstTreatment: location.gstTreatment,
               isPrimary: true,
+              /**
+               * The only address a new company has is its billing and its shipping address.
+               *
+               * The schema says as much — "both until somebody says otherwise" — but these were never
+               * written, so the column default of false won, and a company created from the app had
+               * no billing address for its first invoice to default from.
+               */
+              isBilling: true,
+              isShipping: true,
             },
           ],
         },
       },
+      // Returned so a form that created a contact alongside the company can select it straight away.
+      select: { id: true, name: true, contacts: { select: { id: true, name: true, designation: true } } },
     });
 
+    if (termsCheck.decision) {
+      await recordDecision({ userId: user.id, companyId: company.id, kind: "TERMS", ...termsCheck.decision });
+    }
     await recordAudit({ userId: user.id, action: "CREATE", entityType: "Company", entityId: company.id, entityLabel: company.name });
 
     revalidatePath("/companies");
     revalidatePath("/vendors");
     revalidatePath("/commission-parties");
-    return { ok: true, data: { id: company.id } };
+    return { ok: true, data: { id: company.id, contacts: company.contacts } };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "A company with this name already exists." };
@@ -156,6 +294,7 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
   }
 
   const { id, ...companyInput } = parsed.data;
+  if (!(await categoryExists(companyInput.customerCategoryId))) return { ok: false, error: "That customer category isn't there any more — pick another." };
   const normalizedName = normalizeCompanyName(companyInput.name);
 
   const [existing, current] = await Promise.all([
@@ -168,9 +307,23 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
       error: `"${existing.name}" already exists in the system — company names must be unique.`,
     };
   }
-  if (!current) {
+  /**
+   * Scoped like every other company write. This took any id and saved over it — the profile, the
+   * payment terms, the relationship — whoever's account it was.
+   */
+  if (!current || !(await canSeeCompany(user.id, current.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  const termsCheck = await checkTerms({
+    userId: user.id,
+    companyId: id,
+    relationshipType: companyInput.relationshipType,
+    terms: companyInput.paymentTerms,
+    previousTerms: current.paymentTerms,
+    reason: companyInput.creditOverrideReason,
+    subject: "Default terms",
+  });
+  if (!termsCheck.ok) return { ok: false, error: termsCheck.error };
   // Re-typing within a family is fine (Vendor to Distributor); crossing one isn't. A customer moved
   // to a vendor family drops out of Companies/Customer and loses the tabs holding its order history,
   // and a commission party moved out orphans its linked companies and payee accounts.
@@ -193,10 +346,13 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
   try {
     await db.company.update({
       where: { id },
-      data: { ...companyScalarData(companyInput), vendorStatus },
+      data: { ...companyScalarData(companyInput, current.employeeCount), vendorStatus },
     });
 
     await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Company", entityId: id, entityLabel: companyInput.name });
+    if (termsCheck.decision) {
+      await recordDecision({ userId: user.id, companyId: id, kind: "TERMS", ...termsCheck.decision });
+    }
 
     revalidatePath("/companies");
     revalidatePath(`/companies/${id}`);
@@ -216,6 +372,7 @@ export async function addContact(
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   const user = await requireUser();
+  if (!(await canViewContacts(user.id))) return { ok: false, error: NO_CONTACTS };
   const parsed = contactInputSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -223,7 +380,13 @@ export async function addContact(
   const c = parsed.data;
 
   const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  /**
+   * Scoped like every other company write. This used to check only that the company existed, so any
+   * signed-in user could add a contact to any account by id — including one managed by somebody
+   * else. Out of scope and non-existent answer the same, so an id cannot be used to find out which
+   * accounts are real.
+   */
+  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
 
@@ -236,6 +399,7 @@ export async function addContact(
       phone: c.phone || null,
       linkedinUrl: c.linkedinUrl || null,
       isPrimary: c.isPrimary,
+      receivesDocuments: c.receivesDocuments,
       createdByUserId: user.id,
     },
   });
@@ -255,8 +419,10 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
   const { id, ...c } = parsed.data;
 
   const contact = await db.contact.findUnique({ where: { id } });
-  if (!contact) {
-    return { ok: false, error: "Contact not found." };
+  // Scoped like `addContact`: this edited any contact by id, on any account. Out of scope and
+  // missing answer the same.
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
   }
 
   await db.contact.update({
@@ -268,6 +434,7 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
       phone: c.phone || null,
       linkedinUrl: c.linkedinUrl || null,
       isPrimary: c.isPrimary,
+      receivesDocuments: c.receivesDocuments,
     },
   });
 
@@ -278,10 +445,11 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
 }
 
 export async function deleteContact(id: string): Promise<ActionResult<null>> {
-  await requireUser();
+  const user = await requireUser();
   const contact = await db.contact.findUnique({ where: { id } });
-  if (!contact) {
-    return { ok: false, error: "Contact not found." };
+  // Scoped like `addContact`: this deleted any contact by id, on any account.
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
   }
 
   try {
@@ -310,6 +478,8 @@ export async function assignCompanies(input: unknown): Promise<ActionResult<{ co
     return { ok: false, error: "That person is not a valid, active user." };
   }
 
+  const checked = await checkCallerChange(user.id, companyIds, userId);
+  if (!checked.ok) return checked;
   const result = await db.company.updateMany({
     where: { id: { in: companyIds } },
     data: {
@@ -318,6 +488,7 @@ export async function assignCompanies(input: unknown): Promise<ActionResult<{ co
       assignedAt: new Date(),
     },
   });
+  await auditCallerChange(user.id, checked.data, userId);
 
   if (userId !== user.id) {
     await notifyUser({
@@ -343,23 +514,38 @@ export async function assignCompanies(input: unknown): Promise<ActionResult<{ co
  */
 export async function setCompanyCaller(companyId: string, userId: string | null): Promise<ActionResult<null>> {
   const actor = await requireUser();
-  if (userId) {
-    const caller = await db.user.findUnique({ where: { id: userId } });
-    if (!caller || !caller.active) {
-      return { ok: false, error: "That person is not a valid, active user." };
-    }
-  }
-
-  const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  const company = await db.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, name: true, ownerUserId: true, assignedToUserId: true },
+  });
+  if (!company || !(await canSeeCompany(actor.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  const rights = await reassignRights(actor.id);
+  if (!mayChangeCaller(rights, actor.id, company)) {
+    return { ok: false, error: "You can't change who calls this account." };
+  }
+  if (!userId && !mayLeaveUnassigned(rights)) {
+    return { ok: false, error: "Hand it to a colleague — only someone who can reassign accounts may leave it with no caller." };
+  }
+  if (userId) {
+    const caller = await db.user.findUnique({ where: { id: userId }, select: { active: true } });
+    if (!caller?.active) return { ok: false, error: "That person is not a valid, active user." };
+  }
+  if ((userId ?? null) === company.assignedToUserId) return { ok: true, data: null };
 
   await db.company.update({
     where: { id: companyId },
     data: userId
       ? { assignedToUserId: userId, assignedByUserId: actor.id, assignedAt: new Date() }
       : { assignedToUserId: null, assignedByUserId: null, assignedAt: null },
+  });
+  await recordAudit({
+    userId: actor.id,
+    action: "UPDATE",
+    entityType: "Company",
+    entityId: companyId,
+    entityLabel: `${company.name} — caller: ${await nameOf(company.assignedToUserId)} → ${await nameOf(userId)}`,
   });
 
   if (userId && userId !== actor.id) {
@@ -378,21 +564,87 @@ export async function setCompanyCaller(companyId: string, userId: string | null)
   return { ok: true, data: null };
 }
 
+/** A person's name for the activity log — or "nobody". */
+async function nameOf(userId: string | null | undefined): Promise<string> {
+  if (!userId) return "nobody";
+  return (await db.user.findUnique({ where: { id: userId }, select: { name: true } }))?.name ?? "a removed user";
+}
+
+/**
+ * Whether this person may set the caller on every one of these companies — see src/lib/authz/reassign.ts.
+ * All or nothing: a bulk change that silently skipped the rows it was not allowed would leave
+ * somebody believing a list was reassigned when half of it was not.
+ */
+async function checkCallerChange(
+  actorId: string,
+  companyIds: string[],
+  nextId: string | null,
+): Promise<ActionResult<{ id: string; name: string; assignedToUserId: string | null }[]>> {
+  const rights = await reassignRights(actorId);
+  const companies = await db.company.findMany({
+    where: { id: { in: companyIds }, ...(await companyScope(actorId)) },
+    select: { id: true, name: true, ownerUserId: true, assignedToUserId: true },
+  });
+  if (companies.length !== new Set(companyIds).size) {
+    return { ok: false, error: "Some of the selected companies are not yours to change." };
+  }
+  const refused = companies.filter((c) => !mayChangeCaller(rights, actorId, c));
+  if (refused.length) {
+    return {
+      ok: false,
+      error: `You can't change the caller on ${refused.length === 1 ? refused[0]!.name : `${refused.length} of these companies`} — only on accounts you manage or call.`,
+    };
+  }
+  if (!nextId && !mayLeaveUnassigned(rights)) {
+    return { ok: false, error: "Hand them to a colleague — only someone who can reassign accounts may leave them with no caller." };
+  }
+  return { ok: true, data: companies };
+}
+
+/** One activity-log line per company whose caller actually changes. */
+async function auditCallerChange(actorId: string, companies: { id: string; name: string; assignedToUserId: string | null }[], nextId: string | null) {
+  const to = await nameOf(nextId);
+  for (const c of companies) {
+    if (c.assignedToUserId === nextId) continue;
+    await recordAudit({
+      userId: actorId,
+      action: "UPDATE",
+      entityType: "Company",
+      entityId: c.id,
+      entityLabel: `${c.name} — caller: ${await nameOf(c.assignedToUserId)} → ${to}`,
+    });
+  }
+}
+
 export async function setCompanyOwner(companyId: string, userId: string | null): Promise<ActionResult<null>> {
   const actor = await requireUser();
-  if (userId) {
-    const owner = await db.user.findUnique({ where: { id: userId } });
-    if (!owner || !owner.active) {
-      return { ok: false, error: "That person is not a valid, active user." };
-    }
-  }
-
-  const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true } });
+  // Outside the account scope is answered as missing — and this check comes first because the
+  // account manager *is* the scope: without it, naming yourself was a way to see any company.
+  if (!company || !(await canSeeCompany(actor.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  const rights = await reassignRights(actor.id);
+  if (!mayChangeAccountManager(rights, actor.id, company)) {
+    return { ok: false, error: "You can't change who manages this account." };
+  }
+  if (!userId && !mayLeaveUnassigned(rights)) {
+    return { ok: false, error: "Hand it to a colleague — only someone who can reassign accounts may leave one with nobody." };
+  }
+  if (userId) {
+    const owner = await db.user.findUnique({ where: { id: userId }, select: { active: true } });
+    if (!owner?.active) return { ok: false, error: "That person is not a valid, active user." };
+  }
+  if ((userId ?? null) === company.ownerUserId) return { ok: true, data: null };
 
   await db.company.update({ where: { id: companyId }, data: { ownerUserId: userId } });
+  await recordAudit({
+    userId: actor.id,
+    action: "UPDATE",
+    entityType: "Company",
+    entityId: companyId,
+    entityLabel: `${company.name} — account manager: ${await nameOf(company.ownerUserId)} → ${await nameOf(userId)}`,
+  });
 
   if (userId && userId !== actor.id) {
     await notifyUser({
@@ -499,6 +751,8 @@ type CompanyListParams = {
   assignedToUserId?: string;
   source?: CompanySource;
   industryId?: string;
+  /** A category — which takes in its sub-categories — or one sub-category. */
+  categoryId?: string;
   relationshipType?: CompanyRelationshipType;
   createdFrom?: string;
   createdTo?: string;
@@ -521,8 +775,16 @@ function companyListWhere(params?: CompanyListParams): Prisma.CompanyWhereInput 
       : {}),
     ...(params?.source ? { source: params.source } : {}),
     ...(params?.industryId ? { industryId: params.industryId } : {}),
+    ...categoryFilter(params?.categoryId),
     ...(createdAt ? { createdAt } : {}),
   };
+}
+
+/** A category takes in its sub-categories: "Strategic" lists the key accounts too. */
+function categoryFilter(categoryId?: string): Prisma.CompanyWhereInput {
+  if (!categoryId) return {};
+  if (categoryId === "none") return { customerCategoryId: null };
+  return { OR: [{ customerCategoryId: categoryId }, { customerCategory: { parentId: categoryId } }] };
 }
 
 const companyListInclude = {
@@ -531,6 +793,7 @@ const companyListInclude = {
   createdBy: { select: { id: true, name: true } },
   assignedTo: { select: { id: true, name: true } },
   industry: { select: { id: true, name: true } },
+  customerCategory: { select: CATEGORY_SELECT },
 } as const;
 
 /**
@@ -582,6 +845,7 @@ type CustomerListParams = {
   assignedToUserId?: string;
   source?: CompanySource;
   industryId?: string;
+  categoryId?: string;
   createdFrom?: string;
   createdTo?: string;
 };
@@ -602,6 +866,7 @@ function customerListWhere(params?: CustomerListParams): Prisma.CompanyWhereInpu
       : {}),
     ...(params?.source ? { source: params.source } : {}),
     ...(params?.industryId ? { industryId: params.industryId } : {}),
+    ...categoryFilter(params?.categoryId),
     ...(createdAt ? { createdAt } : {}),
   };
 }
@@ -740,6 +1005,7 @@ export async function listCompanyOptions(params?: { relationshipTypes?: CompanyR
       id: true,
       name: true,
       relationshipType: true,
+      customerCategory: { select: CATEGORY_SELECT },
       contacts: { select: { id: true, name: true, designation: true }, orderBy: { isPrimary: "desc" } },
     },
   });
@@ -921,6 +1187,7 @@ export async function getCompany(id: string) {
     where: { id },
     include: {
       managedByReseller: { select: { id: true, name: true } },
+      customerCategory: { select: CATEGORY_SELECT },
       contacts: { orderBy: { isPrimary: "desc" } },
       leads: {
         orderBy: { createdAt: "desc" },
@@ -1023,9 +1290,22 @@ export async function getCompany(id: string) {
   // and phone to the browser for anyone who opens devtools.
   const restricted = isResellerManaged(company);
   const canViewRestricted = restricted ? await hasEffectivePermission(user.id, "contacts.viewRestricted") : true;
+  /**
+   * The same rule for the view permissions: a part of the account this person may not see is left
+   * out here, not hidden by the page. `getCompany` is an endpoint in its own right, and the customer
+   * page is only one of the things that can call it.
+   */
+  const [seesContacts, seesLeads, seesOrders] = await Promise.all([
+    canViewContacts(user.id),
+    hasEffectivePermission(user.id, "leads.view"),
+    hasEffectivePermission(user.id, "orders.view"),
+  ]);
   return toPlain({
     ...company,
-    contacts: company.contacts.map((c) => redactContactDetails(c, { restricted, canViewRestricted })),
+    contacts: seesContacts ? company.contacts.map((c) => redactContactDetails(c, { restricted, canViewRestricted })) : [],
+    leads: seesLeads ? company.leads : [],
+    products: seesOrders ? company.products : [],
+    ordersAsEndCustomer: seesOrders ? company.ordersAsEndCustomer : [],
   });
 }
 
@@ -1196,11 +1476,21 @@ export async function bulkUpdateCompanies(input: unknown): Promise<ActionResult<
     return { ok: false, error: "Pick something to apply to the selection." };
   }
 
+  /**
+   * Only companies this person can see — for every part of this action, not just the caller.
+   *
+   * It took any ids, so vendor status, tags and the caller could all be changed on accounts the
+   * person could not open. A selection comes from a list that is already scoped, so a mismatch
+   * means a crafted request, and it is refused whole rather than applied to the part that fits.
+   */
   const companies = await db.company.findMany({
-    where: { id: { in: companyIds } },
+    where: { id: { in: companyIds }, ...(await companyScope(user.id)) },
     select: { id: true, relationshipType: true, tags: true },
   });
   if (companies.length === 0) return { ok: false, error: "Those companies no longer exist." };
+  if (companies.length !== new Set(companyIds).size) {
+    return { ok: false, error: "Some of the selected companies are not yours to change." };
+  }
 
   if (vendorStatus) {
     const clients = companies.filter((c) => c.relationshipType === "CLIENT");
@@ -1216,6 +1506,8 @@ export async function bulkUpdateCompanies(input: unknown): Promise<ActionResult<
       const assignee = await db.user.findUnique({ where: { id: nextId }, select: { id: true, active: true } });
       if (!assignee || !assignee.active) return { ok: false, error: "That person is not a valid, active user." };
     }
+    const checked = await checkCallerChange(user.id, companyIds, nextId);
+    if (!checked.ok) return checked;
     await db.company.updateMany({
       where: { id: { in: companyIds } },
       data: {
@@ -1224,6 +1516,8 @@ export async function bulkUpdateCompanies(input: unknown): Promise<ActionResult<
         assignedAt: nextId ? new Date() : null,
       },
     });
+    // After the write, from the values read before it — a log line for a change that failed is a lie.
+    await auditCallerChange(user.id, checked.data, nextId);
     if (nextId && nextId !== user.id) {
       await notifyUser({
         userId: nextId,

@@ -229,13 +229,22 @@ export const HANDOVER_AREAS: HandoverArea[] = [
   },
   {
     key: "inbound-forms",
-    label: "Inbound forms routed to them",
-    detail: "Where new enquiries from the website land. Left pointing at a closed account, they land nowhere.",
+    label: "Forms they own or that route to them",
+    detail:
+      "Event invitations, assessments and enquiry forms they built, and the ones whose new answers land with them. Left on a closed account, nobody can share the form or read what comes in.",
     splittable: false,
     hold: (c, userId) =>
-      c.inboundForm.findMany({ where: { assignToUserId: userId }, orderBy: byId, select: { id: true } }),
-    give: (tx, ids, toUserId) =>
-      tx.inboundForm.updateMany({ where: { id: { in: ids } }, data: { assignToUserId: toUserId } }).then(() => undefined),
+      c.inboundForm.findMany({
+        where: { OR: [{ assignToUserId: userId }, { ownerUserId: userId }] },
+        orderBy: byId,
+        select: { id: true },
+      }),
+    give: async (tx, ids, toUserId, ctx) => {
+      // Two columns, each moved only where it pointed at the leaver — somebody who only received a
+      // form's enquiries does not silently become the owner of it.
+      await tx.inboundForm.updateMany({ where: { id: { in: ids }, assignToUserId: ctx.fromUserId }, data: { assignToUserId: toUserId } });
+      await tx.inboundForm.updateMany({ where: { id: { in: ids }, ownerUserId: ctx.fromUserId }, data: { ownerUserId: toUserId } });
+    },
   },
   {
     key: "vault-credentials",

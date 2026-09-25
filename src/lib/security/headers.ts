@@ -16,6 +16,14 @@ export function needsCamera(pathname: string): boolean {
 }
 
 /**
+ * The one page that asks where somebody is: the access page, for a role that records location at
+ * sign-in. Nowhere else — the location is asked for once, at the door, not tracked afterwards.
+ */
+export function needsLocation(pathname: string): boolean {
+  return pathname === "/access";
+}
+
+/**
  * `self` rather than `*` on the kiosk, and closed everywhere else — so the rest of the app keeps
  * the property that a compromised dependency cannot ask for a camera at all.
  */
@@ -23,7 +31,7 @@ export function permissionsPolicyFor(pathname: string): string {
   return [
     needsCamera(pathname) ? "camera=(self)" : "camera=()",
     "microphone=()",
-    "geolocation=()",
+    needsLocation(pathname) ? "geolocation=(self)" : "geolocation=()",
     "interest-cohort=()",
   ].join(", ");
 }

@@ -1,6 +1,7 @@
 import { logActivity, alertAdmins } from "@/lib/activity";
 import { getSecurityPolicy } from "@/lib/security/store";
 import { isBulkRead } from "@/lib/security/policy";
+import { tenantKey } from "@/lib/tenancy/cache";
 import { throttle } from "@/lib/security/throttle";
 
 /**
@@ -76,13 +77,14 @@ export async function noteRecordsRead(input: {
     if (policy.bulkReadThreshold <= 0) return;
 
     const windowMs = policy.bulkReadWindowMinutes * 60_000;
-    const total = noteReads(input.userId, input.count, windowMs);
+    // Counted per workspace and person — user ids alone repeat across workspaces restored from one backup.
+    const total = noteReads(`${await tenantKey()}|${input.userId}`, input.count, windowMs);
     if (!isBulkRead(total, policy)) return;
 
     // Once over the line the window keeps filling, so without this every subsequent page would
     // raise another critical row and another notification. One per user per window is the signal;
     // the rest is noise that gets the alerting muted.
-    const { write } = throttle(`bulk:${input.userId}`, windowMs);
+    const { write } = throttle(`${await tenantKey()}|bulk:${input.userId}`, windowMs);
     if (!write) return;
 
     await logActivity({

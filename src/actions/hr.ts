@@ -160,6 +160,8 @@ export async function getPerson(userId: string) {
     select: {
       ...directorySelect,
       createdAt: true,
+      // The short reference — USR-000123 — which is what the person's URL canonicalises to.
+      userSeq: true,
       employeeProfile: true,
       directReports: { where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
@@ -270,8 +272,8 @@ export async function recordExit(input: unknown): Promise<ActionResult<null>> {
   const target = await db.user.findUnique({ where: { id: data.userId }, select: { id: true, name: true } });
   if (!target) return { ok: false, error: "That user no longer exists." };
 
-  await db.$transaction([
-    db.employeeProfile.upsert({
+  await db.$transaction(async (tx) => {
+    await tx.employeeProfile.upsert({
       where: { userId: data.userId },
       create: {
         userId: data.userId,
@@ -284,9 +286,9 @@ export async function recordExit(input: unknown): Promise<ActionResult<null>> {
         exitType: data.exitType,
         exitReason: orNull(data.exitReason),
       },
-    }),
-    ...(data.deactivateLogin ? [db.user.update({ where: { id: data.userId }, data: { active: false } })] : []),
-  ]);
+    });
+    for (const op of (data.deactivateLogin ? [tx.user.update({ where: { id: data.userId }, data: { active: false } })] : [])) await op;
+  });
 
   await recordAudit({
     userId: user.id,

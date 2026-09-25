@@ -5,6 +5,7 @@ import { toPlain } from "@/lib/serialize";
 import { requireUser } from "@/lib/session";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { renewalGroup } from "@/lib/subscriptions/proration";
+import { resolveRenewalStage, type RenewalStageKey } from "@/lib/renewals";
 import { pageSlice } from "@/lib/pagination";
 import { addDays } from "@/lib/date-range-presets";
 import { revalidatePath } from "next/cache";
@@ -13,6 +14,7 @@ import { formatOrderId } from "@/lib/order-id";
 import { bulkRenewalTasksSchema } from "@/lib/validation/task";
 import type { ActionResult } from "@/actions/company";
 import type { Prisma } from "@prisma/client";
+import { viewerHas } from "@/actions/permission";
 
 export type RenewalWindow = "expired" | "30" | "60" | "90";
 
@@ -81,6 +83,8 @@ const renewalInclude = {
   },
   // Set once a renewal has been punched, so the list stops asking for one.
   renewedBy: { select: { id: true, orderSeq: true, orderStatus: true } },
+  // Who pinned the stage, where somebody has. The column says so rather than implying the app knew.
+  renewalStageBy: { select: { id: true, name: true } },
   // On a reseller's order this is whose subscription it actually is — renew through the
   // reseller, but the seats and expiry belong to the end customer.
   endCustomer: { select: { id: true, name: true } },
@@ -147,6 +151,133 @@ function withRenewalGroup<T extends RenewalGroupSource>(row: T) {
   };
 }
 
+/** The title `bulkCreateRenewalTasks` writes, which is also how it recognises its own tasks. */
+function renewalTaskTitle(itemName: string, companyName: string) {
+  return `Renew ${itemName} — ${companyName}`;
+}
+
+type StageSource = {
+  id: string;
+  companyId: string;
+  item: { name: string };
+  company: { name: string };
+  renewedBy: { id: string } | null;
+};
+
+/**
+ * What the record already says about how far each renewal has got.
+ *
+ * Four batched queries for the whole page rather than four per row — the alternative is 100 round
+ * trips to render 25 lines, which is the shape of slow list page nobody notices until the book
+ * doubles.
+ *
+ * The task signal matches on company and title because a `Task` has no link to an order. That is
+ * not a guess: `bulkCreateRenewalTasks` recognises its own tasks the same way, so this reads exactly
+ * what that writes. It is the weakest of the four — renaming the product orphans the match — which
+ * is why it is the lowest rung and why the three above it are real foreign keys.
+ */
+async function renewalStageSignals(rows: StageSource[]) {
+  const signals = new Map<
+    string,
+    { renewed: boolean; quoted: boolean; contacted: boolean; taskRaised: boolean; quote: QuoteRef | null }
+  >();
+  if (rows.length === 0) return signals;
+
+  const ids = rows.map((r) => r.id);
+
+  const [quoteLines, calls, tasks] = await Promise.all([
+    /**
+     * A document quoting this subscription's next term.
+     *
+     * Proformas and invoices count as well as proposals: a renewal billed directly, without a quote
+     * ever going out, has plainly got past "Contacted". Cancelled, rejected and expired documents do
+     * not count — a withdrawn quote is not a quote outstanding.
+     */
+    db.tradeDocumentLine.findMany({
+      where: {
+        companyProductId: { in: ids },
+        document: {
+          docType: { in: ["PROPOSAL", "PROFORMA", "INVOICE"] },
+          status: { notIn: ["CANCELLED", "REJECTED", "EXPIRED"] },
+        },
+      },
+      select: {
+        companyProductId: true,
+        document: { select: { id: true, docNumber: true, docType: true, status: true, issueDate: true } },
+      },
+      orderBy: { document: { issueDate: "desc" } },
+    }),
+    db.callLog.findMany({ where: { companyProductId: { in: ids } }, select: { companyProductId: true } }),
+    db.task.findMany({
+      where: {
+        done: false,
+        OR: rows.map((r) => ({ companyId: r.companyId, title: renewalTaskTitle(r.item.name, r.company.name) })),
+      },
+      select: { companyId: true, title: true },
+    }),
+  ]);
+
+  const quoted = new Map<string, QuoteRef>();
+  for (const line of quoteLines) {
+    // Ordered newest first, so the first one seen for an order is the one worth linking to.
+    if (line.companyProductId && !quoted.has(line.companyProductId)) {
+      quoted.set(line.companyProductId, {
+        id: line.document.id,
+        docNumber: line.document.docNumber,
+        docType: line.document.docType,
+        status: line.document.status,
+      });
+    }
+  }
+  const called = new Set(calls.map((c) => c.companyProductId).filter(Boolean) as string[]);
+  const tasked = new Set(tasks.map((t) => `${t.companyId}::${t.title}`));
+
+  for (const row of rows) {
+    const quote = quoted.get(row.id) ?? null;
+    signals.set(row.id, {
+      renewed: Boolean(row.renewedBy),
+      quoted: Boolean(quote),
+      contacted: called.has(row.id),
+      taskRaised: tasked.has(`${row.companyId}::${renewalTaskTitle(row.item.name, row.company.name)}`),
+      quote,
+    });
+  }
+  return signals;
+}
+
+export type QuoteRef = { id: string; docNumber: string; docType: string; status: string };
+
+/**
+ * Each row with the stage it is at, resolved from the evidence and whatever somebody pinned.
+ *
+ * Done here rather than in the component so the list, any export and any future report all answer
+ * the question the same way — a stage worked out twice is a stage that eventually disagrees with
+ * itself.
+ */
+async function withRenewalStage<T extends StageSource & { renewalStage: unknown; renewalStageNote: string | null; renewalStageAt: Date | null; renewalStageBy: { id: string; name: string } | null }>(
+  rows: T[],
+) {
+  const signals = await renewalStageSignals(rows);
+  return rows.map((row) => {
+    const signal = signals.get(row.id) ?? { renewed: false, quoted: false, contacted: false, taskRaised: false, quote: null };
+    const resolved = resolveRenewalStage({
+      override: (row.renewalStage as RenewalStageKey | null) ?? null,
+      signals: signal,
+    });
+    return {
+      ...row,
+      stage: {
+        ...resolved,
+        note: row.renewalStageNote,
+        setAt: row.renewalStageAt,
+        setBy: row.renewalStageBy,
+        /** The document behind a "Quoted", so the cell can link straight to it. */
+        quote: signal.quote,
+      },
+    };
+  });
+}
+
 /**
  * Every matching subscription, with no ceiling on how many that is.
  *
@@ -157,12 +288,13 @@ function withRenewalGroup<T extends RenewalGroupSource>(row: T) {
  */
 export async function listRenewals(params?: { window?: RenewalWindow; search?: string }) {
   const user = await requireUser();
+  if (!(await viewerHas("orders.view"))) return [];
   const rows = await db.companyProduct.findMany({
     where: await renewalWhere(params, new Date(), user.id),
     include: renewalInclude,
     orderBy: renewalOrderBy,
   });
-  return rows.map(withRenewalGroup);
+  return withRenewalStage(rows.map(withRenewalGroup));
 }
 
 /**
@@ -174,6 +306,7 @@ export async function listRenewals(params?: { window?: RenewalWindow; search?: s
  */
 export async function listRenewalsPaged(params: { window?: RenewalWindow; search?: string; page: number; pageSize: number }) {
   const user = await requireUser();
+  if (!(await viewerHas("orders.view"))) return { rows: [], total: 0, expired: 0 };
   const now = new Date();
   const where = await renewalWhere(params, now, user.id);
 
@@ -193,7 +326,7 @@ export async function listRenewalsPaged(params: { window?: RenewalWindow; search
     db.companyProduct.count({ where: { ...where, endDate: { ...where.endDate, lt: now } } }),
   ]);
 
-  return { rows: toPlain(rows.map(withRenewalGroup)), total, expired };
+  return { rows: toPlain(await withRenewalStage(rows.map(withRenewalGroup))), total, expired };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { tenantKey } from "@/lib/tenancy/cache";
 
 export const SECURITY_SETTINGS_ID = "global";
 
@@ -12,17 +13,21 @@ async function fetchSecuritySettings() {
   }
 }
 
-let cache: { value: Awaited<ReturnType<typeof fetchSecuritySettings>>; expiresAt: number } | null = null;
+/** Per workspace — one workspace's SSO settings must never answer for another's sign-in. */
+const cache = new Map<string, { value: Awaited<ReturnType<typeof fetchSecuritySettings>>; expiresAt: number }>();
 const CACHE_TTL_MS = 15_000;
 
 /** Used on the hot path (auth config resolution, which runs on every sign-in and session read) — cached briefly so a policy change still lands within seconds, not instantly. */
 export async function getCachedSecuritySettings() {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
+  const key = await tenantKey();
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
   const value = await fetchSecuritySettings();
-  cache = { value, expiresAt: Date.now() + CACHE_TTL_MS };
+  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
   return value;
 }
 
+/** Everything, every workspace — dropping a cache only costs a re-read. */
 export function invalidateSecuritySettingsCache() {
-  cache = null;
+  cache.clear();
 }

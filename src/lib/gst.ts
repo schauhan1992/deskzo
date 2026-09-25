@@ -85,3 +85,20 @@ export function getPaymentStatus(
   if (paid > total) return { key: "overpaid", label: "Overpaid", tone: "blue" };
   return { key: "paid", label: "Paid", tone: "green" };
 }
+
+/**
+ * The treatment an address should move to when its country changes — or null to leave it alone.
+ *
+ * Only between the two defaults: Unregistered (domestic) and Overseas. A customer abroad billed as
+ * "Unregistered" is taxed as a domestic sale, which is wrong on every invoice; and the quick-create
+ * dialog has no treatment field, so there was no way to put it right there. Anything somebody chose
+ * deliberately — Registered, SEZ, Deemed export — is left exactly as they chose it.
+ */
+export function treatmentForCountryChange(
+  domestic: boolean,
+  current: string | null | undefined,
+): (typeof gstTreatmentValues)[number] | null {
+  if (!domestic && current === "UNREGISTERED") return "OVERSEAS";
+  if (domestic && current === "OVERSEAS") return "UNREGISTERED";
+  return null;
+}

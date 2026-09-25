@@ -2,7 +2,14 @@
 
 import { useId, useState } from "react";
 import type { z } from "zod";
-import { useForm, type UseFormRegister, type FieldValues, type FieldErrors } from "react-hook-form";
+import {
+  useForm,
+  type UseFormRegister,
+  type FieldValues,
+  type FieldErrors,
+  type UseFormWatch,
+  type UseFormSetValue,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import type { GstTreatment } from "@prisma/client";
@@ -22,6 +29,7 @@ import { Star, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { AddressFields } from "@/components/ui/address-fields";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { gstTreatmentValues, gstTreatmentLabels } from "@/lib/gst";
@@ -44,9 +52,17 @@ export type Location = {
 function LocationFields({
   register,
   errors,
+  watch,
+  setValue,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
+  /**
+   * Country, state and city are pickers rather than text boxes, so they cannot be `register`ed —
+   * the form has to hand their current values in and take the new ones back.
+   */
+  watch: UseFormWatch<FieldValues>;
+  setValue: UseFormSetValue<FieldValues>;
 }) {
   // These fields already carry visible labels, so they are wired up with htmlFor rather than
   // aria-label — one source of truth for the wording, and the label text becomes a click target.
@@ -68,30 +84,26 @@ function LocationFields({
         </Label>
         <Input id={`${uid}-address`} {...register("address")} />
       </div>
-      <div className="space-y-1">
-        <Label htmlFor={`${uid}-city`} className="text-xs">
-          City
-        </Label>
-        <Input id={`${uid}-city`} {...register("city")} />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={`${uid}-state`} className="text-xs">
-          State
-        </Label>
-        <Input id={`${uid}-state`} {...register("state")} />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={`${uid}-country`} className="text-xs">
-          Country
-        </Label>
-        <Input id={`${uid}-country`} placeholder="India" {...register("country")} />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={`${uid}-pincode`} className="text-xs">
-          PIN code
-        </Label>
-        <Input id={`${uid}-pincode`} placeholder="400001" {...register("pincode")} />
-        {errors.pincode && <p className="text-xs text-danger">{String(errors.pincode.message)}</p>}
+      {/**
+        * The state here is what decides the tax on every document raised against this address, so
+        * it is chosen from the GST table rather than typed. See `AddressFields`.
+        */}
+      <div className="col-span-2">
+        <AddressFields
+          columns={2}
+          country={String(watch("country") ?? "")}
+          state={String(watch("state") ?? "")}
+          city={String(watch("city") ?? "")}
+          pincode={String(watch("pincode") ?? "")}
+          onChange={(patch) => {
+            for (const [key, value] of Object.entries(patch)) {
+              // `shouldDirty` so the form knows something changed — without it the Save button on
+              // the edit form stays disabled after picking a state and nothing can be saved.
+              setValue(key, value, { shouldDirty: true, shouldValidate: true });
+            }
+          }}
+        />
+        {errors.pincode && <p className="mt-1 text-xs text-danger">{String(errors.pincode.message)}</p>}
       </div>
       <div className="space-y-1">
         <Label htmlFor={`${uid}-gstNumber`} className="text-xs">
@@ -135,6 +147,8 @@ function EditLocationForm({ location, onClose }: { location: Location; onClose: 
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, UpdateCompanyLocationInput>({
     resolver: zodResolver(updateCompanyLocationSchema),
@@ -167,7 +181,12 @@ function EditLocationForm({ location, onClose }: { location: Location; onClose: 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-2 rounded-md border border-line bg-surface-sunken p-3">
       {serverError && <p className="text-xs text-danger">{serverError}</p>}
-      <LocationFields register={register as unknown as UseFormRegister<FieldValues>} errors={errors} />
+      <LocationFields
+        register={register as unknown as UseFormRegister<FieldValues>}
+        errors={errors}
+        watch={watch as unknown as UseFormWatch<FieldValues>}
+        setValue={setValue as unknown as UseFormSetValue<FieldValues>}
+      />
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Cancel
@@ -195,6 +214,8 @@ export function LocationsManager({ companyId, locations }: { companyId: string; 
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<AddFormValues, unknown, AddCompanyLocationInput>({
     resolver: zodResolver(addCompanyLocationSchema),
@@ -290,7 +311,12 @@ export function LocationsManager({ companyId, locations }: { companyId: string; 
       ) : (
         <form onSubmit={handleSubmit(onAddSubmit)} className="space-y-2 rounded-md border border-line p-3">
           {addServerError && <p className="text-xs text-danger">{addServerError}</p>}
-          <LocationFields register={register as unknown as UseFormRegister<FieldValues>} errors={errors} />
+          <LocationFields
+        register={register as unknown as UseFormRegister<FieldValues>}
+        errors={errors}
+        watch={watch as unknown as UseFormWatch<FieldValues>}
+        setValue={setValue as unknown as UseFormSetValue<FieldValues>}
+      />
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
               Cancel

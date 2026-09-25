@@ -59,6 +59,7 @@ export function NewItemForm({ brands }: { brands: BrandOption[] }) {
         itemType={itemType}
         brands={brands}
         brandId={brandId}
+        onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
         trackInventory={!!trackInventory}
         showOpeningStock
       />

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { getExpense } from "@/actions/expense";
 import { hasEffectivePermission } from "@/actions/permission";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -15,10 +17,25 @@ import {
 } from "@/lib/expenses";
 import { formatVisitId } from "@/lib/visits";
 
-export default async function ExpenseDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const [expense, session] = await Promise.all([getExpense(id), auth()]);
+export default async function ExpenseDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  /**
+   * The sequence resolves to the cuid before the action runs, so every check that action already
+   * made still happens — this translates the reference, it does not bypass anything. A sequence
+   * matching nothing falls through as the original segment and the action answers null, which is
+   * the same refusal a bad cuid gets.
+   */
+  const ref = parseRecordRef(id);
+  const resolved =
+    ref.kind === "seq"
+      ? ((await db.expense.findUnique({ where: { expenseSeq: ref.seq }, select: { id: true } }))?.id ?? id)
+      : ref.id;
+
+  const [expense, session] = await Promise.all([getExpense(resolved), auth()]);
   if (!expense) notFound();
+
+  // After the check, never before — see `canonicalise`.
+  canonicalise(id, "/expenses", formatExpenseId(expense.expenseSeq), query);
 
   const userId = session!.user.id;
   const isMine = expense.userId === userId;

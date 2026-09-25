@@ -16,7 +16,8 @@
  * The randomness is seeded, so a re-run produces the same company rather than a different one.
  */
 import { randomBytes } from "node:crypto";
-import { PrismaClient, Prisma, type Role, type AttendanceStatus, type CandidateStatus, type EmploymentType } from "@prisma/client";
+import { PrismaClient, Prisma, type AttendanceStatus, type CandidateStatus, type EmploymentType } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { dateOnly, daysInMonth, eachDay, financialYearOf, isWeekOff, monthRange, toKey } from "../src/lib/hr/calendar";
 import { computePayslip, monthlyGross } from "../src/lib/hr/payroll";

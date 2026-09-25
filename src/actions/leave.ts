@@ -292,26 +292,23 @@ export async function decideLeave(input: unknown): Promise<ActionResult<null>> {
     );
     const workingSet = new Set(counted.workingDates);
 
-    await db.$transaction([
-      db.leaveRequest.update({
+    await db.$transaction(async (tx) => {
+      await tx.leaveRequest.update({
         where: { id },
         data: { status: "APPROVED", approverId: user.id, decidedAt: new Date(), decisionNote: note?.trim() || null },
-      }),
-      // Unpaid leave still records the days taken; it simply has no balance to draw down.
-      ...(request.type.paid
+      });
+      for (const op of (request.type.paid
         ? [
-            db.leaveBalance.update({
+            tx.leaveBalance.update({
               where: { userId_typeId_year: { userId: request.userId, typeId: request.typeId, year: fy } },
               data: { used: { increment: new Prisma.Decimal(days) } },
             }),
           ]
-        : []),
-      // Attendance is written from the approval, so a month's loss-of-pay figure never has to guess
-      // whether a gap in the calendar was leave or an absence.
-      ...eachDay(request.fromDate, request.toDate)
+        : [])) await op;
+      for (const op of eachDay(request.fromDate, request.toDate)
         .filter((d) => workingSet.has(toKey(d)))
         .map((d) =>
-          db.attendanceDay.upsert({
+          tx.attendanceDay.upsert({
             where: { userId_date: { userId: request.userId, date: d } },
             create: {
               userId: request.userId,
@@ -324,8 +321,8 @@ export async function decideLeave(input: unknown): Promise<ActionResult<null>> {
               leaveRequestId: id,
             },
           }),
-        ),
-    ]);
+        )) await op;
+    });
   } else {
     await db.leaveRequest.update({
       where: { id },
@@ -383,19 +380,18 @@ export async function cancelLeave(id: string): Promise<ActionResult<null>> {
   const wasApproved = request.status === "APPROVED";
   const fy = financialYearOf(request.fromDate);
 
-  await db.$transaction([
-    db.leaveRequest.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date() } }),
-    ...(wasApproved && request.type.paid
+  await db.$transaction(async (tx) => {
+    await tx.leaveRequest.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date() } });
+    for (const op of (wasApproved && request.type.paid
       ? [
-          db.leaveBalance.update({
+          tx.leaveBalance.update({
             where: { userId_typeId_year: { userId: request.userId, typeId: request.typeId, year: fy } },
             data: { used: { decrement: request.days } },
           }),
         ]
-      : []),
-    // The attendance rows this leave created go with it; days it did not create are left alone.
-    ...(wasApproved ? [db.attendanceDay.deleteMany({ where: { leaveRequestId: id } })] : []),
-  ]);
+      : [])) await op;
+    for (const op of (wasApproved ? [tx.attendanceDay.deleteMany({ where: { leaveRequestId: id } })] : [])) await op;
+  });
 
   await recordAudit({
     userId: user.id,

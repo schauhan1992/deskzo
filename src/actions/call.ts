@@ -9,6 +9,7 @@ import { toPlain } from "@/lib/serialize";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { callOutcomeValues, isConnected } from "@/lib/calls";
 import type { ActionResult } from "@/actions/company";
+import { viewerHas } from "@/actions/permission";
 
 const callSelect = {
   id: true,
@@ -187,6 +188,7 @@ export async function completeFollowUp(id: string): Promise<ActionResult<null>> 
  */
 export async function listCompanyNumbers(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("calls.view"))) return [];
 
   /**
    * Never a reseller's end customer.
@@ -232,6 +234,7 @@ export async function listCalls(params: {
   view?: string;
 }) {
   const user = await requireUser();
+  if (!(await viewerHas("calls.view"))) return { rows: [], total: 0 };
 
   const where: Prisma.CallLogWhereInput = {
     /**
@@ -287,6 +290,7 @@ export async function listCalls(params: {
 /** Headline figures for the calling team: dials, how many reached a person, and time on the phone. */
 export async function callSummary(params?: { from?: string; to?: string; userId?: string }) {
   const user = await requireUser();
+  if (!(await viewerHas("calls.view"))) return { total: 0, connected: 0, connectRate: 0, talkTimeSeconds: 0, companiesReached: 0, dueCallbacks: 0 };
   const from = params?.from ? startOfDay(params.from) : startOfDay(new Date().toISOString());
   const to = params?.to ? endOfDay(params.to) : endOfDay(new Date().toISOString());
 
@@ -318,6 +322,7 @@ export async function callSummary(params?: { from?: string; to?: string; userId?
 /** A company's call history, for the 360 view. */
 export async function listCompanyCalls(companyId: string, take = 50) {
   const user = await requireUser();
+  if (!(await viewerHas("calls.view"))) return [];
   return toPlain(
     await db.callLog.findMany({
       // Scoped as well as filtered by id. Every row here shares one company, so the scope is

@@ -1,3 +1,5 @@
+import { headcountLabel } from "@/lib/company-size";
+
 /**
  * What the technical findings mean for someone about to pick up the phone.
  *
@@ -40,7 +42,8 @@ const DAY = 24 * 60 * 60 * 1000;
 
 export function opportunitiesFrom(signals: DomainSignals, asOf: Date = new Date()): Opportunity[] {
   const found: Opportunity[] = [];
-  const seats = signals.employeeCount ? `${signals.employeeCount} staff` : "the team";
+  // The band, not the stored number — which may be a band's lower bound (see company-size.ts).
+  const seats = headcountLabel(signals.employeeCount) ? `${headcountLabel(signals.employeeCount)} staff` : "the team";
 
   // ── Email and productivity ────────────────────────────────────────────────
   if (signals.emailProvider === "Google Workspace") {

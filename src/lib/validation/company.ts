@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { CompanyRelationshipType } from "@prisma/client";
 import { paymentTermsValues } from "@/lib/gst";
 import { companyLocationFieldsSchema } from "@/lib/validation/company-location";
+import { EMPLOYEE_BAND_KEYS } from "@/lib/company-size";
 
 export const companySourceValues = ["LINKEDIN", "REFERRAL", "INBOUND", "OTHER"] as const;
 
@@ -95,16 +96,24 @@ export const contactDesignationValues = [
 export const contactInputSchema = z.object({
   name: z.string().trim().min(1, "Contact name is required"),
   designation: z.enum(contactDesignationValues).default("OTHER"),
-  email: z.string().trim().email("Invalid email").optional().or(z.literal("")),
+  // Lowercased, as the contact importer stores it. Saved as typed, "SACHIN@WROFFY.COM" and
+  // "sachin@wroffy.com" were two different contacts to every comparison and every duplicate check,
+  // and an export re-imported as a change to a record nobody had touched.
+  email: z.string().trim().toLowerCase().email("Invalid email").optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
   linkedinUrl: z.string().trim().url("Invalid URL").optional().or(z.literal("")),
   isPrimary: z.boolean().default(false),
+  /** Pre-selected when a document for this company is emailed — see src/actions/document-mail.ts. */
+  receivesDocuments: z.boolean().default(false),
 });
 
-const employeeCountField = z.preprocess(
-  (v) => (v === "" || v === undefined || v === null ? undefined : Number(v)),
-  z.number().int().nonnegative().optional(),
-);
+/**
+ * A company's size, as a band from `EMPLOYEE_BANDS` — or blank.
+ *
+ * The forms deal in bands; the server turns one into the number stored (`countForBand`), keeping a
+ * more precise count it already holds. See src/lib/company-size.ts.
+ */
+const employeeBandField = z.enum(EMPLOYEE_BAND_KEYS).optional().or(z.literal(""));
 
 const tagsField = z.preprocess((v) => {
   if (Array.isArray(v)) return v;
@@ -121,12 +130,17 @@ const companyDetailsShape = {
   name: z.string().trim().min(2, "Company name is required"),
   industryId: z.string().optional().or(z.literal("")),
   category: z.string().trim().optional().or(z.literal("")),
+  /** Where the customer sits — see src/lib/customers/categories.ts. "" takes them out. */
+  customerCategoryId: z.string().optional().or(z.literal("")),
   companyType: z.enum(companyTypeValues).optional().or(z.literal("")),
   relationshipType: z.enum(relationshipTypeValues).default("CLIENT"),
   website: z.string().trim().optional().or(z.literal("")),
   linkedinUrl: z.string().trim().optional().or(z.literal("")),
-  employeeCount: employeeCountField,
-  paymentTerms: z.enum(paymentTermsValues).default("NET_30"),
+  employeeBand: employeeBandField,
+  // Advance unless somebody agrees otherwise — see Company.paymentTerms.
+  paymentTerms: z.enum(paymentTermsValues).default("ADVANCE"),
+  /** Why longer terms than the customer's credit rating supports — required only then. See src/lib/credit/guard.ts. */
+  creditOverrideReason: z.string().trim().max(500).optional().or(z.literal("")),
   dunsNumber: z.string().trim().optional().or(z.literal("")),
   tags: tagsField,
   source: z.enum(companySourceValues).default("OTHER"),
@@ -163,9 +177,9 @@ export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
 export type ContactInput = z.infer<typeof contactInputSchema>;
 export type UpdateContactInput = z.infer<typeof updateContactSchema>;
 
-export function normalizeCompanyName(name: string) {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
-}
+// Moved to its own module so client components can apply the duplicate rule cheaply; re-exported so
+// every existing import keeps working.
+export { normalizeCompanyName } from "@/lib/company-name";
 
 export const assignCompaniesSchema = z.object({
   companyIds: z.array(z.string().min(1)).min(1, "Select at least one company"),

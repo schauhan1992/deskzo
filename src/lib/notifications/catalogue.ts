@@ -65,6 +65,8 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "CALLER_ASSIGNED", label: "A calling list is assigned", when: "Companies are allocated to you to ring.", group: "sales" },
   { type: "ORDER_STATUS_CHANGED", label: "An order changes status", when: "An order you raised or watch is approved, processed or fulfilled.", group: "sales" },
   { type: "ORDER_WATCHER_ADDED", label: "I am added to an order", when: "Somebody adds you as a watcher.", group: "sales" },
+  { type: "DOCUMENT_APPROVAL_REQUESTED", label: "A document needs my approval", when: "Somebody submits a quotation or invoice you are an approver for. Never for your own — nobody approves what they submitted.", group: "sales" },
+  { type: "DOCUMENT_APPROVAL_DECIDED", label: "My document was approved or sent back", when: "An approver signs off something you submitted, or sends it back with a reason.", group: "sales" },
   { type: "RENEWAL_EXPIRING", label: "A renewal is coming up", when: "A subscription on your accounts enters its expiry window.", group: "sales" },
   { type: "VISIT_SCHEDULED", label: "A visit is scheduled", when: "A field visit is booked in your name.", group: "sales" },
 
@@ -89,11 +91,13 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "LETTER_ISSUED", label: "A letter is issued to me", when: "HR issues you an offer, confirmation or any other letter.", group: "people" },
   { type: "BIRTHDAY_TODAY", label: "Somebody's birthday", when: "A colleague has a birthday today.", group: "people" },
   { type: "WORK_ANNIVERSARY", label: "A work anniversary", when: "A colleague reaches a year with the company.", group: "people" },
+  { type: "ACTIVITY_AWARD", label: "Awards and prizes", when: "The fortnight's most active, the month's top sellers, the prizes up for grabs — and a note to you when you win.", group: "people" },
   { type: "HOLIDAY_UPCOMING", label: "A holiday is coming", when: "A company holiday is a few days away.", group: "people" },
 
   // ─── Customers ──────────────────────────────────────────────────────────────────────────────
   { type: "FEEDBACK_RECEIVED", label: "A customer leaves feedback", when: "A customer answers a feedback request on your account.", group: "customers" },
   { type: "FEEDBACK_SUBMITTED", label: "Feedback about me", when: "Somebody leaves feedback naming you.", group: "customers" },
+  { type: "FORM_RESPONSE", label: "Somebody answers a form", when: "A customer answers a form of yours, or replies to an invitation you sent.", group: "customers" },
   { type: "PORTAL_REQUEST", label: "A customer asks for something", when: "A customer raises a renewal, licence or question from their portal.", group: "customers" },
 
   // ─── Security ───────────────────────────────────────────────────────────────────────────────

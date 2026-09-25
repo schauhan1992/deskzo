@@ -3,7 +3,7 @@ import { listItems } from "@/actions/item";
 import { listBrands } from "@/actions/brand";
 import { itemTypeValues } from "@/lib/validation/item";
 import { PAGE_SIZES, resolvePage, resolvePageSize } from "@/lib/pagination";
-import { SelectParamFilter } from "@/components/ui/select-param-filter";
+import { OptionParamFilter } from "@/components/ui/option-param-filter";
 import { Pagination } from "@/components/ui/pagination";
 import { isModuleEnabled } from "@/actions/module";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,9 @@ export default async function ItemsPage({
           <p className="mt-1 text-sm text-muted">{result.total} item(s) in the catalog</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/items/brands">
+            <Button variant="ghost">Brands &amp; families</Button>
+          </Link>
           <ImportItemsDialog />
           <ExportItemsButton />
           <Link href="/items/new">
@@ -93,10 +96,12 @@ export default async function ItemsPage({
       </form>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SelectParamFilter
+        <OptionParamFilter
           paramName="brandId"
           label="Brand"
-          options={brands.map((b) => ({ value: b.id, label: b.name }))}
+          listLabel="Brands"
+          options={brands.map((b) => ({ id: b.id, name: b.name }))}
+          placeholder="All brands — type to search"
         />
       </div>
 

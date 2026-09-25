@@ -1,5 +1,6 @@
 "use client";
 
+import type { CategoryTree, FlatCategory } from "@/lib/customers/categories";
 import { useState } from "react";
 import type { z } from "zod";
 import { useForm, type UseFormRegister, type FieldValues } from "react-hook-form";
@@ -14,8 +15,9 @@ import {
 } from "@/lib/validation/company";
 import { updateCompany } from "@/actions/company";
 import { Button } from "@/components/ui/button";
-import { CompanyDetailFields } from "@/components/companies/company-fields";
+import { CompanyDetailFields, type TermsAdvice } from "@/components/companies/company-fields";
 import type { Company, CompanyRelationshipType } from "@prisma/client";
+import { bandForCount } from "@/lib/company-size";
 
 type FormValues = z.input<typeof updateCompanySchema>;
 type IndustryOption = { id: string; name: string };
@@ -35,15 +37,22 @@ function relationshipTypeOptionsFor(current: CompanyRelationshipType) {
 export function EditCompanyForm({
   company,
   industries,
+  categories,
+  termsAdvice = null,
 }: {
-  company: Company;
+  // Money columns reach the client as plain numbers — see `toPlain`.
+  company: Omit<Company, "creditLimit"> & { creditLimit: number | null };
+  /** For a customer: their credit rating and what it supports. Null for a vendor, or without the payments view. */
+  termsAdvice?: TermsAdvice | null;
   industries: IndustryOption[];
+  categories?: CategoryTree<FlatCategory>[];
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, UpdateCompanyInput>({
     resolver: zodResolver(updateCompanySchema),
@@ -51,12 +60,13 @@ export function EditCompanyForm({
       id: company.id,
       name: company.name,
       industryId: company.industryId ?? "",
-      category: company.category ?? "",
+      customerCategoryId: company.customerCategoryId ?? "",
       companyType: company.companyType ?? "",
       relationshipType: company.relationshipType,
       website: company.website ?? "",
       linkedinUrl: company.linkedinUrl ?? "",
-      employeeCount: company.employeeCount ?? undefined,
+      // The band the stored count falls in; saving it unchanged keeps the exact count (countForBand).
+      employeeBand: bandForCount(company.employeeCount)?.key ?? "",
       paymentTerms: company.paymentTerms,
       dunsNumber: company.dunsNumber ?? "",
       tags: company.tags.join(", "),
@@ -82,7 +92,10 @@ export function EditCompanyForm({
         register={register as unknown as UseFormRegister<FieldValues>}
         errors={errors}
         industries={industries}
+        categories={categories}
         relationshipTypeOptions={relationshipTypeOptionsFor(company.relationshipType)}
+        termsAdvice={termsAdvice}
+        selectedTerms={String(watch("paymentTerms") ?? "")}
       />
       <p className="text-xs text-subtle">
         Addresses and GST numbers are now managed per location — see the Locations tab on the company page.

@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, Copy, Loader2 } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
+import { ArrowUpRight, Check, Copy, FileText, Loader2 } from "lucide-react";
 import { addableSubscriptions, quoteAddon } from "@/actions/addon";
+import { createProposalFromAddonQuote } from "@/actions/addon-proposal";
 import { listCompanyOptions } from "@/actions/company";
 import { proRataMonths } from "@/lib/subscriptions/proration";
 import { addonQuote } from "@/lib/subscriptions/addon-quote";
@@ -43,6 +45,8 @@ export function RailProRata() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showText, setShowText] = useState(false);
+  const [drafted, setDrafted] = useState<{ id: string; docNumber: string | null } | null>(null);
+  const [drafting, startDrafting] = useTransition();
 
   useEffect(() => {
     let live = true;
@@ -98,6 +102,19 @@ export function RailProRata() {
   const signature = `${subId}:${qty}:${addOn}:${byMonth}`;
   if (copied && copiedFor !== signature) {
     setCopied(false);
+  }
+
+  /**
+   * The link to the draft is cleared the moment any figure changes.
+   *
+   * It is a link to a document holding *these* numbers, and leaving it on screen while the quantity
+   * is edited would offer a salesperson a proposal for eight seats under a panel now reading twelve.
+   * The draft itself stays — it exists and may well be wanted — it is just no longer what this panel
+   * is describing, so pressing the button again is the honest next step.
+   */
+  const [draftedFor, setDraftedFor] = useState("");
+  if (drafted && draftedFor !== signature) {
+    setDrafted(null);
   }
 
   /**
@@ -314,6 +331,69 @@ export function RailProRata() {
                   </>
                 )}
               </Button>
+
+              {/**
+                * Raising the quote as a document, rather than only as text to paste.
+                *
+                * The figures are not sent — only which subscription, how many seats, from when, and
+                * which basis is on screen. The action works the price out again from the order, so
+                * what the proposal carries cannot differ from what the panel just showed, and a
+                * price cannot be posted in from outside.
+                */}
+              {drafted ? (
+                /* The number truncates and "Open" never does: the rail is 288px wide at anything
+                   below a large screen, and a document number is free text that can be as long as
+                   whoever set the numbering format wanted. Keeping the action at full width and
+                   letting the label give way is the right way round — the number is confirmation,
+                   the link is the point. */
+                <Link
+                  href={`/documents/${drafted.id}`}
+                  className="flex w-full items-center justify-between gap-2 rounded-base border border-success/40 bg-success-bg px-3 py-2 text-xs font-medium text-success transition-colors hover:border-success"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Check className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{drafted.docNumber ?? "Proposal"} drafted</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    Open
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </span>
+                </Link>
+              ) : (
+                <Button
+                  size="sm"
+                  className="w-full"
+                  disabled={drafting}
+                  onClick={() => {
+                    setError(null);
+                    startDrafting(async () => {
+                      const result = await createProposalFromAddonQuote({
+                        parentId: subId,
+                        quantity: qty,
+                        startDate: addOn,
+                        basis: byMonth ? "MONTH" : "DAY",
+                      });
+                      if (!result.ok) setError(result.error);
+                      else {
+                        setDrafted(result.data);
+                        setDraftedFor(signature);
+                      }
+                    });
+                  }}
+                >
+                  {drafting ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Creating the draft…
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="mr-1.5 h-3.5 w-3.5" />
+                      Create proposal
+                    </>
+                  )}
+                </Button>
+              )}
 
               {showText && (
                 <textarea

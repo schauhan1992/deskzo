@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { feedbackAbout } from "@/actions/feedback";
@@ -6,6 +5,7 @@ import { currentUser } from "@/lib/session";
 import { Card } from "@/components/ui/card";
 import { FeedbackList } from "@/components/feedback/feedback-list";
 import { FeedbackSummaryStrip } from "@/components/feedback/feedback-summary";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /**
  * What customers have said about you, by name.
@@ -20,9 +20,8 @@ export default async function MyFeedbackPage() {
   const user = await currentUser();
   const data = user ? await feedbackAbout(user.id) : null;
 
-  const head = await headers();
-  const host = head.get("x-forwarded-host") ?? head.get("host") ?? "localhost:3000";
-  const proto = head.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  // The workspace's own address — links from here are pasted into WhatsApp and emails.
+  const origin = await tenantOrigin();
 
   if (!data) {
     return (
@@ -48,7 +47,7 @@ export default async function MyFeedbackPage() {
       <div className="mt-4">
         <FeedbackList
           rows={data.rows}
-          origin={`${proto}://${host}`}
+          origin={origin}
           emptyHint="No customer has been asked about you yet."
         />
       </div>

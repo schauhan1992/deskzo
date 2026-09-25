@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type TicketStatus, type TicketPriority, type TicketType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireUser } from "@/lib/session";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
-import { hasEffectivePermission } from "@/actions/permission";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatTicketId } from "@/lib/tickets";
@@ -159,6 +160,7 @@ const ticketListInclude = {
 
 export async function listTickets(params?: TicketListParams) {
   const user = await requireUser();
+  if (!(await viewerHas("tickets.view"))) return [];
   return db.ticket.findMany({
     where: await ticketListWhere(user.id, params),
     orderBy: { updatedAt: "desc" },
@@ -168,6 +170,7 @@ export async function listTickets(params?: TicketListParams) {
 
 export async function listTicketsPaged(params: TicketListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
+  if (!(await viewerHas("tickets.view"))) return { rows: [], total: 0 };
   const where = await ticketListWhere(user.id, params);
   const [rows, total] = await Promise.all([
     db.ticket.findMany({
@@ -189,10 +192,11 @@ export async function listTicketsPaged(params: TicketListParams & { page: number
  */
 export async function getTicket(id: string) {
   const user = await requireUser();
+  if (!(await viewerHas("tickets.view"))) return null;
   return db.ticket.findFirst({
     where: { id, ...(await viaCompanyScope(user.id)) },
     include: {
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, name: true, customerCategory: { select: CATEGORY_SELECT } } },
       contact: { select: { id: true, name: true, email: true, phone: true, designation: true } },
       companyProduct: { select: { id: true, orderSeq: true, item: { select: { name: true } } } },
       assignedTo: { select: { id: true, name: true } },
@@ -393,6 +397,7 @@ export async function bulkUpdateTickets(input: unknown): Promise<ActionResult<{ 
 /** Open tickets across the whole filtered set, so the header count doesn't shrink as you page. */
 export async function countOpenTickets(params?: TicketListParams) {
   const user = await requireUser();
+  if (!(await viewerHas("tickets.view"))) return 0;
   return db.ticket.count({
     // Scoped through the same `where` as the list it sits above, or the header would count
     // tickets the rows beneath it no longer show.

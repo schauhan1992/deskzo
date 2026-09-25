@@ -12,7 +12,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PERMISSIONS, PERMISSION_KEYS, permissionGroup, PERMISSION_GROUP_ORDER, getPermissionDefinition } from "../src/lib/permissions";
-import { ROLES } from "../src/lib/roles";
+import { SYSTEM_ROLE_KEYS } from "../src/lib/roles";
+import { roleKeys } from "../src/lib/authz/role-registry";
 import { ROLE_PRESETS, presetDiff, presetsForRole, getPreset } from "../src/lib/authz/presets";
 import { db } from "../src/lib/db";
 import { resolveUserPermissions } from "../src/lib/authz/resolve";
@@ -76,15 +77,14 @@ ok(
 
 console.log("\n— Roles —\n");
 
-// The bug this exists to prevent: ROLES omitted PURCHASE while three accounts held it, so those
-// users had no column in the permission screen and an empty sidebar.
-const PRISMA_ROLES = ["ADMIN", "PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"];
-eq("The assignable list covers every role in the schema", ROLES.length, PRISMA_ROLES.length);
-ok(
-  "  and names exactly the same ones",
-  PRISMA_ROLES.every((r) => (ROLES as readonly string[]).includes(r)),
-  PRISMA_ROLES.filter((r) => !(ROLES as readonly string[]).includes(r)).join(", ") || "in step",
-);
+// This used to compare the assignable list against the Prisma enum, because the two were written
+// out by hand in two places and had drifted — PURCHASE was missing from one while three accounts
+// held it, so those users had no column in the permission screen and an empty sidebar.
+//
+// There is no enum any more: roles are rows. What the code still names by hand is
+// `SYSTEM_ROLE_KEYS`, and the drift to guard against is between that list and the database, which
+// is checked in `rolesAreData()` below because it needs a query.
+eq("The application names eight roles of its own", SYSTEM_ROLE_KEYS.length, 8);
 
 console.log("\n— Presets —\n");
 
@@ -102,7 +102,7 @@ ok(
 );
 ok(
   "Every preset targets a role that exists",
-  ROLE_PRESETS.every((p) => (ROLES as readonly string[]).includes(p.role)),
+  ROLE_PRESETS.every((p) => (SYSTEM_ROLE_KEYS as readonly string[]).includes(p.role)),
 );
 
 // Every key a preset is ALLOWED to contain should be reachable through one, or the preset list
@@ -119,7 +119,7 @@ const uncovered = PERMISSIONS.filter(
 ok("Every non-admin permission appears in at least one preset", uncovered.length === 0, uncovered.join(", ") || "all covered");
 
 const rolesWithPresets = new Set(ROLE_PRESETS.map((p) => p.role));
-const rolesWithout = (ROLES as readonly string[]).filter((r) => r !== "ADMIN" && !rolesWithPresets.has(r as never));
+const rolesWithout = (SYSTEM_ROLE_KEYS as readonly string[]).filter((r) => r !== "ADMIN" && !rolesWithPresets.has(r as never));
 ok("Every assignable role has a preset to start from", rolesWithout.length === 0, rolesWithout.join(", ") || "all covered");
 
 const salesPresets = presetsForRole("SALES");
@@ -213,11 +213,23 @@ const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext("
  */
 function guardingHelpers(source: string): string[] {
   const helpers: string[] = [];
-  const declarations = source.split(/\n(?:export )?async function /).slice(1);
-  for (const decl of declarations) {
-    const name = decl.slice(0, decl.indexOf("(")).trim();
-    if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue;
-    if (BASE_MARKERS.some((m) => decl.includes(m))) helpers.push(name);
+  const declarations = source
+    .split(/\n(?:export )?async function /)
+    .slice(1)
+    .map((decl) => ({ name: decl.slice(0, decl.indexOf("(")).trim(), decl }))
+    .filter((d) => d.name && /^[A-Za-z_$][\w$]*$/.test(d.name));
+  // Transitively: a helper that calls a guarding helper guards too — `workable()` calling `who()`
+  // calling `requireUser()`. Repeated until nothing new is found.
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const { name, decl } of declarations) {
+      if (helpers.includes(name)) continue;
+      const markers = [...BASE_MARKERS, ...helpers.map((h) => `${h}(`)];
+      if (markers.some((m) => decl.includes(m))) {
+        helpers.push(name);
+        grew = true;
+      }
+    }
   }
   return helpers;
 }
@@ -233,6 +245,10 @@ const PUBLIC_ACTIONS = new Set([
   "src/actions/intake.ts",
   // Sign-in itself.
   "src/actions/auth.ts",
+  // The access page: a person held at the door shares their location or signs out. `requireUser`
+  // refuses exactly these people by design, so the session is read directly — and each action does
+  // one narrow thing to the caller's own session. See src/actions/access-gate.ts.
+  "src/actions/access-gate.ts",
   // The app's name, logo and colour, read by the sign-in page before anybody has a session.
   // Nothing here is confidential — it is what the login screen is painted with.
   "src/actions/branding.ts",
@@ -250,6 +266,16 @@ const PUBLIC_ACTIONS = new Set([
    * arrival time is taken by the server rather than accepted from the form.
    */
   "src/actions/visitor-public.ts",
+  /**
+   * PIN lookups for the address forms.
+   *
+   * Reachable without a session because the new-joiner intake form is — a candidate fills in their
+   * home address from a link, signed in to nothing. What it returns is India Post's published
+   * directory: post office names, districts and states for a PIN, which the Department of Posts
+   * gives to anybody. Nothing from this business's own data is read. The work is bounded instead —
+   * inputs are length-checked before any query and every answer is capped (`check:address`).
+   */
+  "src/actions/geo.ts",
   /**
    * The customer portal.
    *
@@ -341,6 +367,128 @@ ok(
   ungated.length === 0 ? "every one resolves a session or checks a permission" : `${ungated.length}: ${ungated.slice(0, 12).join(", ")}${ungated.length > 12 ? " …" : ""}`,
 );
 
+/**
+ * Exactly one super admin, and no way to make another from inside the app.
+ *
+ * The super admin is the account `resolve.ts` short-circuits for: it holds everything
+ * unconditionally and no permission row is consulted for it. One account outside the permission
+ * system is a decision; a button that makes more of them is a policy nobody chose, and every extra
+ * holder is a person whose access cannot be reviewed on the access screen.
+ *
+ * Enforced from both sides in the database rather than by convention:
+ *   · `users_one_super_admin` (partial unique index) refuses a second — the ceiling.
+ *   · `users_require_remaining_super_admin` (trigger) refuses to remove the last — the floor.
+ *
+ * Asserted here because both are invisible from the TypeScript: nothing fails to compile if the
+ * index is dropped, and the first anybody would know is a second holder appearing.
+ */
+async function superAdminIsSingular() {
+  console.log("\n— Exactly one super admin —\n");
+
+  const holders = await db.user.findMany({ where: { isSuperAdmin: true }, select: { email: true, role: true, active: true } });
+  ok(
+    "exactly one account holds super admin",
+    holders.length === 1,
+    holders.map((h) => `${h.email} (${h.role}${h.active ? "" : ", inactive"})`).join(", ") || "none",
+  );
+  ok(
+    "  and it is an active ADMIN",
+    holders.length === 1 && holders[0]!.role === "ADMIN" && holders[0]!.active,
+    "a super admin who is not an ADMIN is invisible to every role === ADMIN comparison in the app",
+  );
+
+  /**
+   * Both attempts below are matched on what the database says, never on a sentinel of our own.
+   *
+   * Prisma's error message quotes the surrounding source lines of the call that failed. The first
+   * version of this check threw `new Error("NO_OTHER_USER")` a line above the update, looked for
+   * that string in the resulting message, found Prisma's echo of its own source, and concluded the
+   * database had *allowed* a second super admin. A test that reads its own source back as evidence
+   * is worse than no test: it fails when the rule holds.
+   */
+  const violated = (err: unknown, fragment: RegExp) => fragment.test((err as Error).message);
+
+  // ── The ceiling ────────────────────────────────────────────────────────────────────────────
+  const victim = await db.user.findFirst({ where: { isSuperAdmin: false }, select: { id: true } });
+  let secondRefused = false;
+  let ceilingDetail = "no ordinary account to promote, so the ceiling could not be exercised";
+  if (victim) {
+    try {
+      await db.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: victim.id }, data: { isSuperAdmin: true, role: "ADMIN" } });
+        // Reached only if the index is gone. Rolls the attempt back either way.
+        throw new Error("rollback");
+      });
+      ceilingDetail = "the update was accepted — users_one_super_admin is missing";
+    } catch (err) {
+      secondRefused = violated(err, /Unique constraint failed/i);
+      if (!secondRefused) ceilingDetail = "the update was accepted — users_one_super_admin is missing";
+    }
+  }
+  ok("the database refuses a second super admin", secondRefused, secondRefused ? "users_one_super_admin" : ceilingDetail);
+
+  // ── The floor ──────────────────────────────────────────────────────────────────────────────
+  const only = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
+  let lastRefused = false;
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: only!.id }, data: { isSuperAdmin: false } });
+      throw new Error("rollback");
+    });
+  } catch (err) {
+    // The trigger's own words — "is the only active super admin" — rather than the absence of a
+    // sentinel, for the same reason as above.
+    lastRefused = violated(err, /only active super admin/i);
+  }
+  ok(
+    "the database refuses to remove the last one",
+    lastRefused,
+    lastRefused
+      ? "floor and ceiling at one: no window where a script could leave none, or three"
+      : "users_require_remaining_super_admin did not fire",
+  );
+
+  // ── And no way in from the application ─────────────────────────────────────────────────────
+  /**
+   * Writes, not reads.
+   *
+   * `select: { isSuperAdmin: true }` is how every one of these files *reads* the flag, and matching
+   * the bare pair flagged all of them — the check failed while the code was correct, which teaches
+   * people to ignore it. Only a `data:` block setting it true is a grant.
+   */
+  const grantingFiles = readdirSync("src/actions")
+    .filter((f) => f.endsWith(".ts"))
+    .filter((f) => /data:\s*\{[^}]*isSuperAdmin:\s*true/.test(readFileSync(join("src/actions", f), "utf8")));
+  ok(
+    "no server action grants super admin",
+    grantingFiles.length === 0,
+    grantingFiles.length === 0
+      ? "the access drawer's Make super admin button is gone; the app must not offer what the database refuses"
+      : grantingFiles.join(", "),
+  );
+
+  const registry = readFileSync("src/lib/permissions.ts", "utf8");
+  ok(
+    "  and no permission key grants it either",
+    !/manageSuperAdmin|grantSuperAdmin/.test(registry),
+    "a grantable key is a key that can be escalated to",
+  );
+
+  /**
+   * The thing a super admin *can* still do, which is the point of the whole arrangement.
+   *
+   * Making somebody an admin is `users.assignRole`, and it is `superAdminOnly` — only a super
+   * admin may hand it out. An admin sits inside the permission system, so what they can do is
+   * reviewable, narrowable and revocable. That is the difference being preserved.
+   */
+  const assignRole = PERMISSIONS.find((x) => x.key === "users.assignRole");
+  ok(
+    "a super admin can still make somebody an admin",
+    assignRole?.superAdminOnly === true && assignRole?.delegable === false,
+    "users.assignRole is superAdminOnly and non-delegable — grantable by a super admin, and by nobody else",
+  );
+}
+
 async function compareResolvers() {
   console.log("\n— The two resolvers agree —\n");
 
@@ -392,7 +540,55 @@ async function compareResolvers() {
 
 }
 
+/**
+ * Roles are rows, and the rows the code names must actually be there.
+ *
+ * The enum used to guarantee this: a role the application mentioned existed by definition, because
+ * mentioning it and declaring it were the same act. Now they are two, and the gap between them is
+ * a foreign key violation on the next person assigned that role, or a preset that silently applies
+ * to nothing.
+ */
+async function rolesAreData() {
+  console.log(`
+— Roles are data —
+`);
+
+  const rows = await db.role.findMany({ select: { key: true, isSystem: true } });
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+
+  const missing = SYSTEM_ROLE_KEYS.filter((k) => !byKey.has(k));
+  ok(
+    "every role the code names exists as a row",
+    missing.length === 0,
+    missing.length === 0 ? SYSTEM_ROLE_KEYS.join(", ") : `missing: ${missing.join(", ")}`,
+  );
+  ok(
+    "  and each is marked as a system role, so it cannot be deleted",
+    SYSTEM_ROLE_KEYS.every((k) => byKey.get(k)?.isSystem === true),
+    "ADMIN is named by the permission resolver and the super-admin constraint; the rest by the built-in presets",
+  );
+
+  const presetRoles = [...new Set(ROLE_PRESETS.map((p) => p.role))];
+  const orphanPresets = presetRoles.filter((r) => !byKey.has(r));
+  ok(
+    "every preset names a role that exists",
+    orphanPresets.length === 0,
+    orphanPresets.length === 0 ? `${presetRoles.length} roles have presets` : orphanPresets.join(", "),
+  );
+
+  const held = await db.user.groupBy({ by: ["role"], _count: { _all: true } });
+  const unknownHeld = held.filter((h) => !byKey.has(h.role));
+  ok(
+    "nobody holds a role that does not exist",
+    unknownHeld.length === 0,
+    unknownHeld.length === 0
+      ? held.map((h) => `${h.role} ${h._count._all}`).join(", ")
+      : unknownHeld.map((h) => h.role).join(", "),
+  );
+}
 compareResolvers()
+  .then(superAdminIsSingular)
+  .then(rolesAreData)
   .catch((err) => {
     console.error(" FAIL  The bulk resolver comparison threw", err);
     failures += 1;

@@ -2,6 +2,27 @@
 
 import { useEffect, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { LAYER_POPOVER } from "@/components/ui/layers";
+
+/** Anything that takes keyboard input, and so must be allowed to take focus. */
+const FOCUSABLE_FIELDS = "input, textarea, select, [contenteditable='true']";
+
+/**
+ * Whether a mousedown on this target should be swallowed to keep focus on the anchor.
+ *
+ * Swallowing it is what stops the anchor's blur firing before a click on an option registers, and
+ * that is worth keeping. But cancelling mousedown is precisely how a browser is told *not* to move
+ * focus — so a panel that did it to everything could never contain a text field: the click lands,
+ * the field never focuses, and typing goes nowhere with no error and nothing to see. That is not
+ * hypothetical; it is how the "why" box on the renewals stage picker shipped broken.
+ *
+ * Exported because the failure is invisible in markup — the field renders perfectly and simply does
+ * not work — so the rule is asserted directly rather than eyeballed. See `check:renewal-stage`.
+ */
+export function keepsFocusOnAnchor(target: EventTarget | null): boolean {
+  const element = target as { closest?: (selector: string) => unknown } | null;
+  return !element?.closest?.(FOCUSABLE_FIELDS);
+}
 
 /**
  * A dropdown panel that renders into `document.body` and positions itself against an anchor.
@@ -87,9 +108,9 @@ export function AnchoredPopover({
 
   return createPortal(
     <div
-      // Keeping mousedown from reaching the document stops the anchor's blur firing before a click
-      // on an option registers.
-      onMouseDown={(e) => e.preventDefault()}
+      onMouseDown={(e) => {
+        if (keepsFocusOnAnchor(e.target)) e.preventDefault();
+      }}
       style={{
         position: "fixed",
         top: position.flipped ? undefined : position.top + 4,
@@ -100,7 +121,10 @@ export function AnchoredPopover({
       }}
       // `overscroll-contain` stops a scroll that reaches the end of the panel from carrying on into
       // the page behind it — which reads as the dropdown dragging the whole app around under it.
-      className="z-50 overscroll-contain overflow-y-auto rounded-lg border border-line bg-surface shadow-lg"
+      // Above a modal, not level with it: this panel is always opened *from* something, and when
+      // that something is a combobox inside a dialog, a popover on the same layer disappears behind
+      // the dialog it belongs to.
+      className={`${LAYER_POPOVER} overscroll-contain overflow-y-auto rounded-lg border border-line bg-surface shadow-lg`}
     >
       {children}
     </div>,

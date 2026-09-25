@@ -44,6 +44,12 @@ export const MERGE_FIELDS: MergeField[] = [
   { key: "fulfilledDate", label: "Completed on", example: "19 Sept 2026", source: "When the order was marked fulfilled" },
   { key: "unsubscribeUrl", label: "Unsubscribe link", example: "https://…/preferences/…", source: "Filled in automatically" },
   { key: "postalAddress", label: "Our address", example: "…", source: "Organisation settings" },
+  // Form invitations only. Anywhere else they have no value, so use them there with a fallback or not at all.
+  { key: "formName", label: "Form or event", example: "Customer roundtable — Pune", source: "The form an invitation is for" },
+  { key: "formLink", label: "Their personal link", example: "https://…/forms/…/…", source: "Filled in per person — an invitation must carry it" },
+  { key: "eventDate", label: "Event date", example: "Thu, 15 Oct 2026, 6:30 pm", source: "The event's start, in India time" },
+  { key: "eventVenue", label: "Event venue", example: "The Westin, Koregaon Park", source: "The event's venue" },
+  { key: "inviterName", label: "Who invited them", example: "Priya Sharma", source: "Whoever sent the invitation" },
 ];
 
 const FIELD_KEYS = new Set(MERGE_FIELDS.map((f) => f.key));
@@ -70,7 +76,16 @@ function valueOf(values: MergeValues, key: string): string | null {
  * `unknown` is reported separately from `missing`: a typo like `{{frstName}}` is an author error to
  * fix now, whereas a genuinely absent value may just mean this recipient should be skipped.
  */
-export function render(template: string, values: MergeValues): RenderResult {
+export function render(
+  template: string,
+  values: MergeValues,
+  /**
+   * `escape` is applied to the merged values — not to the template, and not to a fallback, both of
+   * which the author wrote. An HTML template passes `escapeHtml`, so a customer's name can never
+   * become markup.
+   */
+  options?: { escape?: (value: string) => string },
+): RenderResult {
   const missing: string[] = [];
   const unknown: string[] = [];
   const used: string[] = [];
@@ -83,7 +98,7 @@ export function render(template: string, values: MergeValues): RenderResult {
     }
     used.push(key);
     const value = valueOf(values, key);
-    if (value !== null) return value;
+    if (value !== null) return options?.escape ? options.escape(value) : value;
 
     // The bar is the decision. `{{firstName|there}}` says what to print instead; `{{firstName|}}`
     // says print nothing, deliberately; `{{firstName}}` says nothing at all about it, and that

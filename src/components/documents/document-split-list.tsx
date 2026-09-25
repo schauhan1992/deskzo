@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import type { TradeDocumentStatus, EInvoiceStatus, CompanyRelationshipType } from "@prisma/client";
+import type {
+  TradeDocumentStatus,
+  EInvoiceStatus,
+  CompanyRelationshipType,
+  DocumentApprovalStatus,
+} from "@prisma/client";
+import { approvalStatusLabels, approvalStatusTone } from "@/lib/documents/approval";
 import { Badge } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { statusTone, tradeDocumentStatusLabels } from "@/lib/trade-documents";
@@ -20,6 +26,7 @@ type DocumentRow = {
   irn: string | null;
   company: { id: string; name: string; relationshipType: CompanyRelationshipType };
   createdBy: { name: string };
+  approvalStatus?: DocumentApprovalStatus;
 };
 
 /**
@@ -30,7 +37,19 @@ type DocumentRow = {
  * Selection lives in the URL (`?sel=`) rather than component state, so a particular document in the
  * split view is a link somebody can send.
  */
-export function DocumentSplitList({ documents, selectedId }: { documents: DocumentRow[]; selectedId: string | null }) {
+export function DocumentSplitList({
+  documents,
+  selectedId,
+  approvalEnabled = false,
+  approvalRequiredIds,
+}: {
+  documents: DocumentRow[];
+  selectedId: string | null;
+  /** Off means nothing asked for approval, so nothing is said about it. See DocumentRows. */
+  approvalEnabled?: boolean;
+  /** Which documents need sign-off, when the type needs it only above a limit. Left out: all of them. */
+  approvalRequiredIds?: string[];
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -67,6 +86,9 @@ export function DocumentSplitList({ documents, selectedId }: { documents: Docume
             </div>
             <div className="mt-1.5 flex items-center gap-2">
               <Badge tone={statusTone[doc.status]}>{tradeDocumentStatusLabels[doc.status]}</Badge>
+              {(approvalRequiredIds ? approvalRequiredIds.includes(doc.id) : approvalEnabled) && doc.approvalStatus && doc.approvalStatus !== "APPROVED" && (
+                <Badge tone={approvalStatusTone[doc.approvalStatus]}>{approvalStatusLabels[doc.approvalStatus]}</Badge>
+              )}
               {doc.irn && <Badge tone="green">IRN</Badge>}
             </div>
           </Link>

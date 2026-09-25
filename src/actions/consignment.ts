@@ -528,6 +528,8 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
           // Goods leaving our premises, so it sits on the sales side — even though nothing is sold.
           direction: "SALES",
           status: "ISSUED",
+          // Nobody typed this one; dispatching the consignment produced it.
+          origin: "CONSIGNMENT",
           companyId: consignment.toCompanyId!,
           locationId: consignment.toLocationId,
           issueDate,

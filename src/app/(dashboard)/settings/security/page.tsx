@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ScrollText } from "lucide-react";
+import { Fingerprint, ScrollText } from "lucide-react";
 import { currentUser } from "@/lib/session";
 import { getSecurityPolicyForAdmin } from "@/actions/security-policy";
 import { getSecuritySettings } from "@/actions/security";
@@ -33,6 +33,18 @@ export default async function SecuritySettingsPage() {
         <CardHeader className="text-sm font-medium text-text">Sign-in</CardHeader>
         <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} />}</CardContent>
       </Card>
+
+      <Link href="/settings/security/access" className="mt-6 block">
+        <Card className="flex items-center justify-between gap-3 px-5 py-4 hover:border-brand">
+          <span>
+            <span className="block text-sm font-medium text-text">Devices, networks &amp; sign-ins</span>
+            <span className="block text-xs text-muted">
+              Which devices and networks each role may use, devices waiting for approval, and where everybody signed in from.
+            </span>
+          </span>
+          <Fingerprint className="h-5 w-5 shrink-0 text-brand" aria-hidden />
+        </Card>
+      </Link>
 
       <div className="mt-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

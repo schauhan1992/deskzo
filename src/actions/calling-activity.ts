@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { CallerAllocationMethod, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
+import { canViewContacts } from "@/lib/authz/contact-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -163,14 +164,14 @@ export async function redistributeActivity(input: {
     input.method,
   );
 
-  await db.$transaction(
-    allocations.map((a) =>
-      db.workbookRecord.update({
+  await db.$transaction(async (tx) => {
+    for (const op of allocations.map((a) =>
+      tx.workbookRecord.update({
         where: { id: a.recordId },
         data: { assignedToUserId: a.userId, sortOrder: a.sortOrder },
       }),
-    ),
-  );
+    )) await op;
+  });
 
   await recordAudit({
     userId: user.id,
@@ -229,6 +230,11 @@ export async function myCallingQueue(workbookId: string) {
     }),
   ]);
   if (!workbook || workbook.mode !== "COLD_CALLING") return null;
+
+  // Without `contacts.view` the queue still names who to ask for, but not how to reach them.
+  if (!(await canViewContacts(user.id))) {
+    for (const r of records) for (const c of r.company.contacts) Object.assign(c, { email: null, phone: null });
+  }
 
   const done = records.filter((r) => r.status === "DONE" || r.status === "SKIPPED");
   const handled = done.map((r) => r.handleSeconds ?? 0).filter((n) => n > 0);

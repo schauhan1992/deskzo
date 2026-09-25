@@ -1,5 +1,6 @@
-import { Role } from "@prisma/client";
+import { ADMIN_ROLE, type Role } from "@/lib/roles";
 import { db } from "@/lib/db";
+import { roleKeys } from "@/lib/authz/role-registry";
 import { can } from "@/lib/authz/resolve";
 import {
   actorContext,
@@ -171,7 +172,16 @@ async function resolve(row: Record<string, string>, ctx: ImportContext): Promise
   const r = new RowReader(row);
   const name = r.text("Name");
   const email = r.text("Email").toLowerCase();
-  const role = r.enum("Role", Role);
+  /**
+   * The accepted set is read from the database, not from a compiled enum.
+   *
+   * `r.enum` wants a map of allowed values, which used to be the Prisma `Role` enum object. Roles
+   * are rows now, so an import naming a role somebody created last week has to be accepted — and
+   * one naming a role that does not exist still has to be refused, which is the same check against
+   * a different source.
+   */
+  const allowedRoles = Object.fromEntries((await roleKeys()).map((k) => [k, k]));
+  const role = r.enum("Role", allowedRoles);
   const superAdminCell = r.boolean("Super admin");
   const active = r.boolean("Active");
   if (r.error) return { error: r.error };
@@ -221,7 +231,7 @@ async function resolve(row: Record<string, string>, ctx: ImportContext): Promise
 
   // ── A super admin's account, from a file ──────────────────────────────────────────────────────
   if (existing?.isSuperAdmin) {
-    if (role !== undefined && role !== Role.ADMIN) {
+    if (role !== undefined && role !== ADMIN_ROLE) {
       return {
         error: `${existing.name} is a super admin, and a super admin is always ADMIN. Remove super admin on their own screen before changing the role.`,
       };
@@ -286,7 +296,7 @@ async function resolve(row: Record<string, string>, ctx: ImportContext): Promise
   // `users.assignRole` guards a role that is actually moving, and the creation of an ADMIN, exactly
   // as createUser and updateUserAssignment do. A role cell that restates what is already stored is
   // not a grant and does not need the key, which is what lets an exported file be handed back.
-  const grantsRole = existing ? role !== undefined && role !== existing.role : role === Role.ADMIN;
+  const grantsRole = existing ? role !== undefined && role !== existing.role : role === ADMIN_ROLE;
   // A row that writes nothing needs no authority to write it; it is a skip.
   const writes = !existing || changes.length > 0;
 

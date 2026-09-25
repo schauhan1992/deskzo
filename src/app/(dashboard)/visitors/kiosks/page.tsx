@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { listKiosks } from "@/actions/visitor";
 import { KioskManager } from "@/components/visitors/kiosk-manager";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 export default async function KiosksPage() {
   if (!(await isModuleEnabled("visitors"))) return <ModuleDisabledNotice moduleKey="visitors" />;
@@ -14,9 +14,8 @@ export default async function KiosksPage() {
 
   // Read from the request rather than an env var, so the link is right whether this is reached on
   // localhost, a LAN address or the public host — a reception tablet is usually on the LAN.
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  // The workspace's own address — links from here are pasted into WhatsApp and emails.
+  const origin = await tenantOrigin();
 
   return (
     <div className="animate-fade-rise">
@@ -29,7 +28,7 @@ export default async function KiosksPage() {
         address bar.
       </p>
       <div className="mt-5">
-        <KioskManager kiosks={kiosks} origin={`${proto}://${host}`} />
+        <KioskManager kiosks={kiosks} origin={origin} />
       </div>
     </div>
   );

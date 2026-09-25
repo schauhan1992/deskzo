@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { MessageChannel, MessageClass, MarketingTopic, Prisma } from "@prisma/client";
+import type { MessageChannel, MessageClass, MarketingTopic, Prisma, TemplateFormat } from "@prisma/client";
 import { db } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 import { getOrganisation } from "@/lib/organisation";
@@ -10,8 +10,11 @@ import { audienceCompanyWhere, capPerCompany, contactWhere, parseCompanyFilters,
 import { canSend, type RecipientState, type SendContext, type SendVerdict } from "@/lib/marketing/suppression";
 import { nextSendTime, type ScheduleRules } from "@/lib/marketing/schedule";
 import { render, type MergeValues } from "@/lib/marketing/merge";
+import { composeEmail, escapeHtml } from "@/lib/marketing/html";
+import { trackedLink } from "@/lib/marketing/tracking";
 import { postalAddressFor } from "@/lib/marketing/footer";
 import { providerByKey, routeFor, type RoutableProvider } from "@/lib/marketing/providers";
+import type { OutboundMessage } from "@/lib/marketing/providers/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 /**
@@ -86,8 +89,11 @@ export type ResolvedRecipient = { recipient: Recipient; verdict: SendVerdict };
  * a few thousand rows, and this runs on a five-minute tick.
  */
 export async function resolveRecipients(params: {
-  companyFilters: unknown;
-  contactFilters: unknown;
+  /** An audience's filters — leave both out for a list-only send. */
+  companyFilters?: unknown;
+  contactFilters?: unknown;
+  /** An uploaded list, on its own or on top of the audience. */
+  listId?: string | null;
   channel: MessageChannel;
   topic: MarketingTopic;
   messageClass: MessageClass;
@@ -96,11 +102,17 @@ export async function resolveRecipients(params: {
   const companyFilters = parseCompanyFilters(params.companyFilters);
   const contactFilters = parseContactFilters(params.contactFilters);
 
+  const fromAudience: Prisma.ContactWhereInput | null =
+    params.companyFilters !== undefined
+      ? { company: audienceCompanyWhere(companyFilters), ...contactWhere(contactFilters, params.channel, db.contact.fields.email) }
+      : null;
+  // A list is everyone on it. Whether each of them may be mailed is the verdict's job below, the
+  // same as for anybody else — being uploaded earns nobody a way round the rules.
+  const fromList: Prisma.ContactWhereInput | null = params.listId ? { marketingLists: { some: { listId: params.listId } } } : null;
+  if (!fromAudience && !fromList) return [];
+
   const contacts = await db.contact.findMany({
-    where: {
-      company: audienceCompanyWhere(companyFilters),
-      ...contactWhere(contactFilters, params.channel, db.contact.fields.email),
-    },
+    where: fromAudience && fromList ? { OR: [fromAudience, fromList] } : (fromAudience ?? fromList)!,
     select: {
       id: true,
       name: true,
@@ -122,7 +134,8 @@ export async function resolveRecipients(params: {
     take: 5000,
   });
 
-  const capped = capPerCompany(contacts, contactFilters.maxPerCompany);
+  // The per-company cap is the audience's rule; a list was chosen person by person.
+  const capped = fromList ? contacts : capPerCompany(contacts, contactFilters.maxPerCompany);
   if (capped.length === 0) return [];
 
   const contactIds = capped.map((c) => c.id);
@@ -303,6 +316,50 @@ export function newToken() {
 
 export type QueueOutcome = { queued: number; suppressed: number; blocked: number };
 
+export type BuiltEmail =
+  | { ok: true; subject: string; html: string; text: string; unsubscribeUrl: string }
+  | { ok: false; missing: string[] };
+
+/**
+ * One recipient's email, finished: merged, composed with its footer, tracked, and with its own
+ * one-click unsubscribe address. Campaigns and journeys both build theirs here, so a journey step is
+ * held to exactly the same rules as a broadcast.
+ */
+export function buildMarketingEmail(input: {
+  template: { subject: string | null; preheader: string | null; body: string; format: TemplateFormat };
+  recipient: Recipient;
+  settings: MarketingSettings;
+  token: string;
+  origin: string;
+  track: boolean;
+}): BuiltEmail {
+  const { template, token, origin, settings } = input;
+  const values = mergeValuesFor(input.recipient, settings, { unsubscribeUrl: `${origin}/preferences/${token}` });
+  const subject = render(template.subject ?? "", values);
+  const preheader = render(template.preheader ?? "", values);
+  // An HTML template's merged values are escaped; its own markup, and a fallback it wrote, are not.
+  const body = render(template.body, values, template.format === "HTML" ? { escape: escapeHtml } : undefined);
+  if (!subject.ok || !preheader.ok || !body.ok) {
+    return { ok: false, missing: [...new Set([subject, preheader, body].flatMap((r) => (r.ok ? [] : r.missing)))] };
+  }
+  const email = composeEmail({
+    format: template.format,
+    body: body.text,
+    preheader: preheader.text,
+    footer: {
+      senderName: settings.ourName,
+      unsubscribeUrl: String(values.unsubscribeUrl),
+      postalAddress: settings.postalAddress,
+      // Placed by the author already — once is enough.
+      includeUnsubscribe: !body.used.includes("unsubscribeUrl"),
+      includeAddress: !body.used.includes("postalAddress"),
+    },
+    origin,
+    track: input.track ? { openPixelUrl: `${origin}/track/${token}`, link: (url) => trackedLink(origin, token, url) } : undefined,
+  });
+  return { ok: true, subject: subject.text, html: email.html, text: email.text, unsubscribeUrl: `${origin}/api/marketing/unsubscribe/${token}` };
+}
+
 /**
  * Turns an audience into message rows.
  *
@@ -318,8 +375,9 @@ export async function queueCampaign(campaignId: string, origin: string): Promise
   const settings = await marketingSettings();
 
   const resolved = await resolveRecipients({
-    companyFilters: campaign.audience.companyFilters,
-    contactFilters: campaign.audience.contactFilters,
+    companyFilters: campaign.audience?.companyFilters,
+    contactFilters: campaign.audience?.contactFilters,
+    listId: campaign.listId,
     channel: campaign.channel,
     topic: campaign.template.topic,
     messageClass: "MARKETING",
@@ -368,15 +426,17 @@ export async function queueCampaign(campaignId: string, origin: string): Promise
       continue;
     }
 
-    const values = mergeValuesFor(recipient, settings, {
-      unsubscribeUrl: `${origin}/preferences/${token}`,
-    });
-    const subject = render(campaign.template.subject ?? "", values);
-    const body = render(campaign.template.body, values);
+    const email =
+      campaign.channel === "EMAIL"
+        ? buildMarketingEmail({ template: campaign.template, recipient, settings, token, origin, track: true })
+        : null;
+    // WhatsApp carries its words as they are — no HTML, no footer, no pixel.
+    const values = mergeValuesFor(recipient, settings, { unsubscribeUrl: `${origin}/preferences/${token}` });
+    const plain = email ? null : { subject: render(campaign.template.subject ?? "", values), body: render(campaign.template.body, values) };
 
     // A message that cannot be filled in is not sent half-finished. "Hi ," is unrecoverable.
-    if (!subject.ok || !body.ok) {
-      const missing = [...(subject.ok ? [] : subject.missing), ...(body.ok ? [] : body.missing)];
+    const missing = email ? (email.ok ? [] : email.missing) : [plain!.subject, plain!.body].flatMap((r) => (r.ok ? [] : r.missing));
+    if (missing.length > 0) {
       await db.marketingMessage
         .create({
           data: {
@@ -392,13 +452,40 @@ export async function queueCampaign(campaignId: string, origin: string): Promise
       continue;
     }
 
-    await db.marketingMessage
-      .create({ data: { ...base, subject: subject.text, body: body.text, status: "QUEUED" } })
-      .catch(() => undefined);
+    const content =
+      email && email.ok
+        ? { subject: email.subject, body: email.html, textBody: email.text, unsubscribeUrl: email.unsubscribeUrl }
+        : { subject: plain!.subject.ok ? plain!.subject.text : "", body: plain!.body.ok ? plain!.body.text : "" };
+    await db.marketingMessage.create({ data: { ...base, ...content, status: "QUEUED" } }).catch(() => undefined);
     queued += 1;
   }
 
   return { queued, suppressed, blocked };
+}
+
+/**
+ * Campaigns, moved along by what their messages have done: SCHEDULED → SENDING once the first has
+ * gone, and SENT once nothing is left waiting. Without this a campaign said "Scheduled" for ever,
+ * long after the last message was delivered.
+ */
+export async function settleCampaigns(): Promise<void> {
+  const active = await db.campaign.findMany({ where: { status: { in: ["SCHEDULED", "SENDING"] } }, select: { id: true, status: true } });
+  if (active.length === 0) return;
+  const counts = await db.marketingMessage.groupBy({
+    by: ["campaignId", "status"],
+    where: { campaignId: { in: active.map((c) => c.id) } },
+    _count: { _all: true },
+  });
+  for (const c of active) {
+    const mine = counts.filter((r) => r.campaignId === c.id);
+    const waiting = mine.filter((r) => r.status === "QUEUED" || r.status === "SENDING").reduce((t, r) => t + r._count._all, 0);
+    const gone = mine.filter((r) => !["QUEUED", "SENDING", "SUPPRESSED"].includes(r.status)).reduce((t, r) => t + r._count._all, 0);
+    if (waiting === 0) {
+      await db.campaign.update({ where: { id: c.id }, data: { status: "SENT", finishedAt: new Date() } });
+    } else if (gone > 0 && c.status === "SCHEDULED") {
+      await db.campaign.update({ where: { id: c.id }, data: { status: "SENDING" } });
+    }
+  }
 }
 
 // ─── Sending ──────────────────────────────────────────────────────────────────
@@ -421,6 +508,25 @@ async function providerCredentials(id: string) {
     config: (row.config as Record<string, unknown>) ?? {},
     secret: row.secretCipher ? decryptSecret(row.secretCipher) : null,
   };
+}
+
+/**
+ * Straight through the provider chain, now — for a test send, which has no row to queue. The same
+ * routing and failover as the queue, so a test that arrives proves the real thing can.
+ */
+export async function deliverNow(message: OutboundMessage, messageClass: MessageClass): Promise<{ ok: true; provider: string } | { ok: false; error: string }> {
+  const chain = routeFor(await loadProviders(), { kind: "EMAIL", messageClass });
+  if (chain.length === 0) return { ok: false, error: "No email provider is set up for marketing mail — add one in the marketing settings." };
+  let last = "No provider accepted it.";
+  for (const candidate of chain) {
+    const implementation = providerByKey[candidate.key];
+    if (!implementation) continue;
+    const result = await implementation.send(message, await providerCredentials(candidate.id));
+    if (result.ok) return { ok: true, provider: candidate.label };
+    last = result.error;
+    if (!result.retryable) break;
+  }
+  return { ok: false, error: last };
 }
 
 export type TickOutcome = { claimed: number; sent: number; failed: number };
@@ -491,7 +597,9 @@ export async function sendQueued(runId: string, batchSize = 100): Promise<TickOu
           toName: message.contact?.name ?? null,
           subject: message.subject ?? "",
           html: message.body,
-          listUnsubscribe: null,
+          text: message.textBody ?? undefined,
+          // The one-click unsubscribe Gmail and Yahoo require of bulk senders. Null for a notice.
+          listUnsubscribe: message.unsubscribeUrl,
         },
         credentialCache.get(candidate.id)!,
       );

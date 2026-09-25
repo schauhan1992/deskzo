@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { getVisit } from "@/actions/visit";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -16,16 +18,34 @@ import {
   formatDuration,
 } from "@/lib/visits";
 import { expenseCategoryLabels, expenseStatusLabels, expenseStatusTone, formatExpenseId } from "@/lib/expenses";
+import { viewerHas } from "@/actions/permission";
+import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 
 const stamp = (value: Date | string | null) =>
   value
     ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
     : "—";
 
-export default async function VisitDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const [visit, session] = await Promise.all([getVisit(id), auth()]);
+export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  if (!(await viewerHas("visits.view"))) return <NoAccessNotice title="Visit" permission="visits.view" />;
+  /**
+   * The sequence resolves to the cuid before the action runs, so every check that action already
+   * made still happens — this translates the reference, it does not bypass anything. A sequence
+   * matching nothing falls through as the original segment and the action answers null, which is
+   * the same refusal a bad cuid gets.
+   */
+  const ref = parseRecordRef(id);
+  const resolved =
+    ref.kind === "seq"
+      ? ((await db.visit.findUnique({ where: { visitSeq: ref.seq }, select: { id: true } }))?.id ?? id)
+      : ref.id;
+
+  const [visit, session] = await Promise.all([getVisit(resolved), auth()]);
   if (!visit) notFound();
+
+  // After the check, never before — see `canonicalise`.
+  canonicalise(id, "/visits", formatVisitId(visit.visitSeq), query);
 
   const userId = session!.user.id;
   const canEdit = visit.userId === userId || (await getDownlineUserIds(userId)).includes(visit.userId);

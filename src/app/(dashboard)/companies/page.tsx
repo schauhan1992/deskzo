@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { listCompaniesPaged, listAssignableUsers } from "@/actions/company";
 import { listIndustries } from "@/actions/industry";
+import { listCustomerCategories } from "@/actions/customer-category";
+import { categoryFilterOptions } from "@/lib/customers/categories";
 import { Button } from "@/components/ui/button";
 import { CompaniesTable } from "@/components/companies/companies-table";
 import { CompanySplitList } from "@/components/companies/company-split-list";
@@ -16,6 +18,7 @@ import { companySourceValues } from "@/lib/validation/company";
 import type { CompanyStage, CompanySource } from "@prisma/client";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
+import { viewerReassignControls } from "@/lib/authz/reassign";
 
 export default async function CompaniesPage({
   searchParams,
@@ -26,6 +29,7 @@ export default async function CompaniesPage({
     assignedTo?: string;
     source?: string;
     industryId?: string;
+    category?: string;
     createdFrom?: string;
     createdTo?: string;
     page?: string;
@@ -42,7 +46,7 @@ export default async function CompaniesPage({
   // always a won deal that's still waiting on its first order, never a real paying customer.
   // Vendors/OEMs/distributors/partners/commission parties never appear here — they live in their
   // own modules (`listCompanies` defaults to `relationshipType: "CLIENT"`).
-  const [viewMode, result, assignableUsers, industries] = await Promise.all([
+  const [viewMode, result, assignableUsers, industries, categories] = await Promise.all([
     getViewMode("companies"),
     listCompaniesPaged({
       page,
@@ -53,11 +57,13 @@ export default async function CompaniesPage({
       assignedToUserId: params.assignedTo,
       source: params.source as CompanySource | undefined,
       industryId: params.industryId,
+      categoryId: params.category,
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
     }),
     listAssignableUsers(),
     listIndustries(),
+    listCustomerCategories(),
   ]);
 
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
@@ -77,6 +83,7 @@ export default async function CompaniesPage({
       assignedTo: params.assignedTo,
       source: params.source,
       industryId: params.industryId,
+      category: params.category,
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
       ...overrides,
@@ -108,6 +115,7 @@ export default async function CompaniesPage({
           label="Industry"
           options={industries.map((i) => ({ value: i.id, label: i.name }))}
         />
+        <SelectParamFilter paramName="category" label="Category" options={categoryFilterOptions(categories)} />
         <SelectParamFilter
           paramName="assignedTo"
           label="Caller"
@@ -152,7 +160,7 @@ export default async function CompaniesPage({
         </SplitListShell>
       ) : (
         <div className="mt-6">
-          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} />
+          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} reassign={await viewerReassignControls()} />
           <Pagination
             page={page}
             pageSize={pageSize}

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { Prisma, type IncentiveBasis, type IncentiveStatus, type TargetMetric } from "@prisma/client";
-import { db } from "@/lib/db";
+import { db, getTenantDb } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
@@ -388,7 +388,7 @@ export async function generateEarnings(params?: { upTo?: string }): Promise<Acti
       continue;
     }
 
-    const userIds = await subjectUserIds(db, {
+    const userIds = await subjectUserIds(await getTenantDb(), {
       scope: target.scope,
       userId: target.userId,
       departmentId: target.departmentId,
@@ -398,7 +398,7 @@ export async function generateEarnings(params?: { upTo?: string }): Promise<Acti
       continue;
     }
 
-    const achieved = await measure(db, target.metric, { from: target.fromDate, to: target.toDate, userIds });
+    const achieved = await measure(await getTenantDb(), target.metric, { from: target.fromDate, to: target.toDate, userIds });
     const result = computeIncentive({
       scheme: toScheme(target.incentiveScheme),
       targetValue: Number(target.value),

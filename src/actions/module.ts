@@ -34,13 +34,33 @@ const moduleStates = cache(async (): Promise<Map<string, boolean>> => {
   return new Map(rows.map((r) => [r.key, r.enabled]));
 });
 
+/**
+ * Whether this module is available to the person asking: switched on for the company, and — for a
+ * module with a `viewPermission` — theirs to see.
+ *
+ * The second half is what makes the `*.view` permissions real rather than cosmetic. There are ~150
+ * calls to this across pages, actions and the dashboard, each already refusing when a module is off;
+ * answering "off" to somebody without the module's view permission makes every one of them refuse
+ * that person too, with nothing new at any call site and so nothing to forget at the next one.
+ */
 export async function isModuleEnabled(key: string): Promise<boolean> {
-  await requireUser();
+  return (await moduleAccess(key)) === "available";
+}
+
+export type ModuleAccess = "available" | "switched-off" | "no-permission";
+
+/** The same answer as `isModuleEnabled`, with the reason — so a page can say which it is. */
+export async function moduleAccess(key: string): Promise<ModuleAccess> {
+  const user = await requireUser();
   const def = getModuleDefinition(key);
-  if (!def || def.core) return true;
-  const states = await moduleStates();
-  // Absent means on: a module nobody has switched off has no row.
-  return states.get(key) ?? true;
+  if (!def) return "available";
+  if (!def.core) {
+    const states = await moduleStates();
+    // Absent means on: a module nobody has switched off has no row.
+    if (!(states.get(key) ?? true)) return "switched-off";
+  }
+  if (def.viewPermission && !(await hasEffectivePermission(user.id, def.viewPermission))) return "no-permission";
+  return "available";
 }
 
 export async function setModuleEnabled(key: string, enabled: boolean): Promise<ActionResult<null>> {

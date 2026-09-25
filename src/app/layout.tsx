@@ -22,6 +22,16 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 const themeScript = `(function(){try{var s=localStorage.getItem("theme");var d=document.documentElement.dataset.defaultTheme;var t=s||d||"system";var dark=t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",dark);}catch(e){}})();`;
 
+/**
+ * Every page renders per request, never once at build time.
+ *
+ * One server answers for every workspace, told apart by the host it was reached on — and Next's
+ * Full Route Cache is keyed by path, not host. A page that could be prerendered (one whose data
+ * lookups happen to fall back quietly, like branding's) would be rendered once and then served to
+ * every workspace alike, with the first one's name and data in it. See src/lib/tenancy.
+ */
+export const dynamic = "force-dynamic";
+
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const branding = await getBranding();
 

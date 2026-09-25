@@ -1,7 +1,9 @@
 "use client";
 
 import { X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useModalA11y } from "@/components/ui/use-modal-a11y";
+import { LAYER_MODAL } from "@/components/ui/layers";
 
 export function SidePane({
   open,
@@ -24,8 +26,9 @@ export function SidePane({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50">
+  // Portalled for the same reasons as `Dialog` — see the note there.
+  return createPortal(
+    <div className={`fixed inset-0 ${LAYER_MODAL}`}>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div
         ref={containerRef}
@@ -49,6 +52,7 @@ export function SidePane({
         </div>
         <div className="flex-1 overflow-y-auto p-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

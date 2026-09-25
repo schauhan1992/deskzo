@@ -36,6 +36,8 @@ export type Moment = {
    * birthday is worth knowing; it is not worth a modal.
    */
   splash: boolean;
+  /** A sales win or an achievement: the splash throws confetti. */
+  confetti?: boolean;
 };
 
 export type PersonForCelebration = {
@@ -60,6 +62,9 @@ export type StoredCelebration = {
   startsOn: Date;
   endsOn: Date;
   subject?: { id: string; name: string } | null;
+  /** Who gets the splash; the rest see the strip. Absent on older callers means everybody. */
+  splashFor?: "EVERYONE" | "SUBJECT";
+  source?: string;
 };
 
 export type HolidayForCelebration = { id: string; name: string; date: Date; optional: boolean };
@@ -191,8 +196,11 @@ export function momentsFor(input: {
       aboutViewer: c.subjectUserId === viewer.userId,
       imageDataUrl: c.imageDataUrl,
       accent: c.accent,
-      // Somebody wrote this on purpose for today, so it is worth the interruption.
-      splash: true,
+      // Somebody wrote this on purpose for today, or a sale earned it, so it is worth the
+      // interruption — unless it is set to be the winner's own moment, when everybody else gets the
+      // strip instead.
+      splash: c.splashFor === "SUBJECT" ? c.subjectUserId === viewer.userId : true,
+      confetti: c.kind === "ACHIEVEMENT",
     });
   }
 

@@ -18,6 +18,8 @@ import {
 import { parseSeqQuery, formatItemId } from "@/lib/order-id";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { recordAudit } from "@/lib/audit";
+import { hasEffectivePermission } from "@/actions/permission";
+import { canonicalColumn, cleanName, nameKey } from "@/lib/items/catalogue-import";
 import type { ActionResult } from "@/actions/company";
 
 const FIXED_DIRECTION: Partial<Record<string, 1 | -1>> = {
@@ -70,6 +72,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
           sku: rest.sku.trim(),
           type: rest.type,
           category: rest.category || null,
+          hsnCode: rest.hsnCode || null,
           vendor: rest.vendor || null,
           brandId: rest.brandId || null,
           productFamilyId: rest.productFamilyId || null,
@@ -136,6 +139,7 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
         sku: rest.sku.trim(),
         type: rest.type,
         category: rest.category || null,
+        hsnCode: rest.hsnCode || null,
         vendor: rest.vendor || null,
         brandId: rest.brandId || null,
         productFamilyId: rest.productFamilyId || null,
@@ -188,12 +192,12 @@ export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQ
     return { ok: false, error: `Not enough stock — only ${item.stockQuantity} on hand.` };
   }
 
-  await db.$transaction([
-    db.stockMovement.create({
+  await db.$transaction(async (tx) => {
+    await tx.stockMovement.create({
       data: { itemId, type, quantityChange, reason: reason || null, createdByUserId: user.id },
-    }),
-    db.item.update({ where: { id: itemId }, data: { stockQuantity: nextQuantity } }),
-  ]);
+    });
+    await tx.item.update({ where: { id: itemId }, data: { stockQuantity: nextQuantity } });
+  });
 
   revalidatePath(`/items/${itemId}`);
   revalidatePath("/items");
@@ -307,7 +311,7 @@ export async function listItemOptions() {
     await db.item.findMany({
       where: { active: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, sku: true, type: true, unit: true, sellingPrice: true },
+      select: { id: true, name: true, sku: true, type: true, unit: true, sellingPrice: true, taxRatePercent: true },
     }),
   );
 }
@@ -345,6 +349,7 @@ export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; file
     sku: sanitizeCsvCell(item.sku),
     type: item.type,
     category: sanitizeCsvCell(item.category ?? ""),
+    hsnCode: item.hsnCode ?? "",
     vendor: sanitizeCsvCell(item.vendor ?? ""),
     brand: sanitizeCsvCell(item.brand?.name ?? ""),
     productFamily: sanitizeCsvCell(item.productFamily?.name ?? ""),
@@ -368,8 +373,109 @@ export type ImportItemsResult = {
   created: number;
   updated: number;
   errors: { row: number; message: string }[];
+  /** Brands the file named that were not in the catalogue, and were added to it. */
+  brandsCreated: string[];
+  /** The same for product families, as "Brand → Family". */
+  familiesCreated: string[];
 };
 
+type CatalogueBrand = { id: string; name: string; families: Map<string, string> };
+
+/**
+ * The catalogue's brands and families, looked up by `nameKey` and added to as the file names new
+ * ones — so a brand that appears on two hundred rows is created once, on the first, and "DELL" on
+ * row 40 is the "Dell" created on row 3.
+ *
+ * Only somebody who holds `catalog.manage` adds to it, the same permission the Brands page asks for.
+ * Anybody else still gets every row whose brand and family already exist; a row naming one that
+ * does not is refused with the name, rather than the item landing without the brand it asked for.
+ */
+async function catalogueResolver(canCreate: boolean, result: ImportItemsResult) {
+  const brands = await db.brand.findMany({
+    select: { id: true, name: true, families: { select: { id: true, name: true } } },
+  });
+  const byName = new Map<string, CatalogueBrand>();
+  const byId = new Map<string, CatalogueBrand>();
+  for (const b of brands) {
+    const entry = { id: b.id, name: b.name, families: new Map(b.families.map((f) => [nameKey(f.name), f.id])) };
+    byName.set(nameKey(b.name), entry);
+    byId.set(b.id, entry);
+  }
+
+  async function brand(name: string): Promise<CatalogueBrand | { error: string }> {
+    const found = byName.get(nameKey(name));
+    if (found) return found;
+    const stored = cleanName(name);
+    if (!canCreate) {
+      return { error: `Brand "${stored}" isn't in the catalogue — add it under Items & Inventory → Brands, or ask someone who manages the catalogue.` };
+    }
+    let row: { id: string; name: string } | null = null;
+    try {
+      row = await db.brand.create({ data: { name: stored }, select: { id: true, name: true } });
+      result.brandsCreated.push(stored);
+    } catch (err) {
+      // Added by somebody else since this import started.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+      row = await db.brand.findFirst({ where: { name: { equals: stored, mode: "insensitive" } }, select: { id: true, name: true } });
+      if (!row) throw err;
+    }
+    const entry = { id: row.id, name: row.name, families: new Map<string, string>() };
+    byName.set(nameKey(row.name), entry);
+    byId.set(row.id, entry);
+    return entry;
+  }
+
+  async function family(brandId: string, name: string): Promise<{ id: string } | { error: string }> {
+    let owner = byId.get(brandId);
+    if (!owner) {
+      // A brand added since the import began, reached through an existing item.
+      const b = await db.brand.findUnique({ where: { id: brandId }, select: { id: true, name: true, families: { select: { id: true, name: true } } } });
+      if (!b) return { error: "That item's brand no longer exists." };
+      owner = { id: b.id, name: b.name, families: new Map(b.families.map((f) => [nameKey(f.name), f.id])) };
+      byId.set(b.id, owner);
+      byName.set(nameKey(b.name), owner);
+    }
+    const found = owner.families.get(nameKey(name));
+    if (found) return { id: found };
+    const stored = cleanName(name);
+    if (!canCreate) {
+      return { error: `${owner.name} has no product family "${stored}" — add it under Items & Inventory → Brands, or ask someone who manages the catalogue.` };
+    }
+    let row: { id: string } | null = null;
+    try {
+      row = await db.productFamily.create({ data: { brandId: owner.id, name: stored }, select: { id: true } });
+      result.familiesCreated.push(`${owner.name} → ${stored}`);
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+      row = await db.productFamily.findFirst({
+        where: { brandId: owner.id, name: { equals: stored, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!row) throw err;
+    }
+    owner.families.set(nameKey(stored), row.id);
+    return row;
+  }
+
+  return { brand, family };
+}
+
+/**
+ * Items from a spreadsheet — every attribute the item form has, brand and product family included.
+ *
+ * ## Columns
+ *
+ * Headers are matched loosely (`canonicalColumn`): "Selling Price", "sellingPrice" and "selling_price"
+ * are one column, and "HSN/SAC", "Make" and "UOM" are understood. Anything unrecognised is ignored,
+ * which is what lets an export — with its item id and stock columns — come straight back in.
+ *
+ * ## A missing column is not a blank one
+ *
+ * For brand, product family and HSN/SAC — the columns added after the first template — a column the
+ * file does not have leaves those fields as they are on an existing item, while a column present
+ * but left blank clears them. Otherwise re-importing an older template, or a sheet of prices only,
+ * would strip the brand off every item it touched.
+ */
 export async function importItems(formData: FormData): Promise<ActionResult<ImportItemsResult>> {
   const user = await requireUser();
   const moduleError = await requireItemsModule();
@@ -387,6 +493,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
   const parsed = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: true,
+    transformHeader: canonicalColumn,
   });
 
   if (parsed.errors.length > 0) {
@@ -396,7 +503,24 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
     return { ok: false, error: "The file has no data rows." };
   }
 
-  const result: ImportItemsResult = { created: 0, updated: 0, errors: [] };
+  const columns = new Set(parsed.meta.fields ?? []);
+  const hasBrand = columns.has("brand");
+  const hasFamily = columns.has("productFamily");
+  const hasHsn = columns.has("hsnCode");
+
+  const result: ImportItemsResult = { created: 0, updated: 0, errors: [], brandsCreated: [], familiesCreated: [] };
+  const catalogue = await catalogueResolver(await hasEffectivePermission(user.id, "catalog.manage"), result);
+
+  // Every SKU the file names, in one query rather than one per row.
+  const skus = [...new Set(parsed.data.map((r) => String(r.sku ?? "").trim()).filter(Boolean))];
+  const known = new Map(
+    (
+      await db.item.findMany({
+        where: { sku: { in: skus } },
+        select: { id: true, sku: true, brandId: true, productFamilyId: true },
+      })
+    ).map((i) => [i.sku, i]),
+  );
 
   for (let i = 0; i < parsed.data.length; i++) {
     const rowNumber = i + 2; // header is row 1
@@ -409,12 +533,47 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
       continue;
     }
     const data = validated.data;
+    const existing = known.get(data.sku);
     // Only goods can track inventory — see the matching note in createItem.
     const trackInventory = data.type === "GOOD" && data.trackInventory;
 
-    try {
-      const existing = await db.item.findUnique({ where: { sku: data.sku } });
+    // Brand, then family — each left as it is when the file has no such column.
+    let brandId = existing?.brandId ?? null;
+    let productFamilyId = existing?.productFamilyId ?? null;
+    if (hasFamily && data.productFamily && !(hasBrand ? data.brand : brandId)) {
+      result.errors.push({ row: rowNumber, message: `Product family "${data.productFamily}" needs its brand on the same row.` });
+      continue;
+    }
+    if (hasBrand) {
+      if (data.brand) {
+        const brand = await catalogue.brand(data.brand);
+        if ("error" in brand) {
+          result.errors.push({ row: rowNumber, message: brand.error });
+          continue;
+        }
+        // A family belongs to one brand, so a new brand drops the old brand's family.
+        if (brand.id !== brandId) productFamilyId = null;
+        brandId = brand.id;
+      } else {
+        brandId = null;
+        productFamilyId = null;
+      }
+    }
+    if (hasFamily) {
+      if (data.productFamily && brandId) {
+        const family = await catalogue.family(brandId, data.productFamily);
+        if ("error" in family) {
+          result.errors.push({ row: rowNumber, message: family.error });
+          continue;
+        }
+        productFamilyId = family.id;
+      } else {
+        productFamilyId = null;
+      }
+    }
+    const hsnCode = hasHsn ? data.hsnCode || null : undefined;
 
+    try {
       if (existing) {
         // Never touch stock on update — that stays authoritative in the stock ledger,
         // adjusted only via "Record movement" on the item page.
@@ -424,7 +583,10 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
             name: data.name,
             type: data.type,
             category: data.category || null,
+            hsnCode,
             vendor: data.vendor || null,
+            brandId,
+            productFamilyId,
             unit: data.unit || null,
             billingCycle: data.billingCycle || null,
             costPrice: data.costPrice ?? null,
@@ -436,16 +598,20 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
             active: data.active,
           },
         });
+        known.set(data.sku, { ...existing, brandId, productFamilyId });
         result.updated++;
       } else {
-        await db.$transaction(async (tx) => {
-          const created = await tx.item.create({
+        const created = await db.$transaction(async (tx) => {
+          const item = await tx.item.create({
             data: {
               name: data.name,
               sku: data.sku,
               type: data.type,
               category: data.category || null,
+              hsnCode: hsnCode ?? null,
               vendor: data.vendor || null,
+              brandId,
+              productFamilyId,
               unit: data.unit || null,
               billingCycle: data.billingCycle || null,
               costPrice: data.costPrice ?? null,
@@ -463,7 +629,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
           if (trackInventory && data.openingStock) {
             await tx.stockMovement.create({
               data: {
-                itemId: created.id,
+                itemId: item.id,
                 type: "RECEIVED",
                 quantityChange: data.openingStock,
                 reason: "Opening stock (import)",
@@ -471,7 +637,10 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
               },
             });
           }
+          return item;
         });
+        // A second row for the same SKU further down updates this one, as it would a stored item.
+        known.set(data.sku, { id: created.id, sku: data.sku, brandId, productFamilyId });
         result.created++;
       }
     } catch {
@@ -479,6 +648,19 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
     }
   }
 
-  revalidatePath("/items");
+  if (result.created + result.updated + result.brandsCreated.length > 0) {
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Item",
+      entityId: "import",
+      entityLabel:
+        `Imported items — ${result.created} created, ${result.updated} updated` +
+        (result.brandsCreated.length ? `, ${result.brandsCreated.length} brand(s) added` : "") +
+        (result.familiesCreated.length ? `, ${result.familiesCreated.length} product family(ies) added` : ""),
+    });
+  }
+
+  revalidatePath("/items", "layout");
   return { ok: true, data: result };
 }

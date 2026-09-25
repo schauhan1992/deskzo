@@ -53,7 +53,7 @@ import { seedExtras } from "./demo/extras";
 import { seedDetail } from "./demo/detail";
 import { seedFinance } from "./demo/finance";
 import { seedReach } from "./demo/reach";
-import { DEMO_EMAIL_DOMAIN, DEMO_SKU, DEMO_TAG, log } from "./demo/shared";
+import { BOOK_SIZE, COMPANY_AGE_DAYS, DEMO_EMAIL_DOMAIN, DEMO_SKU, DEMO_TAG, HEADCOUNT, log } from "./demo/shared";
 
 const db = new PrismaClient();
 const args = process.argv.slice(2);
@@ -189,6 +189,31 @@ async function reset() {
     await db.employeeProfile.deleteMany({ where: { userId: { in: userIds } } });
     // Managers before reports, or the self-reference blocks the delete.
     await db.user.updateMany({ where: { managerId: { in: userIds } }, data: { managerId: null } });
+
+    /**
+     * Anything a demo person created but this reset does not own.
+     *
+     * `Company.createdById` is required and has no cascade, so a company created by a demo user but
+     * not carrying the demo tag — one another seed made while signed in as them — blocks the whole
+     * user delete with a foreign-key error, and the reset stops half-done.
+     *
+     * Reassigned to the surviving admin rather than deleted. This reset is only entitled to remove
+     * what it created, and a row it did not tag is somebody else's; moving the authorship is enough
+     * to let the people go, and leaves the record for whoever does own it to clean up.
+     */
+    const survivor = await db.user.findFirst({
+      where: { id: { notIn: userIds }, active: true },
+      orderBy: { isSuperAdmin: "desc" },
+      select: { id: true },
+    });
+    if (survivor) {
+      const orphaned = await db.company.updateMany({
+        where: { createdById: { in: userIds } },
+        data: { createdById: survivor.id },
+      });
+      if (orphaned.count > 0) log("Reassigned", `${orphaned.count} company record(s) another seed left behind`);
+    }
+
     await db.user.deleteMany({ where: { id: { in: userIds } } });
   }
 
@@ -229,7 +254,13 @@ async function safetyCheck() {
 
 async function main() {
   const started = Date.now();
-  console.log("\nSeeding a year of trading.\n");
+  const months = Math.round(COMPANY_AGE_DAYS / 30);
+  console.log(
+    `\nSeeding a ${months}-month-old company: ${HEADCOUNT} people, ${BOOK_SIZE} accounts.\n` +
+      `Everything is dated inside those ${COMPANY_AGE_DAYS} days, except subscription terms —\n` +
+      `a reseller takes over tenancies that were already running, and those expiries are what\n` +
+      `keeps the renewals screen worth looking at.\n`,
+  );
 
   if (RESET) await reset();
   if (!FORCE && !(await safetyCheck())) {
@@ -251,7 +282,7 @@ async function main() {
 
   const { people, departments, leaving } = await seedPeople(db);
   const items = await seedCatalogue(db, admin.id);
-  const companies = await seedCompanies(db, people, admin.id, 500);
+  const companies = await seedCompanies(db, people, admin.id, BOOK_SIZE);
   await seedActivity(db, companies, items, people);
   await seedDocuments(db, companies, items, people);
   await seedModules(db, companies, items, people, departments);

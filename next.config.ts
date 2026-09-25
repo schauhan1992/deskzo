@@ -10,6 +10,23 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
 
   /**
+   * The dev server prints every Server Function call with its arguments — and those arguments
+   * include what people type into secret fields: AI provider keys, email-provider and e-invoice
+   * credentials, passwords. Found when a copilot key appeared in plain text in the dev log. Off, so
+   * no secret lands in a terminal, a log file or a screen share.
+   */
+  logging: {
+    serverFunctions: false,
+  },
+
+  /**
+   * Each workspace is its own subdomain — locally `acme.localhost:3000`. Next 16 refuses dev assets
+   * and hot reload to any origin not listed here, which would leave every workspace but the bare
+   * `localhost` a page that never finishes loading in development.
+   */
+  allowedDevOrigins: ["*.localhost"],
+
+  /**
    * eSSL / ZKTeco terminals post to a fixed path.
    *
    * Their firmware lets you set the server address and port on the keypad, but the path is baked

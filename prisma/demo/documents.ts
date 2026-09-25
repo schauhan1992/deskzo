@@ -36,12 +36,17 @@ export async function seedDocuments(
 ) {
   const sales = people.filter((p) => p.dept === "Sales");
   const accounts = people.filter((p) => p.dept === "Accounts");
+  // Whoever raises a purchase order. Falls back to Accounts on a roster too small to have a
+  // purchase desk of its own, so this never picks from an empty list.
+  const purchasers = people.filter((p) => p.dept === "Purchase").length > 0
+    ? people.filter((p) => p.dept === "Purchase")
+    : accounts;
 
   const orders = await db.companyProduct.findMany({
     select: {
       id: true, companyId: true, locationId: true, itemId: true, quantity: true,
       unitPrice: true, createdAt: true, addedByUserId: true,
-      item: { select: { name: true, hsnCode: true, taxRatePercent: true, unit: true } },
+      item: { select: { name: true, hsnCode: true, taxRatePercent: true, unit: true, type: true } },
     },
   });
   /**
@@ -66,7 +71,19 @@ export async function seedDocuments(
   let invoices = 0;
   let allocations = 0;
   let outstanding = 0;
-  const seq = { PROPOSAL: 0, INVOICE: 0 };
+  const seq = { PROPOSAL: 0, PROFORMA: 0, INVOICE: 0, PURCHASE_ORDER: 0, BILL: 0, DELIVERY_CHALLAN: 0 };
+  let proformas = 0;
+  let purchases = 0;
+  let challans = 0;
+
+  /**
+   * Who we buy from.
+   *
+   * A purchase order and the bill against it point at a vendor, not at the customer the goods are
+   * for — so without this the purchase side of the app has nothing in it at all, and the two
+   * document types that live there cannot be opened, filtered or approved.
+   */
+  const vendors = companies.filter((c) => c.relationship === "VENDOR");
 
   for (const [key, group] of byBatch) {
     const companyId = key.split(":")[0]!;
@@ -130,6 +147,8 @@ export async function seedDocuments(
       data: {
         docNumber: `QT/${fyLabel}/${String(seq.PROPOSAL).padStart(4, "0")}`,
         docType: "PROPOSAL",
+          // Typed into the document form, which is what a seeded document stands in for.
+          origin: "MANUAL",
         direction: "SALES",
         status: pick(["ACCEPTED", "ACCEPTED", "ACCEPTED", "ISSUED", "EXPIRED"] as const),
         companyId,
@@ -154,6 +173,8 @@ export async function seedDocuments(
       data: {
         docNumber: `INV/${fyLabel}/${String(seq.INVOICE).padStart(4, "0")}`,
         docType: "INVOICE",
+          // Typed into the document form, which is what a seeded document stands in for.
+          origin: "MANUAL",
         direction: "SALES",
         status,
         companyId,
@@ -198,9 +219,123 @@ export async function seedDocuments(
     } else {
       outstanding += Number(invoice.total);
     }
+
+    /**
+     * ── The other four kinds of document ──────────────────────────────────────────────────────
+     *
+     * A proforma where the customer paid in advance, the purchase order and vendor bill behind
+     * what was sold, and a delivery challan for goods that physically moved. All four are built
+     * from the same computed totals as the invoice above, so the tax on them reconciles the same
+     * way — and all four exist so the screens that show them have something to show.
+     */
+
+    // A minority of customers pay up front, and those get a proforma before the invoice.
+    if (chance(0.22)) {
+      seq.PROFORMA += 1;
+      const proformaOn = daysAgo(Math.floor((Date.now() - raisedOn.getTime()) / 86400000) + int(2, 10));
+      await db.tradeDocument.create({
+        data: {
+          docNumber: `PI/${fyLabel}/${String(seq.PROFORMA).padStart(4, "0")}`,
+          docType: "PROFORMA",
+          // Typed into the document form, which is what a seeded document stands in for.
+          origin: "MANUAL",
+          direction: "SALES",
+          status: pick(["ISSUED", "ISSUED", "ACCEPTED"] as const),
+          companyId,
+          locationId: group[0]!.locationId,
+          salespersonId: owner,
+          createdById: pick(accounts).id,
+          issueDate: proformaOn,
+          createdAt: proformaOn,
+          ...totals,
+          lines: { create: lineData },
+        },
+      });
+      proformas += 1;
+    }
+
+    // What we bought to fulfil it, and the vendor's invoice for it.
+    if (vendors.length > 0 && chance(0.55)) {
+      const vendor = pick(vendors);
+      const orderedOn = daysAgo(Math.floor((Date.now() - raisedOn.getTime()) / 86400000) + int(3, 14));
+      seq.PURCHASE_ORDER += 1;
+      const po = await db.tradeDocument.create({
+        data: {
+          docNumber: `PO/${fyLabel}/${String(seq.PURCHASE_ORDER).padStart(4, "0")}`,
+          docType: "PURCHASE_ORDER",
+          // Typed into the document form, which is what a seeded document stands in for.
+          origin: "MANUAL",
+          direction: "PURCHASE",
+          status: pick(["ACCEPTED", "ACCEPTED", "ISSUED"] as const),
+          companyId: vendor.id,
+          locationId: vendor.locationId,
+          createdById: pick(purchasers).id,
+          issueDate: orderedOn,
+          createdAt: orderedOn,
+          ...totals,
+          placeOfSupplyCode: vendor.stateCode,
+          lines: { create: lineData },
+        },
+        select: { id: true },
+      });
+      purchases += 1;
+
+      // Most purchase orders come back as a bill. The ones that have not yet are what the
+      // purchase team is chasing, which is the whole point of that screen.
+      if (chance(0.72)) {
+        seq.BILL += 1;
+        const billedOn = daysAgo(Math.floor((Date.now() - orderedOn.getTime()) / 86400000) - int(1, 8));
+        await db.tradeDocument.create({
+          data: {
+            docNumber: `BILL/${fyLabel}/${String(seq.BILL).padStart(4, "0")}`,
+            docType: "BILL",
+            origin: "CONVERSION",
+            direction: "PURCHASE",
+            status: pick(["PAID", "PAID", "ISSUED"] as const),
+            companyId: vendor.id,
+            locationId: vendor.locationId,
+            createdById: pick(accounts).id,
+            issueDate: billedOn,
+            dueDate: new Date(billedOn.getTime() + int(15, 45) * 86400000),
+            createdAt: billedOn,
+            sourceDocumentId: po.id,
+            ...totals,
+            placeOfSupplyCode: vendor.stateCode,
+            lines: { create: lineData },
+          },
+        });
+      }
+    }
+
+    // Goods that physically moved get a challan. Services do not — nothing travels.
+    const hasGoods = group.some((o) => o.item.type === "GOOD");
+    if (hasGoods && chance(0.4)) {
+      seq.DELIVERY_CHALLAN += 1;
+      await db.tradeDocument.create({
+        data: {
+          docNumber: `DC/${fyLabel}/${String(seq.DELIVERY_CHALLAN).padStart(4, "0")}`,
+          docType: "DELIVERY_CHALLAN",
+          // Typed into the document form, which is what a seeded document stands in for.
+          origin: "MANUAL",
+          direction: "SALES",
+          status: "ISSUED",
+          companyId,
+          locationId: group[0]!.locationId,
+          createdById: pick(accounts).id,
+          issueDate: raisedOn,
+          createdAt: raisedOn,
+          ...totals,
+          lines: { create: lineData },
+        },
+      });
+      challans += 1;
+    }
   }
 
   log("Quotations", `${quotes}`);
+  log("Proformas", `${proformas} — customers who paid in advance`);
+  log("Purchase side", `${purchases} orders to vendors, and the bills against them`);
+  log("Delivery challans", `${challans} — goods that physically moved`);
   log("Invoices", `${invoices} with ${allocations} receipts allocated`);
   log("Outstanding", `₹${(outstanding / 10000000).toFixed(2)} crore unsettled`);
 

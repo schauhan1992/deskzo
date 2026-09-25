@@ -12,6 +12,7 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { CallButton } from "@/components/calls/call-button";
 import { EmailCheckBadge } from "@/components/contacts/email-address";
 import { formatSpan } from "@/lib/workspace/allocation";
+import { headcountLabel } from "@/lib/company-size";
 
 type Queue = NonNullable<Awaited<ReturnType<typeof myCallingQueue>>>;
 type Record_ = Queue["records"][number];
@@ -117,7 +118,7 @@ export function CallingStation({ queue }: { queue: Queue }) {
                           .filter(Boolean)
                           .join(", ")
                       : null,
-                    current.company.employeeCount ? `${current.company.employeeCount} staff` : null,
+                    headcountLabel(current.company.employeeCount) ? `${headcountLabel(current.company.employeeCount)} staff` : null,
                   ]
                     .filter(Boolean)
                     .join(" · ") || "No details on file"}

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getTradeDocument, listDocumentParties } from "@/actions/trade-document";
 import { listAssignableUsers } from "@/actions/company";
 import { getNumberSetting } from "@/actions/document-number";
-import { getOrganisation } from "@/lib/organisation";
+import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { stateCodeFromGstin } from "@/lib/gst-engine";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -53,7 +53,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     getOrganisation(),
     getNumberSetting(document.docType),
   ]);
-  const orgAddress = [org.legalName, org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" "), org.state]
+  const orgAddress = [org.legalName, org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" "), org.state, foreignCountry(org)]
     .filter(Boolean)
     .join("\n");
 

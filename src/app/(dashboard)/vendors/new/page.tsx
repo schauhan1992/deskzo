@@ -1,4 +1,5 @@
 import { listIndustries } from "@/actions/industry";
+import { viewerHas } from "@/actions/permission";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
@@ -10,7 +11,7 @@ export default async function NewVendorPage() {
     return <ModuleDisabledNotice moduleKey="vendors" />;
   }
 
-  const industries = await listIndustries();
+  const [industries, canAddContacts] = await Promise.all([listIndustries(), viewerHas("contacts.view")]);
 
   return (
     <div>
@@ -20,6 +21,7 @@ export default async function NewVendorPage() {
       </p>
       <NewCompanyForm
         industries={industries}
+        canAddContacts={canAddContacts}
         defaultRelationshipType="VENDOR"
         relationshipTypeOptions={vendorRelationshipTypeValues}
       />

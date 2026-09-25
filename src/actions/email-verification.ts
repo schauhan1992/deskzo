@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { EmailCheckMethod, EmailCheckStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
+import { contactScope, contactIdsInScope, mayWorkWithContactsOf, NO_CONTACTS } from "@/lib/authz/contact-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { parseEmailAddress } from "@/lib/email-verification";
@@ -69,7 +70,9 @@ export async function verifyContactEmail(contactId: string): Promise<ActionResul
     where: { id: contactId },
     select: { id: true, name: true, email: true, companyId: true, company: { select: { name: true } } },
   });
-  if (!contact) return { ok: false, error: "That contact no longer exists." };
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: "That contact no longer exists." };
+  }
   if (!contact.email) return { ok: false, error: "There's no email address on this contact to check." };
 
   await primeFromDomainProfiles([contact.companyId]);
@@ -101,8 +104,11 @@ export async function verifyContactEmails(contactIds: string[]): Promise<
   const user = await requireUser();
   if (contactIds.length === 0) return { ok: false, error: "Nothing selected." };
 
+  // Only the contacts this person may see — the rest are skipped as if they did not exist.
+  const allowed = await contactIdsInScope(user.id, contactIds);
+  if (allowed.length === 0) return { ok: false, error: NO_CONTACTS };
   const contacts = await db.contact.findMany({
-    where: { id: { in: contactIds } },
+    where: { id: { in: allowed } },
     select: { id: true, email: true, companyId: true },
   });
 
@@ -136,7 +142,8 @@ export async function verifyContactEmails(contactIds: string[]): Promise<
 export async function verifyCompanyEmails(companyId: string): Promise<
   ActionResult<{ checked: number; skipped: number; results: CheckResult[] }>
 > {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await mayWorkWithContactsOf(user.id, companyId))) return { ok: false, error: NO_CONTACTS };
   const contacts = await db.contact.findMany({
     where: { companyId, email: { not: null } },
     select: { id: true },
@@ -162,7 +169,9 @@ export async function markEmailConfirmed(
     where: { id: contactId },
     select: { id: true, email: true, companyId: true },
   });
-  if (!contact) return { ok: false, error: "That contact no longer exists." };
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: "That contact no longer exists." };
+  }
   if (!contact.email) return { ok: false, error: "There's no email address on this contact." };
 
   const status: EmailCheckStatus = verdict === "CONFIRMED" ? "VALID" : "INVALID";
@@ -207,13 +216,15 @@ const CURRENT: Prisma.ContactWhereInput = {
 
 /** How the address book looks at a glance. */
 export async function emailVerificationSummary() {
-  await requireUser();
+  const user = await requireUser();
+  // The viewer's own book, like every other count of contacts.
+  const scope = await contactScope(user.id);
   const [total, checked, valid, risky, invalid] = await Promise.all([
-    db.contact.count({ where: { email: { not: null } } }),
-    db.contact.count({ where: CURRENT }),
-    db.contact.count({ where: { ...CURRENT, emailStatus: "VALID" } }),
-    db.contact.count({ where: { ...CURRENT, emailStatus: "RISKY" } }),
-    db.contact.count({ where: { ...CURRENT, emailStatus: "INVALID" } }),
+    db.contact.count({ where: { AND: [scope, { email: { not: null } }] } }),
+    db.contact.count({ where: { AND: [scope, CURRENT] } }),
+    db.contact.count({ where: { AND: [scope, CURRENT, { emailStatus: "VALID" }] } }),
+    db.contact.count({ where: { AND: [scope, CURRENT, { emailStatus: "RISKY" }] } }),
+    db.contact.count({ where: { AND: [scope, CURRENT, { emailStatus: "INVALID" }] } }),
   ]);
   // Anything whose address has moved on since it was checked is unchecked again, which is the
   // same rule the badge applies.
@@ -222,8 +233,10 @@ export async function emailVerificationSummary() {
 
 /** Addresses the last check condemned, so somebody can go and find the right ones. */
 export async function badEmailContacts(params: { page: number; pageSize: number }) {
-  await requireUser();
-  const where: Prisma.ContactWhereInput = { ...CURRENT, emailStatus: { in: ["INVALID", "RISKY"] } };
+  const user = await requireUser();
+  const where: Prisma.ContactWhereInput = {
+    AND: [await contactScope(user.id), CURRENT, { emailStatus: { in: ["INVALID", "RISKY"] } }],
+  };
   const [rows, total] = await Promise.all([
     db.contact.findMany({
       where,

@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, paymentScope, viaCompanyScope } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
-import { hasEffectivePermission } from "@/actions/permission";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
 import {
@@ -307,6 +307,7 @@ async function maySeeCustomer(userId: string, companyId: string): Promise<boolea
 /** One invoice's settlement, with the payments and credits that produced it. */
 export async function getInvoiceSettlement(invoiceId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return null;
   const invoice = await db.tradeDocument.findFirst({
     // Reached through the party, like the invoice itself: what has been paid and what is still
     // outstanding is the account's business, not everybody's. `findFirst` so the scope can travel
@@ -350,6 +351,7 @@ export async function getInvoiceSettlement(invoiceId: string) {
 /** How much of a credit note is still available to apply. */
 export async function getCreditNoteBalance(creditNoteId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return null;
   const creditNote = await db.tradeDocument.findFirst({
     where: { id: creditNoteId, ...(await viaCompanyScope(user.id)) },
     select: {
@@ -373,6 +375,7 @@ export async function getCreditNoteBalance(creditNoteId: string) {
 /** Open invoices for a customer — the picker when applying a payment or a credit note. */
 export async function listOpenInvoices(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return [];
   // Every unpaid invoice a customer has, with what is still owed on each — the picker is reached
   // from a credit note the viewer is already on, so this only refuses an id passed in by hand.
   if (!(await maySeeCustomer(user.id, companyId))) return [];
@@ -398,6 +401,7 @@ export async function listOpenInvoices(companyId: string) {
  */
 export async function customerStatement(companyId: string, opts?: { from?: string; to?: string }) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return null;
   const asOf = new Date();
 
   /**
@@ -532,6 +536,7 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
  */
 export async function agingReport(params?: { search?: string }) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return { rows: [], totals: { buckets: emptyAging(), total: 0 } };
   const asOf = new Date();
 
   const invoices = await db.tradeDocument.findMany({
@@ -605,6 +610,7 @@ export async function agingReport(params?: { search?: string }) {
 /** Issued credit notes for a customer that still have an unapplied balance. */
 export async function listAvailableCredits(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return [];
   if (!(await maySeeCustomer(user.id, companyId))) return [];
   const creditNotes = await db.tradeDocument.findMany({
     where: { companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } },

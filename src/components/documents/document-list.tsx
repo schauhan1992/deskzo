@@ -1,20 +1,33 @@
 import Link from "next/link";
 import type { TradeDocumentType, TradeDocumentStatus } from "@prisma/client";
 import { listTradeDocuments, tradeDocumentSummary } from "@/actions/trade-document";
+import { approvalDocumentsFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
+import { approvalRequirement } from "@/lib/documents/approval";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { DocumentRows } from "@/components/documents/document-rows";
 import { DocumentSplitList } from "@/components/documents/document-split-list";
 import { DocumentDetail } from "@/components/documents/document-detail";
 import { DocumentPdfPreview } from "@/components/documents/document-pdf-preview";
 import { SearchParamInput } from "@/components/ui/search-param-input";
+import { SelectParamFilter } from "@/components/ui/select-param-filter";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { ColumnPicker } from "@/components/ui/table-columns";
+import { documentTableKey } from "@/lib/tables/registry";
+import { listAssignableUsers } from "@/actions/company";
 import { Pagination } from "@/components/ui/pagination";
 import { SplitListShell, SplitListEmpty, SplitListPage, resolveSelected } from "@/components/ui/split-list";
 import { ViewModeToggle } from "@/components/ui/view-mode-toggle";
 import { getViewMode } from "@/actions/view-mode";
 import { formatCurrency } from "@/lib/utils";
 import { PAGE_SIZES, resolvePage, resolvePageSize } from "@/lib/pagination";
-import { documentListPath, isEInvoiceEligible, tradeDocumentLabels, tradeDocumentStatusLabels } from "@/lib/trade-documents";
+import {
+  documentDirection,
+  documentListPath,
+  documentOriginLabels,
+  isEInvoiceEligible,
+  tradeDocumentLabels,
+  tradeDocumentStatusLabels,
+} from "@/lib/trade-documents";
 
 const STATUS_VALUES: TradeDocumentStatus[] = [
   "DRAFT",
@@ -30,6 +43,12 @@ const STATUS_VALUES: TradeDocumentStatus[] = [
 export type DocumentListSearchParams = {
   status?: string;
   q?: string;
+  /** Issue-date window. */
+  from?: string;
+  to?: string;
+  salesperson?: string;
+  /** A `DocumentOrigin`, or "none" for documents that never recorded one. */
+  origin?: string;
   page?: string;
   pageSize?: string;
   /** Which document is open beside the list. */
@@ -55,70 +74,138 @@ export async function DocumentList({
   const page = resolvePage(searchParams.page);
   const pageSize = resolvePageSize(searchParams.pageSize);
 
-  const [viewMode, { rows, total }, summary] = await Promise.all([
+  const [viewMode, { rows, total }, summary, approvalPolicy, users] = await Promise.all([
     getViewMode("documents"),
-    listTradeDocuments({ docType, status, search: searchParams.q, page, pageSize }),
+    listTradeDocuments({
+      docType,
+      status,
+      search: searchParams.q,
+      from: searchParams.from,
+      to: searchParams.to,
+      salespersonId: searchParams.salesperson,
+      origin: searchParams.origin,
+      page,
+      pageSize,
+    }),
     tradeDocumentSummary(docType),
+    // One answer for the whole list rather than per row: approval is configured per type.
+    approvalPolicyFor(docType),
+    listAssignableUsers(),
   ]);
+
+  /**
+   * Which of this page's documents need sign-off. The type may only need it above a value or a
+   * discount, so the badge is decided per document — a ₹5,000 quote under the limit is not "Not
+   * submitted", it is simply a quote.
+   */
+  const approvalFacts = approvalPolicy.enabled ? await approvalDocumentsFor(rows.map((r) => r.id)) : new Map();
+  const approvalRequiredIds = rows
+    .filter((r) => approvalPolicy.enabled && (!approvalFacts.has(r.id) || approvalRequirement(approvalPolicy, approvalFacts.get(r.id)!).required))
+    .map((r) => r.id);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const basePath = documentListPath[docType];
   const eInvoiced = isEInvoiceEligible(docType);
+  const isSales = documentDirection[docType] === "SALES";
 
   const draftCount = summary.find((s) => s.status === "DRAFT")?.count ?? 0;
   const issuedValue = summary
     .filter((s) => s.status !== "DRAFT" && s.status !== "CANCELLED")
     .reduce((sum, s) => sum + s.total, 0);
 
+  /**
+   * The current query with a few keys overridden.
+   *
+   * Everything that came in is carried through, rather than a hand-listed set of keys. The old
+   * version named five params explicitly, which made it a whitelist: every filter added afterwards
+   * would be silently dropped the moment somebody used one of these links, and the link would look
+   * like it had cleared the filter on purpose.
+   */
   function queryFor(overrides: Record<string, string | undefined>) {
-    const next = {
-      status: searchParams.status,
-      q: searchParams.q,
-      pageSize: searchParams.pageSize,
-      sel: searchParams.sel,
-      view: searchParams.view,
-      ...overrides,
-    };
+    const next: Record<string, string | undefined> = { ...searchParams, ...overrides };
     return Object.fromEntries(Object.entries(next).filter(([, v]) => v)) as Record<string, string>;
   }
 
   const selected = viewMode === "split" ? resolveSelected(rows, searchParams.sel) : null;
   const pdfView = selected !== null && searchParams.view === "pdf";
 
+  /**
+   * One row, the way every other records list does it.
+   *
+   * This screen used to spend two bands on a single search box and nine status pills — 102px to
+   * offer one filter. The pills read well but they do not scale: adding the four filters below
+   * would have made three bands of chrome above a list somebody is trying to read. Each control
+   * resets `page` itself, which is what the pills' `page: undefined` was doing by hand.
+   *
+   * Nothing resets `sel`: `resolveSelected` already falls back to the first row when the open
+   * document is filtered out, so the split view heals itself.
+   */
   const filters = (
-    <>
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search number, reference or party…" />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {[
-          { label: "All", value: undefined as TradeDocumentStatus | undefined },
-          ...STATUS_VALUES.map((v) => ({ label: tradeDocumentStatusLabels[v], value: v })),
-        ].map((f) => (
-          <Link
-            key={f.label}
-            href={{ pathname: basePath, query: queryFor({ status: f.value, page: undefined }) }}
-            className={`rounded-full px-3 py-1 text-sm transition-colors ${
-              status === f.value || (!status && !f.value)
-                ? "bg-brand text-brand-contrast"
-                : "border border-line-strong bg-surface text-muted hover:text-text"
-            }`}
-          >
-            {f.label}
-          </Link>
-        ))}
-      </div>
-    </>
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <SearchParamInput paramName="q" placeholder="Search number, reference or party…" />
+      <SelectParamFilter
+        paramName="status"
+        label="Status"
+        allLabel="Any status"
+        options={STATUS_VALUES.map((v) => ({ value: v, label: tradeDocumentStatusLabels[v] }))}
+      />
+      {/* Only where there is one to filter by: a purchase order's last column is whoever raised it,
+          not a salesperson, and `listTradeDocuments` narrows on `salespersonId` either way. */}
+      {isSales && (
+        <SelectParamFilter
+          paramName="salesperson"
+          label="Salesperson"
+          allLabel="Anyone"
+          options={users.map((u) => ({ value: u.id, label: u.name }))}
+        />
+      )}
+      <SelectParamFilter
+        paramName="origin"
+        label="Source"
+        allLabel="Any source"
+        options={[
+          ...Object.entries(documentOriginLabels).map(([value, label]) => ({ value, label })),
+          // A real answer rather than an absent filter — it finds what the back catalogue could
+          // not place, which is the question the Source column raises.
+          { value: "none", label: "Not recorded" },
+        ]}
+      />
+      <DateRangePicker fromParam="from" toParam="to" label="Issued" />
+      {/* Only in table view. The split list is a card list, not a table, so a picker there would
+          offer choices that change nothing on screen. */}
+      {viewMode === "list" && <ColumnPicker tableKey={documentTableKey(docType)} className="ml-auto" />}
+    </div>
   );
 
   const header = (
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
+      {/**
+        * `min-w-0 flex-1` so the text column yields rather than shoving the actions onto their own
+        * line. The subtitle grew when the summary cards were folded into it, and a flex child sized
+        * to its content took the full width — which wrapped the toggle and the New button below the
+        * heading and left-aligned them, reading as though they belonged to nothing.
+        */}
+      <div className="min-w-0 flex-1">
         <h1 className="text-xl font-semibold text-text">{title}</h1>
-        <p className="mt-1 text-sm text-muted">{description}</p>
+        {/**
+          * The three figures that used to be cards, on the subtitle line.
+          *
+          * "Shown" rather than "total" is load-bearing. `total` comes from the list query and *is*
+          * narrowed by the search and the filters; `draftCount` and `issuedValue` come from
+          * `tradeDocumentSummary`, which takes neither and always describes the whole book. In
+          * separate bordered cards that difference was invisible; on one line, "12 total · 40 draft"
+          * would read as a contradiction. Saying "shown" makes the narrowing explicit instead.
+          */}
+        <p className="mt-1 text-sm text-muted">
+          {description} · {total} shown · {draftCount} draft ·{" "}
+          {/* Labelled as an equivalent because the documents behind it may be in several
+              currencies and this is their rupee total. */}
+          {formatCurrency(issuedValue)} issued (₹ equivalent)
+        </p>
       </div>
-      <div className="flex items-center gap-2">
+      {/* `ml-auto` as well as `justify-between`, so that on a screen narrow enough to wrap anyway
+          these stay on the right rather than falling to the left margin. */}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <ViewModeToggle viewKey="documents" mode={viewMode} />
         <Link href={`/documents/new?type=${docType}`}>
           <Button>New {tradeDocumentLabels[docType].toLowerCase()}</Button>
@@ -131,31 +218,14 @@ export async function DocumentList({
     <SplitListPage active={viewMode === "split"}>
       {header}
 
-      {viewMode === "list" && (
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Card className="px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-subtle">Total</div>
-            <div className="mt-1 text-lg font-semibold text-text">{total}</div>
-          </Card>
-          <Card className="px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-subtle">Drafts</div>
-            <div className="mt-1 text-lg font-semibold text-text">{draftCount}</div>
-          </Card>
-          <Card className="px-4 py-3">
-            {/* Labelled, because it is a converted figure: the documents behind it may be in
-                several currencies and the total is their rupee equivalent. */}
-            <div className="text-xs uppercase tracking-wide text-subtle">Issued value (₹)</div>
-            <div className="mt-1 text-lg font-semibold text-text">{formatCurrency(issuedValue)}</div>
-          </Card>
-        </div>
-      )}
-
       {filters}
 
       {viewMode === "split" ? (
         <SplitListShell
           countLabel={`${total} ${tradeDocumentLabels[docType].toLowerCase()}${total === 1 ? "" : "s"}`}
-          listPane={<DocumentSplitList documents={rows} selectedId={selected} />}
+          listPane={
+            <DocumentSplitList documents={rows} selectedId={selected} approvalEnabled={approvalPolicy.enabled} approvalRequiredIds={approvalRequiredIds} />
+          }
         >
           {selected ? (
             <>
@@ -193,8 +263,15 @@ export async function DocumentList({
         </SplitListShell>
       ) : (
         <>
-          <div className="mt-5">
-            <DocumentRows docType={docType} documents={rows} eInvoiced={eInvoiced} />
+          {/* mt-6 is what all seven peer list screens use. */}
+          <div className="mt-6">
+            <DocumentRows
+              docType={docType}
+              documents={rows}
+              eInvoiced={eInvoiced}
+              approvalEnabled={approvalPolicy.enabled}
+              approvalRequiredIds={approvalRequiredIds}
+            />
           </div>
 
           <Pagination page={page} pageSize={pageSize} total={total} totalPages={totalPages} pageSizes={PAGE_SIZES} />

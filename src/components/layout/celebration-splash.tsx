@@ -82,6 +82,8 @@ function SplashCard({ moment, remaining, onClose }: { moment: Moment; remaining:
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 animate-fade-in bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
+      {moment.confetti && <Confetti accent={accent} />}
+
       <div className="relative w-full max-w-md animate-scale-in overflow-hidden rounded-2xl border border-line bg-surface shadow-lg">
         {/* The tint is applied inline because it is per-occasion data, not a theme token — a
             celebration posted with a colour has to render in that colour. */}
@@ -140,17 +142,53 @@ function SplashCard({ moment, remaining, onClose }: { moment: Moment; remaining:
 }
 
 /**
- * The quiet line above the dashboard: the greeting, plus whose birthday it is.
+ * Confetti, falling once behind the card. Pure CSS: positions and colours come from the piece's
+ * index rather than `Math.random`, so the server and the browser draw the same thing, and the
+ * reduced-motion setting stops it like every other animation here.
+ */
+const CONFETTI_COLOURS = ["#f59e0b", "#10b981", "#6366f1", "#ec4899", "#06b6d4", "#ef4444"];
+
+export function Confetti({ accent, pieces = 70 }: { accent: string; pieces?: number }) {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      {Array.from({ length: pieces }, (_, i) => {
+        const left = (i * 37 + 11) % 100;
+        const delay = ((i * 53) % 90) / 100;
+        const duration = 2.4 + ((i * 29) % 16) / 10;
+        const size = 6 + ((i * 7) % 6);
+        const colour = i % 7 === 0 ? accent : CONFETTI_COLOURS[i % CONFETTI_COLOURS.length];
+        return (
+          <span
+            key={i}
+            className="confetti-piece"
+            style={{
+              left: `${left}%`,
+              width: size,
+              height: size * 0.45,
+              backgroundColor: colour,
+              animationDelay: `${delay}s`,
+              animationDuration: `${duration}s`,
+              transform: `rotate(${(i * 47) % 360}deg)`,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The quiet line under the dashboard's greeting: whose birthday it is, who has an anniversary.
  *
  * Never interrupts, and is not dismissed — it is simply what is true today, and it disappears
- * tomorrow on its own.
+ * tomorrow on its own. Renders nothing when there is nothing quiet to say.
  */
-export function GreetingStrip({ greeting, moments }: { greeting: string; moments: Moment[] }) {
+export function MomentChips({ moments }: { moments: Moment[] }) {
   // Only the quiet ones: anything that earned a splash has already had its moment.
   const quiet = moments.filter((m) => !m.splash);
+  if (quiet.length === 0) return null;
   return (
-    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <h2 className="text-lg font-semibold text-text">{greeting}</h2>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       {quiet.map((m) => {
         const Icon = ICONS[m.tone];
         const accent = m.accent || ACCENTS[m.tone];

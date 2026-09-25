@@ -346,9 +346,9 @@ export async function assignWorkbook(input: {
   const already = new Set(workbook.assignees.map((a) => a.userId));
   const added = wanted.filter((id) => !already.has(id));
 
-  await db.$transaction([
-    db.workbookAssignee.deleteMany({ where: { workbookId: workbook.id, userId: { notIn: wanted.length > 0 ? wanted : ["-"] } } }),
-    db.workbookAssignee.createMany({
+  await db.$transaction(async (tx) => {
+    await tx.workbookAssignee.deleteMany({ where: { workbookId: workbook.id, userId: { notIn: wanted.length > 0 ? wanted : ["-"] } } });
+    await tx.workbookAssignee.createMany({
       data: added.map((userId) => ({
         workbookId: workbook.id,
         userId,
@@ -356,8 +356,8 @@ export async function assignWorkbook(input: {
         note: input.note?.trim() || null,
       })),
       skipDuplicates: true,
-    }),
-  ]);
+    });
+  });
 
   for (const userId of added) {
     await notifyUser({

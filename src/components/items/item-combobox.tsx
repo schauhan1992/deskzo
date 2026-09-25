@@ -13,6 +13,7 @@ export type ItemComboOption = {
   type: string;
   unit: string | null;
   sellingPrice: unknown;
+  taxRatePercent?: unknown;
 };
 
 const MAX_RESULTS = 20;
@@ -27,12 +28,15 @@ export function ItemCombobox({
   onSelect,
   showPrice = false,
   placeholder = "Type to search products…",
+  ariaLabel,
 }: {
   items: ItemComboOption[];
   value: string;
   onSelect: (item: ItemComboOption | null) => void;
   showPrice?: boolean;
   placeholder?: string;
+  /** For a list of these — "Product 2" tells one row from the next where the placeholder cannot. */
+  ariaLabel?: string;
 }) {
   const [query, setQuery] = useState(() => {
     const selected = items.find((i) => i.id === value);
@@ -95,7 +99,7 @@ export function ItemCombobox({
         autoComplete="off"
         // This one takes no `id`, so there is no visible label for it to be paired with and no
         // better name to lose to. The placeholder is what the field says it is.
-        aria-label={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         {...combobox.comboboxProps}
       />
       {isOpen && (

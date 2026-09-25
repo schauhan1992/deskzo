@@ -9,16 +9,32 @@
  * Guard it the way you guard database access itself, because that is precisely what it is.
  *
  *   npx tsx scripts/grant-super-admin.ts someone@example.com
- *   npx tsx scripts/grant-super-admin.ts someone@example.com --revoke
+ *
+ * ## It transfers, it does not add
+ *
+ * There is exactly one super admin and the database enforces it from both sides —
+ * `users_one_super_admin` refuses a second, `users_require_remaining_super_admin` refuses to remove
+ * the last. So "grant" here means *move*: the current holder is demoted and the named account
+ * promoted, in one transaction, because for the instant between those two statements the rule would
+ * otherwise be broken in one direction or the other.
+ *
+ * `--revoke` is gone with the same reasoning. Revoking the only holder is exactly the state the
+ * trigger exists to prevent, and it was the state this script existed to recover from — a flag that
+ * could only ever produce a refusal or a disaster.
  */
 import { db } from "../src/lib/db";
 
 async function main() {
   const email = process.argv[2]?.trim().toLowerCase();
-  const revoking = process.argv.includes("--revoke");
 
   if (!email) {
-    console.error("Usage: npx tsx scripts/grant-super-admin.ts <email> [--revoke]");
+    console.error("Usage: npx tsx scripts/grant-super-admin.ts <email>");
+    console.error("Moves super admin to that account. There is only ever one.");
+    process.exit(1);
+  }
+  if (process.argv.includes("--revoke")) {
+    console.error("--revoke is gone: there is exactly one super admin, so revoking is a transfer.");
+    console.error("Name the account it should move to instead.");
     process.exit(1);
   }
 
@@ -33,31 +49,44 @@ async function main() {
     process.exit(1);
   }
 
-  if (revoking) {
-    // The same rule the application enforces, repeated here because this path bypasses it: leaving
-    // nobody with the flag is unrecoverable from inside the app, and this script would be the thing
-    // you reached for — so it must not be the thing that caused it.
-    const others = await db.user.count({
-      where: { isSuperAdmin: true, active: true, id: { not: user.id } },
-    });
-    if (others === 0) {
-      console.error(`Refusing: ${user.name} is the only active super admin. Promote somebody else first.`);
-      process.exit(1);
+  const current = await db.user.findFirst({
+    where: { isSuperAdmin: true },
+    select: { id: true, name: true, email: true },
+  });
+
+  if (current?.id === user.id) {
+    console.log(`${user.name} <${user.email}> already holds it. Nothing to do.`);
+    process.exit(0);
+  }
+
+  /**
+   * Demote then promote, inside one transaction.
+   *
+   * The order matters and so does the atomicity. Promoting first hits `users_one_super_admin`,
+   * because for that statement there are briefly two. Demoting first outside a transaction leaves a
+   * window with none — and if the promote then fails, that window never closes and the only tool
+   * for fixing it is this script, which has just caused the problem.
+   *
+   * Inside a transaction both are true at once from every other session's point of view, and a
+   * failure at either statement leaves the holder exactly where it was.
+   */
+  await db.$transaction(async (tx) => {
+    if (current) {
+      await tx.user.update({ where: { id: current.id }, data: { isSuperAdmin: false } });
     }
-    await db.user.update({ where: { id: user.id }, data: { isSuperAdmin: false } });
-    console.log(`Removed super admin from ${user.name} <${user.email}>. ${others} remain.`);
-  } else {
     // Role and active status are forced, not merely required. The CHECK constraint refuses a super
     // admin who is not an ADMIN, and a deactivated one cannot sign in to use it — both of which
     // would turn a recovery into a second incident.
-    await db.user.update({
+    await tx.user.update({
       where: { id: user.id },
       data: { isSuperAdmin: true, role: "ADMIN", active: true },
     });
-    console.log(`${user.name} <${user.email}> is now a super admin (role ADMIN, active).`);
-    if (user.role !== "ADMIN") console.log(`  Their role was ${user.role} and has been changed to ADMIN.`);
-    if (!user.active) console.log("  Their account was deactivated and has been reactivated.");
-  }
+  });
+
+  if (current) console.log(`Moved super admin from ${current.name} <${current.email}>.`);
+  console.log(`${user.name} <${user.email}> is now the super admin (role ADMIN, active).`);
+  if (user.role !== "ADMIN") console.log(`  Their role was ${user.role} and has been changed to ADMIN.`);
+  if (!user.active) console.log("  Their account was deactivated and has been reactivated.");
 
   // Recorded against the target rather than an actor, because there is no session here. The detail
   // says how it happened, so an auditor reading the trail is not left with an unexplained change.
@@ -66,7 +95,7 @@ async function main() {
       actorUserId: user.id,
       subjectType: "USER",
       subjectUserId: user.id,
-      changeKind: revoking ? "SUPER_ADMIN_REVOKED" : "SUPER_ADMIN_GRANTED",
+      changeKind: "SUPER_ADMIN_GRANTED",
       detail: `Applied from the command line with database access (scripts/grant-super-admin.ts), outside any session`,
     },
   });
@@ -75,7 +104,12 @@ async function main() {
     where: { isSuperAdmin: true },
     select: { name: true, email: true, active: true },
   });
-  console.log(`\nSuper admins now: ${remaining.map((u) => `${u.name} <${u.email}>${u.active ? "" : " (inactive)"}`).join(", ") || "none"}`);
+  console.log(`\nSuper admin now: ${remaining.map((u) => `${u.name} <${u.email}>${u.active ? "" : " (inactive)"}`).join(", ") || "none"}`);
+  if (remaining.length !== 1) {
+    // Should be unreachable — the index and the trigger both forbid it — so if it ever prints,
+    // something has been done to this database outside the application.
+    console.error(`WARNING: ${remaining.length} accounts hold super admin. There should be exactly one.`);
+  }
   process.exit(0);
 }
 

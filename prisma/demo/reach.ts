@@ -415,6 +415,7 @@ export async function seedReach(
         thankYouText: "Thanks — somebody will be in touch shortly.",
         active: true,
         createdById: marketer.id,
+        ownerUserId: marketer.id,
         createdAt: daysAgo(int(90, 300)),
       },
       select: { id: true },

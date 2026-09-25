@@ -1,20 +1,33 @@
-import { listCompanyOptions } from "@/actions/company";
+import { listAssignableUsers, listCompanyOptions } from "@/actions/company";
+import { hasEffectivePermission } from "@/actions/permission";
+import { requireUser } from "@/lib/session";
 import { listItemOptions } from "@/actions/item";
 import { listIndustries } from "@/actions/industry";
 import { isModuleEnabled } from "@/actions/module";
 import { NewLeadForm } from "@/components/leads/new-lead-form";
+import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function NewLeadPage({
   searchParams,
 }: {
   searchParams: Promise<{ companyId?: string }>;
 }) {
-  const itemsEnabled = await isModuleEnabled("items");
-  const [{ companyId }, companies, items, industries] = await Promise.all([
+  const [itemsEnabled, user] = await Promise.all([isModuleEnabled("items"), requireUser()]);
+  const [canViewLeads, canAddContact] = await Promise.all([
+    hasEffectivePermission(user.id, "leads.view"),
+    hasEffectivePermission(user.id, "contacts.view"),
+  ]);
+  if (!canViewLeads) return <NoAccessNotice title="New lead" permission="leads.view" />;
+  const [{ companyId }, companies, items, industries, canAssign, people] = await Promise.all([
     searchParams,
     listCompanyOptions(),
     itemsEnabled ? listItemOptions() : Promise.resolve([]),
     listIndustries(),
+    // Either permission that assigns may choose the owner — matching `resolveOwner` in actions/lead.ts.
+    Promise.all([hasEffectivePermission(user.id, "leads.assign"), hasEffectivePermission(user.id, "accounts.reassign")]).then(
+      ([assign, reassign]) => assign || reassign,
+    ),
+    listAssignableUsers(),
   ]);
 
   return (
@@ -30,6 +43,10 @@ export default async function NewLeadPage({
           items={items}
           itemsEnabled={itemsEnabled}
           industries={industries}
+          currentUser={{ id: user.id, role: user.role }}
+          canAssign={canAssign}
+          canAddContact={canAddContact}
+          people={people.map((p) => ({ id: p.id, name: p.name, email: p.email, hint: p.role }))}
         />
       </div>
     </div>

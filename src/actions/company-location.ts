@@ -97,10 +97,10 @@ export async function setPrimaryLocation(id: string): Promise<ActionResult<null>
     return { ok: false, error: "Location not found." };
   }
 
-  await db.$transaction([
-    db.companyLocation.updateMany({ where: { companyId: location.companyId }, data: { isPrimary: false } }),
-    db.companyLocation.update({ where: { id }, data: { isPrimary: true } }),
-  ]);
+  await db.$transaction(async (tx) => {
+    await tx.companyLocation.updateMany({ where: { companyId: location.companyId }, data: { isPrimary: false } });
+    await tx.companyLocation.update({ where: { id }, data: { isPrimary: true } });
+  });
 
   revalidatePath(`/companies/${location.companyId}`);
   return { ok: true, data: null };

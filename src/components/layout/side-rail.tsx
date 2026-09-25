@@ -1,22 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { BadgeCheck, CalendarRange, Calculator, CheckSquare, Coins, StickyNote, X } from "lucide-react";
-import { SIDE_RAIL_STORAGE_KEY, parseTool, type SideRailTool } from "@/lib/side-rail";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Megaphone, MonitorPlay, Sparkles, StickyNote, X } from "lucide-react";
+import { COPILOT_OPEN_EVENT, SIDE_RAIL_STORAGE_KEY, UPDATES_SEEN_EVENT, parseTool, type SideRailTool } from "@/lib/side-rail";
 import { RailTasks } from "@/components/layout/rail-tasks";
 import { RailNotes } from "@/components/layout/rail-notes";
 import { RailCalculator } from "@/components/layout/rail-calculator";
 import { RailCurrency } from "@/components/layout/rail-currency";
 import { RailLookup } from "@/components/layout/rail-lookup";
 import { RailProRata } from "@/components/layout/rail-prorata";
+import { RailHelp, RailUpdates, RailVideos } from "@/components/layout/rail-help";
 
-const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator }[] = [
-  { key: "tasks", label: "My tasks", icon: CheckSquare },
-  { key: "notes", label: "Sticky notes", icon: StickyNote },
-  { key: "calculator", label: "GST & margin", icon: Calculator },
-  { key: "prorata", label: "Pro-rata", icon: CalendarRange },
-  { key: "currency", label: "Currency", icon: Coins },
-  { key: "lookup", label: "GSTIN check", icon: BadgeCheck },
+const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group: "work" | "help" }[] = [
+  { key: "tasks", label: "My tasks", icon: CheckSquare, group: "work" },
+  { key: "notes", label: "Sticky notes", icon: StickyNote, group: "work" },
+  { key: "calculator", label: "GST & margin", icon: Calculator, group: "work" },
+  { key: "prorata", label: "Pro-rata", icon: CalendarRange, group: "work" },
+  { key: "currency", label: "Currency", icon: Coins, group: "work" },
+  { key: "lookup", label: "GSTIN check", icon: BadgeCheck, group: "work" },
+  { key: "updates", label: "What's new", icon: Megaphone, group: "help" },
+  { key: "help", label: "Help", icon: CircleHelp, group: "help" },
+  { key: "videos", label: "Video walkthroughs", icon: MonitorPlay, group: "help" },
 ];
 
 /**
@@ -31,8 +35,32 @@ const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator }[] = [
  * The panel sits beside the content rather than over it. A tool you need *while* reading something
  * is no use if it covers the thing you were reading, which is the whole reason it is not a modal.
  */
-export function SideRail() {
+export function SideRail({
+  copilot = false,
+  unreadUpdates = 0,
+  canManageHelp = false,
+}: {
+  /** The copilot is on and this person may use it — the rail then offers it beside Help. */
+  copilot?: boolean;
+  /** What's new posts they have not seen, for the dot on its button. */
+  unreadUpdates?: number;
+  canManageHelp?: boolean;
+}) {
   const open = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+
+  // The server's count, until What's new is opened — then cleared at once, rather than on the next
+  // page load. A new count from the server (a new post, another page) replaces it.
+  const [unread, setUnread] = useState(unreadUpdates);
+  const [unreadFrom, setUnreadFrom] = useState(unreadUpdates);
+  if (unreadUpdates !== unreadFrom) {
+    setUnreadFrom(unreadUpdates);
+    setUnread(unreadUpdates);
+  }
+  useEffect(() => {
+    const clear = () => setUnread(0);
+    window.addEventListener(UPDATES_SEEN_EVENT, clear);
+    return () => window.removeEventListener(UPDATES_SEEN_EVENT, clear);
+  }, []);
 
   const choose = useCallback((tool: SideRailTool) => {
     try {
@@ -93,6 +121,9 @@ export function SideRail() {
             {active.key === "prorata" && <RailProRata />}
             {active.key === "currency" && <RailCurrency />}
             {active.key === "lookup" && <RailLookup />}
+            {active.key === "updates" && <RailUpdates canManage={canManageHelp} />}
+            {active.key === "help" && <RailHelp canManage={canManageHelp} />}
+            {active.key === "videos" && <RailVideos canManage={canManageHelp} />}
           </div>
         </aside>
       )}
@@ -101,25 +132,43 @@ export function SideRail() {
         {/* The header’s height and its border, continued. */}
         <div className="h-14 w-full shrink-0 border-b border-line" />
         <div className="flex flex-col items-center gap-1 py-2">
-        {TOOLS.map((tool) => {
+        {TOOLS.map((tool, index) => {
           const Icon = tool.icon;
           const isOpen = open === tool.key;
+          const dot = tool.key === "updates" && unread > 0;
+          const startsGroup = index > 0 && TOOLS[index - 1].group !== tool.group;
           return (
-            <button
-              key={tool.key}
-              type="button"
-              title={tool.label}
-              aria-label={tool.label}
-              aria-pressed={isOpen}
-              onClick={() => choose(tool.key)}
-              className={`grid h-9 w-9 place-items-center rounded-base transition-colors ${
-                isOpen ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text"
-              }`}
-            >
-              <Icon className="h-[18px] w-[18px]" />
-            </button>
+            <div key={tool.key} className="flex flex-col items-center">
+              {startsGroup && <div className="my-1.5 h-px w-6 bg-line" aria-hidden="true" />}
+              <button
+                type="button"
+                title={tool.label}
+                aria-label={dot ? `${tool.label} — ${unread} new` : tool.label}
+                aria-pressed={isOpen}
+                onClick={() => choose(tool.key)}
+                className={`relative grid h-9 w-9 place-items-center rounded-base transition-colors ${
+                  isOpen ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text"
+                }`}
+              >
+                <Icon className="h-[18px] w-[18px]" />
+                {dot && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" aria-hidden="true" />}
+              </button>
+            </div>
           );
         })}
+        {/* Not a panel: the copilot has its own drawer, opened from the header. This is a second way
+            in, next to Help, where somebody who is stuck is already looking. */}
+        {copilot && (
+          <button
+            type="button"
+            title="Ask the AI copilot"
+            aria-label="Ask the AI copilot"
+            onClick={() => window.dispatchEvent(new Event(COPILOT_OPEN_EVENT))}
+            className="grid h-9 w-9 place-items-center rounded-base text-muted transition-colors hover:bg-surface-sunken hover:text-brand"
+          >
+            <Sparkles className="h-[18px] w-[18px]" />
+          </button>
+        )}
         </div>
       </nav>
     </div>

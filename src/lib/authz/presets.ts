@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { PERMISSIONS, type PermissionKey } from "@/lib/permissions";
 
 /**
@@ -35,6 +35,32 @@ export type RolePreset = {
  * keys that let their holder rewrite the rules, and they are granted one at a time by a person, not
  * handed out by a profile.
  */
+/**
+ * What of an account every profile may see — all of it, as before these existed.
+ *
+ * Applying a preset switches off anything it does not list, so a preset without these would take
+ * the Contacts, Orders, Payments… tabs away from whoever it was applied to. They are in every
+ * profile; narrowing one is a decision for the role afterwards, in Users & access.
+ */
+const ACCOUNT_VIEWS = [
+  "contacts.view",
+  "leads.view",
+  "orders.view",
+  "payments.view",
+  "documents.view",
+  "projects.view",
+  "calls.view",
+  "visits.view",
+  "tickets.view",
+  "emails.view",
+] as const satisfies readonly PermissionKey[];
+
+/**
+ * What every profile carries besides the account views — tools anybody's job can use. The AI copilot
+ * only ever sees and does what the person using it already can, so it widens nothing.
+ */
+const EVERY_PROFILE = ["copilot.use"] as const satisfies readonly PermissionKey[];
+
 export const ROLE_PRESETS: RolePreset[] = [
   // ─── Sales ──────────────────────────────────────────────────────────────────────────────────
   {
@@ -42,26 +68,44 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Sales executive",
     description: "Works leads and orders for their own accounts. Cannot approve their own paperwork or see anybody else's numbers.",
     role: "SALES",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "vault.use","products.edit", "tickets.create", "feedback.request", "marketing.viewAll", "targets.viewAll",
-      "documents.issue"],
+      "documents.issue",
+      "documents.send",
+      // Their own event invitations and requirement assessments.
+      "forms.create",
+      // Their own accounts and leads, to a colleague — never somebody else's.
+      "accounts.handOffOwn"],
   },
   {
     key: "sales-manager",
     label: "Sales manager",
     description: "A sales executive plus the team view: their reports' visits, expenses and targets, the ability to set targets, and handing a departing rep's accounts to somebody else.",
     role: "SALES",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "products.edit",
       "products.delete",
+      // A manager hands leads to their team; a rep does not hand leads to a manager.
+      "leads.assign",
+      "accounts.reassign",
+      "accounts.handOffOwn",
       "tickets.create",
       "documents.issue",
+      "documents.send",
       // A manager may pull back a document a rep raised in error; an executive may not.
       "documents.void",
       "feedback.request",
       "feedback.viewAll",
       "marketing.viewAll",
       "marketing.send",
+      "forms.create",
+      // How much a deal at each stage counts in the forecast — the sales manager knows the pipeline best.
+      "forecast.manage",
+      // Which wins the floor celebrates, and how loudly.
+      "wins.manage",
+      "companies.manageCategories",
+      // Tidying the book — folding a duplicate account into the real one.
+      "companies.merge",
       "targets.manage",
       "targets.viewAll",
       "visits.viewAll",
@@ -77,14 +121,15 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Calling agent",
     description: "Works a calling list and logs outcomes. Deliberately narrow — this is the profile with the widest access to contact details and the least need for anything else.",
     role: "CALLING",
-    permissions: ["tickets.create", "companies.viewAll"],
+    // leads.assign: a qualified call is handed to the salesperson who will work it.
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "tickets.create", "companies.viewAll", "leads.assign"],
   },
   {
     key: "data-profiler",
     label: "Data profiler",
     description: "Builds and cleans the company and contact records that everything else runs on.",
     role: "PROFILE",
-    permissions: ["tickets.create", "companies.viewAll"],
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "tickets.create", "companies.viewAll"],
   },
   // ─── Support ────────────────────────────────────────────────────────────────────────────────
   {
@@ -92,7 +137,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Support agent",
     description: "Handles tickets and the IT asset estate for customers under contract.",
     role: "SUPPORT",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "visitors.view",
       "vault.use","tickets.create", "assets.manage", "assets.viewAll", "feedback.request", "contacts.viewRestricted", "companies.viewAll"],
   },
@@ -102,7 +147,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     description:
       "Runs delivery projects end to end. Note what is absent: opening a customer's stored credentials is its own key, granted one person at a time rather than by a job title.",
     role: "SUPPORT",
-    permissions: ["companies.viewAll", "projects.manage", "tickets.create", "tasks.delete"],
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "companies.viewAll", "projects.manage", "tickets.create", "tasks.delete"],
   },
   {
     key: "delivery-head",
@@ -110,7 +155,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     description:
       "Every project rather than only their own, plus the credential store. This is the profile that can read a customer's passwords — give it to as few people as the work allows.",
     role: "MANAGEMENT",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "companies.viewAll",
       "projects.manage",
       "projects.viewAll",
@@ -123,7 +168,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Support lead",
     description: "A support agent plus ticket deletion, the full feedback picture, and team performance.",
     role: "SUPPORT",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "visitors.view",
       "companies.viewAll",
       "tickets.create",
@@ -143,13 +188,14 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Accounts executive",
     description: "Records money in and out and approves orders against payment terms. No access to salaries.",
     role: "ACCOUNTS",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "vault.use",
       "companies.viewAll",
       "payments.record",
       "payments.manage",
       "orders.approve",
       "documents.issue",
+      "documents.send",
       "ledger.viewReports",
       "expenses.reimburse",
       "expenses.viewAll",
@@ -160,14 +206,16 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Accounts manager",
     description: "The full finance function short of payroll — including deletions, expense approval and the tax reports.",
     role: "ACCOUNTS",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "companies.viewAll",
       "payments.record",
       "payments.delete",
       "payments.manage",
       "orders.approve",
+      "credit.override",
       "ledger.viewReports",
       "documents.issue",
+      "documents.send",
       "documents.void",
       "expenses.approve",
       "expenses.reimburse",
@@ -193,7 +241,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     role: "PURCHASE",
     // This role held nothing at all before, because it was missing from the role list the
     // permission screen renders from — see src/lib/roles.ts.
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "vault.use","orders.process", "products.edit", "tickets.create", "companies.viewAll", "data.exportCatalog", "data.importCatalog",
       // Whoever places the order with the distributor is who should be checking its monthly bill.
       "purchase.reconcile"],
@@ -204,8 +252,10 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Operations manager",
     description: "Sees across the company and approves most things, but holds nothing that changes who can do what.",
     role: "MANAGEMENT",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "companies.viewAll",
+      "accounts.reassign",
+      "credit.override",
       "products.edit",
       "products.delete",
       "catalog.manage",
@@ -214,6 +264,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "orders.approve",
       "orders.process",
       "documents.issue",
+      "documents.send",
       "documents.void",
       "purchase.reconcile",
       "portal.manage",
@@ -246,7 +297,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "HR manager",
     description: "People records, attendance, leave, payroll, and handing over a leaver's work. Note that payroll is not inheritable — a manager of this person does not get it.",
     role: "MANAGEMENT",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "visitors.manage",
       "visitors.view",
       "engagement.readFeedback",
@@ -271,12 +322,14 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Marketing manager",
     description: "Runs campaigns and journeys end to end, including approving a send.",
     role: "MANAGEMENT",
-    permissions: [
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "companies.viewAll",
       "marketing.manage",
       "marketing.send",
       "marketing.approve",
       "marketing.viewAll",
+      "forms.create",
+      "forms.manageAll",
       "feedback.request",
       "feedback.viewAll",
       "contacts.viewRestricted",
@@ -291,14 +344,14 @@ export const ROLE_PRESETS: RolePreset[] = [
     description:
       "Can open any stored credential, including ones nobody shared. Every such reveal is recorded as an override and reported to the record's owner — accountable access, not silent access. One or two people, no more.",
     role: "MANAGEMENT",
-    permissions: ["vault.use", "vault.viewAll", "vault.manageTags"],
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "vault.use", "vault.viewAll", "vault.manageTags"],
   },
   {
     key: "auditor",
     label: "Auditor (read-only)",
     description: "Sees everything and changes nothing — the activity log, the permission review screens, and company-wide figures. Grants no ability to act.",
     role: "MANAGEMENT",
-    permissions: ["activity.viewAll", "activity.export", "permissions.view", "expenses.viewAll", "visits.viewAll", "performance.view", "hr.viewAll", "assets.viewAll", "feedback.viewAll", "marketing.viewAll", "targets.viewAll", "companies.viewAll", "data.exportCrm", "data.exportFinance"],
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "activity.viewAll", "activity.export", "permissions.view", "expenses.viewAll", "visits.viewAll", "performance.view", "hr.viewAll", "assets.viewAll", "feedback.viewAll", "marketing.viewAll", "targets.viewAll", "companies.viewAll", "data.exportCrm", "data.exportFinance"],
   },
 ];
 

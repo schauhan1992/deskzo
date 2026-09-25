@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/card";
 import { SplitRow } from "@/components/ui/split-list";
 import { SELECTED_PARAM } from "@/lib/view-mode";
 import { vendorStatusLabels } from "@/lib/validation/company";
+import { CategoryIcon } from "@/components/customers/category-chip";
+import type { CategoryWithParent } from "@/lib/customers/categories";
 
 const STAGE_TONE: Record<CompanyStage, "default" | "green" | "blue" | "red" | "amber"> = {
   PROSPECT: "default",
@@ -28,6 +30,7 @@ type CompanyRow = {
   vendorStatus?: VendorStatus | null;
   _count: { contacts: number; leads: number; products?: number };
   owner: { id: string; name: string } | null;
+  customerCategory?: CategoryWithParent | null;
 };
 
 /**
@@ -69,6 +72,7 @@ export function CompanySplitList({
             subtitle={company.owner ? company.owner.name : "Unassigned"}
             badges={
               <>
+                <CategoryIcon category={company.customerCategory} />
                 {isVendor && company.vendorStatus ? (
                   <Badge tone={VENDOR_STATUS_TONE[company.vendorStatus]}>
                     {vendorStatusLabels[company.vendorStatus]}

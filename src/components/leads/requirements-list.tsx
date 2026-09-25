@@ -27,8 +27,21 @@ type Requirement = {
   id: string;
   quantity: number;
   notes: string | null;
+  renewalDate?: Date | string | null;
   item: { id: string; name: string; sku: string; type: string; unit: string | null; sellingPrice: unknown };
 };
+
+/**
+ * A stored renewal date as the day it is. Stored as UTC midnight (see `LeadRequirement.renewalDate`),
+ * so it is read in UTC — read in any other zone west of Greenwich it would be the day before.
+ */
+const renewalDay = (value: Date | string | null | undefined) =>
+  value ? new Date(value).toISOString().slice(0, 10) : "";
+const renewalLabel = (value: Date | string | null | undefined) =>
+  value
+    ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value))
+    : null;
+const REMARKS_HINT = "Remarks — contract ID, VIP number, subscription ID, tenant ID…";
 
 type AddFormValues = z.input<typeof addLeadRequirementSchema>;
 type EditFormValues = z.input<typeof updateLeadRequirementSchema>;
@@ -46,6 +59,7 @@ function EditRequirementForm({ requirement, onClose }: { requirement: Requiremen
       id: requirement.id,
       quantity: requirement.quantity,
       notes: requirement.notes ?? "",
+      renewalDate: renewalDay(requirement.renewalDate),
     },
   });
 
@@ -77,9 +91,16 @@ function EditRequirementForm({ requirement, onClose }: { requirement: Requiremen
           className="w-24"
           {...register("quantity")}
         />
-        <Input aria-label={`Notes on ${requirement.item.name}`} placeholder="Notes (optional)" {...register("notes")} />
+        <Input
+          aria-label={`Renewal date for ${requirement.item.name}`}
+          type="date"
+          className="w-44"
+          {...register("renewalDate")}
+        />
       </div>
+      <Input aria-label={`Remarks on ${requirement.item.name}`} placeholder={REMARKS_HINT} {...register("notes")} />
       {errors.quantity && <p className="text-xs text-danger">{errors.quantity.message}</p>}
+      {errors.renewalDate && <p className="text-xs text-danger">{errors.renewalDate.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Cancel
@@ -129,7 +150,7 @@ export function RequirementsList({
       setServerError(result.error);
       return;
     }
-    reset({ leadId, itemId: "", quantity: 1, notes: "" });
+    reset({ leadId, itemId: "", quantity: 1, notes: "", renewalDate: "" });
     setOpen(false);
     router.refresh();
   }
@@ -163,6 +184,9 @@ export function RequirementsList({
                 {r.item.unit ? ` ${r.item.unit}` : ""} ·{" "}
                 {formatCurrency((Number(r.item.sellingPrice) * r.quantity).toString())}
               </div>
+              {renewalLabel(r.renewalDate) && (
+                <div className="text-muted">Renews {renewalLabel(r.renewalDate)}</div>
+              )}
               {r.notes && <div className="text-muted">{r.notes}</div>}
             </div>
             {(canEdit || canDelete) && (
@@ -207,8 +231,10 @@ export function RequirementsList({
           {errors.itemId && <p className="text-xs text-danger">{errors.itemId.message}</p>}
           <div className="flex gap-2">
             <Input aria-label="Quantity" type="number" min={1} placeholder="Qty" className="w-24" {...register("quantity")} />
-            <Input aria-label="Notes" placeholder="Notes (optional)" {...register("notes")} />
+            <Input aria-label="Renewal date" type="date" className="w-44" {...register("renewalDate")} />
           </div>
+          <Input aria-label="Remarks" placeholder={REMARKS_HINT} {...register("notes")} />
+          {errors.renewalDate && <p className="text-xs text-danger">{errors.renewalDate.message}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
               Cancel

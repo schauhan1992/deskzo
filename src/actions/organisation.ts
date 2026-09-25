@@ -47,6 +47,7 @@ export async function updateOrganisation(input: unknown): Promise<ActionResult<{
     // rather than leaving it unset and silently taxing every sale as inter-state.
     stateCode: blank(data.stateCode) ?? (data.gstin ? data.gstin.slice(0, 2) : null),
     pincode: blank(data.pincode),
+    country: blank(data.country),
     email: blank(data.email),
     phone: blank(data.phone),
     bankName: blank(data.bankName),

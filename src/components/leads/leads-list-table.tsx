@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { LeadStatus } from "@prisma/client";
+import type { LeadSource, LeadStatus } from "@prisma/client";
 import { bulkUpdateLeads } from "@/actions/lead";
 import { leadStatusValues } from "@/lib/validation/lead";
 import { Card } from "@/components/ui/card";
@@ -11,11 +11,16 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatLeadId } from "@/lib/order-id";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { useColumns } from "@/components/ui/table-columns";
+import { LeadScoreBadge } from "@/components/leads/lead-score";
+import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
 
 type LeadRow = {
   id: string;
+  /** The short reference — LEAD-000123. Stable while the title, which is free text, is not. */
+  leadSeq: number;
   title: string;
   status: LeadStatus;
   /** Why a lost or disqualified deal died — shown on hover, never set for an open one. */
@@ -25,14 +30,21 @@ type LeadRow = {
   updatedAt: Date | string;
   company: { id: string; name: string };
   owner: { id: string; name: string } | null;
+  /** 0–100, or null for a closed lead — see src/lib/leads/score.ts. */
+  score: number | null;
+  source: LeadSource;
+  sourceDetail: string | null;
 };
 
 export function LeadsListTable({
   leads,
   assignableUsers,
+  reassign,
 }: {
   leads: LeadRow[];
   assignableUsers: { id: string; name: string; role: string }[];
+  /** Whether this person may change lead owners at all — see src/lib/authz/reassign.ts. */
+  reassign: { show: boolean; canUnassign: boolean };
 }) {
   const cols = useColumns("leads");
   const router = useRouter();
@@ -68,20 +80,22 @@ export function LeadsListTable({
     <div>
       <BulkBar count={selection.count} onClear={selection.clear} error={error} notice={notice}>
         {/* Bulk-bar controls have no captions; the "no change" option is a placeholder, not a name. */}
-        <Select
-          value={ownerUserId}
-          onChange={(e) => setOwnerUserId(e.target.value)}
-          className="h-9 w-52"
-          aria-label="Owner"
-        >
-          <option value="">Owner — no change</option>
-          <option value="unassign">Unassign</option>
-          {assignableUsers.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name} ({u.role})
-            </option>
-          ))}
-        </Select>
+        {reassign.show && (
+          <Select
+            value={ownerUserId}
+            onChange={(e) => setOwnerUserId(e.target.value)}
+            className="h-9 w-52"
+            aria-label="Owner"
+          >
+            <option value="">Owner — no change</option>
+            {reassign.canUnassign && <option value="unassign">Unassign</option>}
+            {assignableUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.role})
+              </option>
+            ))}
+          </Select>
+        )}
         <Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 w-48" aria-label="Status">
           <option value="">Status — no change</option>
           {leadStatusValues.map((s) => (
@@ -114,9 +128,12 @@ export function LeadsListTable({
                     <Checkbox checked={selection.allSelected} onChange={selection.toggleAll} aria-label="Select all leads" />
                   </th>
                 )}
+                {cols.show("id") && <th className="px-4 py-2.5">ID</th>}
                 {cols.show("title") && <th className="px-4 py-2.5">Title</th>}
                 {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
                 {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
+                {cols.show("score") && <th className="px-4 py-2.5">Score</th>}
+                {cols.show("source") && <th className="px-4 py-2.5">Source</th>}
                 {cols.show("owner") && <th className="px-4 py-2.5">Owner</th>}
                 {cols.show("value") && <th className="px-4 py-2.5">Value</th>}
                 {cols.show("expectedClose") && <th className="px-4 py-2.5">Expected close</th>}
@@ -135,6 +152,11 @@ export function LeadsListTable({
                       />
                     </td>
                   )}
+                  {/* The title is mutable free text that changes as a deal evolves — this is the
+                      reference that does not. */}
+                  {cols.show("id") && (
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted">{formatLeadId(lead.leadSeq)}</td>
+                  )}
                   {cols.show("title") && (
                     <td className="px-4 py-2.5">
                       <Link href={`/leads/${lead.id}`} className="font-medium text-text hover:underline">
@@ -152,6 +174,16 @@ export function LeadsListTable({
                   {cols.show("status") && (
                     <td className="px-4 py-2.5">
                       <LeadStatusBadge status={lead.status} lostReason={lead.lostReason} />
+                    </td>
+                  )}
+                  {cols.show("score") && (
+                    <td className="px-4 py-2.5">
+                      {lead.score === null ? <span className="text-subtle">—</span> : <LeadScoreBadge score={lead.score} />}
+                    </td>
+                  )}
+                  {cols.show("source") && (
+                    <td className="px-4 py-2.5 text-muted" title={lead.sourceDetail ?? undefined}>
+                      {LEAD_SOURCE_LABELS[lead.source]}
                     </td>
                   )}
                   {cols.show("owner") && (

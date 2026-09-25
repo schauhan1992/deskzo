@@ -230,6 +230,8 @@ export async function seedDetail(
       data: {
         docNumber: `CN/${String(fy).slice(2)}-${String(fy + 1).slice(2)}/${String(creditNotes + 1).padStart(4, "0")}`,
         docType: "CREDIT_NOTE",
+        // Raised against the invoice it reduces, which is a conversion of that document.
+        origin: "CONVERSION",
         direction: "SALES",
         status: "ISSUED",
         companyId: invoice.companyId,

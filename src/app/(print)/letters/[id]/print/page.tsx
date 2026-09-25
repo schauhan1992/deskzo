@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getLetter } from "@/actions/employee-docs";
-import { getOrganisation } from "@/lib/organisation";
+import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
 import { formatDate } from "@/lib/utils";
@@ -39,7 +39,7 @@ export default async function PrintLetterPage({
   const addressLines = [
     org.addressLine1,
     org.addressLine2,
-    [org.city, org.state, org.pincode].filter(Boolean).join(", ") || null,
+    [org.city, org.state, org.pincode, foreignCountry(org)].filter(Boolean).join(", ") || null,
   ].filter(Boolean) as string[];
   const contactLine = [org.phone, org.email].filter(Boolean).join("  ·  ");
 

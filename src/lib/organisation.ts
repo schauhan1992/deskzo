@@ -15,6 +15,8 @@ export type Organisation = {
   state: string | null;
   stateCode: string | null;
   pincode: string | null;
+  /** Blank means India — see `isIndia`. */
+  country: string | null;
   email: string | null;
   phone: string | null;
   bankName: string | null;
@@ -77,6 +79,7 @@ export const EMPTY_ORGANISATION: Organisation = {
   state: null,
   stateCode: null,
   pincode: null,
+  country: null,
   email: null,
   phone: null,
   bankName: null,
@@ -118,6 +121,17 @@ export const EMPTY_ORGANISATION: Organisation = {
  * filled them in and while the database is still migrating — an empty form is a far better outcome
  * there than a 500.
  */
+/**
+ * The country, for printing — or null when it is India.
+ *
+ * Every document this company issues is addressed from India by default, and printing "India" under
+ * a Mumbai address adds a line nobody reads. It is printed only when it says something.
+ */
+export function foreignCountry(org: { country: string | null }): string | null {
+  const country = org.country?.trim();
+  return country && country.toLowerCase() !== "india" ? country : null;
+}
+
 export async function getOrganisation(): Promise<Organisation> {
   try {
     const row = await db.organisationSettings.findUnique({ where: { id: "global" } });
@@ -134,6 +148,7 @@ export async function getOrganisation(): Promise<Organisation> {
       state: row.state,
       stateCode: row.stateCode,
       pincode: row.pincode,
+      country: row.country,
       email: row.email,
       phone: row.phone,
       bankName: row.bankName,

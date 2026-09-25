@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { VerifiedField, VerificationStatus } from "@prisma/client";
+import type { Prisma, VerifiedField, VerificationStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
+import { canViewContacts, mayWorkWithContactsOf } from "@/lib/authz/contact-access";
+import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { looksLikeEmail } from "@/lib/email-verification";
@@ -41,7 +43,23 @@ export async function verifyContactDetail(input: {
   }
 
   const company = await db.company.findUnique({ where: { id: input.companyId }, select: { id: true, name: true } });
-  if (!company) return { ok: false, error: "That company no longer exists." };
+  /**
+   * The caller's own account book, or a calling-list record handed to them for this company. The
+   * second matters: a campaign is built from its creator's scope and shared out to callers who
+   * manage none of those accounts, and the calling station is exactly where this is pressed.
+   */
+  const viaOwnRecord =
+    !!input.recordId &&
+    (await canViewContacts(user.id)) &&
+    (await db.workbookRecord.count({ where: { id: input.recordId, companyId: input.companyId, assignedToUserId: user.id } })) > 0;
+  if (!company || !(viaOwnRecord || (await mayWorkWithContactsOf(user.id, company.id)))) {
+    return { ok: false, error: "That company no longer exists." };
+  }
+  // The contact has to be at that company, or a verdict filed against one account lands on another's contact.
+  if (input.contactId) {
+    const contact = await db.contact.findUnique({ where: { id: input.contactId }, select: { companyId: true } });
+    if (!contact || contact.companyId !== company.id) return { ok: false, error: "That contact isn't at this company." };
+  }
 
   const verification = await db.contactVerification.create({
     data: {
@@ -108,7 +126,9 @@ export async function applyVerification(id: string): Promise<ActionResult<null>>
       contactId: true, company: { select: { id: true, name: true } },
     },
   });
-  if (!verification) return { ok: false, error: "That verification no longer exists." };
+  if (!verification || !(await mayWorkWithContactsOf(user.id, verification.company.id))) {
+    return { ok: false, error: "That verification no longer exists." };
+  }
   if (verification.appliedAt) return { ok: false, error: "That correction has already been applied." };
   if (verification.status !== "CORRECTED" || !verification.correctedValue) {
     return { ok: false, error: "There's no corrected value on this one to apply." };
@@ -133,13 +153,14 @@ export async function applyVerification(id: string): Promise<ActionResult<null>>
         }
       : { phone: verification.correctedValue };
 
-  await db.$transaction([
-    db.contact.update({ where: { id: verification.contactId }, data: emailFields }),
-    db.contactVerification.update({
+  const contactId = verification.contactId;
+  await db.$transaction(async (tx) => {
+    await tx.contact.update({ where: { id: contactId }, data: emailFields });
+    await tx.contactVerification.update({
       where: { id },
       data: { appliedAt: new Date(), appliedByUserId: user.id },
-    }),
-  ]);
+    });
+  });
 
   await recordAudit({
     userId: user.id,
@@ -156,8 +177,10 @@ export async function applyVerification(id: string): Promise<ActionResult<null>>
 /** Dismisses a correction without applying it — wrong claims need closing too. */
 export async function dismissVerification(id: string): Promise<ActionResult<null>> {
   const user = await requireUser();
-  const verification = await db.contactVerification.findUnique({ where: { id }, select: { id: true, appliedAt: true } });
-  if (!verification) return { ok: false, error: "That verification no longer exists." };
+  const verification = await db.contactVerification.findUnique({ where: { id }, select: { id: true, appliedAt: true, companyId: true } });
+  if (!verification || !(await mayWorkWithContactsOf(user.id, verification.companyId))) {
+    return { ok: false, error: "That verification no longer exists." };
+  }
   if (verification.appliedAt) return { ok: false, error: "That one has already been applied." };
 
   // Marked applied-by with no data change: the row stays as the record that somebody looked at it
@@ -168,6 +191,15 @@ export async function dismissVerification(id: string): Promise<ActionResult<null
   });
   revalidatePath("/verifications");
   return { ok: true, data: null };
+}
+
+/**
+ * The verifications this person may see: those on accounts in their scope, and none at all without
+ * `contacts.view`. The queue used to list every account's corrections to anybody.
+ */
+async function verificationScope(userId: string): Promise<Prisma.ContactVerificationWhereInput> {
+  if (!(await canViewContacts(userId))) return { id: { in: [] } };
+  return (await viaCompanyScope(userId)) as Prisma.ContactVerificationWhereInput;
 }
 
 const verificationSelect = {
@@ -187,10 +219,9 @@ const verificationSelect = {
 
 /** Corrections waiting for somebody to accept or reject them. */
 export async function pendingVerifications(params: { page: number; pageSize: number; onlyCorrections?: boolean }) {
-  await requireUser();
-  const where = {
-    appliedAt: null,
-    ...(params.onlyCorrections ? { status: "CORRECTED" as const } : {}),
+  const user = await requireUser();
+  const where: Prisma.ContactVerificationWhereInput = {
+    AND: [await verificationScope(user.id), { appliedAt: null, ...(params.onlyCorrections ? { status: "CORRECTED" as const } : {}) }],
   };
   const [rows, total] = await Promise.all([
     db.contactVerification.findMany({
@@ -207,7 +238,8 @@ export async function pendingVerifications(params: { page: number; pageSize: num
 
 /** Everything ever said about this company's details, for its own 360 view. */
 export async function companyVerifications(companyId: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await mayWorkWithContactsOf(user.id, companyId))) return [];
   return toPlain(
     await db.contactVerification.findMany({
       where: { companyId },
@@ -219,11 +251,12 @@ export async function companyVerifications(companyId: string) {
 }
 
 export async function verificationSummary() {
-  await requireUser();
+  const user = await requireUser();
+  const scope = await verificationScope(user.id);
   const [pending, corrections, wrong] = await Promise.all([
-    db.contactVerification.count({ where: { appliedAt: null } }),
-    db.contactVerification.count({ where: { appliedAt: null, status: "CORRECTED" } }),
-    db.contactVerification.count({ where: { status: "WRONG" } }),
+    db.contactVerification.count({ where: { AND: [scope, { appliedAt: null }] } }),
+    db.contactVerification.count({ where: { AND: [scope, { appliedAt: null, status: "CORRECTED" }] } }),
+    db.contactVerification.count({ where: { AND: [scope, { status: "WRONG" }] } }),
   ]);
   return { pending, corrections, wrong };
 }

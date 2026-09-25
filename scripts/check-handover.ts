@@ -22,7 +22,7 @@
  * a database with real data in it.
  */
 import Module from "node:module";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "../src/lib/db";
 
 const PREFIX = "ZZHandover";

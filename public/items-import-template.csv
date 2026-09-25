@@ -1,4 +1,5 @@
-name,sku,type,category,vendor,unit,billingCycle,costPrice,sellingPrice,taxRatePercent,description,trackInventory,reorderLevel,openingStock,active
-Dell Latitude 5440 Laptop,DELL-LAT-5440,GOOD,Laptop,Dell,Piece,,55000,68000,18,14-inch business laptop,true,5,20,true
-Microsoft 365 Business Standard,MS365-BSTD,SUBSCRIPTION,Productivity Suite,Microsoft,Seat / year,ANNUAL,8500,10500,18,Annual Microsoft 365 license,false,,,true
-On-site Installation,INSTALL-ONSITE,SERVICE,Professional Services,Wroffy,Visit,,0,2500,18,On-site setup and installation,false,,,true
+name,sku,type,brand,productFamily,category,hsnCode,vendor,unit,billingCycle,costPrice,sellingPrice,taxRatePercent,description,trackInventory,reorderLevel,openingStock,active
+Dell Latitude 5440 Laptop,DELL-LAT-5440,GOOD,Dell,Latitude,Laptop,84713010,Sourced via Ingram,Piece,,55000,68000,18,14-inch business laptop,true,5,20,true
+Microsoft 365 Business Standard,MS365-BSTD,SUBSCRIPTION,Microsoft,Microsoft 365,Productivity Suite,997331,Sourced via Redington,Seat / year,ANNUAL,8500,10500,18,Annual Microsoft 365 licence,false,,,true
+AutoCAD LT Perpetual,ACAD-LT-PERP,PERPETUAL,Autodesk,AutoCAD,Design Software,997331,,Licence,ONE_TIME,52000,61000,18,Perpetual AutoCAD LT licence,false,,,true
+On-site Installation,INSTALL-ONSITE,SERVICE,,,Professional Services,998313,,Visit,,0,2500,18,On-site setup and installation,false,,,true

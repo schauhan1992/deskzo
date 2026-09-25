@@ -4,9 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, UserCog, X, Crown } from "lucide-react";
 import { effectivePermissionsFor } from "@/actions/permission";
-import { setUserPermission, clearUserPermission, setSuperAdmin, userPermissionOverrides } from "@/actions/access";
+import { setUserPermission, clearUserPermission, userPermissionOverrides } from "@/actions/access";
 import { Badge, Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
 
@@ -46,15 +45,21 @@ const VIA_TONE: Record<string, "default" | "green" | "blue" | "amber" | "red" | 
   none: "default",
 };
 
+/**
+ * No longer takes `viewerIsSuperAdmin`.
+ *
+ * It existed to decide whether to show the two super-admin buttons, and both are gone: there is
+ * exactly one super admin, the database enforces it, and moving it needs database access. Other
+ * screens still pass the flag around for their own reasons — this one no longer has a use for
+ * knowing.
+ */
 export function UserAccessDrawer({
   userId,
   userName,
-  viewerIsSuperAdmin,
   mayManage = true,
 }: {
   userId: string;
   userName: string;
-  viewerIsSuperAdmin: boolean;
   /** Read-only for a reviewer who may see access but not change it. */
   mayManage?: boolean;
 }) {
@@ -122,46 +127,16 @@ export function UserAccessDrawer({
                       </p>
                       <p className="mt-1 text-xs text-brand">
                         No permission row is consulted for this account, so nothing on this screen can restrict them.
-                        They cannot be demoted, deactivated or impersonated by an ordinary admin, and the last one
-                        cannot be removed at all.
+                        They cannot be demoted, deactivated or impersonated by an ordinary admin.
+                      </p>
+                      <p className="mt-1 text-xs text-brand">
+                        There is exactly one, always — the database refuses a second and refuses to remove the last.
+                        Moving it is a deliberate act with database access:{" "}
+                        <code className="font-mono">npx tsx scripts/grant-super-admin.ts &lt;email&gt;</code>. To give
+                        somebody broad access from here, make them an <strong>admin</strong> instead: an admin sits
+                        inside the permission system, so what they can do is reviewable and revocable.
                       </p>
                     </Card>
-                  )}
-
-                  {viewerIsSuperAdmin && !loaded.user.isSuperAdmin && loaded.user.active && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={isPending}
-                      onClick={() => {
-                        setError(null);
-                        startTransition(async () => {
-                          const result = await setSuperAdmin(userId, true);
-                          if (!result.ok) setError(result.error);
-                          else router.refresh();
-                        });
-                      }}
-                    >
-                      <Crown className="h-3.5 w-3.5" />
-                      Make super admin
-                    </Button>
-                  )}
-                  {viewerIsSuperAdmin && loaded.user.isSuperAdmin && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={isPending}
-                      onClick={() => {
-                        setError(null);
-                        startTransition(async () => {
-                          const result = await setSuperAdmin(userId, false);
-                          if (!result.ok) setError(result.error);
-                          else router.refresh();
-                        });
-                      }}
-                    >
-                      Remove super admin
-                    </Button>
                   )}
 
                   {overrides.length > 0 && (

@@ -20,7 +20,13 @@ function* walk(dir) {
   }
 }
 
-const ALLOWED = ["src/components/ui/outbound-link.tsx"];
+const ALLOWED = [
+  "src/components/ui/outbound-link.tsx",
+  // Not an anchor: the `<base target="_blank">` of the document the mail log shows an email in. That
+  // document sits in a frame sandboxed with nothing allowed, so no link in it can open at all — the
+  // base target exists to make sure of that — and it carries `no-referrer` besides. See mailPreviewDocument.
+  "src/lib/mail-log.ts",
+];
 const problems = [];
 
 for (const file of walk(ROOT)) {

@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 
 /**
  * The shape of the DLP policy, its defaults, and the questions the rest of the app asks it.

@@ -3,7 +3,8 @@
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { Prisma, type CandidateStatus, type EmployeeDocumentType, type EmploymentType, type LetterType, type Role } from "@prisma/client";
+import { Prisma, type CandidateStatus, type EmployeeDocumentType, type EmploymentType, type LetterType } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { toPlain } from "@/lib/serialize";

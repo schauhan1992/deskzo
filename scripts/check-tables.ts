@@ -38,6 +38,16 @@ const IMPLEMENTATIONS: Record<string, string> = {
   customers: "src/components/companies/companies-table.tsx",
   vendors: "src/components/companies/companies-table.tsx",
   "commission-parties": "src/components/companies/companies-table.tsx",
+  // The same arrangement as the four above, keyed on `docType` rather than `mode`: one component
+  // renders all seven document lists. Seven entries rather than one because two of the columns
+  // differ by type — see the registry's own note on that.
+  "documents:PROPOSAL": "src/components/documents/document-rows.tsx",
+  "documents:PROFORMA": "src/components/documents/document-rows.tsx",
+  "documents:INVOICE": "src/components/documents/document-rows.tsx",
+  "documents:CREDIT_NOTE": "src/components/documents/document-rows.tsx",
+  "documents:PURCHASE_ORDER": "src/components/documents/document-rows.tsx",
+  "documents:BILL": "src/components/documents/document-rows.tsx",
+  "documents:DELIVERY_CHALLAN": "src/components/documents/document-rows.tsx",
 };
 
 console.log("\n— The registry —\n");
@@ -145,11 +155,19 @@ for (const [file, tableKeys] of byFile) {
     );
   }
 
-  const hardCoded = /colSpan=\{(\d+)\}/.exec(source);
+  /**
+   * Any literal number inside the braces, not only a bare one.
+   *
+   * The narrower `/colSpan=\{(\d+)\}/` could not see `colSpan={eInvoiced ? 10 : 9}`, so it printed
+   * "uses cols.count" over a colSpan that was hardcoded twice — a false pass, which is the one
+   * result a check must never give. A ternary is exactly how a hardcoded count survives somebody
+   * adding a conditional column, so it is the case most worth catching.
+   */
+  const hardCoded = /colSpan=\{[^}]*\b\d+\b[^}]*\}/.exec(source);
   ok(
     `${label}: no hardcoded colSpan`,
     hardCoded === null,
-    hardCoded ? `colSpan={${hardCoded[1]}} should be colSpan={cols.count}` : "uses cols.count",
+    hardCoded ? `${hardCoded[0]} should be colSpan={cols.count}` : "uses cols.count",
   );
 }
 

@@ -3,13 +3,15 @@ import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoginForm } from "@/components/auth/login-form";
+import { currentMaintenance } from "@/lib/maintenance";
+import { formatIstDateTime } from "@/lib/india-time";
 
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ callbackUrl?: string }>;
 }) {
-  const [params, security] = await Promise.all([searchParams, getCachedSecuritySettings()]);
+  const [params, security, maintenance] = await Promise.all([searchParams, getCachedSecuritySettings(), currentMaintenance()]);
   const callbackUrl = params.callbackUrl || "/dashboard";
   const ssoEnabled = !!security?.ssoEnabled;
   const enforceSso = !!security?.enforceSso;
@@ -20,6 +22,15 @@ export default async function LoginPage({
         <CardContent className="pt-6">
           <h1 className="text-lg font-semibold text-text">Wroffy ERP</h1>
           <p className="mt-1 text-sm text-muted">Sign in to continue</p>
+
+          {/* Open during maintenance so an admin can get in — and saying so, so nobody else signs in
+              only to meet the maintenance page. See src/lib/maintenance.ts. */}
+          {maintenance.phase === "on" && (
+            <p role="status" className="mt-4 rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning">
+              The app is down for maintenance{maintenance.endsAt ? ` until ${formatIstDateTime(maintenance.endsAt)}` : ""}. Only administrators can use it
+              until then.
+            </p>
+          )}
 
           {ssoEnabled && (
             <>

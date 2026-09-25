@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Trophy } from "lucide-react";
 import { getUserPerformance, canViewPerformance } from "@/actions/performance";
 import { Card, Badge } from "@/components/ui/card";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -21,6 +23,9 @@ export default async function PerformancePage({
       <div className="max-w-md">
         <h1 className="text-xl font-semibold text-text">Performance</h1>
         <p className="mt-2 text-sm text-muted">You don&apos;t have permission to view team performance.</p>
+        <Link href="/wins/most-active" className="mt-3 inline-flex items-center gap-1.5 text-sm text-brand hover:underline">
+          <Trophy className="h-4 w-4" aria-hidden /> Most active of the fortnight
+        </Link>
       </div>
     );
   }
@@ -38,8 +43,14 @@ export default async function PerformancePage({
         </p>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <DateRangePicker fromParam="from" toParam="to" label="Period" />
+        <Link
+          href="/wins/most-active"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-text hover:bg-surface-sunken"
+        >
+          <Trophy className="h-4 w-4" style={{ color: "#f59e0b" }} aria-hidden /> Most active of the fortnight
+        </Link>
       </div>
 
       <Card className="mt-6 overflow-x-auto p-0">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { z } from "zod";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,9 +10,12 @@ import { createLead } from "@/actions/lead";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/utils";
 import { CompanyCombobox, type CompanyComboOption } from "@/components/ui/company-combobox";
 import { QuickCreateCompanyDialog, type QuickCreatedCompany } from "@/components/companies/quick-create-company-dialog";
+import { NewContactDialog, type CreatedContact } from "@/components/companies/new-contact-dialog";
+import { ItemCombobox } from "@/components/items/item-combobox";
+import { PersonCombobox, type PersonOption } from "@/components/ui/person-combobox";
+import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
 
 type ItemOption = {
   id: string;
@@ -33,12 +36,22 @@ export function NewLeadForm({
   items,
   itemsEnabled,
   industries,
+  currentUser,
+  canAssign,
+  canAddContact = true,
+  people,
 }: {
   companies: CompanyComboOption[];
   initialCompanyId?: string;
   items: ItemOption[];
   itemsEnabled: boolean;
   industries: IndustryOption[];
+  currentUser: { id: string; role: string };
+  /** `leads.assign` — may choose anybody as the salesperson. */
+  canAssign: boolean;
+  /** `contacts.view` — may add a person at the company from here. */
+  canAddContact?: boolean;
+  people: PersonOption[];
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -47,6 +60,10 @@ export function NewLeadForm({
     open: false,
     initialName: "",
   });
+  const [contactDialog, setContactDialog] = useState(false);
+  // DOM ids for the product rows — from useId, never from useFieldArray's row id, which is a fresh
+  // uuid per render environment and breaks hydration (see check:address).
+  const rowId = useId();
   const {
     register,
     control,
@@ -56,7 +73,7 @@ export function NewLeadForm({
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, CreateLeadInput>({
     resolver: zodResolver(createLeadSchema),
-    defaultValues: { companyId: initialCompanyId ?? "", requirements: [] },
+    defaultValues: { companyId: initialCompanyId ?? "", requirements: [], source: "OTHER", sourceDetail: "", ownerUserId: "" },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "requirements" });
 
@@ -66,8 +83,21 @@ export function NewLeadForm({
   function handleCompanyCreated(company: QuickCreatedCompany) {
     setLocalCompanies((prev) => [...prev, company]);
     setValue("companyId", company.id, { shouldValidate: true });
-    setValue("contactId", "");
+    // The person entered in the dialog is who this lead is with — selected, not left for a second trip.
+    setValue("contactId", company.contacts[0]?.id ?? "");
     setCreateDialog({ open: false, initialName: "" });
+  }
+
+  /**
+   * A new person at the company already chosen: added to that company's contacts here, so the
+   * dropdown can show them, and selected — they are who this lead came from.
+   */
+  function handleContactCreated(contact: CreatedContact) {
+    setLocalCompanies((prev) =>
+      prev.map((c) => (c.id === selectedCompanyId ? { ...c, contacts: [...(c.contacts ?? []), contact] } : c)),
+    );
+    setValue("contactId", contact.id, { shouldDirty: true });
+    setContactDialog(false);
   }
 
   async function onSubmit(values: CreateLeadInput) {
@@ -110,14 +140,27 @@ export function NewLeadForm({
 
           <div className="space-y-1.5">
             <Label htmlFor="contactId">Contact</Label>
-            <Select id="contactId" {...register("contactId")} disabled={!selectedCompany}>
-              <option value="">No specific contact</option>
-              {selectedCompany?.contacts?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.designation.replaceAll("_", " ")})
-                </option>
-              ))}
-            </Select>
+            <div className="flex gap-2">
+              <Select id="contactId" className="flex-1" {...register("contactId")} disabled={!selectedCompany}>
+                <option value="">No specific contact</option>
+                {selectedCompany?.contacts?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.designation.replaceAll("_", " ")})
+                  </option>
+                ))}
+              </Select>
+              {canAddContact && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!selectedCompany}
+                  onClick={() => setContactDialog(true)}
+                  title={selectedCompany ? undefined : "Choose the company first"}
+                >
+                  + New contact
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -142,6 +185,57 @@ export function NewLeadForm({
             </div>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="source">Source</Label>
+              <Select id="source" {...register("source")}>
+                {LEAD_SOURCE_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {LEAD_SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sourceDetail">Source detail</Label>
+              <Input
+                id="sourceDetail"
+                placeholder="Which website or page, campaign, who referred them…"
+                autoComplete="off"
+                {...register("sourceDetail")}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="ownerUserId">Salesperson</Label>
+            {canAssign ? (
+              <>
+                <Controller
+                  name="ownerUserId"
+                  control={control}
+                  render={({ field }) => (
+                    <PersonCombobox
+                      id="ownerUserId"
+                      people={people}
+                      value={field.value ?? ""}
+                      onSelect={(person) => field.onChange(person?.id ?? "")}
+                      placeholder="Search a salesperson — or leave empty to assign automatically"
+                    />
+                  )}
+                />
+                <p className="text-xs text-subtle">
+                  Left empty, the assignment rules choose (Settings → Lead assignment).
+                </p>
+              </>
+            ) : (
+              // Without `leads.assign` there is no choice to offer — say where it will go instead.
+              <p id="ownerUserId" className="text-sm text-muted">
+                {currentUser.role === "SALES" ? "This lead will be yours." : "Assigned automatically by the lead assignment rules."}
+              </p>
+            )}
+          </div>
+
           {itemsEnabled && (
             <div className="space-y-2 border-t border-line pt-4">
               <div className="flex items-center justify-between">
@@ -150,7 +244,7 @@ export function NewLeadForm({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => append({ itemId: "", quantity: 1, notes: "" })}
+                  onClick={() => append({ itemId: "", quantity: 1, notes: "", renewalDate: "" })}
                   disabled={items.length === 0}
                 >
                   + Add product
@@ -163,42 +257,69 @@ export function NewLeadForm({
                 const selectedItemId = watch(`requirements.${index}.itemId`);
                 const selectedItem = items.find((i) => i.id === selectedItemId);
                 return (
-                  <div key={field.id} className="flex items-start gap-2 rounded-md border border-line p-2.5">
-                    <div className="flex-1 space-y-1">
-                      {/*
-                       * These two get `aria-label` rather than an id/htmlFor pairing: the only visible
-                       * caption is "Products required" over the whole list, so there is no per-row
-                       * wording to point at, and the row number is what tells one line from the next.
-                       */}
-                      <Select
-                        aria-label={`Product ${index + 1}`}
-                        {...register(`requirements.${index}.itemId` as const)}
-                      >
-                        <option value="">Select a product…</option>
-                        {items.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} ({item.sku}) — {formatCurrency(String(item.sellingPrice))}
-                            {item.unit ? ` / ${item.unit}` : ""}
-                          </option>
-                        ))}
-                      </Select>
-                      {errors.requirements?.[index]?.itemId && (
-                        <p className="text-xs text-danger">{errors.requirements[index]?.itemId?.message}</p>
-                      )}
-                      {selectedItem && <p className="text-xs text-subtle">{selectedItem.type}</p>}
+                  <div key={field.id} className="space-y-2 rounded-md border border-line p-2.5">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        {/* Search, not a dropdown: the catalogue is long, and the name is what people know. */}
+                        <Controller
+                          name={`requirements.${index}.itemId` as const}
+                          control={control}
+                          render={({ field: itemField }) => (
+                            <ItemCombobox
+                              items={items}
+                              value={itemField.value ?? ""}
+                              onSelect={(item) => itemField.onChange(item?.id ?? "")}
+                              ariaLabel={`Product ${index + 1}`}
+                              showPrice
+                            />
+                          )}
+                        />
+                        {errors.requirements?.[index]?.itemId && (
+                          <p className="text-xs text-danger">{errors.requirements[index]?.itemId?.message}</p>
+                        )}
+                        {selectedItem && <p className="text-xs text-subtle">{selectedItem.type}</p>}
+                      </div>
+                      <div className="w-20">
+                        <Input
+                          type="number"
+                          min={1}
+                          placeholder="Qty"
+                          aria-label={`Quantity for product ${index + 1}`}
+                          {...register(`requirements.${index}.quantity` as const)}
+                        />
+                      </div>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => remove(index)}>
+                        Remove
+                      </Button>
                     </div>
-                    <div className="w-20">
-                      <Input
-                        type="number"
-                        min={1}
-                        placeholder="Qty"
-                        aria-label={`Quantity for product ${index + 1}`}
-                        {...register(`requirements.${index}.quantity` as const)}
-                      />
+                    {/* Both optional. The remarks are where the reference to an existing subscription goes,
+                        so a renewal can be matched to the right tenant or VIP account later. */}
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[11rem_1fr]">
+                      <div className="space-y-1">
+                        <Label htmlFor={`${rowId}-${index}-renewal`} className="text-xs">
+                          Renewal date
+                        </Label>
+                        <Input
+                          id={`${rowId}-${index}-renewal`}
+                          type="date"
+                          {...register(`requirements.${index}.renewalDate` as const)}
+                        />
+                        {errors.requirements?.[index]?.renewalDate && (
+                          <p className="text-xs text-danger">{errors.requirements[index]?.renewalDate?.message}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`${rowId}-${index}-remarks`} className="text-xs">
+                          Remarks
+                        </Label>
+                        <Input
+                          id={`${rowId}-${index}-remarks`}
+                          placeholder="Contract ID, VIP number, subscription ID, tenant ID…"
+                          autoComplete="off"
+                          {...register(`requirements.${index}.notes` as const)}
+                        />
+                      </div>
                     </div>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => remove(index)}>
-                      Remove
-                    </Button>
                   </div>
                 );
               })}
@@ -220,9 +341,19 @@ export function NewLeadForm({
         open={createDialog.open}
         initialName={createDialog.initialName}
         industries={industries}
+        canAddContact={canAddContact}
         onClose={() => setCreateDialog({ open: false, initialName: "" })}
         onCreated={handleCompanyCreated}
       />
+      {selectedCompany && canAddContact && (
+        <NewContactDialog
+          open={contactDialog}
+          companyId={selectedCompany.id}
+          companyName={selectedCompany.name}
+          onClose={() => setContactDialog(false)}
+          onCreated={handleContactCreated}
+        />
+      )}
     </Card>
   );
 }

@@ -591,6 +591,11 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   DepreciationCharge: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   DocumentCounter: { disposition: "specification", reason: "The current value of a numbering series. The series definition exports; its counter is state." },
   DocumentNumberSetting: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  DocumentApprovalPolicy: {
+    disposition: "specification",
+    reason:
+      "Who signs off each kind of document. Configuration rather than records, and it names roles and people by id — neither of which survives a move to a system with its own idea of both. Exported in the workflow specification so the rule can be rebuilt deliberately rather than loaded into a shape that would silently approve the wrong things.",
+  },
   EmployeeDocument: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   EmployeeLetter: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   EmploymentHistory: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
@@ -598,6 +603,47 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   FinalSettlement: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   FiscalYearClose: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   FixedAsset: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  IpRule: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  NetworkAddress: { disposition: "excluded", reason: "A cache of addresses and their looked-up places, rebuilt as people sign in. Nothing in it is a record of anything." },
+  RoleAccessPolicy: { disposition: "specification", reason: "Who may sign in on what and from where, per role. Configuration, and keyed on roles by id — rebuilt deliberately rather than loaded." },
+  SignIn: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  UserDevice: { disposition: "excluded", reason: "A device is a hash of a cookie in one of this installation's browsers. It identifies nothing anywhere else, and carrying it over would only carry over approvals nobody can re-check." },
+  ActivityAward: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  MarketingAsset: { disposition: "archive", reason: "Pictures from uploaded email templates, kept so mail already sent still shows them. Exported to the archive bundle with the templates' history rather than migrated." },
+  MarketingList: { disposition: "archive", reason: "Who was uploaded for a mass mail, and the consent statement they were uploaded under — evidence to keep, not configuration to load. The people themselves travel as contacts." },
+  MarketingListMember: { disposition: "archive", reason: "Which contacts were on which uploaded list — part of the consent evidence, archived with the list." },
+  CopilotSettings: { disposition: "excluded", reason: "Which AI provider this installation uses, with its keys encrypted under this installation's secret. Meaningless — and undecryptable — anywhere else." },
+  CopilotConversation: { disposition: "excluded", reason: "People's private chats with the copilot. Not business records, and not something to carry into another system." },
+  CopilotMessage: { disposition: "excluded", reason: "The turns of a private copilot chat, including what it looked up — copies of records that travel as themselves." },
+  CopilotUsage: { disposition: "excluded", reason: "How many AI tokens each person used per day, for this installation's allowance. Billing state, not a record." },
+  CopilotProposal: { disposition: "excluded", reason: "Tasks and notes the copilot drafted; the ones confirmed exist as ordinary tasks and notes, which travel as themselves." },
+  CompanyLock: { disposition: "excluded", reason: "Whether this installation's CRM is locked for everybody but the super admin, and the notice shown. A switch, not a record." },
+  GeoState: { disposition: "excluded", reason: "GeoNames' public list of states and provinces — reference data about the world, reloaded from GeoNames, not a business record." },
+  GeoCity: { disposition: "excluded", reason: "GeoNames' public list of towns and cities — reference data, reloaded from GeoNames." },
+  GeoPostalCode: { disposition: "excluded", reason: "GeoNames' public postal codes — reference data, reloaded from GeoNames." },
+  MailConnection: { disposition: "excluded", reason: "A person's connection to their own Outlook: a Microsoft token encrypted under this installation's secret. Useless anywhere else — each person connects again." },
+  DocumentRenderGrant: { disposition: "excluded", reason: "Two-minute passes for the server to print a document it is emailing. Spent or expired within minutes; nothing to carry." },
+  DocumentEmailTemplate: { disposition: "specification", reason: "The wording sent with an emailed document, per type. Configuration rather than records." },
+  HelpDesk: { disposition: "specification", reason: "The helpline number, hours and support address shown on the dashboard. Configuration rather than records — set again in a new system." },
+  HelpLink: { disposition: "specification", reason: "Links to help articles and training videos listed in the rail. An index of material that lives elsewhere; configuration, not records." },
+  Announcement: { disposition: "archive", reason: "What's new posts — what the company told its people, and when. History worth keeping, with no place in a target CRM." },
+  MaintenanceMode: { disposition: "excluded", reason: "Whether this installation is down for maintenance right now, and until when. A switch, not a record — it means nothing anywhere else." },
+  CompanyMerge: { disposition: "archive", reason: "Which duplicate companies were merged into which, with what each looked like and what moved. The record of a decision, exported to the archive bundle; the surviving company travels as itself." },
+  CompanyDuplicateDismissal: { disposition: "excluded", reason: "Pairs of companies somebody said are not duplicates, so the list stops offering them. A note to this installation's duplicate finder, keyed on its own ids — meaningless anywhere else." },
+  CustomerCategory: { disposition: "specification", reason: "How customers are grouped, with icons, colours and handling notes. Configuration rather than records — rebuilt deliberately in a new system rather than loaded; each company's place in it travels as a label on the company." },
+  Prize: { disposition: "specification", reason: "What is up for grabs, per place and period. Configuration rather than records — rebuilt deliberately in a new system rather than loaded." },
+  PrizeWinner: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  PrizeAnnouncement: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  ActivityAwardSettings: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  SalesCelebrationSettings: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  ForecastCommit: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  ForecastStageWeight: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  FormAccessGrant: {
+    disposition: "specification",
+    reason:
+      "Who may see, change, invite to and read each form. Configuration that names people and roles by id — neither survives a move to a system with its own idea of both — so it is described in the workflow specification to be rebuilt deliberately, not loaded into a shape that would share customers' answers with the wrong people.",
+  },
+  FormInvite: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   FormSubmission: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   Holiday: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   InboundForm: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
@@ -627,6 +673,11 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   PayrollRun: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   Payslip: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   PermissionChange: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  Role: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records, and the half that gives `RolePermission` its meaning — a table of permissions keyed on roles nobody can name describes nothing. Exported in the workflow specification, where a role appears with its name, its description and every permission it grants, which is what somebody rebuilding this on another system actually needs. It is not loadable: the target has its own idea of what a role is.",
+  },
   RolePermission: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   SalaryStructure: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   ScreenshotAllowance: { disposition: "excluded", reason: "A per-day counter. The evidence it counts lives in ActivityLog." },
@@ -647,4 +698,31 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   Workbook: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   WorkbookAssignee: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   WorkbookRecord: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  PostOffice: {
+    disposition: "excluded",
+    reason:
+      "Reference data, not the business’s data: India Post’s published PIN directory, reloaded from prisma/reference/ on any install. Exporting 165,000 post offices with a customer book would bury it, and the target system gets the same directory from the same public source.",
+  },
+  ReferenceDataset: {
+    disposition: "excluded",
+    reason: "Records which reference file this install loaded and when — bookkeeping about PostOffice, which is itself excluded.",
+  },
+  LeadCaptureKey: {
+    disposition: "excluded",
+    reason: "API credentials for this install’s websites. Only a digest of each secret is kept, which no other system could use — a new CRM issues its own keys.",
+  },
+  LeadAssignmentRule: {
+    disposition: "specification",
+    reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded.",
+  },
+  CreditDecision: {
+    disposition: "archive",
+    reason:
+      "Immutable history — who gave which customer more credit than their record supported, and why. The rating behind it is recomputed from the payments, which export as records; the decisions are the part a target could not rebuild, and the part an auditor asks for.",
+  },
+  ReferenceSync: {
+    disposition: "excluded",
+    reason:
+      "Holds an encrypted API key for data.gov.in and the progress of the last directory sync. A secret is never exported, and the rest describes this install, not the business.",
+  },
 };

@@ -11,7 +11,7 @@
  * recognise them by shape.
  */
 
-export type SideRailTool = "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup";
+export type SideRailTool = "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos";
 
 export const SIDE_RAIL_TOOLS: SideRailTool[] = [
   "tasks",
@@ -20,7 +20,18 @@ export const SIDE_RAIL_TOOLS: SideRailTool[] = [
   "prorata",
   "currency",
   "lookup",
+  // The second group, below a rule: not tools for the work in front of you but where to turn when
+  // you are stuck — what changed, how something is done, and a walkthrough to watch.
+  "updates",
+  "help",
+  "videos",
 ];
+
+/** Fired by the rail's copilot button; the header's copilot listens and opens its drawer. */
+export const COPILOT_OPEN_EVENT = "wroffy.copilot";
+
+/** Fired when What's new has been opened, so the rail's dot clears without waiting for a reload. */
+export const UPDATES_SEEN_EVENT = "wroffy.updates-seen";
 
 /**
  * Where the open tool is remembered.

@@ -23,7 +23,7 @@
  */
 import Module from "node:module";
 import bcrypt from "bcryptjs";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "../src/lib/db";
 import { digestSecret, encryptSecret, decryptSecret } from "../src/lib/crypto";
 import {

@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { listFeedback } from "@/actions/feedback";
@@ -9,6 +8,7 @@ import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { FeedbackList } from "@/components/feedback/feedback-list";
 import { FeedbackSummaryStrip } from "@/components/feedback/feedback-summary";
 import { AlertTriangle } from "lucide-react";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 export default async function FeedbackPage({
   searchParams,
@@ -23,10 +23,7 @@ export default async function FeedbackPage({
 
   // The link has to survive being pasted into WhatsApp, so it needs an absolute URL. Taken from the
   // request rather than an env var, so it is right on localhost, on staging and in production.
-  const head = await headers();
-  const host = head.get("x-forwarded-host") ?? head.get("host") ?? "localhost:3000";
-  const proto = head.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${proto}://${host}`;
+  const origin = await tenantOrigin();
 
   return (
     <div className="animate-fade-rise">

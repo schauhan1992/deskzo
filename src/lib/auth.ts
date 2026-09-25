@@ -7,7 +7,8 @@ import { decryptSecret } from "@/lib/crypto";
 import { verifyTotpCode } from "@/lib/totp";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { logActivity } from "@/lib/activity";
-import type { Role } from "@prisma/client";
+import { doorCheck, recordSignIn } from "@/lib/access/record";
+import type { Role } from "@/lib/roles";
 import type { Provider } from "@auth/core/providers";
 
 declare module "next-auth" {
@@ -17,11 +18,13 @@ declare module "next-auth" {
       name: string;
       email: string;
       role: Role;
+      /** This sign-in — see `SignIn.sid`. Absent on a session issued before sign-ins were recorded. */
+      sid?: string;
     };
   }
 }
 
-type AppJWT = { id?: string; role?: Role; [key: string]: unknown };
+type AppJWT = { id?: string; role?: Role; sid?: string; [key: string]: unknown };
 
 async function buildConfig() {
   const security = await getCachedSecuritySettings();
@@ -89,6 +92,14 @@ async function buildConfig() {
           }
         }
 
+        // Last, once the person has proved who they are: a network they may not use at all is refused
+        // here, with the reason logged. Everything subtler is left to the access gate, which can
+        // explain itself on a page — see src/lib/access.
+        const held = await doorCheck(user);
+        if (held) {
+          return refuse(held === "NETWORK_BLOCKED" ? "the network is blocked" : "their role only allows approved networks", user);
+        }
+
         return {
           id: user.id,
           name: user.name,
@@ -125,16 +136,30 @@ async function buildConfig() {
           // SSO signs people into accounts an admin already provisioned — it's not a self-signup path.
           const existing = await db.user.findUnique({ where: { email: user.email } });
           if (!existing || !existing.active) return false;
+          const held = await doorCheck(existing);
+          if (held) {
+            await logActivity({
+              kind: "LOGIN_FAILED",
+              userId: existing.id,
+              userName: existing.name,
+              userEmail: existing.email,
+              summary: `Microsoft sign-in refused for ${existing.name}: ${held === "NETWORK_BLOCKED" ? "the network is blocked" : "their role only allows approved networks"}`,
+              metadata: { reason: held },
+            });
+            return false;
+          }
         }
         return true;
       },
-      jwt: async ({ token, user }: { token: unknown; user?: { email?: string | null } }) => {
+      jwt: async ({ token, user, account }: { token: unknown; user?: { email?: string | null }; account?: { provider?: string } | null }) => {
         const t = token as AppJWT;
         if (user?.email) {
           const dbUser = await db.user.findUnique({ where: { email: user.email } });
           if (dbUser) {
             t.id = dbUser.id;
             t.role = dbUser.role;
+            // Only here, where `user` is present: this is the sign-in itself, not a later read.
+            t.sid = await recordSignIn({ userId: dbUser.id, provider: account?.provider ?? "credentials" });
           }
         }
         return t;
@@ -143,6 +168,7 @@ async function buildConfig() {
         const t = token as AppJWT;
         session.user.id = t.id ?? "";
         session.user.role = t.role ?? "SALES";
+        session.user.sid = t.sid;
         return session;
       },
     },

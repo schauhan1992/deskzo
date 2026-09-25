@@ -7,15 +7,50 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  ADMIN
-  PROFILE
-  CALLING
-  SALES
-  SUPPORT
-  MANAGEMENT
-  ACCOUNTS
-  PURCHASE
+/**
+ * A role, as data rather than as an enum.
+ * It was an enum, which meant adding "Regional Manager" was a schema change, a migration and a
+ * deploy — so in practice nobody added one, and people were given a near-enough role plus a pile of
+ * personal exceptions. That is the failure this replaces: an exception is for the individual case,
+ * and a role that everybody needs three exceptions on is a role that should have existed.
+ * ## The key is the identity, the name is the label
+ * `key` is the primary key and never changes. It is what `users.role` and `role_permissions.role`
+ * point at, what the thirty-odd `role === "ADMIN"` comparisons in the application compare against,
+ * and what the built-in presets are written in terms of. Renaming is therefore free and completely
+ * safe: it changes `name`, and nothing in the code or the database is keyed on that.
+ * The key is generated from the name once, at creation. After that the two are independent — call
+ * the role whatever you like, as often as you like.
+ */
+model Role {
+  /**
+   * Immutable, upper snake case, e.g. REGIONAL_MANAGER. Referenced by every user and permission row.
+   */
+  key         String  @id
+  /**
+   * What people see, and may rename at will.
+   */
+  name        String
+  description String?
+
+  /**
+   * True for the eight roles the application shipped with.
+   * They can be renamed and their permissions changed like any other. They cannot be deleted:
+   * ADMIN because the permission resolver and the super-admin constraint both name it, and the rest
+   * because the built-in presets are written against them and would quietly stop applying.
+   */
+  isSystem  Boolean @default(false)
+  sortOrder Int     @default(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  permissions  RolePermission[]
+  candidates   Candidate[]
+  formGrants   FormAccessGrant[]
+  accessPolicy RoleAccessPolicy?
+
+  @@map("roles")
 }
 
 enum GstTreatment {
@@ -234,6 +269,25 @@ enum OrderStatus {
   CANCELLED
 }
 
+/**
+ * How far along a renewal is — see `CompanyProduct.renewalStage` and `src/lib/renewals.ts`.
+ * Most of these are worked out from what has happened rather than stored: NOT_STARTED, TASK_RAISED,
+ * CONTACTED, QUOTED and RENEWED all have evidence behind them. They are in the enum so that a stage
+ * the app currently derives could be pinned by hand later without another migration.
+ * NEGOTIATING, ON_HOLD and LOST are the reason the column exists at all: nothing in the data says
+ * them, and they are what a salesperson most wants to record.
+ */
+enum RenewalStage {
+  NOT_STARTED
+  TASK_RAISED
+  CONTACTED
+  QUOTED
+  NEGOTIATING
+  ON_HOLD
+  LOST
+  RENEWED
+}
+
 enum OrderExpenseType {
   COMMISSION
   FREIGHT
@@ -320,6 +374,16 @@ enum NotificationType {
    */
   PORTAL_REQUEST
   /**
+   * Somebody answered a form, or an invited customer RSVPd. Goes to whoever sent the invitation, else
+   * whoever the form routes to, else its owner. A form that also made a lead sends LEAD_ASSIGNED instead.
+   */
+  FORM_RESPONSE
+  /**
+   * The fortnight's most active people, announced — to everybody, to managers, or to the winners,
+   * as the award settings say. See src/lib/performance/awards.ts.
+   */
+  ACTIVITY_AWARD
+  /**
    * Somebody opened a credential you own. Sent for every reveal that is not your own, including
    * an admin using their override — access nobody is told about is access nobody reviews.
    */
@@ -344,6 +408,16 @@ enum NotificationType {
    * A visitor they invited is due shortly, or has been added for them by somebody else.
    */
   VISITOR_EXPECTED
+  /**
+   * A quotation or invoice is waiting for their sign-off. Goes to everyone the policy names as an
+   * approver, never to the person who submitted it — they cannot approve their own.
+   */
+  DOCUMENT_APPROVAL_REQUESTED
+  /**
+   * Their document was approved, or sent back with a reason. Goes to whoever submitted it, because
+   * a rejection nobody is told about is a document that simply stops moving.
+   */
+  DOCUMENT_APPROVAL_DECIDED
 }
 
 model User {
@@ -367,7 +441,15 @@ model User {
    */
   userSeq                Int       @unique @default(autoincrement())
   passwordHash           String
-  role                   Role
+  /**
+   * The role's `key`, not its name.
+   * A string rather than an id, and that is the whole reason this migration was affordable: every
+   * `role === "ADMIN"` comparison in the application, the super-admin CHECK constraint, and all
+   * sixteen built-in presets compare against this exact literal and go on working untouched. An
+   * id-based relation would have meant loading the role on every query that asks "is this an admin".
+   */
+  role                   String
+  roleRef                Role      @relation(fields: [role], references: [key])
   /**
    * The tier above ADMIN.
    * A super admin holds every permission unconditionally — the resolver returns true before it
@@ -390,6 +472,22 @@ model User {
    * Forces a password change on next login — set when an admin creates the account or resets a password.
    */
   mustChangePassword     Boolean   @default(false)
+  /**
+   * An administrator's lock: they can sign in, and see nothing but the notice below until it is
+   * lifted — or until `lockedUntil`, when set, passes. See src/lib/access/lock.ts.
+   */
+  lockedAt               DateTime?
+  lockedUntil            DateTime?
+  lockMessage            String?
+  lockedById             String?
+  lockedBy               User?     @relation("UserLockedBy", fields: [lockedById], references: [id], onDelete: SetNull)
+  locksApplied           User[]    @relation("UserLockedBy")
+  /**
+   * The newest "What's new" post this person has seen. Posts published after it are unread — one
+   * timestamp rather than a row per post, because "have I seen everything up to now" is the only
+   * question the dot beside the bell asks.
+   */
+  updatesSeenAt          DateTime?
   /**
    * AES-256-GCM encrypted TOTP secret (see src/lib/crypto.ts) — null until the user completes two-factor setup.
    */
@@ -460,80 +558,120 @@ model User {
   journalEntriesCreated      JournalEntry[]           @relation("JournalCreatedBy")
   ordersAccountsApproved     CompanyProduct[]         @relation("OrderAccountsApprovedBy")
   ordersPurchased            CompanyProduct[]         @relation("OrderPurchasedBy")
+  renewalStagesSet           CompanyProduct[]         @relation("RenewalStageSetBy")
+  documentsSubmitted         TradeDocument[]          @relation("DocumentSubmittedBy")
+  documentsApproved          TradeDocument[]          @relation("DocumentApprovedBy")
+  approvesDocumentTypes      DocumentApprovalPolicy[] @relation("DocumentApprover")
+  approvalPoliciesUpdated    DocumentApprovalPolicy[] @relation("ApprovalPolicyUpdatedBy")
   watchedOrders              CompanyProduct[]         @relation("OrderWatchers")
 
-  callsLogged             CallLog[]                  @relation("CallLoggedBy")
-  workbooks               Workbook[]                 @relation("WorkbookOwner")
-  workbookAssignments     WorkbookAssignee[]         @relation("WorkbookAssignedTo")
-  workbookAssignmentsMade WorkbookAssignee[]         @relation("WorkbookAssignedBy")
-  workbookRecords         WorkbookRecord[]           @relation("WorkbookRecordCaller")
-  verificationsMade       ContactVerification[]      @relation("ContactVerifiedBy")
-  verificationsApplied    ContactVerification[]      @relation("ContactVerificationAppliedBy")
-  emailChecksRun          Contact[]                  @relation("ContactEmailCheckedBy")
-  auditLogsAsImpersonator AuditLog[]                 @relation("AuditImpersonatedBy")
-  biometricPunches        BiometricPunch[]           @relation("UserBiometricPunches")
-  regularisations         AttendanceRegularisation[] @relation("UserRegularisations")
-  regularisationsToDecide AttendanceRegularisation[] @relation("RegularisationApprover")
-  documents               EmployeeDocument[]         @relation("UserDocuments")
-  documentsUploaded       EmployeeDocument[]         @relation("DocumentUploadedBy")
-  employmentHistory       EmploymentHistory[]        @relation("UserEmploymentHistory")
-  employmentVerified      EmploymentHistory[]        @relation("EmploymentVerifiedBy")
-  letters                 EmployeeLetter[]           @relation("UserLetters")
-  lettersIssued           EmployeeLetter[]           @relation("LetterIssuedBy")
-  settlement              FinalSettlement?           @relation("UserSettlement")
-  settlementsApproved     FinalSettlement[]          @relation("SettlementApprovedBy")
-  settlementsCreated      FinalSettlement[]          @relation("SettlementCreatedBy")
-  candidatesOwned         Candidate[]                @relation("CandidateOwner")
-  candidatesToManage      Candidate[]                @relation("CandidateManager")
-  candidateRecord         Candidate?                 @relation("CandidateConverted")
-  hrTasksAbout            Task[]                     @relation("TaskAboutUser")
-  employeeProfile         EmployeeProfile?           @relation("UserEmployeeProfile")
-  leaveBalances           LeaveBalance[]             @relation("UserLeaveBalances")
-  leaveRequests           LeaveRequest[]             @relation("UserLeaveRequests")
-  leaveApprovals          LeaveRequest[]             @relation("LeaveApprover")
-  attendance              AttendanceDay[]            @relation("UserAttendance")
-  attendanceRegularised   AttendanceDay[]            @relation("AttendanceRegularisedBy")
-  salaryStructures        SalaryStructure[]          @relation("UserSalaryStructures")
-  salaryStructuresCreated SalaryStructure[]          @relation("SalaryStructureCreatedBy")
-  payslips                Payslip[]                  @relation("UserPayslips")
-  payrollRunsCreated      PayrollRun[]               @relation("PayrollCreatedBy")
-  payrollRunsLocked       PayrollRun[]               @relation("PayrollLockedBy")
-  celebrationsAbout       Celebration[]              @relation("CelebrationSubject")
-  celebrationsCreated     Celebration[]              @relation("CelebrationAuthor")
-  celebrationsSeen        CelebrationSeen[]
-  ledgerLocks             LedgerLock[]               @relation("LedgerLockBy")
-  fiscalYearsClosed       FiscalYearClose[]          @relation("FiscalYearClosedBy")
-  bankAccountsCreated     BankAccount[]              @relation("BankAccountCreatedBy")
-  statementLinesMatched   BankStatementLine[]        @relation("StatementMatchedBy")
-  bankReconciliations     BankReconciliation[]       @relation("ReconciledBy")
-  assetsCreated           FixedAsset[]               @relation("AssetCreatedBy")
-  assetsHeld              FixedAsset[]               @relation("AssetCustodian")
-  depreciationCharges     DepreciationCharge[]       @relation("DepreciationCreatedBy")
-  itAssets                Asset[]                    @relation("ITAssetCustodian")
-  itAssetsCreated         Asset[]                    @relation("ITAssetCreatedBy")
-  assetMovementsRecorded  AssetMovement[]            @relation("AssetMovementRecordedBy")
-  assetMovementsFrom      AssetMovement[]            @relation("AssetMovementFromUser")
-  assetMovementsTo        AssetMovement[]            @relation("AssetMovementToUser")
-  assetMovementsAcked     AssetMovement[]            @relation("AssetMovementAcknowledged")
-  consignmentsCreated     Consignment[]              @relation("ConsignmentCreatedBy")
-  feedbackRequested       FeedbackRequest[]          @relation("FeedbackRequestedBy")
-  feedbackAbout           FeedbackRequest[]          @relation("FeedbackAboutUser")
-  feedbackAcknowledged    FeedbackResponse[]         @relation("FeedbackAcknowledgedBy")
-  audiencesCreated        Audience[]                 @relation("AudienceCreatedBy")
-  templatesCreated        MarketingTemplate[]        @relation("TemplateCreatedBy")
-  campaignsCreated        Campaign[]                 @relation("CampaignCreatedBy")
-  campaignsApproved       Campaign[]                 @relation("CampaignApprovedBy")
-  journeysCreated         Journey[]                  @relation("JourneyCreatedBy")
-  consentsCaptured        ContactConsent[]           @relation("ConsentCapturedBy")
-  suppressionsCreated     Suppression[]              @relation("SuppressionCreatedBy")
-  formsCreated            InboundForm[]              @relation("FormCreatedBy")
-  formsAssigned           InboundForm[]              @relation("FormAssignee")
-  targets                 Target[]                   @relation("TargetOwner")
-  targetsCreated          Target[]                   @relation("TargetCreatedBy")
-  incentiveEarnings       IncentiveEarning[]         @relation("IncentiveEarner")
-  incentivesApproved      IncentiveEarning[]         @relation("IncentiveApprovedBy")
-  incentivesCreated       IncentiveEarning[]         @relation("IncentiveCreatedBy")
-  incentiveSchemesCreated IncentiveScheme[]          @relation("IncentiveSchemeCreatedBy")
+  callsLogged              CallLog[]                  @relation("CallLoggedBy")
+  workbooks                Workbook[]                 @relation("WorkbookOwner")
+  workbookAssignments      WorkbookAssignee[]         @relation("WorkbookAssignedTo")
+  workbookAssignmentsMade  WorkbookAssignee[]         @relation("WorkbookAssignedBy")
+  workbookRecords          WorkbookRecord[]           @relation("WorkbookRecordCaller")
+  verificationsMade        ContactVerification[]      @relation("ContactVerifiedBy")
+  verificationsApplied     ContactVerification[]      @relation("ContactVerificationAppliedBy")
+  emailChecksRun           Contact[]                  @relation("ContactEmailCheckedBy")
+  auditLogsAsImpersonator  AuditLog[]                 @relation("AuditImpersonatedBy")
+  biometricPunches         BiometricPunch[]           @relation("UserBiometricPunches")
+  regularisations          AttendanceRegularisation[] @relation("UserRegularisations")
+  regularisationsToDecide  AttendanceRegularisation[] @relation("RegularisationApprover")
+  documents                EmployeeDocument[]         @relation("UserDocuments")
+  documentsUploaded        EmployeeDocument[]         @relation("DocumentUploadedBy")
+  employmentHistory        EmploymentHistory[]        @relation("UserEmploymentHistory")
+  employmentVerified       EmploymentHistory[]        @relation("EmploymentVerifiedBy")
+  letters                  EmployeeLetter[]           @relation("UserLetters")
+  lettersIssued            EmployeeLetter[]           @relation("LetterIssuedBy")
+  settlement               FinalSettlement?           @relation("UserSettlement")
+  settlementsApproved      FinalSettlement[]          @relation("SettlementApprovedBy")
+  settlementsCreated       FinalSettlement[]          @relation("SettlementCreatedBy")
+  candidatesOwned          Candidate[]                @relation("CandidateOwner")
+  candidatesToManage       Candidate[]                @relation("CandidateManager")
+  candidateRecord          Candidate?                 @relation("CandidateConverted")
+  hrTasksAbout             Task[]                     @relation("TaskAboutUser")
+  employeeProfile          EmployeeProfile?           @relation("UserEmployeeProfile")
+  leaveBalances            LeaveBalance[]             @relation("UserLeaveBalances")
+  leaveRequests            LeaveRequest[]             @relation("UserLeaveRequests")
+  leaveApprovals           LeaveRequest[]             @relation("LeaveApprover")
+  attendance               AttendanceDay[]            @relation("UserAttendance")
+  attendanceRegularised    AttendanceDay[]            @relation("AttendanceRegularisedBy")
+  salaryStructures         SalaryStructure[]          @relation("UserSalaryStructures")
+  salaryStructuresCreated  SalaryStructure[]          @relation("SalaryStructureCreatedBy")
+  payslips                 Payslip[]                  @relation("UserPayslips")
+  payrollRunsCreated       PayrollRun[]               @relation("PayrollCreatedBy")
+  payrollRunsLocked        PayrollRun[]               @relation("PayrollLockedBy")
+  celebrationsAbout        Celebration[]              @relation("CelebrationSubject")
+  celebrationsCreated      Celebration[]              @relation("CelebrationAuthor")
+  salesCelebrationSettings SalesCelebrationSettings[] @relation("SalesCelebrationSettingsBy")
+  activityAwardSettings    ActivityAwardSettings[]    @relation("ActivityAwardSettingsBy")
+  prizesUpdated            Prize[]                    @relation("PrizeUpdatedBy")
+  prizesWon                PrizeWinner[]              @relation("PrizeWinnerUser")
+  prizesHandedOver         PrizeWinner[]              @relation("PrizeHandedOverBy")
+  prizeAnnouncements       PrizeAnnouncement[]        @relation("PrizeAnnouncedBy")
+  marketingAssets          MarketingAsset[]           @relation("MarketingAssetBy")
+  marketingLists           MarketingList[]            @relation("MarketingListBy")
+  companyMerges            CompanyMerge[]             @relation("CompanyMergedBy")
+  maintenanceChanges       MaintenanceMode[]          @relation("MaintenanceUpdatedBy")
+  copilotSettingsChanges   CopilotSettings[]          @relation("CopilotSettingsUpdatedBy")
+  copilotConversations     CopilotConversation[]      @relation("CopilotConversationUser")
+  copilotUsage             CopilotUsage[]             @relation("CopilotUsageUser")
+  copilotProposals         CopilotProposal[]          @relation("CopilotProposalUser")
+  companyLocks             CompanyLock[]              @relation("CompanyLockedBy")
+  helpDeskChanges          HelpDesk[]                 @relation("HelpDeskUpdatedBy")
+  mailConnection           MailConnection?            @relation("UserMailConnection")
+  documentEmailTemplates   DocumentEmailTemplate[]    @relation("DocumentEmailTemplateBy")
+  documentRenderGrants     DocumentRenderGrant[]      @relation("DocumentRenderGrantUser")
+  helpLinks                HelpLink[]                 @relation("HelpLinkCreatedBy")
+  announcements            Announcement[]             @relation("AnnouncementCreatedBy")
+  celebrationsSeen         CelebrationSeen[]
+  ledgerLocks              LedgerLock[]               @relation("LedgerLockBy")
+  fiscalYearsClosed        FiscalYearClose[]          @relation("FiscalYearClosedBy")
+  bankAccountsCreated      BankAccount[]              @relation("BankAccountCreatedBy")
+  statementLinesMatched    BankStatementLine[]        @relation("StatementMatchedBy")
+  bankReconciliations      BankReconciliation[]       @relation("ReconciledBy")
+  assetsCreated            FixedAsset[]               @relation("AssetCreatedBy")
+  assetsHeld               FixedAsset[]               @relation("AssetCustodian")
+  depreciationCharges      DepreciationCharge[]       @relation("DepreciationCreatedBy")
+  itAssets                 Asset[]                    @relation("ITAssetCustodian")
+  itAssetsCreated          Asset[]                    @relation("ITAssetCreatedBy")
+  assetMovementsRecorded   AssetMovement[]            @relation("AssetMovementRecordedBy")
+  assetMovementsFrom       AssetMovement[]            @relation("AssetMovementFromUser")
+  assetMovementsTo         AssetMovement[]            @relation("AssetMovementToUser")
+  assetMovementsAcked      AssetMovement[]            @relation("AssetMovementAcknowledged")
+  consignmentsCreated      Consignment[]              @relation("ConsignmentCreatedBy")
+  feedbackRequested        FeedbackRequest[]          @relation("FeedbackRequestedBy")
+  feedbackAbout            FeedbackRequest[]          @relation("FeedbackAboutUser")
+  feedbackAcknowledged     FeedbackResponse[]         @relation("FeedbackAcknowledgedBy")
+  audiencesCreated         Audience[]                 @relation("AudienceCreatedBy")
+  templatesCreated         MarketingTemplate[]        @relation("TemplateCreatedBy")
+  campaignsCreated         Campaign[]                 @relation("CampaignCreatedBy")
+  campaignsApproved        Campaign[]                 @relation("CampaignApprovedBy")
+  journeysCreated          Journey[]                  @relation("JourneyCreatedBy")
+  consentsCaptured         ContactConsent[]           @relation("ConsentCapturedBy")
+  suppressionsCreated      Suppression[]              @relation("SuppressionCreatedBy")
+  formsCreated             InboundForm[]              @relation("FormCreatedBy")
+  formsAssigned            InboundForm[]              @relation("FormAssignee")
+  formsOwned               InboundForm[]              @relation("FormOwner")
+  formGrants               FormAccessGrant[]          @relation("FormAccessUser")
+  formGrantsGiven          FormAccessGrant[]          @relation("FormAccessGrantedBy")
+  formInvitesSent          FormInvite[]               @relation("FormInviteInvitedBy")
+  formAttendanceMarked     FormSubmission[]           @relation("FormAttendanceMarkedBy")
+  formResponsesRecorded    FormSubmission[]           @relation("FormResponseRecordedBy")
+  devices                  UserDevice[]               @relation("DeviceOwner")
+  devicesDecided           UserDevice[]               @relation("DeviceDecidedBy")
+  signIns                  SignIn[]                   @relation("SignInUser")
+  signInsEnded             SignIn[]                   @relation("SignInEndedBy")
+  ipRulesCreated           IpRule[]                   @relation("IpRuleCreatedBy")
+  accessPoliciesChanged    RoleAccessPolicy[]         @relation("AccessPolicyUpdatedBy")
+  forecastCommits          ForecastCommit[]           @relation("ForecastCommitOwner")
+  forecastWeightsSet       ForecastStageWeight[]      @relation("ForecastWeightUpdatedBy")
+  targets                  Target[]                   @relation("TargetOwner")
+  targetsCreated           Target[]                   @relation("TargetCreatedBy")
+  incentiveEarnings        IncentiveEarning[]         @relation("IncentiveEarner")
+  incentivesApproved       IncentiveEarning[]         @relation("IncentiveApprovedBy")
+  incentivesCreated        IncentiveEarning[]         @relation("IncentiveCreatedBy")
+  incentiveSchemesCreated  IncentiveScheme[]          @relation("IncentiveSchemeCreatedBy")
 
   activity               ActivityLog[]            @relation("UserActivity")
   permissionGrants       UserPermission[]         @relation("UserPermissionSubject")
@@ -588,6 +726,8 @@ model User {
   invitesHosted          VisitorInvite[]          @relation("InviteHost")
   invitesCreated         VisitorInvite[]          @relation("InviteCreatedBy")
   photo                  UserPhoto?               @relation("UserPhoto")
+  creditDecisions        CreditDecision[]         @relation("CreditDecidedBy")
+  messagesSent           MarketingMessage[]       @relation("MarketingMessageSentBy")
 
   @@index([departmentId])
   @@index([managerId])
@@ -635,11 +775,27 @@ model Industry {
 
 model Company {
   id                  String                  @id @default(cuid())
+  /**
+   * The short number people quote at each other — COM-000123.
+   * `id` is a cuid: correct, unique, and unsayable over the phone. Ten other records already carry
+   * a sequence for exactly this reason (orders, leads, contacts, tickets, payments…), and a company
+   * was the conspicuous exception — so the only way to refer to one unambiguously was its name,
+   * which is mutable and, in a country with three "Evergreen Logistics", not unique either.
+   * Backfilled in creation order rather than in whatever order the table happened to scan, so the
+   * oldest account is COM-000001 and the numbering means something.
+   */
+  companySeq          Int                     @unique @default(autoincrement())
   name                String
   normalizedName      String                  @unique
   industryId          String?
   industry            Industry?               @relation(fields: [industryId], references: [id])
   category            String?
+  /**
+   * Where this customer sits — a category, or a sub-category under one — shown as an icon chip beside
+   * their name wherever it appears. See src/lib/customers/categories.ts.
+   */
+  customerCategoryId  String?
+  customerCategory    CustomerCategory?       @relation("CompanyCustomerCategory", fields: [customerCategoryId], references: [id], onDelete: SetNull)
   companyType         CompanyType?
   relationshipType    CompanyRelationshipType @default(CLIENT)
   vendorStatus        VendorStatus?
@@ -664,7 +820,16 @@ model Company {
   website             String?
   linkedinUrl         String?
   employeeCount       Int?
-  paymentTerms        PaymentTerms            @default(NET_30)
+  /// Advance by default — most customers of a reseller pay before the licence is ordered.
+  paymentTerms        PaymentTerms            @default(ADVANCE)
+  /// The most this customer may owe at once, set by somebody who can override credit. Null means
+  /// the engine's suggestion applies (src/lib/credit/engine.ts). A reseller's lives on its profile.
+  creditLimit         Decimal?                @db.Decimal(14, 2)
+  /// The last computed rating, kept so lists can filter and sort by it. Decisions never read this —
+  /// they recompute from the payment history — so a stale copy can mislead a list, never an approval.
+  creditRating        CreditRating?
+  creditScore         Int?
+  creditScoredAt      DateTime?
   dunsNumber          String?
   tags                String[]                @default([])
   source              CompanySource           @default(OTHER)
@@ -683,10 +848,12 @@ model Company {
 
   contacts               Contact[]
   leads                  Lead[]
+  creditDecisions        CreditDecision[]
   feedbackRequests       FeedbackRequest[]       @relation("FeedbackCompany")
   journeyEnrolments      JourneyEnrolment[]      @relation("JourneyCompany")
   marketingMessages      MarketingMessage[]      @relation("MarketingMessageCompany")
   formSubmissions        FormSubmission[]        @relation("FormSubmissionCompany")
+  formInvites            FormInvite[]            @relation("FormInviteCompany")
   products               CompanyProduct[]
   vendorOrders           CompanyProduct[]        @relation("CompanyProductVendor")
   vendorStatements       VendorStatement[]       @relation("VendorStatementVendor")
@@ -753,6 +920,10 @@ model Company {
   projects           Project[]             @relation("ProjectCompany")
 
   vaultCredentials VaultCredential[] @relation("VaultCredentialCompany")
+  /**
+   * Companies merged into this one — their old links find it through these.
+   */
+  mergedFrom       CompanyMerge[]    @relation("CompanyMergedInto")
   visitorCompanies VisitorCompany[]  @relation("VisitorCompanyOrigin")
 
   @@index([stage])
@@ -762,6 +933,8 @@ model Company {
   // `assignedToUserId` was already indexed; this one was not, and both are filtered the same way.
   @@index([ownerUserId])
   @@index([managedByResellerId])
+  @@index([creditRating])
+  @@index([customerCategoryId])
   @@map("companies")
 }
 
@@ -933,6 +1106,11 @@ model Contact {
   phone       String?
   linkedinUrl String?
   isPrimary   Boolean            @default(false)
+  /**
+   * Gets the invoices, proposals and credit notes — pre-selected when somebody presses Mail on a
+   * document for this company. See src/actions/document-mail.ts.
+   */
+  receivesDocuments Boolean      @default(false)
 
   /**
    * The last verdict on this email address — see src/lib/email-verification.ts.
@@ -953,6 +1131,12 @@ model Contact {
    * Null, too, for contacts added before this was tracked.
    */
   preferenceToken      String?           @unique
+  /**
+   * Preference links of contacts combined into this one when two companies were merged — mail
+   * already sent carries them, and an unsubscribe link has to keep working after the person it was
+   * sent to became somebody else's record. See src/lib/companies/merge.ts.
+   */
+  formerPreferenceTokens String[]        @default([])
   createdByUserId      String?
   createdBy            User?             @relation("ContactCreatedBy", fields: [createdByUserId], references: [id])
   createdAt            DateTime          @default(now())
@@ -961,11 +1145,13 @@ model Contact {
   leads             Lead[]
   tickets           Ticket[]
   visits            Visit[]
-  feedbackRequests  FeedbackRequest[]  @relation("FeedbackContact")
-  journeyEnrolments JourneyEnrolment[] @relation("JourneyContact")
-  marketingMessages MarketingMessage[] @relation("MarketingMessageContact")
-  consents          ContactConsent[]   @relation("ContactConsent")
-  formSubmissions   FormSubmission[]   @relation("FormSubmissionContact")
+  feedbackRequests  FeedbackRequest[]     @relation("FeedbackContact")
+  journeyEnrolments JourneyEnrolment[]    @relation("JourneyContact")
+  marketingMessages MarketingMessage[]    @relation("MarketingMessageContact")
+  consents          ContactConsent[]      @relation("ContactConsent")
+  marketingLists    MarketingListMember[] @relation("MarketingListMemberContact")
+  formSubmissions   FormSubmission[]      @relation("FormSubmissionContact")
+  formInvites       FormInvite[]          @relation("FormInviteContact")
 
   calls            CallLog[]
   verifications    ContactVerification[]
@@ -1013,6 +1199,23 @@ model Lead {
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
+  /// Where the enquiry came from. Distinct from Company.source, which is how the *account* was found.
+  source         LeadSource      @default(OTHER)
+  /// The particulars — which website and page, which campaign, who referred them.
+  sourceDetail   String?
+  /// 0–100, from `scoreLead` (src/lib/leads/score.ts). Stored so the list can sort by it; refreshed
+  /// on every change to the lead and by the periodic tick, because part of it is how recent things are.
+  score          Int?
+  scoreUpdatedAt DateTime?
+  /// How the owner was chosen, in words — "Rule: Microsoft leads (round robin)". Shown on the lead
+  /// so the person it landed on can see why, and so can whoever set the rules.
+  assignmentNote String?
+  /// The website API key that sent it, and that site's own id for the enquiry. Together unique, so a
+  /// website retrying a request that timed out gets the same lead back instead of a duplicate.
+  captureKeyId   String?
+  captureKey     LeadCaptureKey? @relation(fields: [captureKeyId], references: [id], onDelete: SetNull)
+  externalId     String?
+
   activities   Activity[]
   proposals    Proposal[]
   requirements LeadRequirement[]
@@ -1030,12 +1233,15 @@ model Lead {
   formSubmissions FormSubmission[] @relation("FormSubmissionLead")
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
 
+  @@unique([captureKeyId, externalId])
   @@index([companyId])
   @@index([status])
   // Same reason as Company.ownerUserId above.
   @@index([ownerUserId])
   /// Every Leads report windows on this. See the note on Ticket.
   @@index([createdAt])
+  @@index([score])
+  @@index([source])
   @@map("leads")
 }
 
@@ -1151,6 +1357,8 @@ model OrganisationSettings {
    */
   stateCode    String?
   pincode      String?
+  /// Blank means India, as it does on every address — see `isIndia`. Printed only when it is not.
+  country      String?
   email        String?
   phone        String?
 
@@ -1308,6 +1516,58 @@ enum TradeDocumentType {
   DELIVERY_CHALLAN
 }
 
+/**
+ * Which part of the app raised a document — see `TradeDocument.origin`.
+ * Deliberately only the paths that exist. A speculative value nothing ever writes is vocabulary that
+ * reads as meaningful on a screen and never appears, and extending an enum is a migration either
+ * way, so there is nothing saved by guessing ahead.
+ */
+enum DocumentOrigin {
+  /**
+   * Typed into the document form.
+   */
+  MANUAL
+  /**
+   * Converted from another document — `sourceDocumentId` says which.
+   */
+  CONVERSION
+  /**
+   * The pro-rata calculator in the side rail: seats added part-way through a term.
+   */
+  ADDON_CALCULATOR
+  /**
+   * One click from the renewals list.
+   */
+  RENEWAL
+  /**
+   * The delivery challan raised automatically when a consignment is dispatched.
+   */
+  CONSIGNMENT
+}
+
+/**
+ * Where a document has got to in sign-off — see `TradeDocument.approvalStatus`.
+ * A separate axis from `TradeDocumentStatus` on purpose. That field already carries what the
+ * *customer* did: ACCEPTED and REJECTED mean they took or turned down the quote. Reusing them for
+ * internal sign-off would make "Rejected" mean two opposite things on the same screen — the customer
+ * said no, or a colleague sent it back for a correction before it ever left the building.
+ * Whether a document needs approving at all is not stored here. That is the policy's answer, and it
+ * can change: turning approval on for invoices must apply to the drafts already sitting there, which
+ * a value frozen onto each row at creation could never do.
+ */
+enum DocumentApprovalStatus {
+  /**
+   * Nobody has asked for sign-off. The resting state, and where an edited document returns to.
+   */
+  NOT_SUBMITTED
+  PENDING
+  APPROVED
+  /**
+   * Sent back. The document stays a draft and stays editable — that is the point of rejecting it.
+   */
+  REJECTED
+}
+
 enum TradeDocumentStatus {
   DRAFT
   ISSUED
@@ -1377,6 +1637,13 @@ model TradeDocument {
   sellerGstin   String?
   buyerGstin    String?
   /**
+   * The party's name as it stood on an issued document, frozen when the party was merged into another
+   * company — so a reprint, and the e-invoice already registered, still say what was issued. Null
+   * means "read the company's name", which is right for everything never merged. See
+   * src/lib/companies/merge.ts.
+   */
+  partyName     String?
+  /**
    * How the buyer is treated for GST on this document. Snapshotted rather than read from the
    * company, because it decides whether a GSTIN is required and a customer's registration can
    * change after a document is issued.
@@ -1418,6 +1685,38 @@ model TradeDocument {
   issueDate  DateTime  @default(now())
   dueDate    DateTime?
   validUntil DateTime?
+
+  /**
+   * Which part of the app raised this document.
+   * Not the same question as `sourceDocumentId`, which says *what* it was converted from — this says
+   * *how* it came to exist at all. A proposal typed into the document form and one produced in a
+   * click from the renewals list are the same record afterwards, and telling them apart is what
+   * answers "is anybody actually using the renewal button?" and "where did this quote come from?".
+   * Nullable rather than defaulted, so a creation path that forgets to say silently reads as "not
+   * recorded" instead of claiming to be manual. `createTradeDocument` fills it in for everything
+   * that goes through it.
+   */
+  origin DocumentOrigin?
+
+  /**
+   * Internal sign-off, which is a different question from what the customer did with it.
+   * Only meaningful where `DocumentApprovalPolicy` has approval switched on for this type; where it
+   * is off, every document sits at NOT_SUBMITTED and issuing does not consult it.
+   * Editing an APPROVED document puts it back to NOT_SUBMITTED. Without that, sign-off means
+   * nothing: a ₹1,000 quote gets approved and then edited to ₹10,00,000 carrying somebody else's
+   * name as the approver.
+   */
+  approvalStatus DocumentApprovalStatus @default(NOT_SUBMITTED)
+  submittedById  String?
+  submittedBy    User?                  @relation("DocumentSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedAt    DateTime?
+  approvedById   String?
+  approvedBy     User?                  @relation("DocumentApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt     DateTime?
+  /**
+   * Why it was sent back, or a note from whoever signed it off. The part worth reading later.
+   */
+  approvalNote   String?
 
   /**
    * Proposal → proforma → invoice: each conversion records where it came from.
@@ -1485,9 +1784,13 @@ model TradeDocument {
   salespersonId String?
   salesperson   User?     @relation("TradeDocumentSalesperson", fields: [salespersonId], references: [id])
   issuedAt      DateTime?
+  /** The last time it was emailed to the customer from here. Who to, and from whom, is in `emails`. */
+  lastEmailedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  emails          MarketingMessage[]      @relation("MarketingMessageDocument")
+  renderGrants    DocumentRenderGrant[]
   lines           TradeDocumentLine[]
   /**
    * Payments settling this invoice.
@@ -1578,6 +1881,48 @@ enum DocumentNumberMode {
 }
 
 /**
+ * Who signs off each kind of document before it can be issued.
+ * One row per document type, because the answer differs by type and that is the whole point: a
+ * quotation is a commitment to a price and belongs to whoever runs the desk, while a tax invoice
+ * posts to the ledger and files with the government and belongs to accounts.
+ * ## Three ways to name an approver, and why all three
+ * `approverRoles` follows the job rather than the person, so it survives somebody leaving.
+ * `approvers` names individuals, which is the right answer when two named people sign off invoices
+ * and nobody else. `managerApproves` sends a document up the submitter's own reporting line, which
+ * is the only one of the three that gives a different answer per document — Rahul's goes to Priya,
+ * Sana's goes to Amit — and so is the only one that can express "a manager approves for their team".
+ * They are additive: any one of them being satisfied is enough. An approval system where the rules
+ * had to *all* agree would deadlock the first time somebody's manager was on leave.
+ * Off by default for every type, so installing this changes nothing until somebody turns it on.
+ */
+model DocumentApprovalPolicy {
+  docType TradeDocumentType @id
+  enabled Boolean           @default(false)
+
+  /**
+   * Role keys, not foreign keys — a scalar list cannot carry one.
+   * `deleteRole` guards against orphaning these, the same way it refuses a role somebody still
+   * holds. Silently dropping a deleted role from a policy would quietly change who may approve an
+   * invoice, which is not a change that should happen as a side effect of tidying up roles.
+   */
+  approverRoles   String[] @default([])
+  approvers       User[]   @relation("DocumentApprover")
+  managerApproves Boolean  @default(false)
+
+  /// Only documents worth more than this (in rupees, GST included) need approval. Null: every one does
+  /// — unless the discount rule below is the only rule set. See `approvalRequirement`.
+  minValue           Decimal? @db.Decimal(14, 2)
+  /// Any line discounted by more than this percent needs approval, whatever the document is worth.
+  maxDiscountPercent Decimal? @db.Decimal(5, 2)
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("ApprovalPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("document_approval_policies")
+}
+
+/**
  * How each document type's number is built — the prefix and the next serial, editable the way
  * Zoho Books does it. Separate from `DocumentCounter`, which is the financial-year GST series:
  * this is the *format*, that is the *sequence*.
@@ -1652,7 +1997,8 @@ model DocumentCounter {
 }
 
 model RolePermission {
-  role       Role
+  role       String
+  roleRef    Role     @relation(fields: [role], references: [key], onDelete: Cascade)
   permission String
   allowed    Boolean  @default(true)
   updatedAt  DateTime @updatedAt
@@ -1746,14 +2092,19 @@ model Item {
 }
 
 model LeadRequirement {
-  id        String   @id @default(cuid())
-  leadId    String
-  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  itemId    String
-  item      Item     @relation(fields: [itemId], references: [id])
-  quantity  Int      @default(1)
-  notes     String?
-  createdAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id])
+  quantity    Int       @default(1)
+  /// Remarks — shown as such on the forms. Where the reference that identifies an existing
+  /// subscription goes: a Microsoft tenant ID, an Adobe VIP number, an Autodesk contract ID.
+  notes       String?
+  /// When the subscription this line is about comes up for renewal, if it is a renewal. Date only,
+  /// stored as UTC midnight like `Lead.expectedCloseDate`, so `toISOString().slice(0, 10)` is the day.
+  renewalDate DateTime?
+  createdAt   DateTime  @default(now())
 
   @@index([leadId])
   @@index([itemId])
@@ -1801,6 +2152,30 @@ model CompanyProduct {
   renewedFrom   CompanyProduct?  @relation("SubscriptionRenewal", fields: [renewedFromId], references: [id], onDelete: SetNull)
   renewedBy     CompanyProduct?  @relation("SubscriptionRenewal")
   addons        CompanyProduct[] @relation("SubscriptionAddons")
+
+  /**
+   * A renewal stage somebody pinned by hand.
+   * Null is the normal state and means "work it out" — the stage is otherwise derived from what has
+   * actually happened (a call logged, a proposal raised, the renewal punched), which cannot go stale
+   * the way a field people have to remember to update always does. See `resolveRenewalStage`.
+   * This column exists for the three things that leave no trace at all and are exactly what a
+   * salesperson wants to record: NEGOTIATING, ON_HOLD and LOST. The enum holds the derived stages
+   * too, so allowing one of those to be pinned later is a change to the picker rather than another
+   * migration — but nothing offers them today, because pinning a stage the evidence already reports
+   * only stops it moving on its own.
+   * A pin does not survive the renewal actually being punched: an order existing is a fact and
+   * "Lost" is an opinion that has since been overtaken. The column keeps the pinned value rather than
+   * clearing it, so the screen can say it was overtaken instead of silently contradicting whoever
+   * set it.
+   */
+  renewalStage     RenewalStage?
+  /**
+   * Why — the part worth reading back on a lost renewal. "Lost" alone answers nothing.
+   */
+  renewalStageNote String?
+  renewalStageAt   DateTime?
+  renewalStageById String?
+  renewalStageBy   User?         @relation("RenewalStageSetBy", fields: [renewalStageById], references: [id], onDelete: SetNull)
 
   /**
    * What a full year of one seat costs, kept beside the pro-rated `unitPrice` an addon is actually
@@ -1873,10 +2248,12 @@ model CompanyProduct {
    */
   watchers User[] @relation("OrderWatchers")
 
-  allocations   PaymentAllocation[]
-  tickets       Ticket[]
-  expenses      OrderExpense[]
-  documentLines TradeDocumentLine[]
+  allocations      PaymentAllocation[]
+  tickets          Ticket[]
+  expenses         OrderExpense[]
+  documentLines    TradeDocumentLine[]
+  creditDecisions  CreditDecision[]
+  customerMessages MarketingMessage[]  @relation("MarketingMessageOrder")
 
   calls            CallLog[]
   assets           Asset[]           @relation("AssetOrder")
@@ -4068,7 +4445,8 @@ model Candidate {
   /**
    * The role their login will get on conversion — decided at offer, not on day one.
    */
-  role           Role           @default(SALES)
+  role           String         @default("SALES")
+  roleRef        Role           @relation(fields: [role], references: [key])
 
   status          CandidateStatus @default(PROSPECT)
   source          String?
@@ -4204,12 +4582,37 @@ model Celebration {
   endsOn   DateTime @db.Date
   active   Boolean  @default(true)
 
-  createdById String
-  createdBy   User     @relation("CelebrationAuthor", fields: [createdById], references: [id], onDelete: Cascade)
+  /**
+   * Null when the app wrote it itself — a sales win celebrated as it happened.
+   */
+  createdById String?
+  createdBy   User?    @relation("CelebrationAuthor", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  /**
+   * Written by a person, or raised by a sale — see src/lib/wins. The sales ones are one per occasion:
+   * `occasionKey` ("deal:<leadId>", "target:<targetId>") is unique, so a win is celebrated once
+   * however many times the detector runs.
+   */
+  source      CelebrationSource @default(MANUAL)
+  occasionKey String?           @unique
+  /**
+   * Who gets the full-screen splash. EVERYONE for a win meant to motivate the room; SUBJECT for one
+   * that is the winner's moment, which everybody else sees in the greeting strip instead.
+   */
+  splashFor   SplashScope       @default(EVERYONE)
+  /**
+   * The figure behind it — a deal's value, what was booked — for the wins wall.
+   */
+  amount      Decimal?          @db.Decimal(14, 2)
+  /**
+   * Anything else the wins wall shows: a top performer's runners-up, a target's metric and number.
+   */
+  details     Json?
+
   @@index([active, startsOn, endsOn])
+  @@index([source, createdAt])
   @@map("celebrations")
 }
 
@@ -5462,6 +5865,16 @@ model MarketingTemplate {
    * The template name approved by the WhatsApp BSP. Meaningless for email.
    */
   whatsappTemplateName String?
+  /**
+   * TEXT is written in the editor — line breaks kept, merged values escaped, wrapped in a plain
+   * layout. HTML is uploaded or pasted, and cleaned on save. See src/lib/marketing/html.ts.
+   */
+  format               TemplateFormat   @default(TEXT)
+  /**
+   * The file an uploaded template came from, so it can be recognised later.
+   */
+  sourceFileName       String?
+  assets               MarketingAsset[]
 
   active Boolean @default(true)
 
@@ -5494,8 +5907,13 @@ model Campaign {
   reference String @unique
   name      String
 
-  audienceId String
-  audience   Audience          @relation(fields: [audienceId], references: [id])
+  /**
+   * Who it goes to: an audience (derived from the CRM), an uploaded list, or both — at least one.
+   */
+  audienceId String?
+  audience   Audience?         @relation(fields: [audienceId], references: [id], onDelete: Restrict)
+  listId     String?
+  list       MarketingList?    @relation(fields: [listId], references: [id], onDelete: SetNull)
   templateId String
   template   MarketingTemplate @relation(fields: [templateId], references: [id])
 
@@ -5698,10 +6116,20 @@ model MarketingMessage {
    * Frozen when the message is queued. Editing a template next month must not rewrite what went out
    * last month — the same reason a letter's body is frozen and its letterhead is not.
    */
-  subject String?
-  body    String
-  toEmail String?
-  toPhone String?
+  subject        String?
+  body           String
+  /**
+   * The plain-text part, frozen with the body. Null on rows written before there was one — the
+   * provider derives it from the HTML then.
+   */
+  textBody       String?
+  /**
+   * Where the List-Unsubscribe header points — the one-click unsubscribe Gmail and Yahoo require
+   * of anybody sending in bulk.
+   */
+  unsubscribeUrl String?
+  toEmail        String?
+  toPhone        String?
 
   status           MessageStatus @default(QUEUED)
   /**
@@ -5720,6 +6148,23 @@ model MarketingMessage {
   providerMessageId String?
   error             String?
 
+  /// Who pressed send, for a message a person sent by hand (a renewal or fulfilment notice). A
+  /// campaign's author is on the campaign and a journey sends by itself, so both leave this null.
+  sentByUserId     String?
+  sentBy           User?               @relation("MarketingMessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  /// The order a customer notice was about.
+  companyProductId String?
+  companyProduct   CompanyProduct?     @relation("MarketingMessageOrder", fields: [companyProductId], references: [id], onDelete: SetNull)
+  noticeKind       CustomerNoticeKind?
+  /// The form invitation this message carried — first send or a reminder, each its own message.
+  formInviteId     String?
+  formInvite       FormInvite?         @relation(fields: [formInviteId], references: [id], onDelete: SetNull)
+  /** The invoice, proposal or credit note this email carried. */
+  tradeDocumentId  String?
+  tradeDocument    TradeDocument?      @relation("MarketingMessageDocument", fields: [tradeDocumentId], references: [id], onDelete: SetNull)
+  /** The mailbox it went out from, when it was sent as a person rather than through a provider. */
+  fromEmail        String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5732,7 +6177,12 @@ model MarketingMessage {
   @@unique([enrolmentId, stepId])
   @@index([status, scheduledFor])
   @@index([companyId])
+  /// The mail log: newest first, for one customer or across all of them.
+  @@index([companyId, createdAt])
+  @@index([createdAt])
   @@index([contactId, sentAt])
+  @@index([formInviteId])
+  @@index([tradeDocumentId])
   @@map("marketing_messages")
 }
 
@@ -5880,14 +6330,154 @@ model InboundForm {
   thankYouText   String?
   active         Boolean        @default(true)
 
+  /**
+   * What kind of form this is. Decides the starter questions and, for EVENT, that the form carries
+   * a date, a place, an RSVP and an attendance register. See src/lib/forms/categories.ts.
+   */
+  category FormCategory @default(ENQUIRY)
+  /**
+   * Who can fill it in: anyone with the public link, only the people sent a personal invitation, or
+   * both. An invitation-only form's public address answers "not available", exactly as a closed one
+   * does, so the slug gives nothing away.
+   */
+  fillMode FormFillMode @default(LINK)
+  /**
+   * Stops taking answers after this moment. Null: open until somebody closes it.
+   */
+  closesAt DateTime?
+
+  /**
+   * EVENT only. Stored as instants; shown in India time.
+   */
+  eventStartsAt DateTime?
+  eventEndsAt   DateTime?
+  /**
+   * A place, or "Online — link sent on registration". Free text: a roundtable is often a hotel.
+   */
+  venue         String?
+  /**
+   * Seats. Registrations that would go past it are refused; a "can't make it" never is.
+   */
+  capacity      Int?
+
+  /**
+   * Whose form it is. Full control — questions, sharing, every response — whatever anybody else was
+   * granted. Separate from `createdById` so that a handover can move ownership without rewriting
+   * who built it.
+   */
+  ownerUserId String
+  owner       User   @relation("FormOwner", fields: [ownerUserId], references: [id])
+
   createdById String
   createdBy   User     @relation("FormCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   submissions FormSubmission[]
+  grants      FormAccessGrant[]
+  invites     FormInvite[]
 
+  @@index([ownerUserId])
   @@map("marketing_forms")
+}
+
+enum FormCategory {
+  ENQUIRY
+  EVENT
+  ASSESSMENT
+  SURVEY
+  OTHER
+}
+
+enum FormFillMode {
+  LINK
+  INVITE
+  BOTH
+}
+
+enum FormAttendance {
+  ATTENDED
+  NO_SHOW
+}
+
+/**
+ * Who else may see a form, change it, invite people to it, or read what people answered.
+ * Granted to one person or to everybody holding a role — exactly one of the two, enforced by a CHECK
+ * constraint in the migration. The three switches are independent on purpose: somebody can be allowed
+ * to build the questions without reading a customer's answers, or to read the answers of an event
+ * they did not organise. Holding a grant at all is what lets somebody see the form.
+ * The owner and anybody with `forms.manageAll` need no row. See src/lib/forms/access.ts.
+ */
+model FormAccessGrant {
+  id     String      @id @default(cuid())
+  formId String
+  form   InboundForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  userId  String?
+  user    User?   @relation("FormAccessUser", fields: [userId], references: [id], onDelete: Cascade)
+  roleKey String?
+  role    Role?   @relation(fields: [roleKey], references: [key], onDelete: Cascade)
+
+  canEdit          Boolean @default(false)
+  canViewResponses Boolean @default(false)
+  canInvite        Boolean @default(false)
+
+  grantedById String?
+  grantedBy   User?    @relation("FormAccessGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([formId, userId])
+  @@unique([formId, roleKey])
+  @@index([userId])
+  @@index([roleKey])
+  @@map("form_access_grants")
+}
+
+/**
+ * A personal invitation: one contact, one form, one link.
+ * The token in the link is the whole authentication — 192 bits, and it lets the holder answer this
+ * one form as this one contact, and nothing else. Reminders reuse it, so every email somebody was
+ * sent opens the same answer, and answering again changes that answer rather than adding a second.
+ * Status is derived, never stored: withdrawn, answered (and for an event, coming or not), link
+ * opened, or just sent. A stored status is one more thing to keep in step with the submission.
+ */
+model FormInvite {
+  id     String      @id @default(cuid())
+  formId String
+  form   InboundForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  token  String      @unique
+
+  contactId String
+  contact   Contact @relation("FormInviteContact", fields: [contactId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation("FormInviteCompany", fields: [companyId], references: [id], onDelete: Cascade)
+  /**
+   * The address it went to, frozen — the contact's may change after.
+   */
+  email     String
+
+  invitedById String?
+  invitedBy   User?     @relation("FormInviteInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  lastSentAt  DateTime?
+  sendCount   Int       @default(0)
+  /**
+   * First time the link was loaded. A mail scanner following links counts too, so this is "the link
+   * was opened", never "they read it".
+   */
+  openedAt    DateTime?
+  revokedAt   DateTime?
+
+  submission FormSubmission?
+  messages   MarketingMessage[]
+
+  /**
+   * One invitation per person per form: inviting again is a reminder, not a second invitation.
+   */
+  @@unique([formId, contactId])
+  @@index([companyId])
+  @@map("form_invites")
 }
 
 model FormSubmission {
@@ -5914,9 +6504,35 @@ model FormSubmission {
    */
   sourceHash String?
 
+  /**
+   * Came in through a personal invitation. Answering again updates this row.
+   */
+  inviteId String?     @unique
+  invite   FormInvite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  /**
+   * EVENT forms: the RSVP. Null on every other kind of form.
+   */
+  attending            Boolean?
+  /**
+   * EVENT forms, on the day. Only somebody who said they were coming is marked.
+   */
+  attendance           FormAttendance?
+  attendanceMarkedAt   DateTime?
+  attendanceMarkedById String?
+  attendanceMarkedBy   User?           @relation("FormAttendanceMarkedBy", fields: [attendanceMarkedById], references: [id], onDelete: SetNull)
+
+  /**
+   * Somebody here entered this for them — an RSVP given on the phone. Null when they filled it in.
+   */
+  recordedById String?
+  recordedBy   User?   @relation("FormResponseRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([formId, createdAt])
+  @@index([companyId])
   @@map("marketing_form_submissions")
 }
 
@@ -6052,6 +6668,44 @@ enum ActivityKind {
   PERMISSION_DENIED
   RATE_LIMITED
 
+  // Where and on what people sign in — src/lib/access
+  /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * A browser this account has not used before. Waiting for approval when the role requires it.
+   */
+  NEW_DEVICE
+  DEVICE_APPROVED
+  /**
+   * Rejected before it was ever used, or revoked after — either way it no longer gets in.
+   */
+  DEVICE_BLOCKED
+  /**
+   * An address nobody on this account's role has an allow rule for, seen for the first time.
+   */
+  NEW_NETWORK
+  /**
+   * A request turned away or held by the access rules: a blocked network, a device waiting for
+   * approval, a device type the role may not use, a location not shared.
+   */
+  ACCESS_HELD
+  /**
+   * Two sign-ins further apart than anybody could have travelled in the time between them.
+   */
+  IMPOSSIBLE_TRAVEL
+  /**
+   * An admin ended somebody's session, or a device was revoked with sessions open on it.
+   */
+  SESSION_ENDED
+
   // Administration
   SECURITY_POLICY_CHANGED
 }
@@ -6153,7 +6807,31 @@ model SecurityPolicy {
    * Roles the deterrents do not apply to. ADMIN is always exempt and is not stored here — an admin
    * locked out of copying cannot administer the thing that locked them out.
    */
-  exemptRoles Role[] @default([])
+  /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * Plain strings, not a relation.
+   * Postgres cannot put a foreign key on the elements of an array, so a deleted role simply stops
+   * matching anything here — which is the right outcome: an exemption for a role nobody holds is
+   * not an exemption, and blocking a role deletion over a stale DLP entry would be worse.
+   */
+  exemptRoles String[] @default([])
 
   updatedAt DateTime @updatedAt
 
@@ -6169,6 +6847,241 @@ enum BotMode {
    * Let it through, but record that it came — for finding out what is hitting you first.
    */
   LOG
+}
+
+// ---------------------------------------------------------------------------------------------
+// Access control: who may sign in, from where, and on what — src/lib/access
+// ---------------------------------------------------------------------------------------------
+
+enum DeviceKind {
+  MOBILE
+  TABLET
+  /**
+   * A laptop or a desktop. A browser cannot tell the two apart, so the app does not pretend to —
+   * approving one specific machine is how a laptop is told from the desktop beside it.
+   */
+  COMPUTER
+}
+
+enum DeviceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+/**
+ * What happens when somebody on a role arrives from an address no allow rule covers.
+ */
+enum UnknownNetworkAction {
+  /**
+   * Let them in and record where from.
+   */
+  ALLOW
+  /**
+   * Let them in, and tell the security admins the first time the address is seen.
+   */
+  ALERT
+  /**
+   * Hold them until an admin allows the address.
+   */
+  HOLD
+  /**
+   * Only allow-listed networks. There is no approval path — an admin adds a rule.
+   */
+  BLOCK
+}
+
+enum IpRuleAction {
+  ALLOW
+  BLOCK
+}
+
+/**
+ * A browser somebody signs in on.
+ * Identified by a random token in an http-only cookie, stored here only as a hash. So a "device" is
+ * one browser on one machine: another browser, a private window or cleared cookies is a new device.
+ * That is the honest unit — nothing a web page can read identifies the hardware — and it is enough
+ * to make approval mean something: the token has to be taken off the approved machine to be used.
+ * Checked on every request, not only at sign-in, which is also what gives a signed-in session a way
+ * to be ended: revoking the device ends every session on it within seconds.
+ */
+model UserDevice {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation("DeviceOwner", fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  kind      DeviceKind
+  /**
+   * "Chrome on Windows" — from the browser's own description of itself.
+   */
+  label     String
+  userAgent String?
+  status    DeviceStatus @default(PENDING)
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  lastIp      String?
+  lastPlace   String?
+
+  /**
+   * Null with status APPROVED means it was allowed automatically: its role did not require
+   * approval when it was first seen.
+   */
+  decidedById  String?
+  decidedBy    User?     @relation("DeviceDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt    DateTime?
+  decisionNote String?
+
+  /**
+   * The sign-in whose location was last shared from this device. A role that requires location
+   * asks again at every new sign-in, not once per device.
+   */
+  locationSessionId String?
+
+  signIns SignIn[]
+
+  @@unique([userId, tokenHash])
+  @@index([status])
+  @@map("user_devices")
+}
+
+/**
+ * One sign-in, and the session that follows it: where from, on what, and — for a role that requires
+ * it — where the person said they were.
+ * `sid` is written into the session token at sign-in, which is what lets one session be ended
+ * without ending every other one the person has open.
+ */
+model SignIn {
+  id       String      @id @default(cuid())
+  sid      String      @unique
+  userId   String
+  user     User        @relation("SignInUser", fields: [userId], references: [id], onDelete: Cascade)
+  deviceId String?
+  device   UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  /**
+   * "credentials" or "microsoft-entra-id".
+   */
+  provider String
+
+  at         DateTime    @default(now())
+  lastSeenAt DateTime    @default(now())
+  ip         String?
+  userAgent  String?
+  deviceKind DeviceKind?
+
+  /**
+   * From the address, at the moment of sign-in: approximate, city-level, and for mobile data often
+   * the operator's hub rather than the person. Null when no location database is installed, or for
+   * a private address.
+   */
+  city        String?
+  region      String?
+  countryCode String?
+  country     String?
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  /**
+   * From the browser, when the role requires it. Reported by the device, so a determined person
+   * can fake it — it is evidence, not proof.
+   */
+  gpsLatitude  Decimal?  @db.Decimal(9, 6)
+  gpsLongitude Decimal?  @db.Decimal(9, 6)
+  gpsAccuracyM Int?
+  gpsAt        DateTime?
+
+  /**
+   * NEW_DEVICE, NEW_NETWORK, IMPOSSIBLE_TRAVEL — what was unusual about it, worked out when it happened.
+   */
+  flags String[] @default([])
+
+  endedAt   DateTime?
+  endedById String?
+  endedBy   User?     @relation("SignInEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, at])
+  @@index([at])
+  @@map("sign_ins")
+}
+
+/**
+ * The access rules for one role. A role with no row has none: every device, every network, no
+ * location asked for.
+ */
+model RoleAccessPolicy {
+  roleKey String @id
+  role    Role   @relation(fields: [roleKey], references: [key], onDelete: Cascade)
+
+  allowMobile   Boolean @default(true)
+  allowTablet   Boolean @default(true)
+  allowComputer Boolean @default(true)
+
+  requireDeviceApproval Boolean              @default(false)
+  unknownNetwork        UnknownNetworkAction @default(ALLOW)
+  requireLocation       Boolean              @default(false)
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("AccessPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("role_access_policies")
+}
+
+/**
+ * An address or range that is allowed or blocked — the office network, a branch, a known-bad host.
+ * `cidr` is canonical: a single address is stored as /32 (or /128), and host bits are cleared. A
+ * rule applies to the roles listed, or to everybody when the list is empty. A block beats an allow
+ * wherever both match.
+ */
+model IpRule {
+  id       String       @id @default(cuid())
+  cidr     String
+  action   IpRuleAction
+  label    String
+  roleKeys String[]     @default([])
+
+  createdById String?
+  createdBy   User?     @relation("IpRuleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  /**
+   * A rule that lapses on its own is one nobody has to remember to take away.
+   */
+  expiresAt   DateTime?
+
+  @@index([action])
+  @@map("ip_rules")
+}
+
+/**
+ * Every address a signed-in person has arrived from, and where it is. The list an admin works
+ * through to allow the new branch office or block the address that should not be there.
+ */
+model NetworkAddress {
+  ip           String   @id
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+  lastUserId   String?
+  lastUserName String?
+
+  city        String?
+  region      String?
+  countryCode String?
+  country     String?
+  isPrivate   Boolean @default(false)
+
+  /**
+   * When somebody was first held on it for want of an allow rule, and when admins were told.
+   */
+  heldAt      DateTime?
+  alertedAt   DateTime?
+  /**
+   * Looked at and left as it is — neither allowed nor blocked. Takes it off the review list.
+   */
+  dismissedAt DateTime?
+
+  @@index([lastSeenAt])
+  @@map("network_addresses")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -6236,7 +7149,31 @@ model PermissionChange {
   /**
    * Set for a role-level change.
    */
-  subjectRole   Role?
+  /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * /**
+   * Deliberately a bare string with no foreign key.
+   * This is the audit trail. A role that has since been deleted must still appear in its own
+   * history — a reference that forced the row to disappear with the role, or that stopped the role
+   * being deleted at all, would make the log describe only the present.
+   */
+  subjectRole   String?
   /**
    * Set for a per-user change.
    */
@@ -6286,6 +7223,16 @@ enum PermissionChangeKind {
   TWO_FACTOR_RESET
   SUPER_ADMIN_GRANTED
   SUPER_ADMIN_REVOKED
+
+  /**
+   * The role itself, as against somebody being put into one.
+   * Roles became data, so defining one is now an act somebody performs rather than a deploy. These
+   * three are the audit trail for it: an access review asking "where did this role come from"
+   * should not have to infer it from the permissions that appeared underneath it.
+   */
+  ROLE_CREATED
+  ROLE_RENAMED
+  ROLE_DELETED
 }
 
 /**
@@ -7861,6 +8808,27 @@ enum BackupStatus {
 }
 
 /**
+ * How a backup is stored, which is really a question about what it depends on.
+ * `pg_dump` has no incremental mode — both kinds below are complete snapshots of the whole
+ * database, and both restore on their own. What differs is where the bytes live.
+ */
+enum BackupKind {
+  /**
+   * One standalone file. Copy it off the machine and it is complete: nothing else is needed to
+   * restore it, which is what makes it the one to take offsite.
+   */
+  FULL
+
+  /**
+   * Split into content-addressed pieces shared with every other chunked backup, so a run stores
+   * only what changed since the last one. Still a full snapshot — its manifest names every piece it
+   * needs — but the pieces live in the shared store, so a copy of the manifest alone restores
+   * nothing. Offsite copies have to take the whole backup folder.
+   */
+  INCREMENTAL
+}
+
+/**
  * One run of pg_dump, and everything needed to decide whether it can be restored.
  * The row exists before the dump finishes, so a run that dies half way leaves a `RUNNING` record
  * rather than no record at all — a backup log that only shows successes is one that cannot tell
@@ -7883,14 +8851,26 @@ model Backup {
   filename  String
   directory String
 
-  status     BackupStatus @default(RUNNING)
-  startedAt  DateTime     @default(now())
-  finishedAt DateTime?
-  sizeBytes  BigInt?
+  status      BackupStatus @default(RUNNING)
+  kind        BackupKind   @default(FULL)
+  startedAt   DateTime     @default(now())
+  finishedAt  DateTime?
+  /**
+   * The size of the snapshot — what a restore of this backup produces.
+   * The same number for both kinds, so the two are comparable in the log.
+   */
+  sizeBytes   BigInt?
+  /**
+   * What this run actually added to disk.
+   * Equal to `sizeBytes` for a FULL backup. For an INCREMENTAL it is only the pieces that were not
+   * already stored, which is the number that makes "incremental" mean something on the screen —
+   * and the number that goes down as backups get more alike, rather than up.
+   */
+  storedBytes BigInt?
   /**
    * Whatever pg_dump said when it failed. Kept verbatim — a paraphrased error is not a clue.
    */
-  error      String?
+  error       String?
 
   /**
    * The migration the schema was on. A dump cannot be restored into a database whose code has
@@ -8477,4 +9457,1056 @@ model EwayBill {
   @@index([documentId])
   @@index([status, createdAt])
   @@map("eway_bills")
+}
+
+// ── Reference data ─────────────────────────────────────────────────────────────────────────────
+//
+// Facts about the world rather than about this business: every post office in India, from the
+// Department of Posts' own directory. None of it is created by using the app, so none of it may be
+// removed by resetting the app. `src/lib/reference-data.ts` lists these models and `check:address`
+// fails if a seed, reset or script deletes from them; `prisma/seed.ts` reloads them after a
+// `migrate reset`, which is the one path that drops them along with everything else.
+
+/// One post office from India Post's All India Pincode Directory — a PIN has several.
+model PostOffice {
+  id          Int      @id @default(autoincrement())
+  pincode     String   @db.Char(6)
+  officeName  String
+  /// BO, SO, HO — branch, sub and head office, as published.
+  officeType  String?
+  /// Whether it delivers mail. A non-delivery office is an address nobody receives post at.
+  delivery    Boolean  @default(true)
+  /// Title-cased from the directory's capitals.
+  district    String
+  /// Letters only — what `pinSearchFor` matches a city against.
+  districtKey String
+  /// As published, title-cased. Kept even when it does not resolve, so the loader can say which.
+  stateName   String
+  /// The GST state code, resolved at load time through `stateCodeFromName`. Null when it would not
+  /// resolve — the row is still a real PIN and still worth finding.
+  stateCode   String?  @db.Char(2)
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  @@index([pincode])
+  @@index([stateCode, districtKey])
+  @@map("post_offices")
+}
+
+/// What was loaded into a reference table, from which file — so a reload of the same file is a no-op.
+model ReferenceDataset {
+  /// e.g. `india-post-pincodes`.
+  key              String   @id
+  /// The file it came from, as given to the loader.
+  source           String
+  /// SHA-256 of that file. The same file twice is skipped; a new month's file replaces the rows.
+  checksum         String
+  rowCount         Int
+  /// Rows the file carried that could not be used — no PIN, no office, no district.
+  skipped          Int      @default(0)
+  /// State names that did not resolve to a GST code, with counts. Empty when everything resolved.
+  unresolvedStates Json?
+  loadedAt         DateTime @default(now())
+
+  @@map("reference_datasets")
+}
+
+/// Syncing a reference table from its source — today, the PIN directory from data.gov.in.
+///
+/// Holds the API key (encrypted, never sent to a browser) and the state of the current or last run,
+/// which the settings page polls while a sync is going. One row per dataset, keyed like
+/// `ReferenceDataset`. A reference table itself, so no reset removes it — see `REFERENCE_TABLES`.
+model ReferenceSync {
+  key          String    @id
+  /// `encryptSecret` of the data.gov.in API key. Read only by the sync worker.
+  apiKeyCipher String?
+  /// IDLE, RUNNING, SUCCEEDED or FAILED.
+  status       String    @default("IDLE")
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  /// Post offices fetched so far in this run, and how many the source says there are.
+  fetched      Int       @default(0)
+  total        Int?
+  /// What happened, in words — the summary on success, the reason on failure. Never holds the key.
+  message      String?
+  startedById  String?
+  updatedAt    DateTime  @updatedAt
+
+  @@map("reference_syncs")
+}
+
+/// Where a lead came from. The first stop for "which channel is worth the money".
+enum LeadSource {
+  WEBSITE
+  REFERRAL
+  LINKEDIN
+  CALLING
+  EMAIL
+  EVENT
+  PARTNER
+  ADVERTISEMENT
+  EXISTING_CUSTOMER
+  WALK_IN
+  OTHER
+}
+
+/// A website's credential for the lead capture API (POST /api/v1/leads).
+///
+/// One per site or form, so each can be revoked alone and every lead says which one sent it. The
+/// secret is shown once, at creation, and only its digest is kept — like a password, it cannot be
+/// read back, only replaced.
+model LeadCaptureKey {
+  id           String    @id @default(cuid())
+  /// What the person who made it called it — "wroffy.com contact form".
+  name         String
+  /// The public half, sent as the username. `lck_` and random; unique.
+  keyId        String    @unique
+  /// `digestSecret` of the secret half. The secret itself is never stored.
+  secretDigest String
+  /// Written into every lead this key creates, after the page URL the site sends.
+  sourceLabel  String?
+  active       Boolean   @default(true)
+  lastUsedAt   DateTime?
+  useCount     Int       @default(0)
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  leads Lead[]
+
+  @@map("lead_capture_keys")
+}
+
+enum LeadAssignmentStrategy {
+  /// Each of the people in turn.
+  ROUND_ROBIN
+  /// Whoever has the fewest open leads right now.
+  LEAST_LOADED
+  /// Always the one person named.
+  SPECIFIC_USER
+  /// The account manager of the company the lead is for — when it has one who can take it. Placed
+  /// first, it keeps existing customers with the person who already knows them.
+  ACCOUNT_MANAGER
+}
+
+/// A rule for who a new lead goes to when nobody has been chosen — see src/lib/leads/assign.ts.
+///
+/// Rules are tried in `priority` order and the first whose conditions all hold decides. Every
+/// condition list is "any of these"; an empty list matches everything, so a rule with none is a
+/// catch-all, and belongs last.
+model LeadAssignmentRule {
+  id           String                 @id @default(cuid())
+  name         String
+  priority     Int                    @default(100)
+  active       Boolean                @default(true)
+  /// Product brands on the lead — Microsoft, Adobe, Autodesk, Dell.
+  brandIds     String[]
+  itemTypes    ItemType[]
+  /// The contact's designation.
+  designations ContactDesignation[]
+  sources      LeadSource[]
+  /// The company's state, as the address picker spells it — for territories.
+  states       String[]
+  strategy     LeadAssignmentStrategy @default(ROUND_ROBIN)
+  /// The people it chooses between. Inactive users are skipped when a lead is assigned, never removed.
+  userIds      String[]
+  /// Leave the person out on a day they are on approved leave.
+  skipOnLeave  Boolean                @default(true)
+  /// Round-robin position. Advanced atomically, so two leads at once go to two different people.
+  rrCursor     Int                    @default(0)
+  createdById  String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@index([active, priority])
+  @@map("lead_assignment_rules")
+}
+
+/**
+ * Where a customer stands on credit — see src/lib/credit/engine.ts.
+ */
+enum CreditRating {
+  RELIABLE
+  FAIR
+  RISKY
+  NEW
+}
+
+enum CreditDecisionKind {
+  /// A customer's default payment terms set longer than their rating supports.
+  TERMS
+  /// A credit limit set, changed or cleared by hand.
+  LIMIT
+  /// An order given longer terms than suggested, or approved over the credit limit.
+  ORDER
+}
+
+/**
+ * Every time somebody gave a customer more credit than the engine suggested, and why.
+ * Append-only: this is the answer to "who put them on Net 45?" a year later, so it is never edited
+ * and a changed mind is a new row. The rating and score are the ones in front of the person when
+ * they decided — the rating now may be different, and that difference is the point of keeping it.
+ */
+model CreditDecision {
+  id          String             @id @default(cuid())
+  companyId   String
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orderId     String?
+  order       CompanyProduct?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  kind        CreditDecisionKind
+  /// What was decided, in words — "Net 30 on ORD-000042", "limit ₹5,00,000 (was suggested ₹2,50,000)".
+  detail      String
+  reason      String
+  rating      CreditRating
+  score       Int?
+  decidedById String
+  decidedBy   User               @relation("CreditDecidedBy", fields: [decidedById], references: [id])
+  createdAt   DateTime           @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([orderId])
+  @@map("credit_decisions")
+}
+
+/**
+ * Which customer notice a message was — see src/lib/marketing/customer-notices.ts.
+ */
+enum CustomerNoticeKind {
+  RENEWAL
+  FULFILMENT
+}
+
+// ---------------------------------------------------------------------------------------------
+// Forecasting — src/lib/forecast
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * An admin's override of one stage's weight in the sales forecast.
+ * Without a row, a stage is weighted by the win rate actually achieved from it over the last twelve
+ * months, or by a standard figure until there is enough history to learn from. An override is for
+ * when the business knows something the history does not — a new product line, a changed team.
+ */
+model ForecastStageWeight {
+  stage       LeadStatus @id
+  percent     Int
+  updatedById String?
+  updatedBy   User?      @relation("ForecastWeightUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime   @updatedAt
+
+  @@map("forecast_stage_weights")
+}
+
+/**
+ * A salesperson's own number for a month — what they commit to, and what they could reach if things
+ * go well — set beside the forecast the system works out from their deals.
+ * One per person per month, changed in place: the latest call is the call. Who changed it and when
+ * is in the audit log.
+ */
+model ForecastCommit {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation("ForecastCommitOwner", fields: [userId], references: [id], onDelete: Cascade)
+  /**
+   * yyyy-mm, the month in India time.
+   */
+  month    String
+  commit   Decimal  @db.Decimal(14, 2)
+  bestCase Decimal? @db.Decimal(14, 2)
+  note     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, month])
+  @@index([month])
+  @@map("forecast_commits")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sales wins — src/lib/wins
+// ---------------------------------------------------------------------------------------------
+
+enum CelebrationSource {
+  MANUAL
+  DEAL_WON
+  TARGET_HIT
+  FIRST_ORDER
+  TOP_PERFORMER
+  MOST_ACTIVE
+  /**
+   * The prizes up for grabs, told to everybody as a month or fortnight opens — see src/lib/wins/prizes.ts.
+   */
+  PRIZES
+}
+
+enum SplashScope {
+  EVERYONE
+  SUBJECT
+}
+
+/**
+ * Which sales moments celebrate themselves, and how loudly. One row.
+ */
+model SalesCelebrationSettings {
+  id String @id @default("global")
+
+  dealWon        Boolean     @default(true)
+  /**
+   * Before GST. Only deals worth at least this are celebrated — a splash for every small order
+   * teaches people to click it away.
+   */
+  dealWonMinimum Decimal     @default(500000) @db.Decimal(14, 2)
+  dealWonSplash  SplashScope @default(EVERYONE)
+
+  targetHit       Boolean        @default(true)
+  targetHitSplash SplashScope    @default(EVERYONE)
+  /**
+   * Which targets count. Empty means every metric.
+   */
+  targetMetrics   TargetMetric[] @default([])
+
+  firstOrder       Boolean     @default(true)
+  firstOrderSplash SplashScope @default(SUBJECT)
+
+  topPerformer       Boolean     @default(true)
+  topPerformerSplash SplashScope @default(EVERYONE)
+  topPerformerCount  Int         @default(3)
+
+  /**
+   * Whether the wins wall and the TV screen show rupee amounts, or only ranks and progress.
+   */
+  showAmounts Boolean @default(true)
+
+  updatedById String?
+  updatedBy   User?    @relation("SalesCelebrationSettingsBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+
+  @@map("sales_celebration_settings")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Most active of the fortnight — src/lib/performance
+// ---------------------------------------------------------------------------------------------
+
+enum AwardAudience {
+  /**
+   * A notification to everybody naming the winners, a personal note to each winner, and — when the
+   * splash is on — the full-screen celebration for the whole company.
+   */
+  EVERYONE
+  /**
+   * The ranking to the people who can see team performance. Nobody else is told.
+   */
+  MANAGERS
+  /**
+   * A personal congratulation to each winner, and nothing company-wide.
+   */
+  WINNERS
+}
+
+model ActivityAwardSettings {
+  id       String        @id @default("global")
+  enabled  Boolean       @default(true)
+  audience AwardAudience @default(EVERYONE)
+  /**
+   * How many to name overall.
+   */
+  topCount Int           @default(3)
+  /**
+   * The full-screen splash: for everybody when the audience is everybody, for the winner when it is
+   * the winners. Managers-only never splashes.
+   */
+  splash   Boolean       @default(true)
+
+  updatedById String?
+  updatedBy   User?    @relation("ActivityAwardSettingsBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+
+  @@map("activity_award_settings")
+}
+
+/**
+ * One fortnight's result, as it was announced — kept so the Performance page can show who won which
+ * fortnight, and so a fortnight is announced once however often the check runs.
+ */
+model ActivityAward {
+  id       String        @id @default(cuid())
+  /**
+   * "2026-09-A" for the 1st to the 15th, "2026-09-B" for the 16th to the end. Unique.
+   */
+  period   String        @unique
+  label    String
+  from     DateTime
+  to       DateTime
+  /**
+   * The ranking with each person's points and what they were for, and the sales and support leaders.
+   */
+  overall  Json
+  areas    Json
+  audience AwardAudience
+
+  announcedAt DateTime @default(now())
+
+  @@index([announcedAt])
+  @@map("activity_awards")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Prizes — src/lib/wins/prizes.ts
+// ---------------------------------------------------------------------------------------------
+
+enum PrizeRace {
+  /**
+   * Every fortnight's most active — src/lib/performance.
+   */
+  MOST_ACTIVE
+  /**
+   * Every month's top sellers, by order value booked — the wins leaderboard.
+   */
+  TOP_SELLERS
+}
+
+/**
+ * A prize up for grabs.
+ * `period` "" is the standing prize, given every period nobody has planned otherwise. "2026-10" (a
+ * month, for top sellers) or "2026-10-A" (a fortnight, for the most active) plans one for that period
+ * alone — slot by slot, so planning a bigger first prize for Diwali keeps the standing second and third.
+ */
+model Prize {
+  id           String    @id @default(cuid())
+  race         PrizeRace
+  period       String    @default("")
+  /**
+   * "1", "2", "3" — and, for the most active, "sales" and "support" for the leader of each area.
+   */
+  slot         String
+  name         String
+  note         String?
+  /**
+   * A picture of it, shrunk in the browser before it is sent — the wall and the TV load every one.
+   */
+  imageDataUrl String?
+
+  updatedById String?
+  updatedBy   User?    @relation("PrizeUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([race, period, slot])
+  @@map("prizes")
+}
+
+/**
+ * Somebody who won, with what they won as it was on the day — a prize edited next month does not
+ * change what was given last month. The hall of fame.
+ */
+model PrizeWinner {
+  id          String        @id @default(cuid())
+  race        PrizeRace
+  period      String
+  periodLabel String
+  slot        String
+  userId      String
+  user        User          @relation("PrizeWinnerUser", fields: [userId], references: [id], onDelete: Cascade)
+  /**
+   * Points for the most active; rupees booked for a top seller.
+   */
+  score       Decimal       @db.Decimal(14, 2)
+  prizeName   String?
+  prizeNote   String?
+  prizeImage  String?
+  /**
+   * Who the result was told to. Top sellers are always everybody; the most active, as their settings
+   * said that fortnight — and the hall of fame shows it to the same people.
+   */
+  audience    AwardAudience
+
+  handedOverAt   DateTime?
+  handedOverById String?
+  handedOverBy   User?     @relation("PrizeHandedOverBy", fields: [handedOverById], references: [id], onDelete: SetNull)
+
+  announcedAt DateTime @default(now())
+
+  @@unique([race, period, slot])
+  @@index([userId])
+  @@index([announcedAt])
+  @@map("prize_winners")
+}
+
+/**
+ * A prize list told to everybody: once automatically as a period opens, and whenever somebody presses
+ * the button after changing it.
+ */
+model PrizeAnnouncement {
+  id            String    @id @default(cuid())
+  race          PrizeRace
+  period        String
+  /**
+   * "auto:<race>:<period>" for the automatic one, so it goes out once however often the check runs.
+   * Null for one sent by hand.
+   */
+  autoKey       String?   @unique
+  announcedById String?
+  announcedBy   User?     @relation("PrizeAnnouncedBy", fields: [announcedById], references: [id], onDelete: SetNull)
+  announcedAt   DateTime  @default(now())
+
+  @@index([race, announcedAt])
+  @@map("prize_announcements")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Customer categories — src/lib/customers/categories.ts
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * How a customer is to be treated — "Strategic › Key account", "Watch › Slow payer" — with an icon and
+ * a colour so the chip beside their name is recognisable at a glance, and a note on how to deal with
+ * them. Two levels: a category, and optionally sub-categories under it; a customer sits in one.
+ */
+model CustomerCategory {
+  id        String             @id @default(cuid())
+  name      String
+  /**
+   * Null for a category; the category it belongs to for a sub-category. Never deeper than that.
+   */
+  parentId  String?
+  parent    CustomerCategory?  @relation("CustomerCategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  CustomerCategory[] @relation("CustomerCategoryTree")
+  /**
+   * A key from the icon set in src/lib/customers/category-icons.ts. A sub-category without one shows
+   * its category's.
+   */
+  icon      String?
+  /**
+   * A hex colour. A sub-category without one shows its category's.
+   */
+  color     String?
+  /**
+   * How to treat customers here — shown under their name. A sub-category's follows its category's.
+   */
+  guidance  String?
+  sortOrder Int                @default(0)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  companies Company[] @relation("CompanyCustomerCategory")
+
+  @@index([parentId])
+  @@map("customer_categories")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mass mail — HTML templates, their pictures, and uploaded lists
+// ---------------------------------------------------------------------------------------------
+
+enum TemplateFormat {
+  TEXT
+  HTML
+}
+
+/**
+ * A picture from an uploaded template, served publicly so a mail client can load it. Kept when the
+ * template is replaced or deleted: mail already sent still points here.
+ */
+model MarketingAsset {
+  id          String             @id @default(cuid())
+  templateId  String?
+  template    MarketingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  fileName    String
+  mimeType    String
+  size        Int
+  data        Bytes
+  createdById String?
+  createdBy   User?              @relation("MarketingAssetBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime           @default(now())
+
+  @@index([templateId])
+  @@map("marketing_assets")
+}
+
+/**
+ * A list of people uploaded for a mass mail. Each row became a contact first — so an unsubscribe
+ * sticks to the person, not to one send — and the consent the uploader confirmed is recorded
+ * against each of them.
+ */
+model MarketingList {
+  id          String           @id @default(cuid())
+  name        String
+  fileName    String?
+  /**
+   * How these people agreed to hear from us, in the uploader's words — the evidence on every
+   * consent row the upload wrote.
+   */
+  consentNote String
+  topics      MarketingTopic[]
+  createdById String
+  createdBy   User             @relation("MarketingListBy", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+
+  members   MarketingListMember[]
+  campaigns Campaign[]
+
+  @@map("marketing_lists")
+}
+
+model MarketingListMember {
+  listId    String
+  list      MarketingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   Contact       @relation("MarketingListMemberContact", fields: [contactId], references: [id], onDelete: Cascade)
+  addedAt   DateTime      @default(now())
+
+  @@id([listId, contactId])
+  @@index([contactId])
+  @@map("marketing_list_members")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Merging duplicate companies — src/lib/companies/merge.ts
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A company merged into another: what it was, what moved, and what was kept from which side — and
+ * how its old links (its COM number, its id) find the company it became. The duplicate itself is
+ * gone; this is the only trace of it, so it is never deleted.
+ * A later merge of the survivor re-points `intoCompanyId` like every other link, so a chain of
+ * merges always ends at the company that exists.
+ */
+model CompanyMerge {
+  id            String   @id @default(cuid())
+  fromCompanyId String   @unique
+  fromSeq       Int      @unique
+  fromName      String
+  intoCompanyId String
+  into          Company  @relation("CompanyMergedInto", fields: [intoCompanyId], references: [id], onDelete: Cascade)
+  /**
+   * The duplicate as it was, with its addresses — enough to answer "what was that company?" later.
+   */
+  snapshot      Json
+  /**
+   * How many of each kind of record moved, and every clash and how it was settled.
+   */
+  moved         Json
+  /**
+   * For each company detail that differed, which side's value was kept.
+   */
+  choices       Json
+  mergedById    String?
+  mergedBy      User?    @relation("CompanyMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
+  mergedAt      DateTime @default(now())
+
+  @@index([intoCompanyId])
+  @@map("company_merges")
+}
+
+/**
+ * Two companies somebody looked at and said are not the same, so the duplicates list stops offering
+ * the pair. Plain ids, no foreign keys: a merge must not carry a dismissal across as if it were data.
+ * `companyAId` is always the smaller of the two, so a pair is stored one way round.
+ */
+model CompanyDuplicateDismissal {
+  id            String   @id @default(cuid())
+  companyAId    String
+  companyBId    String
+  dismissedById String?
+  createdAt     DateTime @default(now())
+
+  @@unique([companyAId, companyBId])
+  @@map("company_duplicate_dismissals")
+}
+
+/**
+ * Planned downtime — src/lib/maintenance.ts. One row, `id = "global"`.
+ *
+ * While it is on, everybody who can't change organisation settings sees a maintenance page instead
+ * of the app; those who can keep working, to check the change they took it down for. Before a
+ * scheduled window, everybody sees a banner saying when.
+ */
+model MaintenanceMode {
+  id          String    @id @default("global")
+  enabled     Boolean   @default(false)
+  /**
+   * When it starts. Null means the moment it is switched on.
+   */
+  startsAt    DateTime?
+  /**
+   * When it ends by itself. Null means until somebody switches it off.
+   */
+  endsAt      DateTime?
+  /**
+   * What everybody else is told on the maintenance page.
+   */
+  message     String?
+  updatedById String?
+  updatedBy   User?     @relation("MaintenanceUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime  @updatedAt
+
+  @@map("maintenance_mode")
+}
+
+// ---------------------------------------------------------------------------------------------
+// The AI copilot — src/lib/copilot/
+// ---------------------------------------------------------------------------------------------
+
+enum AiProvider {
+  ANTHROPIC
+  OPENAI
+  GEMINI
+}
+
+/**
+ * Which AI provider and model the copilot uses, and the keys for each. One row, `id = "global"`.
+ *
+ * The keys are encrypted with `encryptSecret` like every other provider secret, and never leave the
+ * server: the settings screen is told only whether one is saved. Each provider keeps its own key so
+ * switching between them doesn't mean pasting a key again.
+ */
+model CopilotSettings {
+  id                 String     @id @default("global")
+  enabled            Boolean    @default(false)
+  provider           AiProvider @default(ANTHROPIC)
+  model              String     @default("claude-opus-5")
+  anthropicKeyCipher String?
+  openaiKeyCipher    String?
+  geminiKeyCipher    String?
+  /**
+   * Tokens one person may use in a day, input and output together. Resets at midnight India time.
+   */
+  dailyTokenLimit    Int        @default(300000)
+  updatedById        String?
+  updatedBy          User?      @relation("CopilotSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt          DateTime   @updatedAt
+
+  @@map("copilot_settings")
+}
+
+/**
+ * One chat. Private to the person who had it — nobody else, admins included, can open it from the
+ * app: what somebody asked about is theirs.
+ */
+model CopilotConversation {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation("CopilotConversationUser", fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  messages  CopilotMessage[]
+  proposals CopilotProposal[]
+
+  @@index([userId, updatedAt])
+  @@map("copilot_conversations")
+}
+
+/**
+ * A turn in a chat, in a shape that doesn't belong to any one provider — see
+ * src/lib/copilot/types.ts — so a conversation survives the provider being switched mid-way.
+ */
+model CopilotMessage {
+  id             String              @id @default(cuid())
+  conversationId String
+  conversation   CopilotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /**
+   * user, assistant, or tool — the last being what the copilot looked up, fed back to the model.
+   */
+  role           String
+  content        Json
+  provider       AiProvider?
+  model          String?
+  inputTokens    Int                 @default(0)
+  outputTokens   Int                 @default(0)
+  createdAt      DateTime            @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("copilot_messages")
+}
+
+/**
+ * Tokens used per person per day — what the daily limit is checked against, and the usage screen.
+ */
+model CopilotUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation("CopilotUsageUser", fields: [userId], references: [id], onDelete: Cascade)
+  day          DateTime @db.Date
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  requests     Int      @default(0)
+
+  @@unique([userId, day])
+  @@map("copilot_usage")
+}
+
+enum CopilotProposalKind {
+  TASK
+  NOTE
+}
+
+enum CopilotProposalStatus {
+  PENDING
+  DONE
+  CANCELLED
+  FAILED
+}
+
+/**
+ * Something the copilot offered to create — a task, a note — waiting for the person to confirm it.
+ * Nothing is written until they do, and then it is written by the same action the app's own form
+ * uses, as them.
+ */
+model CopilotProposal {
+  id             String                @id @default(cuid())
+  conversationId String
+  conversation   CopilotConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                  @relation("CopilotProposalUser", fields: [userId], references: [id], onDelete: Cascade)
+  kind           CopilotProposalKind
+  /**
+   * The input for the action that will create it, exactly as it will be sent.
+   */
+  payload        Json
+  /**
+   * One line for the card: "Call Acme about the renewal — due Fri 26 Sep".
+   */
+  summary        String
+  status         CopilotProposalStatus @default(PENDING)
+  /**
+   * The id of what was created, or why it couldn't be.
+   */
+  recordId       String?
+  error          String?
+  createdAt      DateTime              @default(now())
+  decidedAt      DateTime?
+
+  @@index([userId, status])
+  @@map("copilot_proposals")
+}
+
+/**
+ * The whole company locked by the super admin: everybody else can sign in and sees only the notice.
+ * One row, `id = "global"`. See src/lib/access/lock.ts.
+ */
+model CompanyLock {
+  id         String    @id @default("global")
+  enabled    Boolean   @default(false)
+  message    String?
+  /**
+   * When it lifts by itself. Null means until the super admin lifts it.
+   */
+  until      DateTime?
+  lockedAt   DateTime?
+  lockedById String?
+  lockedBy   User?     @relation("CompanyLockedBy", fields: [lockedById], references: [id], onDelete: SetNull)
+  updatedAt  DateTime  @updatedAt
+
+  @@map("company_locks")
+}
+
+/**
+ * Where people go for help: the helpline shown in the corner of the dashboard's welcome header, and
+ * the support address. One row, like MaintenanceMode — there is one helpline, not one per record.
+ * Every field is optional, and a helpline with no number is simply not shown.
+ */
+model HelpDesk {
+  id                String   @id @default("global")
+  /** "Wroffy Support" — what the number is labelled as. */
+  helplineLabel     String?
+  helplinePhone     String?
+  /** Free text, because hours are said differently everywhere: "Mon – Fri • 9:30 AM – 6:30 PM". */
+  helplineHours     String?
+  /** "English, हिन्दी" — the languages somebody on the line speaks. */
+  helplineLanguages String?
+  supportEmail      String?
+  updatedById       String?
+  updatedBy         User?    @relation("HelpDeskUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt         DateTime @updatedAt
+
+  @@map("help_desk")
+}
+
+enum HelpLinkKind {
+  ARTICLE
+  VIDEO
+}
+
+/**
+ * A help article or a video walkthrough, listed in the rail on the right. Links, not content: the
+ * material lives wherever it is written or recorded (a wiki, YouTube, a shared drive), and this is
+ * the index people find it through.
+ */
+model HelpLink {
+  id          String       @id @default(cuid())
+  kind        HelpLinkKind
+  title       String
+  /** https only, or an in-app path beginning with "/". Checked on save — see src/lib/help/links.ts. */
+  url         String
+  description String?
+  sortOrder   Int          @default(0)
+  active      Boolean      @default(true)
+  createdById String?
+  createdBy   User?        @relation("HelpLinkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([kind, active, sortOrder])
+  @@map("help_links")
+}
+
+/**
+ * A "What's new" post: a change to the system, a new process, anything everybody should know. Shown
+ * under Recent Updates on the dashboard and in the rail, with a dot until it has been read.
+ *
+ * `publishedAt` may be in the future — the post stays out of sight until then, so an update can be
+ * written ahead of the release it describes.
+ */
+model Announcement {
+  id          String   @id @default(cuid())
+  title       String
+  body        String
+  /** Optional "read more": https, or an in-app path beginning with "/". */
+  linkUrl     String?
+  pinned      Boolean  @default(false)
+  publishedAt DateTime @default(now())
+  createdById String?
+  createdBy   User?    @relation("AnnouncementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([publishedAt])
+  @@map("announcements")
+}
+
+enum MailConnectionProvider {
+  MICROSOFT
+}
+
+/**
+ * A person's own mailbox, connected so the ERP can send as them — an invoice goes out from their
+ * address and lands in their Sent Items. See src/lib/mail/microsoft.ts.
+ *
+ * One per person, and only ever their own: the mailbox Microsoft reports has to be the address on
+ * their account here, or the connection is refused. The refresh token is encrypted with
+ * encryptSecret and never leaves the server.
+ */
+model MailConnection {
+  id                   String                 @id @default(cuid())
+  userId               String                 @unique
+  user                 User                   @relation("UserMailConnection", fields: [userId], references: [id], onDelete: Cascade)
+  provider             MailConnectionProvider @default(MICROSOFT)
+  /** The address mail goes out from. */
+  mailbox              String
+  displayName          String?
+  refreshTokenCipher   String
+  accessTokenCipher    String?
+  accessTokenExpiresAt DateTime?
+  /** What Microsoft granted, as it said so. */
+  scopes               String
+  connectedAt          DateTime               @default(now())
+  lastUsedAt           DateTime?
+  /**
+   * Set when Microsoft refuses the stored token — a changed password, a revoked consent, an account
+   * disabled. Nothing is sent until the person connects again.
+   */
+  brokenAt             DateTime?
+  lastError            String?
+  updatedAt            DateTime               @updatedAt
+
+  @@map("mail_connections")
+}
+
+/**
+ * The words that go with a document when it is emailed — one per document type, with merge fields.
+ * No row means the built-in wording in src/lib/documents/email-template.ts.
+ */
+model DocumentEmailTemplate {
+  docType     TradeDocumentType @id
+  subject     String
+  body        String
+  updatedById String?
+  updatedBy   User?             @relation("DocumentEmailTemplateBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime          @updatedAt
+
+  @@map("document_email_templates")
+}
+
+/**
+ * A one-time pass for the server's own headless browser to open one document's print page, so it
+ * can be turned into the PDF that is attached. See src/lib/documents/render-grant.ts.
+ *
+ * Minted by the send action for the person sending, after it has checked they may see the document;
+ * good for that document only, for two minutes, once.
+ */
+model DocumentRenderGrant {
+  id         String        @id
+  documentId String
+  document   TradeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User          @relation("DocumentRenderGrantUser", fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([expiresAt])
+  @@map("document_render_grants")
+}
+
+/**
+ * States and provinces outside India, from GeoNames' admin1CodesASCII.txt — reference data, loaded
+ * by prisma/reference/geonames.ts and never deleted by anything else (src/lib/reference-data.ts).
+ * India's states are not here: they come from the GST state list, which is the one that moves tax.
+ */
+model GeoState {
+  countryCode String @db.Char(2)
+  /** GeoNames' admin1 code — "03" for Dubai, "CA" for California. */
+  code        String
+  name        String
+  asciiName   String
+
+  @@id([countryCode, code])
+  @@map("geo_states")
+}
+
+/** Towns and cities outside India with at least 1,000 people, from GeoNames' cities1000 — for suggestions. */
+model GeoCity {
+  /** GeoNames' own id, so a reload replaces rather than duplicates. */
+  id          Int      @id
+  name        String
+  asciiName   String
+  /**
+   * The name with its accents taken off — "Zurich" for "Zürich". GeoNames' own ASCII form spells some
+   * places the local way instead ("Zuerich"), which is not what anybody types.
+   */
+  plainName   String   @default("")
+  countryCode String   @db.Char(2)
+  /** The GeoState code it is in, when GeoNames knows it. */
+  stateCode   String?
+  population  Int      @default(0)
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  @@index([countryCode, stateCode])
+  @@index([countryCode, asciiName])
+  @@index([countryCode, plainName])
+  @@map("geo_cities")
+}
+
+/**
+ * Postal codes outside India, from GeoNames' postal code files — full codes for the UK, Canada and
+ * the Netherlands, the published form elsewhere. India's are India Post's, in post_offices.
+ */
+model GeoPostalCode {
+  id          Int      @id @default(autoincrement())
+  countryCode String   @db.Char(2)
+  /** As published: "SW1A 1AA". */
+  postalCode  String
+  /** Upper case, no spaces or hyphens — what a lookup matches on. See postalKey(). */
+  postalKey   String
+  placeName   String
+  stateName   String?
+  stateCode   String?
+  district    String?
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  @@index([countryCode, postalKey])
+  @@map("geo_postal_codes")
 }

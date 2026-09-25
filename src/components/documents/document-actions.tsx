@@ -13,6 +13,7 @@ import {
 } from "@/actions/trade-document";
 import { Printer, Pencil, Send, ArrowRightLeft, FileCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DocumentMailButton } from "@/components/documents/document-mail-dialog";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/menu";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -34,6 +35,7 @@ export function DocumentActions({
   hasIrn,
   einvoiceEnabled,
   canCancelIrn,
+  canEmail = false,
 }: {
   id: string;
   docType: TradeDocumentType;
@@ -43,6 +45,8 @@ export function DocumentActions({
   einvoiceEnabled: boolean;
   /** False once the portal's 24-hour window has closed, so the button doesn't offer the impossible. */
   canCancelIrn: boolean;
+  /** May email it to the customer — documents.send, an emailable type, issued and not cancelled. */
+  canEmail?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -105,11 +109,6 @@ export function DocumentActions({
           </>
         ) : (
           <>
-            <Button variant="secondary" onClick={() => window.open(`/documents/${id}/print`, "_blank")}>
-              <Printer className="mr-1.5 h-3.5 w-3.5" />
-              Print / PDF
-            </Button>
-
             {targets.map((target) => (
               <Button
                 key={target}
@@ -139,6 +138,21 @@ export function DocumentActions({
             )}
           </>
         )}
+
+        {/**
+         * Available whatever the status, including on a draft.
+         *
+         * It used to sit in the issued branch only, which had it backwards: a draft is precisely
+         * the thing you want to read as a document before committing to it — checking the address,
+         * the description and the tax before it goes to a customer is the entire reason drafts
+         * exist. It is also read-only, so there is nothing to withhold. The list view's preview tab
+         * already showed drafts this way; only this bar disagreed.
+         */}
+        <Button variant="secondary" onClick={() => window.open(`/documents/${id}/print`, "_blank")}>
+          <Printer className="mr-1.5 h-3.5 w-3.5" />
+          {isDraft ? "Preview PDF" : "Print / PDF"}
+        </Button>
+        {canEmail && <DocumentMailButton documentId={id} />}
 
         {hasMoreActions && (
           <Menu>

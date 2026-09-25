@@ -72,3 +72,52 @@ export function endOfIndianDay(date: string): Date | null {
   const at = istMidnight(parts.year, parts.month, parts.day + 1);
   return Number.isNaN(at.getTime()) ? null : at;
 }
+
+/**
+ * `yyyy-mm-ddThh:mm` — what a `datetime-local` input gives — read as a time in India.
+ *
+ * The input carries no zone, and `new Date(value)` would read it in whatever zone the process runs
+ * in: right on a laptop in Pune, five and a half hours out on a server in UTC. An event at 6:30 pm
+ * has to be 6:30 pm wherever the form was saved from.
+ */
+export function parseIstDateTime(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(value.trim());
+  if (!match) return null;
+  const [y, mo, d, h, mi] = [1, 2, 3, 4, 5].map((i) => Number(match[i])) as [number, number, number, number, number];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return null;
+  const at = new Date(Date.UTC(y, mo - 1, d, h, mi) - IST_OFFSET_MS);
+  // 31 February is not a date, and Date.UTC would quietly make it 3 March.
+  if (istDateParts(at).day !== d) return null;
+  return at;
+}
+
+/** The other way: an instant as India wall-clock time, to fill a `datetime-local` input. */
+export function istDateTimeInput(at: Date | string | null | undefined): string {
+  if (!at) return "";
+  const shifted = new Date(new Date(at).getTime() + IST_OFFSET_MS);
+  if (Number.isNaN(shifted.getTime())) return "";
+  return shifted.toISOString().slice(0, 16);
+}
+
+/** "Thu, 15 Oct 2026, 6:30 pm" in India time, whatever zone the server or the reader is in. */
+export function formatIstDateTime(at: Date | string): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(at));
+}
+
+/** "15 Oct 2026" in India time — the day something happened, where the hour is noise. */
+export function formatIstDate(at: Date | string): string {
+  return new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }).format(new Date(at));
+}
+
+/** "6:30 pm" in India time — the end of an event that starts and finishes on one day. */
+export function formatIstTime(at: Date | string): string {
+  return new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" }).format(new Date(at));
+}

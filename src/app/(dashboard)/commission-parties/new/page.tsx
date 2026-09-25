@@ -1,4 +1,5 @@
 import { listIndustries } from "@/actions/industry";
+import { viewerHas } from "@/actions/permission";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
@@ -10,7 +11,7 @@ export default async function NewCommissionPartyPage() {
     return <ModuleDisabledNotice moduleKey="commission_parties" />;
   }
 
-  const industries = await listIndustries();
+  const [industries, canAddContacts] = await Promise.all([listIndustries(), viewerHas("contacts.view")]);
 
   return (
     <div>
@@ -21,6 +22,7 @@ export default async function NewCommissionPartyPage() {
       </p>
       <NewCompanyForm
         industries={industries}
+        canAddContacts={canAddContacts}
         defaultRelationshipType="COMMISSION_PARTY"
         relationshipTypeOptions={commissionPartyRelationshipTypeValues}
       />

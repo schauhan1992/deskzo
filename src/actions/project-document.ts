@@ -157,14 +157,15 @@ export async function saveProjectType(input: {
     ? await db.projectType.update({ where: { id: input.id }, data, select: { id: true } })
     : await db.projectType.create({ data, select: { id: true } });
 
-  if (input.milestones) {
+  const milestones = input.milestones;
+  if (milestones) {
     // Replaced rather than diffed. The template is a list somebody edits as a whole, and a diff
     // would have to guess which renamed row was which — while changing a template never touches a
     // project that already exists, so there is nothing downstream to preserve identity for.
-    await db.$transaction([
-      db.projectTemplateMilestone.deleteMany({ where: { typeId: saved.id } }),
-      db.projectTemplateMilestone.createMany({
-        data: input.milestones
+    await db.$transaction(async (tx) => {
+      await tx.projectTemplateMilestone.deleteMany({ where: { typeId: saved.id } });
+      await tx.projectTemplateMilestone.createMany({
+        data: milestones
           .filter((m) => m.name.trim())
           .map((m, i) => ({
             typeId: saved.id,
@@ -173,8 +174,8 @@ export async function saveProjectType(input: {
             dayOffset: m.dayOffset,
             sortOrder: i,
           })),
-      }),
-    ]);
+      });
+    });
   }
 
   await recordAudit({

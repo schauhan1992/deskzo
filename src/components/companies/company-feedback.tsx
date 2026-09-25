@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { companyFeedback } from "@/actions/feedback";
 import { getOrganisation } from "@/lib/organisation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,6 +5,7 @@ import { FeedbackList } from "@/components/feedback/feedback-list";
 import { FeedbackSummaryStrip } from "@/components/feedback/feedback-summary";
 import { AskFeedbackDialog } from "@/components/feedback/ask-feedback-dialog";
 import { MIN_RATING } from "@/lib/feedback/rating";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /**
  * What this customer has told us, on their own page.
@@ -17,10 +17,7 @@ import { MIN_RATING } from "@/lib/feedback/rating";
 export async function CompanyFeedback({ companyId, companyName }: { companyId: string; companyName: string }) {
   const [{ rows, summary, canRequest }, org] = await Promise.all([companyFeedback(companyId), getOrganisation()]);
 
-  const head = await headers();
-  const host = head.get("x-forwarded-host") ?? head.get("host") ?? "localhost:3000";
-  const proto = head.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${proto}://${host}`;
+  const origin = await tenantOrigin();
 
   const gated = org.feedbackReviewUrl && org.feedbackReviewMinRating > MIN_RATING;
 

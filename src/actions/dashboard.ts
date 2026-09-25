@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { db, getTenantDb } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { isModuleEnabled, getModuleStates } from "@/actions/module";
 import { paymentsSnapshot } from "@/actions/payment";
@@ -35,11 +35,12 @@ export type DashboardSummary = {
   /** The raw sourcing pool — everyone who hasn't bought anything from us yet (see `customers` for who has). */
   companies: { total: number; prospects: number; leads: number; awaitingOrder: number };
   customers: { total: number };
+  /** Null without `leads.view` — the widgets are left off rather than shown as zero. */
   leads: {
     open: number;
     pipelineValue: number;
     recent: { id: string; title: string; companyName: string; status: string; estimatedValue: number | null }[];
-  };
+  } | null;
   vendors: { onboarding: number; active: number; inactive: number } | null;
   renewals: {
     expired: number;
@@ -134,7 +135,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    * numbers rather than the numbers being returned bare.
    */
   const leadIds = await scopeUserIds(user.id, "targets.viewAll");
-  const leadScope = leadIds === null ? {} : { ownerUserId: { in: leadIds } };
+  const canSeeLeads = await can(user.id, "leads.view");
+  const leadScope = !canSeeLeads ? { id: { in: [] } } : leadIds === null ? {} : { ownerUserId: { in: leadIds } };
   const leadWidgetScope: WidgetScope = leadIds === null ? "company" : leadIds.length > 1 ? "team" : "own";
 
   const [
@@ -196,7 +198,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const customers = { total: customersWithOrders };
 
   const closedStatuses = new Set(["WON", "LOST", "DISQUALIFIED"]);
-  const leads = {
+  const leads: DashboardSummary["leads"] = !canSeeLeads ? null : {
     open: leadGroups.filter((g) => !closedStatuses.has(g.status)).reduce((sum, g) => sum + g._count, 0),
     pipelineValue: Number(pipelineValueAgg._sum.estimatedValue ?? 0),
     recent: recentLeads.map((lead) => ({
@@ -429,7 +431,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     const order = ["ORDER_VALUE", "INVOICED_VALUE", "LEAD_VALUE_WON"];
     const chosen = candidates.sort((a, b) => order.indexOf(a.metric) - order.indexOf(b.metric))[0];
     if (chosen) {
-      const achieved = await measure(db, chosen.metric, {
+      const achieved = await measure(await getTenantDb(), chosen.metric, {
         from: chosen.fromDate,
         to: chosen.toDate,
         userIds: [user.id],

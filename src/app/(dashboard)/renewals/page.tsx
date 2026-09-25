@@ -8,6 +8,7 @@ import { RenewalsTable } from "@/components/renewals/renewals-table";
 import { RenewalSplitList } from "@/components/renewals/renewal-split-list";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
 import { RenewButton } from "@/components/renewals/renew-button";
+import { RenewalProposalButton } from "@/components/renewals/renewal-proposal-button";
 import { CallButton } from "@/components/calls/call-button";
 // A renewal row IS an order — the subscription and the order it was punched as are one record — so
 // the order's detail is the renewal's detail.
@@ -16,6 +17,7 @@ import { SplitListShell, SplitListEmpty, SplitListPage, resolveSelected } from "
 import { ViewModeToggle } from "@/components/ui/view-mode-toggle";
 import { getViewMode } from "@/actions/view-mode";
 import { listAssignableUsers } from "@/actions/company";
+import { canSetRenewalStage } from "@/actions/renewal-stage";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 
@@ -35,10 +37,11 @@ export default async function RenewalsPage({
     : undefined;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
-  const [viewMode, result, users] = await Promise.all([
+  const [viewMode, result, users, canSetStage] = await Promise.all([
     getViewMode("renewals"),
     listRenewalsPaged({ window, search: params.q, page, pageSize }),
     listAssignableUsers(),
+    canSetRenewalStage(),
   ]);
   const renewals = result.rows;
   const selected = viewMode === "split" ? resolveSelected(renewals, params.sel) : null;
@@ -103,6 +106,11 @@ export default async function RenewalsPage({
                       companyProductId={selectedRenewal.id}
                       companyName={(selectedRenewal.endCustomer ?? selectedRenewal.company).name}
                     />
+                    <RenewalProposalButton
+                      companyProductId={selectedRenewal.id}
+                      companyName={(selectedRenewal.endCustomer ?? selectedRenewal.company).name}
+                      alreadyRenewed={Boolean(selectedRenewal.renewedBy)}
+                    />
                     <RenewButton companyProductId={selectedRenewal.id} />
                   </div>
                 </div>
@@ -118,7 +126,7 @@ export default async function RenewalsPage({
       ) : (
         <>
           <div className="mt-6">
-            <RenewalsTable renewals={renewals} users={users} />
+            <RenewalsTable renewals={renewals} users={users} canSetStage={canSetStage} />
           </div>
 
           <Pagination

@@ -1,4 +1,7 @@
 import { listIndustries } from "@/actions/industry";
+import { listCustomerCategories } from "@/actions/customer-category";
+import { viewerHas } from "@/actions/permission";
+import { newCustomerTermsAdvice } from "@/actions/credit";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
@@ -10,7 +13,7 @@ export default async function NewResellerPage() {
     return <ModuleDisabledNotice moduleKey="resellers" />;
   }
 
-  const industries = await listIndustries();
+  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), newCustomerTermsAdvice(), listCustomerCategories()]);
 
   return (
     <div>
@@ -21,6 +24,9 @@ export default async function NewResellerPage() {
       </p>
       <NewCompanyForm
         industries={industries}
+        categories={categories}
+        canAddContacts={canAddContacts}
+        termsAdvice={termsAdvice}
         defaultRelationshipType="RESELLER"
         relationshipTypeOptions={resellerRelationshipTypeValues}
       />

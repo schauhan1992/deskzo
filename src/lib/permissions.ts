@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 
 /**
  * Every capability the application knows how to restrict.
@@ -158,6 +158,19 @@ export const PERMISSION_REGISTRY = [
     label: "Raise and issue sales documents",
     description:
       "Create, edit and issue quotations, proformas, tax invoices, credit notes and delivery challans, and register an invoice with the e-invoice portal. Issuing posts to the ledger and files with the government, so it is not the same thing as drafting one.",
+    defaultRoles: ["SALES", "ACCOUNTS", "MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
+    /**
+     * Emailing a document to the customer's contacts from your own Outlook — src/actions/document-mail.ts.
+     * Separate from issuing: plenty of people raise quotes who should not be the one mailing them, and
+     * a mail cannot be called back.
+     */
+    key: "documents.send",
+    label: "Email sales documents to customers",
+    description:
+      "Email an issued proposal, proforma, tax invoice or credit note to the customer's contacts, as a PDF, from your own connected Outlook mailbox.",
     defaultRoles: ["SALES", "ACCOUNTS", "MANAGEMENT"],
     group: "Sales & customers",
   },
@@ -371,6 +384,49 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT", "SALES"],
   },
   {
+    key: "access.approveDevices",
+    label: "Approve devices",
+    description:
+      "Approve, reject and revoke the devices people sign in on. Revoking a device ends every session on it. Nobody can approve their own.",
+    defaultRoles: [],
+    selfExcluded: true,
+  },
+  {
+    key: "access.viewSignIns",
+    label: "See where people sign in",
+    description:
+      "Every sign-in with its network, its approximate location and — for roles that record it — the location the device reported. Personal data about staff: give it to the few who need it.",
+    defaultRoles: [],
+  },
+  {
+    key: "forecast.manage",
+    label: "Set forecast weights",
+    description:
+      "Override how much a deal at each stage counts towards the sales forecast. Without an override, each stage counts at the win rate it has actually achieved over the last year.",
+    defaultRoles: ["MANAGEMENT"],
+  },
+  {
+    key: "wins.manage",
+    label: "Run wins, awards and prizes",
+    description:
+      "Choose which sales moments celebrate themselves and how loudly, run the fortnightly most-active awards, set the prizes for the top sellers and the most active and announce them, and tick off each prize as it is handed over.",
+    defaultRoles: ["MANAGEMENT"],
+  },
+  {
+    key: "forms.create",
+    label: "Build forms",
+    description:
+      "Create forms — event invitations, requirement assessments, enquiry and survey forms — and own the ones you build. What anybody else may do with a form is decided on the form itself, by its owner.",
+    defaultRoles: ["MANAGEMENT", "SALES"],
+  },
+  {
+    key: "forms.manageAll",
+    label: "Manage every form",
+    description:
+      "See, change, share and read the responses of every form, whoever built it — including the answers customers gave. Without it somebody sees only their own forms and the ones shared with them.",
+    defaultRoles: ["MANAGEMENT"],
+  },
+  {
     key: "targets.manage",
     label: "Set targets",
     description:
@@ -449,12 +505,36 @@ export const PERMISSION_REGISTRY = [
     key: "backups.manage",
     label: "Take database backups",
     description:
-      "See the backup log and take one on demand. A backup is a complete copy of the system — every order, every password hash, every encrypted secret — so this is the ability to create one, not to read it: the files are written to the server and are not downloadable through the app. Restoring is a command-line operation with the application stopped, and no permission grants it.",
+      "See the backup log and take one on demand. A backup is a complete copy of the system — every order, every password hash, every encrypted secret — so this is the ability to create one, not to carry it away: taking the file off the server needs \"Download a backup\", and putting one back needs \"Restore from a backup\". Neither is included here.",
     defaultRoles: [],
     group: "Administration",
     // Not inherited from managing whoever administers the system. Taking a copy of everything is
     // its own decision.
     delegable: false,
+    tier: "critical",
+  },
+  {
+    key: "backups.download",
+    label: "Download a backup",
+    description:
+      "Take a backup off the server as a single sealed file. Held apart from taking one because the two risks are opposite: a backup on the server is a safety net, and a backup on a laptop is the whole business — every customer, every order, every password hash — somewhere nobody is watching. The file is encrypted under a passphrase chosen at download, and every download is recorded against the person who asked for it.",
+    defaultRoles: [],
+    group: "Administration",
+    delegable: false,
+    // Grantable only by a super admin: this is the shortest path from one account to a copy of
+    // everything, and it should never arrive as a side effect of somebody tidying up roles.
+    superAdminOnly: true,
+    tier: "critical",
+  },
+  {
+    key: "backups.restore",
+    label: "Restore from a backup",
+    description:
+      "Replace the entire contents of the database with an uploaded backup file. This is the most destructive thing anybody can do here — it discards every record created since the backup was taken, including the audit log that would say who did it — and it is the one action that can substitute a whole database, users and all. It requires the file's passphrase, a typed confirmation, and it puts the application into maintenance while it runs.",
+    defaultRoles: [],
+    group: "Administration",
+    delegable: false,
+    superAdminOnly: true,
     tier: "critical",
   },
   {
@@ -477,6 +557,20 @@ export const PERMISSION_REGISTRY = [
     group: "Administration",
     delegable: false,
     tier: "sensitive",
+  },
+  {
+    /**
+     * Locking one person out of the CRM — src/lib/access/lock.ts. Locking the whole company is not
+     * this key: only the super admin can, because only the super admin is never locked themselves.
+     */
+    key: "users.lock",
+    label: "Lock people out of the CRM",
+    description:
+      "Lock a person's access with a notice they see instead of the app — they can still sign in, and nothing else — until you lift it or a date you set passes. Not the super admin, and not yourself.",
+    defaultRoles: [],
+    group: "Administration",
+    delegable: false,
+    tier: "critical",
   },
   {
     key: "users.assignRole",
@@ -563,11 +657,191 @@ export const PERMISSION_REGISTRY = [
     tier: "sensitive",
   },
   {
+    /**
+     * Choosing who owns a lead when it is created — anybody, not only yourself.
+     *
+     * `createLead` used to take any owner from anybody, with nothing on the form to set one and
+     * nothing on the server to stop a crafted request doing it. Without this a person's new lead is
+     * theirs, or goes to the assignment rules; with it they can hand it to a colleague.
+     */
+    key: "leads.assign",
+    label: "Assign leads to others",
+    description:
+      "Pick the salesperson a new lead goes to. Without this, a new lead is yours if you sell, and otherwise goes to the automatic assignment rules.",
+    defaultRoles: ["MANAGEMENT", "CALLING"],
+    group: "Sales & customers",
+  },
+  // ── What of an account somebody may see ─────────────────────────────────────────────────────
+  //
+  // Each of these governs one kind of record everywhere it appears: the customer page's tab, the
+  // module's own pages and the actions behind both. Where a kind of record is its own module, the
+  // key is that module's `viewPermission` (src/lib/modules.ts), and `isModuleEnabled` answers "off"
+  // to anybody without it — so every page, action and dashboard figure already gated on the module
+  // follows the permission with no second check to forget. Contacts and leads are part of the core
+  // Companies module, so they are checked where they are read.
+  //
+  // Every role holds all nine by default, so nobody lost anything when they arrived; restricting a
+  // role is unticking a box in Users & access.
+  {
+    key: "contacts.view",
+    label: "View contacts",
+    description: "The people at an account — the Contacts tab, their phone numbers and emails on leads and in the calling screen, and adding or editing them.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Sales & customers",
+  },
+  {
+    key: "emails.view",
+    label: "View emails sent to customers",
+    description: "The mail log — every email the ERP sent a customer (renewal and fulfilment notices, campaigns, journeys), with its content and whether it was delivered, opened or bounced. On a customer's Emails tab and the Mail log page, for the accounts this person can see.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Sales & customers",
+  },
+  {
+    key: "leads.view",
+    label: "View leads",
+    description: "The lead pipeline — the Leads pages, a customer's Leads tab, pipeline value and activity on the customer page, and lead figures on the dashboard.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Sales & customers",
+  },
+  {
+    key: "orders.view",
+    label: "View orders",
+    description: "Orders, subscriptions and renewals — the Orders and Renewals modules, and a customer's Products & Subscriptions and Renewals tabs.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Orders & fulfilment",
+  },
+  {
+    key: "payments.view",
+    label: "View payments",
+    description: "Money in and owed — the Payments and Receivables modules, and a customer's Payments and Statement tabs with the billed and outstanding figures.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Finance",
+  },
+  {
+    key: "credit.override",
+    label: "Override credit terms & limits",
+    description:
+      "Give a customer longer payment terms than their credit rating supports, set or change their credit limit, and approve an order that goes over it. Each time asks for a reason, which is kept against the customer. Without it the rating's suggested terms are the most anybody can give.",
+    defaultRoles: ["MANAGEMENT", "ACCOUNTS"],
+    group: "Finance",
+    tier: "sensitive",
+  },
+  {
+    key: "documents.view",
+    label: "View quotes & invoices",
+    description: "Proposals, proformas, invoices and purchase documents — their modules, and a customer's Documents tab.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Finance",
+  },
+  {
+    key: "projects.view",
+    label: "View projects",
+    description: "The Projects module and a customer's Projects tab. Which projects appear still follows project membership — see \"See every project\".",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Support",
+  },
+  {
+    key: "calls.view",
+    label: "View calls",
+    description: "The call log — the Calls module and a customer's Calls tab.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Sales & customers",
+  },
+  {
+    key: "visits.view",
+    label: "View visits",
+    description: "Customer visits — the Visits module and a customer's Visits tab. Whose visits appear still follows \"See everybody's visits\".",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Sales & customers",
+  },
+  {
+    key: "tickets.view",
+    label: "View tickets",
+    description: "Support tickets — the Helpdesk module and a customer's Tickets tab.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Support",
+  },
+  {
+    /**
+     * Moving an account or a lead from one person to another — any the holder can see.
+     *
+     * The account manager is what the account scope resolves against: whoever holds it sees the
+     * company and everything hanging off it. Changing it was open to anybody signed in, and by id, so
+     * a salesperson could make themselves account manager of a company they could not see — and
+     * thereby see it. This is the line; `accounts.handOffOwn` is the narrower one for handing on
+     * only what is already yours.
+     */
+    key: "accounts.reassign",
+    label: "Reassign accounts and leads",
+    description:
+      "Change the account manager or caller of any account you can see, and the owner of any lead you can see — including leaving one with nobody. Every change is written to the activity log.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
+    key: "accounts.handOffOwn",
+    label: "Hand off your own accounts and leads",
+    description:
+      "Pass what is yours to a colleague: an account you manage (its manager and caller), an account you are the caller on (the caller), a lead you own. Always to a person — only someone who can reassign may leave it with nobody.",
+    defaultRoles: ["SALES", "MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
     key: "workspace.manageAny",
     label: "Act on anyone's saved list",
     description:
       "Edit, delete, assign, open a private one, and start or re-share a calling activity on a list somebody else built. Everyone can already do all of this to their own — this is the override for a list whose owner has left, is away, or built it for a team that now needs it back.",
     defaultRoles: [],
+  },
+  {
+    key: "companies.manageCategories",
+    label: "Manage customer categories",
+    description:
+      "Create, rename, recolour and remove the customer categories and sub-categories, their icons and their handling notes — how every account is described to everybody. Putting a customer in a category needs only access to that customer.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
+    /**
+     * The AI copilot — src/lib/copilot/. Everything it looks up it looks up as the person chatting,
+     * through the same checks the app's own screens use, so this key decides only whether they may
+     * use it at all — never what it can see.
+     */
+    key: "copilot.use",
+    label: "Use the AI copilot",
+    description:
+      "Ask questions about your data, get reports, and have tasks and notes drafted for you to confirm. It sees and does only what you already can, and counts against a daily allowance.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Administration",
+  },
+  {
+    /**
+     * The helpline, the help articles and videos in the rail, and the What's new posts everybody
+     * sees — src/actions/help.ts. Its own key rather than `settings.manage`, because whoever trains
+     * people and announces changes is rarely the person who should be editing the GSTIN.
+     */
+    key: "help.manage",
+    label: "Manage help & What's new",
+    description:
+      "Set the support helpline shown on the dashboard, list help articles and training videos, and post What's new updates that everybody sees.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Administration",
+  },
+  {
+    /**
+     * Folding a duplicate company into the one that stays — see src/lib/companies/merge.ts.
+     *
+     * Not undoable: the duplicate is removed and everything under it now belongs to the other. So it
+     * is its own permission rather than part of editing a company, and the merge screen still asks
+     * for the duplicate's name to be typed before anything moves.
+     */
+    key: "companies.merge",
+    label: "Merge duplicate companies",
+    description:
+      "Fold a duplicate company into the one that stays: its contacts, leads, orders, invoices, payments, tickets, visits and everything else move across, matching contacts are combined, and the duplicate is removed — its old links open the company it became. Only between companies you can see, and it can't be undone.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Sales & customers",
+    tier: "sensitive",
   },
   {
     key: "companies.viewAll",
@@ -748,6 +1022,10 @@ const GROUP_BY_PREFIX: Record<string, string> = {
   tickets: "Support",
   tasks: "Support",
   marketing: "Marketing",
+  forms: "Marketing",
+  forecast: "Sales & customers",
+  wins: "Sales & customers",
+  access: "Administration",
   hr: "People & HR",
   payroll: "People & HR",
   performance: "Performance",

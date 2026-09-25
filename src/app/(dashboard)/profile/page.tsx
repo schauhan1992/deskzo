@@ -6,9 +6,22 @@ import { ChangePasswordForm } from "@/components/profile/change-password-form";
 import { TwoFactorSetup } from "@/components/profile/two-factor-setup";
 import { PhotoManager } from "@/components/profile/photo-manager";
 import { ContactForm } from "@/components/profile/contact-form";
+import { myAccess } from "@/actions/access-control";
+import { MyAccess } from "@/components/access/my-access";
+import { DEVICE_KIND_LABEL } from "@/lib/access/device";
+import { placeText } from "@/lib/access/geo";
+import { formatIstDateTime } from "@/lib/india-time";
+import { getMailConnection } from "@/actions/document-mail";
+import { OutlookConnection } from "@/components/profile/outlook-connection";
 
-export default async function ProfilePage() {
-  const [profile, security] = await Promise.all([getOwnProfile(), getCachedSecuritySettings()]);
+export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ outlook?: string }> }) {
+  const [profile, security, access, mail, { outlook }] = await Promise.all([
+    getOwnProfile(),
+    getCachedSecuritySettings(),
+    myAccess(),
+    getMailConnection(),
+    searchParams,
+  ]);
   if (!profile) notFound();
 
   const twoFactorEnabled = !!profile.twoFactorEnabledAt;
@@ -85,7 +98,8 @@ export default async function ProfilePage() {
           </Card>
         </div>
 
-        <Card className="self-start">
+        <div className="space-y-6 self-start">
+        <Card>
           <CardHeader className="text-sm font-medium text-text">Two-factor authentication</CardHeader>
           <CardContent>
             <p className="mb-3 text-sm text-muted">
@@ -95,7 +109,49 @@ export default async function ProfilePage() {
             <TwoFactorSetup enabled={twoFactorEnabled} />
           </CardContent>
         </Card>
+
+        {/* Not shown while viewing as somebody: whose mailbox is connected is theirs alone. */}
+        {mail && (
+          <Card>
+            <CardHeader className="text-sm font-medium text-text">Outlook mailbox</CardHeader>
+            <CardContent>
+              <OutlookConnection appReady={mail.appReady} connection={mail.connection} connectHref={mail.connectHref} outcome={outlook ?? null} />
+            </CardContent>
+          </Card>
+        )}
+        </div>
       </div>
+
+      <Card>
+        <CardHeader className="text-sm font-medium text-text">Your devices and sign-ins</CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-muted">
+            Every sign-in is recorded with its network and approximate location — this is what the security admins see. A session
+            you don&apos;t recognise, end it here and change your password.
+          </p>
+          <MyAccess
+            devices={access.devices.map((d) => ({
+              id: d.id,
+              label: d.label,
+              kindLabel: DEVICE_KIND_LABEL[d.kind],
+              statusLabel: d.status === "APPROVED" ? "Approved" : d.status === "PENDING" ? "Waiting for approval" : d.status === "REJECTED" ? "Rejected" : "Revoked",
+              tone: d.status === "APPROVED" ? "green" : d.status === "PENDING" ? "amber" : "red",
+              lastText: formatIstDateTime(d.lastSeenAt),
+              place: d.lastPlace,
+            }))}
+            signIns={access.signIns.map((s) => ({
+              id: s.id,
+              atText: formatIstDateTime(s.at),
+              place: placeText(s),
+              ip: s.ip,
+              device: s.device?.label ?? null,
+              current: s.current,
+              ended: s.endedAt !== null,
+              located: s.gpsAt !== null,
+            }))}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

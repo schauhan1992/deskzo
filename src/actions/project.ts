@@ -15,7 +15,7 @@ import { requireUser } from "@/lib/session";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
-import { hasEffectivePermission } from "@/actions/permission";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { visibleProjectsWhere } from "@/lib/projects/visibility";
 import { milestonesFromTemplate, projectStatusLabels } from "@/lib/projects/status";
 import type { ActionResult } from "@/actions/company";
@@ -81,6 +81,7 @@ export type ProjectFilters = {
 
 export async function listProjects(filters?: ProjectFilters) {
   const user = await requireUser();
+  if (!(await viewerHas("projects.view"))) return [];
   const { viewAll: mayViewAll } = await access(user.id);
   const viewAll = filters?.mineOnly ? false : mayViewAll;
 
@@ -130,6 +131,7 @@ export async function listProjects(filters?: ProjectFilters) {
 
 export async function getProject(id: string) {
   const user = await requireUser();
+  if (!(await viewerHas("projects.view"))) return null;
   const { viewAll } = await access(user.id);
 
   const project = await db.project.findFirst({
@@ -515,12 +517,12 @@ export async function postUpdate(input: {
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.body.trim()) return { ok: false, error: "An empty update tells nobody anything." };
 
-  await db.$transaction([
-    db.projectUpdate.create({
+  await db.$transaction(async (tx) => {
+    await tx.projectUpdate.create({
       data: { projectId: input.projectId, body: input.body.trim(), health: input.health, authorId: user.id },
-    }),
-    db.project.update({ where: { id: input.projectId }, data: { health: input.health } }),
-  ]);
+    });
+    await tx.project.update({ where: { id: input.projectId }, data: { health: input.health } });
+  });
 
   revalidatePath(`/projects/${input.projectId}`);
   return { ok: true, data: null };

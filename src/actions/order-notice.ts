@@ -1,6 +1,5 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
@@ -8,6 +7,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { queueCustomerNotice, resolveNoticeRecipients } from "@/lib/marketing/order-notice";
 import type { NoticeKind } from "@/lib/marketing/customer-notices";
 import type { ActionResult } from "@/actions/company";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /**
  * The mail icon on a renewal, and the one on a fulfilled order.
@@ -27,11 +27,9 @@ async function access() {
   return { user, allowed };
 }
 
+/** Where links in what this sends should point — the workspace's own address. */
 async function currentOrigin() {
-  const head = await headers();
-  const host = head.get("x-forwarded-host") ?? head.get("host") ?? "localhost:3000";
-  const proto = head.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
+  return tenantOrigin();
 }
 
 /** Who this could go to, and what would happen to each of them, before anybody presses send. */
@@ -51,7 +49,7 @@ export async function sendCustomerNotice(input: {
   const { user, allowed } = await access();
   if (!allowed) return { ok: false, error: "You can't write to customers about orders." };
 
-  const result = await queueCustomerNotice({ ...input, origin: await currentOrigin() });
+  const result = await queueCustomerNotice({ ...input, origin: await currentOrigin(), sentByUserId: user.id });
   if (!result.ok) return result;
 
   const { product, ...outcome } = result.data;

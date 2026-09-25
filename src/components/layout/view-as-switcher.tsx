@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftRight, Eye, Search, X } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { startViewingAs, stopViewingAs } from "@/actions/impersonation";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { Button } from "@/components/ui/button";

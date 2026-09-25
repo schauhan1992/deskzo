@@ -1,8 +1,7 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { Prisma, type CampaignStatus, type JourneyStatus, type MarketingTopic, type MessageChannel } from "@prisma/client";
+import { Prisma, type CampaignStatus, type JourneyStatus, type MarketingTopic, type MessageChannel, type TemplateFormat } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { toPlain } from "@/lib/serialize";
@@ -11,12 +10,14 @@ import { financialYearOf } from "@/lib/gst-engine";
 import { hasEffectivePermission } from "@/actions/permission";
 import { summariseSuppressions } from "@/lib/marketing/suppression";
 import { fieldsUsed, previewValues, render } from "@/lib/marketing/merge";
-import { marketingSettings, queueCampaign, resolveRecipients } from "@/lib/marketing/pipeline";
+import { deliverNow, marketingSettings, queueCampaign, resolveRecipients } from "@/lib/marketing/pipeline";
+import { composeEmail, escapeHtml, removedInCleaning, sanitizeEmailHtml } from "@/lib/marketing/html";
 import { runMarketingTick, tickHealth } from "@/lib/marketing/tick";
 import { candidatesFor } from "@/lib/marketing/enrol";
 import { audienceCompanyWhere, parseCompanyFilters, DEFAULT_CONTACT_FILTERS } from "@/lib/marketing/audience";
 import { TRIGGERS } from "@/lib/marketing/triggers";
 import type { ActionResult } from "@/actions/company";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /**
  * Building and sending campaigns.
@@ -38,11 +39,9 @@ async function access() {
 }
 
 /** Links in an email have to work from outside, so the origin comes from the request. */
+/** Where links in what this sends should point — the workspace's own address. */
 async function currentOrigin() {
-  const head = await headers();
-  const host = head.get("x-forwarded-host") ?? head.get("host") ?? "localhost:3000";
-  const proto = head.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
+  return tenantOrigin();
 }
 
 // ─── Audiences ────────────────────────────────────────────────────────────────
@@ -181,6 +180,8 @@ export async function saveTemplate(input: {
   subject?: string;
   preheader?: string;
   body: string;
+  /** TEXT unless said otherwise. HTML is only for email, and is cleaned before it is stored. */
+  format?: TemplateFormat;
   whatsappTemplateName?: string;
   active?: boolean;
 }): Promise<ActionResult<{ id: string; warnings: string[] }>> {
@@ -188,18 +189,26 @@ export async function saveTemplate(input: {
   if (!manage) return { ok: false, error: "You can't edit templates." };
   if (!input.name.trim()) return { ok: false, error: "Give the template a name." };
   if (!input.body.trim()) return { ok: false, error: "There's nothing in the body." };
+  const format: TemplateFormat = input.format === "HTML" && input.channel === "EMAIL" ? "HTML" : "TEXT";
+  // Pasted or edited HTML is cleaned exactly as an uploaded file is — the editor is not a way round it.
+  const body = format === "HTML" ? sanitizeEmailHtml(input.body) : input.body;
+  if (format === "HTML" && !body.replace(/<[^>]+>/g, "").trim() && !/<img\b/i.test(body)) {
+    return { ok: false, error: "Nothing is left in that HTML once it's cleaned." };
+  }
 
   // A typo'd merge field is an author error, and it is much cheaper to catch here than at send.
-  const used = fieldsUsed(`${input.subject ?? ""} ${input.body}`);
+  const used = fieldsUsed(`${input.subject ?? ""} ${input.preheader ?? ""} ${body}`);
   if (used.unknown.length > 0) {
     return { ok: false, error: `No such merge field: ${used.unknown.map((u) => `{{${u}}}`).join(", ")}` };
   }
 
   const warnings: string[] = [];
   if (input.channel === "EMAIL" && !input.subject?.trim()) warnings.push("No subject line.");
-  if (input.channel === "EMAIL" && !input.body.includes("{{unsubscribeUrl}}")) {
-    warnings.push("No unsubscribe link — one is added automatically, but putting it where you want it reads better.");
+  if (input.channel === "EMAIL" && !body.includes("{{unsubscribeUrl}}")) {
+    warnings.push("No unsubscribe link in the body — a footer with one is added to every email, but placing it yourself reads better.");
   }
+  const removed = format === "HTML" ? removedInCleaning(input.body, body) : [];
+  if (removed.length) warnings.push(`Removed for safety: ${removed.join(", ")}.`);
   if (input.channel === "WHATSAPP" && !input.whatsappTemplateName?.trim()) {
     warnings.push("WhatsApp will reject this without an approved template name.");
   }
@@ -210,7 +219,8 @@ export async function saveTemplate(input: {
     topic: input.topic,
     subject: input.subject?.trim() || null,
     preheader: input.preheader?.trim() || null,
-    body: input.body,
+    body,
+    format,
     whatsappTemplateName: input.whatsappTemplateName?.trim() || null,
     active: input.active ?? true,
   };
@@ -230,20 +240,102 @@ export async function saveTemplate(input: {
   return { ok: true, data: { id: saved.id, warnings } };
 }
 
-/** What a template looks like filled in, before anybody commits to sending it. */
-export async function previewTemplate(input: { subject?: string; body: string }) {
+/**
+ * What a template looks like filled in, before anybody commits to sending it — as the finished
+ * email, footer and all, cleaned the way a save would clean it. `html` is shown in a sandboxed
+ * frame: nothing in it can run, and no link in it goes anywhere.
+ */
+export async function previewTemplate(input: { subject?: string; preheader?: string; body: string; format?: TemplateFormat }) {
   await access();
+  const built = await renderSample(input);
+  return {
+    subject: built.subject,
+    body: built.text,
+    html: built.html,
+    problems: built.problems,
+  };
+}
+
+async function renderSample(
+  input: { subject?: string | null; preheader?: string | null; body: string; format?: TemplateFormat },
+  context?: { settings: Awaited<ReturnType<typeof marketingSettings>>; origin: string },
+) {
+  const format: TemplateFormat = input.format === "HTML" ? "HTML" : "TEXT";
   const values = previewValues();
+  const body = format === "HTML" ? sanitizeEmailHtml(input.body) : input.body;
   const subject = render(input.subject ?? "", values);
-  const body = render(input.body, values);
+  const preheader = render(input.preheader ?? "", values);
+  const merged = render(body, values, format === "HTML" ? { escape: escapeHtml } : undefined);
+  const settings = context?.settings ?? (await marketingSettings());
+  const origin = context?.origin ?? (await currentOrigin());
+  const email = merged.ok
+    ? composeEmail({
+        format,
+        body: merged.text,
+        preheader: preheader.ok ? preheader.text : null,
+        footer: {
+          senderName: settings.ourName,
+          unsubscribeUrl: `${origin}/preferences/preview`,
+          postalAddress: settings.postalAddress,
+          includeUnsubscribe: !merged.used.includes("unsubscribeUrl"),
+          includeAddress: !merged.used.includes("postalAddress"),
+        },
+        origin,
+      })
+    : null;
   return {
     subject: subject.ok ? subject.text : null,
-    body: body.ok ? body.text : null,
+    html: email?.html ?? null,
+    text: email?.text ?? null,
     problems: [
       ...(subject.ok ? [] : subject.missing.map((m) => `Subject needs {{${m}}}`)),
-      ...(body.ok ? [] : body.missing.map((m) => `Body needs {{${m}}}`)),
+      ...(preheader.ok ? [] : preheader.missing.map((m) => `Preview line needs {{${m}}}`)),
+      ...(merged.ok ? [] : merged.missing.map((m) => `Body needs {{${m}}}`)),
     ],
   };
+}
+
+/** Every email template in use, each rendered with example values — the gallery a mass mail starts from. */
+export async function templateGallery() {
+  const { manage, send } = await access();
+  if (!manage && !send) return [];
+  const [templates, settings, origin] = await Promise.all([
+    db.marketingTemplate.findMany({ where: { active: true, channel: "EMAIL" }, orderBy: { updatedAt: "desc" }, take: 60 }),
+    marketingSettings(),
+    currentOrigin(),
+  ]);
+  return toPlain(
+    await Promise.all(
+      templates.map(async (t) => {
+        const built = await renderSample(t, { settings, origin });
+        return { id: t.id, name: t.name, subject: built.subject ?? t.subject, topic: t.topic, format: t.format, updatedAt: t.updatedAt, html: built.html, problems: built.problems };
+      }),
+    ),
+  );
+}
+
+/**
+ * A template, filled in with example values, to the person asking — and only to them. The quickest
+ * way to see what Outlook does to it, and to prove the provider actually delivers.
+ */
+export async function sendTestEmail(input: { templateId: string }): Promise<ActionResult<{ to: string; provider: string }>> {
+  const { user, manage, send } = await access();
+  if (!manage && !send) return { ok: false, error: "You can't send marketing email." };
+  const [template, me] = await Promise.all([
+    db.marketingTemplate.findUnique({ where: { id: input.templateId } }),
+    db.user.findUnique({ where: { id: user.id }, select: { email: true, name: true } }),
+  ]);
+  if (!template || template.channel !== "EMAIL") return { ok: false, error: "That isn't an email template." };
+  if (!me?.email) return { ok: false, error: "Your account has no email address to send the test to." };
+  const built = await renderSample(template);
+  if (!built.html || !built.subject) return { ok: false, error: built.problems[0] ?? "The template can't be filled in." };
+  const delivered = await deliverNow(
+    { to: me.email, toName: me.name, subject: `[Test] ${built.subject}`, html: built.html, text: built.text ?? undefined },
+    "MARKETING",
+  );
+  if (!delivered.ok) return { ok: false, error: delivered.error };
+  await recordAudit({ userId: user.id, action: "CREATE", entityType: "MarketingTemplate", entityId: template.id, entityLabel: `Test of “${template.name}” sent to ${me.email}` });
+  return { ok: true, data: { to: me.email, provider: delivered.provider } };
 }
 
 // ─── Campaigns ────────────────────────────────────────────────────────────────
@@ -269,6 +361,7 @@ export async function listCampaigns(filters?: { status?: string }) {
       take: 200,
       include: {
         audience: { select: { id: true, name: true } },
+        list: { select: { id: true, name: true } },
         template: { select: { id: true, name: true, topic: true } },
         createdBy: { select: { name: true } },
         approvedBy: { select: { name: true } },
@@ -278,44 +371,80 @@ export async function listCampaigns(filters?: { status?: string }) {
   );
 }
 
+/** "Audience", "List", or both — what a campaign goes to, in words. */
+function recipientsLabel(c: { audience: { name: string } | null; list: { name: string } | null }): string {
+  return [c.audience?.name, c.list ? `list “${c.list.name}”` : null].filter(Boolean).join(" + ") || "nobody";
+}
+
+/**
+ * A campaign's report: how far it got, what people did with it, and the reason for every person it
+ * never reached. Opens are approximate — some clients block the pixel, some fetch it for everyone —
+ * and a click implies an open, so both are counted per person rather than per event.
+ */
 export async function getCampaign(id: string) {
   const { viewAll } = await access();
   if (!viewAll) return null;
   const campaign = await db.campaign.findUnique({
     where: { id },
     include: {
-      audience: true,
-      template: true,
+      audience: { select: { id: true, name: true } },
+      list: { select: { id: true, name: true, _count: { select: { members: true } } } },
+      template: { select: { id: true, name: true, subject: true, format: true, topic: true } },
       createdBy: { select: { name: true } },
       approvedBy: { select: { name: true } },
     },
   });
   if (!campaign) return null;
 
-  const [counts, suppressed] = await Promise.all([
-    db.marketingMessage.groupBy({
-      by: ["status"],
-      where: { campaignId: id },
-      _count: { _all: true },
-    }),
+  const [counts, reasons, opened, clicked, unsubscribed, links, recent, sample] = await Promise.all([
+    db.marketingMessage.groupBy({ by: ["status"], where: { campaignId: id }, _count: { _all: true } }),
+    db.marketingMessage.groupBy({ by: ["suppressedReason"], where: { campaignId: id, status: "SUPPRESSED" }, _count: { _all: true } }),
+    db.messageEvent.findMany({ where: { message: { campaignId: id }, type: { in: ["OPEN", "CLICK"] } }, distinct: ["messageId"], select: { messageId: true } }),
+    db.messageEvent.findMany({ where: { message: { campaignId: id }, type: "CLICK" }, distinct: ["messageId"], select: { messageId: true } }),
+    db.messageEvent.count({ where: { message: { campaignId: id }, type: "UNSUBSCRIBE" } }),
+    db.messageEvent.groupBy({ by: ["url"], where: { message: { campaignId: id }, type: "CLICK", url: { not: null } }, _count: { _all: true }, orderBy: { _count: { url: "desc" } }, take: 10 }),
     db.marketingMessage.findMany({
-      where: { campaignId: id, status: "SUPPRESSED" },
-      select: { suppressedReason: true, company: { select: { name: true } } },
-      take: 50,
+      where: { campaignId: id },
+      orderBy: [{ sentAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+      take: 100,
+      select: { id: true, toEmail: true, status: true, sentAt: true, suppressedReason: true, error: true, contact: { select: { name: true } }, company: { select: { id: true, name: true } } },
     }),
+    // One real message as it went out, for the preview.
+    db.marketingMessage.findFirst({ where: { campaignId: id, status: { notIn: ["SUPPRESSED"] }, body: { not: "" } }, select: { body: true, subject: true } }),
   ]);
 
+  const by = Object.fromEntries(counts.map((c) => [c.status, c._count._all])) as Record<string, number>;
+  const gone = ["SENT", "DELIVERED", "OPENED", "CLICKED", "BOUNCED", "COMPLAINED"].reduce((t, s) => t + (by[s] ?? 0), 0);
   return toPlain({
     campaign,
-    counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
-    suppressed,
+    recipients: recipientsLabel(campaign),
+    counts: by,
+    totals: {
+      recipients: counts.reduce((t, c) => t + c._count._all, 0),
+      waiting: (by.QUEUED ?? 0) + (by.SENDING ?? 0),
+      sent: gone,
+      opened: opened.length,
+      clicked: clicked.length,
+      bounced: (by.BOUNCED ?? 0) + (by.COMPLAINED ?? 0),
+      failed: by.FAILED ?? 0,
+      withheld: by.SUPPRESSED ?? 0,
+      unsubscribed,
+    },
+    withheldBecause: reasons
+      .map((r) => ({ reason: (r.suppressedReason ?? "Held back").replace(/^[A-Z_]+: /, ""), count: r._count._all }))
+      .sort((a, b) => b.count - a.count),
+    links: links.map((l) => ({ url: l.url!, clicks: l._count._all })),
+    recent,
+    sample,
   });
 }
 
 export async function saveCampaign(input: {
   id?: string;
   name: string;
-  audienceId: string;
+  /** An audience, an uploaded list, or both — at least one. */
+  audienceId?: string | null;
+  listId?: string | null;
   templateId: string;
   channel: MessageChannel;
   scheduledFor?: string;
@@ -325,10 +454,15 @@ export async function saveCampaign(input: {
   const { user, manage } = await access();
   if (!manage) return { ok: false, error: "You can't create campaigns." };
   if (!input.name.trim()) return { ok: false, error: "Give the campaign a name." };
+  if (!input.audienceId && !input.listId) return { ok: false, error: "Choose who it goes to — an audience, a list, or both." };
+  if (input.listId && !(await db.marketingList.findUnique({ where: { id: input.listId }, select: { id: true } }))) {
+    return { ok: false, error: "That list isn't there any more." };
+  }
 
   const data = {
     name: input.name.trim(),
-    audienceId: input.audienceId,
+    audienceId: input.audienceId || null,
+    listId: input.listId || null,
     templateId: input.templateId,
     channel: input.channel,
     scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
@@ -399,13 +533,14 @@ export async function dryRunCampaign(id: string): Promise<ActionResult<{
   const { send } = await access();
   if (!send) return { ok: false, error: "You can't send campaigns." };
 
-  const campaign = await db.campaign.findUnique({ where: { id }, include: { audience: true, template: true } });
+  const campaign = await db.campaign.findUnique({ where: { id }, include: { audience: true, list: { select: { name: true } }, template: true } });
   if (!campaign) return { ok: false, error: "That campaign no longer exists." };
 
   const settings = await marketingSettings();
   const resolved = await resolveRecipients({
-    companyFilters: campaign.audience.companyFilters,
-    contactFilters: campaign.audience.contactFilters,
+    companyFilters: campaign.audience?.companyFilters,
+    contactFilters: campaign.audience?.contactFilters,
+    listId: campaign.listId,
     channel: campaign.channel,
     topic: campaign.template.topic,
     messageClass: "MARKETING",
@@ -430,7 +565,7 @@ export async function dryRunCampaign(id: string): Promise<ActionResult<{
     data: toPlain({
       reference: campaign.reference,
       subject: campaign.template.subject ?? campaign.template.name,
-      audienceName: campaign.audience.name,
+      audienceName: recipientsLabel(campaign),
       willReceive: sendable.length,
       withheld: withheld.length,
       reasons: [...byReason.entries()]
@@ -451,7 +586,7 @@ export async function scheduleCampaign(id: string): Promise<ActionResult<{ queue
   const { user, send } = await access();
   if (!send) return { ok: false, error: "You can't send campaigns." };
 
-  const campaign = await db.campaign.findUnique({ where: { id }, include: { audience: true, template: true } });
+  const campaign = await db.campaign.findUnique({ where: { id }, include: { audience: true, list: { select: { name: true } }, template: true } });
   if (!campaign) return { ok: false, error: "That campaign no longer exists." };
   if (campaign.status !== "DRAFT" && campaign.status !== "PENDING_APPROVAL") {
     return { ok: false, error: `It is already ${campaign.status.toLowerCase().replaceAll("_", " ")}.` };
@@ -459,8 +594,9 @@ export async function scheduleCampaign(id: string): Promise<ActionResult<{ queue
 
   const settings = await marketingSettings();
   const resolved = await resolveRecipients({
-    companyFilters: campaign.audience.companyFilters,
-    contactFilters: campaign.audience.contactFilters,
+    companyFilters: campaign.audience?.companyFilters,
+    contactFilters: campaign.audience?.contactFilters,
+    listId: campaign.listId,
     channel: campaign.channel,
     topic: campaign.template.topic,
     messageClass: "MARKETING",
@@ -481,19 +617,24 @@ export async function scheduleCampaign(id: string): Promise<ActionResult<{ queue
     };
   }
 
-  const origin = await currentOrigin();
-  const outcome = await queueCampaign(id, origin);
-  await db.campaign.update({ where: { id }, data: { status: "SCHEDULED", startedAt: new Date() } });
+  const outcome = await queueNow(campaign, user.id);
+  return { ok: true, data: { ...outcome, needsApproval: false } };
+}
 
+/** Freezes the recipients, marks it scheduled, and says so in the audit log. Not exported. */
+async function queueNow(campaign: { id: string; reference: string }, userId: string) {
+  const origin = await currentOrigin();
+  const outcome = await queueCampaign(campaign.id, origin);
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: "SCHEDULED", startedAt: new Date() } });
   await recordAudit({
-    userId: user.id,
+    userId,
     action: "UPDATE",
     entityType: "Campaign",
-    entityId: id,
+    entityId: campaign.id,
     entityLabel: `${campaign.reference} scheduled — ${outcome.queued} queued, ${outcome.suppressed + outcome.blocked} not sent`,
   });
   revalidatePath("/marketing");
-  return { ok: true, data: { ...outcome, needsApproval: false } };
+  return outcome;
 }
 
 export async function approveCampaign(id: string): Promise<ActionResult<null>> {
@@ -519,8 +660,101 @@ export async function approveCampaign(id: string): Promise<ActionResult<null>> {
     entityId: id,
     entityLabel: `${campaign.reference} approved`,
   });
+  // Somebody already pressed send — that is how it came to be waiting. Approval is the go-ahead, so
+  // it goes now, rather than waiting for them to notice and press send a second time.
+  await queueNow(campaign, user.id);
   revalidatePath("/marketing");
   return { ok: true, data: null };
+}
+
+// ─── Mass mail: lists, and the send-in-one-go flow ────────────────────────────
+
+export async function listMarketingLists() {
+  const { viewAll } = await access();
+  if (!viewAll) return [];
+  return toPlain(
+    await db.marketingList.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: { id: true, name: true, fileName: true, topics: true, consentNote: true, createdAt: true, createdBy: { select: { name: true } }, _count: { select: { members: true, campaigns: true } } },
+    }),
+  );
+}
+
+/**
+ * Who a send would reach, before it exists — for the mass-mail screen, which picks the template and
+ * the people first and only makes a campaign when somebody presses send.
+ */
+export async function previewRecipients(input: { templateId: string; audienceId?: string | null; listId?: string | null }) {
+  const { manage, send } = await access();
+  if (!manage && !send) return null;
+  if (!input.audienceId && !input.listId) return null;
+  const [template, audience] = await Promise.all([
+    db.marketingTemplate.findUnique({ where: { id: input.templateId }, select: { topic: true, channel: true } }),
+    input.audienceId ? db.audience.findUnique({ where: { id: input.audienceId }, select: { companyFilters: true, contactFilters: true } }) : null,
+  ]);
+  if (!template) return null;
+  const settings = await marketingSettings();
+  const resolved = await resolveRecipients({
+    companyFilters: audience?.companyFilters,
+    contactFilters: audience?.contactFilters,
+    listId: input.listId || null,
+    channel: template.channel,
+    topic: template.topic,
+    messageClass: "MARKETING",
+    settings,
+  });
+  const sendable = resolved.filter((r) => r.verdict.ok);
+  const byReason = new Map<string, number>();
+  for (const r of resolved) if (!r.verdict.ok) byReason.set(r.verdict.detail, (byReason.get(r.verdict.detail) ?? 0) + 1);
+  return toPlain({
+    willReceive: sendable.length,
+    withheld: resolved.length - sendable.length,
+    reasons: [...byReason.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count),
+    sample: sendable.slice(0, 5).map((r) => ({ name: r.recipient.name, company: r.recipient.companyName, email: r.recipient.email })),
+    needsApproval: sendable.length >= settings.approvalThreshold,
+    approvalThreshold: settings.approvalThreshold,
+  });
+}
+
+/**
+ * Template, people, go: makes the campaign and sends it (or schedules it) in one step. Somebody who
+ * may build campaigns but not send them gets a draft for a colleague to send. Over the approval
+ * threshold it waits for a second person, exactly as a campaign sent the long way does.
+ */
+export async function sendMassMail(input: {
+  name: string;
+  templateId: string;
+  audienceId?: string | null;
+  listId?: string | null;
+  scheduledFor?: string | null;
+}): Promise<ActionResult<{ id: string; outcome: "QUEUED" | "NEEDS_APPROVAL" | "DRAFT"; queued: number; withheld: number }>> {
+  const { manage, send } = await access();
+  if (!manage) return { ok: false, error: "You can't create campaigns." };
+  const template = await db.marketingTemplate.findUnique({ where: { id: input.templateId }, select: { channel: true, active: true } });
+  if (!template || !template.active) return { ok: false, error: "Pick a template that's in use." };
+  if (input.scheduledFor && Number.isNaN(new Date(input.scheduledFor).getTime())) return { ok: false, error: "That send time isn't a date." };
+  const saved = await saveCampaign({
+    name: input.name,
+    templateId: input.templateId,
+    audienceId: input.audienceId,
+    listId: input.listId,
+    channel: template.channel,
+    scheduledFor: input.scheduledFor ?? undefined,
+  });
+  if (!saved.ok) return saved;
+  if (!send) return { ok: true, data: { id: saved.data.id, outcome: "DRAFT", queued: 0, withheld: 0 } };
+  const scheduled = await scheduleCampaign(saved.data.id);
+  if (!scheduled.ok) return { ok: false, error: `${scheduled.error} The campaign is saved as a draft.` };
+  return {
+    ok: true,
+    data: {
+      id: saved.data.id,
+      outcome: scheduled.data.needsApproval ? "NEEDS_APPROVAL" : "QUEUED",
+      queued: scheduled.data.queued,
+      withheld: scheduled.data.suppressed + scheduled.data.blocked,
+    },
+  };
 }
 
 export async function cancelCampaign(id: string): Promise<ActionResult<{ stopped: number }>> {

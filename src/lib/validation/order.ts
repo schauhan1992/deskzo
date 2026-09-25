@@ -74,6 +74,8 @@ export const createOrderSchema = z.object({
   poNumber: z.string().trim().optional().or(z.literal("")),
   proposalId: z.string().optional().or(z.literal("")),
   paymentTerms: z.enum(["DUE_ON_RECEIPT", "ADVANCE", "NET_15", "NET_30", "NET_45", "NET_60"]).optional().or(z.literal("")),
+  /** Why this order gets longer terms than the customer's credit rating supports — see src/lib/credit/guard.ts. */
+  creditOverrideReason: z.string().trim().max(500).optional().or(z.literal("")),
   startDate: z.string().optional().or(z.literal("")),
   endDate: z.string().optional().or(z.literal("")),
   notes: z.string().trim().optional().or(z.literal("")),
@@ -87,6 +89,8 @@ export const approveOrderSchema = z.object({
   orderId: z.string().min(1),
   approved: z.boolean(),
   notes: z.string().trim().optional().or(z.literal("")),
+  /** Required to approve an order with a credit concern — longer terms than rated, or over the limit. */
+  creditOverrideReason: z.string().trim().max(500).optional().or(z.literal("")),
 });
 
 export const processOrderSchema = z.object({

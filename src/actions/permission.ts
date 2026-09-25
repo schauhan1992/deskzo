@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
-import { ROLES } from "@/lib/roles";
+import { roleKeys } from "@/lib/authz/role-registry";
 import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey } from "@/lib/permissions";
 import { can, permissionsFor, explain, resolveUserPermissions, describeSource } from "@/lib/authz/resolve";
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
@@ -40,6 +40,12 @@ export async function hasEffectivePermission(userId: string, key: PermissionKey 
   return can(userId, key);
 }
 
+/** `hasEffectivePermission` for the signed-in user — for a page that only wants the one answer. */
+export async function viewerHas(key: PermissionKey | string): Promise<boolean> {
+  const session = await requireUser();
+  return can(session.id, key);
+}
+
 /** Every permission the signed-in user holds. Drives the sidebar. */
 export async function navPermissions(userId: string): Promise<PermissionKey[]> {
   const session = await requireUser();
@@ -65,6 +71,16 @@ export async function getPermissionMatrix() {
   const rows = await db.rolePermission.findMany();
   const overrides = new Map(rows.map((r) => [`${r.role}:${r.permission}`, r.allowed]));
 
+  /**
+   * The columns of the matrix, read rather than hardcoded.
+   *
+   * This was the `ROLES` constant, so the screen could only ever show the eight roles the enum
+   * declared. A role somebody creates has to appear here on the next render or the screen is
+   * describing a system that no longer exists — which is exactly the failure that made
+   * `PURCHASE` invisible when it was missing from that array while three accounts held it.
+   */
+  const columns = await roleKeys();
+
   return PERMISSIONS.map((perm) => ({
     key: perm.key,
     label: perm.label,
@@ -76,7 +92,7 @@ export async function getPermissionMatrix() {
     tier: perm.tier ?? "standard",
     defaultRoles: perm.defaultRoles as readonly Role[],
     roles: Object.fromEntries(
-      ROLES.map((role) => [
+      columns.map((role: Role) => [
         role,
         overrides.get(`${role}:${perm.key}`) ??
           // Absent an override, an admin holds everything and everyone else holds their defaults.
@@ -95,7 +111,7 @@ export async function getPermissionMatrix() {
      * not tell, and `resetRolePermission` sat there offering to undo something invisible.
      */
     explicit: Object.fromEntries(
-      ROLES.map((role) => [role, overrides.has(`${role}:${perm.key}`)]),
+      columns.map((role: Role) => [role, overrides.has(`${role}:${perm.key}`)]),
     ) as Record<Role, boolean>,
   }));
 }

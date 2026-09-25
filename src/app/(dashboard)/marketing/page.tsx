@@ -1,4 +1,6 @@
-import { AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { listAudiences, listCampaigns, listTemplates, marketingOverview } from "@/actions/marketing";
@@ -61,7 +63,16 @@ export default async function MarketingPage({
             here.
           </p>
         </div>
-        {canManage && <CampaignEditor audiences={audiences} templates={templates} />}
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/marketing/send">
+              <Button>
+                <Send className="h-4 w-4" /> Send a mass mail
+              </Button>
+            </Link>
+            <CampaignEditor audiences={audiences} templates={templates} />
+          </div>
+        )}
       </div>
 
       <div className="mt-4">

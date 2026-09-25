@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { detectSalesWins } from "@/lib/wins/detect";
 import Papa from "papaparse";
-import { Prisma, type LeadStatus } from "@prisma/client";
+import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
@@ -21,11 +23,95 @@ import {
   logActivitySchema,
   addLeadRequirementSchema,
   updateLeadRequirementSchema,
+  renewalDateToStore,
 } from "@/lib/validation/lead";
 import type { ActionResult } from "@/actions/company";
+import { chooseOwner } from "@/lib/leads/assign";
+import { mayChangeLeadOwner, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
+import { refreshLeadScore } from "@/lib/leads/score-store";
+
+/** A person's name for the activity log — or "nobody". */
+async function ownerName(userId: string | null | undefined): Promise<string> {
+  if (!userId) return "nobody";
+  return (await db.user.findUnique({ where: { id: userId }, select: { name: true } }))?.name ?? "a removed user";
+}
+
+/**
+ * `leads.view` — whether this person sees the pipeline at all, before any question of which account.
+ *
+ * Leads live in a core module, so `isModuleEnabled` can't carry this the way it carries orders or
+ * projects; every action below asks it first instead. `leadInScope` and `leadListWhere` ask it too,
+ * so a lead action added later that scopes through either is covered even if it forgets.
+ */
+const NO_LEADS = "You don't have access to leads.";
+async function canViewLeads(userId: string): Promise<boolean> {
+  return hasEffectivePermission(userId, "leads.view");
+}
+
+/**
+ * Whether this user may work on a lead — the same line the lead page draws.
+ *
+ * A lead belongs to its company's account, and `canSeeCompany` is where that is decided. The page
+ * already refused a lead outside it; these actions did not, so a lead's products could be added to,
+ * edited or removed by id from any account. Out of scope and missing answer the same.
+ */
+async function leadInScope(userId: string, leadId: string): Promise<boolean> {
+  if (!(await canViewLeads(userId))) return false;
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { company: { select: { ownerUserId: true } } } });
+  return !!lead && (await canSeeCompany(userId, lead.company.ownerUserId));
+}
+
+/**
+ * Who a new lead belongs to, and a note saying why.
+ *
+ *   · A person chosen on the form — yourself freely, anybody else only with `leads.assign`.
+ *   · Nobody chosen — the assignment rules (`chooseOwner`). Except that a salesperson who cannot
+ *     assign keeps their own lead: somebody who found the business should not watch the rules
+ *     hand it to a colleague.
+ *   · No rule matches — a salesperson's own; otherwise unassigned, which the list shows as such.
+ */
+async function resolveOwner(
+  user: { id: string; role: string },
+  data: { ownerUserId?: string; contactId?: string; source: LeadSource },
+  companyId: string,
+  companyOwnerId: string | null,
+  itemIds: string[],
+): Promise<{ ok: true; userId: string | null; note: string | null } | { ok: false; error: string }> {
+  // Choosing the owner of a new lead is assigning it — so either permission that assigns will do.
+  const mayAssign =
+    (await hasEffectivePermission(user.id, "leads.assign")) || (await hasEffectivePermission(user.id, "accounts.reassign"));
+
+  if (data.ownerUserId) {
+    if (data.ownerUserId !== user.id && !mayAssign) {
+      return { ok: false, error: "You can't assign leads to other people." };
+    }
+    const target = await db.user.findUnique({ where: { id: data.ownerUserId }, select: { active: true, name: true } });
+    if (!target?.active) return { ok: false, error: "That person can't take leads — they may have been deactivated." };
+    return { ok: true, userId: data.ownerUserId, note: data.ownerUserId === user.id ? null : "Assigned when the lead was created" };
+  }
+
+  if (!mayAssign && user.role === "SALES") return { ok: true, userId: user.id, note: null };
+
+  const [items, contact, location] = await Promise.all([
+    itemIds.length ? db.item.findMany({ where: { id: { in: itemIds } }, select: { brandId: true, type: true } }) : [],
+    data.contactId ? db.contact.findUnique({ where: { id: data.contactId }, select: { designation: true } }) : null,
+    db.companyLocation.findFirst({ where: { companyId, isPrimary: true }, select: { state: true } }),
+  ]);
+  const chosen = await chooseOwner({
+    brandIds: [...new Set(items.map((i) => i.brandId).filter((b): b is string => !!b))],
+    itemTypes: [...new Set(items.map((i) => i.type))],
+    designation: contact?.designation ?? null,
+    source: data.source,
+    state: location?.state ?? null,
+    companyOwnerId,
+  });
+  if (chosen) return { ok: true, userId: chosen.userId, note: chosen.note };
+  return { ok: true, userId: user.role === "SALES" ? user.id : null, note: null };
+}
 
 export async function createLead(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = createLeadSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -33,13 +119,28 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
   const data = parsed.data;
 
   const company = await db.company.findUnique({ where: { id: data.companyId } });
-  if (!company) {
+  // Scoped: a lead can only be opened on an account this person could open.
+  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
+  }
+  /**
+   * The contact has to work at the company. The form only offers that company's people, but the
+   * action took any contact id — so a lead could name somebody from another customer entirely, and
+   * every call and email logged against it would go to the wrong person.
+   */
+  if (data.contactId) {
+    const contact = await db.contact.findUnique({ where: { id: data.contactId }, select: { companyId: true } });
+    if (!contact || contact.companyId !== company.id) {
+      return { ok: false, error: "That contact isn't at this company." };
+    }
   }
 
   const itemsEnabled = await isModuleEnabled("items");
   const requirements = itemsEnabled ? data.requirements : [];
-  const resolvedOwnerId = data.ownerUserId || (user.role === "SALES" ? user.id : null);
+
+  const owner = await resolveOwner(user, data, company.id, company.ownerUserId, requirements.map((r) => r.itemId));
+  if (!owner.ok) return { ok: false, error: owner.error };
+  const resolvedOwnerId = owner.userId;
 
   const lead = await db.$transaction(async (tx) => {
     const created = await tx.lead.create({
@@ -52,12 +153,16 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
         expectedCloseDate: data.expectedCloseDate ? new Date(data.expectedCloseDate) : null,
         sourcedByUserId: company.createdById,
         ownerUserId: resolvedOwnerId,
+        assignmentNote: owner.note,
+        source: data.source,
+        sourceDetail: data.sourceDetail || null,
         createdByUserId: user.id,
         requirements: {
           create: requirements.map((r) => ({
             itemId: r.itemId,
             quantity: r.quantity,
             notes: r.notes || null,
+            renewalDate: renewalDateToStore(r.renewalDate),
           })),
         },
       },
@@ -81,6 +186,7 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
   }
 
   await recordAudit({ userId: user.id, action: "CREATE", entityType: "Lead", entityId: lead.id, entityLabel: data.title });
+  await refreshLeadScore(lead.id);
 
   revalidatePath("/leads");
   revalidatePath(`/companies/${data.companyId}`);
@@ -88,7 +194,8 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function addLeadRequirement(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const itemsEnabled = await isModuleEnabled("items");
   if (!itemsEnabled) {
     return { ok: false, error: "The Items & Inventory module is disabled." };
@@ -97,23 +204,24 @@ export async function addLeadRequirement(input: unknown): Promise<ActionResult<{
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { leadId, itemId, quantity, notes } = parsed.data;
+  const { leadId, itemId, quantity, notes, renewalDate } = parsed.data;
 
-  const lead = await db.lead.findUnique({ where: { id: leadId } });
-  if (!lead) {
+  if (!(await leadInScope(user.id, leadId))) {
     return { ok: false, error: "Lead not found." };
   }
 
   const requirement = await db.leadRequirement.create({
-    data: { leadId, itemId, quantity, notes: notes || null },
+    data: { leadId, itemId, quantity, notes: notes || null, renewalDate: renewalDateToStore(renewalDate) },
   });
 
+  await refreshLeadScore(leadId);
   revalidatePath(`/leads/${leadId}`);
   return { ok: true, data: { id: requirement.id } };
 }
 
 export async function updateLeadRequirement(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   if (!(await hasEffectivePermission(user.id, "products.edit"))) {
     return { ok: false, error: "You don't have permission to edit products." };
   }
@@ -121,34 +229,37 @@ export async function updateLeadRequirement(input: unknown): Promise<ActionResul
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { id, quantity, notes } = parsed.data;
+  const { id, quantity, notes, renewalDate } = parsed.data;
 
   const requirement = await db.leadRequirement.findUnique({ where: { id } });
-  if (!requirement) {
+  if (!requirement || !(await leadInScope(user.id, requirement.leadId))) {
     return { ok: false, error: "Requirement not found." };
   }
 
   await db.leadRequirement.update({
     where: { id },
-    data: { quantity, notes: notes || null },
+    data: { quantity, notes: notes || null, renewalDate: renewalDateToStore(renewalDate) },
   });
 
+  await refreshLeadScore(requirement.leadId);
   revalidatePath(`/leads/${requirement.leadId}`);
   return { ok: true, data: { id } };
 }
 
 export async function removeLeadRequirement(id: string): Promise<ActionResult<null>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   if (!(await hasEffectivePermission(user.id, "products.delete"))) {
     return { ok: false, error: "You don't have permission to delete products." };
   }
   const requirement = await db.leadRequirement.findUnique({ where: { id } });
-  if (!requirement) {
+  if (!requirement || !(await leadInScope(user.id, requirement.leadId))) {
     return { ok: false, error: "Requirement not found." };
   }
 
   await db.leadRequirement.delete({ where: { id } });
 
+  await refreshLeadScore(requirement.leadId);
   revalidatePath(`/leads/${requirement.leadId}`);
   return { ok: true, data: null };
 }
@@ -159,7 +270,24 @@ type LeadListParams = {
   ownerUserId?: string;
   closeFrom?: string;
   closeTo?: string;
+  source?: LeadSource;
+  /** Hot, warm or cold — ranges of the stored score, the same cut-offs as `gradeFor`. */
+  grade?: "HOT" | "WARM" | "COLD";
+  sort?: "score";
 };
+
+const GRADE_RANGES = {
+  HOT: { gte: 70 },
+  WARM: { gte: 40, lt: 70 },
+  COLD: { lt: 40 },
+} as const;
+
+/** Newest activity first, or — asked for — the hottest first, with closed leads (no score) last. */
+function leadListOrder(params?: LeadListParams): Prisma.LeadOrderByWithRelationInput[] {
+  return params?.sort === "score"
+    ? [{ score: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }]
+    : [{ updatedAt: "desc" }];
+}
 
 /**
  * Shared by the board (which needs every lead), the paginated list view and the CSV export.
@@ -182,6 +310,9 @@ type LeadListParams = {
  * downline is what makes a team's leads visible to the team.
  */
 async function leadListWhere(userId: string, params?: LeadListParams): Promise<Prisma.LeadWhereInput> {
+  // No pipeline at all: a `where` nothing matches, so the list, the pager's count and the export
+  // all come back empty from the one place rather than each needing to remember.
+  if (!(await canViewLeads(userId))) return { id: { in: [] } };
   const expectedCloseDate = dateRangeFilter(params?.closeFrom, params?.closeTo);
   return {
     ...(await viaCompanyScope(userId)),
@@ -200,6 +331,8 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
         : { ownerUserId: params.ownerUserId }
       : {}),
     ...(expectedCloseDate ? { expectedCloseDate } : {}),
+    ...(params?.source ? { source: params.source } : {}),
+    ...(params?.grade && GRADE_RANGES[params.grade] ? { score: GRADE_RANGES[params.grade] } : {}),
   };
 }
 
@@ -213,7 +346,7 @@ export async function listLeads(params?: LeadListParams) {
   const user = await requireUser();
   return db.lead.findMany({
     where: await leadListWhere(user.id, params),
-    orderBy: { updatedAt: "desc" },
+    orderBy: leadListOrder(params),
     include: leadListInclude,
   });
 }
@@ -230,7 +363,7 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
   const [rows, total] = await Promise.all([
     db.lead.findMany({
       where,
-      orderBy: { updatedAt: "desc" },
+      orderBy: leadListOrder(params),
       include: leadListInclude,
       ...pageSlice(params.page, params.pageSize),
     }),
@@ -241,6 +374,7 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
 
 export async function getLead(id: string) {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return null;
   const lead = await db.lead.findUnique({
     where: { id },
     include: {
@@ -251,6 +385,7 @@ export async function getLead(id: string) {
           owner: { select: { id: true, name: true } },
           assignedTo: { select: { id: true, name: true } },
           industry: { select: { id: true, name: true } },
+          customerCategory: { select: CATEGORY_SELECT },
           locations: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         },
       },
@@ -273,6 +408,10 @@ export async function getLead(id: string) {
    * record and locations, the contact, the whole activity trail — comes with it.
    */
   if (!(await canSeeCompany(user.id, lead.company.ownerUserId))) return null;
+  // The lead names its contact either way; how to reach them is `contacts.view`'s to give.
+  if (lead.contact && !(await hasEffectivePermission(user.id, "contacts.view"))) {
+    return toPlain({ ...lead, contact: { ...lead.contact, email: null, phone: null, linkedinUrl: null } });
+  }
   return toPlain(lead);
 }
 
@@ -287,6 +426,7 @@ export async function getLead(id: string) {
  */
 export async function leadDocumentDraft(leadId: string) {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return null;
   // Scoped in the `where` rather than checked after the fetch, so the `select` stays exactly the
   // shape the document form expects — a lead out of scope is simply not found, as in `getLead`.
   const lead = await db.lead.findFirst({
@@ -316,6 +456,7 @@ export async function leadDocumentDraft(leadId: string) {
 
 export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = updateLeadStatusSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -327,7 +468,8 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
   }
 
   const lead = await db.lead.findUnique({ where: { id: leadId } });
-  if (!lead) {
+  // Scoped like the lead page: moving another account's lead through the pipeline by id was open.
+  if (!lead || !(await leadInScope(user.id, leadId))) {
     return { ok: false, error: "Lead not found." };
   }
 
@@ -368,6 +510,10 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
 
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: leadId, entityLabel: lead.title });
 
+  await refreshLeadScore(leadId);
+  // A deal just won may be one to celebrate, and may have taken somebody past their target. Now,
+  // rather than at the next tick, so the room hears about it while it is news.
+  if (status === "WON") await detectSalesWins().catch((err) => console.error("sales wins could not be detected", err));
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
   revalidatePath(`/companies/${lead.companyId}`);
@@ -376,6 +522,7 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
 
 export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; filename: string }>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
 
   const leads = await db.lead.findMany({
     // The export is the list with no screen in front of it, and it is the worse leak of the two:
@@ -416,6 +563,7 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
 
 export async function logActivity(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = logActivitySchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -423,7 +571,8 @@ export async function logActivity(input: unknown): Promise<ActionResult<{ id: st
   const { leadId, type, notes } = parsed.data;
 
   const lead = await db.lead.findUnique({ where: { id: leadId } });
-  if (!lead) {
+  // Scoped like the lead page: logging a call against another account's lead by id was open.
+  if (!lead || !(await leadInScope(user.id, leadId))) {
     return { ok: false, error: "Lead not found." };
   }
 
@@ -441,6 +590,7 @@ export async function logActivity(input: unknown): Promise<ActionResult<{ id: st
     });
   }
 
+  await refreshLeadScore(leadId);
   revalidatePath(`/leads/${leadId}`);
   return { ok: true, data: { id: activity.id } };
 }
@@ -453,6 +603,7 @@ export async function logActivity(input: unknown): Promise<ActionResult<{ id: st
  */
 export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ count: number }>> {
   const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = bulkUpdateLeadsSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -471,7 +622,50 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
       const owner = await db.user.findUnique({ where: { id: nextOwnerId }, select: { id: true, active: true } });
       if (!owner || !owner.active) return { ok: false, error: "That user can't be assigned leads." };
     }
+    /**
+     * Every selected lead must be one this person can see *and* may hand on — see
+     * src/lib/authz/reassign.ts. This took any ids and changed them with no check at all. All or
+     * nothing, so a list is never left half-reassigned by rows quietly skipped.
+     */
+    const rights = await reassignRights(user.id);
+    const leads = await db.lead.findMany({
+      where: { id: { in: leadIds }, ...(await viaCompanyScope(user.id)) },
+      select: { id: true, title: true, ownerUserId: true },
+    });
+    if (leads.length !== new Set(leadIds).size) {
+      return { ok: false, error: "Some of the selected leads are not yours to change." };
+    }
+    const refused = leads.filter((l) => !mayChangeLeadOwner(rights, user.id, l));
+    if (refused.length) {
+      return {
+        ok: false,
+        error: `You can only hand off leads you own — ${refused.length === 1 ? `“${refused[0]!.title}” isn't yours` : `${refused.length} of these aren't yours`}.`,
+      };
+    }
+    if (!nextOwnerId && !mayLeaveUnassigned(rights)) {
+      return { ok: false, error: "Hand them to a colleague — only someone who can reassign leads may leave them with nobody." };
+    }
     await db.lead.updateMany({ where: { id: { in: leadIds } }, data: { ownerUserId: nextOwnerId } });
+    const to = await ownerName(nextOwnerId);
+    for (const lead of leads) {
+      if (lead.ownerUserId === nextOwnerId) continue;
+      await recordAudit({
+        userId: user.id,
+        action: "UPDATE",
+        entityType: "Lead",
+        entityId: lead.id,
+        entityLabel: `${lead.title} — owner: ${await ownerName(lead.ownerUserId)} → ${to}`,
+      });
+    }
+    if (nextOwnerId && nextOwnerId !== user.id) {
+      await notifyUser({
+        userId: nextOwnerId,
+        type: "LEAD_ASSIGNED",
+        title: `${leads.length === 1 ? "A lead was" : `${leads.length} leads were`} assigned to you`,
+        message: leads.length === 1 ? leads[0]!.title : undefined,
+        link: leads.length === 1 ? `/leads/${leads[0]!.id}` : "/leads?view=list",
+      });
+    }
   }
 
   if (status) {

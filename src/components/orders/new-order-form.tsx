@@ -20,7 +20,11 @@ import { listCommissionPartyOptions, listEndCustomers } from "@/actions/company"
 import { getResellerPriceForItem } from "@/actions/reseller";
 import { resolveResellerPrice, describePriceSource } from "@/lib/reseller-pricing";
 import { listCommissionPartyAccounts } from "@/actions/commission-party";
-import { paymentTermsValues, paymentTermsLabels } from "@/lib/gst";
+import { calculateOrderAmount, paymentTermsValues, paymentTermsLabels } from "@/lib/gst";
+import { getCreditSnapshot } from "@/actions/credit";
+import { CreditBadge } from "@/components/credit/credit-badge";
+import { creditConcerns, termsExceed, type TermsKey } from "@/lib/credit/engine";
+import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -92,6 +96,37 @@ export function NewOrderForm({
   const selectedItem = items.find((i) => i.id === selectedItemId);
   const isSubscription = selectedItem?.type === "SUBSCRIPTION";
   const watcherUserIds = watch("watcherUserIds") ?? [];
+
+  /**
+   * The customer's credit, fetched when they are chosen — so the person punching the order sees
+   * before saving what accounts will see at approval. Null when there is nothing to show (no
+   * customer yet, or someone without the payments view), in which case the server still decides.
+   */
+  const [credit, setCredit] = useState<Awaited<ReturnType<typeof getCreditSnapshot>>>(null);
+  useEffect(() => {
+    if (!selectedCompanyId) {
+      setCredit(null);
+      return;
+    }
+    let cancelled = false;
+    getCreditSnapshot(selectedCompanyId).then((snapshot) => {
+      if (!cancelled) setCredit(snapshot);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCompanyId]);
+  const chosenTerms = (watch("paymentTerms") || "") as TermsKey | "";
+  const orderAmount = calculateOrderAmount({
+    quantity: Number(watch("quantity")) || 0,
+    unitPrice: Number(watch("unitPrice") || selectedItem?.sellingPrice || 0),
+    taxRatePercent: selectedItem?.taxRatePercent ? Number(selectedItem.taxRatePercent) : null,
+  }).total;
+  const effectiveTerms = (chosenTerms || credit?.defaultTerms) as TermsKey | undefined;
+  const concerns = credit && effectiveTerms ? creditConcerns(credit, { terms: effectiveTerms, amount: orderAmount }) : [];
+  // Terms chosen on the order that are longer than suggested — the one case that needs an override now, not at approval.
+  const overridingTerms =
+    !!credit && !!chosenTerms && chosenTerms !== credit.defaultTerms && termsExceed(chosenTerms, credit.recommendedTerms);
 
   function loadCompanyDetails(companyId: string) {
     setValue("locationId", "");
@@ -317,13 +352,42 @@ export function NewOrderForm({
             <div className="space-y-1.5">
               <Label htmlFor="paymentTerms">Payment terms</Label>
               <Select id="paymentTerms" {...register("paymentTerms")}>
-                <option value="">Use customer&apos;s default</option>
+                <option value="">
+                  Use customer&apos;s default{credit ? ` (${paymentTermsLabels[credit.defaultTerms]})` : ""}
+                </option>
                 {paymentTermsValues.map((t) => (
                   <option key={t} value={t}>
                     {paymentTermsLabels[t]}
                   </option>
                 ))}
               </Select>
+              {credit && (
+                <div className="space-y-1.5 text-xs">
+                  <p className="flex flex-wrap items-center gap-1.5 text-muted">
+                    <CreditBadge rating={credit.rating} score={credit.score} />
+                    up to {paymentTermsLabels[credit.recommendedTerms]} · owes {formatCurrency(credit.outstanding)} of a{" "}
+                    {formatCurrency(credit.limit)} limit
+                  </p>
+                  {overridingTerms &&
+                    (credit.canOverride ? (
+                      <Textarea
+                        aria-label="Why give longer terms"
+                        placeholder={`Why ${paymentTermsLabels[chosenTerms as TermsKey]}? Kept on the customer's credit record.`}
+                        {...register("creditOverrideReason")}
+                      />
+                    ) : (
+                      <p className="text-danger">
+                        Longer than their record supports — choose {paymentTermsLabels[credit.recommendedTerms]} or shorter, or leave
+                        it on their default.
+                      </p>
+                    ))}
+                  {!overridingTerms && concerns.length > 0 && (
+                    <p className="text-warning">
+                      Accounts will need a credit override to approve this — {concerns.map((c) => c.text).join("; and ")}.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

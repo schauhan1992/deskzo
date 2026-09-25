@@ -506,7 +506,9 @@ async function main() {
     const created = await createCompany({
       name: `${MARK} ${Date.now()}`,
       relationshipType: "CLIENT",
-      paymentTerms: "NET_30",
+      // Advance: a new customer has no credit record, so longer terms would need a credit override —
+      // a different rule (check:credit), and not what this section is about.
+      paymentTerms: "ADVANCE",
       source: "REFERRAL",
       tags: [],
       contacts: [],

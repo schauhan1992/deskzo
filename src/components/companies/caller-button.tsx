@@ -16,10 +16,16 @@ export function CallerButton({
   companyId,
   caller,
   users,
+  canChange,
+  canUnassign,
 }: {
   companyId: string;
   caller: Caller;
   users: AssignableUser[];
+  /** From `src/lib/authz/reassign.ts`, decided on the server — without it this is a label, not a button. */
+  canChange: boolean;
+  /** Only a reassigner may leave it with nobody; somebody handing off their own must name a colleague. */
+  canUnassign: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -46,6 +52,17 @@ export function CallerButton({
     });
   }
 
+  // Shown as a plain label to somebody who may not change it — a button that only ever refuses is
+  // worse than no button.
+  if (!canChange) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-muted">
+        <PhoneCall className="h-3 w-3" />
+        {caller ? `Caller: ${caller.name}` : "No caller"}
+      </span>
+    );
+  }
+
   return (
     <>
       <button
@@ -64,7 +81,7 @@ export function CallerButton({
           {/* aria-label rather than a visible label: the dialog heading is the only caption this
               control has, and a heading is not a label — it names the dialog, not the select. */}
           <Select aria-label="Caller" value={selected} onChange={(e) => setSelected(e.target.value)}>
-            <option value="">Unassigned</option>
+            {canUnassign && <option value="">Unassigned</option>}
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name} ({u.role})

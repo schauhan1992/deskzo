@@ -18,6 +18,7 @@ import { companySourceValues, vendorStatusValues, vendorStatusLabels } from "@/l
 import type { CompanySource, VendorStatus } from "@prisma/client";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
+import { viewerReassignControls } from "@/lib/authz/reassign";
 
 // Search params reach Prisma's enum filters directly, so anything unrecognised is dropped rather
 // than passed through — an unknown value would otherwise fail the query and 500 the page.
@@ -139,7 +140,7 @@ export default async function CommissionPartiesPage({
         </SplitListShell>
       ) : (
         <div className="mt-6">
-          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} mode="commission-parties" />
+          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} mode="commission-parties" reassign={await viewerReassignControls()} />
           <Pagination
             page={page}
             pageSize={pageSize}

@@ -33,6 +33,7 @@ export type Contact = VerifiableContact & {
   phone: string | null;
   linkedinUrl: string | null;
   isPrimary: boolean;
+  receivesDocuments: boolean;
   /** Email/phone were stripped server-side because this company belongs to a reseller. */
   detailsRedacted?: boolean;
 };
@@ -91,6 +92,10 @@ function ContactFields({
           <input type="checkbox" {...register("isPrimary")} />
           Primary contact
         </label>
+        <label className="mt-1.5 flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" {...register("receivesDocuments")} />
+          Receives invoices &amp; quotes — ticked when a document is emailed
+        </label>
       </div>
     </div>
   );
@@ -114,6 +119,7 @@ function EditContactForm({ contact, onClose }: { contact: Contact; onClose: () =
       phone: contact.phone ?? "",
       linkedinUrl: contact.linkedinUrl ?? "",
       isPrimary: contact.isPrimary,
+      receivesDocuments: contact.receivesDocuments,
     },
   });
 
@@ -187,7 +193,7 @@ export function ContactsList({
     formState: { errors, isSubmitting },
   } = useForm<AddFormValues, unknown, ContactInput>({
     resolver: zodResolver(contactInputSchema),
-    defaultValues: { designation: "OTHER", isPrimary: false },
+    defaultValues: { designation: "OTHER", isPrimary: false, receivesDocuments: false },
   });
 
   async function onAddSubmit(values: ContactInput) {
@@ -195,7 +201,7 @@ export function ContactsList({
     if (!result.ok) {
       return;
     }
-    reset({ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: false });
+    reset({ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: false, receivesDocuments: false });
     setAddOpen(false);
     router.refresh();
   }
@@ -226,6 +232,7 @@ export function ContactsList({
               <div className="flex items-center gap-2">
                 <span className="font-medium text-text">{c.name}</span>
                 {c.isPrimary && <Badge tone="blue">Primary</Badge>}
+                {c.receivesDocuments && <Badge tone="green">Invoices</Badge>}
               </div>
               <div className="text-muted">{c.designation.replaceAll("_", " ")}</div>
               <div className="mt-1 flex flex-wrap items-center gap-3">

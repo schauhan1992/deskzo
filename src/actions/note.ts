@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { mayAttachTo } from "@/lib/authz/attachments";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { accountScopeIds } from "@/lib/authz/company-scope";
@@ -165,25 +166,7 @@ async function readableNotesWhere(userId: string): Promise<Prisma.StickyNoteWher
  * to `create`, where the foreign key rejects it as a raw database error rather than as the "no such
  * record" this function exists to say.
  */
-async function canAttachTo(
-  userId: string,
-  attachments: { companyId: string | null; leadId: string | null; ticketId: string | null },
-): Promise<boolean> {
-  const { companyId, leadId, ticketId } = attachments;
-  if (!companyId && !leadId && !ticketId) return true;
-
-  const scopeIds = await accountScopeIds(userId);
-  // `undefined` means no restriction, so the scope half of each clause drops out of the spread and
-  // the count asks only whether the record exists. Every attachment is still looked up.
-  const inScope: Prisma.CompanyWhereInput | undefined =
-    scopeIds === null ? undefined : { ownerUserId: { in: scopeIds } };
-  const viaCompany = inScope ? { company: inScope } : {};
-
-  if (companyId && (await db.company.count({ where: { id: companyId, ...inScope } })) === 0) return false;
-  if (leadId && (await db.lead.count({ where: { id: leadId, ...viaCompany } })) === 0) return false;
-  if (ticketId && (await db.ticket.count({ where: { id: ticketId, ...viaCompany } })) === 0) return false;
-  return true;
-}
+const canAttachTo = mayAttachTo;
 
 function revalidateNotePaths(note: { companyId: string | null; leadId: string | null; ticketId: string | null }) {
   revalidatePath("/notes");
@@ -447,11 +430,11 @@ export async function reorderNotes(input: unknown): Promise<ActionResult<null>> 
   // Ownership is repeated in each statement's `where` for the same reason as the other writes: the
   // filter above says which ids to send, but only the clause inside the write decides which rows are
   // allowed to move.
-  await db.$transaction(
-    ordered.map((id, index) =>
-      db.stickyNote.updateMany({ where: { id, ownerUserId: user.id }, data: { position: index } }),
-    ),
-  );
+  await db.$transaction(async (tx) => {
+    for (const op of ordered.map((id, index) =>
+      tx.stickyNote.updateMany({ where: { id, ownerUserId: user.id }, data: { position: index } }),
+    )) await op;
+  });
 
   // One row for the board rather than one per note. A drag touches every card on screen, and an
   // audit log with forty rows per rearrangement is a log nobody reads when it matters.

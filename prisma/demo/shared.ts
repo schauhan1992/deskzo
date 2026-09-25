@@ -18,9 +18,40 @@ export const DEMO_TAG = "seed-demo";
 export const DEMO_SKU = "DMO-";
 export const DEMO_EMAIL_DOMAIN = "@demo.wroffy.invalid";
 
-/** Twelve months back from today, which is the window everything is spread across. */
 export const TODAY = new Date();
-export const YEAR_AGO = new Date(TODAY.getTime() - 365 * 86400000);
+
+/**
+ * How long this company has been running, and so how far back anything can have happened.
+ *
+ * The single lever for the dataset's age. Every date in every demo module goes through `daysAgo`
+ * below — there is no raw arithmetic on `TODAY` anywhere else — so clamping it here shortens the
+ * whole history at once rather than needing twenty ranges adjusted in step.
+ *
+ * ## The one thing that is deliberately older than the company
+ *
+ * Subscription terms. Their start date is worked back from the *expiry* (see `activity.ts`), so a
+ * subscription can begin before the company existed — and it should. A reseller onboarding a
+ * customer takes over the tenancies they are already running, part-way through their term. That is
+ * also what keeps the renewals screen worth looking at: clamp those too and every expiry lands more
+ * than eight months out, so the 30/60/90-day windows are empty and the module cannot be tested.
+ */
+export const COMPANY_AGE_DAYS = 120;
+
+/** The day the company opened. */
+export const FOUNDED = new Date(TODAY.getTime() - COMPANY_AGE_DAYS * 86400000);
+
+/** How many people are on the payroll. The roster in `people.ts` scales itself to this. */
+export const HEADCOUNT = 50;
+
+/**
+ * How many accounts are on the books.
+ *
+ * Tied to the headcount rather than fixed, because the two move together: a book is only as big as
+ * the people working it. Four accounts a head is a young company's ratio — enough that every list,
+ * filter and report has something to show, and not so many that a four-month-old firm looks like it
+ * has been trading for a decade.
+ */
+export const BOOK_SIZE = HEADCOUNT * 4;
 
 let seed = 20260920;
 export function rnd() {
@@ -30,18 +61,32 @@ export function rnd() {
 export const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rnd() * arr.length)]!;
 export const int = (min: number, max: number) => Math.floor(rnd() * (max - min + 1)) + min;
 export const chance = (p: number) => rnd() < p;
-export const daysAgo = (n: number) => new Date(TODAY.getTime() - n * 86400000);
+/**
+ * Clamped to the company's own lifetime, so nothing is dated before it existed.
+ *
+ * Every module asks for a spread in days — `daysAgo(int(0, 365))` and the like — and those ranges
+ * were written for a year-old business. Rather than rewrite twenty of them, the floor is applied
+ * here: ask for 300 days ago on a 120-day-old company and you get its founding day.
+ *
+ * `daysAhead` is deliberately NOT clamped. The future is not constrained by how long the company
+ * has been trading, and the renewals, targets and expiry screens all live there.
+ */
+export const daysAgo = (n: number) => new Date(TODAY.getTime() - Math.min(n, COMPANY_AGE_DAYS) * 86400000);
 export const daysAhead = (n: number) => new Date(TODAY.getTime() + n * 86400000);
 
 /**
- * A moment somewhere in the last year, weighted towards recent.
+ * A moment somewhere in the company's life, weighted towards recent.
  *
- * A flat spread looks wrong: a business that has been running a year has more of everything in the
- * last quarter than the first, because it grew. Squaring the random number bends the curve that way.
+ * A flat spread looks wrong: a business has more of everything in its last quarter than its first,
+ * because it grew. Squaring the random number bends the curve that way.
+ *
+ * Spread across `COMPANY_AGE_DAYS` rather than a flat year, so a young company's activity is dense
+ * over a short history instead of four fifths of it piling onto the founding day — which is what a
+ * clamped year-long spread would have produced.
  */
 export function sometimeLastYear(): Date {
   const r = rnd();
-  return daysAgo(Math.floor(r * r * 365));
+  return daysAgo(Math.floor(r * r * COMPANY_AGE_DAYS));
 }
 
 /** Business hours on a weekday — nothing in this dataset should be timestamped 3am on a Sunday. */

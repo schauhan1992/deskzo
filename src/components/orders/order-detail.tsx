@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOrder } from "@/actions/order";
 import { listVendorOptions } from "@/actions/company";
-import { hasEffectivePermission } from "@/actions/permission";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
+import { orderCreditPosition } from "@/lib/credit/order";
 import { isModuleEnabled } from "@/actions/module";
 import { currentUser } from "@/lib/session";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -16,6 +17,7 @@ import { formatOrderId } from "@/lib/order-id";
 import { calculateOrderAmount, calculateOrderMargin, getPaymentStatus, paymentTermsLabels } from "@/lib/gst";
 import { orderExpenseTypeLabels, orderBusinessTypeLabels } from "@/lib/validation/order";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
+import { CategoryChip } from "@/components/customers/category-chip";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -63,6 +65,28 @@ export async function OrderDetail({
     hasEffectivePermission(userId, "payments.delete"),
   ]);
   if (!order) notFound();
+
+  /**
+   * Where the order stands on credit, while it waits for approval — computed by the same function
+   * `approveOrder` enforces with, so what the approver reads is what the action will decide. Shown
+   * to anyone who can see the customer's money; the override itself is only offered to approvers.
+   */
+  const position =
+    order.orderStatus === "PENDING_APPROVAL" && (await viewerHas("payments.view")) ? await orderCreditPosition(order.id) : null;
+  const credit = position
+    ? {
+        rating: position.assessment.rating,
+        score: position.assessment.score,
+        recommendedTerms: position.assessment.recommendedTerms,
+        terms: position.terms,
+        limit: position.assessment.limit,
+        outstanding: position.assessment.outstanding,
+        overdue: position.assessment.overdue,
+        concerns: position.concerns.map((c) => c.text),
+        termsDecided: position.termsDecided,
+        canOverride: await viewerHas("credit.override"),
+      }
+    : null;
 
   const { subtotal, gstAmount, total } = calculateOrderAmount({
     quantity: order.quantity,
@@ -118,6 +142,7 @@ export async function OrderDetail({
             <Link href={`/companies/${order.company.id}`} className="hover:underline">
               {order.company.name}
             </Link>
+            <CategoryChip category={order.company.customerCategory} className="ml-1.5 align-middle" />
             {" · "}
             {order.item.name} × {order.quantity}
             {order.item.unit ? ` ${order.item.unit}` : ""}
@@ -316,6 +341,7 @@ export async function OrderDetail({
                 vendorOptions={vendorOptions}
                 companyId={order.company.id}
                 companyName={order.company.name}
+                credit={credit}
               />
             </CardContent>
           </Card>

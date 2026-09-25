@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { getPermissionDefinition, type PermissionKey } from "@/lib/permissions";
 

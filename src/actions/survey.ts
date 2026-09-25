@@ -297,26 +297,26 @@ export async function saveSurvey(input: {
 
   // Questions and targets are replaced wholesale. Answers store the option *text*, so rewriting a
   // question cannot retrospectively change what somebody chose.
-  await db.$transaction([
-    db.surveyQuestion.deleteMany({ where: { surveyId: survey.id, id: { notIn: questions.map((q) => q.id ?? "").filter(Boolean) } } }),
-    ...questions.map((q, i) =>
+  await db.$transaction(async (tx) => {
+    await tx.surveyQuestion.deleteMany({ where: { surveyId: survey.id, id: { notIn: questions.map((q) => q.id ?? "").filter(Boolean) } } });
+    for (const op of questions.map((q, i) =>
       q.id
-        ? db.surveyQuestion.update({
+        ? tx.surveyQuestion.update({
             where: { id: q.id },
             data: { kind: q.kind, prompt: q.prompt.trim(), helpText: q.helpText?.trim() || null, required: q.required, options: q.options, sortOrder: i },
           })
-        : db.surveyQuestion.create({
+        : tx.surveyQuestion.create({
             data: { surveyId: survey.id, kind: q.kind, prompt: q.prompt.trim(), helpText: q.helpText?.trim() || null, required: q.required, options: q.options, sortOrder: i },
           }),
-    ),
-    db.surveyTarget.deleteMany({ where: { surveyId: survey.id } }),
-    ...(input.audience === "INDIVIDUAL"
-      ? (input.targetUserIds ?? []).map((userId) => db.surveyTarget.create({ data: { surveyId: survey.id, userId } }))
-      : []),
-    ...(input.audience === "DEPARTMENT"
-      ? (input.targetDepartmentIds ?? []).map((departmentId) => db.surveyTarget.create({ data: { surveyId: survey.id, departmentId } }))
-      : []),
-  ]);
+    )) await op;
+    await tx.surveyTarget.deleteMany({ where: { surveyId: survey.id } });
+    for (const op of (input.audience === "INDIVIDUAL"
+      ? (input.targetUserIds ?? []).map((userId) => tx.surveyTarget.create({ data: { surveyId: survey.id, userId } }))
+      : [])) await op;
+    for (const op of (input.audience === "DEPARTMENT"
+      ? (input.targetDepartmentIds ?? []).map((departmentId) => tx.surveyTarget.create({ data: { surveyId: survey.id, departmentId } }))
+      : [])) await op;
+  });
 
   await recordAudit({
     userId: user.id, action: input.id ? "UPDATE" : "CREATE", entityType: "Survey",

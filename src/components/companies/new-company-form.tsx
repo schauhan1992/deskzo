@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import type { CategoryTree, FlatCategory } from "@/lib/customers/categories";
+import { useId, useState } from "react";
 import type { z } from "zod";
 import { useForm, useFieldArray, type UseFormRegister, type FieldValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,24 +16,35 @@ import {
 import { createCompany } from "@/actions/company";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { AddressFields } from "@/components/ui/address-fields";
+import { isIndia } from "@/lib/geo/countries";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CompanyDetailFields } from "@/components/companies/company-fields";
-import { gstTreatmentValues, gstTreatmentLabels } from "@/lib/gst";
+import { CompanyDetailFields, type TermsAdvice } from "@/components/companies/company-fields";
+import { ExistingCompanyMatches } from "@/components/companies/existing-company-matches";
+import { gstTreatmentValues, gstTreatmentLabels, treatmentForCountryChange } from "@/lib/gst";
 
 type FormValues = z.input<typeof createCompanySchema>;
 type IndustryOption = { id: string; name: string };
 
 export function NewCompanyForm({
   industries,
+  categories,
   defaultRelationshipType = "CLIENT",
   relationshipTypeOptions = relationshipTypeValues,
   managedByResellerId,
+  canAddContacts = true,
+  termsAdvice = null,
 }: {
   industries: IndustryOption[];
+  categories?: CategoryTree<FlatCategory>[];
   defaultRelationshipType?: CompanyRelationshipType;
   relationshipTypeOptions?: readonly CompanyRelationshipType[];
   /** Creating one of this reseller's end customers — the record is flagged do-not-contact on save. */
   managedByResellerId?: string;
+  /** Without `contacts.view` the company is created bare, and its people added by someone who has it. */
+  canAddContacts?: boolean;
+  /** For a customer: what a new customer's (empty) credit record supports. */
+  termsAdvice?: TermsAdvice | null;
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -40,6 +52,8 @@ export function NewCompanyForm({
     register,
     control,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, CreateCompanyInput>({
     resolver: zodResolver(createCompanySchema),
@@ -47,12 +61,25 @@ export function NewCompanyForm({
       source: "LINKEDIN",
       relationshipType: defaultRelationshipType,
       managedByResellerId,
-      paymentTerms: "NET_30",
+      paymentTerms: "ADVANCE",
       location: { label: "Head Office", country: "India", gstTreatment: "UNREGISTERED" },
-      contacts: [{ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: true }],
+      contacts: canAddContacts
+        ? [{ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: true }]
+        : [],
     },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "contacts" });
+  /**
+   * DOM ids for the contact rows, from `useId` rather than from `field.id`.
+   *
+   * `useFieldArray` gives each row an id that is stable across re-renders — which is what makes
+   * it the right React `key`, and it stays one below. But it is a fresh random UUID per render
+   * *environment*, so the server and the browser generate different ones and every `htmlFor` on
+   * these rows mismatches on hydration. React cannot patch attributes up, so the labels end up
+   * pointing at nothing: clicking one does not focus its field, and a screen reader announces
+   * the input unnamed.
+   */
+  const rowId = useId();
 
   async function onSubmit(values: CreateCompanyInput) {
     setServerError(null);
@@ -72,7 +99,11 @@ export function NewCompanyForm({
         register={register as unknown as UseFormRegister<FieldValues>}
         errors={errors}
         industries={industries}
+        categories={categories}
         relationshipTypeOptions={relationshipTypeOptions}
+        nameAddon={<ExistingCompanyMatches name={String(watch("name") ?? "")} />}
+        termsAdvice={termsAdvice}
+        selectedTerms={String(watch("paymentTerms") ?? "")}
       />
 
       <Card>
@@ -90,21 +121,26 @@ export function NewCompanyForm({
             <Label htmlFor="location.address">Address</Label>
             <Textarea id="location.address" {...register("location.address")} />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="location.city">City</Label>
-            <Input id="location.city" {...register("location.city")} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="location.state">State</Label>
-            <Input id="location.state" {...register("location.state")} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="location.country">Country</Label>
-            <Input id="location.country" placeholder="India" {...register("location.country")} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="location.pincode">PIN code</Label>
-            <Input id="location.pincode" placeholder="400001" {...register("location.pincode")} />
+          {/* The state decides the tax on every document raised against this address, so it is
+              chosen from the GST table rather than typed. See `AddressFields`. */}
+          <div className="col-span-2">
+            <AddressFields
+              columns={2}
+              country={String(watch("location.country") ?? "")}
+              state={String(watch("location.state") ?? "")}
+              city={String(watch("location.city") ?? "")}
+              pincode={String(watch("location.pincode") ?? "")}
+              onChange={(patch) => {
+                for (const [key, value] of Object.entries(patch)) {
+                  setValue(`location.${key}` as never, value as never, { shouldDirty: true, shouldValidate: true });
+                }
+                // A customer abroad is Overseas, not Unregistered — see `treatmentForCountryChange`.
+                if (patch.country !== undefined) {
+                  const next = treatmentForCountryChange(isIndia(patch.country), watch("location.gstTreatment"));
+                  if (next) setValue("location.gstTreatment", next, { shouldDirty: true });
+                }
+              }}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="location.gstNumber">GST number</Label>
@@ -123,70 +159,72 @@ export function NewCompanyForm({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
-          <span>Contacts</span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              append({ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: false })
-            }
-          >
-            + Add contact
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {fields.map((field, index) => (
-            <div key={field.id} className="grid grid-cols-2 gap-3 rounded-md border border-line p-3">
-              {/* Ids are keyed off field.id, not the row index: useFieldArray hands each row a stable
-                  unique key, so removing a contact cannot leave two rows sharing an id and pointing
-                  every label at the first one. */}
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor={`${field.id}-name`}>Name</Label>
-                <Input id={`${field.id}-name`} {...register(`contacts.${index}.name` as const)} />
-                {errors.contacts?.[index]?.name && (
-                  <p className="text-xs text-danger">{errors.contacts[index]?.name?.message}</p>
-                )}
+      {canAddContacts && (
+        <Card>
+          <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
+            <span>Contacts</span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                append({ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: false })
+              }
+            >
+              + Add contact
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {fields.map((field, index) => (
+              <div key={field.id} className="grid grid-cols-2 gap-3 rounded-md border border-line p-3">
+                {/* Ids are keyed off field.id, not the row index: useFieldArray hands each row a stable
+                    unique key, so removing a contact cannot leave two rows sharing an id and pointing
+                    every label at the first one. */}
+                <div className="col-span-2 space-y-1.5">
+                  <Label htmlFor={`${rowId}-${index}-name`}>Name</Label>
+                  <Input id={`${rowId}-${index}-name`} {...register(`contacts.${index}.name` as const)} />
+                  {errors.contacts?.[index]?.name && (
+                    <p className="text-xs text-danger">{errors.contacts[index]?.name?.message}</p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${rowId}-${index}-designation`}>Designation</Label>
+                  <Select id={`${rowId}-${index}-designation`} {...register(`contacts.${index}.designation` as const)}>
+                    {contactDesignationValues.map((d) => (
+                      <option key={d} value={d}>
+                        {d.replaceAll("_", " ")}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${rowId}-${index}-email`}>Email</Label>
+                  <Input id={`${rowId}-${index}-email`} type="email" {...register(`contacts.${index}.email` as const)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${rowId}-${index}-phone`}>Phone</Label>
+                  <Input id={`${rowId}-${index}-phone`} {...register(`contacts.${index}.phone` as const)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${rowId}-${index}-linkedin`}>LinkedIn URL</Label>
+                  <Input id={`${rowId}-${index}-linkedin`} {...register(`contacts.${index}.linkedinUrl` as const)} />
+                </div>
+                <div className="col-span-2 flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2 text-sm text-muted">
+                    <input type="checkbox" {...register(`contacts.${index}.isPrimary` as const)} />
+                    Primary contact
+                  </label>
+                  {fields.length > 1 && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => remove(index)}>
+                      Remove
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`${field.id}-designation`}>Designation</Label>
-                <Select id={`${field.id}-designation`} {...register(`contacts.${index}.designation` as const)}>
-                  {contactDesignationValues.map((d) => (
-                    <option key={d} value={d}>
-                      {d.replaceAll("_", " ")}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`${field.id}-email`}>Email</Label>
-                <Input id={`${field.id}-email`} type="email" {...register(`contacts.${index}.email` as const)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`${field.id}-phone`}>Phone</Label>
-                <Input id={`${field.id}-phone`} {...register(`contacts.${index}.phone` as const)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`${field.id}-linkedin`}>LinkedIn URL</Label>
-                <Input id={`${field.id}-linkedin`} {...register(`contacts.${index}.linkedinUrl` as const)} />
-              </div>
-              <div className="col-span-2 flex items-center justify-between pt-1">
-                <label className="flex items-center gap-2 text-sm text-muted">
-                  <input type="checkbox" {...register(`contacts.${index}.isPrimary` as const)} />
-                  Primary contact
-                </label>
-                {fields.length > 1 && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => remove(index)}>
-                    Remove
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex justify-end gap-3">
         <Button type="button" variant="secondary" onClick={() => router.back()}>

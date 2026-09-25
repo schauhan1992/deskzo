@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { formatContactId, formatLeadId } from "@/lib/order-id";
 import { db } from "@/lib/db";
 import { accountScopeIds } from "@/lib/authz/company-scope";
 import { sanitizeCsvCell } from "@/lib/csv";
@@ -194,7 +195,7 @@ export async function accountBundle(userId: string, companyId: string) {
       {
         name: "Contacts",
         rows: company.contacts.map((c) => ({
-          Key: `CON-${String(c.contactSeq).padStart(6, "0")}`,
+          Key: formatContactId(c.contactSeq),
           Name: c.name,
           Designation: c.designation,
           Email: c.email ?? "",
@@ -235,7 +236,7 @@ export async function accountBundle(userId: string, companyId: string) {
       {
         name: "Leads",
         rows: leads.map((l) => ({
-          Lead: `LEAD-${String(l.leadSeq).padStart(6, "0")}`,
+          Lead: formatLeadId(l.leadSeq),
           Title: l.title,
           Status: l.status,
           Value: l.estimatedValue ? Number(l.estimatedValue) : null,

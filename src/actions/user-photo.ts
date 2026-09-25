@@ -79,17 +79,14 @@ export async function setProfilePhoto(dataUrl: string, userId?: string): Promise
   }
 
   const now = new Date();
-  await db.$transaction([
-    db.userPhoto.upsert({
+  await db.$transaction(async (tx) => {
+    await tx.userPhoto.upsert({
       where: { userId: targetId },
       create: { userId: targetId, dataUrl, mimeType: mimeType!, byteSize },
       update: { dataUrl, mimeType: mimeType!, byteSize },
-    }),
-    // Written in the same transaction as the bytes: the column is what tells a list a photo exists
-    // and what busts the browser cache, so the two drifting apart shows people a stale face or no
-    // face at all.
-    db.user.update({ where: { id: targetId }, data: { photoUpdatedAt: now } }),
-  ]);
+    });
+    await tx.user.update({ where: { id: targetId }, data: { photoUpdatedAt: now } });
+  });
 
   if (!self) {
     const target = await db.user.findUnique({ where: { id: targetId }, select: { name: true } });
@@ -112,10 +109,10 @@ export async function removeProfilePhoto(userId?: string): Promise<ActionResult<
   const { actorId, allowed, self } = await mayEdit(targetId);
   if (!allowed) return { ok: false, error: "You can't change somebody else's profile photo." };
 
-  await db.$transaction([
-    db.userPhoto.deleteMany({ where: { userId: targetId } }),
-    db.user.update({ where: { id: targetId }, data: { photoUpdatedAt: null } }),
-  ]);
+  await db.$transaction(async (tx) => {
+    await tx.userPhoto.deleteMany({ where: { userId: targetId } });
+    await tx.user.update({ where: { id: targetId }, data: { photoUpdatedAt: null } });
+  });
 
   if (!self) {
     const target = await db.user.findUnique({ where: { id: targetId }, select: { name: true } });

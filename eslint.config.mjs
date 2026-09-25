@@ -5,6 +5,32 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  /**
+   * Multi-tenancy guard rails — the editor-time half of `npm run check:tenancy`. One server answers
+   * for every workspace, so anything that caches, batches or defers work without knowing which
+   * workspace it is for can hand one customer's data to another. See src/lib/tenancy.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.property.name='$transaction'][arguments.0.type!='ArrowFunctionExpression'][arguments.0.type!='FunctionExpression']",
+          message: "Use the interactive form — db.$transaction(async (tx) => { … }). The array form needs its queries built on one client up front, which the per-workspace db can't do.",
+        },
+      ],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "next/server", importNames: ["after"], message: "after() from a page can't see which workspace it is for — use tenantAfter() from src/lib/tenancy." },
+            { name: "next/cache", importNames: ["unstable_cache"], message: "Next's data cache is shared by every workspace — cache per workspace with src/lib/tenancy/cache." },
+          ],
+        },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

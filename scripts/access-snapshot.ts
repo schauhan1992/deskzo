@@ -14,7 +14,7 @@
 import { db } from "../src/lib/db";
 import { PERMISSIONS } from "../src/lib/permissions";
 import { resolveUserPermissions } from "../src/lib/authz/resolve";
-import { ROLES } from "../src/lib/roles";
+import { roleKeys } from "../src/lib/authz/role-registry";
 
 async function main() {
   const keys = PERMISSIONS.map((p) => p.key).sort();
@@ -44,7 +44,7 @@ async function main() {
   // Role-level view too, so a role with no current holder is still covered — otherwise a conversion
   // that widens PURCHASE goes unnoticed simply because nobody happened to be sampled.
   console.log(`\n# Registry defaults, by role`);
-  for (const role of ROLES) {
+  for (const role of await roleKeys()) {
     const byDefault = PERMISSIONS.filter((p) => (p.defaultRoles as readonly string[]).includes(role)).map((p) => p.key);
     console.log(`${role} ${byDefault.length}: ${byDefault.sort().join(",")}`);
   }

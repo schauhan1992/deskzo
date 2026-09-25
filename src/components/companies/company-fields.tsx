@@ -4,6 +4,20 @@ import { companySourceValues, companyTypeValues, relationshipTypeValues, relatio
 import { paymentTermsValues, paymentTermsLabels } from "@/lib/gst";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { EMPLOYEE_BANDS } from "@/lib/company-size";
+import { CreditBadge } from "@/components/credit/credit-badge";
+import { termsExceed, type CreditRating, type TermsKey } from "@/lib/credit/engine";
+import type { CategoryTree, FlatCategory } from "@/lib/customers/categories";
+
+/** What the credit engine says about a customer's terms — see src/lib/credit/engine.ts. */
+export type TermsAdvice = {
+  rating: CreditRating;
+  score: number | null;
+  recommendedTerms: TermsKey;
+  canOverride: boolean;
+  /** What they are on now — null for a customer being created. Unchanged terms are never a new decision. */
+  currentTerms: TermsKey | null;
+};
 
 type IndustryOption = { id: string; name: string };
 
@@ -11,13 +25,30 @@ export function CompanyDetailFields({
   register,
   errors,
   industries,
+  categories,
   relationshipTypeOptions = relationshipTypeValues,
+  nameAddon,
+  termsAdvice,
+  selectedTerms,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
   industries: IndustryOption[];
+  /** The customer categories to offer. Left out where a category means nothing — vendors, say. */
+  categories?: CategoryTree<FlatCategory>[];
   relationshipTypeOptions?: readonly CompanyRelationshipType[];
+  /** Rendered under the name — the create form puts the existing-company search here. */
+  nameAddon?: React.ReactNode;
+  /** A customer's credit advice for the terms field. Left out for vendors: their terms are ours to pay. */
+  termsAdvice?: TermsAdvice | null;
+  /** The terms currently chosen in the form, so the advice can react to them. */
+  selectedTerms?: string;
 }) {
+  const chosen = (selectedTerms || null) as TermsKey | null;
+  const changed = !!termsAdvice && !!chosen && chosen !== termsAdvice.currentTerms;
+  const overriding = changed && !!chosen && termsExceed(chosen, termsAdvice!.recommendedTerms);
+  const standingBeyond =
+    !!termsAdvice && !changed && !!termsAdvice.currentTerms && termsExceed(termsAdvice.currentTerms, termsAdvice.recommendedTerms);
   return (
     <div className="space-y-6">
       <Card>
@@ -27,6 +58,7 @@ export function CompanyDetailFields({
             <Label htmlFor="name">Company name *</Label>
             <Input id="name" {...register("name")} />
             {errors.name && <p className="text-xs text-danger">{String(errors.name.message)}</p>}
+            {nameAddon}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="industryId">Industry</Label>
@@ -44,10 +76,25 @@ export function CompanyDetailFields({
               </p>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="category">Category</Label>
-            <Input id="category" placeholder="e.g. SMB, Enterprise, Education" {...register("category")} />
-          </div>
+          {categories && (
+            <div className="space-y-1.5">
+              <Label htmlFor="customerCategoryId">Customer category</Label>
+              <Select id="customerCategoryId" {...register("customerCategoryId")}>
+                <option value="">None</option>
+                {categories.map((top) => (
+                  <optgroup key={top.id} label={top.name}>
+                    <option value={top.id}>{top.name}</option>
+                    {top.children.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {top.name} › {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+              <p className="text-xs text-subtle">Shown beside their name everywhere, with how to treat them.</p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="companyType">Company type</Label>
             <Select id="companyType" {...register("companyType")}>
@@ -70,8 +117,16 @@ export function CompanyDetailFields({
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="employeeCount">Number of employees</Label>
-            <Input id="employeeCount" type="number" min={0} {...register("employeeCount")} />
+            <Label htmlFor="employeeBand">Number of employees</Label>
+            {/* A band, not a number — nobody adding a customer knows it has 37 staff. See company-size.ts. */}
+            <Select id="employeeBand" {...register("employeeBand")}>
+              <option value="">Not known</option>
+              {EMPLOYEE_BANDS.map((b) => (
+                <option key={b.key} value={b.key}>
+                  {b.label}
+                </option>
+              ))}
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="website">Website</Label>
@@ -90,6 +145,29 @@ export function CompanyDetailFields({
                 </option>
               ))}
             </Select>
+            {termsAdvice && (
+              <div className="space-y-1.5 text-xs">
+                <p className="flex flex-wrap items-center gap-1.5 text-muted">
+                  <CreditBadge rating={termsAdvice.rating} score={termsAdvice.score} />
+                  their record supports up to {paymentTermsLabels[termsAdvice.recommendedTerms]}
+                </p>
+                {overriding &&
+                  (termsAdvice.canOverride ? (
+                    <Input
+                      aria-label="Why give longer terms"
+                      placeholder={`Why ${paymentTermsLabels[chosen!]}? Kept on their credit record.`}
+                      {...register("creditOverrideReason")}
+                    />
+                  ) : (
+                    <p className="text-danger">
+                      Longer than their record supports — saving needs someone who can override credit terms.
+                    </p>
+                  ))}
+                {standingBeyond && (
+                  <p className="text-warning">Their current terms are longer than their record now supports.</p>
+                )}
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="dunsNumber">D-U-N-S number</Label>

@@ -28,8 +28,20 @@ import { listItemOptions } from "@/actions/item";
 import { listTickets } from "@/actions/ticket";
 import { estateCount } from "@/actions/it-asset";
 import { listTasks } from "@/actions/task";
+import { listProjects } from "@/actions/project";
+import { CompanyProjects } from "@/components/companies/company-projects";
+import { getCreditProfile } from "@/actions/credit";
+import { CompanyCredit } from "@/components/credit/company-credit";
+import { CreditBadge } from "@/components/credit/credit-badge";
+import { getSupportLoad } from "@/actions/support-load";
+import { companyMailSummary, listMailLog } from "@/actions/mail-log";
+import { CompanyEmails } from "@/components/mail-log/company-emails";
+import { CompanyForms } from "@/components/forms/company-forms";
+import { companyFormResponses } from "@/actions/forms";
+import { SupportLevelBadge, SupportLoadPanel } from "@/components/support/support-load-panel";
 import { hasEffectivePermission } from "@/actions/permission";
 import { currentUser } from "@/lib/session";
+import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -47,6 +59,9 @@ import { CustomerNoticeButton } from "@/components/marketing/customer-notice-but
 import { RenewButton } from "@/components/renewals/renew-button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { CompanyStageBadge } from "@/components/companies/company-stage-badge";
+import { CategoryChip, CategoryGuidance } from "@/components/customers/category-chip";
+import { CategoryPicker } from "@/components/customers/category-picker";
+import { listCustomerCategories } from "@/actions/customer-category";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { CallList } from "@/components/calls/call-list";
 import { DomainPanel } from "@/components/domains/domain-panel";
@@ -72,6 +87,7 @@ import { getRenewalStatus } from "@/lib/renewals";
 import { formatOrderId } from "@/lib/order-id";
 import { paymentTermsLabels } from "@/lib/gst";
 import { relationshipTypeLabels, vendorStatusLabels } from "@/lib/validation/company";
+import { headcountLabel } from "@/lib/company-size";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
 
@@ -125,6 +141,12 @@ export async function CompanyDetail({
     notesEnabled,
     canBroadcastNote,
     canManagePortal,
+    canSeeContacts,
+    canSeeLeads,
+    canSeeOrders,
+    projectsEnabled,
+    canManageProjects,
+    canMerge,
   ] = await Promise.all([
     isModuleEnabled("items"),
     isModuleEnabled("renewals"),
@@ -152,8 +174,17 @@ export async function CompanyDetail({
     isModuleEnabled("notes"),
     canBroadcastNotes(),
     hasEffectivePermission(userId, "portal.manage"),
+    // The `*.view` permissions. The module-shaped ones (documents, payments, visits, calls,
+    // tickets, renewals, projects) are already inside `isModuleEnabled` above; these three have no
+    // module of their own to ride on, so they are asked for directly.
+    hasEffectivePermission(userId, "contacts.view"),
+    hasEffectivePermission(userId, "leads.view"),
+    hasEffectivePermission(userId, "orders.view"),
+    isModuleEnabled("projects"),
+    hasEffectivePermission(userId, "projects.manage"),
+    hasEffectivePermission(userId, "companies.merge"),
   ]);
-  const [company, itemOptions, companyTickets, companyTasks, assignableUsers, vendorOptions, companyCalls, domainBriefing] = await Promise.all([
+  const [company, itemOptions, companyTickets, companyTasks, assignableUsers, vendorOptions, companyCalls, domainBriefing, companyProjects, customerCategories] = await Promise.all([
     getCompany(id),
     itemsEnabled ? listItemOptions() : Promise.resolve([]),
     helpdeskEnabled ? listTickets({ companyId: id }) : Promise.resolve([]),
@@ -162,6 +193,8 @@ export async function CompanyDetail({
     itemsEnabled ? listVendorOptions() : Promise.resolve([]),
     callsEnabled ? listCompanyCalls(id) : Promise.resolve([]),
     domainsEnabled ? getDomainBriefing(id) : Promise.resolve(null),
+    projectsEnabled ? listProjects({ companyId: id }) : Promise.resolve([]),
+    listCustomerCategories(),
   ]);
   if (!company) notFound();
 
@@ -169,6 +202,13 @@ export async function CompanyDetail({
   // Subscriptions, Leads, Renewals) track what a company has bought from Wroffy, which doesn't
   // apply. Resellers are on the buying side, so they keep those tabs: their orders are real orders.
   const isVendor = !isCustomerRelationshipType(company.relationshipType);
+  // Who may move this account, decided by the same rules the actions enforce — see
+  // src/lib/authz/reassign.ts — so the buttons below are shown only to people they will work for.
+  const reassign = await reassignRights(userId);
+  const holders = { ownerUserId: company.owner?.id ?? null, assignedToUserId: company.assignedTo?.id ?? null };
+  const canChangeManager = mayChangeAccountManager(reassign, userId, holders);
+  const canChangeCaller = mayChangeCaller(reassign, userId, holders);
+  const canUnassign = mayLeaveUnassigned(reassign);
   const isCommissionParty = company.relationshipType === "COMMISSION_PARTY";
   const isReseller = company.relationshipType === "RESELLER";
   const managedByReseller = company.managedByReseller;
@@ -201,11 +241,20 @@ export async function CompanyDetail({
   const showStatement = receivablesEnabled && !isVendor;
   const statement = showStatement ? await customerStatement(company.id) : null;
 
-  const [documents, companyPayments, paymentSummary] = await Promise.all([
+  // Credit is money about the account, so it rides on the payments view like the billed figures do.
+  const [documents, companyPayments, paymentSummary, creditProfile, supportLoad, mailSummary, companyForms] = await Promise.all([
     documentsEnabled ? listCompanyDocuments(company.id) : Promise.resolve([]),
     paymentsEnabled ? listCompanyPayments(company.id) : Promise.resolve([]),
     paymentsEnabled ? companyPaymentSummary(company.id) : Promise.resolve(null),
+    paymentsEnabled && !isVendor ? getCreditProfile(company.id) : Promise.resolve(null),
+    // How much support they take against what they pay — beside their tickets, where it is judged.
+    helpdeskEnabled && !isVendor ? getSupportLoad(company.id) : Promise.resolve(null),
+    // Null without `emails.view` or outside the account scope — and then there is no Emails tab.
+    !isVendor ? companyMailSummary(company.id) : Promise.resolve(null),
+    // Only the forms whose answers are shared with this viewer — and no tab when there are none.
+    !isVendor ? companyFormResponses(company.id) : Promise.resolve(null),
   ]);
+  const showFormsTab = Boolean(companyForms && (companyForms.responses.length > 0 || companyForms.waiting.length > 0));
 
   // Commission is paid on a customer's business, so it's a customer-side view; a commission party
   // sees the mirror of it (what they earned) on their own Details tab instead.
@@ -232,30 +281,45 @@ export async function CompanyDetail({
   const productRows = [...company.products, ...company.ordersAsEndCustomer];
   // A won deal only counts as a real Customer once it has at least one order on file (even an
   // expired one) — otherwise it's shown as "Awaiting Order" rather than a misleading "CUSTOMER".
-  const isAwaitingOrder = company.stage === "CUSTOMER" && productRows.length === 0;
+  // Only said to someone who can see the orders — without `orders.view` the list is empty because it
+  // was left out, not because there are none.
+  const isAwaitingOrder = canSeeOrders && company.stage === "CUSTOMER" && productRows.length === 0;
 
   const tabs = [
     { key: "details", label: "Details" },
-    ...(!isVendor && itemsEnabled ? [{ key: "products", label: "Products & Subscriptions" }] : []),
+    ...(!isVendor && itemsEnabled && canSeeOrders ? [{ key: "products", label: "Products & Subscriptions" }] : []),
     ...(documentsEnabled ? [{ key: "documents", label: "Documents" }] : []),
     ...(paymentsEnabled && !isVendor ? [{ key: "payments", label: "Payments" }] : []),
+    ...(creditProfile ? [{ key: "credit", label: "Credit" }] : []),
     ...(showStatement ? [{ key: "statement", label: "Statement" }] : []),
     ...(showCommissionTab ? [{ key: "commission", label: "Commission" }] : []),
     ...(visitsEnabled ? [{ key: "visits", label: "Visits" }] : []),
     ...(callsEnabled ? [{ key: "calls", label: "Calls" }] : []),
-    ...(!isVendor ? [{ key: "leads", label: "Leads" }] : []),
+    ...(!isVendor && canSeeLeads ? [{ key: "leads", label: "Leads" }] : []),
+    ...(!isVendor && projectsEnabled ? [{ key: "projects", label: "Projects" }] : []),
     ...(!isVendor && itemsEnabled && renewalsEnabled ? [{ key: "renewals", label: "Renewals" }] : []),
     { key: "locations", label: "Locations" },
-    { key: "contacts", label: "Contacts" },
+    ...(canSeeContacts ? [{ key: "contacts", label: "Contacts" }] : []),
     ...(showEstateTab ? [{ key: "assets", label: "IT Assets" }] : []),
     ...(feedbackEnabled && !isVendor ? [{ key: "feedback", label: "Feedback" }] : []),
     ...(marketingEnabled && canViewMarketing && !isVendor ? [{ key: "marketing", label: "Marketing" }] : []),
     ...(helpdeskEnabled ? [{ key: "tickets", label: "Tickets" }] : []),
+    ...(mailSummary ? [{ key: "emails", label: "Emails" }] : []),
+    ...(showFormsTab ? [{ key: "forms", label: "Forms" }] : []),
     ...(tasksEnabled ? [{ key: "tasks", label: "Tasks" }] : []),
     ...(canManagePortal && !isVendor ? [{ key: "portal", label: "Portal" }] : []),
   ];
+  /** A link to one of the tabs below, keeping the list filters when embedded — as `TabNav` builds them. */
+  const tabHref = (key: string) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(linkParams)) if (v) query.set(k, v);
+    query.set("tab", key);
+    return `${basePath ?? `/companies/${company.id}`}?${query}`;
+  };
   const primaryLocation = company.locations.find((l) => l.isPrimary) ?? company.locations[0];
   const activeTab = tabs.some((t) => t.key === tab) ? tab! : "details";
+  // The rows only when the tab is open; the counts above are cheap and always there.
+  const recentMail = activeTab === "emails" && mailSummary ? await listMailLog({ companyId: company.id, page: 1, pageSize: 50 }) : null;
 
   // Renewals follow the subscription, so an end customer sees the expiries bought for them too.
   //
@@ -311,6 +375,9 @@ export async function CompanyDetail({
         <div className="min-w-0 flex-1 basis-64">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold text-text">{company.name}</h1>
+            {/* Who this customer is, before anything else on the page. Whoever can open the account can
+                edit it, so whoever can see this can change it. */}
+            <CategoryPicker companyId={company.id} current={company.customerCategory} categories={customerCategories} canEdit />
             {managedByReseller && <Badge tone="amber">Reseller-managed</Badge>}
             {isReseller && <Badge tone="blue">Reseller</Badge>}
             {!isVendor && <CompanyStageBadge stage={company.stage} awaitingOrder={isAwaitingOrder} />}
@@ -331,6 +398,7 @@ export async function CompanyDetail({
               ))}
             </div>
           )}
+          <CategoryGuidance category={company.customerCategory} className="mt-3 max-w-3xl" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Not for a reseller's end customer: the same rule that stops us emailing them stops us
@@ -341,8 +409,22 @@ export async function CompanyDetail({
           {isVendor && company.vendorStatus && (
             <VendorStatusControl companyId={company.id} status={company.vendorStatus} />
           )}
-          <AccountManagerButton companyId={company.id} owner={company.owner} users={assignableUsers} />
-          {!isVendor && <CallerButton companyId={company.id} caller={company.assignedTo} users={assignableUsers} />}
+          <AccountManagerButton
+            companyId={company.id}
+            owner={company.owner}
+            users={assignableUsers}
+            canChange={canChangeManager}
+            canUnassign={canUnassign}
+          />
+          {!isVendor && (
+            <CallerButton
+              companyId={company.id}
+              caller={company.assignedTo}
+              users={assignableUsers}
+              canChange={canChangeCaller}
+              canUnassign={canUnassign}
+            />
+          )}
           {isVendor && <VendorCodeButton companyId={company.id} vendorCode={company.vendorCode} />}
           {/* Resellers need this for the PAN their onboarding KYC step checks. */}
           {(isReseller || (isVendor && !isCommissionParty)) && (
@@ -357,11 +439,16 @@ export async function CompanyDetail({
               }}
             />
           )}
-          {!isVendor && <ActivityPanelButton timeline={timeline} />}
+          {!isVendor && canSeeLeads && <ActivityPanelButton timeline={timeline} />}
           <Link href={`/companies/${company.id}/edit`}>
             <Button variant="secondary">Edit</Button>
           </Link>
-          {!isVendor && (
+          {canMerge && (
+            <Link href={`/companies/merge?keep=${company.id}`} title="This company stays; pick the duplicate to fold into it">
+              <Button variant="ghost">Merge a duplicate</Button>
+            </Link>
+          )}
+          {!isVendor && canSeeLeads && (
             <Link href={`/leads/new?companyId=${company.id}`}>
               <Button>New lead</Button>
             </Link>
@@ -382,10 +469,12 @@ export async function CompanyDetail({
             <div className="text-xs uppercase tracking-wide text-subtle">Locations</div>
             <div className="mt-1 text-xl font-semibold text-text">{company.locations.length}</div>
           </Card>
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Contacts</div>
-            <div className="mt-1 text-xl font-semibold text-text">{company.contacts.length}</div>
-          </Card>
+          {canSeeContacts && (
+            <Card className="p-4">
+              <div className="text-xs uppercase tracking-wide text-subtle">Contacts</div>
+              <div className="mt-1 text-xl font-semibold text-text">{company.contacts.length}</div>
+            </Card>
+          )}
           <Card className="p-4">
             <div className="text-xs uppercase tracking-wide text-subtle">Added on</div>
             <div className="mt-1 text-xl font-semibold text-text">{formatDate(company.createdAt)}</div>
@@ -395,62 +484,90 @@ export async function CompanyDetail({
         // Pipeline on the left, real money in the middle, recency on the right — the whole account
         // in one row, which is the point of a 360 view.
         <div className="grid grid-cols-2 gap-3 @xl:grid-cols-3 @5xl:grid-cols-6">
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Leads</div>
-            <div className="mt-1 text-lg font-semibold text-text">{company.leads.length}</div>
-            <div className="mt-0.5 text-xs text-muted">
-              {openLeads.length} open · {wonLeads.length} won · {lostLeads.length} lost
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Open pipeline</div>
-            <div className="mt-1 text-lg font-semibold text-text">{formatCurrency(openValue)}</div>
-            <div className="mt-0.5 text-xs text-muted">
-              {formatCurrency(wonValue)} won across {wonLeads.length} lead(s)
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Documents</div>
-            <div className="mt-1 text-lg font-semibold text-text">{documents.length}</div>
-            <div className="mt-0.5 text-xs text-muted">
-              {documentsEnabled
-                ? `${documents.filter((d) => d.docType === "INVOICE").length} invoice(s)`
-                : "Module off"}
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Billed</div>
-            <div className="mt-1 text-lg font-semibold text-text">
-              {paymentSummary ? formatCurrency(paymentSummary.billed) : "—"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted">
-              {paymentSummary ? `${formatCurrency(paymentSummary.received)} received` : "Payments module off"}
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Outstanding</div>
-            <div
-              className={`mt-1 text-lg font-semibold ${
-                paymentSummary && paymentSummary.outstanding > 0 ? "text-danger" : "text-text"
-              }`}
-            >
-              {paymentSummary ? formatCurrency(paymentSummary.outstanding) : "—"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted">
-              {!paymentSummary
-                ? "Payments module off"
-                : paymentSummary.credit > 0
-                  ? `${formatCurrency(paymentSummary.credit)} in credit`
-                  : paymentSummary.unallocated > 0
-                    ? `${formatCurrency(paymentSummary.unallocated)} unallocated`
-                    : "Fully allocated"}
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-subtle">Last activity</div>
-            <div className="mt-1 text-lg font-semibold text-text">{formatDate(timeline[0]?.occurredAt ?? null)}</div>
-            <div className="mt-0.5 text-xs text-muted">{timeline.length} logged total</div>
-          </Card>
+          {/* Each card only for someone who may see what it counts — a figure with its source
+              withheld is still the thing withheld. */}
+          {canSeeLeads && (
+            <>
+              <Card className="p-4">
+                <div className="text-xs uppercase tracking-wide text-subtle">Leads</div>
+                <div className="mt-1 text-lg font-semibold text-text">{company.leads.length}</div>
+                <div className="mt-0.5 text-xs text-muted">
+                  {openLeads.length} open · {wonLeads.length} won · {lostLeads.length} lost
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="text-xs uppercase tracking-wide text-subtle">Open pipeline</div>
+                <div className="mt-1 text-lg font-semibold text-text">{formatCurrency(openValue)}</div>
+                <div className="mt-0.5 text-xs text-muted">
+                  {formatCurrency(wonValue)} won across {wonLeads.length} lead(s)
+                </div>
+              </Card>
+            </>
+          )}
+          {documentsEnabled && (
+            <Card className="p-4">
+              <div className="text-xs uppercase tracking-wide text-subtle">Documents</div>
+              <div className="mt-1 text-lg font-semibold text-text">{documents.length}</div>
+              <div className="mt-0.5 text-xs text-muted">
+                {documents.filter((d) => d.docType === "INVOICE").length} invoice(s)
+              </div>
+            </Card>
+          )}
+          {paymentSummary && (
+            <>
+              <Card className="p-4">
+                <div className="text-xs uppercase tracking-wide text-subtle">Billed</div>
+                <div className="mt-1 text-lg font-semibold text-text">{formatCurrency(paymentSummary.billed)}</div>
+                <div className="mt-0.5 text-xs text-muted">{formatCurrency(paymentSummary.received)} received</div>
+              </Card>
+              <Card className="p-4">
+                <div className="text-xs uppercase tracking-wide text-subtle">Outstanding</div>
+                <div
+                  className={`mt-1 text-lg font-semibold ${paymentSummary.outstanding > 0 ? "text-danger" : "text-text"}`}
+                >
+                  {formatCurrency(paymentSummary.outstanding)}
+                </div>
+                <div className="mt-0.5 text-xs text-muted">
+                  {paymentSummary.credit > 0
+                    ? `${formatCurrency(paymentSummary.credit)} in credit`
+                    : paymentSummary.unallocated > 0
+                      ? `${formatCurrency(paymentSummary.unallocated)} unallocated`
+                      : "Fully allocated"}
+                </div>
+              </Card>
+            </>
+          )}
+          {creditProfile && (
+            <Link href={tabHref("credit")} className="block">
+              <Card className="h-full p-4 transition hover:border-line-strong">
+                <div className="text-xs uppercase tracking-wide text-subtle">Credit</div>
+                <div className="mt-1.5">
+                  <CreditBadge rating={creditProfile.rating} score={creditProfile.score} />
+                </div>
+                <div className={`mt-1 text-xs ${creditProfile.termsBeyond ? "text-warning" : "text-muted"}`}>
+                  Up to {paymentTermsLabels[creditProfile.recommendedTerms]} · limit {formatCurrency(creditProfile.limit)}
+                </div>
+              </Card>
+            </Link>
+          )}
+          {supportLoad && (
+            <Link href={tabHref("tickets")} className="block">
+              <Card className="h-full p-4 transition hover:border-line-strong">
+                <div className="text-xs uppercase tracking-wide text-subtle">Support</div>
+                <div className="mt-1 text-lg font-semibold text-text">{supportLoad.tickets} ticket(s)</div>
+                <div className="mt-0.5">
+                  <SupportLevelBadge level={supportLoad.level} multiple={supportLoad.multiple} />
+                </div>
+              </Card>
+            </Link>
+          )}
+          {canSeeLeads && (
+            <Card className="p-4">
+              <div className="text-xs uppercase tracking-wide text-subtle">Last activity</div>
+              <div className="mt-1 text-lg font-semibold text-text">{formatDate(timeline[0]?.occurredAt ?? null)}</div>
+              <div className="mt-0.5 text-xs text-muted">{timeline.length} logged total</div>
+            </Card>
+          )}
         </div>
       )}
 
@@ -680,11 +797,11 @@ export async function CompanyDetail({
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Category</span>
-                  <span className="text-text">{company.category ?? "—"}</span>
+                  {company.customerCategory ? <CategoryChip category={company.customerCategory} /> : <span className="text-text">—</span>}
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Employees</span>
-                  <span className="text-text">{company.employeeCount ?? "—"}</span>
+                  <span className="text-text">{headcountLabel(company.employeeCount) ?? "—"}</span>
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Website</span>
@@ -743,7 +860,7 @@ export async function CompanyDetail({
           </>
         )}
 
-          {activeTab === "products" && itemsEnabled && (
+          {activeTab === "products" && itemsEnabled && canSeeOrders && (
             <Card>
               <CardHeader className="text-sm font-medium text-text">
                 {isReseller ? "Orders placed (billed to this reseller)" : "Products & Subscriptions"}
@@ -836,6 +953,8 @@ export async function CompanyDetail({
 
           {activeTab === "statement" && statement && <CompanyStatement statement={statement} />}
 
+          {activeTab === "credit" && creditProfile && <CompanyCredit companyId={company.id} profile={creditProfile} />}
+
           {activeTab === "commission" && showCommissionTab && (
             <CompanyCommission
               companyId={company.id}
@@ -845,7 +964,7 @@ export async function CompanyDetail({
             />
           )}
 
-          {activeTab === "leads" && (
+          {activeTab === "leads" && canSeeLeads && (
             <Card>
               <CardHeader className="text-sm font-medium text-text">Leads</CardHeader>
               <CardContent className="p-0">
@@ -884,6 +1003,15 @@ export async function CompanyDetail({
                 </table>
               </CardContent>
             </Card>
+          )}
+
+          {activeTab === "projects" && projectsEnabled && (
+            <CompanyProjects
+              companyId={company.id}
+              projects={companyProjects}
+              canCreate={canManageProjects}
+              asOf={new Date()}
+            />
           )}
 
           {activeTab === "renewals" && itemsEnabled && renewalsEnabled && (
@@ -975,7 +1103,7 @@ export async function CompanyDetail({
             </Card>
           )}
 
-          {activeTab === "contacts" && (
+          {activeTab === "contacts" && canSeeContacts && (
             <Card>
               <CardHeader className="text-sm font-medium text-text">Contacts</CardHeader>
               <CardContent>
@@ -1000,6 +1128,8 @@ export async function CompanyDetail({
             <CompanyMarketing companyId={company.id} companyName={company.name} />
           )}
 
+          {activeTab === "tickets" && helpdeskEnabled && supportLoad && <SupportLoadPanel load={supportLoad} />}
+
           {activeTab === "tickets" && helpdeskEnabled && (
             <Card className="overflow-x-auto p-0">
               <div className="flex items-center justify-between border-b border-line px-5 py-4">
@@ -1013,6 +1143,12 @@ export async function CompanyDetail({
               <TicketsTable tickets={companyTickets} showCompany={false} />
             </Card>
           )}
+
+          {activeTab === "emails" && mailSummary && recentMail && (
+            <CompanyEmails companyId={company.id} summary={mailSummary} recent={recentMail} />
+          )}
+
+          {activeTab === "forms" && showFormsTab && companyForms && <CompanyForms data={companyForms} />}
 
           {activeTab === "tasks" && tasksEnabled && (
             <Card>

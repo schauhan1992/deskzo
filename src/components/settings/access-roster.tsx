@@ -19,11 +19,9 @@ type Row = Awaited<ReturnType<typeof accessRoster>>[number];
  */
 export function AccessRoster({
   rows,
-  viewerIsSuperAdmin,
   mayManage,
 }: {
   rows: Row[];
-  viewerIsSuperAdmin: boolean;
   mayManage: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -131,12 +129,7 @@ export function AccessRoster({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                  <UserAccessDrawer
-                    userId={r.id}
-                    userName={r.name}
-                    viewerIsSuperAdmin={viewerIsSuperAdmin}
-                    mayManage={mayManage}
-                  />
+                  <UserAccessDrawer userId={r.id} userName={r.name} mayManage={mayManage} />
                 </td>
               </tr>
             ))}

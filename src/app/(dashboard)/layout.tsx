@@ -33,6 +33,13 @@ import { dlpApplies, hasAnyDeterrent } from "@/lib/security/policy";
 import { recordPageView } from "@/lib/security/page-view";
 import { DlpGuard } from "@/components/security/dlp-guard";
 import { Watermark } from "@/components/security/watermark";
+import { MaintenanceBanner } from "@/components/layout/maintenance-banner";
+import { getCopilotAvailability } from "@/actions/copilot";
+import { CopilotButton } from "@/components/copilot/copilot-panel";
+import { HeaderSearch } from "@/components/layout/header-search";
+import { searchScopesForMe } from "@/actions/search";
+import { unreadUpdateCount } from "@/actions/help";
+import { can } from "@/lib/authz/resolve";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
@@ -50,7 +57,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // point of the feature is to see their app, and a header still showing the admin's name and role
   // would make it impossible to tell whose permissions a page was rendered with.
   const shownUser = viewAs?.user ?? session?.user;
-  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash] = await Promise.all([
+  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp] = await Promise.all([
     listViewAsTargets(),
     // Resolved for whoever the request is acting as, so an admin viewing as a salesperson sees
     // the salesperson's sidebar rather than their own.
@@ -65,6 +72,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
       // The skip is per session, so nothing is passed in: a dismissal the server remembered would
     // make "not now" permanent, which is the opposite of what a mandatory form needs.
     pendingSplash([]),
+    // Not while viewing as somebody: a copilot chat is private, and would open as theirs.
+    shownUser && !viewAs ? getCopilotAvailability().catch(() => null) : Promise.resolve(null),
+    // The header search offers only the lists this person can open — src/actions/search.ts. Like
+    // the sidebar, it follows "view as".
+    shownUser ? searchScopesForMe().catch(() => []) : Promise.resolve([]),
+    shownUser ? unreadUpdateCount().catch(() => 0) : Promise.resolve(0),
+    shownUser ? can(shownUser.id, "help.manage") : Promise.resolve(false),
 ]);
 
   // Not while viewing as somebody else: an admin borrowing an account should not be wished a happy
@@ -160,7 +174,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* Sticky so the controls stay reachable when a long table scrolls. */}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-line bg-surface/85 px-4 backdrop-blur-md md:px-6">
           {/* Leaves room for the mobile menu button, which floats over this corner. */}
-          <div className="w-9 md:hidden" />
+          <div className="w-9 shrink-0 md:hidden" />
+          {searchScopes.length > 0 && <HeaderSearch scopes={searchScopes} />}
           {viewAs && (
             <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-warning-bg px-2.5 py-1 text-xs font-medium text-warning">
               <Eye className="h-3.5 w-3.5 shrink-0" />
@@ -182,6 +197,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               targets={viewAsTargets}
               viewingAs={viewAs ? { userName: viewAs.user.name, actorName: viewAs.actor.name } : null}
             />
+            {copilot && <CopilotButton availability={copilot} />}
             <ThemeToggle defaultTheme={branding.defaultTheme} />
             <NotificationBell />
             <Link
@@ -213,6 +229,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </form>
           </div>
         </header>
+        <MaintenanceBanner />
         <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">
           {children}
         </main>
@@ -225,7 +242,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         for a convenience. The tools it offers all have pages of their own.
       */}
       <div className="hidden xl:block">
-        <SideRail />
+        <SideRail copilot={!!copilot} unreadUpdates={unreadUpdates} canManageHelp={canManageHelp} />
       </div>
     </div>
     </TableColumnsProvider>

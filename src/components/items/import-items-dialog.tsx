@@ -6,6 +6,11 @@ import { importItems, type ImportItemsResult } from "@/actions/item";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
+/** The first twenty names and a count of the rest — a first import can add hundreds. */
+function listSome(names: string[]) {
+  return names.slice(0, 20).join(", ") + (names.length > 20 ? ` and ${names.length - 20} more` : "");
+}
+
 export function ImportItemsDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -57,6 +62,22 @@ export function ImportItemsDialog() {
             exists update that item&rsquo;s details (stock is never touched by import — record
             stock movements from the item page). New rows are created.
           </p>
+          <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
+            <li>
+              Every field on the item form has a column — including <strong>brand</strong>,{" "}
+              <strong>productFamily</strong> and <strong>hsnCode</strong> (HSN or SAC, 4, 6 or 8 digits).
+              Headers like &ldquo;Selling Price&rdquo; or &ldquo;HSN/SAC&rdquo; are understood too.
+            </li>
+            <li>
+              Brands and families are matched by name, ignoring case. One that isn&rsquo;t in the catalogue yet
+              is added — if you manage the catalogue; otherwise that row is skipped and named below.
+            </li>
+            <li>
+              Leave out the brand, family or HSN column entirely and existing items keep theirs; include the
+              column but leave a cell blank and that item&rsquo;s value is cleared. An export can be edited and
+              imported straight back.
+            </li>
+          </ul>
 
           <a
             href="/items-import-template.csv"
@@ -83,6 +104,17 @@ export function ImportItemsDialog() {
                 Created {result.created}, updated {result.updated}
                 {result.errors.length > 0 ? `, ${result.errors.length} row(s) skipped` : ""}.
               </p>
+              {/* Listed by name so a typo that became a new brand is caught now, not in a report. */}
+              {result.brandsCreated.length > 0 && (
+                <p className="mt-1 text-muted">
+                  Added {result.brandsCreated.length} brand(s): {listSome(result.brandsCreated)}
+                </p>
+              )}
+              {result.familiesCreated.length > 0 && (
+                <p className="mt-1 text-muted">
+                  Added {result.familiesCreated.length} product family(ies): {listSome(result.familiesCreated)}
+                </p>
+              )}
               {result.errors.length > 0 && (
                 <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-danger">
                   {result.errors.map((e, idx) => (

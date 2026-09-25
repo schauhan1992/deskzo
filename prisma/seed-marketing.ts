@@ -268,6 +268,7 @@ async function main() {
       assignToUserId: admin.id,
       thankYouText: "We'll be in touch within one working day.",
       createdById: admin.id,
+      ownerUserId: admin.id,
     },
   });
   console.log(`Form: /forms/${FORM_SLUG} — a stranger filling it in becomes a company, a contact and a lead.`);

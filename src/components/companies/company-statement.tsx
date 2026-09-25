@@ -4,7 +4,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { AGING_BUCKETS } from "@/lib/receivables";
 
-type Statement = Awaited<ReturnType<typeof customerStatement>>;
+type Statement = NonNullable<Awaited<ReturnType<typeof customerStatement>>>;
 
 const KIND_TONE = {
   INVOICE: "blue",

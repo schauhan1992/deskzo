@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Lock, ShieldAlert, Sparkles, RotateCcw, Search } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { setRolePermission, resetRolePermission } from "@/actions/permission";
 import type { previewPreset } from "@/actions/access";
 import { applyPreset, previewPreset as loadPreview } from "@/actions/access";

@@ -459,9 +459,9 @@ export async function issueLetter(id: string): Promise<ActionResult<null>> {
   if (!manage) return { ok: false, error: "Only HR can issue a letter." };
   if (letter.status !== "DRAFT") return { ok: false, error: `That letter is already ${letter.status.toLowerCase()}.` };
 
-  await db.$transaction([
-    db.employeeLetter.update({ where: { id }, data: { status: "ISSUED", issuedById: user.id } }),
-    db.employeeDocument.create({
+  await db.$transaction(async (tx) => {
+    await tx.employeeLetter.update({ where: { id }, data: { status: "ISSUED", issuedById: user.id } });
+    await tx.employeeDocument.create({
       data: {
         userId: letter.userId,
         // A letter issued to a candidate is filed against the candidate. Copying only the userId
@@ -479,8 +479,8 @@ export async function issueLetter(id: string): Promise<ActionResult<null>> {
         letterId: letter.id,
         uploadedById: user.id,
       },
-    }),
-  ]);
+    });
+  });
 
   // Only an employee gets told. An offer letter is issued to somebody who has no account yet —
   // it reaches them by email from HR, which is the point of it being an offer.
@@ -514,10 +514,10 @@ export async function revokeLetter(id: string): Promise<ActionResult<null>> {
 
   // Never deleted: the number was quoted to somebody, and a reference that resolves to nothing is
   // worse than one that resolves to "withdrawn".
-  await db.$transaction([
-    db.employeeLetter.update({ where: { id }, data: { status: "REVOKED" } }),
-    db.employeeDocument.deleteMany({ where: { letterId: id } }),
-  ]);
+  await db.$transaction(async (tx) => {
+    await tx.employeeLetter.update({ where: { id }, data: { status: "REVOKED" } });
+    await tx.employeeDocument.deleteMany({ where: { letterId: id } });
+  });
 
   await recordAudit({
     userId: user.id,

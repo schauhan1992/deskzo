@@ -1,4 +1,5 @@
-import type { PermissionChangeKind, PermissionSubjectType, Role } from "@prisma/client";
+import type { PermissionChangeKind, PermissionSubjectType } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { resolveViewAs } from "@/lib/impersonation";

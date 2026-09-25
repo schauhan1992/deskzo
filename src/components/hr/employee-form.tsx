@@ -7,6 +7,7 @@ import { saveEmployeeProfile } from "@/actions/hr";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
+import { AddressFields } from "@/components/ui/address-fields";
 import { employmentTypeLabels, employmentTypeValues, genderValues } from "@/lib/validation/hr";
 
 type Person = NonNullable<Awaited<ReturnType<typeof getPerson>>>;
@@ -172,15 +173,21 @@ export function EmployeeForm({
           <Field label="Address line 2">
             {(id) => <Input id={id} value={form.addressLine2} onChange={set("addressLine2")} />}
           </Field>
-          <Field label="City">
-            {(id) => <Input id={id} value={form.city} onChange={set("city")} />}
-          </Field>
-          <Field label="State" hint="Sets the professional-tax slab on their payslip.">
-            {(id) => <Input id={id} value={form.state} onChange={set("state")} placeholder="Maharashtra" />}
-          </Field>
-          <Field label="PIN code">
-            {(id) => <Input id={id} value={form.pincode} onChange={set("pincode")} />}
-          </Field>
+          {/**
+            * The state is not a label here either — it sets the professional-tax slab on every
+            * payslip, so a typed spelling is the wrong deduction rather than an untidy record.
+            */}
+          <div className="sm:col-span-2">
+            <AddressFields
+              columns={3}
+              showCountry={false}
+              country="India"
+              state={form.state}
+              city={form.city}
+              pincode={form.pincode}
+              onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+            />
+          </div>
         </CardContent>
       </Card>
 

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import type { BotVerdict } from "@/lib/security/bots";
+import { tenantKey } from "@/lib/tenancy/cache";
 import { throttle } from "@/lib/security/throttle";
 
 /**
@@ -27,7 +28,7 @@ export async function recordBotHit(input: {
   // was a throttle the thing being throttled got to defeat by varying one header. The category is
   // a closed set of six, and the full agent is still written into the row itself.
   const key = `bot:${input.ipAddress ?? "?"}|${input.verdict.category}`;
-  const { write, suppressedSince } = throttle(key, WINDOW_MS);
+  const { write, suppressedSince } = throttle(`${await tenantKey()}|${key}`, WINDOW_MS);
   if (!write) return;
 
   try {

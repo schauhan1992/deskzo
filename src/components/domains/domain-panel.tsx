@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { headcountLabel } from "@/lib/company-size";
 
 type Briefing = NonNullable<Awaited<ReturnType<typeof getDomainBriefing>>>;
 
@@ -123,7 +124,7 @@ export function DomainPanel({ companyId, briefing }: { companyId: string; briefi
 
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
                   {company.industry?.name && <span>{company.industry.name}</span>}
-                  {company.employeeCount && <span>{company.employeeCount} employees</span>}
+                  {headcountLabel(company.employeeCount) && <span>{headcountLabel(company.employeeCount)} employees</span>}
                   {company.category && <span>{company.category}</span>}
                   <CompanyLinks
                     website={profile.finalUrl ?? company.website}

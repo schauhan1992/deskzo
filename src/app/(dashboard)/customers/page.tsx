@@ -1,6 +1,8 @@
 import { listCustomersPaged, listAssignableUsers } from "@/actions/company";
 import { portalStateFor } from "@/lib/portal/state";
 import { listIndustries } from "@/actions/industry";
+import { listCustomerCategories } from "@/actions/customer-category";
+import { categoryFilterOptions } from "@/lib/customers/categories";
 import { CompaniesTable } from "@/components/companies/companies-table";
 import { CompanySplitList } from "@/components/companies/company-split-list";
 import { CompanyDetail } from "@/components/companies/company-detail";
@@ -15,6 +17,7 @@ import { companySourceValues } from "@/lib/validation/company";
 import type { CompanySource } from "@prisma/client";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
+import { viewerReassignControls } from "@/lib/authz/reassign";
 
 export default async function CustomersPage({
   searchParams,
@@ -24,6 +27,7 @@ export default async function CustomersPage({
     assignedTo?: string;
     source?: string;
     industryId?: string;
+    category?: string;
     createdFrom?: string;
     createdTo?: string;
     page?: string;
@@ -35,7 +39,7 @@ export default async function CustomersPage({
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
-  const [viewMode, result, assignableUsers, industries] = await Promise.all([
+  const [viewMode, result, assignableUsers, industries, categories] = await Promise.all([
     getViewMode("customers"),
     listCustomersPaged({
       page,
@@ -44,11 +48,13 @@ export default async function CustomersPage({
       assignedToUserId: params.assignedTo,
       source: params.source as CompanySource | undefined,
       industryId: params.industryId,
+      categoryId: params.category,
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
     }),
     listAssignableUsers(),
     listIndustries(),
+    listCustomerCategories(),
   ]);
 
   /**
@@ -81,6 +87,7 @@ export default async function CustomersPage({
           label="Industry"
           options={industries.map((i) => ({ value: i.id, label: i.name }))}
         />
+        <SelectParamFilter paramName="category" label="Category" options={categoryFilterOptions(categories)} />
         <SelectParamFilter
           paramName="assignedTo"
           label="Caller"
@@ -107,7 +114,7 @@ export default async function CustomersPage({
         </SplitListShell>
       ) : (
         <div className="mt-6">
-          <CompaniesTable companies={rows} assignableUsers={assignableUsers} mode="customers" />
+          <CompaniesTable companies={rows} assignableUsers={assignableUsers} mode="customers" reassign={await viewerReassignControls()} />
           <Pagination
             page={page}
             pageSize={pageSize}

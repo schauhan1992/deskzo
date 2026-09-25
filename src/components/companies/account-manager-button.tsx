@@ -15,10 +15,16 @@ export function AccountManagerButton({
   companyId,
   owner,
   users,
+  canChange,
+  canUnassign,
 }: {
   companyId: string;
   owner: Owner;
   users: AssignableUser[];
+  /** From `src/lib/authz/reassign.ts`, decided on the server — without it this is a label, not a button. */
+  canChange: boolean;
+  /** Only a reassigner may leave it with nobody; somebody handing off their own must name a colleague. */
+  canUnassign: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -45,6 +51,17 @@ export function AccountManagerButton({
     });
   }
 
+  // Shown as a plain label to somebody who may not change it — a button that only ever refuses is
+  // worse than no button.
+  if (!canChange) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-muted">
+        <UserRound className="h-3 w-3" />
+        {owner ? `Account manager: ${owner.name}` : "No account manager"}
+      </span>
+    );
+  }
+
   return (
     <>
       <button
@@ -60,7 +77,7 @@ export function AccountManagerButton({
         <div className="space-y-3">
           {error && <p className="text-xs text-danger">{error}</p>}
           <Select aria-label="Account manager" value={selected} onChange={(e) => setSelected(e.target.value)}>
-            <option value="">Unassigned</option>
+            {canUnassign && <option value="">Unassigned</option>}
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name} ({u.role})

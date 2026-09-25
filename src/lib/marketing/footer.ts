@@ -20,6 +20,8 @@ export type AddressParts = {
   city: string | null;
   state: string | null;
   pincode: string | null;
+  /** Optional so callers holding an older shape still type-check; blank or India prints nothing. */
+  country?: string | null;
 };
 
 export type FooterAddress = {
@@ -46,7 +48,10 @@ export function formatRegisteredAddress(org: AddressParts): string | null {
   const region = [org.city?.trim(), org.state?.trim()].filter(Boolean).join(", ");
   const locality = [region, org.pincode?.trim()].filter(Boolean).join(" ");
 
-  const lines = [name, street, locality].filter((line): line is string => !!line && line.length > 0);
+  // A foreign registered office names its country; an Indian one does not need to say so.
+  const country = org.country?.trim() && org.country.trim().toLowerCase() !== "india" ? org.country.trim() : null;
+
+  const lines = [name, street, locality, country].filter((line): line is string => !!line && line.length > 0);
   return lines.length > 0 ? lines.join("\n") : null;
 }
 

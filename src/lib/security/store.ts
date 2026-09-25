@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { DEFAULT_SECURITY_POLICY, type SecurityPolicyShape } from "@/lib/security/policy";
+import { tenantKey } from "@/lib/tenancy/cache";
 
 export const SECURITY_POLICY_ID = "global";
 
@@ -28,16 +29,20 @@ async function fetchPolicy(): Promise<SecurityPolicyShape> {
   }
 }
 
-let cache: { value: SecurityPolicyShape; expiresAt: number } | null = null;
+/** Per workspace: each has its own copy, print and bot rules. */
+const cache = new Map<string, { value: SecurityPolicyShape; expiresAt: number }>();
 const CACHE_TTL_MS = 15_000;
 
 export async function getSecurityPolicy(): Promise<SecurityPolicyShape> {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
+  const key = await tenantKey();
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
   const value = await fetchPolicy();
-  cache = { value, expiresAt: Date.now() + CACHE_TTL_MS };
+  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
   return value;
 }
 
+/** Everything, every workspace — dropping a cache only costs a re-read. */
 export function invalidateSecurityPolicyCache() {
-  cache = null;
+  cache.clear();
 }

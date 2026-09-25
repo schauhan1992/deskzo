@@ -25,6 +25,10 @@ import { LeadStatusControl } from "@/components/leads/lead-status-control";
 import { ActivityForm } from "@/components/leads/activity-form";
 import { RequirementsList } from "@/components/leads/requirements-list";
 import { TaskList } from "@/components/tasks/task-list";
+import { LeadScoreBadge, LeadScoreCard } from "@/components/leads/lead-score";
+import { refreshLeadScore } from "@/lib/leads/score-store";
+import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
+import { CategoryChip } from "@/components/customers/category-chip";
 
 /**
  * A lead's full detail — the requirement, its timeline, and the controls that move it along.
@@ -61,6 +65,9 @@ export async function LeadDetail({ id }: { id: string }) {
     visitsEnabled ? listLeadVisits(id) : Promise.resolve([]),
   ]);
   if (!lead) notFound();
+  // Recomputed on view and stored, so what the page shows is never staler than the moment it opened —
+  // and the list, which sorts by the stored figure, catches up at the same time.
+  const score = await refreshLeadScore(lead.id);
 
   // Fetched after the lead, because the briefing is keyed on the company the lead belongs to.
   const domainBriefing = domainsEnabled ? await getDomainBriefing(lead.company.id) : null;
@@ -78,13 +85,17 @@ export async function LeadDetail({ id }: { id: string }) {
     <div className="@container space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0 flex-1 basis-64">
-          <h1 className="text-xl font-semibold text-text">{lead.title}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl font-semibold text-text">{lead.title}</h1>
+            <LeadScoreBadge score={score?.score} />
+          </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             <Link href={`/companies/${company.id}`} className="font-medium text-text hover:underline">
               {company.name}
             </Link>
             <CompanyStageBadge stage={company.stage} />
+            <CategoryChip category={company.customerCategory} />
             {lead.contact && <span className="text-muted">· {lead.contact.name}</span>}
           </div>
 
@@ -194,6 +205,8 @@ export async function LeadDetail({ id }: { id: string }) {
 
           {domainBriefing && <DomainPanel companyId={company.id} briefing={domainBriefing} />}
 
+          {score && <LeadScoreCard result={score} />}
+
           <Card>
             <CardHeader className="text-sm font-medium text-text">Details</CardHeader>
             <CardContent className="space-y-2 text-sm">
@@ -207,7 +220,18 @@ export async function LeadDetail({ id }: { id: string }) {
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Owner</span>
-                <span className="text-text">{lead.owner?.name ?? "Unassigned"}</span>
+                <span className="text-right text-text">
+                  {lead.owner?.name ?? "Unassigned"}
+                  {/* Why it landed on this person — so they, and whoever set the rules, can see. */}
+                  {lead.assignmentNote && <span className="block text-[11px] text-subtle">{lead.assignmentNote}</span>}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="text-muted">Source</span>
+                <span className="text-right text-text">
+                  {LEAD_SOURCE_LABELS[lead.source]}
+                  {lead.sourceDetail && <span className="block text-[11px] text-subtle">{lead.sourceDetail}</span>}
+                </span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Account manager</span>

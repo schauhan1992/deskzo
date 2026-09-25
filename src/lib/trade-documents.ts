@@ -1,4 +1,4 @@
-import type { TradeDocumentType, TradeDirection, TradeDocumentStatus } from "@prisma/client";
+import type { TradeDocumentType, TradeDirection, TradeDocumentStatus, DocumentOrigin } from "@prisma/client";
 
 export const tradeDocumentTypeValues = [
   "PROPOSAL",
@@ -64,6 +64,31 @@ export const tradeDocumentStatusLabels: Record<TradeDocumentStatus, string> = {
   PAID: "Paid",
   CANCELLED: "Cancelled",
   EXPIRED: "Expired",
+};
+
+/**
+ * Where a document came from, in words — see `TradeDocument.origin`.
+ *
+ * "Manual" is deliberately not the label for a null. A row with no origin is one written by a path
+ * that never said, and reading that as "somebody typed it" would be a guess presented as a fact;
+ * every document that existed before the column was added was placed by the migration, so a blank
+ * one means something newer is not declaring itself.
+ */
+export const documentOriginLabels: Record<DocumentOrigin, string> = {
+  MANUAL: "Entered by hand",
+  CONVERSION: "Converted",
+  ADDON_CALCULATOR: "Add-on calculator",
+  RENEWAL: "Renewals list",
+  CONSIGNMENT: "Consignment",
+};
+
+/** Muted throughout: provenance is context, not status, and should not compete with the status badge. */
+export const documentOriginTone: Record<DocumentOrigin, "default" | "blue"> = {
+  MANUAL: "default",
+  CONVERSION: "blue",
+  ADDON_CALCULATOR: "blue",
+  RENEWAL: "blue",
+  CONSIGNMENT: "default",
 };
 
 export const statusTone: Record<TradeDocumentStatus, "default" | "green" | "blue" | "red" | "amber" | "brand"> = {

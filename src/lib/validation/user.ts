@@ -1,9 +1,19 @@
 import { z } from "zod";
-import { ROLES } from "@/lib/roles";
+
+
+/**
+ * A role key, checked against the database rather than against a union.
+ *
+ * This was `z.enum(ROLES)`, which could enumerate the eight roles the enum declared. Roles are rows
+ * now, so the schema can only say "a non-empty string" and the action behind it calls `roleExists`
+ * before writing — with the foreign key on `users.role` as the backstop if anything ever slips past
+ * both.
+ */
+const roleKey = z.string().trim().min(1, "Pick a role");
 
 export const updateUserAssignmentSchema = z.object({
   id: z.string().min(1),
-  role: z.enum(ROLES),
+  role: roleKey,
   departmentId: z.string().min(1).nullable(),
   managerId: z.string().min(1).nullable(),
 });
@@ -13,7 +23,7 @@ export type UpdateUserAssignmentInput = z.infer<typeof updateUserAssignmentSchem
 export const createUserSchema = z.object({
   name: z.string().trim().min(2, "Name is required"),
   email: z.string().trim().email("Enter a valid email"),
-  role: z.enum(ROLES),
+  role: roleKey,
   departmentId: z.string().optional().or(z.literal("")),
   temporaryPassword: z.string().min(8, "Temporary password must be at least 8 characters"),
 });

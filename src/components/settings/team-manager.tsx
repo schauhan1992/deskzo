@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { updateUserAssignment, setUserActive, resetUserTwoFactor } from "@/actions/user";
 import { Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

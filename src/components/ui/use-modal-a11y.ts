@@ -26,6 +26,29 @@ export function useModalA11y(open: boolean, onClose: () => void) {
   const containerRef = useRef<HTMLDivElement>(null);
   const returnFocusTo = useRef<HTMLElement | null>(null);
 
+  /**
+   * Held in a ref so the effect below depends on `open` alone.
+   *
+   * Callers pass `onClose` as a closure — `() => setOpen(false)`, or a function declared in the
+   * component body — which is a new identity on every render. With `onClose` in the dependency
+   * array, every keystroke in any field inside an overlay re-rendered the parent, changed that
+   * identity, and tore the whole effect down and back up: the scroll lock was released and
+   * re-applied, focus was returned to the element behind the overlay and then moved back in, and
+   * "back in" means onto the first focusable control — the close button in the header.
+   *
+   * The visible result was that typing a passphrase moved focus to the X after *every single
+   * character*, so the second character went nowhere. Every overlay in the app shares this hook, so
+   * every overlay had it; it only became obvious in a dialog somebody has to type a long string
+   * into.
+   *
+   * A ref rather than `useCallback` at each call site, because that is a rule every future caller
+   * would have to know, and the one who forgets gets this bug back.
+   */
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
 
@@ -61,7 +84,7 @@ export function useModalA11y(open: boolean, onClose: () => void) {
          * added later — without each of them having to remember.
          */
         if (event.defaultPrevented) return;
-        onClose();
+        closeRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -88,7 +111,7 @@ export function useModalA11y(open: boolean, onClose: () => void) {
       document.body.style.overflow = previousOverflow;
       returnFocusTo.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return { titleId, containerRef };
 }

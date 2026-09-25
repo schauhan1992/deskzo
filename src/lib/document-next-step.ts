@@ -26,6 +26,7 @@ export function nextStepFor({
   balance,
   creditRemaining,
   needsIrn,
+  awaitingApproval,
   asOf,
 }: {
   docType: TradeDocumentType;
@@ -39,9 +40,17 @@ export function nextStepFor({
   creditRemaining: number | null;
   /** An issued e-invoice-eligible document that the portal hasn't stamped yet. */
   needsIrn: boolean;
+  /**
+   * The document needs signing off and has not been.
+   *
+   * The approval banner says so in more detail and carries the buttons, so this one stands down
+   * rather than stacking a second banner above the same document saying something less urgent.
+   */
+  awaitingApproval?: boolean;
   asOf: Date;
 }): NextStep | null {
   if (status === "CANCELLED" || status === "REJECTED" || status === "EXPIRED") return null;
+  if (awaitingApproval) return null;
 
   if (status === "DRAFT") {
     return {

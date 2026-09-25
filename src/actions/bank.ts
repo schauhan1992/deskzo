@@ -155,10 +155,10 @@ async function ledgerAccountForNewBank(name: string): Promise<string> {
 
 async function makeDefault(id: string) {
   // Exactly one default, always: two would make "where does an unassigned payment go" ambiguous.
-  await db.$transaction([
-    db.bankAccount.updateMany({ where: { id: { not: id } }, data: { isDefault: false } }),
-    db.bankAccount.update({ where: { id }, data: { isDefault: true, active: true } }),
-  ]);
+  await db.$transaction(async (tx) => {
+    await tx.bankAccount.updateMany({ where: { id: { not: id } }, data: { isDefault: false } });
+    await tx.bankAccount.update({ where: { id }, data: { isDefault: true, active: true } });
+  });
 }
 
 export async function setBankAccountActive(id: string, active: boolean): Promise<ActionResult<null>> {
@@ -426,13 +426,13 @@ export async function matchStatementLine(statementLineId: string, bookLineId: st
   const taken = await db.bankStatementLine.findFirst({ where: { matchedLineId: bookLineId }, select: { id: true } });
   if (taken) return { ok: false, error: "That entry is already matched to another statement row." };
 
-  await db.$transaction([
-    db.bankStatementLine.update({
+  await db.$transaction(async (tx) => {
+    await tx.bankStatementLine.update({
       where: { id: statementLineId },
       data: { matchedLineId: bookLineId, matchedAt: new Date(), matchedById: user.id },
-    }),
-    db.journalLine.update({ where: { id: bookLineId }, data: { reconciledAt: new Date() } }),
-  ]);
+    });
+    await tx.journalLine.update({ where: { id: bookLineId }, data: { reconciledAt: new Date() } });
+  });
 
   revalidatePath("/accounting/banking");
   return { ok: true, data: null };
@@ -447,14 +447,15 @@ export async function unmatchStatementLine(statementLineId: string): Promise<Act
     select: { matchedLineId: true },
   });
   if (!line?.matchedLineId) return { ok: false, error: "That row isn't matched." };
+  const matchedLineId = line.matchedLineId;
 
-  await db.$transaction([
-    db.bankStatementLine.update({
+  await db.$transaction(async (tx) => {
+    await tx.bankStatementLine.update({
       where: { id: statementLineId },
       data: { matchedLineId: null, matchedAt: null, matchedById: null },
-    }),
-    db.journalLine.update({ where: { id: line.matchedLineId }, data: { reconciledAt: null } }),
-  ]);
+    });
+    await tx.journalLine.update({ where: { id: matchedLineId }, data: { reconciledAt: null } });
+  });
   revalidatePath("/accounting/banking");
   return { ok: true, data: null };
 }

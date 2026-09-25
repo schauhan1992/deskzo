@@ -3,7 +3,7 @@
 import { Prisma, type ContactDesignation, type CompanyRelationshipType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { contactScope, contactIdsInScope, NO_CONTACTS } from "@/lib/authz/contact-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { pageSlice } from "@/lib/pagination";
@@ -56,7 +56,7 @@ function contactListWhere(params?: ContactListParams): Prisma.ContactWhereInput 
  * back shows its email and phone. A reseller-managed contact out of scope is caught by both.
  */
 async function scopedContactWhere(userId: string, params?: ContactListParams): Promise<Prisma.ContactWhereInput> {
-  return { AND: [contactListWhere(params), { ...(await viaCompanyScope(userId)) }] };
+  return { AND: [contactListWhere(params), await contactScope(userId)] };
 }
 
 const contactListInclude = {
@@ -133,6 +133,15 @@ export async function bulkUpdateContacts(input: unknown): Promise<ActionResult<{
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { contactIds, designation, action } = parsed.data;
+
+  /**
+   * Every selected contact must be one this person may see. This deleted or re-designated any ids
+   * it was handed, whichever account they belonged to. All or nothing, like the other bulk bars.
+   */
+  const allowed = await contactIdsInScope(user.id, contactIds);
+  if (allowed.length !== new Set(contactIds).size) {
+    return { ok: false, error: allowed.length === 0 ? NO_CONTACTS : "Some of the selected contacts are not yours to change." };
+  }
 
   if (action === "delete") {
     let deleted = 0;

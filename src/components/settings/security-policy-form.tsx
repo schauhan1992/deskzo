@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, ShieldAlert } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { updateSecurityPolicy } from "@/actions/security-policy";
 import type { SecurityPolicyShape } from "@/lib/security/policy";
 import { Button } from "@/components/ui/button";

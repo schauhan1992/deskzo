@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";

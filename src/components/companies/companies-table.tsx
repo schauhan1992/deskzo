@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { useColumns } from "@/components/ui/table-columns";
-import { PORTAL_STATE_LABEL, type PortalState } from "@/lib/portal/state";
+import { formatCompanyId } from "@/lib/order-id";
+import { PORTAL_STATE_LABEL, type PortalState } from "@/lib/portal/state-labels";
+import { CategoryIcon } from "@/components/customers/category-chip";
+import type { CategoryWithParent } from "@/lib/customers/categories";
 
 const STAGE_TONE: Record<CompanyStage, "default" | "green" | "blue" | "red" | "amber"> = {
   PROSPECT: "default",
@@ -28,6 +31,8 @@ const VENDOR_STATUS_TONE: Record<VendorStatus, "default" | "green" | "blue" | "r
 
 type CompanyRow = {
   id: string;
+  /** The short reference people quote — COM-000123. `id` is a cuid, which nobody can read out. */
+  companySeq: number;
   name: string;
   stage: CompanyStage;
   relationshipType: CompanyRelationshipType;
@@ -38,6 +43,8 @@ type CompanyRow = {
   owner: { id: string; name: string } | null;
   createdBy: { id: string; name: string };
   assignedTo: { id: string; name: string } | null;
+  /** Where the customer sits — its icon goes beside the name. Absent on the vendor lists. */
+  customerCategory?: CategoryWithParent | null;
   /**
    * Resolved by the page, not here.
    *
@@ -62,9 +69,12 @@ export function CompaniesTable({
   companies,
   assignableUsers,
   mode = "companies",
+  reassign,
 }: {
   companies: CompanyRow[];
   assignableUsers: AssignableUser[];
+  /** Whether this person may change callers at all, and leave them with nobody — see src/lib/authz/reassign.ts. */
+  reassign: { show: boolean; canUnassign: boolean };
   mode?: "companies" | "vendors" | "customers" | "commission-parties";
 }) {
   const router = useRouter();
@@ -142,20 +152,23 @@ export function CompaniesTable({
       <BulkBar count={selection.count} onClear={selection.clear} error={error} notice={notice}>
         {/* The bulk bar has no room for captions — each control's own placeholder or first option is
             the only wording on screen, so the name has to be carried on the control itself. */}
-        <Select
-          value={assignTo}
-          onChange={(e) => setAssignTo(e.target.value)}
-          aria-label="Assign selected companies to"
-          className="h-9 w-56"
-        >
-          <option value="">{assignActionLabel}</option>
-          <option value="unassign">Unassign</option>
-          {assignableUsers.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name} ({u.role})
-            </option>
-          ))}
-        </Select>
+        {/* Only for somebody who may change callers — a picker that only ever refuses is worse than none. */}
+        {reassign.show && (
+          <Select
+            value={assignTo}
+            onChange={(e) => setAssignTo(e.target.value)}
+            aria-label="Assign selected companies to"
+            className="h-9 w-56"
+          >
+            <option value="">{assignActionLabel}</option>
+            {reassign.canUnassign && <option value="unassign">Unassign</option>}
+            {assignableUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.role})
+              </option>
+            ))}
+          </Select>
+        )}
         {hasOnboardingStatusColumn && (
           <Select
             value={vendorStatus}
@@ -197,6 +210,7 @@ export function CompaniesTable({
                     />
                   </th>
                 )}
+                {cols.show("id") && <th className="px-4 py-2.5">ID</th>}
                 {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
                 {cols.show("status") &&
                   (hasOnboardingStatusColumn ? (
@@ -228,11 +242,19 @@ export function CompaniesTable({
                       />
                     </td>
                   )}
+                  {/* One sequence across all four lists, so a customer and a vendor can never
+                      carry the same number. */}
+                  {cols.show("id") && (
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted">{formatCompanyId(c.companySeq)}</td>
+                  )}
                   {cols.show("company") && (
                     <td className="px-4 py-2.5">
-                      <Link href={`/companies/${c.id}`} className="font-medium text-text hover:underline">
-                        {c.name}
-                      </Link>
+                      <span className="inline-flex items-center gap-1.5">
+                        <CategoryIcon category={c.customerCategory} />
+                        <Link href={`/companies/${c.id}`} className="font-medium text-text hover:underline">
+                          {c.name}
+                        </Link>
+                      </span>
                     </td>
                   )}
                   {cols.show("status") &&

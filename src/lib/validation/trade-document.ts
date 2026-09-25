@@ -3,6 +3,7 @@ import { tradeDocumentTypeValues } from "@/lib/trade-documents";
 import { GST_STATE_CODES, GSTIN_PATTERN } from "@/lib/gst-engine";
 import { gstTreatmentValues } from "@/lib/gst";
 import { BASE_CURRENCY, CURRENCY_CODES } from "@/lib/currency";
+import { postalCodeField, refinePostalCode } from "@/lib/geo/postal";
 
 const number = (fallback?: number) =>
   z.preprocess((v) => (v === "" || v === undefined || v === null ? fallback : Number(v)), z.number());
@@ -51,17 +52,13 @@ const addressFields = {
   city: z.string().trim().optional().or(z.literal("")),
   state: z.string().trim().optional().or(z.literal("")),
   stateCode,
-  pincode: z
-    .string()
-    .trim()
-    .refine((v) => v === "" || /^[1-9][0-9]{5}$/.test(v), "A PIN code is six digits")
-    .optional()
-    .or(z.literal("")),
+  // Six digits in India, any postal code elsewhere — the rule is `refinePostalCode`, on the object.
+  pincode: postalCodeField,
   country: z.string().trim().optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
 };
 
-export const documentAddressSchema = z.object(addressFields);
+export const documentAddressSchema = z.object(addressFields).superRefine(refinePostalCode);
 export type DocumentAddressInput = z.infer<typeof documentAddressSchema>;
 
 export const tradeDocumentSchema = z
@@ -192,12 +189,9 @@ export const organisationSettingsSchema = z.object({
   city: z.string().trim().optional().or(z.literal("")),
   state: z.string().trim().optional().or(z.literal("")),
   stateCode,
-  pincode: z
-    .string()
-    .trim()
-    .refine((v) => v === "" || /^[1-9][0-9]{5}$/.test(v), "A PIN code is six digits")
-    .optional()
-    .or(z.literal("")),
+  // Six digits in India, any postal code elsewhere — the rule is `refinePostalCode`, on the object.
+  pincode: postalCodeField,
+  country: z.string().trim().max(60).optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
   bankName: z.string().trim().optional().or(z.literal("")),
@@ -208,7 +202,27 @@ export const organisationSettingsSchema = z.object({
   invoiceTerms: z.string().trim().optional().or(z.literal("")),
   invoiceNotes: z.string().trim().optional().or(z.literal("")),
   roundOffTotals: z.boolean().default(true),
-});
+})
+  .superRefine(refinePostalCode)
+  /**
+   * The GST state code is the GSTIN's own first two digits, not a second opinion.
+   *
+   * It is the seller half of CGST + SGST against IGST, and the e-invoice portal rejects a document
+   * whose seller state disagrees with the seller GSTIN. The form used to move the code whenever the
+   * address state was changed — so choosing Haryana for a Maharashtra GSTIN quietly re-taxed every
+   * invoice from the wrong state. A registration is in exactly one state; there is no correct
+   * invoice where the two differ, so they are refused together rather than saved apart.
+   */
+  .superRefine((value, ctx) => {
+    const prefix = value.gstin && GSTIN_PATTERN.test(value.gstin) ? value.gstin.slice(0, 2) : null;
+    if (prefix && value.stateCode && value.stateCode !== prefix) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["stateCode"],
+        message: `Your GSTIN is registered in ${GST_STATE_CODES[prefix] ?? prefix} (${prefix}) — the GST state code has to match it.`,
+      });
+    }
+  });
 
 export const einvoiceSettingsSchema = z.object({
   einvoiceEnabled: z.boolean().default(false),

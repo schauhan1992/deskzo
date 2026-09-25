@@ -9,7 +9,7 @@ import { pageSlice } from "@/lib/pagination";
 import { dateRangeFilter } from "@/lib/utils";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { canSeeCompany } from "@/lib/authz/company-scope";
-import { hasEffectivePermission } from "@/actions/permission";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatVisitId, visitPurposeLabels } from "@/lib/visits";
@@ -90,6 +90,7 @@ const visitListInclude = {
 
 export async function listVisitsPaged(params: VisitListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
+  if (!(await viewerHas("visits.view"))) return { rows: [], total: 0, openCount: 0 };
   const where = await visitListWhere(user.id, params);
   const [rows, total, openCount] = await Promise.all([
     db.visit.findMany({
@@ -107,6 +108,7 @@ export async function listVisitsPaged(params: VisitListParams & { page: number; 
 /** A company's visits, for its 360 view — scoped the same way as the list. */
 export async function listCompanyVisits(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("visits.view"))) return [];
   const where = await visitListWhere(user.id, { companyId });
   const rows = await db.visit.findMany({ where, orderBy: { scheduledFor: "desc" }, include: visitListInclude });
   return toPlain(rows);
@@ -120,6 +122,7 @@ export async function listCompanyVisits(companyId: string) {
  */
 export async function listLeadVisits(leadId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("visits.view"))) return [];
   const where = await visitListWhere(user.id, { leadId });
   const rows = await db.visit.findMany({ where, orderBy: { scheduledFor: "desc" }, include: visitListInclude });
   return toPlain(rows);
@@ -127,6 +130,7 @@ export async function listLeadVisits(leadId: string) {
 
 export async function getVisit(id: string) {
   const user = await requireUser();
+  if (!(await viewerHas("visits.view"))) return null;
   const visit = await db.visit.findUnique({
     where: { id },
     include: {

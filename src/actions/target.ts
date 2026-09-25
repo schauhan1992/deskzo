@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { Prisma, type TargetMetric, type TargetPeriod, type TargetScope } from "@prisma/client";
-import { db } from "@/lib/db";
+import { db, getTenantDb } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
@@ -101,7 +101,7 @@ export async function listTargets(filters?: {
   });
 
   const subjects = await subjectUserIdsMany(
-    db,
+    await getTenantDb(),
     rows.map((t) => ({
       scope: t.scope,
       userId: t.user?.id ?? null,
@@ -109,7 +109,7 @@ export async function listTargets(filters?: {
     })),
   );
   const achievements = await measureMany(
-    db,
+    await getTenantDb(),
     rows.map((t, i) => ({ metric: t.metric, from: t.fromDate, to: t.toDate, userIds: subjects[i] })),
   );
 
@@ -151,7 +151,7 @@ export async function targetsFor(userId: string) {
   // rather than by being faster — where a person does hold several targets on one metric and
   // period, it costs one query instead of several.
   const achievements = await measureMany(
-    db,
+    await getTenantDb(),
     rows.map((t) => ({ metric: t.metric, from: t.fromDate, to: t.toDate, userIds: [userId] })),
   );
 
@@ -358,7 +358,7 @@ export async function recentActual(params: {
   const { user, viewAll } = await access();
   const allowed = await visibleUserIds(user.id, viewAll);
   if (allowed && !allowed.includes(params.userId)) return 0;
-  return measure(db, params.metric, {
+  return measure(await getTenantDb(), params.metric, {
     from: new Date(`${params.fromDate}T00:00:00.000Z`),
     to: new Date(`${params.toDate}T00:00:00.000Z`),
     userIds: [params.userId],

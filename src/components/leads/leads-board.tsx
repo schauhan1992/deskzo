@@ -8,6 +8,7 @@ import { formatCurrency } from "@/lib/utils";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { updateLeadStatus } from "@/actions/lead";
 import type { LeadStatus } from "@prisma/client";
+import { LeadScoreBadge } from "@/components/leads/lead-score";
 
 const COLUMNS: { status: LeadStatus; label: string }[] = [
   { status: "NEW", label: "New" },
@@ -31,6 +32,7 @@ type BoardLead = {
   estimatedValue: string | null;
   company: { id: string; name: string };
   owner: { id: string; name: string } | null;
+  score: number | null;
 };
 
 export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
@@ -133,7 +135,10 @@ export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
                           draggedId === lead.id ? "opacity-40" : ""
                         }`}
                       >
-                        <div className="text-sm font-medium text-text">{lead.title}</div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-sm font-medium text-text">{lead.title}</div>
+                          <LeadScoreBadge score={lead.score} />
+                        </div>
                         <div className="mt-0.5 text-xs text-muted">{lead.company.name}</div>
                         {/* The column already names the status, so the badge is only worth its
                             space on a dead deal — where it carries the reason on hover. */}

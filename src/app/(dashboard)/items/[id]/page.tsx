@@ -6,20 +6,37 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { formatItemId } from "@/lib/order-id";
+import { canonicalise, parseRecordRef } from "@/lib/record-url";
+import { db } from "@/lib/db";
 import { AdjustStockForm } from "@/components/items/adjust-stock-form";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 const TYPE_TONE = { GOOD: "default", SERVICE: "blue", SUBSCRIPTION: "green", PERPETUAL: "amber" } as const;
 
-export default async function ItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ItemDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const enabled = await isModuleEnabled("items");
   if (!enabled) {
     return <ModuleDisabledNotice moduleKey="items" />;
   }
 
-  const { id } = await params;
-  const item = await getItem(id);
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  /**
+   * The sequence resolves to the cuid before the action runs, so `getItem` keeps doing every check
+   * it already did — this only translates the reference, it does not bypass anything. A sequence
+   * that matches nothing falls through as the original segment and `getItem` answers null, which is
+   * the same refusal a bad cuid gets.
+   */
+  const ref = parseRecordRef(id);
+  const resolved =
+    ref.kind === "seq"
+      ? ((await db.item.findUnique({ where: { itemSeq: ref.seq }, select: { id: true } }))?.id ?? id)
+      : ref.id;
+
+  const item = await getItem(resolved);
   if (!item) notFound();
+
+  // After the check, never before — see `canonicalise`.
+  canonicalise(id, "/items", formatItemId(item.itemSeq), query);
 
   const lowStock =
     item.trackInventory && item.reorderLevel !== null && item.stockQuantity <= item.reorderLevel;
@@ -64,6 +81,11 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ id:
                 <div className="text-text">
                   {item.taxRatePercent ? `${item.taxRatePercent}%` : "—"}
                 </div>
+              </div>
+              <div>
+                <div className="text-muted">HSN / SAC</div>
+                {/* Said plainly when missing: the GST summary flags every invoice line without one. */}
+                <div className={item.hsnCode ? "font-mono text-text" : "text-danger"}>{item.hsnCode ?? "Not set"}</div>
               </div>
               {item.billingCycle && (
                 <div>

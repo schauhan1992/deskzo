@@ -12,7 +12,7 @@ import {
 } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
 import { pageOf } from "@/lib/pagination";
-import { hasEffectivePermission } from "@/actions/permission";
+import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postPaymentToLedger } from "@/lib/ledger/journal";
 import { calculateOrderAmount } from "@/lib/gst";
@@ -335,6 +335,7 @@ export type PaymentStatusFilter = "unpaid" | "partial" | "paid";
  */
 export async function paymentsSnapshot() {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return { outstandingBalance: 0, unpaidCount: 0, partialCount: 0 };
 
   const orders = await db.companyProduct.findMany({
     /**
@@ -373,6 +374,7 @@ export async function listOrdersWithPayments(params?: {
   status?: PaymentStatusFilter;
 }) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return [];
 
   const orders = await db.companyProduct.findMany({
     where: {
@@ -421,6 +423,7 @@ export async function listOrdersWithPayments(params?: {
 /** A company's orders with their financials, for the "select an order to allocate against" step. */
 export async function listCompanyOrdersForPayment(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return [];
   // What each order is worth and how much of it is still owed — the account's commercials, for a
   // company this person may not manage. No orders rather than a refusal, so the dialog that calls
   // this just has nothing to allocate against.
@@ -446,6 +449,7 @@ export async function listPayments(params?: {
   unallocatedOnly?: boolean;
 }) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return [];
 
   const payments = await db.payment.findMany({
     /**
@@ -511,6 +515,7 @@ export async function listPayments(params?: {
  */
 export async function listCompanyPayments(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return [];
   if (!(await canSeeCompanyMoney(user.id, companyId))) return [];
 
   const payments = await db.payment.findMany({
@@ -550,6 +555,7 @@ export async function listCompanyPayments(companyId: string) {
 /** Billed / received / outstanding for one company, across every order on its account. */
 export async function companyPaymentSummary(companyId: string) {
   const user = await requireUser();
+  if (!(await viewerHas("payments.view"))) return { billed: 0, received: 0, outstanding: 0, credit: 0, unallocated: 0 };
   // Zeros rather than `null`: this is the stat row at the top of the 360 view, so the shape has to
   // survive — and for an account somebody does not manage, "nothing billed, nothing received" is
   // the same refusal the empty list beside it gives.

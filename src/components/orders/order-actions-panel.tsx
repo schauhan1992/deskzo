@@ -10,8 +10,25 @@ import { Dialog } from "@/components/ui/dialog";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 import { PaymentsDialog, type PayableOrder } from "@/components/payments/payments-dialog";
 import { paymentTermsLabels } from "@/lib/gst";
+import { CreditBadge } from "@/components/credit/credit-badge";
+import { MIN_OVERRIDE_REASON, type CreditRating, type TermsKey } from "@/lib/credit/engine";
+import { formatCurrency } from "@/lib/utils";
 
 type VendorOption = { id: string; name: string; paymentTerms: PaymentTerms };
+
+/** The order's credit position while it awaits approval — see `orderCreditPosition`. */
+export type OrderCredit = {
+  rating: CreditRating;
+  score: number | null;
+  recommendedTerms: TermsKey;
+  terms: TermsKey;
+  limit: number;
+  outstanding: number;
+  overdue: number;
+  concerns: string[];
+  termsDecided: boolean;
+  canOverride: boolean;
+};
 
 export function OrderActionsPanel({
   order,
@@ -23,6 +40,7 @@ export function OrderActionsPanel({
   vendorOptions,
   companyId,
   companyName,
+  credit = null,
 }: {
   order: PayableOrder & { orderStatus: OrderStatus; vendorId: string | null; purchasePrice: unknown; ourPoNumber: string | null; addedByUserId: string };
   currentUserId: string;
@@ -33,11 +51,13 @@ export function OrderActionsPanel({
   vendorOptions: VendorOption[];
   companyId: string;
   companyName: string;
+  credit?: OrderCredit | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [approveNotes, setApproveNotes] = useState("");
+  const [creditReason, setCreditReason] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -50,7 +70,7 @@ export function OrderActionsPanel({
   function handleApprove(approved: boolean, notes?: string) {
     setError(null);
     startTransition(async () => {
-      const result = await approveOrder({ orderId: order.id, approved, notes: notes ?? "" });
+      const result = await approveOrder({ orderId: order.id, approved, notes: notes ?? "", creditOverrideReason: creditReason });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -109,6 +129,40 @@ export function OrderActionsPanel({
       {order.orderStatus === "PENDING_APPROVAL" && canApprove && (
         <div className="space-y-2 rounded-md border border-warning bg-warning-bg p-3">
           <p className="text-sm font-medium text-text">Awaiting your review</p>
+          {credit && (
+            <div className="space-y-1.5 rounded-md border border-line bg-surface p-2.5 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted">Credit</span>
+                <CreditBadge rating={credit.rating} score={credit.score} />
+                <span className="text-muted">
+                  {paymentTermsLabels[credit.terms]} on this order · up to {paymentTermsLabels[credit.recommendedTerms]} suggested · owes{" "}
+                  {formatCurrency(credit.outstanding)} of {formatCurrency(credit.limit)}
+                  {credit.overdue > 0 && <span className="text-danger"> ({formatCurrency(credit.overdue)} overdue)</span>}
+                </span>
+              </div>
+              {credit.termsDecided && <p className="text-muted">Its terms were approved as a credit override when it was punched.</p>}
+              {credit.concerns.length > 0 && (
+                <div className="space-y-1.5 text-warning">
+                  <p className="font-medium">Approving this needs a credit override:</p>
+                  <ul className="list-disc space-y-0.5 pl-4">
+                    {credit.concerns.map((c) => (
+                      <li key={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</li>
+                    ))}
+                  </ul>
+                  {credit.canOverride ? (
+                    <Textarea
+                      aria-label="Why approve it anyway"
+                      placeholder="Why approve it anyway — kept on the customer's credit record"
+                      value={creditReason}
+                      onChange={(e) => setCreditReason(e.target.value)}
+                    />
+                  ) : (
+                    <p className="text-muted">Only someone who can override credit terms can approve it. You can still reject it.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <Textarea
             aria-label="Approval notes"
             placeholder="Notes (optional)"
@@ -116,8 +170,13 @@ export function OrderActionsPanel({
             onChange={(e) => setApproveNotes(e.target.value)}
           />
           <div className="flex gap-2">
-            <Button type="button" size="sm" disabled={isPending} onClick={() => handleApprove(true, approveNotes)}>
-              {isPending ? "Saving…" : "Approve"}
+            <Button
+              type="button"
+              size="sm"
+              disabled={isPending || (!!credit && credit.concerns.length > 0 && (!credit.canOverride || creditReason.trim().length < MIN_OVERRIDE_REASON))}
+              onClick={() => handleApprove(true, approveNotes)}
+            >
+              {isPending ? "Saving…" : credit && credit.concerns.length > 0 ? "Approve with credit override" : "Approve"}
             </Button>
             <Button type="button" variant="danger" size="sm" disabled={isPending} onClick={() => setShowReject(true)}>
               Reject

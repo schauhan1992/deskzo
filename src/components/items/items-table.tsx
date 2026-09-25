@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import type { BrandOption } from "@/components/items/item-fields";
+import { OptionCombobox } from "@/components/ui/option-combobox";
 
 const TYPE_TONE: Record<ItemType, "default" | "blue" | "green" | "amber"> = {
   GOOD: "default",
@@ -89,23 +90,20 @@ export function ItemsTable({ items, brands }: { items: ItemRow[]; brands: BrandO
         <div className="flex w-full flex-wrap items-center gap-2">
             {/* The bulk bar has no captions — the "no change" option is the only visible cue, and an
                 option is not a name. Each control carries its own. */}
-            <Select
-              value={brandId}
-              onChange={(e) => {
-                setBrandId(e.target.value);
-                setProductFamilyId("");
-              }}
-              className="h-9 w-44"
-              aria-label="Brand"
-            >
-              <option value="">Brand — no change</option>
-              <option value="clear">Remove brand</option>
-              {brands.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
+            {/* Searched, not scrolled — the catalogue can hold a thousand brands. "Remove brand" is
+                offered first, as the one choice that isn't a brand. */}
+            <div className="w-52">
+              <OptionCombobox
+                listLabel="Brands"
+                options={[{ id: "clear", name: "Remove brand" }, ...brands.map((b) => ({ id: b.id, name: b.name }))]}
+                value={brandId}
+                onSelect={(b) => {
+                  setBrandId(b?.id ?? "");
+                  setProductFamilyId("");
+                }}
+                placeholder="Brand — no change"
+              />
+            </div>
             <Select
               value={productFamilyId}
               onChange={(e) => setProductFamilyId(e.target.value)}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HSN_MESSAGE, HSN_PATTERN, normaliseHsn } from "@/lib/items/catalogue-import";
 
 export const itemTypeValues = ["GOOD", "SERVICE", "SUBSCRIPTION", "PERPETUAL"] as const;
 
@@ -35,11 +36,22 @@ const optionalNonNegativeInt = z.preprocess(
   z.number().int().nonnegative().optional(),
 );
 
+/**
+ * HSN for goods, SAC for services — the code every invoice line carries and the GST return groups by.
+ * Optional here, since a new catalogue is rarely complete, but a code that is present has to be one;
+ * the GST summary already flags lines with none. Stored without the spaces people copy it with.
+ */
+const hsnField = z.preprocess(
+  (v) => normaliseHsn(v),
+  z.union([z.literal(""), z.string().regex(HSN_PATTERN, HSN_MESSAGE)]),
+);
+
 const itemDetailShape = {
   name: z.string().trim().min(2, "Item name is required"),
   sku: z.string().trim().min(1, "SKU is required"),
   type: z.enum(itemTypeValues),
   category: z.string().trim().optional().or(z.literal("")),
+  hsnCode: hsnField,
   vendor: z.string().trim().optional().or(z.literal("")),
   brandId: z.string().optional().or(z.literal("")),
   productFamilyId: z.string().optional().or(z.literal("")),
@@ -103,6 +115,11 @@ export const importItemRowSchema = z.object({
     message: "Type must be GOOD, SERVICE, SUBSCRIPTION, or PERPETUAL",
   })),
   category: z.string().trim().optional().or(z.literal("")),
+  /** Matched by name, case and spacing ignored — see `nameKey`. Blank clears it. */
+  brand: z.string().trim().optional().or(z.literal("")),
+  /** One of the brand's families, matched the same way. Needs a brand. */
+  productFamily: z.string().trim().optional().or(z.literal("")),
+  hsnCode: hsnField,
   vendor: z.string().trim().optional().or(z.literal("")),
   unit: z.string().trim().optional().or(z.literal("")),
   billingCycle: z.preprocess(csvOptionalEnumTrimUpper, z.enum(billingCycleValues).optional()),

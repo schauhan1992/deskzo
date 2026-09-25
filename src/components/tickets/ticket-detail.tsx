@@ -23,6 +23,7 @@ import { AssignTicketButton } from "@/components/tickets/assign-ticket-button";
 import { CommentThread } from "@/components/tickets/comment-thread";
 import { DeleteTicketButton } from "@/components/tickets/delete-ticket-button";
 import { TaskList } from "@/components/tasks/task-list";
+import { CategoryChip } from "@/components/customers/category-chip";
 
 /**
  * A ticket's full detail — SLA state, assignment, and the comment thread. Rendered on its own
@@ -62,6 +63,7 @@ export async function TicketDetail({ id }: { id: string }) {
             <Link href={`/companies/${ticket.company.id}`} className="hover:underline">
               {ticket.company.name}
             </Link>
+            <CategoryChip category={ticket.company.customerCategory} className="ml-1.5 align-middle" />
             {ticket.contact && ` · ${ticket.contact.name}`}
             {" · "}
             {ticketTypeLabels[ticket.ticketType]}

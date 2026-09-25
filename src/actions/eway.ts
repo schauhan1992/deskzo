@@ -392,7 +392,7 @@ export async function ewayForDocument(documentId: string): Promise<ActionResult<
       docNumber: doc.docNumber,
       docType: doc.docType,
       issueDate: doc.issueDate,
-      customerName: doc.company.name,
+      customerName: doc.partyName ?? doc.company.name,
       // The goods, not the paperwork — a challan totals nil and still moves six lakhs of kit.
       total: declaredValue,
       interstate,
@@ -551,7 +551,7 @@ function toEwayPayload(
     },
     to: {
       gstin: doc.buyerGstin,
-      tradeName: doc.company.name,
+      tradeName: doc.partyName ?? doc.company.name,
       address1: doc.shippingLine1 ?? doc.billingLine1 ?? "",
       place: doc.shippingCity ?? doc.billingCity ?? "",
       pincode: doc.shippingPincode ?? doc.billingPincode ?? "",

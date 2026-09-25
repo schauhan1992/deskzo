@@ -24,6 +24,7 @@ import {
 import type { CompanySource, VendorStatus } from "@prisma/client";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
+import { viewerReassignControls } from "@/lib/authz/reassign";
 
 // Search params reach Prisma's enum filters directly, so anything outside the allowed set is
 // dropped rather than passed through: an unknown value would 500 the query, and a relationship
@@ -154,7 +155,7 @@ export default async function VendorsPage({
         </SplitListShell>
       ) : (
         <div className="mt-6">
-          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} mode="vendors" />
+          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} mode="vendors" reassign={await viewerReassignControls()} />
           <Pagination
             page={page}
             pageSize={pageSize}

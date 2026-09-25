@@ -2,10 +2,16 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
+import { canonicalise, parseRecordRef } from "@/lib/record-url";
+import { formatTicketId } from "@/lib/tickets";
 import { TicketDetail } from "@/components/tickets/ticket-detail";
+import { viewerHas } from "@/actions/permission";
+import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const [{ id }, user] = await Promise.all([params, requireUser()]);
+export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const [{ id }, query, user] = await Promise.all([params, searchParams, requireUser()]);
+  if (!(await viewerHas("tickets.view"))) return <NoAccessNotice title="Ticket" permission="tickets.view" />;
+  const ref = parseRecordRef(id);
 
   /**
    * Through the company, not the assignee: a ticket is about a customer, and "who is working it" is
@@ -14,10 +20,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
    * into another rep's account.
    */
   const ticket = await db.ticket.findUnique({
-    where: { id },
-    select: { company: { select: { ownerUserId: true } } },
+    where: ref.kind === "seq" ? { ticketSeq: ref.seq } : { id: ref.id },
+    select: { id: true, ticketSeq: true, company: { select: { ownerUserId: true } } },
   });
   if (!ticket || !(await canSeeCompany(user.id, ticket.company.ownerUserId))) notFound();
 
-  return <TicketDetail id={id} />;
+  // After the check, never before — see `canonicalise`.
+  canonicalise(id, "/tickets", formatTicketId(ticket.ticketSeq), query);
+
+  return <TicketDetail id={ticket.id} />;
 }

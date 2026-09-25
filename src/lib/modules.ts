@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import { DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine } from "lucide-react";
+import type { PermissionKey } from "@/lib/permissions";
 
 /**
  * The keys a nav item is gated on, as a list.
@@ -35,6 +36,15 @@ export type ModuleDefinition = {
   /** Sidebar section this module's links appear under. */
   navGroup: string;
   navItems: NavItem[];
+  /**
+   * The permission somebody needs to see this module's records at all.
+   *
+   * The toggle above answers "does this company use it"; this answers "may this person see it".
+   * `isModuleEnabled` checks both, so every page, action and dashboard figure that already asks
+   * whether a module is on also asks, without being changed, whether it is on *for this person*.
+   * The sidebar hides the module's links to people without it. See the `*.view` permissions.
+   */
+  viewPermission?: PermissionKey;
 };
 
 export const MODULE_REGISTRY: ModuleDefinition[] = [
@@ -46,8 +56,12 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navGroup: "Sales",
     navItems: [
       { href: "/companies", label: "Companies", icon: Building2 },
-      { href: "/leads", label: "Leads", icon: Target },
+      { href: "/leads", label: "Leads", icon: Target, permission: "leads.view" },
       { href: "/customers", label: "Customer", icon: Handshake },
+      // One company entered twice, and the merge that folds it into the real one — src/lib/companies/merge.ts.
+      { href: "/companies/duplicates", label: "Duplicate companies", icon: Combine, permission: "companies.merge" },
+      // Every email the ERP sent a customer — src/actions/mail-log.ts.
+      { href: "/mail-log", label: "Mail log", icon: Mail, permission: "emails.view" },
     ],
   },
   {
@@ -55,10 +69,16 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Items & Inventory",
     description: "Catalog of goods, services, and subscriptions, with stock tracking for goods.",
     navGroup: "Catalog & Stock",
-    navItems: [{ href: "/items", label: "Items & Inventory", icon: Package }],
+    navItems: [
+      { href: "/items", label: "Items & Inventory", icon: Package },
+      // The catalogue behind the item pickers — moved here from Settings → Lists, since a reseller's
+      // thousand brands are catalogue work rather than configuration.
+      { href: "/items/brands", label: "Brands & families", icon: Tags },
+    ],
   },
   {
     key: "orders",
+    viewPermission: "orders.view",
     label: "Orders",
     description:
       "Order punching: sales punches an order, accounts approves payment terms, purchasing sources the vendor — with margin, PO, and fulfillment tracking end to end.",
@@ -67,6 +87,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "sales_documents",
+    viewPermission: "documents.view",
     label: "Sales Documents",
     description:
       "Proposals, proforma invoices, GST tax invoices and credit notes — with place-of-supply tax handling, and e-invoice (IRN) and e-way bill generation through the government portal.",
@@ -84,6 +105,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "purchase_documents",
+    viewPermission: "documents.view",
     label: "Purchase Documents",
     description: "Purchase orders raised on vendors, and the bills they send back against them.",
     navGroup: "Purchase",
@@ -95,6 +117,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "renewals",
+    viewPermission: "orders.view",
     label: "Renewals",
     description:
       "Track subscription start/expiry dates across every customer and manage upcoming renewals in one place.",
@@ -103,6 +126,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "payments",
+    viewPermission: "payments.view",
     label: "Payments",
     description: "Record payments received against orders and track outstanding balances across every customer.",
     navGroup: "Payments",
@@ -110,11 +134,16 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "receivables",
+    viewPermission: "payments.view",
     label: "Receivables",
     description:
       "What customers owe, aged from each invoice's due date — with payments and credit notes applied against invoices, and a statement of account per customer.",
     navGroup: "Payments",
-    navItems: [{ href: "/receivables", label: "Receivables", icon: Scale }],
+    navItems: [
+      { href: "/receivables", label: "Receivables", icon: Scale },
+      // Who is safe to give terms to — the credit engine's list (src/lib/credit/engine.ts).
+      { href: "/receivables/credit", label: "Customer credit", icon: ShieldCheck },
+    ],
   },
   {
     key: "payables",
@@ -153,7 +182,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navGroup: "Prospecting",
     navItems: [
       { href: "/workspace", label: "Workspace", icon: LayoutList },
-      { href: "/verifications", label: "Contact Checks", icon: BadgeCheck },
+      { href: "/verifications", label: "Contact Checks", icon: BadgeCheck, permission: "contacts.view" },
     ],
   },
   {
@@ -166,6 +195,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "calls",
+    viewPermission: "calls.view",
     label: "Calls",
     description:
       "Call logging for the calling and sales teams: a phone icon on every company, lead, ticket and renewal that dials the contact, times the call and records how it went, plus a worklist of the callbacks still owed.",
@@ -267,6 +297,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "contacts_library",
+    viewPermission: "contacts.view",
     label: "Contacts Library",
     description: "Every contact across every company — clients, vendors, OEMs — in one searchable, filterable list.",
     navGroup: "Directory",
@@ -296,6 +327,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "visits",
+    viewPermission: "visits.view",
     label: "Field Visits",
     description:
       "Client meetings and field visits: plan them with a purpose and agenda, check in and out on the day, write up the outcome, and claim the travel against them.",
@@ -340,12 +372,41 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       "Campaigns and triggered journeys built from what the ERP already knows — a renewal coming up, a warranty running out, more staff than seats. Every send is checked against consent and suppression first, and a step can hand one of ours a task instead of mailing the customer. A reseller's end customers are never reachable from here.",
     navGroup: "Marketing",
     navItems: [
+      { href: "/marketing/send", label: "Send a mass mail", icon: Send, permission: "marketing.manage" },
       { href: "/marketing", label: "Campaigns", icon: Megaphone },
       { href: "/marketing/journeys", label: "Journeys", icon: Route },
       { href: "/marketing/templates", label: "Templates", icon: FileText },
       { href: "/marketing/audiences", label: "Audiences", icon: MailCheck },
+      { href: "/marketing/lists", label: "Mailing lists", icon: ListPlus },
       { href: "/marketing/suppressions", label: "Suppression list", icon: ShieldBan, permission: "marketing.manage" },
     ],
+  },
+  {
+    key: "wins",
+    label: "Sales Wins",
+    description:
+      "Wins that celebrate themselves: a big deal closed, a target reached, a new customer's first order, the month's top performer — a full-screen splash with confetti for everybody or just the winner, a wins wall with this month's leaderboard, and a TV screen for the sales floor.",
+    navGroup: "Sales",
+    // Everybody sees it: the whole point is that the rest of the room sees the win.
+    navItems: [{ href: "/wins", label: "Wins & leaderboard", icon: Trophy }],
+  },
+  {
+    key: "forecast",
+    label: "Forecasting",
+    description:
+      "What is coming, period by period: open deals weighted by the win rate each stage has actually achieved, renewals by the rate each brand really renews at, cash expected in from each customer's own payment habits, machines coming out of warranty with no AMC — beside targets, last year and each salesperson's own commit.",
+    navGroup: "Sales",
+    // No permission gate: everybody sees the forecast for the accounts they can see.
+    navItems: [{ href: "/forecast", label: "Forecast", icon: TrendingUp }],
+  },
+  {
+    key: "forms",
+    label: "Forms & Events",
+    description:
+      "Forms built in the app rather than in a spreadsheet: customer roundtables and event invitations with RSVPs and an attendance register, requirement assessments before a proposal, enquiry and survey forms. Share a public link, send personal invitations, or both — and decide per form who can see it, change it, invite to it and read what people answered.",
+    navGroup: "Marketing",
+    // No permission gate: the list shows the forms shared with each person, which is the point.
+    navItems: [{ href: "/marketing/forms", label: "Forms & events", icon: ClipboardPen }],
   },
   {
     key: "customer_portal",
@@ -371,6 +432,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "projects",
+    viewPermission: "projects.view",
     label: "Projects",
     description:
       "Delivered work for customers — website builds, migrations, implementations. Milestones and billing stages, an agreement and NDA store, encrypted credentials, risks and weekly updates. Visible to the people on each project rather than to everyone.",
@@ -389,11 +451,16 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "helpdesk",
+    viewPermission: "tickets.view",
     label: "Helpdesk / Tickets",
     description:
       "Support tickets linked to a company and contact, with priority, an SLA target, agent assignment, and a comment thread.",
     navGroup: "Support",
-    navItems: [{ href: "/tickets", label: "Tickets", icon: Ticket }],
+    navItems: [
+      { href: "/tickets", label: "Tickets", icon: Ticket },
+      // Which customers take the most support against what they pay — src/lib/support/load.ts.
+      { href: "/tickets/load", label: "Support load", icon: Gauge },
+    ],
   },
   {
     key: "reports",

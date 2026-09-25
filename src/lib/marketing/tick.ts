@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { db } from "@/lib/db";
 import { advanceEnrolments, runEnrolments } from "@/lib/marketing/enrol";
-import { sendQueued } from "@/lib/marketing/pipeline";
+import { sendQueued, settleCampaigns } from "@/lib/marketing/pipeline";
 import { purgeExpiredActivity } from "@/lib/security/retention";
 
 /**
@@ -39,6 +39,8 @@ export async function runMarketingTick(origin: string): Promise<TickResult> {
     const { enrolled } = await runEnrolments();
     const moved = await advanceEnrolments(origin);
     const sent = await sendQueued(runId);
+    // A campaign whose last message has gone says so. Housekeeping, so it never fails the tick.
+    await settleCampaigns().catch((err) => console.error("settleCampaigns failed", err));
 
     // Piggy-backed on the one job that is already scheduled. Wrapped separately because expiring
     // old log rows is housekeeping: it must never be the reason a tick reports a failure and stops

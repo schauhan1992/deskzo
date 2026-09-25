@@ -9,6 +9,7 @@ import { canSend } from "@/lib/marketing/suppression";
 import { nextSendTime } from "@/lib/marketing/schedule";
 import { render } from "@/lib/marketing/merge";
 import {
+  buildMarketingEmail,
   marketingSettings,
   mergeValuesFor,
   newToken,
@@ -590,9 +591,12 @@ async function runStep(
   if (!chosen) return "SKIPPED";
 
   const token = newToken();
+  // Email is built exactly as a campaign's is — footer, one-click unsubscribe, tracking. WhatsApp
+  // carries its words as written.
+  const email = template.channel === "EMAIL" ? buildMarketingEmail({ template, recipient: chosen.recipient, settings, token, origin, track: true }) : null;
   const values = mergeValuesFor(chosen.recipient, settings, { unsubscribeUrl: `${origin}/preferences/${token}` });
-  const subject = render(template.subject ?? "", values);
-  const body = render(template.body, values);
+  const subject = email ? null : render(template.subject ?? "", values);
+  const body = email ? null : render(template.body, values);
 
   const base = {
     token,
@@ -622,8 +626,8 @@ async function runStep(
     return "SKIPPED";
   }
 
-  if (!subject.ok || !body.ok) {
-    const missing = [...(subject.ok ? [] : subject.missing), ...(body.ok ? [] : body.missing)];
+  const missing = email ? (email.ok ? [] : email.missing) : [subject!, body!].flatMap((r) => (r.ok ? [] : r.missing));
+  if (missing.length > 0) {
     await db.marketingMessage
       .create({
         data: {
@@ -638,9 +642,11 @@ async function runStep(
     return "SKIPPED";
   }
 
-  await db.marketingMessage
-    .create({ data: { ...base, subject: subject.text, body: body.text, status: "QUEUED" } })
-    .catch(() => undefined);
+  const content =
+    email && email.ok
+      ? { subject: email.subject, body: email.html, textBody: email.text, unsubscribeUrl: email.unsubscribeUrl }
+      : { subject: subject?.ok ? subject.text : "", body: body?.ok ? body.text : "" };
+  await db.marketingMessage.create({ data: { ...base, ...content, status: "QUEUED" } }).catch(() => undefined);
   return "QUEUED";
 }
 

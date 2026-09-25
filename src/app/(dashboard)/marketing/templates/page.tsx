@@ -48,6 +48,7 @@ export default async function TemplatesPage() {
                       <span className="text-sm font-medium text-text">{t.name}</span>
                       <Badge tone="blue">{t.channel === "WHATSAPP" ? "WhatsApp" : "Email"}</Badge>
                       <Badge tone="default">{TOPICS.find((x) => x.key === t.topic)?.label ?? t.topic}</Badge>
+                      {t.format === "HTML" && <Badge tone="brand">HTML{t.sourceFileName ? ` · ${t.sourceFileName}` : ""}</Badge>}
                       {!t.active && <Badge tone="amber">Retired</Badge>}
                     </div>
                     {t.subject && <p className="text-xs text-muted">{t.subject}</p>}

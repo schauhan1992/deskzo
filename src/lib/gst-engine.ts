@@ -49,13 +49,53 @@ export function stateCodeFromGstin(gstin?: string | null) {
  * Nadu", "TAMILNADU" and "tamil-nadu" are all the same state and none of them is a typo worth
  * refusing an address over.
  */
-const STATE_CODE_BY_NAME = new Map(
-  Object.entries(GST_STATE_CODES).map(([code, name]) => [name.toLowerCase().replace(/[^a-z]/g, ""), code]),
-);
+/**
+ * A state name reduced to the letters that identify it.
+ *
+ * "&" and "and" are the same word. The table below writes "Jammu & Kashmir"; India Post, the GST
+ * portal's own exports and most people typing write "Jammu and Kashmir" — and stripping punctuation
+ * alone turned those into `jammukashmir` and `jammuandkashmir`, two different keys for one state.
+ * Every state with an ampersand in its name failed that way and was quietly taxed as inter-state.
+ * Dropping "and" as a whole *word* is safe: no state name contains it as one except as a joiner,
+ * and "Andaman" keeps its letters because it is a different token.
+ */
+export function stateKey(name: string): string {
+  return name
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((word) => word && word !== "and" && word !== "the")
+    .join("");
+}
+
+/**
+ * Official names that were right when somebody wrote them down.
+ *
+ * Each is a real, former or alternative name for exactly one GST state, not a guess at a typo — the
+ * India Post directory still publishes several of them, and a customer record typed years ago says
+ * "Orissa" for the same reason. The two halves of Dadra & Nagar Haveli and Daman & Diu were separate
+ * union territories until 2020 and both now carry code 26. "harayna" is deliberately absent: a typo
+ * resolving to a state would hide exactly the mistake the address picker exists to surface.
+ */
+const STATE_ALIASES: Record<string, string> = {
+  orissa: "21",
+  pondicherry: "34",
+  chattisgarh: "22",
+  uttaranchal: "05",
+  dadranagarhaveli: "26",
+  damandiu: "26",
+  nctofdelhi: "07",
+  newdelhi: "07",
+  andamannicobar: "35",
+};
+
+const STATE_CODE_BY_NAME = new Map([
+  ...Object.entries(GST_STATE_CODES).map(([code, name]) => [stateKey(name), code] as const),
+  ...Object.entries(STATE_ALIASES),
+]);
 
 export function stateCodeFromName(state?: string | null) {
   if (!state) return null;
-  return STATE_CODE_BY_NAME.get(state.trim().toLowerCase().replace(/[^a-z]/g, "")) ?? null;
+  return STATE_CODE_BY_NAME.get(stateKey(state.trim())) ?? null;
 }
 
 export const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z][Z][0-9A-Z]$/;
@@ -304,3 +344,6 @@ export function amountInWords(amount: number, code: string = BASE_CURRENCY): str
   if (!sub || !words.subMany) return `${sign}${major} Only`;
   return `${sign}${major ? `${major} and ` : ""}${twoDigits(sub)} ${sub === 1 ? words.subOne : words.subMany} Only`;
 }
+
+/** The GST "state" of a party outside India — place of supply for an export. */
+export const OTHER_COUNTRY_CODE = "96";

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
@@ -11,7 +11,6 @@ import {
   assertGrantWithinOwnAuthority,
   assertMayActOnTarget,
   assertNotSelf,
-  assertSuperAdminRemains,
   AuthzError,
 } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
@@ -327,62 +326,30 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
 // ─── The super-admin flag ─────────────────────────────────────────────────────────────────────
 
 /**
- * Grants or revokes super admin.
+ * There is no action here that grants super admin, and that is the design.
  *
- * Gated on `actor.isSuperAdmin` alone and never on a permission key, deliberately: a grantable key
- * is a key that can be escalated to, so `permissions.manageSuperAdmin` does not exist. The only way
- * to become a super admin is for an existing one to say so, or for somebody with database access to
- * run scripts/grant-super-admin.ts.
+ * `setSuperAdmin` used to live at this point in the file: an existing super admin could promote
+ * anybody from the access drawer. It is gone, along with its two buttons, because the account it
+ * creates is the one account every permission check short-circuits for — it holds everything
+ * unconditionally, no permission row is consulted for it, and it cannot be impersonated. One
+ * account being outside the permission system is a decision somebody made once. A button that
+ * makes more of them turns that decision into a habit, and the permission system stops describing
+ * who can do what.
+ *
+ * So the rule is now enforced in two places that do not depend on this file being read:
+ *
+ *   · `users_one_super_admin`, a partial unique index, refuses to create a second.
+ *   · `users_require_remaining_super_admin`, a trigger, refuses to remove the last.
+ *
+ * Exactly one, always. Moving it needs database access —
+ * `npx tsx scripts/grant-super-admin.ts <email>` transfers it — which is the right bar for an
+ * account that can do everything, and the same bar as restoring a backup or reading a dump.
+ *
+ * What a super admin *can* still do from the app is make somebody an **admin**: that is
+ * `users.assignRole`, which is `superAdminOnly` in the registry, so only a super admin can hand it
+ * out. An admin is inside the permission system and can be reviewed, narrowed and revoked, which is
+ * precisely the difference.
  */
-export async function setSuperAdmin(userId: string, isSuper: boolean): Promise<ActionResult<null>> {
-  const session = await requireUser();
-  const actor = await actorContext(session.id);
-  if (!actor.isSuperAdmin) {
-    return { ok: false, error: "Only a super admin can grant or revoke super admin access." };
-  }
-
-  const target = await db.user.findUnique({
-    where: { id: userId },
-    select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true },
-  });
-  if (!target) return { ok: false, error: "That user no longer exists." };
-
-  try {
-    assertNotSelf(actor.id, userId, "super admin access");
-  } catch (err) {
-    return refuse(err);
-  }
-
-  if (!isSuper && target.isSuperAdmin) {
-    try {
-      await db.$transaction(async (tx) => {
-        await assertSuperAdminRemains(tx, userId);
-        await tx.user.update({ where: { id: userId }, data: { isSuperAdmin: false } });
-      });
-    } catch (err) {
-      return refuse(err);
-    }
-  } else if (isSuper && !target.isSuperAdmin) {
-    if (!target.active) return { ok: false, error: `${target.name}'s account is deactivated.` };
-    // Forced, not merely required: the CHECK constraint enforces it, and every one of the ~77
-    // `role === "ADMIN"` comparisons in the app depends on it being true.
-    await db.user.update({ where: { id: userId }, data: { isSuperAdmin: true, role: "ADMIN" } });
-  } else {
-    return { ok: true, data: null };
-  }
-
-  await recordPermissionChange({
-    actorUserId: actor.id,
-    subjectType: "USER",
-    subjectUserId: userId,
-    changeKind: isSuper ? "SUPER_ADMIN_GRANTED" : "SUPER_ADMIN_REVOKED",
-    detail: `${actor.name} ${isSuper ? "made" : "removed"} ${target.name} ${isSuper ? "a super admin" : "as a super admin"}`,
-  });
-
-  revalidatePath("/settings/access");
-  revalidatePath("/", "layout");
-  return { ok: true, data: null };
-}
 
 /** The authorization change history, for the access-review screen. */
 export async function permissionChangeHistory(params: { userId?: string; role?: Role; limit?: number } = {}) {

@@ -368,88 +368,216 @@ export function ReportExplorer({
 
   return (
     <div className="mt-6 space-y-4">
+      {/* Three steps, top to bottom, in the order they are done: what to report, what to narrow it
+          to, then run. The filters used to sit behind a button beside Run and open underneath it, so
+          the page read as "run, then filter" — the wrong way round for the one thing that decides
+          what the report counts. */}
       <Card>
-        <CardContent className="grid grid-cols-2 gap-3 py-4 md:grid-cols-4 xl:grid-cols-7">
-          <Field label="Report on">
-            <Select aria-label="Report on" value={sourceKey} onChange={(e) => chooseSource(e.target.value)}>
-              {sources.map((s) => (
-                <option key={s.key} value={s.key}>{s.label}</option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Measure">
-            <Select aria-label="Measure" value={measure} onChange={(e) => setMeasure(e.target.value)}>
-              {source.measures.map((m) => (
-                <option key={m.key} value={m.key}>{m.label}</option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Break down by">
-            <Select aria-label="Break down by" value={dimension} onChange={(e) => chooseDimension(e.target.value)}>
-              <option value={TIME}>Time</option>
-              {source.dimensions.map((d) => (
-                <option key={d.key} value={d.key}>{d.label}</option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Across (optional)">
-            <Select aria-label="Across (optional)" value={column} onChange={(e) => setColumn(e.target.value)}>
-              <option value="">—</option>
-              {dimension !== TIME && <option value={TIME}>Time</option>}
-              {source.dimensions
-                .filter((d) => d.key !== dimension)
-                .map((d) => (
-                  <option key={d.key} value={d.key}>{d.label}</option>
-                ))}
-            </Select>
-          </Field>
-
-{/* Grain only means something when one axis is time, so it is absent rather than present and
-            greyed. A disabled control captioned "(unused)" reads as a broken feature — which is how
-            it was reported — and it takes up the same room either way. */}
-          {(dimension === TIME || column === TIME) && (
-            <Field label="Grain">
-              <Select aria-label="Grain" value={grain} onChange={(e) => setGrain(e.target.value as Grain)}>
-                {grains.map((g) => (
-                  <option key={g.key} value={g.key}>{g.label}</option>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-text">
+            <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand text-[11px] text-brand-contrast">1</span>
+            What to report
+          </h2>
+        </CardHeader>
+        <CardContent className="space-y-3 pb-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Field label="Report on">
+              <Select aria-label="Report on" value={sourceKey} onChange={(e) => chooseSource(e.target.value)}>
+                {sources.map((s) => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
                 ))}
               </Select>
             </Field>
-          )}
 
-          <Field label="Dated on">
-            <Select aria-label="Dated on" value={dateField} onChange={(e) => setDateField(e.target.value)}>
-              {source.dateFields.map((d) => (
-                <option key={d.key} value={d.key}>{d.label}</option>
-              ))}
-            </Select>
-          </Field>
+            <Field label="Measure">
+              <Select aria-label="Measure" value={measure} onChange={(e) => setMeasure(e.target.value)}>
+                {source.measures.map((m) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
+                ))}
+              </Select>
+            </Field>
 
-          <div className="col-span-2 grid grid-cols-2 gap-2 xl:col-span-1">
-            <Field label="From">
+            <Field label="Break down by">
+              <Select aria-label="Break down by" value={dimension} onChange={(e) => chooseDimension(e.target.value)}>
+                <option value={TIME}>Time</option>
+                {source.dimensions.map((d) => (
+                  <option key={d.key} value={d.key}>{d.label}</option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Across (optional)">
+              <Select aria-label="Across (optional)" value={column} onChange={(e) => setColumn(e.target.value)}>
+                <option value="">—</option>
+                {dimension !== TIME && <option value={TIME}>Time</option>}
+                {source.dimensions
+                  .filter((d) => d.key !== dimension)
+                  .map((d) => (
+                    <option key={d.key} value={d.key}>{d.label}</option>
+                  ))}
+              </Select>
+            </Field>
+
+            {/* Grain only means something when one axis is time, so it is absent rather than present and
+                greyed. A disabled control captioned "(unused)" reads as a broken feature — which is how
+                it was reported — and it takes up the same room either way. */}
+            {(dimension === TIME || column === TIME) && (
+              <Field label="Grain">
+                <Select aria-label="Grain" value={grain} onChange={(e) => setGrain(e.target.value as Grain)}>
+                  {grains.map((g) => (
+                    <option key={g.key} value={g.key}>{g.label}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+          </div>
+
+          {/* The window on its own row: squeezed into the last seventh of the one above, a date field
+              was too narrow to show its own date. */}
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Dated on" className="w-full sm:w-56">
+              <Select aria-label="Dated on" value={dateField} onChange={(e) => setDateField(e.target.value)}>
+                {source.dateFields.map((d) => (
+                  <option key={d.key} value={d.key}>{d.label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="From" className="w-[calc(50%-0.375rem)] sm:w-44">
               <Input aria-label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
             </Field>
-            <Field label="To">
+            <Field label="To" className="w-[calc(50%-0.375rem)] sm:w-44">
               <Input aria-label="To" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </Field>
           </div>
+          {source.measures.find((m) => m.key === measure)?.description && (
+            <p className="text-xs text-subtle">{source.measures.find((m) => m.key === measure)?.description}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Two filter layers, kept visibly apart because they do different things. The workspace
+          filters narrow which accounts are in scope at all; the dimension filters narrow what
+          came back. Presenting them as one list would suggest they are interchangeable. */}
+      <Card>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-text">
+            <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand text-[11px] text-brand-contrast">2</span>
+            Narrow it down <span className="font-normal text-subtle">(optional)</span>
+          </h2>
+          {/* Offered for every source. It used to appear only for company-anchored ones, because
+              the only thing behind it was the account filter — so a report you could narrow by
+              product looked as though it could not be narrowed at all. */}
+          <Button size="sm" variant={activeFilterCount > 0 || panelOpen ? "secondary" : "ghost"} onClick={() => setPanelOpen((v) => !v)} aria-expanded={panelOpen}>
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            {panelOpen ? "Hide filters" : activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Add filters"}
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4 pb-4">
+          {!panelOpen && activeFilterCount === 0 && (
+            <p className="text-xs text-subtle">
+              Nothing narrowed — the report counts all {source.label.toLowerCase()} in the window
+              {source.companyAnchored ? " across every account you can see" : ""}. Add filters to count only some before you run it.
+            </p>
+          )}
+
+          {panelOpen && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-text">Which {source.label.toLowerCase()}</h2>
+                  <span className="text-xs text-subtle">Narrows what is counted</span>
+                </CardHeader>
+                <CardContent>
+                  <DimensionFilters
+                    dimensions={source.dimensions.map((d) => ({ key: d.key, label: d.label }))}
+                    values={options.values}
+                    counts={options.counts}
+                    filters={filters}
+                    loading={optionsLoading}
+                    capped={options.capped}
+                    onChange={setFilters}
+                  />
+                </CardContent>
+              </Card>
+
+              {source.companyAnchored && (
+                <Card>
+                  <CardHeader className="flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-text">Which accounts</h2>
+                    <span className="text-xs text-subtle">Narrows the query itself</span>
+                  </CardHeader>
+                  <CardContent>
+                    <FilterBuilder filters={companyFilters} onChange={(update) => setCompanyFilters(update)} options={filterOptions} />
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* Not gated on a result any more. A filter set before running is exactly the case that
+              most needs showing, and hiding it left the Run button looking unconditional. */}
+          {activeFilterCount > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Account chips first and in a quieter colour, because they are the wider of the two
+                  layers: they decide which accounts exist for this report at all, and the brand-coloured
+                  chips beside them then narrow what came back. Same shape, deliberately different
+                  weight — reading them as one list is the mistake the two panels exist to prevent. */}
+              {companyChips.map((f) => (
+                <button
+                  key={`company:${f.key}`}
+                  type="button"
+                  onClick={() =>
+                    setCompanyFilters((prev) => {
+                      const next = { ...prev };
+                      delete next[f.key];
+                      return next;
+                    })
+                  }
+                  aria-label={`Remove account filter ${f.label}${f.value ? `: ${f.value}` : ""}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-sunken px-2 py-0.5 text-xs text-muted hover:text-text"
+                >
+                  {f.label}
+                  {f.value ? `: ${f.value}` : ""}
+                  <X className="h-3 w-3" />
+                </button>
+              ))}
+              {Object.entries(filters).flatMap(([key, values]) =>
+                values.map((v) => (
+                  // The X is decorative, so the chip's name was "Brand: AutoCAD" — a statement of what is
+                  // filtered, with nothing saying that pressing it undoes that.
+                  <button
+                    key={`${key}:${v}`}
+                    type="button"
+                    onClick={() => toggleFilter(key, v)}
+                    aria-label={`Remove filter ${source.dimensions.find((d) => d.key === key)?.label ?? key}: ${v}`}
+                    className="inline-flex items-center gap-1 rounded-full bg-brand-subtle px-2 py-0.5 text-xs text-brand hover:opacity-80"
+                  >
+                    {source.dimensions.find((d) => d.key === key)?.label}: {v}
+                    <X className="h-3 w-3" />
+                  </button>
+                )),
+              )}
+              {/* Clears both layers, because it sits under both sets of chips and clearing one of them
+                  while leaving the other is the reading nobody has. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters({});
+                  setCompanyFilters({});
+                }}
+                className="text-xs text-muted hover:text-text hover:underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={run} disabled={pending}>
+        <Button onClick={run} disabled={pending}>
           {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BarChart3 className="h-3.5 w-3.5" />}
-          {pending ? "Running…" : "Run report"}
-        </Button>
-        {/* Offered for every source. It used to appear only for company-anchored ones, because
-            the only thing behind it was the account filter — so a report you could narrow by
-            product looked as though it could not be narrowed at all. */}
-        <Button size="sm" variant={activeFilterCount > 0 ? "secondary" : "ghost"} onClick={() => setPanelOpen((v) => !v)}>
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          {pending ? "Running…" : activeFilterCount > 0 ? `Run report with ${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"}` : "Run report"}
         </Button>
         {result && (
           <>
@@ -463,105 +591,7 @@ export function ReportExplorer({
             </Button>
           </>
         )}
-        {source.measures.find((m) => m.key === measure)?.description && (
-          <span className="text-xs text-subtle">{source.measures.find((m) => m.key === measure)?.description}</span>
-        )}
       </div>
-
-      {/* Two filter layers, kept visibly apart because they do different things. The workspace
-          filters narrow which accounts are in scope at all; the dimension filters narrow what
-          came back. Presenting them as one list would suggest they are interchangeable. */}
-      {panelOpen && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-text">Which {source.label.toLowerCase()}</h2>
-              <span className="text-xs text-subtle">Narrows what is counted</span>
-            </CardHeader>
-            <CardContent>
-              <DimensionFilters
-                dimensions={source.dimensions.map((d) => ({ key: d.key, label: d.label }))}
-                values={options.values}
-                counts={options.counts}
-                filters={filters}
-                loading={optionsLoading}
-                capped={options.capped}
-                onChange={setFilters}
-              />
-            </CardContent>
-          </Card>
-
-          {source.companyAnchored && (
-            <Card>
-              <CardHeader className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-text">Which accounts</h2>
-                <span className="text-xs text-subtle">Narrows the query itself</span>
-              </CardHeader>
-              <CardContent>
-                <FilterBuilder filters={companyFilters} onChange={(update) => setCompanyFilters(update)} options={filterOptions} />
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Not gated on a result any more. A filter set before running is exactly the case that
-          most needs showing, and hiding it left the Run button looking unconditional. */}
-      {activeFilterCount > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {/* Account chips first and in a quieter colour, because they are the wider of the two
-              layers: they decide which accounts exist for this report at all, and the brand-coloured
-              chips beside them then narrow what came back. Same shape, deliberately different
-              weight — reading them as one list is the mistake the two panels exist to prevent. */}
-          {companyChips.map((f) => (
-            <button
-              key={`company:${f.key}`}
-              type="button"
-              onClick={() =>
-                setCompanyFilters((prev) => {
-                  const next = { ...prev };
-                  delete next[f.key];
-                  return next;
-                })
-              }
-              aria-label={`Remove account filter ${f.label}${f.value ? `: ${f.value}` : ""}`}
-              className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-sunken px-2 py-0.5 text-xs text-muted hover:text-text"
-            >
-              {f.label}
-              {f.value ? `: ${f.value}` : ""}
-              <X className="h-3 w-3" />
-            </button>
-          ))}
-          {Object.entries(filters).flatMap(([key, values]) =>
-            values.map((v) => (
-              // The X is decorative, so the chip's name was "Brand: AutoCAD" — a statement of what is
-              // filtered, with nothing saying that pressing it undoes that.
-              <button
-                key={`${key}:${v}`}
-                type="button"
-                onClick={() => toggleFilter(key, v)}
-                aria-label={`Remove filter ${source.dimensions.find((d) => d.key === key)?.label ?? key}: ${v}`}
-                className="inline-flex items-center gap-1 rounded-full bg-brand-subtle px-2 py-0.5 text-xs text-brand hover:opacity-80"
-              >
-                {source.dimensions.find((d) => d.key === key)?.label}: {v}
-                <X className="h-3 w-3" />
-              </button>
-            )),
-          )}
-          {/* Clears both layers, because it sits under both sets of chips and clearing one of them
-              while leaving the other is the reading nobody has. */}
-          <button
-            type="button"
-            onClick={() => {
-              setFilters({});
-              setCompanyFilters({});
-            }}
-            className="text-xs text-muted hover:text-text hover:underline"
-          >
-            Clear
-          </button>
-        </div>
-      )}
 
       {/* Both regions are mounted whether or not there is anything in them, which is the whole
           point: a live region announces a *change* to something the reader is already watching, so
@@ -772,9 +802,9 @@ export function ReportExplorer({
  * pair an id with at the call site — every control above carries an `aria-label` repeating these
  * exact words instead. Change one and change the other; they are the same name said twice.
  */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1">
+    <div className={cn("space-y-1", className)}>
       <Label className="text-xs">{label}</Label>
       {children}
     </div>

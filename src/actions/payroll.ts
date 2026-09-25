@@ -286,10 +286,10 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
 
   // Replaced wholesale rather than reconciled row by row: a recalculation is a fresh answer to the
   // same question, and matching old rows to new ones would only create ways for the two to diverge.
-  await db.$transaction([
-    db.payslip.deleteMany({ where: { runId: run.id } }),
-    db.payslip.createMany({ data: slips }),
-  ]);
+  await db.$transaction(async (tx) => {
+    await tx.payslip.deleteMany({ where: { runId: run.id } });
+    await tx.payslip.createMany({ data: slips });
+  });
 
   // Marked paid only after the payslips are written, and only for people who actually got one —
   // an earning tied to a payslip that failed to write would be an incentive nobody can pay again.

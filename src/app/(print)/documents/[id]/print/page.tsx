@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { getTradeDocument } from "@/actions/trade-document";
-import { getOrganisation } from "@/lib/organisation";
+import { findTradeDocumentFor } from "@/lib/documents/load";
+import { spendRenderGrant } from "@/lib/documents/render-grant";
+import { can } from "@/lib/authz/resolve";
+import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
 import { formatDate } from "@/lib/utils";
@@ -10,6 +13,8 @@ import { GST_STATE_CODES, amountInWords } from "@/lib/gst-engine";
 import { documentDirection, tradeDocumentLabels } from "@/lib/trade-documents";
 import { gstTreatmentLabels } from "@/lib/gst";
 import { formatAddress } from "@/lib/document-draft";
+import { approvalDocumentFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
+import { approvalRequirement } from "@/lib/documents/approval";
 
 /**
  * The page that becomes the PDF. It deliberately ignores the app's dark mode and semantic tokens —
@@ -23,10 +28,10 @@ export default async function PrintDocumentPage({
   params: Promise<{ id: string }>;
   /** `embed=1` drops the print button — the preview pane has its own, and a button inside a
    *  preview of a printed page is one more thing that isn't on the printed page. */
-  searchParams: Promise<{ embed?: string }>;
+  searchParams: Promise<{ embed?: string; render?: string }>;
 }) {
-  const [{ id }, { embed }] = await Promise.all([params, searchParams]);
-  const [document, org, branding] = await Promise.all([getTradeDocument(id), getOrganisation(), getBranding()]);
+  const [{ id }, { embed, render }] = await Promise.all([params, searchParams]);
+  const [document, org, branding] = await Promise.all([loadForPrint(id, render), getOrganisation(), getBranding()]);
   if (!document) notFound();
 
   /**
@@ -77,7 +82,7 @@ export default async function PrintDocumentPage({
     ? `${GST_STATE_CODES[document.placeOfSupplyCode] ?? "Unknown"} (${document.placeOfSupplyCode})`
     : "Not set";
 
-  const orgLines = [org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" — "), org.state];
+  const orgLines = [org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" — "), org.state, foreignCountry(org)];
   const billingLines = formatAddress({
     attention: document.billingAttention,
     line1: document.billingLine1,
@@ -98,7 +103,8 @@ export default async function PrintDocumentPage({
   });
 
   const counterparty = {
-    name: document.company.name,
+    // The name it was issued under, if the party has since been merged into another company.
+    name: document.partyName ?? document.company.name,
     gstin: isSales ? document.buyerGstin : document.sellerGstin,
     lines: billingLines.length > 0 ? billingLines : orgLines,
   };
@@ -106,15 +112,58 @@ export default async function PrintDocumentPage({
   // A shipping address only earns its space when it actually differs from the billing one.
   const showShipping = !document.shippingSameAsBilling && shippingLines.length > 0;
 
+  /**
+   * The watermark, where this document has not been signed off.
+   *
+   * Only for types that actually require approval — a watermark on every draft would be noise, and
+   * noise on a document is worse than nothing because people stop reading it.
+   *
+   * It is printed, not merely shown. The risk is entirely in the saved PDF: somebody previews an
+   * unapproved quotation, saves it and emails it, and the customer holds a price nobody signed off.
+   * A `print:hidden` watermark would vanish at exactly the moment it mattered.
+   */
+  // And only on a document that needs it: a quote under the approval limit is not waiting for anybody.
+  const [approvalPolicy, approvalFacts] = await Promise.all([approvalPolicyFor(document.docType), approvalDocumentFor(document.id)]);
+  const needsSignOff = approvalFacts ? approvalRequirement(approvalPolicy, approvalFacts).required : approvalPolicy.enabled;
+  const watermark =
+    needsSignOff && document.approvalStatus !== "APPROVED"
+      ? document.approvalStatus === "REJECTED"
+        ? "Not Approved"
+        : "Yet to be Approved"
+      : null;
+
   return (
-    <div className="mx-auto max-w-[820px] bg-white p-8 text-[13px] text-neutral-900 print:p-0">
+    <div className="relative mx-auto max-w-[820px] bg-white p-8 text-[13px] text-neutral-900 print:p-0">
       {embed !== "1" && (
         <div className="mb-4 flex justify-end print:hidden">
           <PrintButton />
         </div>
       )}
 
-      <div className="border border-neutral-300">
+      {watermark && (
+        /**
+         * Across the page, behind the content.
+         *
+         * `pointer-events-none` so it never blocks selecting or clicking the document underneath,
+         * and `print-color-adjust` because browsers drop background and faint colour when printing
+         * unless told not to — without it the watermark is on screen and missing from the paper,
+         * which is the one place it has to be.
+         */
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden"
+          style={{ WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}
+        >
+          <span
+            className="select-none whitespace-nowrap text-[68px] font-bold uppercase tracking-[0.12em] text-neutral-400"
+            style={{ transform: "rotate(-30deg)", opacity: 0.22 }}
+          >
+            {watermark}
+          </span>
+        </div>
+      )}
+
+      <div className="relative z-0 border border-neutral-300">
         <div className="flex items-start justify-between gap-6 border-b border-neutral-300 p-5">
           <div className="flex items-start gap-3">
             {branding.logoDataUrl && (
@@ -126,7 +175,7 @@ export default async function PrintDocumentPage({
               {org.tradeName && <div className="text-neutral-600">{org.tradeName}</div>}
               <div className="mt-1 leading-5 text-neutral-600">
                 {[org.addressLine1, org.addressLine2].filter(Boolean).join(", ")}
-                {org.city && <div>{[org.city, org.state, org.pincode].filter(Boolean).join(", ")}</div>}
+                {org.city && <div>{[org.city, org.state, org.pincode, foreignCountry(org)].filter(Boolean).join(", ")}</div>}
                 {org.gstin && <div>GSTIN: {org.gstin}</div>}
                 {org.phone && <div>{org.phone}</div>}
               </div>
@@ -138,6 +187,22 @@ export default async function PrintDocumentPage({
             </div>
             <div className="mt-1 font-mono text-neutral-700">{document.docNumber}</div>
             <div className="text-neutral-600">Dated {formatDate(document.issueDate)}</div>
+            {/**
+              * A draft says so, on the paper.
+              *
+              * This page is reachable before a document is issued, which is the point — you read it
+              * over before committing to it. But it otherwise renders exactly like the finished
+              * article, and the number on it is not final: issuing assigns the real one. Without
+              * this, the obvious next step after previewing is to save the PDF and send it, and the
+              * customer receives a quote carrying a number that will belong to a different document.
+              *
+              * Deliberately not `print:hidden` — the whole risk is the printed copy.
+              */}
+            {document.status === "DRAFT" && (
+              <div className="mt-2 inline-block border border-neutral-400 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                Draft — not issued
+              </div>
+            )}
           </div>
         </div>
 
@@ -401,4 +466,19 @@ function PrintRow({ label, value }: { label: string; value: string }) {
       <span className="text-neutral-900">{value}</span>
     </div>
   );
+}
+
+/**
+ * The document, for whoever is looking.
+ *
+ * Normally that is the person signed in. When the server's own browser is printing it for an email,
+ * there is no session, only a render pass (src/lib/documents/render-grant.ts): spent here, once, it
+ * names the person who pressed send, and the document is loaded as they would see it — their
+ * permission and their accounts, checked again now rather than trusted from a minute ago.
+ */
+async function loadForPrint(id: string, render: string | undefined) {
+  if (!render) return getTradeDocument(id);
+  const userId = await spendRenderGrant(render, id);
+  if (!userId || !(await can(userId, "documents.view"))) return null;
+  return findTradeDocumentFor(userId, id);
 }

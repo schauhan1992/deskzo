@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { Eye } from "lucide-react";
-import { ROLES } from "@/lib/roles";
+import { ADMIN_ROLE, type Role } from "@/lib/roles";
+import { roleKeys } from "@/lib/authz/role-registry";
+import { listRolesForScreen } from "@/actions/role";
+import { RoleManager } from "@/components/settings/role-manager";
 import { currentUser } from "@/lib/session";
 import { listDepartments } from "@/actions/department";
 import { listUsers } from "@/actions/user";
@@ -86,7 +89,7 @@ export default async function UsersAccessPage({
       </div>
 
       <div className="mt-5">
-        {tab === "people" && <PeopleTab mayManage={mayManage} viewerIsSuperAdmin={viewerIsSuperAdmin} />}
+        {tab === "people" && <PeopleTab mayManage={mayManage} />}
         {tab === "exceptions" && <ExceptionsTab mayManage={mayManage} />}
         {tab === "who" && <WhoCanTab />}
         {tab === "roles" && <RolesTab mayManage={mayManage} viewerIsSuperAdmin={viewerIsSuperAdmin} />}
@@ -95,14 +98,15 @@ export default async function UsersAccessPage({
   );
 }
 
-async function PeopleTab({ mayManage, viewerIsSuperAdmin }: { mayManage: boolean; viewerIsSuperAdmin: boolean }) {
+async function PeopleTab({ mayManage }: { mayManage: boolean }) {
   const [roster, users, departments, history] = await Promise.all([
     accessRoster(),
     listUsers(),
     listDepartments(),
     permissionChangeHistory({ limit: 8 }),
   ]);
-  const nonAdminRoles = ROLES.filter((r) => r !== "ADMIN");
+  const allRoles = await roleKeys();
+  const nonAdminRoles = allRoles.filter((r: Role) => r !== ADMIN_ROLE);
 
   return (
     <div className="space-y-6">
@@ -114,7 +118,7 @@ async function PeopleTab({ mayManage, viewerIsSuperAdmin }: { mayManage: boolean
         {mayManage && <NewUserDialog roles={nonAdminRoles} departments={departments} />}
       </div>
 
-      <AccessRoster rows={roster} viewerIsSuperAdmin={viewerIsSuperAdmin} mayManage={mayManage} />
+      <AccessRoster rows={roster} mayManage={mayManage} />
 
       <Card>
         <CardHeader className="text-sm font-medium text-text">Roles, departments &amp; reporting lines</CardHeader>
@@ -124,7 +128,7 @@ async function PeopleTab({ mayManage, viewerIsSuperAdmin }: { mayManage: boolean
             role — so the reporting line is an access decision, not just an org chart. Changing one needs permission
             to manage access.
           </p>
-          <TeamManager users={users} departments={departments} roles={ROLES} />
+          <TeamManager users={users} departments={departments} roles={allRoles} />
         </CardContent>
       </Card>
 
@@ -191,7 +195,12 @@ async function WhoCanTab() {
 }
 
 async function RolesTab({ mayManage, viewerIsSuperAdmin }: { mayManage: boolean; viewerIsSuperAdmin: boolean }) {
-  const [permissions, history] = await Promise.all([getPermissionMatrix(), permissionChangeHistory({ limit: 8 })]);
+  const [permissions, history, roles, roleRows] = await Promise.all([
+    getPermissionMatrix(),
+    permissionChangeHistory({ limit: 8 }),
+    roleKeys(),
+    listRolesForScreen(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -211,10 +220,12 @@ async function RolesTab({ mayManage, viewerIsSuperAdmin }: { mayManage: boolean;
         </p>
       </div>
 
+      {roleRows.ok && <RoleManager roles={roleRows.data} mayManage={mayManage} />}
+
       <PermissionMatrix
         rows={permissions.map((p) => ({ ...p, roles: p.roles as Record<string, boolean> }))}
-        roles={[...ROLES]}
-        presetsByRole={Object.fromEntries(ROLES.map((r) => [r, ROLE_PRESETS.filter((p) => p.role === r)]))}
+        roles={roles}
+        presetsByRole={Object.fromEntries(roles.map((r: Role) => [r, ROLE_PRESETS.filter((p) => p.role === r)]))}
         viewerIsSuperAdmin={viewerIsSuperAdmin}
         mayManage={mayManage}
       />

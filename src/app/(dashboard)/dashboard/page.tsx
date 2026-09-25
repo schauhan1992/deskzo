@@ -24,7 +24,14 @@ import {
   OutstandingCard,
   TopExpensesCard,
 } from "@/components/finance/finance-cards";
-import { GreetingStrip } from "@/components/layout/celebration-splash";
+import { WelcomeHeader, type DashboardTab } from "@/components/dashboard/welcome-header";
+import { GettingStarted } from "@/components/dashboard/getting-started";
+import { RecentUpdates } from "@/components/help/recent-updates";
+import { getGettingStarted, getHelpDesk, listUpdates, unreadUpdateCount } from "@/actions/help";
+import { getBranding } from "@/actions/branding";
+import { getOrganisation } from "@/lib/organisation";
+import { requireUser } from "@/lib/session";
+import { can } from "@/lib/authz/resolve";
 import { todaysMoments } from "@/lib/hr/today";
 
 function StatCard({ label, value, sublabel, href }: { label: string; value: string; sublabel?: string; href: string }) {
@@ -121,14 +128,66 @@ function TargetCard({
   );
 }
 
-export default async function DashboardPage() {
-  // The greeting now comes from todaysMoments(), which resolves the name itself.
-  const [summary, widgetOptions, prefs, presets, today] = await Promise.all([
+const TABS: DashboardTab[] = [
+  { key: "overview", label: "Dashboard" },
+  { key: "getting-started", label: "Getting Started" },
+  { key: "updates", label: "Recent Updates" },
+];
+
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab: requested } = await searchParams;
+  const tab = TABS.some((t) => t.key === requested) ? requested! : "overview";
+
+  // The band across the top is the same on every tab: the greeting (which resolves the name itself,
+  // from todaysMoments()), the company, and the helpline.
+  const user = await requireUser();
+  const [today, branding, organisation, helpDesk, unread, canManageHelp] = await Promise.all([
+    todaysMoments(),
+    getBranding(),
+    getOrganisation(),
+    getHelpDesk(),
+    unreadUpdateCount(),
+    can(user.id, "help.manage"),
+  ]);
+  const companyName = organisation.tradeName || organisation.legalName || branding.appName;
+  const header = (actions?: ReactNode) => (
+    <WelcomeHeader
+      greeting={today.greeting}
+      moments={today.moments}
+      companyName={companyName}
+      logoDataUrl={branding.logoDataUrl}
+      helpDesk={helpDesk}
+      // The count is only worth showing until they open the tab that clears it.
+      tabs={TABS.map((t) => (t.key === "updates" && tab !== "updates" ? { ...t, badge: unread } : t))}
+      activeTab={tab}
+      actions={actions}
+    />
+  );
+
+  // The other two tabs return before a single widget is computed — the dashboard's own queries are
+  // the expensive part of this page, and neither tab shows any of them.
+  if (tab === "getting-started") {
+    return (
+      <div>
+        {header()}
+        <GettingStarted steps={await getGettingStarted()} />
+      </div>
+    );
+  }
+  if (tab === "updates") {
+    return (
+      <div>
+        {header()}
+        <RecentUpdates posts={await listUpdates()} canManage={canManageHelp} />
+      </div>
+    );
+  }
+
+  const [summary, widgetOptions, prefs, presets] = await Promise.all([
     getDashboardSummary(),
     getDashboardWidgetOptions(),
     getDashboardPreferences(),
     getDashboardPresetOptions(),
-    todaysMoments(),
   ]);
 
   const availableKeys = new Set(widgetOptions.map((w) => w.key));
@@ -165,17 +224,20 @@ export default async function DashboardPage() {
     />
   );
 
-  widgets.leads = (
-    <StatCard
-      label="Open leads"
-      value={String(summary.leads.open)}
-      // Says whose pipeline this is. Without it, two people comparing home screens and seeing
-      // different totals conclude the app is broken rather than that one of them is looking at
-      // their own team.
-      sublabel={`${formatCurrency(summary.leads.pipelineValue)} in open pipeline · ${SCOPE_LABEL[summary.scopes.leads]}`}
-      href="/leads"
-    />
-  );
+  const leadSummary = summary.leads;
+  if (leadSummary) {
+    widgets.leads = (
+      <StatCard
+        label="Open leads"
+        value={String(leadSummary.open)}
+        // Says whose pipeline this is. Without it, two people comparing home screens and seeing
+        // different totals conclude the app is broken rather than that one of them is looking at
+        // their own team.
+        sublabel={`${formatCurrency(leadSummary.pipelineValue)} in open pipeline · ${SCOPE_LABEL[summary.scopes.leads]}`}
+        href="/leads"
+      />
+    );
+  }
 
   if (summary.vendors) {
     widgets.vendors = (
@@ -318,13 +380,13 @@ export default async function DashboardPage() {
     );
   }
 
-  widgets.recentLeads = (
+  if (leadSummary) widgets.recentLeads = (
     <ListCard title="Recently updated leads" href="/leads">
-      {summary.leads.recent.length === 0 ? (
+      {leadSummary.recent.length === 0 ? (
         <Empty>No leads yet.</Empty>
       ) : (
         <ul className="divide-y divide-line">
-          {summary.leads.recent.map((lead) => (
+          {leadSummary.recent.map((lead) => (
             <li key={lead.id} className="flex items-center justify-between px-5 py-3">
               <div className="min-w-0">
                 <Link href={`/leads/${lead.id}`} className="truncate text-sm font-medium text-text hover:underline">
@@ -511,20 +573,16 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          {/* The greeting knows the time of day and who has a birthday; the splash for anything
-              bigger is mounted in the layout, so it reaches every page. */}
-          <GreetingStrip greeting={today.greeting} moments={today.moments} />
-          <p className="-mt-3 text-sm text-muted">Here&apos;s what&apos;s happening across Wroffy today.</p>
-        </div>
+      {/* The greeting knows the time of day and who has a birthday; the splash for anything bigger is
+          mounted in the layout, so it reaches every page. */}
+      {header(
         <DashboardCustomizeButton
           options={widgetOptions}
           selected={visibleKeys}
           customized={prefs.customized}
           presets={presets}
-        />
-      </div>
+        />,
+      )}
 
       {items.length === 0 ? (
         <Card className="mt-6">

@@ -1,6 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { runMarketingTick } from "@/lib/marketing/tick";
+import { refreshStaleLeadScores } from "@/lib/leads/score-store";
+import { refreshStaleCreditRatings } from "@/lib/credit/load";
+import { detectSalesWins } from "@/lib/wins/detect";
+import { announceActivityAwards } from "@/lib/performance/announce";
+import { announcePrizes } from "@/lib/wins/prize-announce";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /**
  * The scheduler's way in.
@@ -43,16 +49,59 @@ async function handle(request: Request) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
-  const url = new URL(request.url);
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const forwardedProto = request.headers.get("x-forwarded-proto");
   // Links in the mail have to be absolute and have to work from outside, so the origin comes from
   // the request rather than an env var nobody would remember to set.
-  const origin = forwardedHost ? `${forwardedProto ?? "https"}://${forwardedHost}` : url.origin;
+  const origin = await tenantOrigin();
 
   try {
     const result = await runMarketingTick(origin);
-    return NextResponse.json({ ok: true, ...result });
+    /**
+     * Lead scores, riding on the app's one heartbeat.
+     *
+     * Part of a score is time — a lead nobody has touched gets colder by the day with nothing
+     * about it changing — so scores not refreshed in 12 hours are recomputed here, 500 at a time.
+     * Isolated: a scoring failure must not report the marketing tick as failed, or stop it.
+     */
+    const leadScoresRefreshed = await refreshStaleLeadScores({ limit: 500 }).catch((err) => {
+      console.error("lead score refresh failed", err);
+      return 0;
+    });
+    /**
+     * Credit ratings, for the same reason: an invoice passing its due date changes a rating with
+     * nothing being written. Only the stored copy the Customer credit list sorts by — decisions always
+     * recompute — so a failure here costs freshness, never a wrong approval.
+     */
+    const creditRatingsRefreshed = await refreshStaleCreditRatings({ limit: 500 }).catch((err) => {
+      console.error("credit rating refresh failed", err);
+      return 0;
+    });
+    /**
+     * Sales wins: a target crossed by an invoice paid overnight, the month's top performer on the
+     * 1st. Deals and first orders are caught the moment they happen too; this catches the rest.
+     */
+    const salesWins = await detectSalesWins().catch((err) => {
+      console.error("sales wins detection failed", err);
+      return { created: 0 };
+    });
+    /** The fortnight's most active people, the morning after it closes. Once — the award row is the claim. */
+    const activityAward = await announceActivityAwards().catch((err) => {
+      console.error("activity awards failed", err);
+      return { announced: null };
+    });
+    /** What is up for grabs, as a month or fortnight opens. Once each — the announcement row is the claim. */
+    const prizes = await announcePrizes().catch((err) => {
+      console.error("prize announcements failed", err);
+      return { announced: [] as string[] };
+    });
+    return NextResponse.json({
+      ok: true,
+      ...result,
+      leadScoresRefreshed,
+      creditRatingsRefreshed,
+      salesWinsCelebrated: salesWins.created,
+      activityAwardAnnounced: activityAward.announced,
+      prizesAnnounced: prizes.announced,
+    });
   } catch (err) {
     console.error("marketing tick failed", err);
     return NextResponse.json(

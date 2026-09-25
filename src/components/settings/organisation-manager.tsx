@@ -13,7 +13,9 @@ import type { Organisation } from "@/lib/organisation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { GST_STATE_OPTIONS } from "@/lib/gst-engine";
+import { AddressFields } from "@/components/ui/address-fields";
+import { GST_STATE_CODES, GST_STATE_OPTIONS, GSTIN_PATTERN, stateCodeFromName } from "@/lib/gst-engine";
+import { isIndia } from "@/lib/geo/countries";
 import { EINVOICE_PROVIDERS } from "@/lib/einvoice/provider";
 
 export function OrganisationManager({ organisation }: { organisation: Organisation }) {
@@ -31,6 +33,7 @@ export function OrganisationManager({ organisation }: { organisation: Organisati
     state: organisation.state ?? "",
     stateCode: organisation.stateCode ?? "",
     pincode: organisation.pincode ?? "",
+    country: organisation.country ?? "",
     email: organisation.email ?? "",
     phone: organisation.phone ?? "",
     bankName: organisation.bankName ?? "",
@@ -48,6 +51,21 @@ export function OrganisationManager({ organisation }: { organisation: Organisati
 
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  /**
+   * One registration, one state — and the GSTIN is the authority on which.
+   *
+   * Its first two digits *are* the GST state code, so typing it sets the code, and nothing else is
+   * allowed to move the code while there is one. The address state used to move it: choosing
+   * Haryana in the address of a company whose GSTIN starts 27 silently made it a Haryana seller,
+   * which re-taxes every invoice from the wrong state and gets every e-invoice rejected. The server
+   * now refuses that pair outright; these warnings say so before anybody presses Save.
+   */
+  const gstinState = GSTIN_PATTERN.test(form.gstin.trim().toUpperCase()) ? form.gstin.trim().slice(0, 2) : null;
+  const effectiveCode = form.stateCode || gstinState || "";
+  const codeDisagrees = Boolean(gstinState && form.stateCode && form.stateCode !== gstinState);
+  const addressCode = stateCodeFromName(form.state);
+  const addressDisagrees = Boolean(addressCode && effectiveCode && addressCode !== effectiveCode && !codeDisagrees);
 
   function save() {
     setError(null);
@@ -92,7 +110,18 @@ export function OrganisationManager({ organisation }: { organisation: Organisati
           </Field>
           <Field label="GSTIN" hint="The first two digits set your state code automatically.">
             {(id) => (
-              <Input id={id} value={form.gstin} onChange={set("gstin")} placeholder="27AABCW1234F1ZV" className="font-mono" />
+              <Input
+                id={id}
+                value={form.gstin}
+                onChange={(e) => {
+                  const gstin = e.target.value;
+                  const prefix = GSTIN_PATTERN.test(gstin.trim().toUpperCase()) ? gstin.trim().slice(0, 2) : null;
+                  // What the hint below the field has always promised, now done where it can be seen.
+                  setForm((prev) => ({ ...prev, gstin, ...(prefix ? { stateCode: prefix } : {}) }));
+                }}
+                placeholder="27AABCW1234F1ZV"
+                className="font-mono"
+              />
             )}
           </Field>
           <Field label="PAN">
@@ -103,14 +132,29 @@ export function OrganisationManager({ organisation }: { organisation: Organisati
           </Field>
           <Field label="GST state code" hint="Decides CGST + SGST versus IGST on every document.">
             {(id) => (
-              <Select id={id} value={form.stateCode} onChange={set("stateCode")}>
-                <option value="">Derive from GSTIN</option>
-                {GST_STATE_OPTIONS.map((s) => (
-                  <option key={s.code} value={s.code}>
-                    {s.code} — {s.name}
-                  </option>
-                ))}
-              </Select>
+              <>
+                <Select id={id} value={form.stateCode} onChange={set("stateCode")}>
+                  <option value="">Derive from GSTIN</option>
+                  {GST_STATE_OPTIONS.map((s) => (
+                    <option key={s.code} value={s.code}>
+                      {s.code} — {s.name}
+                    </option>
+                  ))}
+                </Select>
+                {codeDisagrees && gstinState && (
+                  <p className="text-xs text-danger">
+                    Your GSTIN is registered in {GST_STATE_CODES[gstinState]} ({gstinState}). Saved like this, every invoice
+                    would be taxed from the wrong state and e-invoices rejected — so it won&apos;t save.{" "}
+                    <button
+                      type="button"
+                      className="font-medium underline underline-offset-2"
+                      onClick={() => setForm((prev) => ({ ...prev, stateCode: gstinState }))}
+                    >
+                      Use {gstinState} — {GST_STATE_CODES[gstinState]}
+                    </button>
+                  </p>
+                )}
+              </>
             )}
           </Field>
 
@@ -120,15 +164,42 @@ export function OrganisationManager({ organisation }: { organisation: Organisati
           <Field label="Address line 2">
             {(id) => <Input id={id} value={form.addressLine2} onChange={set("addressLine2")} />}
           </Field>
-          <Field label="City">
-            {(id) => <Input id={id} value={form.city} onChange={set("city")} />}
-          </Field>
-          <Field label="State">
-            {(id) => <Input id={id} value={form.state} onChange={set("state")} />}
-          </Field>
-          <Field label="PIN code">
-            {(id) => <Input id={id} value={form.pincode} onChange={set("pincode")} placeholder="400001" />}
-          </Field>
+          {/**
+            * The address state sets the GST code only while there is no GSTIN.
+            *
+            * This is the *seller* side of every document, so the address state and the code
+            * disagreeing means invoices computed from one answer and printed with the other. With no
+            * GSTIN yet, picking the state is the best evidence of the code, so it sets it. Once there
+            * is a GSTIN, the GSTIN decides — a registration is in one state — and an address in a
+            * different state is flagged below rather than allowed to move the tax.
+            */}
+          <div className="sm:col-span-2">
+            <AddressFields
+              columns={3}
+              country={form.country}
+              state={form.state}
+              city={form.city}
+              pincode={form.pincode}
+              onChange={(patch) =>
+                setForm((prev) => ({
+                  ...prev,
+                  ...patch,
+                  // Only with no GSTIN to decide it — see `gstinState` above.
+                  // And only in India: a state abroad is no GST state, whatever it is called.
+                  ...(patch.state !== undefined && !gstinState && isIndia(patch.country ?? prev.country)
+                    ? { stateCode: GST_STATE_OPTIONS.find((s) => s.name === patch.state)?.code ?? prev.stateCode }
+                    : {}),
+                }))
+              }
+            />
+            {addressDisagrees && addressCode && (
+              <p className="mt-1.5 text-xs text-warning">
+                The registered address is in {GST_STATE_CODES[addressCode]}, but your GST registration is in{" "}
+                {GST_STATE_CODES[effectiveCode]}. The address on a GST registration is in the state it was issued
+                for — worth checking which of the two is wrong.
+              </p>
+            )}
+          </div>
           <Field label="Email">
             {(id) => <Input id={id} type="email" value={form.email} onChange={set("email")} />}
           </Field>

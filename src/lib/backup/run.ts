@@ -4,6 +4,8 @@ import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { db } from "@/lib/db";
 import { writeSidecar, sidecarPath } from "@/lib/backup/sidecar";
+import { collectGarbage, manifestExists, manifestPath, storeDump, writeManifest } from "@/lib/backup/chunks";
+import type { BackupKind } from "@prisma/client";
 import { secretFingerprint } from "@/lib/backup/fingerprint";
 import { RUNNING_PRESUMED_DEAD_MINUTES } from "@/lib/backup/schedule";
 import {
@@ -84,7 +86,24 @@ function runs(command: string, args: string[]): Promise<boolean> {
 }
 
 export type BackupOutcome =
-  | { ok: true; id: string; filename: string; sizeBytes: number; via: string; pruned: number }
+  | {
+      ok: true;
+      id: string;
+      filename: string;
+      /** The size of the snapshot, whichever way it was stored. */
+      sizeBytes: number;
+      /**
+       * What this run actually put on disk.
+       *
+       * The same as `sizeBytes` for a FULL backup, and usually a small fraction of it for a chunked
+       * one. Reported separately because "38 MB backed up, 900 KB written" is the sentence that
+       * makes an incremental backup believable, and one number cannot say it.
+       */
+      storedBytes: number;
+      kind: BackupKind;
+      via: string;
+      pruned: number;
+    }
   | { ok: false; id: string | null; error: string };
 
 /**
@@ -100,7 +119,14 @@ export async function runBackup(options?: {
   /** From the stored schedule when one drove this run; falls back to the environment and the defaults. */
   keepDays?: number;
   keepMinimum?: number;
+  /**
+   * FULL writes one standalone file. INCREMENTAL splits the same snapshot into the shared chunk
+   * store and writes only what changed. Defaults to FULL, because the standalone file is the one
+   * that survives losing this machine.
+   */
+  kind?: BackupKind;
 }): Promise<BackupOutcome> {
+  const kind: BackupKind = options?.kind ?? "FULL";
   const connection = parseDatabaseUrl(process.env.DATABASE_URL);
   if (!connection) return { ok: false, id: null, error: "DATABASE_URL is missing or not a Postgres URL." };
 
@@ -118,13 +144,22 @@ export async function runBackup(options?: {
   await mkdir(directory, { recursive: true });
 
   const startedAt = new Date();
-  const filename = backupFilename(startedAt);
+  /**
+   * A chunked backup has no single file, so its name ends `.chunked` rather than `.dump`.
+   *
+   * It still gets a name because the log, the pruner and the sort order are all built on one, and
+   * because "which backup is this" should be answerable without joining to the manifest. The
+   * extension is the honest part: somebody looking in the folder for `.chunked` will not find it,
+   * and should not go looking for a file that was never written.
+   */
+  const filename = kind === "FULL" ? backupFilename(startedAt) : backupFilename(startedAt).replace(/\.dump$/, ".chunked");
 
   const record = await db.backup.create({
     data: {
       filename,
       directory,
       status: "RUNNING",
+      kind,
       startedAt,
       via: tool.via,
       schemaVersion: await latestMigration(),
@@ -134,9 +169,29 @@ export async function runBackup(options?: {
     select: { id: true },
   });
 
+  /**
+   * Where the dump lands before anything is decided about it.
+   *
+   * A FULL backup writes straight to its final name. A chunked one writes to a working file that is
+   * read into the store and then deleted — it is never a backup in its own right, and leaving one
+   * behind would put an unreferenced complete copy of the database in the backup folder, which is
+   * exactly what the store exists to avoid.
+   */
+  const workingPath =
+    kind === "FULL" ? path.join(directory, filename) : path.join(directory, `.${filename}.building`);
+
   try {
-    await dump(tool, connection, path.join(directory, filename));
-    const { size } = await stat(path.join(directory, filename));
+    /**
+     * Chunked backups dump uncompressed, and this is the decision the whole feature rests on.
+     *
+     * `--compress=6` puts one deflate stream over the file: change a single row and every byte
+     * after it differs, so no two dumps share a chunk and an "incremental" backup stores the entire
+     * database every time. Measured in `check:backup` — a compressed pair re-stores 100% against
+     * 41% uncompressed on the same change. Compression is applied per chunk in the store instead,
+     * so nothing is given up but the similarity is kept.
+     */
+    await dump(tool, connection, workingPath, kind === "FULL" ? 6 : 0);
+    const { size } = await stat(workingPath);
 
     /**
      * An empty or near-empty file is a failed dump that exited zero, which does happen — a broken
@@ -147,27 +202,43 @@ export async function runBackup(options?: {
       throw new Error(`The dump is only ${size} bytes, which cannot be a whole database.`);
     }
 
-    // Written after the dump, so a sidecar existing means the file beside it is complete.
-    await writeSidecar(path.join(directory, filename), {
-      filename,
-      takenAt: startedAt.toISOString(),
-      schemaVersion: await latestMigration(),
-      secretFingerprint: secretFingerprint(process.env.AUTH_SECRET),
-      via: tool.via,
-      sizeBytes: size,
-      app: "Wroffy ERP",
-    });
+    let storedBytes = size;
+
+    if (kind === "FULL") {
+      // Written after the dump, so a sidecar existing means the file beside it is complete.
+      await writeSidecar(path.join(directory, filename), {
+        filename,
+        takenAt: startedAt.toISOString(),
+        schemaVersion: await latestMigration(),
+        secretFingerprint: secretFingerprint(process.env.AUTH_SECRET),
+        via: tool.via,
+        sizeBytes: size,
+        app: "Wroffy ERP",
+      });
+    } else {
+      const manifest = await storeDump(directory, workingPath);
+      await writeManifest(directory, record.id, manifest);
+      storedBytes = manifest.newBytes;
+      // The working copy goes as soon as its pieces are safely in the store. Until this line there
+      // are two complete copies of the database on disk; after it, one.
+      await rm(workingPath, { force: true }).catch(() => {});
+    }
 
     await db.backup.update({
       where: { id: record.id },
-      data: { status: "SUCCEEDED", finishedAt: new Date(), sizeBytes: BigInt(size) },
+      data: {
+        status: "SUCCEEDED",
+        finishedAt: new Date(),
+        sizeBytes: BigInt(size),
+        storedBytes: BigInt(storedBytes),
+      },
     });
 
     const pruned = await pruneOldBackups(directory, {
       keepDays: options?.keepDays,
       keepMinimum: options?.keepMinimum,
     });
-    return { ok: true, id: record.id, filename, sizeBytes: size, via: tool.via, pruned };
+    return { ok: true, id: record.id, filename, sizeBytes: size, via: tool.via, pruned, kind, storedBytes };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     await db.backup.update({
@@ -175,13 +246,18 @@ export async function runBackup(options?: {
       data: { status: "FAILED", finishedAt: new Date(), error },
     });
     // The part-written file goes with it, so a failed run cannot be mistaken for a restorable one.
+    await rm(workingPath, { force: true }).catch(() => {});
     await rm(path.join(directory, filename), { force: true }).catch(() => {});
     await rm(sidecarPath(path.join(directory, filename)), { force: true }).catch(() => {});
+    // A half-written manifest would name pieces that may not all be there. The chunks themselves are
+    // left for the sweep: they are addressed by content, so any that were written are either shared
+    // with a good backup or unreferenced, and unreferenced is the sweep's job rather than this one's.
+    await rm(manifestPath(directory, record.id), { force: true }).catch(() => {});
     return { ok: false, id: record.id, error };
   }
 }
 
-function dump(tool: DumpTool, connection: Connection, target: string): Promise<void> {
+function dump(tool: DumpTool, connection: Connection, target: string, compress = 6): Promise<void> {
   /**
    * Custom format, compressed. It is what `pg_restore` can read selectively and in parallel, and it
    * is a third the size of plain SQL — which matters when the thing has to be copied off the box.
@@ -213,7 +289,7 @@ function dump(tool: DumpTool, connection: Connection, target: string): Promise<v
   const args = [
     ...tool.args,
     "--format=custom",
-    "--compress=6",
+    `--compress=${compress}`,
     "--no-owner",
     "--no-privileges",
     ...connectionArgs,
@@ -270,14 +346,23 @@ async function latestMigration(): Promise<string | null> {
   }
 }
 
-/** Deletes what the retention policy says may go, and the rows that pointed at them. */
+/**
+ * Deletes what the retention policy says may go, and the rows that pointed at them.
+ *
+ * Returns a count rather than the bytes it freed. The freed figure is only knowable for the chunk
+ * store and only after the sweep, so a caller reading one number would be comparing "rows" against
+ * "bytes of chunks" depending on which kind aged out — and both callers, the settings page and
+ * `check:backup`, want the count. `storeSize` answers the disk-usage question honestly instead.
+ */
 export async function pruneOldBackups(
   directory: string,
   retention?: { keepDays?: number; keepMinimum?: number },
 ): Promise<number> {
   const rows = await db.backup.findMany({
     where: { directory },
-    select: { id: true, filename: true, startedAt: true, status: true },
+    // `kind` decides what there is to delete: a chunked backup has no file of its own, and deleting
+    // by filename would quietly leave its manifest behind pinning chunks nothing can restore.
+    select: { id: true, filename: true, kind: true, startedAt: true, status: true },
   });
 
   const doomed = prunable(
@@ -295,17 +380,54 @@ export async function pruneOldBackups(
     },
   );
 
-  for (const file of doomed) {
-    const dump = path.join(directory, file.filename);
+  // Matched back to their rows by the same filename the deletion below uses, so the set whose data
+  // is removed and the set whose rows are removed cannot drift apart.
+  const doomedNames = new Set(doomed.map((f) => f.filename));
+  const doomedRows = rows.filter((r) => doomedNames.has(r.filename));
+
+  let manifestsRemoved = 0;
+  for (const row of doomedRows) {
+    if (row.kind === "INCREMENTAL") {
+      /**
+       * A chunked backup is its manifest — there is no `.dump` and no sidecar to delete, and the
+       * chunks it names are deliberately left alone here. See the sweep below for why.
+       */
+      if (await manifestExists(directory, row.id)) {
+        await rm(manifestPath(directory, row.id), { force: true }).catch(() => {});
+        manifestsRemoved += 1;
+      }
+      continue;
+    }
+    const dump = path.join(directory, row.filename);
     await rm(dump, { force: true }).catch(() => {});
     // The sidecar goes with its dump. Left behind it is a description of a file that is not there.
     await rm(sidecarPath(dump), { force: true }).catch(() => {});
   }
+
   if (doomed.length > 0) {
     await db.backup.deleteMany({
       where: { directory, filename: { in: doomed.map((f) => f.filename) } },
     });
   }
+
+  /**
+   * The sweep runs *last*, and the ordering is the safety rather than tidiness.
+   *
+   * Chunks are shared: two dumps taken a day apart have almost all of their pieces in common, which
+   * is the entire point of the store. So deleting "this backup's chunks" as part of pruning it would
+   * take pieces out from under every other backup that shares them — most of them — leaving
+   * manifests that still name hashes nobody can supply. Nothing would report an error, nothing on
+   * the settings page would look different, and it would be discovered at a restore.
+   *
+   * Mark-and-sweep is the only order that cannot do that: once the doomed manifests are gone, what
+   * `collectGarbage` keeps is exactly what the *surviving* manifests name. It is run only when a
+   * manifest actually went, because with none removed the answer is a foregone "nothing to free"
+   * bought with a read of every manifest and a walk of the whole store.
+   */
+  if (manifestsRemoved > 0) {
+    await collectGarbage(directory);
+  }
+
   return doomed.length;
 }
 
@@ -316,6 +438,35 @@ export async function filesOnDisk(directory: string): Promise<Set<string>> {
   } catch {
     return new Set();
   }
+}
+
+/**
+ * Which of these backups still have their data, by row id.
+ *
+ * "Is the file in the folder" stopped being the whole question once a backup could have no file:
+ * a chunked row's `.chunked` name is a label, never written, so a listing check would mark every
+ * one of them missing and a settings page would report the store's entire contents as lost.
+ * What stands in for the file is the manifest — see `manifestExists` for why the chunks it names
+ * are not verified here.
+ *
+ * Keyed by id rather than filename because that is what a chunked backup is indexed under, and
+ * because two rows sharing a name should not vouch for each other.
+ */
+export async function presentBackups(
+  directory: string,
+  rows: { id: string; filename: string; kind: BackupKind }[],
+): Promise<Set<string>> {
+  // One listing for all the FULL rows. A stat per row turns a fifty-row table into fifty syscalls
+  // to answer a question one readdir already answered.
+  const onDisk = await filesOnDisk(directory);
+
+  const present = new Set<string>();
+  for (const row of rows) {
+    const there =
+      row.kind === "INCREMENTAL" ? await manifestExists(directory, row.id) : onDisk.has(row.filename);
+    if (there) present.add(row.id);
+  }
+  return present;
 }
 
 /**

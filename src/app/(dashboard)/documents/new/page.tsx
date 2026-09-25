@@ -6,11 +6,13 @@ import { listDocumentParties } from "@/actions/trade-document";
 import { listAssignableUsers } from "@/actions/company";
 import { leadDocumentDraft } from "@/actions/lead";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
-import { getOrganisation } from "@/lib/organisation";
+import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { stateCodeFromGstin } from "@/lib/gst-engine";
 import { DocumentForm } from "@/components/documents/document-form";
 import { blankLine, emptyDefaults } from "@/lib/document-draft";
 import { Card } from "@/components/ui/card";
+import { viewerHas } from "@/actions/permission";
+import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import {
   documentListPath,
   tradeDocumentLabels,
@@ -22,6 +24,7 @@ export default async function NewDocumentPage({
 }: {
   searchParams: Promise<{ type?: string; companyId?: string; leadId?: string }>;
 }) {
+  if (!(await viewerHas("documents.view"))) return <NoAccessNotice title="New document" permission="documents.view" />;
   const params = await searchParams;
   // A delivery challan is not in this list — it is raised from a consignment, so there is no blank
   // form for one. The cast narrows to the types that do have one.
@@ -47,7 +50,7 @@ export default async function NewDocumentPage({
    */
   const defaultSalespersonId = me && salespeople.some((s) => s.id === me.id) ? me.id : "";
   const orgStateCode = org.stateCode ?? stateCodeFromGstin(org.gstin);
-  const orgAddress = [org.legalName, org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" "), org.state]
+  const orgAddress = [org.legalName, org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" "), org.state, foreignCountry(org)]
     .filter(Boolean)
     .join("\n");
 

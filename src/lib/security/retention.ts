@@ -50,5 +50,12 @@ export async function purgeExpiredActivity(): Promise<{ deleted: number; cutoff:
   const allowanceCutoff = new Date(Date.now() - 14 * 24 * 60 * 60_000).toISOString().slice(0, 10);
   await db.screenshotAllowance.deleteMany({ where: { day: { lt: allowanceCutoff } } });
 
+  // Sign-ins carry where somebody was — personal data about staff — so they are kept exactly as
+  // long as the activity log and no longer. An address nobody has come from in that time goes too.
+  // Sessions still open are left alone whatever their age: ending one depends on its row.
+  const signIns = await db.signIn.deleteMany({ where: { at: { lt: cutoff }, OR: [{ endedAt: { not: null } }, { lastSeenAt: { lt: cutoff } }] } });
+  await db.networkAddress.deleteMany({ where: { lastSeenAt: { lt: cutoff } } });
+  deleted += signIns.count;
+
   return { deleted, cutoff };
 }

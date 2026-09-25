@@ -8,6 +8,7 @@ import { headers } from "next/headers";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { throttle } from "@/lib/security/throttle";
+import { tenantKey } from "@/lib/tenancy/cache";
 import { logActivity } from "@/lib/activity";
 
 /**
@@ -52,7 +53,10 @@ export async function checkCredentials(email: string, password: string): Promise
 
   const address = email.trim().toLowerCase();
   const caller = await callerKey();
-  const keys = [`account:${address}`, `caller:${caller}`];
+  // Per workspace too: failures in one workspace must not lock the same address or office network
+  // out of another's.
+  const workspace = await tenantKey();
+  const keys = [`${workspace}|account:${address}`, `${workspace}|caller:${caller}`];
 
   const locked = lockoutState(keys);
   if (locked.lockedOut) {
@@ -73,7 +77,7 @@ export async function checkCredentials(email: string, password: string): Promise
      * the rest" rule the bot log uses, because a log an attacker can fill at will buries the row
      * that mattered.
      */
-    const shouldWrite = throttle(`login-failure:${address}`, 5 * 60 * 1000);
+    const shouldWrite = throttle(`${workspace}|login-failure:${address}`, 5 * 60 * 1000);
     if (shouldWrite.write || after.lockedOut) {
       await logActivity({
         // The two kinds this was always meant to write, and never did.
