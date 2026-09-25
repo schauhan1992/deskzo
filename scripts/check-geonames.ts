@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { deflateRawSync } from "node:zlib";
 import type { ReactElement } from "react";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@wroffy/reference-client";
 import {
   outwardKey,
   parseAdmin1Line,
@@ -48,7 +48,8 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return realLoad.call(this, request, parent, isMain);
 } as typeof realLoad;
 
-const db = new PrismaClient();
+// World places are in the shared reference database, not a workspace's (prisma/reference).
+const db = new PrismaClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {
   console.log(`${pass ? "  ok  " : " FAIL "} ${label}${detail !== "" ? ` — ${String(detail)}` : ""}`);
@@ -207,8 +208,11 @@ async function main() {
   ok("the world tables are reference data", ["geo_states", "geo_cities", "geo_postal_codes"].every((t) => REFERENCE_TABLES.some((r) => r.table === t)));
   const { readFileSync } = load("node:fs") as typeof import("node:fs");
   const root = path.join(__dirname, "..");
-  ok("the seed reloads world places", /await ensureGeonames\(/.test(readFileSync(path.join(root, "prisma", "seed.ts"), "utf8")));
-  ok("so does a restore", /await ensureGeonames\(/.test(readFileSync(path.join(root, "scripts", "restore-worker.ts"), "utf8")));
+  ok("the seed loads world places into the shared database", /await ensureGeonames\(reference\)/.test(readFileSync(path.join(root, "prisma", "seed.ts"), "utf8")));
+  ok(
+    "  and no workspace's database holds them — a reset, restore or backup of one never touches them",
+    !/@@map\("geo_/.test(readFileSync(path.join(root, "prisma", "schema.prisma"), "utf8")) && /@@map\("geo_cities"\)/.test(readFileSync(path.join(root, "prisma", "reference", "schema.prisma"), "utf8")),
+  );
   class Rollback extends Error {}
   try {
     await db.$transaction(async (tx) => {

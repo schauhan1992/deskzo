@@ -1,10 +1,10 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@wroffy/reference-client";
 import { outwardKey, plainText, postalKey } from "@/lib/geo/geonames";
 
 /**
- * Questions about places outside India, answered from GeoNames' tables (geo_states, geo_cities,
- * geo_postal_codes). The queries take their client, so a check can run them inside a transaction it
- * rolls back; the address forms reach them through src/actions/geo.ts.
+ * Questions about places outside India, answered from GeoNames' tables in the shared reference
+ * database (geo_states, geo_cities, geo_postal_codes). The queries take their client, so a check can
+ * run them inside a transaction it rolls back; the address forms reach them through src/actions/geo.ts.
  *
  * Every input is bounded before it reaches a query and every answer is capped, because the actions
  * behind them run without a session (the public new-joiner form collects an address too).

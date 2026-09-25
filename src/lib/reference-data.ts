@@ -18,10 +18,12 @@
  *
  * ## How it is held to
  *
+ *   · They live in a database of their own, shared by every workspace — prisma/reference, at
+ *     REFERENCE_DATABASE_URL. A workspace's reset, restore or `migrate reset` cannot reach them, and
+ *     a workspace's backup does not carry them.
  *   · `check:address` scans every seed, script and action for a delete — or raw SQL — against any
  *     table listed here, outside `prisma/reference/`, and fails naming the file.
- *   · `prisma migrate reset` is the one path that drops them anyway, because it drops the whole
- *     database. `prisma/seed.ts` runs straight after it and reloads them from the committed file.
+ *   · Only the platform may sync them (src/lib/platform/shared-data.ts).
  *
  * Adding a reference table means adding it here; the check then covers it with no other change.
  */

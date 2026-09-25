@@ -55,9 +55,8 @@ import {
   type RestorePhase,
   type RestoreStatus,
 } from "../src/lib/backup/maintenance";
-import { db, getTenantDb } from "../src/lib/db";
-import { ensurePincodes } from "../prisma/reference/pincodes";
-import { ensureGeonames } from "../prisma/reference/geonames";
+import { db } from "../src/lib/db";
+import { REFERENCE_TABLES } from "../src/lib/reference-data";
 
 async function main(tenant: Tenant, id: string) {
   const existing = await readRestoreStatus();
@@ -201,6 +200,21 @@ async function main(tenant: Tenant, id: string) {
   // business, and the archive it came from was encrypted precisely so one would not be lying about.
   await clearStaged(id);
 
+  /**
+   * A backup from before the shared reference database carries its own copy of the PIN directory and
+   * world places. The shared copy (prisma/reference) is the one that counts, so this one is emptied —
+   * otherwise the migration that retires these tables refuses to run, as it must for a workspace
+   * whose copy was never moved. A newer backup has no such tables and nothing happens.
+   */
+  try {
+    await db.$executeRawUnsafe(
+      `DO $$ DECLARE t text; BEGIN FOREACH t IN ARRAY ARRAY[${REFERENCE_TABLES.map((r) => `'${r.table}'`).join(", ")}] LOOP IF to_regclass(t) IS NOT NULL THEN EXECUTE format('TRUNCATE %I', t); END IF; END LOOP; END $$;`,
+    );
+  } catch (err) {
+    await fail(`The backup was restored, but its own copy of the reference data could not be cleared: ${(err as Error).message}`);
+    return;
+  }
+
   await say("restoring", "Bringing the database up to this version…");
   try {
     await migrateDeploy(tenant.dbUrl);
@@ -227,29 +241,8 @@ async function main(tenant: Tenant, id: string) {
     status.keysFromBackup = true;
   }
 
-  /**
-   * Reference data comes back from the committed file, not from the backup.
-   *
-   * A restore rewinds the business to the day the backup was taken, which is the point of it. The
-   * country's post offices are not the business and should not rewind with it — and a backup taken
-   * before the PIN directory was first loaded would otherwise leave every address form without its
-   * lookup. A no-op when the backup already held the same file's rows. See `src/lib/reference-data.ts`.
-   *
-   * Never fatal: the restore itself has succeeded. If the backup predates the table altogether, the
-   * schema needs `migrate deploy` first, and the message says what to run.
-   */
-  let referenceNote = "";
-  try {
-    await ensurePincodes(await getTenantDb(), () => {});
-  } catch (err) {
-    referenceNote = ` The PIN directory could not be reloaded (${(err as Error).message.split("\n")[0]}) — run npm run db:reference once the schema is current.`;
-  }
-  // World places the same way, from the GeoNames files on this server, if they are here.
-  try {
-    await ensureGeonames(await getTenantDb());
-  } catch (err) {
-    referenceNote += ` World places could not be reloaded (${(err as Error).message.split("\n")[0]}) — sync them from Settings → World places.`;
-  }
+  // Reference data is not in a workspace's database or its backups any more (prisma/reference), so a
+  // restore neither rewinds nor reloads it: every workspace's address lookups carry on as they were.
 
   status.phase = "done";
   status.message =
@@ -257,7 +250,7 @@ async function main(tenant: Tenant, id: string) {
       ? "Restored. The backup was taken under different keys — see the file named below before trusting the vault."
       : status.keysFromBackup
         ? "Restored, with the keys the backup was taken under."
-        : "Restored.") + referenceNote;
+        : "Restored.");
   status.finishedAt = new Date().toISOString();
   await writeRestoreStatus(status);
   await releaseLock();

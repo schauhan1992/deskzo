@@ -1,0 +1,155 @@
+// The reference database: facts about the world, shared by every workspace.
+//
+// India Post's PIN directory and GeoNames' states, cities and postal codes — about 750 MB that is
+// the same for every customer, so it is held once, at REFERENCE_DATABASE_URL, instead of in every
+// workspace's database and every workspace's backup. Nothing here belongs to a workspace, nothing
+// here is encrypted under a workspace's keys, and no workspace can change it: syncing it is the
+// platform's (src/lib/platform/shared-data.ts).
+//
+//   npm run reference:generate   the client, into node_modules/@wroffy/reference-client
+//   npm run reference:migrate    apply migrations to REFERENCE_DATABASE_URL
+//   npm run reference:move       move a workspace's copy here (the upgrade from before M3)
+//
+// The tables and columns are exactly the ones the workspace schema held, so rows move across as
+// they are.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/@wroffy/reference-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("REFERENCE_DATABASE_URL")
+}
+
+/// One post office from India Post's All India Pincode Directory — a PIN has several.
+model PostOffice {
+  id          Int      @id @default(autoincrement())
+  pincode     String   @db.Char(6)
+  officeName  String
+  /// BO, SO, HO — branch, sub and head office, as published.
+  officeType  String?
+  /// Whether it delivers mail. A non-delivery office is an address nobody receives post at.
+  delivery    Boolean  @default(true)
+  /// Title-cased from the directory's capitals.
+  district    String
+  /// Letters only — what `pinSearchFor` matches a city against.
+  districtKey String
+  /// As published, title-cased. Kept even when it does not resolve, so the loader can say which.
+  stateName   String
+  /// The GST state code, resolved at load time through `stateCodeFromName`. Null when it would not
+  /// resolve — the row is still a real PIN and still worth finding.
+  stateCode   String?  @db.Char(2)
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  @@index([pincode])
+  @@index([stateCode, districtKey])
+  @@map("post_offices")
+}
+
+/// What was loaded into a reference table, from which file — so a reload of the same file is a no-op.
+model ReferenceDataset {
+  /// e.g. `india-post-pincodes`.
+  key              String   @id
+  /// The file it came from, as given to the loader.
+  source           String
+  /// SHA-256 of that file. The same file twice is skipped; a new month's file replaces the rows.
+  checksum         String
+  rowCount         Int
+  /// Rows the file carried that could not be used — no PIN, no office, no district.
+  skipped          Int      @default(0)
+  /// State names that did not resolve to a GST code, with counts. Empty when everything resolved.
+  unresolvedStates Json?
+  loadedAt         DateTime @default(now())
+
+  @@map("reference_datasets")
+}
+
+/// Syncing a reference table from its source — the PIN directory from data.gov.in, world places
+/// from GeoNames.
+///
+/// Holds the API key (sealed under the platform key — `sealForPlatform`, never a workspace's keys,
+/// never sent to a browser) and the state of the current or last run, which the settings page polls
+/// while a sync is going. One row per dataset, keyed like `ReferenceDataset`.
+model ReferenceSync {
+  key          String    @id
+  /// The data.gov.in API key, sealed for the platform. Read only by the sync worker.
+  apiKeyCipher String?
+  /// IDLE, RUNNING, SUCCEEDED or FAILED.
+  status       String    @default("IDLE")
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  /// Rows fetched so far in this run, and how many the source says there are.
+  fetched      Int       @default(0)
+  total        Int?
+  /// What happened, in words — the summary on success, the reason on failure. Never holds the key.
+  message      String?
+  /// Who started it: a user id in the workspace they started it from. For the log, not a relation.
+  startedById  String?
+  updatedAt    DateTime  @updatedAt
+
+  @@map("reference_syncs")
+}
+
+/**
+ * States and provinces outside India, from GeoNames' admin1CodesASCII.txt. India's states are not
+ * here: they come from the GST state list, which is the one that moves tax.
+ */
+model GeoState {
+  countryCode String @db.Char(2)
+  /** GeoNames' admin1 code — "03" for Dubai, "CA" for California. */
+  code        String
+  name        String
+  asciiName   String
+
+  @@id([countryCode, code])
+  @@map("geo_states")
+}
+
+/** Towns and cities outside India with at least 1,000 people, from GeoNames' cities1000 — for suggestions. */
+model GeoCity {
+  /** GeoNames' own id, so a reload replaces rather than duplicates. */
+  id          Int      @id
+  name        String
+  asciiName   String
+  /**
+   * The name with its accents taken off — "Zurich" for "Zürich". GeoNames' own ASCII form spells some
+   * places the local way instead ("Zuerich"), which is not what anybody types.
+   */
+  plainName   String   @default("")
+  countryCode String   @db.Char(2)
+  /** The GeoState code it is in, when GeoNames knows it. */
+  stateCode   String?
+  population  Int      @default(0)
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  @@index([countryCode, stateCode])
+  @@index([countryCode, asciiName])
+  @@index([countryCode, plainName])
+  @@map("geo_cities")
+}
+
+/**
+ * Postal codes outside India, from GeoNames' postal code files — full codes for the UK, Canada and
+ * the Netherlands, the published form elsewhere. India's are India Post's, in post_offices.
+ */
+model GeoPostalCode {
+  id          Int      @id @default(autoincrement())
+  countryCode String   @db.Char(2)
+  /** As published: "SW1A 1AA". */
+  postalCode  String
+  /** Upper case, no spaces or hyphens — what a lookup matches on. See postalKey(). */
+  postalKey   String
+  placeName   String
+  stateName   String?
+  stateCode   String?
+  district    String?
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+
+  @@index([countryCode, postalKey])
+  @@map("geo_postal_codes")
+}

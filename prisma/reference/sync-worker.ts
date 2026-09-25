@@ -22,13 +22,14 @@ import "dotenv/config";
 import { rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
-import { decryptSecret } from "../../src/lib/crypto";
+import { PrismaClient } from "@wroffy/reference-client";
+import { openForPlatform } from "../../src/lib/platform/kek";
 import { PIN_DIRECTORY_KEY } from "../../src/lib/geo/pincode";
 import { fetchDirectory } from "./fetch";
 import { loadPincodes, saveCanonicalCopy } from "./pincodes";
 
-const db = new PrismaClient();
+// The shared reference database (prisma/reference/schema.prisma), which belongs to no workspace.
+const db = new PrismaClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 const scratch = path.join(tmpdir(), `pin-directory-${process.pid}.csv`);
 
 async function main() {
@@ -41,7 +42,7 @@ async function main() {
 
   try {
     if (!sync.apiKeyCipher) throw new Error("No API key is saved. Add one above and sync again.");
-    const apiKey = await decryptSecret(sync.apiKeyCipher);
+    const apiKey = openForPlatform("reference-sync-key", sync.apiKeyCipher);
 
     await progress({ message: "Fetching from data.gov.in…" });
     let lastWrite = 0;

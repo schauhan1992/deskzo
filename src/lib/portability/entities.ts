@@ -618,9 +618,6 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   CopilotUsage: { disposition: "excluded", reason: "How many AI tokens each person used per day, for this installation's allowance. Billing state, not a record." },
   CopilotProposal: { disposition: "excluded", reason: "Tasks and notes the copilot drafted; the ones confirmed exist as ordinary tasks and notes, which travel as themselves." },
   CompanyLock: { disposition: "excluded", reason: "Whether this installation's CRM is locked for everybody but the super admin, and the notice shown. A switch, not a record." },
-  GeoState: { disposition: "excluded", reason: "GeoNames' public list of states and provinces — reference data about the world, reloaded from GeoNames, not a business record." },
-  GeoCity: { disposition: "excluded", reason: "GeoNames' public list of towns and cities — reference data, reloaded from GeoNames." },
-  GeoPostalCode: { disposition: "excluded", reason: "GeoNames' public postal codes — reference data, reloaded from GeoNames." },
   MailConnection: { disposition: "excluded", reason: "A person's connection to their own Outlook: a Microsoft token encrypted under this installation's secret. Useless anywhere else — each person connects again." },
   DocumentRenderGrant: { disposition: "excluded", reason: "Two-minute passes for the server to print a document it is emailing. Spent or expired within minutes; nothing to carry." },
   DocumentEmailTemplate: { disposition: "specification", reason: "The wording sent with an emailed document, per type. Configuration rather than records." },
@@ -698,15 +695,6 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   Workbook: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   WorkbookAssignee: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   WorkbookRecord: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
-  PostOffice: {
-    disposition: "excluded",
-    reason:
-      "Reference data, not the business’s data: India Post’s published PIN directory, reloaded from prisma/reference/ on any install. Exporting 165,000 post offices with a customer book would bury it, and the target system gets the same directory from the same public source.",
-  },
-  ReferenceDataset: {
-    disposition: "excluded",
-    reason: "Records which reference file this install loaded and when — bookkeeping about PostOffice, which is itself excluded.",
-  },
   LeadCaptureKey: {
     disposition: "excluded",
     reason: "API credentials for this install’s websites. Only a digest of each secret is kept, which no other system could use — a new CRM issues its own keys.",
@@ -719,10 +707,5 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     disposition: "archive",
     reason:
       "Immutable history — who gave which customer more credit than their record supported, and why. The rating behind it is recomputed from the payments, which export as records; the decisions are the part a target could not rebuild, and the part an auditor asks for.",
-  },
-  ReferenceSync: {
-    disposition: "excluded",
-    reason:
-      "Holds an encrypted API key for data.gov.in and the progress of the last directory sync. A secret is never exported, and the rest describes this install, not the business.",
   },
 };

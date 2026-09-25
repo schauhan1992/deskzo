@@ -32,23 +32,32 @@ function platformKey(): Buffer {
 
 export type SealPurpose = "db-url" | "key-bundle";
 
-const aad = (tenantId: string, purpose: SealPurpose) => Buffer.from(`${tenantId}|${purpose}`, "utf8");
+/** Whose it is and what for, as GCM associated data: "<tenant id>|db-url", "platform|reference-sync-key". */
+const aad = (owner: string, purpose: string) => Buffer.from(`${owner}|${purpose}`, "utf8");
 
-export function sealForTenant(tenantId: string, purpose: SealPurpose, plainText: string): string {
+function seal(owner: string, purpose: string, plainText: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", platformKey(), iv);
-  cipher.setAAD(aad(tenantId, purpose));
+  cipher.setAAD(aad(owner, purpose));
   const data = Buffer.concat([cipher.update(plainText, "utf8"), cipher.final()]);
   return [FORMAT, iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), data.toString("base64url")].join(".");
 }
 
-export function openForTenant(tenantId: string, purpose: SealPurpose, sealed: string): string {
+function open(owner: string, purpose: string, sealed: string): string {
   const [format, iv, tag, data] = sealed.split(".");
   if (format !== FORMAT || !iv || !tag || data === undefined) throw new Error("Not a sealed value this platform wrote.");
   const decipher = createDecipheriv("aes-256-gcm", platformKey(), Buffer.from(iv, "base64url"));
-  decipher.setAAD(aad(tenantId, purpose));
+  decipher.setAAD(aad(owner, purpose));
   decipher.setAuthTag(Buffer.from(tag, "base64url"));
   return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]).toString("utf8");
+}
+
+export function sealForTenant(tenantId: string, purpose: SealPurpose, plainText: string): string {
+  return seal(tenantId, purpose, plainText);
+}
+
+export function openForTenant(tenantId: string, purpose: SealPurpose, sealed: string): string {
+  return open(tenantId, purpose, sealed);
 }
 
 export type SignPurpose = "backup-archive";
@@ -67,4 +76,20 @@ export function platformHmac(tenantId: string, purpose: SignPurpose): Hmac {
 /** Whether signatures can be made and checked here at all. */
 export function platformKeyConfigured(): boolean {
   return !!process.env.PLATFORM_MASTER_KEY?.trim();
+}
+
+export type PlatformSealPurpose = "reference-sync-key";
+
+/**
+ * Sealing for something that belongs to no workspace — the data.gov.in key that refreshes the shared
+ * PIN directory. Same key and format as `sealForTenant`, bound to "platform" and the purpose instead.
+ * "platform" is a reserved name (src/lib/tenancy/host.ts), so no workspace's id is ever that, and a
+ * workspace's sealed value can never be passed off as one of these or the reverse.
+ */
+export function sealForPlatform(purpose: PlatformSealPurpose, plainText: string): string {
+  return seal("platform", purpose, plainText);
+}
+
+export function openForPlatform(purpose: PlatformSealPurpose, sealed: string): string {
+  return open("platform", purpose, sealed);
 }

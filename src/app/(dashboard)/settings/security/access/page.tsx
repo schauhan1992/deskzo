@@ -23,6 +23,7 @@ import { NetworkReview } from "@/components/access/network-review";
 import { DeviceQueue } from "@/components/access/device-queue";
 import { SignInTable } from "@/components/access/sign-in-table";
 import { GeoDatabaseUpload } from "@/components/access/geo-database";
+import { mayManageSharedData } from "@/lib/platform/shared-data";
 import { DEVICE_KIND_LABEL } from "@/lib/access/device";
 import { GEO_ATTRIBUTION, placeText } from "@/lib/access/geo";
 import { normaliseIp } from "@/lib/access/ip";
@@ -97,11 +98,13 @@ export default async function AccessControlPage({ searchParams }: { searchParams
 }
 
 async function RulesTab({ geo }: { geo: { installed: boolean; file: string | null; type: string | null; builtAt: string | Date | null; sizeBytes: number | null; directory: string } | null }) {
-  const [policies, rules, roles, facts] = await Promise.all([
+  const [policies, rules, roles, facts, manageShared] = await Promise.all([
     listRolePolicies(),
     listIpRules(),
     db.role.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { key: true, name: true } }),
     requestFacts(),
+    // The location file is the whole server's, not this workspace's (src/lib/platform/shared-data.ts).
+    mayManageSharedData(),
   ]);
   return (
     <>
@@ -132,8 +135,13 @@ async function RulesTab({ geo }: { geo: { installed: boolean; file: string | nul
               </p>
             ) : (
               <p className="text-warning">
-                No location database is installed, so sign-ins are recorded without a place. Put a .mmdb city file in{" "}
-                <span className="font-mono">{geo.directory}</span>, or upload one here.
+                No location database is installed, so sign-ins are recorded without a place.
+                {manageShared && (
+                  <>
+                    {" "}
+                    Put a .mmdb city file in <span className="font-mono">{geo.directory}</span>, or upload one here.
+                  </>
+                )}
               </p>
             )}
             <p className="text-xs text-subtle">
@@ -145,7 +153,11 @@ async function RulesTab({ geo }: { geo: { installed: boolean; file: string | nul
               </OutboundLink>
               .
             </p>
-            <GeoDatabaseUpload />
+            {manageShared ? (
+              <GeoDatabaseUpload />
+            ) : (
+              <p className="text-xs text-subtle">The location database is shared by every workspace on this server and kept current by the platform.</p>
+            )}
           </CardContent>
         </Card>
       )}

@@ -10,6 +10,7 @@ import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { geoDirectory, reloadGeoDatabase } from "@/lib/access/geo";
 import { logActivity } from "@/lib/activity";
+import { SHARED_DATA_REFUSAL, mayManageSharedData } from "@/lib/platform/shared-data";
 
 /**
  * Replaces the IP location database with this month's file.
@@ -28,6 +29,8 @@ export async function POST(request: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
   if (!(await can(user.id, "security.manage"))) return NextResponse.json({ error: "You can't change the location database." }, { status: 403 });
+  // One file for the whole server: every workspace's sign-ins are placed with it.
+  if (!(await mayManageSharedData())) return NextResponse.json({ error: SHARED_DATA_REFUSAL }, { status: 403 });
   if (!request.body) return NextResponse.json({ error: "No file was sent." }, { status: 400 });
 
   const name = decodeURIComponent(request.headers.get("x-file-name") ?? "upload.mmdb");

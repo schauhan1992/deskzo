@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { getWorldPlaces, startWorldPlacesSync, type WorldPlacesState } from "@/actions/reference-data";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SharedDataNote } from "@/components/settings/shared-data-note";
 import { OutboundLink } from "@/components/ui/outbound-link";
 
 const when = (iso: string | null) =>
@@ -71,44 +72,48 @@ export function WorldPlacesManager({ initial }: { initial: WorldPlacesState }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex items-center justify-between gap-2 text-sm font-medium text-text">
-          Sync from GeoNames
-          {sync.status === "SUCCEEDED" && <Badge tone="green">Done</Badge>}
-          {sync.status === "FAILED" && <Badge tone="red">Failed</Badge>}
-          {running && <Badge tone="blue">Running</Badge>}
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p className="text-muted">
-            Downloads GeoNames&apos; current files (about 55 MB) and replaces what is loaded — full postal codes for the UK, Canada and the
-            Netherlands, the published form elsewhere. Takes a few minutes; you can leave this page. GeoNames updates daily, so once a month is plenty.
-          </p>
-          {running && (
-            <div className="space-y-1">
-              <div className="h-2 overflow-hidden rounded-full bg-surface-sunken">
-                <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${percent ?? 5}%` }} />
-              </div>
-              <p className="text-xs text-muted">{sync.message}</p>
-            </div>
-          )}
-          {!running && sync.message && sync.status !== "IDLE" && (
-            <p className={`text-xs ${sync.status === "FAILED" ? "text-danger" : "text-muted"}`}>
-              {when(sync.finishedAt)} — {sync.message}
+      {!state.canManage ? (
+        <SharedDataNote what="World places" />
+      ) : (
+        <Card>
+          <CardHeader className="flex items-center justify-between gap-2 text-sm font-medium text-text">
+            Sync from GeoNames
+            {sync.status === "SUCCEEDED" && <Badge tone="green">Done</Badge>}
+            {sync.status === "FAILED" && <Badge tone="red">Failed</Badge>}
+            {running && <Badge tone="blue">Running</Badge>}
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-muted">
+              Downloads GeoNames&apos; current files (about 55 MB) and replaces what is loaded — full postal codes for the UK, Canada and the
+              Netherlands, the published form elsewhere. Takes a few minutes; you can leave this page. GeoNames updates daily, so once a month is plenty.
             </p>
-          )}
-          {error && <p className="text-xs text-danger">{error}</p>}
-          <Button onClick={sync_} disabled={pending || running}>
-            {running ? "Syncing…" : "Sync now"}
-          </Button>
-          <p className="text-xs text-subtle">
-            Place names and postal codes outside India from{" "}
-            <OutboundLink href="https://www.geonames.org/" className="hover:text-text hover:underline">
-              GeoNames
-            </OutboundLink>
-            , licensed CC BY 4.0.
-          </p>
-        </CardContent>
-      </Card>
+            {running && (
+              <div className="space-y-1">
+                <div className="h-2 overflow-hidden rounded-full bg-surface-sunken">
+                  <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${percent ?? 5}%` }} />
+                </div>
+                <p className="text-xs text-muted">{sync.message}</p>
+              </div>
+            )}
+            {!running && sync.message && sync.status !== "IDLE" && (
+              <p className={`text-xs ${sync.status === "FAILED" ? "text-danger" : "text-muted"}`}>
+                {when(sync.finishedAt)} — {sync.message}
+              </p>
+            )}
+            {error && <p className="text-xs text-danger">{error}</p>}
+            <Button onClick={sync_} disabled={pending || running}>
+              {running ? "Syncing…" : "Sync now"}
+            </Button>
+            <p className="text-xs text-subtle">
+              Place names and postal codes outside India from{" "}
+              <OutboundLink href="https://www.geonames.org/" className="hover:text-text hover:underline">
+                GeoNames
+              </OutboundLink>
+              , licensed CC BY 4.0.
+            </p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

@@ -16,11 +16,12 @@
 import "dotenv/config";
 import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@wroffy/reference-client";
 import { CANONICAL_FILE, loadPincodes, saveCanonicalCopy } from "./pincodes";
 import { fetchDirectory } from "./fetch";
 
-const db = new PrismaClient();
+// The shared reference database (prisma/reference/schema.prisma), which belongs to no workspace.
+const db = new PrismaClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 const args = process.argv.slice(2);
 const force = args.includes("--force");
 const fromApi = args.includes("--from-api");

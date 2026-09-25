@@ -18,6 +18,7 @@ import Module from "node:module";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PrismaClient } from "@prisma/client";
+import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
 import { readdirSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -42,7 +43,7 @@ import { postalCodeIssue } from "../src/lib/geo/postal";
 import { offersCreate } from "../src/lib/company-name";
 import { EMPLOYEE_BANDS, bandForCount, countForBand } from "../src/lib/company-size";
 import { treatmentForCountryChange } from "../src/lib/gst";
-import { decryptSecret } from "../src/lib/crypto";
+import { openForPlatform } from "../src/lib/platform/kek";
 import { addCompanyLocationSchema, companyLocationFieldsSchema, updateCompanyLocationSchema } from "../src/lib/validation/company-location";
 import { createCompanySchema } from "../src/lib/validation/company";
 import { documentAddressSchema, organisationSettingsSchema } from "../src/lib/validation/trade-document";
@@ -76,6 +77,8 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
 let actorId = "";
 
 const db = new PrismaClient();
+// The PIN directory and its sync row are the shared reference database's, not a workspace's.
+const ref = new ReferenceClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {
   console.log(`${pass ? "  ok  " : " FAIL "} ${label}${detail !== "" ? ` — ${String(detail)}` : ""}`);
@@ -731,7 +734,7 @@ async function main() {
     "it has a settings page, for settings managers only",
     /key: "pin-directory"[\s\S]{0,300}permission: "settings\.manage"/.test(catalogue),
   );
-  ok("  and its sync state survives a reset", REFERENCE_TABLES.some((t) => t.table === "reference_syncs"));
+  ok("  and its sync state is reference data, which no workspace's reset reaches", REFERENCE_TABLES.some((t) => t.table === "reference_syncs"));
 
   /**
    * Through the real actions, as the super admin — but only while no real key is saved. Everything
@@ -739,8 +742,26 @@ async function main() {
    * a sync they started. With a key in place it says so and checks only what cannot change anything.
    */
   const refActions = require("../src/actions/reference-data") as typeof import("../src/actions/reference-data");
-  const existingSync = await db.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
+  const existingSync = await ref.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
   actorId = admin!.id;
+
+  // Shared by every workspace, so changed only from the platform's (src/lib/platform/shared-data.ts).
+  {
+    const { currentTenant, runAsTenant } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");
+    const here = await currentTenant();
+    ok("this workspace may change it — the first, the installation's own", here.isDefault);
+    const elsewhere = { ...here, isDefault: false };
+    const refusedKey = await runAsTenant(elsewhere, () => refActions.savePinDirectoryApiKey("zzprobe0123456789abcdef0123456789"));
+    const refusedSync = await runAsTenant(elsewhere, () => refActions.startPinDirectorySync());
+    const refusedWorld = await runAsTenant(elsewhere, () => refActions.startWorldPlacesSync());
+    ok(
+      "  any other workspace's admin can see it but not save a key or start a sync",
+      !refusedKey.ok && !refusedSync.ok && !refusedWorld.ok && /only the platform/.test(refusedKey.error),
+      refusedKey.ok ? "saved" : refusedKey.error,
+    );
+    const seen = await runAsTenant(elsewhere, () => refActions.getPinDirectory());
+    ok("  and its page says so, with no controls", seen.ok && seen.data.canManage === false);
+  }
   if (existingSync?.apiKeyCipher || existingSync?.status === "RUNNING") {
     console.log("  (a real key or a running sync is in place — checking read-only)");
     const state = await refActions.getPinDirectory();
@@ -758,11 +779,11 @@ async function main() {
 
       const saved = await refActions.savePinDirectoryApiKey(`  ${FAKE}  `);
       ok("a key is saved", saved.ok, saved.ok ? "" : saved.error);
-      const row = await db.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
+      const row = await ref.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
       ok(
-        "  encrypted, not as typed",
-        !!row?.apiKeyCipher && !row.apiKeyCipher.includes(FAKE) && await decryptSecret(row.apiKeyCipher) === FAKE,
-        "and it decrypts back to exactly the key, trimmed",
+        "  sealed under the platform key, not as typed",
+        !!row?.apiKeyCipher && !row.apiKeyCipher.includes(FAKE) && openForPlatform("reference-sync-key", row.apiKeyCipher) === FAKE,
+        "and it opens back to exactly the key, trimmed — with no workspace's keys involved",
       );
       const state = await refActions.getPinDirectory();
       ok(
@@ -772,12 +793,12 @@ async function main() {
       );
 
       // A run already going: the claim must refuse a second one — without spawning anything.
-      await db.referenceSync.update({ where: { key: PIN_DIRECTORY_KEY }, data: { status: "RUNNING", startedAt: new Date() } });
+      await ref.referenceSync.update({ where: { key: PIN_DIRECTORY_KEY }, data: { status: "RUNNING", startedAt: new Date() } });
       const second = await refActions.startPinDirectorySync();
       ok("a second sync while one runs is refused", !second.ok && /already running/.test(second.error), second.ok ? "started a second" : second.error);
 
       const removed = await refActions.removePinDirectoryApiKey();
-      const afterRemove = await db.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
+      const afterRemove = await ref.referenceSync.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
       ok("a key can be removed", removed.ok && afterRemove?.apiKeyCipher === null);
     } finally {
       // Back exactly as it was: gone if there was no row, otherwise the row it was (a past run's
@@ -785,9 +806,9 @@ async function main() {
       if (existingSync) {
         const { key, updatedAt, ...before } = existingSync;
         void updatedAt;
-        await db.referenceSync.update({ where: { key }, data: before });
+        await ref.referenceSync.update({ where: { key }, data: before });
       } else {
-        await db.referenceSync.deleteMany({ where: { key: PIN_DIRECTORY_KEY } });
+        await ref.referenceSync.deleteMany({ where: { key: PIN_DIRECTORY_KEY } });
       }
       await db.auditLog.deleteMany({ where: { entityType: "ReferenceSync", entityId: PIN_DIRECTORY_KEY, createdAt: { gte: auditSince } } });
     }
@@ -813,9 +834,9 @@ async function main() {
     { pincode: "000003", officeName: "Zzprobe Hill B.O", delivery: true, district: "Zzprobe Uplands", stateName: "Karnataka", stateCode: "29" },
   ].map((r) => ({ ...r, officeType: "SO", districtKey: placeKey(r.district) }));
 
-  await db.postOffice.deleteMany({ where: FIXTURE_WHERE });
+  await ref.postOffice.deleteMany({ where: FIXTURE_WHERE });
   try {
-    await db.postOffice.createMany({ data: fixture });
+    await ref.postOffice.createMany({ data: fixture });
 
     const found = await lookupPincode("000001");
     ok("a PIN is found", found.ok, found.ok ? "" : found.reason);
@@ -865,9 +886,9 @@ async function main() {
     ok("  once each, named by the office that delivers", pins[0]?.area === "Zzprobe Zzz");
     ok("  and not across a state line", (await pincodeSuggestions("Karnataka", "Zzprobe Town")).length === 0);
   } finally {
-    await db.postOffice.deleteMany({ where: FIXTURE_WHERE });
+    await ref.postOffice.deleteMany({ where: FIXTURE_WHERE });
   }
-  ok("the fixture is gone", (await db.postOffice.count({ where: FIXTURE_WHERE })) === 0);
+  ok("the fixture is gone", (await ref.postOffice.count({ where: FIXTURE_WHERE })) === 0);
 
   section("Reference data survives every reset");
 
@@ -919,21 +940,51 @@ async function main() {
 
   const seed = readFileSync("prisma/seed.ts", "utf8");
   ok(
-    "the base seed reloads the directory",
-    /import \{ ensurePincodes \} from "\.\/reference\/pincodes"/.test(seed) && /await ensurePincodes\(db\)/.test(seed),
-    "migrate reset drops everything and then runs prisma/seed.ts — this is where it comes back",
+    "a new machine's seed loads the directory into the shared database",
+    /import \{ ensurePincodes \} from "\.\/reference\/pincodes"/.test(seed) && /await ensurePincodes\(reference\)/.test(seed),
   );
-  const restoreWorker = readFileSync("scripts/restore-worker.ts", "utf8");
+  const workspaceSchema = readFileSync("prisma/schema.prisma", "utf8");
   ok(
-    "  and so does a backup restore",
-    /await ensurePincodes\((db|await getTenantDb\(\))/.test(restoreWorker),
-    "a backup from before the directory was loaded would otherwise leave it empty",
+    "  and no workspace's database holds it — a reset, restore or migrate reset of one cannot reach it",
+    REFERENCE_TABLES.every((t) => !workspaceSchema.includes(`@@map("${t.table}")`)),
+    "prisma/reference/schema.prisma",
   );
+
+  /**
+   * The migration that took the tables out of workspace databases refuses while any of them holds a
+   * row — the one thing standing between a workspace that was never moved and losing its copy. Run
+   * for real, against stand-in tables in a schema of its own, inside a transaction that is rolled back.
+   */
+  {
+    const sql = readFileSync("prisma/migrations/20260926090000_reference_data_moves_out/migration.sql", "utf8");
+    const guard = sql.slice(sql.indexOf("DO $$"), sql.indexOf("END $$;") + "END $$;".length);
+    const drops = [...sql.matchAll(/^DROP TABLE "[a-z_]+";$/gm)].map((m) => m[0]);
+    const attempt = async (withRow: boolean) => {
+      class Rollback extends Error {}
+      try {
+        await db.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`CREATE SCHEMA zz_reference_guard`);
+          await tx.$executeRawUnsafe(`SET LOCAL search_path TO zz_reference_guard`);
+          for (const t of REFERENCE_TABLES) await tx.$executeRawUnsafe(`CREATE TABLE "${t.table}" (x int)`);
+          if (withRow) await tx.$executeRawUnsafe(`INSERT INTO "post_offices" VALUES (1)`);
+          await tx.$executeRawUnsafe(guard);
+          for (const drop of drops) await tx.$executeRawUnsafe(drop);
+          throw new Rollback();
+        });
+      } catch (err) {
+        return err instanceof Rollback ? "ran" : (err as Error).message;
+      }
+      return "ran";
+    };
+    const refused = await attempt(true);
+    ok("the migration retiring these tables refuses while one still holds a row", /reference:move/.test(refused), refused.split("\n").find((l) => /reference/.test(l))?.trim().slice(0, 120));
+    ok("  and goes through once they are empty", (await attempt(false)) === "ran" && drops.length === REFERENCE_TABLES.length);
+  }
 
   section("What is in the database now");
 
-  const dataset = await db.referenceDataset.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
-  const offices = await db.postOffice.count();
+  const dataset = await ref.referenceDataset.findUnique({ where: { key: PIN_DIRECTORY_KEY } });
+  const offices = await ref.postOffice.count();
   if (dataset) {
     console.log(
       `  PIN directory: ${offices.toLocaleString("en-IN")} post offices from ${dataset.source}, loaded ${dataset.loadedAt.toISOString().slice(0, 10)}`,
@@ -959,6 +1010,7 @@ async function main() {
     for (const b of bad) console.log(`    "${b.state}" — ${b._count} location(s)`);
   }
   await db.$disconnect();
+  await ref.$disconnect();
 }
 
 main()
@@ -969,5 +1021,6 @@ main()
   .catch(async (error) => {
     console.error(error);
     await db.$disconnect();
+  await ref.$disconnect();
     process.exit(1);
   });

@@ -8,10 +8,11 @@
  * separate process for the PIN directory's reason: minutes of work that must outlive the request.
  */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@wroffy/reference-client";
 import { GEONAMES_DIR, downloadGeonames, loadGeonames } from "./geonames";
 
-const db = new PrismaClient();
+// The shared reference database (prisma/reference/schema.prisma), which belongs to no workspace.
+const db = new PrismaClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 const KEY = "geonames";
 
 async function main() {

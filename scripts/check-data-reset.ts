@@ -73,13 +73,13 @@ async function main() {
 
   const edge = (child: string, parent: string, column = "x", notnull = false) => ({ child, parent, column, notnull });
   const plan = reset.planReset(
-    ["users", "roles", "backups", "post_offices", "_prisma_migrations", "departments", "companies", "contacts", "sites", "_OrderWatchers"],
+    ["users", "roles", "backups", "_prisma_migrations", "departments", "companies", "contacts", "sites", "_OrderWatchers"],
     [edge("users", "departments", "departmentId"), edge("departments", "sites", "siteId"), edge("contacts", "companies"), edge("companies", "users"), edge("_OrderWatchers", "users"), edge("users", "roles", "role", true)],
   );
   ok("what a kept row points at is deleted, not truncated — and what that points at too", plan.deleteInOrder.join() === "departments,sites", plan.deleteInOrder.join());
   ok("  children before parents", plan.deleteInOrder.indexOf("departments") < plan.deleteInOrder.indexOf("sites"));
   ok("everything else is truncated at once, quoted names and all", plan.truncate.join() === "_OrderWatchers,companies,contacts", plan.truncate.join());
-  ok("the kept tables and the migration log are left alone", ["users", "roles", "backups", "post_offices", "_prisma_migrations"].every((t) => plan.kept.includes(t)) && !plan.truncate.includes("users"));
+  ok("the kept tables and the migration log are left alone", ["users", "roles", "backups", "_prisma_migrations"].every((t) => plan.kept.includes(t)) && !plan.truncate.includes("users"));
   const refusal = (() => {
     try {
       reset.planReset(["users", "departments"], [edge("users", "departments", "departmentId", true)]);
@@ -98,7 +98,10 @@ async function main() {
     }
   })();
   ok("  and so are tables that point at each other with nothing to delete first", cycle.includes("point at each other"), cycle);
-  ok("the reference tables are among the kept, from their own list", (await import("../src/lib/reference-data")).REFERENCE_TABLES.every((t) => reset.keptTables().some((k) => k.table === t.table)));
+  ok(
+    "the reference tables are not a workspace's to keep or wipe — they are the shared reference database's",
+    (await import("../src/lib/reference-data")).REFERENCE_TABLES.every((t) => !reset.keptTables().some((k) => k.table === t.table)),
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("What a fresh install gets from its migrations");
@@ -153,9 +156,6 @@ async function main() {
     await scratch.notification.create({ data: { userId: sa.id, type: "NOTE_REMINDER", title: "ZZ" } });
     await scratch.auditLog.create({ data: { userId: rep.id, action: "CREATE", entityType: "Company", entityId: company.id, entityLabel: "ZZ Acme" } });
     await scratch.organisationSettings.create({ data: {} });
-    await scratch.postOffice.create({ data: { pincode: "012345", officeName: "ZZ PO", district: "ZZ", districtKey: "zz", stateName: "ZZ" } });
-    await scratch.referenceDataset.create({ data: { key: "zz", source: "zz", checksum: "zz", rowCount: 1 } });
-    await scratch.referenceSync.create({ data: { key: "zz" } });
     const byRep = await scratch.backup.create({ data: { filename: "zz-rep.dump", directory: "zz", triggeredById: rep.id } });
     const bySa = await scratch.backup.create({ data: { filename: "zz-sa.dump", directory: "zz", triggeredById: sa.id } });
     await scratch.backupSchedule.create({ data: {} });
@@ -172,7 +172,8 @@ async function main() {
     ok("the super admin is the only user left", people.length === 1 && people[0]!.id === sa.id);
     ok("  with their sign-in intact, and let go of the department and manager that went", people[0]!.passwordHash === sa.passwordHash && people[0]!.departmentId === null && people[0]!.managerId === null && people[0]!.role === "ADMIN");
     ok("the built-in roles stay; one added since goes", (await scratch.role.count({ where: { isSystem: true } })) === systemRoles && (await scratch.role.count({ where: { key: "ZZ_CUSTOM" } })) === 0);
-    ok("the PIN directory and its key stay", (await scratch.postOffice.count()) === 1 && (await scratch.referenceDataset.count()) === 1 && (await scratch.referenceSync.count()) === 1);
+    const leftover = await scratch.$queryRaw<{ n: bigint }[]>`SELECT count(*)::bigint AS n FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('post_offices', 'geo_cities', 'reference_syncs')`;
+    ok("a workspace's database has no reference tables for a reset to reach", Number(leftover[0]!.n) === 0);
     const backups = await scratch.backup.findMany({ orderBy: { filename: "asc" } });
     ok("the backup log stays, so the backup taken first can be restored", backups.length === 2 && (await scratch.backupSchedule.count()) === 1);
     ok("  forgetting only who took a backup when that person is gone", backups.find((b) => b.id === byRep.id)?.triggeredById === null && backups.find((b) => b.id === bySa.id)?.triggeredById === sa.id);
@@ -227,10 +228,13 @@ async function main() {
   try {
     ok("there is a super admin to borrow", !!realSuperAdmin);
     actorId = realSuperAdmin!.id;
-    delete process.env.ENABLE_DATA_RESET;
+    // Set, not deleted: a Prisma client imported later loads .env, and would put a deleted value back.
+    process.env.ENABLE_DATA_RESET = "false";
     const off = await refusedBecause();
     ok("switched off without ENABLE_DATA_RESET — even for the super admin", (await actions.getDataResetOverview()) === null && off.includes("switched off") && off.includes("ENABLE_DATA_RESET"), off);
-    ok("  and the Backups page doesn't show it", !renderToStaticMarkup(await BackupsPage()).includes("Reset all data"));
+    const offHtml = renderToStaticMarkup(await BackupsPage());
+    const shown = offHtml.indexOf("Reset all data");
+    ok("  and the Backups page doesn't show it", shown < 0, shown < 0 ? "" : offHtml.slice(Math.max(0, shown - 200), shown + 60));
 
     process.env.ENABLE_DATA_RESET = "true";
     actorId = other.id;
@@ -242,7 +246,7 @@ async function main() {
     const wrong = await refusedBecause();
     ok("the phrase has to be typed", wrong === "Type RESET ALL DATA to confirm.", wrong);
     const html = renderToStaticMarkup(await BackupsPage());
-    ok("the Backups page shows the panel, with what stays", html.includes("Reset all data — for testing only") && html.includes("India Post") && html.includes("the backup log"));
+    ok("the Backups page shows the panel, with what stays", html.includes("Reset all data — for testing only") && html.includes("the backup log"), html.includes("Reset all data") ? "" : "no panel");
     ok("  the backup-first box starts ticked and the button waits for the phrase", /type="checkbox"[^>]*checked=""/.test(html) && /<button[^>]*disabled=""[^>]*>Reset all data<\/button>/.test(html));
     ok("nothing on the real database was reset by any of that", (await db.company.count()) === companiesBefore);
   } finally {

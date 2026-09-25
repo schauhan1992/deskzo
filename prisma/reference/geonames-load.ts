@@ -6,10 +6,11 @@
  *   … -- --force                         load even if unchanged, or much smaller than what is loaded
  */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@wroffy/reference-client";
 import { GEONAMES_DIR, downloadGeonames, loadGeonames } from "./geonames";
 
-const db = new PrismaClient();
+// The shared reference database (prisma/reference/schema.prisma), which belongs to no workspace.
+const db = new PrismaClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 
 async function main() {
   const args = process.argv.slice(2);

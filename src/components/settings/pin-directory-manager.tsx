@@ -10,6 +10,7 @@ import {
 } from "@/actions/reference-data";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SharedDataNote } from "@/components/settings/shared-data-note";
 import { Input, Label } from "@/components/ui/input";
 
 /** India time, stated — the server and the browser must print the same thing for hydration. */
@@ -100,123 +101,127 @@ export function PinDirectoryManager({ initial }: { initial: PinDirectoryState })
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="text-sm font-medium text-text">Sync from data.gov.in</CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-danger">{error}</p>}
+      {!state.canManage ? (
+        <SharedDataNote what="The PIN directory" />
+      ) : (
+        <Card>
+          <CardHeader className="text-sm font-medium text-text">Sync from data.gov.in</CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-danger">{error}</p>}
 
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-text">API key</span>
-              {sync.hasApiKey ? <Badge tone="green">Saved</Badge> : <Badge>Not set</Badge>}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-text">API key</span>
+                {sync.hasApiKey ? <Badge tone="green">Saved</Badge> : <Badge>Not set</Badge>}
+              </div>
+
+              {sync.hasApiKey && !replacing ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-muted">Stored encrypted. It is never shown again — to change it, replace it.</p>
+                  <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => setReplacing(true)}>
+                    Replace
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={pending || running}
+                    onClick={() => run(removePinDirectoryApiKey)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ) : (
+                <form
+                  className="flex flex-wrap items-end gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    run(
+                      () => savePinDirectoryApiKey(keyInput),
+                      () => {
+                        setKeyInput("");
+                        setReplacing(false);
+                      },
+                    );
+                  }}
+                >
+                  <div className="min-w-64 flex-1 space-y-1.5">
+                    <Label htmlFor="pin-api-key">data.gov.in API key</Label>
+                    {/* A password field so it is not left readable on screen, and never autofilled. */}
+                    <Input
+                      id="pin-api-key"
+                      type="password"
+                      value={keyInput}
+                      onChange={(e) => setKeyInput(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="Paste the key from your data.gov.in account"
+                    />
+                  </div>
+                  <Button type="submit" size="sm" disabled={pending || !keyInput.trim()}>
+                    Save key
+                  </Button>
+                  {replacing && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setReplacing(false)}>
+                      Cancel
+                    </Button>
+                  )}
+                </form>
+              )}
+              <p className="text-xs text-subtle">
+                Free from data.gov.in: sign in, then My Account → Generate API key. It is used for nothing but this sync.
+              </p>
             </div>
 
-            {sync.hasApiKey && !replacing ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-muted">Stored encrypted. It is never shown again — to change it, replace it.</p>
-                <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => setReplacing(true)}>
-                  Replace
-                </Button>
+            <div className="space-y-2 border-t border-line pt-4">
+              <div className="flex flex-wrap items-center gap-3">
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={pending || running}
-                  onClick={() => run(removePinDirectoryApiKey)}
+                  disabled={pending || running || !sync.hasApiKey}
+                  onClick={() => run(startPinDirectorySync)}
                 >
-                  Remove
+                  {running ? "Syncing…" : "Sync now"}
                 </Button>
-              </div>
-            ) : (
-              <form
-                className="flex flex-wrap items-end gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  run(
-                    () => savePinDirectoryApiKey(keyInput),
-                    () => {
-                      setKeyInput("");
-                      setReplacing(false);
-                    },
-                  );
-                }}
-              >
-                <div className="min-w-64 flex-1 space-y-1.5">
-                  <Label htmlFor="pin-api-key">data.gov.in API key</Label>
-                  {/* A password field so it is not left readable on screen, and never autofilled. */}
-                  <Input
-                    id="pin-api-key"
-                    type="password"
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="Paste the key from your data.gov.in account"
-                  />
-                </div>
-                <Button type="submit" size="sm" disabled={pending || !keyInput.trim()}>
-                  Save key
-                </Button>
-                {replacing && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setReplacing(false)}>
-                    Cancel
-                  </Button>
-                )}
-              </form>
-            )}
-            <p className="text-xs text-subtle">
-              Free from data.gov.in: sign in, then My Account → Generate API key. It is used for nothing but this sync.
-            </p>
-          </div>
-
-          <div className="space-y-2 border-t border-line pt-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="button"
-                disabled={pending || running || !sync.hasApiKey}
-                onClick={() => run(startPinDirectorySync)}
-              >
-                {running ? "Syncing…" : "Sync now"}
-              </Button>
-              <p className="text-xs text-subtle">
-                A few minutes. It runs on the server — you can leave this page. The directory is replaced in one step
-                at the end; addresses already saved are not changed.
-              </p>
-            </div>
-
-            {running && (
-              <div className="space-y-1">
-                <div className="h-2 overflow-hidden rounded-full bg-surface-sunken">
-                  <div
-                    className="h-full rounded-full bg-brand transition-[width] duration-500"
-                    style={{ width: `${percent ?? 5}%` }}
-                  />
-                </div>
-                <p className="text-xs text-muted">
-                  {sync.message}
-                  {sync.total ? ` ${sync.fetched.toLocaleString("en-IN")} of ${sync.total.toLocaleString("en-IN")}` : ""}
+                <p className="text-xs text-subtle">
+                  A few minutes. It runs on the server — you can leave this page. The directory is replaced in one step
+                  at the end; addresses already saved are not changed.
                 </p>
               </div>
-            )}
 
-            {sync.stale && (
-              <p className="text-xs text-warning">
-                The sync started {when(sync.startedAt)} stopped without finishing. Press Sync now to start it again.
-              </p>
-            )}
-            {sync.status === "SUCCEEDED" && (
-              <p className="text-xs text-success">
-                {sync.message} <span className="text-subtle">({when(sync.finishedAt)})</span>
-              </p>
-            )}
-            {sync.status === "FAILED" && (
-              <p className="text-xs text-danger">
-                Last sync failed: {sync.message} <span className="text-subtle">({when(sync.finishedAt)})</span>
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              {running && (
+                <div className="space-y-1">
+                  <div className="h-2 overflow-hidden rounded-full bg-surface-sunken">
+                    <div
+                      className="h-full rounded-full bg-brand transition-[width] duration-500"
+                      style={{ width: `${percent ?? 5}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted">
+                    {sync.message}
+                    {sync.total ? ` ${sync.fetched.toLocaleString("en-IN")} of ${sync.total.toLocaleString("en-IN")}` : ""}
+                  </p>
+                </div>
+              )}
+
+              {sync.stale && (
+                <p className="text-xs text-warning">
+                  The sync started {when(sync.startedAt)} stopped without finishing. Press Sync now to start it again.
+                </p>
+              )}
+              {sync.status === "SUCCEEDED" && (
+                <p className="text-xs text-success">
+                  {sync.message} <span className="text-subtle">({when(sync.finishedAt)})</span>
+                </p>
+              )}
+              {sync.status === "FAILED" && (
+                <p className="text-xs text-danger">
+                  Last sync failed: {sync.message} <span className="text-subtle">({when(sync.finishedAt)})</span>
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

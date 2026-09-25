@@ -1,6 +1,6 @@
 "use server";
 
-import { db } from "@/lib/db";
+import { refDb } from "@/lib/platform/reference-db";
 import { GST_STATE_CODES, stateCodeFromName } from "@/lib/gst-engine";
 import { citiesIn } from "@/lib/geo/india";
 import { cityForPin, mergeCitySuggestions, officeLocality, pinSearchFor, titleCase } from "@/lib/geo/pincode";
@@ -42,7 +42,7 @@ export type PinLookup =
 
 /** Whether any directory has been loaded — asked only once a lookup has come back empty. */
 async function directoryLoaded(): Promise<boolean> {
-  return (await db.postOffice.findFirst({ select: { id: true } })) !== null;
+  return (await refDb().postOffice.findFirst({ select: { id: true } })) !== null;
 }
 
 /** The most frequent value, first-seen on a tie. A PIN's offices almost always agree. */
@@ -58,7 +58,7 @@ export async function lookupPincode(input: string): Promise<PinLookup> {
   // this only asks the directory, and the directory has no row for a number that is not one.
   if (!/^\d{6}$/.test(pincode)) return { ok: false, reason: "invalid" };
 
-  const offices = await db.postOffice.findMany({
+  const offices = await refDb().postOffice.findMany({
     where: { pincode },
     select: { officeName: true, delivery: true, district: true, stateName: true, stateCode: true },
     orderBy: [{ delivery: "desc" }, { officeName: "asc" }],
@@ -92,7 +92,7 @@ export async function citySuggestions(state: string): Promise<string[]> {
   const curated = citiesIn(name);
   if (!code) return curated;
 
-  const districts = await db.postOffice.findMany({
+  const districts = await refDb().postOffice.findMany({
     where: { stateCode: code },
     distinct: ["districtKey"],
     select: { district: true },
@@ -117,7 +117,7 @@ export async function pincodeSuggestions(state: string, city: string): Promise<P
   if (!code || place.length < 2) return [];
 
   const { districtKeys, officePrefixes } = pinSearchFor(place);
-  const offices = await db.postOffice.findMany({
+  const offices = await refDb().postOffice.findMany({
     where: {
       stateCode: code,
       OR: [
@@ -142,13 +142,13 @@ export async function pincodeSuggestions(state: string, city: string): Promise<P
 // GST list and its postal codes India Post's.
 
 export async function worldStates(countryCode: string): Promise<WorldState[]> {
-  return statesOf(db, String(countryCode ?? "").toUpperCase().slice(0, 2));
+  return statesOf(refDb(), String(countryCode ?? "").toUpperCase().slice(0, 2));
 }
 
 export async function worldCities(countryCode: string, stateCode: string | null, typed: string): Promise<string[]> {
-  return worldCitiesIn(db, String(countryCode ?? "").toUpperCase().slice(0, 2), stateCode ? String(stateCode) : null, String(typed ?? ""));
+  return worldCitiesIn(refDb(), String(countryCode ?? "").toUpperCase().slice(0, 2), stateCode ? String(stateCode) : null, String(typed ?? ""));
 }
 
 export async function lookupWorldPostal(countryCode: string, code: string): Promise<WorldPostalLookup> {
-  return findPostal(db, String(countryCode ?? "").toUpperCase().slice(0, 2), String(code ?? "").slice(0, 20));
+  return findPostal(refDb(), String(countryCode ?? "").toUpperCase().slice(0, 2), String(code ?? "").slice(0, 20));
 }

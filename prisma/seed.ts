@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
 import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { ensurePincodes } from "./reference/pincodes";
@@ -53,15 +54,24 @@ async function main() {
   }
 
   /**
-   * Reference data last, and on every run.
+   * Reference data last, and on every run — into the shared reference database, not this one.
    *
-   * `prisma migrate reset` drops the whole database and then runs this file — it is the one path
-   * that removes the PIN directory, so this is where it comes back. It is a no-op when the same
-   * file is already loaded, so an ordinary re-seed costs one checksum. See `src/lib/reference-data.ts`.
+   * A reset of this database no longer touches it (it is a database of its own, prisma/reference),
+   * so this is only for a machine setting up for the first time: loaded from the committed files if
+   * they are here, and a no-op when the same file is already loaded. See `src/lib/reference-data.ts`.
    */
   console.log("\nReference data:");
-  await ensurePincodes(db);
-  await ensureGeonames(db);
+  if (!process.env.REFERENCE_DATABASE_URL) {
+    console.log("  REFERENCE_DATABASE_URL is not set — skipped. See .env.example.");
+    return;
+  }
+  const reference = new ReferenceClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
+  try {
+    await ensurePincodes(reference);
+    await ensureGeonames(reference);
+  } finally {
+    await reference.$disconnect();
+  }
 }
 
 main()

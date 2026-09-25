@@ -37,6 +37,7 @@ const SRC = path.join(ROOT, "src");
 const PRISMA_CLIENTS: Record<string, Allowed> = {
   "src/lib/tenancy/clients.ts": { reason: "the per-workspace client pool — every db call goes through it" },
   "src/lib/platform/control-db.ts": { reason: "the control plane's own client — which workspaces exist, never workspace data" },
+  "src/lib/platform/reference-db.ts": { reason: "the shared reference database — facts about the world, the same for every workspace" },
 };
 
 /** Reads of the install's own identity: its database, its secret, its public address. */
@@ -52,7 +53,7 @@ const FORWARDED_HOST: Record<string, Allowed> = {};
 
 /** Worker processes: each must be told its workspace (WROFFY_TENANT_ID) rather than inherit the install's. */
 const SPAWNS: Record<string, Allowed> = {
-  "src/actions/reference-data.ts": { reason: "PIN and GeoNames sync workers — move to the platform console", pending: "M3" },
+  "src/actions/reference-data.ts": { reason: "PIN and GeoNames sync workers write the shared reference database, which belongs to no workspace" },
 };
 
 /**
@@ -136,7 +137,7 @@ for (const { file, text, client } of files) {
   // A client under any name: `PrismaClient` from @prisma/client or the control plane's generated client,
   // however it is aliased on import.
   const clientNames = new Set(["PrismaClient"]);
-  for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@prisma\/client|@wroffy\/control-client)["']/g)) {
+  for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@prisma\/client|@wroffy\/control-client|@wroffy\/reference-client)["']/g)) {
     for (const spec of m[1].split(",")) {
       const alias = spec.trim().match(/^PrismaClient(?:\s+as\s+(\w+))?$/);
       if (alias) clientNames.add(alias[1] ?? "PrismaClient");

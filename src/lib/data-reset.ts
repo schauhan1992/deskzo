@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { REFERENCE_TABLES } from "@/lib/reference-data";
 
 /**
  * TEMPORARY — resetting the whole database to a fresh install, for the testing phase. Remove this
@@ -15,8 +14,8 @@ import { REFERENCE_TABLES } from "@/lib/reference-data";
  *
  *   · the super admin — their account, password and two-factor, so whoever pressed the button can
  *     still sign in;
- *   · the PIN directory and its data.gov.in key (`REFERENCE_TABLES`) — never wiped, by the standing
- *     rule in src/lib/reference-data.ts;
+ *   · the PIN directory and world places — not in this database at all: they are the shared reference
+ *     database's (prisma/reference), which no workspace's reset can reach;
  *   · the backup log and schedule — they describe copies on disk, and the backup taken just before
  *     the reset has to stay listed to be restorable;
  *   · the built-in roles, which every user row needs.
@@ -50,7 +49,6 @@ export function keptTables(): { table: string; what: string }[] {
     { table: tableOf("Role"), what: "the built-in roles — ones added since are removed" },
     { table: tableOf("Backup"), what: "the backup log, so a backup taken before the reset can be restored" },
     { table: tableOf("BackupSchedule"), what: "when backups are taken" },
-    ...REFERENCE_TABLES.map((t) => ({ table: t.table, what: t.what })),
   ];
 }
 

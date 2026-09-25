@@ -27,11 +27,12 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["*.localhost", "127.0.0.1"],
 
   /**
-   * The control plane's Prisma client (prisma/control/schema.prisma), loaded by Node as it is rather
-   * than bundled — the same treatment Next gives Prisma's main client. Bundled, its search for its
-   * own query engine on disk makes the build trace the entire project.
+   * The control plane's and the reference database's Prisma clients (prisma/control,
+   * prisma/reference), loaded by Node as they are rather than bundled — the same treatment Next gives
+   * Prisma's main client. Bundled, a client's search for its own query engine on disk makes the
+   * build trace the entire project.
    */
-  serverExternalPackages: ["@wroffy/control-client"],
+  serverExternalPackages: ["@wroffy/control-client", "@wroffy/reference-client"],
 
   /**
    * eSSL / ZKTeco terminals post to a fixed path.

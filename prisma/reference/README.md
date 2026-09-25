@@ -1,9 +1,21 @@
 # Reference data
 
-Facts about the world rather than about this business. Nothing here is created by using the app,
+Facts about the world rather than about any one business. Nothing here is created by using the app,
 so nothing here is removed by resetting it — no seed, demo reset or cleanup script may delete from
 these tables, and `npm run check:address` fails if one does. The rule and the table list live in
 `src/lib/reference-data.ts`.
+
+## One copy, shared by every workspace
+
+The tables live in a database of their own — `schema.prisma` in this folder, at
+`REFERENCE_DATABASE_URL` — not in any workspace's. A workspace's reset, restore, `migrate reset` or
+backup never touches them, and only the platform may sync them (`src/lib/platform/shared-data.ts`).
+
+| Command | What it does |
+|---|---|
+| `npm run reference:migrate` | Applies this folder's migrations to the reference database |
+| `npm run reference:generate` | Its Prisma client, into `node_modules/@wroffy/reference-client` |
+| `npm run reference:move` | Upgrading a database from before this: copies its reference tables here, checks the copy, empties them — then run `npx prisma migrate deploy` |
 
 ## The PIN directory
 
@@ -51,8 +63,8 @@ is sent only to api.data.gov.in and never printed — not in progress lines, not
    ```
 
 The loader checks the file, replaces the directory in one transaction, and saves a compressed copy
-as `india-post-pincodes.csv.gz`. **Commit that `.gz` file** — it is what every other machine, every
-`prisma migrate reset` and every backup restore reloads from. The raw `.csv` is git-ignored and can
+as `india-post-pincodes.csv.gz`. **Commit that `.gz` file** — it is what every other machine's first
+seed loads from. The raw `.csv` is git-ignored and can
 be deleted afterwards.
 
 Running it again with the same file does nothing. A file with less than half the current number of
@@ -66,9 +78,9 @@ If the loader reports state names that did not resolve to a GST code, add each o
 
 | Event | What happens |
 |---|---|
-| `npm run db:seed` | Loaded if missing or changed; otherwise a no-op |
-| `prisma migrate reset` | Drops everything, then runs the seed above — so it comes back |
-| Backup restore | Reloaded from the committed file after the restore |
+| `npm run db:seed` | Loaded into the reference database if missing or changed; otherwise a no-op |
+| `prisma migrate reset` of a workspace | Never touched — it is not in that database |
+| Backup restore of a workspace | Never touched; an older backup's own copy is emptied after the restore |
 | Demo seed `--reset`, any other seed | Never touched |
 
 Country, state and city lists are not here: they live in code (`src/lib/geo/`), which no data
