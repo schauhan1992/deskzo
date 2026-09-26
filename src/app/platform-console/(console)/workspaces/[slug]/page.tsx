@@ -7,6 +7,9 @@ import { DeprovisionForm, EnterAsSupport, SuspendForm } from "@/components/conso
 import { LimitOverridesForm, ModuleOverrideForm, RemoveOverride, WorkspacePlansForm } from "@/components/console/plan-forms";
 import { consoleStaff, isOwner, mayEnterWorkspaces, mayManage } from "@/lib/platform/console-page";
 import { plansList, staffNames, tenantDetail } from "@/lib/platform/console-data";
+import { TrialEndForm } from "@/components/console/billing-forms";
+import { consoleApplyStanding, consoleGiveTrialPlans } from "@/actions/platform/console";
+import { formatMoney } from "@/lib/billing/money";
 import { entitledModuleKeys } from "@/lib/entitlements";
 import { getModuleDefinition } from "@/lib/modules";
 import { moduleCatalogue } from "@/lib/platform/plans";
@@ -20,7 +23,8 @@ export default async function ConsoleWorkspacePage({ params }: PageProps<"/platf
   const { slug } = await params;
   const [detail, names, plans] = await Promise.all([tenantDetail(slug), staffNames(), plansList()]);
   if (!detail) notFound();
-  const { tenant, host, grant, grants, leases, latest, subscriptions, overrides, entitlements } = detail;
+  const { tenant, host, grant, grants, leases, latest, subscriptions, overrides, entitlements, invoices, standing, usage } = detail;
+  const trial = subscriptions.find((s) => s.gateway === "MANUAL" && s.trialEndsAt);
   const seller = ["OWNER", "ADMIN", "BILLING"].includes(staff.role);
   const liveItems = subscriptions.filter((s) => s.status !== "CANCELLED").flatMap((s) => s.items);
   const modulesNow = entitledModuleKeys(entitlements, tenant.country).filter((key) => !getModuleDefinition(key)?.core);
@@ -110,6 +114,58 @@ export default async function ConsoleWorkspacePage({ params }: PageProps<"/platf
             />
             {mayManage(staff) && <ModuleOverrideForm tenantId={tenant.id} catalogue={catalogue} />}
             <LimitOverridesForm tenantId={tenant.id} seats={tenant.seatOverride} copilotTokens={tenant.copilotTokenOverride} />
+          </div>
+        )}
+      </Section>
+
+      <Section title="Billing">
+        <p className="mb-3 text-sm text-text">
+          {tenant.suspendedFor === "BILLING" && <span className="font-medium text-danger">Held for billing. </span>}
+          {standing.kind === "exempt" && "Nothing to collect: the installation's own, or on a plan given by hand."}
+          {standing.kind === "paid" && "Paid up at its gateway."}
+          {standing.kind === "trial" && `On a free trial until ${when(standing.endsAt)}.`}
+          {standing.kind === "trial-over" && `Trial over; held at ${when(standing.holdAt)} unless it buys a plan.`}
+          {standing.kind === "past-due" && `A payment failed; held at ${when(standing.holdAt)} unless it is paid.`}
+          {standing.kind === "ending" && `Cancelled; runs until ${when(standing.holdAt)}.`}
+          {standing.kind === "lapsed" && "Nothing live — it should be held."}
+          {standing.kind === "none" && "No subscription at all: put it on a plan above."}
+          {usage && <span className="block text-xs text-muted">On {when(usage.recordedAt)}: {usage.seatsUsed} people{usage.seatsLimit !== null ? ` of ${usage.seatsLimit}` : ""}, {usage.copilotTokens.toLocaleString("en-IN")} copilot tokens this month.</span>}
+        </p>
+        <DataTable head={["Subscription", "Status", "Plans", "Period ends", "At the gateway"]} empty="None.">
+          {subscriptions.map((s) => (
+            <tr key={s.id}>
+              <Cell>{s.gateway === "MANUAL" ? (s.status === "TRIALING" ? "trial" : "given by hand") : s.gateway.toLowerCase()}</Cell>
+              <Cell>
+                {s.status.toLowerCase()}
+                {s.cancelAtPeriodEnd && <span className="block text-xs text-warning">ends at period end</span>}
+              </Cell>
+              <Cell>{s.items.map((i) => (i.quantity > 1 ? `${i.plan.name} ×${i.quantity}` : i.plan.name)).join(", ") || "—"}</Cell>
+              <Cell className="whitespace-nowrap text-muted">{when(s.currentPeriodEnd ?? s.trialEndsAt)}</Cell>
+              <Cell className="font-mono text-xs text-muted">{s.externalId ?? "—"}</Cell>
+            </tr>
+          ))}
+        </DataTable>
+        {invoices.length > 0 && (
+          <div className="mt-4">
+            <DataTable head={["Issued", "Number", "Amount", "Status"]}>
+              {invoices.map((i) => (
+                <tr key={i.id}>
+                  <Cell className="whitespace-nowrap text-muted">{when(i.issuedAt)}</Cell>
+                  <Cell>{i.number ?? "—"}</Cell>
+                  <Cell>{formatMoney(i.total, i.currency)}</Cell>
+                  <Cell>{i.status.toLowerCase()}</Cell>
+                </tr>
+              ))}
+            </DataTable>
+          </div>
+        )}
+        {seller && tenant.status !== "DEPROVISIONED" && (
+          <div className="mt-4 flex flex-wrap items-end gap-4">
+            {trial && <TrialEndForm tenantId={tenant.id} endsOn={trial.trialEndsAt ? trial.trialEndsAt.toISOString().slice(0, 10) : null} />}
+            {mayManage(staff) && trial?.status === "TRIALING" && (
+              <ConsoleAction action={consoleGiveTrialPlans.bind(null, tenant.id)} label="Keep its plan without charging" confirm="Give this workspace its trial's plans for free, with no end? Billing will leave it alone." />
+            )}
+            {mayManage(staff) && <ConsoleAction action={consoleApplyStanding.bind(null, tenant.id)} label="Apply its standing now" done="Applied." />}
           </div>
         )}
       </Section>

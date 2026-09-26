@@ -127,6 +127,7 @@
     "check:console": "tsx scripts/check-console.ts",
     "check:module-guards": "tsx scripts/check-module-guards.ts",
     "check:entitlements": "tsx scripts/check-entitlements.ts",
+    "check:billing": "tsx scripts/check-billing.ts",
     "check:access-lock": "tsx scripts/check-access-lock.ts"
   },
   "dependencies": {

@@ -7,6 +7,7 @@
  *   npm run platform:staff -- role <email> <OWNER|ADMIN|SUPPORT|BILLING|READONLY>
  *   npm run platform:staff -- reset-2fa <email>     a lost phone: they enrol again at their next sign-in
  *   npm run platform:staff -- deactivate <email>
+ *   npm run platform:staff -- two-factor <required|optional>   whether everybody must use an authenticator
  *
  * No password is ever given here: `create` and `link` print a link to choose one (it is emailed too),
  * and two-factor is enrolled at the first sign-in. The last active owner cannot be demoted or switched
@@ -16,6 +17,7 @@ import "dotenv/config";
 import type { StaffRole } from "@wroffy/control-client";
 import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
 import { createStaff, deactivateStaff, issuePasswordSetup, resetStaffTwoFactor, setStaffRole } from "../src/lib/platform/staff";
+import { setSetting, staffTwoFactorPolicy } from "../src/lib/platform/settings";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -86,8 +88,20 @@ async function main() {
       console.log(`${user.email} is switched off and signed out.`);
       return;
     }
+    case "two-factor": {
+      // The same switch as the console's Staff page — here for when no owner can reach the console.
+      if (target !== "required" && target !== "optional") {
+        const now = await staffTwoFactorPolicy();
+        console.log(`Two-factor is ${now.mode}${now.chosen ? "" : " (this environment's default — nobody has chosen)"}. Set it with: two-factor required | optional`);
+        return;
+      }
+      await setSetting("staff.twoFactor", target, "platform:staff");
+      await controlDb().platformAuditLog.create({ data: { actorKind: "SCRIPT", actor: "platform:staff", action: "staff.two-factor.policy", detail: { mode: target } } });
+      console.log(`Two-factor for staff is now ${target}.`);
+      return;
+    }
     default:
-      console.log("Commands: list, create, link, role, reset-2fa, deactivate — see the top of scripts/platform-staff.ts.");
+      console.log("Commands: list, create, link, role, reset-2fa, deactivate, two-factor — see the top of scripts/platform-staff.ts.");
       process.exitCode = 1;
   }
 }

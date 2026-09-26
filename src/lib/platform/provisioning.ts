@@ -12,6 +12,7 @@ import { PLATFORM_DOMAIN, RESERVED_SLUGS, SLUG_PATTERN, protocolFor } from "@/li
 import { forgetRegistry, subdomainHost } from "@/lib/tenancy/registry";
 import { PlanRefused, planForNewWorkspace, startOnPlan } from "@/lib/platform/plans";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
+import { trialDays } from "@/lib/platform/settings";
 
 /**
  * Setting a workspace up, from a name to a working address.
@@ -62,6 +63,7 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
   if (problem) throw new ProvisioningRefused(problem);
   const country = WORLD_COUNTRIES.find((c) => c.code === input.country.toUpperCase());
   if (!country) throw new ProvisioningRefused("Choose a country from the list.");
+  const trialEnds = new Date(Date.now() + (await trialDays()) * 86_400_000);
   let plan: Awaited<ReturnType<typeof planForNewWorkspace>>;
   try {
     plan = await planForNewWorkspace(input.planKey, country.code);
@@ -100,7 +102,8 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
       select: { id: true },
     });
     // Without a plan offered it has the core alone, until staff give it one from the console.
-    if (plan) await startOnPlan(tx, tenantId, plan.id);
+    // On a free trial of it; an internal plan is never a trial.
+    if (plan) await startOnPlan(tx, tenantId, plan.id, plan.kind === "INTERNAL" ? null : trialEnds);
     await tx.platformAuditLog.create({ data: { actorKind: "SYSTEM", actor: "signup", action: "tenant.provision.requested", tenantId, detail: { slug } } });
     return created;
   });

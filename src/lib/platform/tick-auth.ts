@@ -14,7 +14,7 @@ import type { JobOutcome } from "@/lib/platform/fanout";
  * outcome, and a 500 when any of them failed, because the scheduler watching the endpoint is the one
  * thing in a position to notice.
  */
-export function tickAuthorised(request: Request, secretName: "MARKETING_TICK_SECRET" | "BACKUP_TICK_SECRET"): boolean {
+export function tickAuthorised(request: Request, secretName: "MARKETING_TICK_SECRET" | "BACKUP_TICK_SECRET" | "PLATFORM_TICK_SECRET"): boolean {
   const expected = process.env[secretName]?.trim();
   if (!expected) return false;
   const header = request.headers.get("authorization") ?? "";

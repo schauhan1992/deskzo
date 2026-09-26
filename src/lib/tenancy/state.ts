@@ -30,6 +30,8 @@ export type Tenant = {
   country: string;
   /** What its plans let it use (src/lib/entitlements.ts). Everything, for one from the environment. */
   entitlements: Entitlements;
+  /** Why it is held, when SUSPENDED: by staff, or for billing — which leaves its billing page open. */
+  holdReason: "STAFF" | "BILLING" | null;
 };
 
 export type ClientEntry = { client: PrismaClient; url: string; lastUsed: number };

@@ -12,7 +12,7 @@ type Stage = { at: "form" } | { at: "code"; email: string } | { at: "progress"; 
  * The signup, in three screens: the form, the emailed code, and the workspace being set up — which
  * ends by going straight into it, signed in (src/actions/platform/signup.ts).
  */
-export function SignupFlow({ suffix, countries }: { suffix: string; countries: Country[] }) {
+export function SignupFlow({ suffix, countries, inviteRequired = true }: { suffix: string; countries: Country[]; inviteRequired?: boolean }) {
   const [stage, setStage] = useState<Stage>({ at: "form" });
   const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite: "" });
   // Remembered with the name it was for, so an answer about an earlier name is never shown.
@@ -143,8 +143,8 @@ export function SignupFlow({ suffix, countries }: { suffix: string; countries: C
         </Select>
       </div>
       <div>
-        <Label htmlFor="invite">Invitation code</Label>
-        <Input id="invite" value={form.invite} onChange={set("invite")} autoComplete="off" required />
+        <Label htmlFor="invite">{inviteRequired ? "Invitation code" : "Invitation code (if you have one)"}</Label>
+        <Input id="invite" value={form.invite} onChange={set("invite")} autoComplete="off" required={inviteRequired} />
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
       <Button type="submit" disabled={pending}>

@@ -84,6 +84,17 @@ model Tenant {
   seatOverride         Int?
   copilotTokenOverride Int?
 
+  /// Why it is held, when it is. A billing hold lets its owner reach the billing page and nothing
+  /// else, and is lifted by paying; a staff hold only by staff.
+  suspendedFor       SuspendedFor?
+  /// Where billing mail goes (the owner's address until they give another), and the tax number put on
+  /// its invoices — a GSTIN in India, a VAT number elsewhere.
+  billingEmail       String?
+  taxId              String?
+  /// Its customer at each gateway, once it has been one.
+  stripeCustomerId   String?       @unique
+  razorpayCustomerId String?       @unique
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   suspendedAt     DateTime?
@@ -97,6 +108,9 @@ model Tenant {
   migrationRuns    TenantMigrationRun[]
   subscriptions    Subscription[]
   moduleOverrides  TenantModuleOverride[]
+  invoices         Invoice[]
+  usage            TenantUsage[]
+  billingNotices   BillingNotice[]
 
   @@map("tenants")
 }
@@ -258,7 +272,8 @@ model PendingSignup {
   country      String
   /// bcrypt, as the owner's account will hold it.
   passwordHash String
-  inviteCodeHash String
+  /// The invitation it came with — none once signup is open to everybody.
+  inviteCodeHash String?
   /// SHA-256 of the code emailed to prove the address.
   codeHash      String
   codeExpiresAt DateTime
@@ -438,11 +453,14 @@ model Plan {
   /// Retired plans stay on the workspaces already on them, but are not given to any more.
   active      Boolean  @default(true)
   sortOrder   Int      @default(0)
+  /// The product its Stripe prices hang off, made with the first of them.
+  stripeProductId String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   modules PlanModule[]
   items   SubscriptionItem[]
+  prices  PlanPrice[]
 
   @@map("plans")
 }
@@ -458,6 +476,8 @@ model PlanModule {
 }
 
 enum SubscriptionStatus {
+  /// Made at a gateway but not yet paid for or authorised — gives nothing yet.
+  INCOMPLETE
   TRIALING
   ACTIVE
   PAST_DUE
@@ -482,6 +502,17 @@ model Subscription {
   trialEndsAt      DateTime?
   currentPeriodEnd DateTime?
   cancelledAt      DateTime?
+  /// Ends when the period it is in ends, rather than renewing.
+  cancelAtPeriodEnd Boolean           @default(false)
+  /// When a payment first failed, for the grace period; cleared once it is paid.
+  pastDueSince     DateTime?
+  /// The subscription at the gateway (Stripe's sub_…, Razorpay's sub_…), and its customer there.
+  externalId         String?          @unique
+  externalCustomerId String?
+  currency           String?
+  interval           BillingInterval?
+  /// Last read from the gateway — by a webhook, or by the daily reconcile.
+  syncedAt           DateTime?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
@@ -499,6 +530,11 @@ model SubscriptionItem {
   plan           Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
   /// How many of it: an add-on of five seats bought twice is ten.
   quantity       Int          @default(1)
+  /// The price it is charged at, when a gateway charges it.
+  priceId        String?
+  price          PlanPrice?   @relation(fields: [priceId], references: [id], onDelete: SetNull)
+  /// Stripe's subscription item (si_…).
+  externalId     String?      @unique
   createdAt      DateTime     @default(now())
 
   @@unique([subscriptionId, planId])
@@ -518,4 +554,133 @@ model TenantModuleOverride {
 
   @@id([tenantId, moduleKey])
   @@map("tenant_module_overrides")
+}
+
+// ─── Billing (M8) ─────────────────────────────────────────────────────────────────────────────────
+
+enum SuspendedFor {
+  STAFF
+  BILLING
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+/// What a plan costs at one gateway, in one currency, each month or year — made at the gateway when
+/// it is made here (a Stripe price, a Razorpay plan) and never changed there: a new price replaces an
+/// old one, and the old one stays on the subscriptions already paying it.
+model PlanPrice {
+  id         String          @id @default(cuid())
+  planId     String
+  plan       Plan            @relation(fields: [planId], references: [id], onDelete: Restrict)
+  gateway    BillingGateway
+  /// ISO 4217, upper case: INR, USD, EUR.
+  currency   String
+  interval   BillingInterval
+  /// In the currency's smallest unit (paise, cents), for one unit of quantity.
+  amount     Int
+  /// Charged per person: the quantity is the seats wanted.
+  perSeat    Boolean         @default(false)
+  /// The gateway's own id for it.
+  externalId String?         @unique
+  active     Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+
+  items SubscriptionItem[]
+
+  @@index([planId])
+  @@map("plan_prices")
+}
+
+/// Every webhook a gateway sent, once each — its id is the key, so a second delivery is a no-op.
+model BillingEvent {
+  id          String         @id @default(cuid())
+  gateway     BillingGateway
+  eventId     String
+  type        String
+  tenantId    String?
+  receivedAt  DateTime       @default(now())
+  processedAt DateTime?
+  error       String?
+  payload     Json
+
+  @@unique([gateway, eventId])
+  @@index([receivedAt])
+  @@map("billing_events")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+/// A gateway's invoice to a workspace, as the gateway reported it.
+model Invoice {
+  id          String         @id @default(cuid())
+  tenantId    String
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  gateway     BillingGateway
+  externalId  String
+  number      String?
+  status      InvoiceStatus
+  currency    String
+  /// Smallest units.
+  subtotal    Int
+  tax         Int            @default(0)
+  total       Int
+  amountPaid  Int            @default(0)
+  periodStart DateTime?
+  periodEnd   DateTime?
+  issuedAt    DateTime
+  paidAt      DateTime?
+  hostedUrl   String?
+  pdfUrl      String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([gateway, externalId])
+  @@index([tenantId, issuedAt])
+  @@map("invoices")
+}
+
+/// A workspace's use, a day at a time — people with an account, and copilot tokens this month so far.
+model TenantUsage {
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  day           DateTime @db.Date
+  seatsUsed     Int
+  seatsLimit    Int?
+  copilotTokens Int
+  recordedAt    DateTime @default(now())
+
+  @@id([tenantId, day])
+  @@map("tenant_usage")
+}
+
+/// The platform's own settings, set from the console. Secrets — gateway keys — are sealed under the
+/// platform key and never shown back.
+model PlatformSetting {
+  key          String   @id
+  value        String?
+  secretCipher String?
+  updatedBy    String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
+/// A billing reminder already sent — its key names the date it was about, so it goes once.
+model BillingNotice {
+  tenantId String
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key      String
+  sentAt   DateTime @default(now())
+
+  @@id([tenantId, key])
+  @@map("billing_notices")
 }

@@ -2,6 +2,9 @@ import { controlDb } from "@/lib/platform/control-db";
 import { latestMigrationName } from "@/lib/platform/migrate";
 import { activeSupportGrant } from "@/lib/platform/support";
 import { parseEntitlements } from "@/lib/entitlements";
+import { billingStanding } from "@/lib/billing/lifecycle";
+import { consoleOrigin } from "@/lib/platform/staff";
+import { autoDeprovision, secretsSet, signupOpen, trialDays } from "@/lib/platform/settings";
 import { subdomainHost } from "@/lib/tenancy/registry";
 
 /**
@@ -70,6 +73,11 @@ export async function tenantDetail(slug: string) {
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId: tenant.id }, orderBy: { moduleKey: "asc" } }),
   ]);
+  const [invoicesOf, standing, usage] = await Promise.all([
+    control.invoice.findMany({ where: { tenantId: tenant.id }, orderBy: { issuedAt: "desc" }, take: 12 }),
+    billingStanding(tenant.id),
+    control.tenantUsage.findFirst({ where: { tenantId: tenant.id }, orderBy: { day: "desc" } }),
+  ]);
   return {
     tenant,
     host: subdomainHost(tenant.slug),
@@ -80,6 +88,9 @@ export async function tenantDetail(slug: string) {
     subscriptions,
     overrides,
     entitlements: parseEntitlements(tenant.entitlements),
+    invoices: invoicesOf,
+    standing,
+    usage,
   };
 }
 
@@ -111,17 +122,42 @@ export async function deviceRoutes() {
 }
 
 /** Each with whether it still works: not expired, and not used up. */
-/** Every plan, with its modules and how many workspaces are on it. */
+/** Every plan, with its modules, its prices, and how many workspaces are on it. */
 export async function plansList() {
   const plans = await controlDb().plan.findMany({
     orderBy: [{ active: "desc" }, { sortOrder: "asc" }, { name: "asc" }],
-    include: { modules: { select: { moduleKey: true } }, items: { where: { subscription: { status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } } }, select: { subscription: { select: { tenantId: true } } } } },
+    include: { prices: { orderBy: [{ active: "desc" }, { createdAt: "desc" }] }, modules: { select: { moduleKey: true } }, items: { where: { subscription: { status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } } }, select: { subscription: { select: { tenantId: true } } } } },
   });
   return plans.map(({ items, modules, ...plan }) => ({
     ...plan,
     modules: modules.map((m) => m.moduleKey),
     workspaces: new Set(items.map((i) => i.subscription.tenantId)).size,
   }));
+}
+
+/** The console's Billing page: settings (secrets only as set or not), webhook addresses, recent events and invoices. */
+export async function billingOverview() {
+  const control = controlDb();
+  const [secrets, open, days, closeByItself, events, invoices, failing] = await Promise.all([
+    secretsSet(),
+    signupOpen(),
+    trialDays(),
+    autoDeprovision(),
+    control.billingEvent.findMany({ orderBy: { receivedAt: "desc" }, take: 50, select: { id: true, gateway: true, eventId: true, type: true, tenantId: true, receivedAt: true, processedAt: true, error: true } }),
+    control.invoice.findMany({ orderBy: { issuedAt: "desc" }, take: 50, include: { tenant: { select: { slug: true } } } }),
+    control.billingEvent.count({ where: { processedAt: null, error: { not: null } } }),
+  ]);
+  const origin = consoleOrigin();
+  return {
+    secrets,
+    signupOpen: open,
+    trialDays: days,
+    autoDeprovision: closeByItself,
+    webhooks: { stripe: `${origin}/api/platform/billing/stripe`, razorpay: `${origin}/api/platform/billing/razorpay`, tick: `${origin}/api/platform/tick` },
+    events,
+    invoices,
+    failing,
+  };
 }
 
 export async function invites() {

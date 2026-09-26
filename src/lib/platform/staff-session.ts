@@ -6,6 +6,7 @@ import { cidrContains, parseCidr, parseIp } from "@/lib/access/ip";
 import { controlDb } from "@/lib/platform/control-db";
 import { openForPlatform, sealForPlatform } from "@/lib/platform/kek";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
+import { staffTwoFactorPolicy } from "@/lib/platform/settings";
 import { protocolFor, requestHost } from "@/lib/tenancy/host";
 import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/totp";
 
@@ -16,8 +17,11 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  *   · The cookie is `__Host-wroffy-console` over https: this host only, never a workspace's.
  *   · It holds a random token; the control plane holds its SHA-256 as a PlatformSession, checked on
  *     every request — thirty minutes idle, twelve hours at most, revocable from the console.
- *   · Two-factor is required. A first sign-in opens only the enrolment page, and a session is not
- *     a console session until its second factor is passed (`mfaAt`).
+ *   · Two-factor, when an owner requires it (src/lib/platform/settings.ts — required in production
+ *     unless they say otherwise): a first sign-in opens only the enrolment page, and a session is
+ *     not a console session until its second factor is passed (`mfaAt`). When it is optional,
+ *     somebody without an authenticator signs in with their password alone; somebody with one is
+ *     still asked for its code. The policy is read on every request, so changing it applies at once.
  *   · Failed attempts lock out by address and by caller, in a namespace of their own ("console|").
  *   · PLATFORM_CONSOLE_IP_ALLOWLIST (comma-separated CIDRs), when set, refuses everywhere else. It
  *     needs TRUST_PROXY=1: the caller's address is only known from our own reverse proxy (callerIp).
@@ -31,7 +35,14 @@ const MAX_MS = 12 * 60 * 60_000;
 const TOUCH_MS = 60_000;
 
 export type Staff = { id: string; email: string; name: string; role: StaffRole };
-export type StaffSession = { staff: Staff; sessionId: string; mfaDone: boolean; enrolled: boolean };
+export type StaffSession = {
+  staff: Staff;
+  sessionId: string;
+  /** Through the second factor — or not asked for one: optional, and no authenticator set up. */
+  mfaDone: boolean;
+  enrolled: boolean;
+  twoFactorRequired: boolean;
+};
 
 export class StaffRefused extends Error {}
 
@@ -86,11 +97,13 @@ export async function currentStaffSession(): Promise<StaffSession | null> {
     await controlDb().platformSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date(now) } }).catch(() => {});
   }
   const { user } = session;
+  const required = (await staffTwoFactorPolicy()).mode === "required";
   return {
     staff: { id: user.id, email: user.email, name: user.name, role: user.role },
     sessionId: session.id,
-    mfaDone: !!session.mfaAt,
+    mfaDone: !!session.mfaAt || (!required && !user.totpEnabledAt),
     enrolled: !!user.totpEnabledAt,
+    twoFactorRequired: required,
   };
 }
 
@@ -139,7 +152,8 @@ export async function signInStaff(input: { email: string; password: string; code
   await controlDb().platformUser.update({ where: { id: user.id }, data: { lastSignInAt: now } });
   await controlDb().platformAuditLog.create({ data: { actorKind: "STAFF", actor: user.id, action: "staff.sign-in", detail: { twoFactor: !!mfaAt } } });
   (await cookies()).set(await cookieName(), token, { httpOnly: true, sameSite: "strict", path: "/", secure: await secureRequest(), maxAge: MAX_MS / 1000 });
-  return { ok: true, enrol: !mfaAt };
+  // Sent to enrol only where the policy asks for it; otherwise straight in.
+  return { ok: true, enrol: !mfaAt && (await staffTwoFactorPolicy()).mode === "required" };
 }
 
 /** The enrolment page: a secret for this staff member's authenticator, made once and kept sealed. */

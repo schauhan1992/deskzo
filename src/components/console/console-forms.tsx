@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { StaffRole } from "@wroffy/control-client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { consoleAddStaff, consoleCreateInvite, consoleNewSetupLink, consoleSavePinKey, consoleSetStaffRole } from "@/actions/platform/console";
+import { consoleAddStaff, consoleCreateInvite, consoleNewSetupLink, consoleSavePinKey, consoleSetStaffRole, consoleSetStaffTwoFactor } from "@/actions/platform/console";
 
 /**
  * The console's small forms. Anything shown once — an invitation code, a password link — is shown
@@ -236,5 +236,53 @@ export function NewSetupLink({ userId }: { userId: string }) {
       </Button>
       {error && <span className="text-xs text-danger">{error}</span>}
     </span>
+  );
+}
+
+/**
+ * Whether staff must use an authenticator — an owner's choice (src/lib/platform/settings.ts). Until it
+ * is made, it follows the environment: required in production, optional in development.
+ */
+export function TwoFactorPolicyForm({ mode, chosen, defaultMode }: { mode: "required" | "optional"; chosen: boolean; defaultMode: "required" | "optional" }) {
+  const router = useRouter();
+  const [value, setValue] = useState(mode);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pending, startTransition] = useTransition();
+  return (
+    <form
+      className="space-y-3 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (value === "optional" && !window.confirm("Make two-factor optional? Staff without an authenticator will reach the console with their password alone.")) return;
+        setMessage(null);
+        startTransition(async () => {
+          const r = await consoleSetStaffTwoFactor(value);
+          setMessage(r.ok ? { ok: true, text: "Saved — it applies from each person's next page." } : { ok: false, text: r.error });
+          if (r.ok) router.refresh();
+        });
+      }}
+    >
+      <label className="flex items-start gap-2 text-text">
+        <input type="radio" name="two-factor" className="mt-1" checked={value === "required"} onChange={() => setValue("required")} />
+        <span>
+          Required for everyone
+          <span className="block text-xs text-muted">Nobody reaches the console without an authenticator; a first sign-in sets one up.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-text">
+        <input type="radio" name="two-factor" className="mt-1" checked={value === "optional"} onChange={() => setValue("optional")} />
+        <span>
+          Optional
+          <span className="block text-xs text-muted">A password is enough for anybody without an authenticator; anybody who set one up is still asked for its code.</span>
+        </span>
+      </label>
+      {!chosen && <p className="text-xs text-muted">Not chosen yet — following this environment&apos;s default: {defaultMode}.</p>}
+      <div className="flex items-center gap-3">
+        <Button type="submit" size="sm" disabled={pending || (chosen && value === mode)}>
+          {pending ? "Saving…" : "Save"}
+        </Button>
+        {message && <span className={message.ok ? "text-xs text-success" : "text-xs text-danger"}>{message.text}</span>}
+      </div>
+    </form>
   );
 }

@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  CreditCard,
   Banknote,
   BookLock,
   Boxes,
@@ -134,6 +135,14 @@ export const SETTINGS: SettingsSection[] = [
             description: "The logo and signature block at the top and bottom of a printed document.",
             href: "/settings/letterhead",
             icon: FileSignature,
+            permission: "settings.manage",
+          },
+          {
+            key: "billing",
+            label: "Plan & billing",
+            description: "Your plan, paying for it, invoices, and how much of it is in use. The workspace owner's alone.",
+            href: "/settings/billing",
+            icon: CreditCard,
             permission: "settings.manage",
           },
           {

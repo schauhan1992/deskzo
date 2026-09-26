@@ -10,6 +10,7 @@ import { isDisposableDomain, parseEmailAddress } from "@/lib/email-verification"
 import { controlDb } from "@/lib/platform/control-db";
 import { createHandoffTicket } from "@/lib/platform/handoff";
 import { sendPlatformMail } from "@/lib/platform/mailer";
+import { signupOpen } from "@/lib/platform/settings";
 import { ProvisioningRefused, slugProblem, startProvisioning } from "@/lib/platform/provisioning";
 import { lockoutState, recordFailure } from "@/lib/security/lockout";
 import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
@@ -18,11 +19,12 @@ import { subdomainHost } from "@/lib/tenancy/registry";
 /**
  * Signing up for a workspace — the public site on the platform's own address (src/app/platform-site).
  *
- *   1. `startSignup`: the form. By invitation only for now. Refuses a disposable address, a name that
- *      is taken or reserved, a short password. Emails a six-digit code and remembers the browser (a
- *      cookie whose secret only this browser has).
- *   2. `verifySignup`: the code. Spends the invitation, reserves the name, queues the workspace
- *      (src/lib/platform/provisioning.ts) and starts the worker.
+ *   1. `startSignup`: the form. By invitation until staff open signup in the console (src/lib/
+ *      platform/settings.ts); after that an invitation is optional, and names the plan when given.
+ *      Refuses a disposable address, a name that is taken or reserved, a short password. Emails a
+ *      six-digit code and remembers the browser (a cookie whose secret only this browser has).
+ *   2. `verifySignup`: the code. Spends the invitation if there is one, reserves the name, queues
+ *      the workspace on a free trial (src/lib/platform/provisioning.ts) and starts the worker.
  *   3. `signupProgress`: what the progress page polls. Once the workspace is up, it hands the owner
  *      a one-time pass to it — once, to this browser only — and the page follows it straight in.
  *
@@ -69,10 +71,10 @@ export type SignupForm = {
   invite: string;
 };
 
-async function inviteProblem(code: string): Promise<string | null> {
+async function inviteProblem(code: string, open: boolean): Promise<string | null> {
   const invite = await controlDb().signupInvite.findUnique({ where: { codeHash: sha256(code.trim()) } });
   if (!invite || invite.uses >= invite.maxUses || (invite.expiresAt && invite.expiresAt < new Date())) {
-    return "That invitation code isn't valid. Signing up is by invitation for now.";
+    return open ? "That invitation code isn't valid — leave it empty to sign up without one." : "That invitation code isn't valid. Signing up is by invitation for now.";
   }
   return null;
 }
@@ -97,8 +99,13 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
   const nameProblem = await slugProblem(slug);
   if (nameProblem) return { ok: false, error: nameProblem };
-  const badInvite = await inviteProblem(String(form.invite ?? ""));
-  if (badInvite) return { ok: false, error: badInvite };
+  // Without an invitation only once signup is open; one given is checked either way.
+  const inviteCode = String(form.invite ?? "").trim();
+  const open = await signupOpen();
+  if (!open || inviteCode) {
+    const badInvite = await inviteProblem(inviteCode, open);
+    if (badInvite) return { ok: false, error: badInvite };
+  }
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const secret = randomBytes(24).toString("base64url");
@@ -111,7 +118,7 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
       slug,
       country: country.code,
       passwordHash: await bcrypt.hash(password, 10),
-      inviteCodeHash: sha256(String(form.invite).trim()),
+      inviteCodeHash: inviteCode ? sha256(inviteCode) : null,
       codeHash: sha256(code),
       codeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
       browserSecretHash: sha256(secret),
@@ -165,12 +172,17 @@ export async function verifySignup(input: string): Promise<SignupResult> {
   }
 
   // The invitation is spent now — conditionally, so two signups on one single-use code get one workspace.
-  const spent = await controlDb().$executeRaw`
-    UPDATE "signup_invites" SET "uses" = "uses" + 1
-    WHERE "codeHash" = ${pending.inviteCodeHash} AND "uses" < "maxUses" AND ("expiresAt" IS NULL OR "expiresAt" > now())`;
-  if (spent !== 1) return { ok: false, error: "That invitation has been used in the meantime." };
+  const inviteCodeHash = pending.inviteCodeHash;
+  if (inviteCodeHash) {
+    const spent = await controlDb().$executeRaw`
+      UPDATE "signup_invites" SET "uses" = "uses" + 1
+      WHERE "codeHash" = ${inviteCodeHash} AND "uses" < "maxUses" AND ("expiresAt" IS NULL OR "expiresAt" > now())`;
+    if (spent !== 1) return { ok: false, error: "That invitation has been used in the meantime." };
+  } else if (!(await signupOpen())) {
+    return { ok: false, error: "Signing up is by invitation for now." };
+  }
 
-  const invite = await controlDb().signupInvite.findUnique({ where: { codeHash: pending.inviteCodeHash }, select: { planKey: true } });
+  const invite = inviteCodeHash ? await controlDb().signupInvite.findUnique({ where: { codeHash: inviteCodeHash }, select: { planKey: true } }) : null;
   let tenantId: string;
   try {
     ({ tenantId } = await startProvisioning({
@@ -184,7 +196,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
     }));
   } catch (err) {
     // The invitation goes back: nothing was made with it.
-    await controlDb().signupInvite.update({ where: { codeHash: pending.inviteCodeHash }, data: { uses: { decrement: 1 } } });
+    if (inviteCodeHash) await controlDb().signupInvite.update({ where: { codeHash: inviteCodeHash }, data: { uses: { decrement: 1 } } });
     if (err instanceof ProvisioningRefused) return { ok: false, error: err.message };
     throw err;
   }

@@ -170,6 +170,7 @@ async function main() {
     const authz = require("../src/lib/authz/resolve") as typeof import("../src/lib/authz/resolve");
     const { SUPPORT_READONLY_ROLE } = require("../src/lib/roles") as typeof import("../src/lib/roles");
     const { db } = require("../src/lib/db") as typeof import("../src/lib/db");
+    const settings = require("../src/lib/platform/settings") as typeof import("../src/lib/platform/settings");
     cleanup = async () => {
       await db.$disconnect();
       await closeControlDb();
@@ -177,6 +178,10 @@ async function main() {
     const control = controlDb();
     const mail: { to: string; subject: string; text: string }[] = [];
     mailer.setTestPlatformMailer(async (m) => void mail.push(m));
+    const unchosen = await settings.staffTwoFactorPolicy();
+    ok("until an owner chooses, staff two-factor follows the environment — optional outside production", unchosen.mode === "optional" && !unchosen.chosen);
+    // What follows is about the console with two-factor required; optional has a section of its own.
+    await settings.setSetting("staff.twoFactor", "required", "check");
 
     /** Signed in as this staff member, two-factor passed — for the role checks, which are not about signing in. */
     const actAs = async (userId: string) => {
@@ -314,6 +319,35 @@ async function main() {
     ok("resetting two-factor signs them out everywhere, and the next sign-in enrols again", reset.ok && (await sessions.currentStaffSession()) === null);
     const reenrol = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
     ok("  (a password alone now, to enrol)", reenrol.ok && reenrol.enrol);
+
+    section("Two-factor, optional");
+    await actAs(adminId);
+    ok("only an owner makes it optional", !(await consoleActions.consoleSetStaffTwoFactor("optional")).ok);
+    await actAs(ownerRow.id);
+    ok("an owner does", (await consoleActions.consoleSetStaffTwoFactor("optional")).ok && (await settings.staffTwoFactorPolicy()).mode === "optional");
+    jar.delete(COOKIE);
+    const passwordOnly = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
+    const through = await sessions.currentStaffSession();
+    ok("without an authenticator, a password alone signs in — straight to the console", passwordOnly.ok && !passwordOnly.enrol && !!through?.mfaDone && !through.enrolled);
+    ok("  its pages and actions answer", (await consolePage.consoleStaff()).email === ownerEmail && (await thrown(() => sessions.requireStaff())) === "");
+    const voluntary = await sessions.enrolmentChallenge();
+    ok("  and it may still set one up", !!voluntary && (await sessions.finishEnrolment(authenticator.generate(voluntary.secret))).ok);
+    await sessions.signOutStaff();
+    const stillAsked = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
+    ok("whoever has an authenticator is still asked for its code", !stillAsked.ok && stillAsked.needsCode === true);
+    ok("  and signs in with it", (await sessions.signInStaff({ email: ownerEmail, password: PASSWORD, code: authenticator.generate(voluntary!.secret) })).ok);
+    const ownerToken = jar.get(COOKIE)!;
+    const adminLink = await staffLib.issuePasswordSetup(adminId);
+    await staffLib.completePasswordSetup(tokenOf(adminLink), PASSWORD);
+    jar.delete(COOKIE);
+    const adminIn = await sessions.signInStaff({ email: "admin@zzconsole.example", password: PASSWORD });
+    const adminToken = jar.get(COOKIE)!;
+    ok("  (an admin without one, in on a password)", adminIn.ok && !!(await sessions.currentStaffSession())?.mfaDone);
+    jar.set(COOKIE, ownerToken);
+    ok("required again, by an owner", (await consoleActions.consoleSetStaffTwoFactor("required")).ok);
+    jar.set(COOKIE, adminToken);
+    ok("  a session without the second factor stops at once — sent to set one up", (await thrown(() => sessions.requireStaff())) !== "" && (await thrown(() => consolePage.consoleStaff())) === "redirect /enrol");
+    ok("every change of the policy is in the audit log", (await control.platformAuditLog.count({ where: { action: "staff.two-factor.policy" } })) === 2);
 
     section("A workspace to support");
     await provisioning.startProvisioning({ slug: "zzcons-a", companyName: "Zz Console Ltd", ownerName: "Asha Zz", ownerEmail: "asha@zzcons.example", ownerPasswordHash: await bcrypt.hash(PASSWORD, 10), country: "IN" });

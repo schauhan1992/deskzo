@@ -8,6 +8,7 @@ import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { getModuleStates } from "@/actions/module";
+import { billingNotice } from "@/actions/billing";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { canViewPerformance } from "@/actions/performance";
 import { navPermissions } from "@/actions/permission";
@@ -86,6 +87,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Not while viewing as somebody else: an admin borrowing an account should not be wished a happy
   // birthday on their behalf, and dismissing it would mark it seen for a person who never saw it.
   const today = viewAs ? null : await todaysMoments();
+  // The owner's reminder while a trial or a grace period runs — null for everybody else.
+  const billing = session?.user && !viewAs ? await billingNotice().catch(() => null) : null;
 
   const currentPath = requestHeaders.get("x-pathname") ?? "";
   // Skipped while viewing as someone else: "you must change your password" is about the person
@@ -234,6 +237,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </header>
         <MaintenanceBanner />
         <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">
+          {billing && (
+            <Link
+              href="/settings/billing"
+              className={`mb-4 block rounded-base border px-3 py-2 text-sm ${billing.tone === "warning" ? "border-warning/40 bg-warning-bg text-warning" : "border-info/30 bg-info-bg text-info"}`}
+            >
+              {billing.text} <span className="font-medium underline">Plan &amp; billing</span>
+            </Link>
+          )}
           {children}
         </main>
         {today && <CelebrationSplash moments={today.moments} />}

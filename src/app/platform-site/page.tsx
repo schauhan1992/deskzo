@@ -2,12 +2,13 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { GoToWorkspace } from "@/components/platform/go-to-workspace";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
+import { signupOpen } from "@/lib/platform/settings";
 
 /**
  * The platform's own address: what somebody sees at the bare domain. Two ways on — to their own
  * workspace, or to setting one up. It reads no workspace's data; there is none here.
  */
-export default function PlatformHome() {
+export default async function PlatformHome() {
   const port = process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_PORT}` : "";
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
@@ -19,7 +20,7 @@ export default function PlatformHome() {
           </div>
           <GoToWorkspace suffix={`.${PLATFORM_DOMAIN}${port}`} />
           <div className="border-t border-line pt-4 text-sm">
-            <p className="text-muted">New here? Setting up a workspace is by invitation for now.</p>
+            <p className="text-muted">{(await signupOpen()) ? "New here? Set up a workspace and try it free." : "New here? Setting up a workspace is by invitation for now."}</p>
             <Link href="/signup" className="mt-1 inline-block font-medium text-brand hover:underline">
               Set up a workspace
             </Link>

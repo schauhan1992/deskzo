@@ -1,6 +1,7 @@
 import { consoleDeactivateStaff, consoleEndStaffSessions, consoleResetStaffTwoFactor } from "@/actions/platform/console";
 import { ConsoleAction } from "@/components/console/console-action";
-import { AddStaffForm, NewSetupLink, StaffRoleSelect } from "@/components/console/console-forms";
+import { AddStaffForm, NewSetupLink, StaffRoleSelect, TwoFactorPolicyForm } from "@/components/console/console-forms";
+import { staffTwoFactorDefault, staffTwoFactorPolicy } from "@/lib/platform/settings";
 import { Cell, DataTable, PageTitle, Section, when } from "@/components/console/console-ui";
 import { consoleStaff, isOwner } from "@/lib/platform/console-page";
 import { staffMembers } from "@/lib/platform/console-data";
@@ -8,11 +9,23 @@ import { staffMembers } from "@/lib/platform/console-data";
 /** The people who can sign in to this console. Only owners change them; there is always one owner. */
 export default async function ConsoleStaffPage() {
   const staff = await consoleStaff();
-  const members = await staffMembers();
+  const [members, twoFactor] = await Promise.all([staffMembers(), staffTwoFactorPolicy()]);
   const owner = isOwner(staff);
   return (
     <>
-      <PageTitle title="Staff">Everyone signs in with a password and an authenticator. The first owner is made on the server: npm run platform:staff.</PageTitle>
+      <PageTitle title="Staff">
+        Everyone signs in with a password{twoFactor.mode === "required" ? " and an authenticator" : ", and an authenticator if they set one up"}. The first owner is made on the server:
+        npm run platform:staff.
+      </PageTitle>
+      <Section title={`Two-factor — ${twoFactor.mode === "required" ? "required for everyone" : "optional"}`}>
+        {owner ? (
+          <TwoFactorPolicyForm mode={twoFactor.mode} chosen={twoFactor.chosen} defaultMode={staffTwoFactorDefault()} />
+        ) : (
+          <p className="text-sm text-muted">
+            {twoFactor.mode === "required" ? "Every staff member needs an authenticator." : "An authenticator is optional; those who set one up are asked for its code."} Only an owner changes this.
+          </p>
+        )}
+      </Section>
       {owner && (
         <Section title="Add someone">
           <AddStaffForm />

@@ -60,6 +60,7 @@ function environmentDefault(): Tenant | null {
     country: "IN",
     // The installation as it was before plans: nothing it had is taken away.
     entitlements: UNRESTRICTED,
+    holdReason: null,
   };
 }
 
@@ -69,7 +70,7 @@ function environmentExtras(): Tenant[] {
     const m = key.match(/^TENANT_DB_([A-Z0-9_]+)$/);
     if (!m || !url) continue;
     const slug = m[1].toLowerCase().replace(/_/g, "-");
-    tenants.push({ id: slug, slug, name: slug, status: "ACTIVE", dbUrl: url, primaryHost: subdomainHost(slug), hosts: [subdomainHost(slug)], source: "env", isDefault: false, keyBundleCipher: null, country: "IN", entitlements: UNRESTRICTED });
+    tenants.push({ id: slug, slug, name: slug, status: "ACTIVE", dbUrl: url, primaryHost: subdomainHost(slug), hosts: [subdomainHost(slug)], source: "env", isDefault: false, keyBundleCipher: null, country: "IN", entitlements: UNRESTRICTED, holdReason: null });
   }
   return tenants;
 }
@@ -86,6 +87,7 @@ type ControlRow = {
   keyBundleCipher: string;
   country: string;
   entitlements: unknown;
+  suspendedFor: "STAFF" | "BILLING" | null;
   domains: { host: string; isPrimary: boolean }[];
 };
 
@@ -99,6 +101,7 @@ const SELECT = {
   keyBundleCipher: true,
   country: true,
   entitlements: true,
+  suspendedFor: true,
   domains: { select: { host: true, isPrimary: true }, orderBy: { createdAt: "asc" as const } },
 };
 
@@ -120,6 +123,7 @@ function fromControl(row: ControlRow): Tenant {
     country: row.country,
     // Malformed or never worked out: the core only.
     entitlements: parseEntitlements(row.entitlements),
+    holdReason: row.status === "SUSPENDED" ? (row.suspendedFor ?? "STAFF") : null,
   };
 }
 

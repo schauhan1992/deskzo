@@ -29,3 +29,11 @@ export function noWorkspacePage(host: string | null): string {
 export function unavailableWorkspacePage(name: string): string {
   return page("Unavailable right now", `<strong>${escape(name)}</strong> can't be opened at the moment. If you look after this workspace, contact support.`);
 }
+
+/** Held for billing: nothing is lost, and its owner can settle it from the billing page. */
+export function billingHeldPage(name: string): string {
+  return page(
+    "Held until the subscription is paid",
+    `<strong>${escape(name)}</strong> is held — its trial has ended or a payment is overdue. Nothing has been deleted. The workspace owner can <a href="/settings/billing">settle it here</a>, and everything opens again at once.`,
+  );
+}

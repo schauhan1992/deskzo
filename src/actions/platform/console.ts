@@ -6,7 +6,12 @@ import path from "node:path";
 import type { StaffRole } from "@wroffy/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { LifecycleRefused, deprovisionTenant, resumeTenant, suspendTenant } from "@/lib/platform/lifecycle";
-import { PlanRefused, savePlan, setLimitOverrides, setModuleOverride, setWorkspacePlans, type PlanInput } from "@/lib/platform/plans";
+import { PlanRefused, giveTrialPlans, savePlan, setLimitOverrides, setModuleOverride, setTrialEnd, setWorkspacePlans, type PlanInput } from "@/lib/platform/plans";
+import { GatewayError } from "@/lib/billing/gateway";
+import { applyStanding } from "@/lib/billing/lifecycle";
+import { PriceRefused, addPlanPrice, retirePlanPrice } from "@/lib/billing/prices";
+import { SECRET_KEYS, setSecret, setSetting, type SecretKey } from "@/lib/platform/settings";
+import { forgetRegistry } from "@/lib/tenancy/registry";
 import { removePinApiKey, savePinApiKey, startPinSync, startWorldSync } from "@/lib/platform/reference-sync";
 import { enterAsSupport } from "@/lib/platform/support";
 import { StaffChangeRefused, createStaff, deactivateStaff, endStaffSessions, issuePasswordSetup, resetStaffTwoFactor, setStaffRole } from "@/lib/platform/staff";
@@ -40,7 +45,9 @@ async function asStaff<T>(roles: readonly StaffRole[], work: (staff: Staff) => P
   try {
     return { ok: true, data: await work(staff) };
   } catch (err) {
-    if (err instanceof StaffChangeRefused || err instanceof LifecycleRefused || err instanceof PlanRefused) return { ok: false, error: err.message };
+    if (err instanceof StaffChangeRefused || err instanceof LifecycleRefused || err instanceof PlanRefused || err instanceof PriceRefused || err instanceof GatewayError) {
+      return { ok: false, error: err.message };
+    }
     throw err;
   }
 }
@@ -214,6 +221,98 @@ export async function consoleSetLimitOverrides(tenantId: string, input: { seats:
   return asStaff(SELLERS, async (staff) => {
     await setLimitOverrides(String(tenantId), input ?? { seats: null, copilotTokens: null }, `staff:${staff.id}`);
     return null;
+  });
+}
+
+// ─── Billing ────────────────────────────────────────────────────────────────────────────────────
+
+/** A price for a plan, made at its gateway first. */
+export async function consoleAddPrice(input: { planKey: string; gateway: "STRIPE" | "RAZORPAY"; currency: string; interval: "MONTH" | "YEAR"; amount: number; perSeat: boolean }) {
+  return asStaff(SELLERS, (staff) => addPlanPrice(input, `staff:${staff.id}`));
+}
+
+export async function consoleRetirePrice(priceId: string) {
+  return asStaff(SELLERS, async (staff) => {
+    await retirePlanPrice(String(priceId), `staff:${staff.id}`);
+    return null;
+  });
+}
+
+/**
+ * The gateways' keys — typed in here, sealed, never shown back. An empty field leaves a key as it
+ * is; `clear` removes one. Owners only: a key moves money.
+ */
+export async function consoleSaveGatewayKeys(input: { values: Partial<Record<SecretKey, string>>; clear?: SecretKey[] }) {
+  return asStaff(["OWNER"], async (staff) => {
+    const changed: string[] = [];
+    for (const key of SECRET_KEYS) {
+      const value = String(input?.values?.[key] ?? "").trim();
+      if (input?.clear?.includes(key)) {
+        await setSecret(key, null, staff.id);
+        changed.push(`${key} removed`);
+      } else if (value) {
+        if (value.length > 500) throw new StaffChangeRefused("That key is too long to be one.");
+        await setSecret(key, value, staff.id);
+        changed.push(key);
+      }
+    }
+    await audit(staff, "billing.keys", { changed });
+    return null;
+  });
+}
+
+/**
+ * Whether every staff member must use an authenticator. Owners only, and recorded: turning it off
+ * lets anybody with a staff password into the console.
+ */
+export async function consoleSetStaffTwoFactor(mode: "required" | "optional") {
+  return asStaff(["OWNER"], async (staff) => {
+    if (mode !== "required" && mode !== "optional") throw new StaffChangeRefused("Required or optional.");
+    await setSetting("staff.twoFactor", mode, staff.id);
+    await audit(staff, "staff.two-factor.policy", { mode });
+    return null;
+  });
+}
+
+/** Open signup, the trial's length, and whether ended workspaces are closed by themselves. Owners only. */
+export async function consoleSaveBillingSettings(input: { signupOpen: boolean; trialDays: number; autoDeprovision: boolean }) {
+  return asStaff(["OWNER"], async (staff) => {
+    const days = Math.round(Number(input?.trialDays));
+    if (!Number.isInteger(days) || days < 1 || days > 90) throw new StaffChangeRefused("A trial is 1 to 90 days.");
+    await setSetting("signup.open", input.signupOpen ? "1" : "0", staff.id);
+    await setSetting("trial.days", String(days), staff.id);
+    await setSetting("billing.autoDeprovision", input.autoDeprovision ? "1" : "0", staff.id);
+    await audit(staff, "billing.settings", { signupOpen: !!input.signupOpen, trialDays: days, autoDeprovision: !!input.autoDeprovision });
+    return null;
+  });
+}
+
+export async function consoleSetTrialEnd(tenantId: string, endsOn: string) {
+  return asStaff(SELLERS, async (staff) => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(endsOn)) ? new Date(`${endsOn}T23:59:59+05:30`) : null;
+    if (!date || Number.isNaN(date.getTime())) throw new StaffChangeRefused("Give the date the trial ends.");
+    await setTrialEnd(String(tenantId), date, `staff:${staff.id}`);
+    await applyStanding(String(tenantId));
+    return null;
+  });
+}
+
+/** Its trial's plans kept without charge — a pilot, a partner. Billing leaves it alone after. */
+export async function consoleGiveTrialPlans(tenantId: string) {
+  return asStaff(MANAGERS, async (staff) => {
+    await giveTrialPlans(String(tenantId), `staff:${staff.id}`);
+    await applyStanding(String(tenantId));
+    return null;
+  });
+}
+
+/** Its standing applied now, rather than at the next tick. */
+export async function consoleApplyStanding(tenantId: string) {
+  return asStaff(MANAGERS, async (staff) => {
+    const outcome = await applyStanding(String(tenantId));
+    forgetRegistry();
+    await audit(staff, "billing.apply", { standing: outcome.standing, action: outcome.action }, String(tenantId));
+    return outcome.action;
   });
 }
 

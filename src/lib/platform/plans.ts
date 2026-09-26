@@ -132,10 +132,37 @@ async function manualSubscription(tx: Prisma.TransactionClient, tenantId: string
   return made.id;
 }
 
-/** A new workspace onto its first plan, inside the transaction that makes it. */
-export async function startOnPlan(tx: Prisma.TransactionClient, tenantId: string, planId: string): Promise<void> {
-  const subscriptionId = await manualSubscription(tx, tenantId);
+/**
+ * A workspace onto its first plan, inside the transaction that makes it: on a free trial until
+ * `trialEndsAt` (src/lib/billing/lifecycle.ts takes it from there), or — without one — as a plan
+ * given by hand, which billing never touches.
+ */
+export async function startOnPlan(tx: Prisma.TransactionClient, tenantId: string, planId: string, trialEndsAt: Date | null = null): Promise<void> {
+  const subscriptionId = trialEndsAt
+    ? (await tx.subscription.create({ data: { tenantId, gateway: "MANUAL", status: "TRIALING", trialEndsAt }, select: { id: true } })).id
+    : await manualSubscription(tx, tenantId);
   await tx.subscriptionItem.upsert({ where: { subscriptionId_planId: { subscriptionId, planId } }, create: { subscriptionId, planId }, update: {} });
+}
+
+/** A trial made longer (or shorter), from the console. */
+export async function setTrialEnd(tenantId: string, trialEndsAt: Date, actor: string): Promise<void> {
+  if (!(trialEndsAt.getTime() > Date.now())) throw new PlanRefused("A trial ends in the future.");
+  const control = controlDb();
+  const trial = await control.subscription.findFirst({ where: { tenantId, gateway: "MANUAL", status: { in: ["TRIALING", "CANCELLED"] }, trialEndsAt: { not: null } }, orderBy: { createdAt: "desc" }, select: { id: true } });
+  if (!trial) throw new PlanRefused("This workspace has no trial.");
+  await control.subscription.update({ where: { id: trial.id }, data: { status: "TRIALING", trialEndsAt, cancelledAt: null } });
+  await audit(actor, "tenant.trial", { endsAt: trialEndsAt.toISOString() }, tenantId);
+  await refreshEntitlements(tenantId);
+}
+
+/** Its trial's plans kept, as a plan given by hand: billing leaves it alone from now on. */
+export async function giveTrialPlans(tenantId: string, actor: string): Promise<void> {
+  const control = controlDb();
+  const trial = await control.subscription.findFirst({ where: { tenantId, gateway: "MANUAL", status: "TRIALING" }, select: { id: true } });
+  if (!trial) throw new PlanRefused("This workspace has no trial running.");
+  await control.subscription.update({ where: { id: trial.id }, data: { status: "ACTIVE", trialEndsAt: null } });
+  await audit(actor, "tenant.trial.given", {}, tenantId);
+  await refreshEntitlements(tenantId);
 }
 
 /**

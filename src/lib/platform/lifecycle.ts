@@ -31,18 +31,35 @@ async function audit(tenantId: string, actor: string, action: string, detail?: R
   await controlDb().platformAuditLog.create({ data: { actorKind: staff ? "STAFF" : "SCRIPT", actor: staff ? actor.slice(6) : actor, action, tenantId, detail: detail as never } });
 }
 
-export async function suspendTenant(tenantId: string, actor: string, reason: string): Promise<void> {
-  await controlDb().tenant.update({ where: { id: tenantId }, data: { status: "SUSPENDED", suspendedAt: new Date() } });
-  await audit(tenantId, actor, "tenant.suspend", { reason });
+/**
+ * `kind`: STAFF, or BILLING — unpaid, a trial over, a subscription ended (src/lib/billing/lifecycle.ts).
+ * A billing hold leaves the owner the billing page, and is lifted by paying; a staff hold is not
+ * lifted by billing, and replaces a billing one.
+ */
+export async function suspendTenant(tenantId: string, actor: string, reason: string, kind: "STAFF" | "BILLING" = "STAFF"): Promise<void> {
+  const tenant = await controlDb().tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { status: true, suspendedFor: true } });
+  // Billing never softens a staff hold into one the owner could lift by paying.
+  if (kind === "BILLING" && tenant.status === "SUSPENDED" && tenant.suspendedFor === "STAFF") return;
+  await controlDb().tenant.update({ where: { id: tenantId }, data: { status: "SUSPENDED", suspendedAt: tenant.status === "SUSPENDED" ? undefined : new Date(), suspendedFor: kind } });
+  await audit(tenantId, actor, "tenant.suspend", { reason, kind });
   forgetRegistry();
 }
 
 export async function resumeTenant(tenantId: string, actor: string): Promise<void> {
   const tenant = await controlDb().tenant.findUniqueOrThrow({ where: { id: tenantId } });
   if (tenant.status !== "SUSPENDED") throw new LifecycleRefused(`Workspace ${tenant.slug} is ${tenant.status}, not suspended.`);
-  await controlDb().tenant.update({ where: { id: tenantId }, data: { status: "ACTIVE", suspendedAt: null } });
+  await controlDb().tenant.update({ where: { id: tenantId }, data: { status: "ACTIVE", suspendedAt: null, suspendedFor: null } });
   await audit(tenantId, actor, "tenant.resume");
   forgetRegistry();
+}
+
+/** Paid again: open — but only a billing hold; a staff hold stays until staff lift it. */
+export async function liftBillingHold(tenantId: string, actor: string): Promise<boolean> {
+  const lifted = await controlDb().tenant.updateMany({ where: { id: tenantId, status: "SUSPENDED", suspendedFor: "BILLING" }, data: { status: "ACTIVE", suspendedAt: null, suspendedFor: null } });
+  if (!lifted.count) return false;
+  await audit(tenantId, actor, "tenant.resume", { billing: true });
+  forgetRegistry();
+  return true;
 }
 
 export async function deprovisionTenant(tenantId: string, actor: string, options: { finalBackup?: boolean } = {}): Promise<{ backup: string | null }> {
@@ -52,7 +69,7 @@ export async function deprovisionTenant(tenantId: string, actor: string, options
   if (row.status === "DEPROVISIONED") throw new LifecycleRefused(`Workspace ${row.slug} is already closed.`);
 
   // Held first, so nobody is working in it while it is backed up and dropped.
-  if (row.status !== "SUSPENDED") await control.tenant.update({ where: { id: tenantId }, data: { status: "SUSPENDED", suspendedAt: new Date() } });
+  if (row.status !== "SUSPENDED") await control.tenant.update({ where: { id: tenantId }, data: { status: "SUSPENDED", suspendedAt: new Date(), suspendedFor: "STAFF" } });
   forgetRegistry();
 
   let backup: string | null = null;

@@ -13,7 +13,8 @@ import { HOST_MISMATCH, classifyHost, requestHost } from "@/lib/tenancy/host";
 import { tenantForKind } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
-import { noWorkspacePage, unavailableWorkspacePage } from "@/lib/tenancy/pages";
+import { billingHeldPage, noWorkspacePage, unavailableWorkspacePage } from "@/lib/tenancy/pages";
+import { holdFor } from "@/lib/tenancy/hold";
 
 /**
  * Served from the proxy while a restore is running, so it depends on nothing.
@@ -80,8 +81,11 @@ const MAINTENANCE_PAGE = `<!doctype html>
  * grant. Bouncing a customer to a sign-in they can never pass would make the link useless, which
  * is why an unsubscribe link behind a login is not an unsubscribe link.
  */
-/** API paths answered on the platform's own address — the scheduled ticks, which fan out over every workspace. */
-const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick)\/?$/;
+/**
+ * API paths answered on the platform's own address — the scheduled ticks, which fan out over every
+ * workspace, and the billing gateways' webhooks.
+ */
+const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay))\/?$/;
 
 const PUBLIC_PREFIXES = ["/login", "/handoff", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
 
@@ -176,10 +180,19 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
    * A workspace being set up, held, mid-migration or closed is not served — not its pages and not its
    * API. The console runs migrations and provisioning as the workspace explicitly, never through here.
    */
-  if (tenant.status !== "ACTIVE") {
+  /**
+   * Held for billing, not by staff: signing in and the billing page stay open, so its owner can pay
+   * and open it again themselves (src/lib/tenancy/hold.ts). Nothing else — no other page, no API, no
+   * scheduled work.
+   */
+  const hold = holdFor(tenant, pathname);
+  if (hold !== "open") {
     if (api) return NextResponse.json({ error: "This workspace is unavailable." }, { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } });
     return harden(
-      new NextResponse(unavailableWorkspacePage(tenant.name), { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "retry-after": "60" } }) as NextResponse,
+      new NextResponse(hold === "billing-notice" ? billingHeldPage(tenant.name) : unavailableWorkspacePage(tenant.name), {
+        status: 503,
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "retry-after": "60" },
+      }) as NextResponse,
       pathname,
     );
   }
