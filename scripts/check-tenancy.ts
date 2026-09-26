@@ -35,11 +35,10 @@ const SRC = path.join(ROOT, "src");
 
 /** Files that may open a database client of their own. */
 const PRISMA_CLIENTS: Record<string, Allowed> = {
-  "src/lib/tenancy/clients.ts": { reason: "the per-workspace client pool — every db call goes through it" },
+  "src/lib/tenancy/clients.ts": { reason: "the one client every workspace shares, routing each query to its workspace's pool — every db call goes through it" },
+  "src/lib/tenancy/direct-client.ts": { reason: "a client of its own on one named database — the provisioner, a new workspace before it is served, scripts and seeds" },
   "src/lib/platform/control-db.ts": { reason: "the control plane's own client — which workspaces exist, never workspace data" },
   "src/lib/platform/reference-db.ts": { reason: "the shared reference database — facts about the world, the same for every workspace" },
-  "src/lib/platform/provisioner.ts": { reason: "the provisioner's connection to the server's maintenance database — makes and drops workspace databases" },
-  "src/lib/platform/provisioning.ts": { reason: "a new workspace's database before the registry serves it — to create its owner and organisation" },
 };
 
 /** Reads of the install's own identity: its database, its secret, its public address. */
@@ -49,6 +48,7 @@ const ENV_READS: Record<string, Allowed> = {
   "src/lib/tenancy/keys.ts": { reason: "AUTH_SECRET: the first workspace's keys before adoption, and check-suite workspaces'" },
   "src/lib/platform/provisioner.ts": { reason: "DATABASE_URL: in development, the provisioner is the same server's maintenance database" },
   "src/lib/tenancy/render-target.ts": { reason: "INTERNAL_APP_URL: where the server's own browser reaches the app, used with the workspace's hostname" },
+  "src/lib/tenancy/direct-client.ts": { reason: "DATABASE_URL: the default address of a script's or seed's own client — requests go through db, never here" },
 };
 
 /** `x-forwarded-host` is a claim anybody can send; only src/lib/tenancy/host.ts may weigh it. */
@@ -90,7 +90,6 @@ const STATE: Record<string, Allowed> = {
 
   "src/lib/access/geo.ts:loaded": { reason: "shared: the GeoIP database file, public data, one per install" },
   "src/lib/access/geo.ts:checkedAt": { reason: "shared: when the GeoIP file was last looked at" },
-  "src/lib/companies/merge.ts:cached": { reason: "shared: relation map derived from the schema, identical everywhere" },
   "src/lib/email-verification-lookup.ts:mxCache": { reason: "shared: public DNS answers" },
   "src/lib/finance/exchange-rate.ts:cache": { reason: "shared: public exchange rates" },
   "src/lib/platform/support.ts:grantCache": CALLER_KEYED("keyed by the workspace's id, which every caller passes"),

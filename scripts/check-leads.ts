@@ -18,7 +18,7 @@
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import Module from "node:module";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { createLeadSchema, renewalDateToStore, updateLeadRequirementSchema } from "../src/lib/validation/lead";
 import { createCompanySchema } from "../src/lib/validation/company";
 import { gradeFor, scoreLead, type LeadSignals } from "../src/lib/leads/score";
@@ -38,7 +38,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const PREFIX = "ZZPROBE_LEADS";
 const REP_EMAIL = "zzprobe.leads@example.invalid";
 let failures = 0;

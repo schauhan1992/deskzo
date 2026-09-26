@@ -20,7 +20,7 @@ import "dotenv/config";
 import { execSync, spawnSync } from "node:child_process";
 import { createCipheriv, createHmac, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 process.env.WROFFY_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
@@ -58,7 +58,7 @@ async function main() {
   if (!local) throw new Error("not a local database");
   const names = { control: `${realName}_authcheck_control`, a: `${realName}_authcheck_a`, b: `${realName}_authcheck_b` };
   const urls = { control: withDatabase(url, names.control), a: withDatabase(url, names.a), b: withDatabase(url, names.b) };
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   let cleanup: (() => Promise<void>) | null = null;
   try {
     for (const name of Object.values(names)) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);

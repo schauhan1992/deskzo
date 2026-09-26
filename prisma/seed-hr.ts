@@ -16,7 +16,8 @@
  * The randomness is seeded, so a re-run produces the same company rather than a different one.
  */
 import { randomBytes } from "node:crypto";
-import { PrismaClient, Prisma, type AttendanceStatus, type CandidateStatus, type EmploymentType } from "@prisma/client";
+import { Prisma, type AttendanceStatus, type CandidateStatus, type EmploymentType } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { dateOnly, daysInMonth, eachDay, financialYearOf, isWeekOff, monthRange, toKey } from "../src/lib/hr/calendar";
@@ -25,7 +26,7 @@ import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from ".
 import type { LetterType } from "@prisma/client";
 import { lossOfPayDays } from "../src/lib/hr/loss-of-pay";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const CODE_PREFIX = "WRF-";
 const DEVICE_SERIAL = "ESSLSEED0001";

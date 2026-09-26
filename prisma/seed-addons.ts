@@ -10,10 +10,11 @@
  *   npm run db:seed:addons -- --reset remove what this made first
  *   npm run db:seed:addons -- --verify-only
  */
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { canAddTo, proRata, remainingDays, renewalGroup, termDays } from "../src/lib/subscriptions/proration";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const PARENT_START = "2026-08-10";
 const PARENT_END = "2027-08-09";

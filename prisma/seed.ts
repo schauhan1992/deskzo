@@ -1,11 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
 import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { ensurePincodes } from "./reference/pincodes";
 import { ensureGeonames } from "./reference/geonames";
 
-const db = new PrismaClient();
+const db = directClient();
 
 async function main() {
   const passwordHash = await bcrypt.hash("ChangeMe123!", 10);

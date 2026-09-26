@@ -19,7 +19,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { createElement, type ReactElement } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { PERMISSION_REGISTRY } from "../src/lib/permissions";
 import { ROLE_PRESETS } from "../src/lib/authz/presets";
 import { MODULE_REGISTRY, getModuleDefinition } from "../src/lib/modules";
@@ -53,7 +53,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_VIEWS";
 const MAIL = "@zzprobe-views.invalid";
 let failures = 0;

@@ -26,7 +26,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { MODULE_REGISTRY } from "../src/lib/modules";
 
 process.env.WROFFY_TENANCY_FALLBACK = "legacy";
@@ -152,7 +152,7 @@ async function main() {
   if (!local) throw new Error("not a local database");
   const controlName = `${realName}_entcheck_control`;
   const controlUrl = withDatabase(url, controlName);
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   const made = new Set<string>();
   let cleanup: (() => Promise<void>) | null = null;
   try {

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { PrismaPg } from "@prisma/adapter-pg";
 import type { PrismaClient } from "@prisma/client";
 import type { Entitlements } from "@/lib/entitlements";
 
@@ -34,15 +35,14 @@ export type Tenant = {
   holdReason: "STAFF" | "BILLING" | null;
 };
 
-export type ClientEntry = {
-  client: PrismaClient;
+/** A workspace's pool of connections, behind Prisma's pg adapter (src/lib/tenancy/clients.ts). */
+export type PoolEntry = {
+  adapter: ReturnType<PrismaPg["connect"]>;
   url: string;
   lastUsed: number;
-  /** Queries (or transactions) running on it now, through `db`. */
+  /** Work running on it now: a call through `db`, a query, a transaction until it ends. */
   inFlight: number;
-  /** Handed out whole (getTenantDb) — not closed before this, whatever inFlight says. */
-  heldUntil: number;
-  /** Evicted: closed as soon as nothing is running on it. */
+  /** Evicted: ended as soon as nothing is running on it. */
   retired: boolean;
   closed: boolean;
   backstop?: ReturnType<typeof setTimeout>;
@@ -53,10 +53,12 @@ type TenancyState = {
   als: AsyncLocalStorage<Tenant>;
   /** host → tenant (or a known miss), with when it was looked up. */
   registry: Map<string, { tenant: Tenant | null; at: number }>;
-  /** One database client per workspace, least recently used first out. */
-  clients: Map<string, ClientEntry>;
-  /** Clients made and closed since the process started — for the load test and diagnostics. */
-  clientCounts: { opened: number; closed: number };
+  /** The one Prisma client every workspace's queries go through. */
+  shared: PrismaClient | null;
+  /** A pool of connections per workspace, least recently used first out. */
+  pools: Map<string, PoolEntry>;
+  /** Pools opened and ended since the process started — for the load test and diagnostics. */
+  poolCounts: { opened: number; closed: number };
   /** Each workspace's opened key bundle, briefly (src/lib/tenancy/keys.ts). */
   keys: Map<string, { cipher: string | null; keys: unknown; at: number }>;
 };
@@ -65,16 +67,18 @@ type TenancyState = {
  * Process-wide tenancy state, on `globalThis` rather than in module scope.
  *
  * `proxy.ts` is bundled separately from the app's routes, so a module-level Map here would exist
- * twice in one process — two sets of database clients per workspace, and a cache the proxy fills
+ * twice in one process — two database clients and two sets of pools, and a cache the proxy fills
  * that the pages never see. A well-known symbol on `globalThis` is the one place both halves share.
  * It also survives the dev server's hot reloads, as the single Prisma client used to.
  */
 export function tenancyState(): TenancyState {
   const g = globalThis as { [key: symbol]: TenancyState | undefined };
   const key = Symbol.for("wroffy.tenancy");
-  if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), clients: new Map(), clientCounts: { opened: 0, closed: 0 }, keys: new Map() };
+  if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), shared: null, pools: new Map(), poolCounts: { opened: 0, closed: 0 }, keys: new Map() };
   // A process that loaded an older copy of this module (a dev server across a hot reload).
   g[key]!.keys ??= new Map();
-  g[key]!.clientCounts ??= { opened: 0, closed: 0 };
+  g[key]!.shared ??= null;
+  g[key]!.pools ??= new Map();
+  g[key]!.poolCounts ??= { opened: 0, closed: 0 };
   return g[key]!;
 }

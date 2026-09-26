@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import Module from "node:module";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
 import { readdirSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,7 +76,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
 } as typeof originalLoad;
 let actorId = "";
 
-const db = new PrismaClient();
+const db = directClient();
 // The PIN directory and its sync row are the shared reference database's, not a workspace's.
 const ref = new ReferenceClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
 let failures = 0;

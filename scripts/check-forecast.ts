@@ -17,7 +17,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { AFTER, BEFORE, UNDATED, bucketFor, monthsIn, periodContaining, periodsFrom, yearEarlier } from "../src/lib/forecast/periods";
 import { DEFAULT_WEIGHTS, MIN_SAMPLE, furthestOpenStage, learnWeights, parseStageChange } from "../src/lib/forecast/stages";
 import { expectedOn, forecastAmc, forecastCollections, forecastRenewals, forecastSales, learnRenewalRates } from "../src/lib/forecast/compute";
@@ -48,7 +48,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_FORECAST";
 const MAIL = "@zzprobe-forecast.invalid";
 const DAY = 86_400_000;

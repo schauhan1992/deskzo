@@ -42,7 +42,7 @@
  *   delivered, opened, clicked or bounced. Fabricating those would put an open rate on a
  *   dashboard, and an open rate is the kind of figure that ends up in a board pack.
  */
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { seedPeople } from "./demo/people";
 import { seedCompanies } from "./demo/companies";
 import { seedCatalogue } from "./demo/catalogue";
@@ -55,7 +55,7 @@ import { seedFinance } from "./demo/finance";
 import { seedReach } from "./demo/reach";
 import { BOOK_SIZE, COMPANY_AGE_DAYS, DEMO_EMAIL_DOMAIN, DEMO_SKU, DEMO_TAG, HEADCOUNT, log } from "./demo/shared";
 
-const db = new PrismaClient();
+const db = directClient();
 const args = process.argv.slice(2);
 const RESET = args.includes("--reset");
 const FORCE = args.includes("--force");

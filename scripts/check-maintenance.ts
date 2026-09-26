@@ -17,7 +17,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import type { ReactElement } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { announced, maintenancePage, maintenanceState, DEFAULT_MESSAGE, type MaintenanceState } from "../src/lib/maintenance-state";
 import { istDateTimeInput, parseIstDateTime } from "../src/lib/india-time";
 
@@ -46,7 +46,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const MAIL = "@zzprobe-maintenance.invalid";
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {

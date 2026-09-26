@@ -11,15 +11,15 @@
  *   · what the process remembers between requests (security settings, maintenance, the company
  *     lock, IP rules) is remembered per workspace;
  *   · with no workspace named, resolution fails closed inside the server;
- *   · the pool of clients stays bounded, and a client evicted mid-use finishes its work;
- *   · roughly what one more workspace's client costs in memory — which sizes TENANCY_MAX_CLIENTS.
+ *   · the workspace pools stay bounded, and a helper holding a workspace's client still reaches it;
+ *   · roughly what one more workspace costs in memory — which sizes TENANCY_MAX_CLIENTS.
  *
  * Maintenance and the company lock are switched on only in the scratch databases, never the real
  * one. Both scratch databases are dropped at the end, pass or fail.
  */
 import "dotenv/config";
 import { execSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 // Read when src/lib/tenancy/clients.ts loads, so set before anything under src is required.
 const MAX_CLIENTS = 6;
@@ -69,7 +69,7 @@ async function main() {
   const urlB = withDatabase(url, nameB);
   ok("  and neither is the real one", ![nameA, nameB].includes(realName));
 
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   let closeAll: (() => Promise<void>) | null = null;
   try {
     for (const name of [nameA, nameB]) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
@@ -104,7 +104,7 @@ async function main() {
     const at = (h: string) => registry.tenantForHost(h);
     ok("the registry knows both, and the first workspace", !!A && !!B && !!legacy, [A?.slug, B?.slug, legacy?.slug].join(", "));
     if (!A || !B || !legacy) throw new Error("registry");
-    const dbName = async () => (await db.$queryRaw<{ name: string }[]>`select current_database() as name`)[0].name;
+    const dbName = async () => (await db.$queryRaw<{ name: string }[]>`select current_database()::text as name`)[0].name;
 
     section("Which host reaches which workspace");
     const port = process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_PORT}` : "";
@@ -228,32 +228,31 @@ async function main() {
       process.env.WROFFY_TENANCY_FALLBACK = "legacy";
     }
 
-    section("A bounded pool of clients");
+    section("A bounded number of workspace pools, on one shared client");
     const extras = (await Promise.all(EXTRA.map((r) => registry.tenantBySlug(`zziso-${r.toLowerCase()}`)))).filter((t): t is NonNullable<typeof t> => !!t);
-    const { clients } = tenancyState();
-    // Measured before the pool is full, so nothing has been evicted yet.
-    const room = MAX_CLIENTS - clients.size;
+    const { pools } = tenancyState();
+    // Measured before the cap is reached, so nothing has been evicted yet.
+    const room = MAX_CLIENTS - pools.size;
     const measured = extras.slice(0, Math.max(1, Math.min(room, 3)));
     const rss0 = process.memoryUsage().rss;
     for (const t of measured) await runAsTenant(t, dbName);
     const rss1 = process.memoryUsage().rss;
     const perClient = (rss1 - rss0) / measured.length / 1024 / 1024;
-    ok("one more workspace's client costs a bounded amount of memory", perClient < 150, `${perClient.toFixed(1)} MB each over ${measured.length} (resident, rough)`);
+    ok("one more workspace costs a pool, not a client — little memory", perClient < 50, `${perClient.toFixed(1)} MB each over ${measured.length} (resident, rough)`);
     const conns = await admin.$queryRaw<{ n: bigint }[]>`select count(*)::bigint as n from pg_stat_activity where datname = ${nameA}`;
     ok("  and a handful of connections", Number(conns[0].n) <= 5 * (measured.length + 1), `${conns[0].n} open to scratch A for ${measured.length + 1} workspaces on it`);
 
-    // A request picks up its client, then enough other workspaces are used to push it out.
+    // A helper picks up its workspace's client, then enough other workspaces are used to push its pool out.
     const held = await runAsTenant(extras[0], getTenantDb);
     const recent = [...extras.slice(measured.length), A, B].slice(-MAX_CLIENTS);
     for (const t of recent) await runAsTenant(t, dbName);
-    ok(`never more than ${MAX_CLIENTS} clients at once`, clients.size <= MAX_CLIENTS, `${clients.size}`);
-    const kept = [...clients.keys()].sort().join(",");
+    ok(`never more than ${MAX_CLIENTS} pools at once`, pools.size <= MAX_CLIENTS, `${pools.size}`);
+    const kept = [...pools.keys()].sort().join(",");
     const expected = recent.map((t) => t.id).sort().join(",");
     ok("  and the ones kept are the most recently used", kept === expected, kept);
-    const late = await held.$queryRaw<{ name: string }[]>`select current_database() as name`;
-    ok("  and a request still holding it finishes on it", late[0].name === nameA);
-    const fresh = await runAsTenant(extras[0], getTenantDb);
-    ok("  the next request gets a new one", fresh !== held && (await runAsTenant(extras[0], dbName)) === nameA);
+    const late = await held.$queryRaw<{ name: string }[]>`select current_database()::text as name`;
+    ok("  and a helper still holding its client reaches its database — outside any workspace, too", late[0].name === nameA);
+    ok("  the next request finds it again", (await runAsTenant(extras[0], dbName)) === nameA);
   } finally {
     if (closeAll) await closeAll().catch(() => {});
     for (const name of [nameA, nameB]) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(() => {});

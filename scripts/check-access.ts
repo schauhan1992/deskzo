@@ -21,7 +21,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { cidrContains, formatIp, isPrivateIp, normaliseIp, parseCidr, parseIp } from "../src/lib/access/ip";
 import { deviceKindFrom, deviceLabel } from "../src/lib/access/device";
 import { OPEN_POLICY, decideAccess, haversineKm, impossibleTravel, networkStanding, type AccessFacts, type IpRuleLike } from "../src/lib/access/decide";
@@ -68,7 +68,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_ACCESS";
 const ROLE = "ZZPROBE_ACCESS_ROLE";
 const ADMIN_ROLE = "ZZPROBE_ACCESS_ADMIN";

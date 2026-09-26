@@ -17,7 +17,7 @@
 import "dotenv/config";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 process.env.WROFFY_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
@@ -46,7 +46,7 @@ async function main() {
   if (!local) throw new Error("not a local database");
   const names = { control: `${realName}_fanout_control`, a: `${realName}_fanout_a`, b: `${realName}_fanout_b` };
   const urls = { control: withDatabase(url, names.control), a: withDatabase(url, names.a), b: withDatabase(url, names.b) };
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   let cleanup: (() => Promise<void>) | null = null;
   try {
     for (const name of Object.values(names)) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
@@ -106,7 +106,7 @@ async function main() {
 
     section("A job for every workspace");
     const who = await fanout.forEachTenant("zz-who", [A, B], async () => {
-      const [{ name }] = await db.$queryRaw<{ name: string }[]>`select current_database() as name`;
+      const [{ name }] = await db.$queryRaw<{ name: string }[]>`select current_database()::text as name`;
       return { id: (await currentTenant()).id, database: name, origin: await tenantOrigin() };
     });
     const [ra, rb] = who;
@@ -200,8 +200,8 @@ async function main() {
     ok("  claiming it again is no change", (await runAsTenant(A, () => routes.claimDeviceSerial(SERIAL))).ok);
     ok("its route leads to its workspace, however it is typed", (await routes.tenantForDeviceSerial(" zzfan0001 "))?.id === idA);
 
-    const workspaceA = new PrismaClient({ datasourceUrl: urls.a });
-    const workspaceB = new PrismaClient({ datasourceUrl: urls.b });
+    const workspaceA = directClient(urls.a);
+    const workspaceB = directClient(urls.b);
     try {
       await workspaceA.biometricDevice.create({ data: { serialNumber: SERIAL, name: "ZZ Front door" } });
       // The same serial registered in B's own database too — only the route says whose it is.

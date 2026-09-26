@@ -22,7 +22,8 @@ import { paymentTermsLabels } from "@/lib/gst";
  * of this file — would be missed. Most company links are `onDelete: Cascade`, so a missed one does not
  * fail: the duplicate is deleted and its rows quietly go with it.
  *
- * So the links are read from Prisma's own description of the schema, and every one of them moves.
+ * So the links are read from the database's own catalog — its foreign keys, and the unique indexes
+ * each is in — and every one of them moves.
  * Only links that can *clash* need a rule here — a table where a company or a contact may appear at
  * most once, or once per something (one reseller profile per company, one price per item per
  * reseller, one consent per topic per person). `unsettledClashes()` lists any such link without a rule;
@@ -68,29 +69,71 @@ export type Link = {
 
 export const linkKey = (l: Link) => `${l.model}.${l.field}`;
 
-/** Every column in the schema that points at a company or at a contact, read from Prisma. */
-export function linksTo(target: "Company" | "Contact"): Link[] {
-  const out: Link[] = [];
-  for (const model of Prisma.dmmf.datamodel.models) {
-    for (const f of model.fields) {
-      if (f.kind !== "object" || f.type !== target || !f.relationFromFields?.length) continue;
-      if (f.relationFromFields.length !== 1) throw new Error(`${model.name}.${f.name} points at a ${target} by more than one column — merge.ts can't move it`);
-      const field = f.relationFromFields[0]!;
-      const scalar = model.fields.find((x) => x.name === field);
-      const uniqueWith: string[][] = [];
-      if (scalar?.isUnique || scalar?.isId) uniqueWith.push([]);
-      for (const u of model.uniqueFields) if (u.includes(field)) uniqueWith.push(u.filter((c) => c !== field));
-      if (model.primaryKey?.fields.includes(field)) uniqueWith.push(model.primaryKey.fields.filter((c) => c !== field));
-      out.push({ model: model.name, field, uniqueWith });
-    }
+type Catalog = Pick<Tx, "$queryRaw">;
+type Keyed = { table: string; columns: string[] };
+export type Links = { company: Link[]; contact: Link[] };
+
+/**
+ * Every column that points at a company or at a contact, read from the database's catalog: its
+ * foreign keys, and for each the unique indexes it is in. Prisma's own description of the schema, as
+ * the Rust-free client carries it, no longer says which column a relation uses — and the catalog is
+ * the truth anyway. No column is renamed with @map, so a column's name is its field's. Partial and
+ * expression indexes are left out, as Prisma leaves them out: the ones that exist are handled below
+ * (check:company-merge lists them). Tables Prisma does not model are skipped, as before.
+ *
+ * Two small queries, one after the other — inside a transaction they share one connection.
+ */
+export async function links(client: Catalog = db): Promise<Links> {
+  const models = Prisma.dmmf.datamodel.models;
+  const tableOf = (model: string) => models.find((m) => m.name === model)?.dbName ?? model;
+  const modelOf = new Map(models.map((m) => [m.dbName ?? m.name, m]));
+  const [companies, contacts] = [tableOf("Company"), tableOf("Contact")];
+  const foreign = await client.$queryRaw<(Keyed & { target: string })[]>`
+    SELECT ch.relname::text AS "table", pa.relname::text AS target, array_agg(a.attname::text ORDER BY k.ord) AS columns
+    FROM pg_constraint c
+    JOIN pg_class ch ON ch.oid = c.conrelid
+    JOIN pg_class pa ON pa.oid = c.confrelid
+    JOIN pg_namespace n ON n.oid = c.connamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    WHERE c.contype = 'f' AND n.nspname = current_schema() AND pa.relname IN (${companies}, ${contacts})
+    GROUP BY c.oid, ch.relname, pa.relname`;
+  const unique = await client.$queryRaw<Keyed[]>`
+    SELECT t.relname::text AS "table", array_agg(a.attname::text ORDER BY k.ord) AS columns
+    FROM pg_index i
+    JOIN pg_class t ON t.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+    WHERE i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL AND n.nspname = current_schema()
+    GROUP BY i.indexrelid, t.relname`;
+  const uniqueOn = new Map<string, string[][]>();
+  for (const u of unique) uniqueOn.set(u.table, [...(uniqueOn.get(u.table) ?? []), u.columns]);
+
+  const out: Links = { company: [], contact: [] };
+  for (const fk of foreign) {
+    const model = modelOf.get(fk.table);
+    if (!model) continue;
+    const target = fk.target === companies ? "company" : "contact";
+    if (fk.columns.length !== 1) throw new Error(`${model.name} points at a ${target} by more than one column — merge.ts can't move it`);
+    const field = fk.columns[0]!;
+    const uniqueWith = (uniqueOn.get(fk.table) ?? []).filter((cols) => cols.includes(field)).map((cols) => cols.filter((c) => c !== field));
+    out[target].push({ model: model.name, field, uniqueWith });
   }
+  // In the schema's own order, as they always came.
+  const rank = (l: Link) => {
+    const m = models.findIndex((x) => x.name === l.model);
+    return m * 10_000 + (models[m]?.fields.findIndex((x) => x.name === l.field) ?? 0);
+  };
+  out.company.sort((a, b) => rank(a) - rank(b));
+  out.contact.sort((a, b) => rank(a) - rank(b));
   return out;
 }
 
-let cached: { company: Link[]; contact: Link[] } | null = null;
-function links() {
-  cached ??= { company: linksTo("Company"), contact: linksTo("Contact") };
-  return cached;
+/** The columns pointing at one kind of record — for check:company-merge. */
+export async function linksTo(target: "Company" | "Contact", client: Catalog = db): Promise<Link[]> {
+  const all = await links(client);
+  return target === "Company" ? all.company : all.contact;
 }
 
 type Delegate = {
@@ -181,8 +224,7 @@ const CLASH_RULES: Record<string, ClashRule> = {
 };
 
 /** Links that can clash and that no rule settles. Must be empty: `check:company-merge` asserts it, and a merge won't start. */
-export function unsettledClashes(): string[] {
-  const { company, contact } = links();
+export function unsettledClashes({ company, contact }: Links): string[] {
   return [...company, ...contact].filter((l) => l.uniqueWith.length > 0 && !CLASH_RULES[linkKey(l)]).map(linkKey);
 }
 
@@ -522,7 +564,8 @@ export async function planMerge(keepId: string, dropId: string): Promise<MergePl
   ]);
   if (!keep || !drop) return null;
   const [keepSide, dropSide] = await Promise.all([side(keep), side(drop)]);
-  const { company } = links();
+  const all = await links();
+  const { company } = all;
 
   const moves = (
     await Promise.all(company.map(async (l) => ({ key: linkKey(l), label: linkLabel(linkKey(l)), count: await delegate(db, l.model).count({ where: { [l.field]: dropId } }) })))
@@ -547,7 +590,7 @@ export async function planMerge(keepId: string, dropId: string): Promise<MergePl
   return {
     keep: keepSide,
     drop: dropSide,
-    blockers: [...mergeBlockers(keep, drop), ...(unsettledClashes().length ? ["Merging is switched off until every link that can clash has a rule — see check:company-merge."] : [])],
+    blockers: [...mergeBlockers(keep, drop), ...(unsettledClashes(all).length ? ["Merging is switched off until every link that can clash has a rule — see check:company-merge."] : [])],
     fields: fieldDiffs(keep, drop),
     moves,
     clashes,
@@ -586,8 +629,7 @@ type FullContact = Prisma.ContactGetPayload<object>;
  * at the second — calls, visits, tickets, leads, consent, list places — moves to the first, blanks on
  * the first are filled from the second, and the second is removed.
  */
-async function combineContacts(tx: Tx, ours: FullContact, theirs: FullContact, companyHadPrimary: boolean): Promise<string[]> {
-  const { contact } = links();
+async function combineContacts(tx: Tx, contact: Link[], ours: FullContact, theirs: FullContact, companyHadPrimary: boolean): Promise<string[]> {
   const notes = await settleClashes(tx, contact, theirs.id, ours.id);
   await moveSuppression(tx, "CONTACT", theirs.id, ours.id);
   await repoint(tx, contact, theirs.id, ours.id);
@@ -674,9 +716,10 @@ function snapshotOf(c: Loaded, contacts: FullContact[]) {
  * two people merging the same pair at once get one merge and one refusal.
  */
 export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
-  const unsettled = unsettledClashes();
+  const all = await links();
+  const unsettled = unsettledClashes(all);
   if (unsettled.length) throw new MergeRefused(`These links can clash and have no rule: ${unsettled.join(", ")}.`);
-  const { company: companyLinks } = links();
+  const { company: companyLinks, contact: contactLinks } = all;
 
   return db.$transaction(
     async (tx) => {
@@ -703,7 +746,7 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
       for (const p of pairs) {
         const ours = keepContacts.find((c) => c.id === p.keepId)!;
         const theirs = dropContacts.find((c) => c.id === p.dropId)!;
-        notes.push(...(await combineContacts(tx, ours, theirs, keepHadPrimaryContact)));
+        notes.push(...(await combineContacts(tx, contactLinks, ours, theirs, keepHadPrimaryContact)));
       }
       if (keepHadPrimaryContact) await tx.contact.updateMany({ where: { companyId: drop.id, isPrimary: true }, data: { isPrimary: false } });
 

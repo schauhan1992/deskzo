@@ -24,7 +24,7 @@ import { existsSync } from "node:fs";
 import Module from "node:module";
 import path from "node:path";
 import bcrypt from "bcryptjs";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 process.env.WROFFY_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
@@ -82,7 +82,7 @@ async function main() {
   if (!local) throw new Error("not a local database");
   const controlName = `${realName}_provcheck_control`;
   const controlUrl = withDatabase(url, controlName);
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   const made = new Set<string>();
   let cleanup: (() => Promise<void>) | null = null;
   try {
@@ -170,7 +170,7 @@ async function main() {
     ok("  the job no longer holds the password", job.status === "SUCCEEDED" && job.ownerPasswordHash === null);
     registry.forgetRegistry();
     const tenantA = (await registry.tenantBySlug("zzprov-a"))!;
-    const inA = new PrismaClient({ datasourceUrl: tenantA.dbUrl });
+    const inA = directClient(tenantA.dbUrl);
     try {
       const owner = await inA.user.findUnique({ where: { email: form.email } });
       ok("the owner is its super admin, with the password they chose", !!owner?.isSuperAdmin && owner.role === "ADMIN" && (await bcrypt.compare(form.password, owner.passwordHash)));
@@ -206,11 +206,11 @@ async function main() {
     registry.forgetRegistry();
     const tenantB = (await registry.tenantBySlug("zzprov-b"))!;
     const roles = await admin.$queryRaw<{ rolname: string; rolsuper: boolean; rolcreatedb: boolean; rolcreaterole: boolean }[]>`
-      select rolname, rolsuper, rolcreatedb, rolcreaterole from pg_roles where rolname in (${A.dbRole}, ${B.dbRole})`;
+      select rolname::text as rolname, rolsuper, rolcreatedb, rolcreaterole from pg_roles where rolname in (${A.dbRole}, ${B.dbRole})`;
     ok("each database has a login of its own, with no power over the server", roles.length === 2 && roles.every((r) => !r.rolsuper && !r.rolcreatedb && !r.rolcreaterole));
     const crossUrl = new URL(tenantB.dbUrl);
     crossUrl.pathname = `/${A.dbName}`;
-    const cross = new PrismaClient({ datasourceUrl: crossUrl.toString() });
+    const cross = directClient(crossUrl.toString());
     const crossed = await cross.$queryRaw`select 1`.then(() => "connected").catch((e: Error) => e.message);
     await cross.$disconnect();
     ok("B's login cannot even open A's database", crossed !== "connected" && /permission denied|not permitted|denied/i.test(crossed), crossed.split("\n").find((l) => /denied/i.test(l))?.trim().slice(0, 90));
@@ -232,7 +232,7 @@ async function main() {
     ok("a short password is refused", !short.ok);
     const done = await runAsTenant(tA, () => reset.resetPassword({ token, password: "a brand new long password" }));
     const reused = await runAsTenant(tA, () => reset.resetPassword({ token, password: "yet another long password" }));
-    const inA2 = new PrismaClient({ datasourceUrl: tA.dbUrl });
+    const inA2 = directClient(tA.dbUrl);
     const ownerAfter = await inA2.user.findUniqueOrThrow({ where: { email: form.email } });
     await inA2.$disconnect();
     ok("the link sets the new password", done.ok && (await bcrypt.compare("a brand new long password", ownerAfter.passwordHash)));

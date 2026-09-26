@@ -18,7 +18,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import type { ReactElement } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 let actorId = "";
 let viewingAs = false;
@@ -59,7 +59,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZLOCK";
 const MAIL = "@zzprobe-lock.invalid";
 const NAMES: Record<string, string> = {};

@@ -14,11 +14,11 @@
  *   npm run db:seed:feedback -- --verify-only
  */
 import { randomBytes } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { submitFeedback } from "../src/actions/feedback-public";
 import { linkState, summarise } from "../src/lib/feedback/rating";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const REVIEW_URL = "https://g.page/r/wroffy-seed/review";
 const MIN_RATING = 4;

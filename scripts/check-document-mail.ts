@@ -25,7 +25,8 @@ import Module from "node:module";
 import http from "node:http";
 import { AddressInfo } from "node:net";
 import { createHash } from "node:crypto";
-import { PrismaClient, type DocumentEmailTemplate } from "@prisma/client";
+import { type DocumentEmailTemplate } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { newRenderToken, printPathDocumentId, verifyRenderToken, RENDER_TTL_MS } from "../src/lib/documents/render-token";
 import {
   DEFAULT_TEMPLATES,
@@ -40,7 +41,7 @@ import {
 } from "../src/lib/documents/email-template";
 import { encryptSecret, decryptSecret } from "../src/lib/crypto";
 
-const db = new PrismaClient();
+const db = directClient();
 const MAIL = "@zzprobe-docmail.invalid";
 const TAG = "Zzdm";
 const RUN = Date.now().toString(36);

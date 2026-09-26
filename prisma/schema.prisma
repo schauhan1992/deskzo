@@ -1,5 +1,9 @@
+// engineType "client": no Rust engine — queries are compiled here and sent through Prisma's pg
+// driver adapter, so one client can serve every workspace (src/lib/tenancy/clients.ts). Every
+// client needs an adapter: directClient() in src/lib/tenancy/direct-client.ts makes one.
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "client"
 }
 
 datasource db {

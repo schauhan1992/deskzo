@@ -20,7 +20,8 @@
 import "dotenv/config";
 import Module from "node:module";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PrismaClient, type AwardAudience } from "@prisma/client";
+import { type AwardAudience } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   ACTIVE_HOURS_CAP,
   NO_ACTIVITY,
@@ -64,7 +65,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_AWARDS";
 const NAME = "Zzprobe";
 const MAIL = "@zzprobe-awards.invalid";

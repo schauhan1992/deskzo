@@ -10,11 +10,12 @@
  *   npm run db:seed:targets -- --reset remove what this made first
  *   npm run db:seed:targets -- --verify-only
  */
-import { PrismaClient, Prisma, type TargetMetric } from "@prisma/client";
+import { Prisma, type TargetMetric } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { metricByKey, monthWindow, progressOf, quarterWindow } from "../src/lib/targets/metrics";
 import { measure, subjectUserIds } from "../src/lib/targets/measure";
 
-const db = new PrismaClient();
+const db = directClient();
 
 let seed = 20260919;
 function rnd() {

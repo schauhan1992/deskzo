@@ -23,7 +23,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { isValidElement, type ReactElement } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { coreName, domainOf, duplicatePairs, pairKey, panFromGstin, phoneKey, similarity, type DuplicateCandidate } from "../src/lib/companies/duplicates";
 
 let actorId = "";
@@ -52,7 +52,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZMRG";
 const MAIL = "@zzprobe-merge.invalid";
 const RUN = Date.now().toString(36);
@@ -202,14 +202,15 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("Every link that can clash has a rule");
 
-  const companyLinks = merge.linksTo("Company").map(merge.linkKey);
-  const contactLinks = merge.linksTo("Contact").map(merge.linkKey);
-  ok("the links are read from the schema — forty and more to a company", companyLinks.length >= 45 && companyLinks.includes("Lead.companyId") && companyLinks.includes("JournalLine.companyId"), companyLinks.length);
+  const allLinks = await merge.links();
+  const companyLinks = allLinks.company.map(merge.linkKey);
+  const contactLinks = allLinks.contact.map(merge.linkKey);
+  ok("the links are read from the database's catalog — forty and more to a company", companyLinks.length >= 45 && companyLinks.includes("Lead.companyId") && companyLinks.includes("JournalLine.companyId"), companyLinks.length);
   ok("  a company's own reseller link and the merge record's are among them", companyLinks.includes("Company.managedByResellerId") && companyLinks.includes("CompanyMerge.intoCompanyId"));
   ok("  and the links to a contact", contactLinks.length >= 15 && contactLinks.includes("ContactConsent.contactId"), contactLinks.length);
-  ok("no link that can clash is without a rule", merge.unsettledClashes().length === 0, merge.unsettledClashes().join(", "));
+  ok("no link that can clash is without a rule", merge.unsettledClashes(allLinks).length === 0, merge.unsettledClashes(allLinks).join(", "));
   const partial = await db.$queryRaw<{ indexname: string }[]>`
-    SELECT indexname FROM pg_indexes
+    SELECT indexname::text AS indexname FROM pg_indexes
     WHERE schemaname = current_schema() AND indexdef LIKE 'CREATE UNIQUE INDEX%' AND indexdef LIKE '% WHERE %'`;
   const known = new Set(["company_locations_one_primary_per_company", "users_one_super_admin"]);
   ok(

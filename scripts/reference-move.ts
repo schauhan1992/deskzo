@@ -21,7 +21,8 @@
  * the order is: this, then `npx prisma migrate deploy`.
  */
 import "dotenv/config";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { Prisma as RefPrisma, PrismaClient as ReferenceClient } from "@wroffy/reference-client";
 import { decryptWith } from "../src/lib/crypto";
 import { closeControlDb } from "../src/lib/platform/control-db";
@@ -47,7 +48,7 @@ async function main() {
   const tenant = slug ? await tenantBySlug(slug) : await legacyTenant();
   if (!tenant) throw new Error(slug ? `There is no workspace "${slug}".` : "There is no first workspace.");
 
-  const workspace = new PrismaClient({ datasourceUrl: tenant.dbUrl });
+  const workspace = directClient(tenant.dbUrl);
   const reference = new ReferenceClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
   try {
     say(`Moving reference data out of workspace "${tenant.slug}"${dryRun ? " — dry run, nothing will change" : ""}\n`);

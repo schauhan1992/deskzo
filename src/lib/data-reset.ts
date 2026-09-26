@@ -79,9 +79,10 @@ type Edge = { child: string; parent: string; column: string; notnull: boolean };
 
 async function schemaFacts(client: PrismaClient | Prisma.TransactionClient) {
   const [tables, edges] = await Promise.all([
-    client.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname = current_schema()`,
+    client.$queryRaw<{ tablename: string }[]>`SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = current_schema()`,
     client.$queryRaw<Edge[]>`
-      SELECT ch.relname AS child, pa.relname AS parent, a.attname AS "column", a.attnotnull AS notnull
+      -- Catalog names are of type name, which the database driver does not read: cast to text.
+      SELECT ch.relname::text AS child, pa.relname::text AS parent, a.attname::text AS "column", a.attnotnull AS notnull
       FROM pg_constraint c
       JOIN pg_class ch ON ch.oid = c.conrelid
       JOIN pg_class pa ON pa.oid = c.confrelid

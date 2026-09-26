@@ -21,13 +21,14 @@ import Module from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ReactElement } from "react";
-import { PrismaClient, type HelpDesk } from "@prisma/client";
+import { type HelpDesk } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { checkLink, youtubeId, LINK_MAX } from "../src/lib/help/links";
 import { gettingStartedSteps, progressOf, type GettingStartedFacts } from "../src/lib/help/getting-started";
 import { SEARCH_SCOPES, refShortcut, searchListHref, searchScope } from "../src/lib/search/scopes";
 import { istDateTimeInput } from "../src/lib/india-time";
 
-const db = new PrismaClient();
+const db = directClient();
 const MAIL = "@zzprobe-help.invalid";
 const TAG = "Zzhelp";
 

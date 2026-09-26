@@ -17,7 +17,8 @@
 import "dotenv/config";
 import Module from "node:module";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PrismaClient, type Prize, type PrizeRace } from "@prisma/client";
+import { type Prize, type PrizeRace } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   checkPrizeImage,
   currentPeriod,
@@ -60,7 +61,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPRIZE";
 const MAIL = "@zzprobe-prizes.invalid";
 const HOUR = 3_600_000;

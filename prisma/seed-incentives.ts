@@ -10,12 +10,13 @@
  *   npm run db:seed:incentives -- --reset remove what this made first
  *   npm run db:seed:incentives -- --verify-only
  */
-import { PrismaClient, Prisma, type IncentiveBasis, type TargetMetric } from "@prisma/client";
+import { Prisma, type IncentiveBasis, type TargetMetric } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { computeIncentive, validateScheme, type Scheme } from "../src/lib/incentives/compute";
 import { measure, subjectUserIds } from "../src/lib/targets/measure";
 import { metricByKey } from "../src/lib/targets/metrics";
 
-const db = new PrismaClient();
+const db = directClient();
 
 type SeededScheme = {
   name: string;

@@ -10,14 +10,15 @@
  *   npm run db:seed:accounting -- --reset remove what this script made first
  *   npm run db:seed:accounting -- --verify-only
  */
-import { PrismaClient, Prisma, type ExpenseCategory } from "@prisma/client";
+import { Prisma, type ExpenseCategory } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { ensureChartOfAccounts, postExpenseToLedger, postPayrollToLedger } from "../src/lib/ledger/journal";
 import { SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { monthlyCharge, endOfMonth, startOfMonth } from "../src/lib/ledger/depreciation";
 import { postDepreciationToLedger } from "../src/lib/ledger/journal";
 import { statementFingerprint } from "../src/lib/ledger/reconcile";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const TAG_PREFIX = "WRF-FA-";
 const BANK_NAMES = ["HDFC Current", "ICICI Current"];

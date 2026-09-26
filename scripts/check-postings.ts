@@ -7,7 +7,7 @@
  *
  *   npm run check:postings
  */
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { computeDocument, type SupplyType } from "../src/lib/gst-engine";
 import {
   postSalesInvoice,
@@ -19,7 +19,7 @@ import {
   type DocumentFinancials,
 } from "../src/lib/ledger/posting";
 
-const db = new PrismaClient();
+const db = directClient();
 
 /**
  * The cases the seed data doesn't happen to contain. Each one runs through the real GST engine, so

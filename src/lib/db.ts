@@ -8,8 +8,9 @@ import { currentTenant } from "@/lib/tenancy/resolve";
  *
  * Every workspace has a database of its own. `db` looks and types like the one Prisma client the
  * app always had, and every call on it first finds the workspace the work is for (see
- * src/lib/tenancy/resolve.ts), then runs on that workspace's client. Prisma calls were always
- * awaited, so nothing that uses `db` had to change.
+ * src/lib/tenancy/resolve.ts), then runs as that workspace — on the one client every workspace
+ * shares, which sends it to that workspace's database (src/lib/tenancy/clients.ts). Prisma calls
+ * were always awaited, so nothing that uses `db` had to change.
  *
  * ## The one shape it refuses
  *
@@ -28,11 +29,11 @@ type InteractiveTransaction = <R>(
 
 export type TenantDb = Omit<PrismaClient, "$transaction" | "$connect" | "$disconnect" | "$on" | "$use" | "$extends"> & {
   $transaction: InteractiveTransaction;
-  /** Closes every workspace's client — what a script does when it is finished. */
+  /** Ends every workspace's pool — what a script does when it is finished. */
   $disconnect: () => Promise<void>;
 };
 
-/** The current workspace's own client. */
+/** The client as the current workspace's: every call on it runs as that workspace. */
 export async function getTenantDb(): Promise<PrismaClient> {
   return clientFor(await currentTenant());
 }
@@ -65,7 +66,7 @@ function withoutSupport(model: string, method: string, args: unknown[]): unknown
 
 function forward(path: [string] | [string, string]) {
   return async (...args: unknown[]) =>
-    // Counted while it runs, so the client is not closed under it (src/lib/tenancy/clients.ts).
+    // As the workspace, its pool counted busy while it runs (src/lib/tenancy/clients.ts).
     withClient(await currentTenant(), async (prisma) => {
       const client = prisma as unknown as Record<string, Record<string, Callable> & Callable>;
       if (path.length === 1) return await (client[path[0]] as Callable).apply(client, args);

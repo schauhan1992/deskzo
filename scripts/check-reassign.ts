@@ -16,7 +16,7 @@
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import Module from "node:module";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   mayChangeAccountManager,
   mayChangeCaller,
@@ -38,7 +38,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_REASSIGN";
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {

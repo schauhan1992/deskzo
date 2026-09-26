@@ -26,7 +26,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 process.env.WROFFY_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -194,7 +194,7 @@ async function main() {
   if (!local) throw new Error("not a local database");
   const controlName = `${realName}_billcheck_control`;
   const controlUrl = withDatabase(url, controlName);
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   const made = new Set<string>();
   let cleanup: (() => Promise<void>) | null = null;
   try {
@@ -336,7 +336,9 @@ async function main() {
     const completed = { id: "evt_zz_1", type: "checkout.session.completed", created: Math.floor(Date.now() / 1000), data: { object: { id: "cs_zz", object: "checkout.session", mode: "subscription", client_reference_id: US, customer: cusId, subscription: "sub_stripe_zz1" } } };
     const signed = stripeSigned(completed);
     ok("unsigned, it is refused", (await webhooks.receiveStripeWebhook(signed.raw, null)).status === 400);
-    ok("  forged, it is refused", (await webhooks.receiveStripeWebhook(signed.raw, signed.signature.replace(/v1=./, "v1=0"))).status === 400);
+    // The first hex digit changed — always to a different one, or one run in sixteen "forges" the real signature.
+    const forged = signed.signature.replace(/v1=(.)/, (_, c: string) => `v1=${c === "0" ? "1" : "0"}`);
+    ok("  forged, it is refused", (await webhooks.receiveStripeWebhook(signed.raw, forged)).status === 400);
     const late = stripeSigned(completed, Date.now() - 6 * 60_000);
     ok("  signed more than five minutes ago, it is refused", (await webhooks.receiveStripeWebhook(late.raw, late.signature)).status === 400);
     ok("  a body changed after signing is refused", (await webhooks.receiveStripeWebhook(signed.raw.replace(US, "someone-else"), signed.signature)).status === 400);

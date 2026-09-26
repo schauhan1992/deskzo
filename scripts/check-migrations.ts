@@ -65,7 +65,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 const MIGRATIONS = "prisma/migrations";
 const SCHEMA = "prisma/schema.prisma";
@@ -148,7 +148,7 @@ async function main() {
   // ── The folder, against what the database says it ran ─────────────────────────────────────────
   section("The folder against the applied history");
 
-  const db = new PrismaClient();
+  const db = directClient();
   let history: { migration_name: string; checksum: string; rolled_back_at: Date | null; started_at: Date }[];
   try {
     history = await db.$queryRawUnsafe(
@@ -247,7 +247,7 @@ async function main() {
   const adminUrl = withDatabase(url, "postgres");
   const shadowUrl = withDatabase(url, shadowName);
 
-  const admin = new PrismaClient({ datasourceUrl: adminUrl });
+  const admin = directClient(adminUrl);
   let replayed = false;
   let detail = "";
   try {

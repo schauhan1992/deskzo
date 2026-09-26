@@ -41,7 +41,7 @@ Set in the server's environment (pm2 ecosystem file or systemd unit), never in t
 | `PLATFORM_CONSOLE_IP_ALLOWLIST` | recommended | CIDRs allowed to reach the console (needs `TRUST_PROXY=1`) |
 | `MARKETING_TICK_SECRET`, `BACKUP_TICK_SECRET`, `PLATFORM_TICK_SECRET` | yes | §1 |
 | `TENANCY_POOLER_URL` | yes with PgBouncer | e.g. `postgresql://127.0.0.1:6432` — the app's workspace queries go there |
-| `TENANCY_MAX_CLIENTS` (35), `TENANCY_CONNECTION_LIMIT` (2), `TENANCY_IDLE_CONNECTION_S` (30) | tune | Workspace clients kept per process, connections each, and how long an unused connection stays open (§7) |
+| `TENANCY_MAX_CLIENTS` (35), `TENANCY_CONNECTION_LIMIT` (2), `TENANCY_IDLE_CONNECTION_S` (30) | tune | Workspace pools kept per process, connections each, and how long an unused connection stays open (§7) |
 | `TENANCY_STATEMENT_TIMEOUT_MS` (30000), `TENANCY_LOCK_TIMEOUT_MS` (10000), `TENANCY_IDLE_IN_TRANSACTION_MS` (60000), `TENANCY_ROLE_CONNECTION_LIMIT` (20) | tune | Each workspace role's limits; after changing, `npm run platform:tenant -- limits` |
 | `BACKUP_DIR` | no (`backups/`) | Where workspace backups are written; each workspace under `workspaces/<id>/` |
 | `PDF_BROWSER_PATH`, `PDF_BROWSER_NO_SANDBOX` | for PDFs | A Chromium for printing documents |
@@ -131,17 +131,15 @@ Each workspace's role has its own limits: a statement stops at thirty seconds, a
 | Invitations | `npm run platform:tenant -- invite [--plan <key>]` |
 | Staff | `npm run platform:staff -- list / create / link / role / reset-2fa / deactivate / two-factor` |
 
-## 7. Capacity: clients, connections and PgBouncer
+## 7. Capacity: connections and PgBouncer
 
-Every app process keeps up to `TENANCY_MAX_CLIENTS` workspace clients, each opening up to `TENANCY_CONNECTION_LIMIT` connections — and Postgres allows `max_connections` for everything. An evicted client closes as soon as the work on it ends, and a connection unused for `TENANCY_IDLE_CONNECTION_S` closes too, so in practice connections follow the work in progress; the product of the two settings is the worst case.
+The app reaches every workspace database through one Prisma client (the Rust-free engine, over Prisma's pg driver adapter), which sends each query to its workspace's own small pool of connections (src/lib/tenancy/clients.ts). A workspace costs a pool — a few milliseconds to open, most of them waiting on the server — not a copy of the schema.
 
-**Opening a client is the expensive part.** Its first query parses the whole schema on the process's only thread — tens of milliseconds during which every other request on that process waits — and a kept client holds some tens of megabytes (both measured in docs/reports/load-test.md). So:
+Every app process keeps up to `TENANCY_MAX_CLIENTS` workspace pools, each opening up to `TENANCY_CONNECTION_LIMIT` connections — and Postgres allows `max_connections` for everything. An evicted pool is ended as soon as the work on it ends, and a connection unused for `TENANCY_IDLE_CONNECTION_S` closes too, so in practice connections follow the work in progress; the product of the two settings is the worst case, and the one to size against.
 
-- set `TENANCY_MAX_CLIENTS` to the workspaces busy on a process within a few minutes, and give the process the memory for them — a process that keeps reopening clients does little else;
-- with more than one app process, route each workspace to the same process (hash on the host at the load balancer), so each keeps clients for its share only;
-- watch for the process's CPU pinned while the database is idle: that is clients being reopened.
-
-The lasting fix is one Prisma engine for every workspace, with each query sent to its workspace's own pool (Prisma's pg driver adapter) — a new dependency, not yet made.
+- **The engine works on one core.** The Rust-free client compiles each query on the process's own thread, where the old engine used threads of its own. Measured on 2026-09-26 (20-core machine, one busy workspace, 32 requests at a time): a process topped out at about 345 of the load test's requests a second against the old engine's 690, for slightly less CPU per request. So run several app processes (pm2 cluster mode, one per core or two) and keep `TENANCY_MAX_CLIENTS × TENANCY_CONNECTION_LIMIT × processes` within the connection budget — or put PgBouncer in front, below.
+- With more than one app process, routing each workspace to the same process (hash on the host at the load balancer) keeps its pool warm — useful, not essential.
+- A query outside any workspace is refused; so is starting at all if Prisma's internals change where the client expects them (see the top of clients.ts) — after upgrading Prisma, run `npm run check:hardening` before anything else.
 
 Run PgBouncer in transaction mode, so the server sees a bounded pool however many workspaces are busy:
 

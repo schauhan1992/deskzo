@@ -16,14 +16,14 @@
  *   npm run db:seed:marketing -- --reset remove what this made first
  *   npm run db:seed:marketing -- --verify-only
  */
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { queueCampaign } from "../src/lib/marketing/pipeline";
 import { normalizeCompanyName } from "../src/lib/validation/company";
 import { runMarketingTick } from "../src/lib/marketing/tick";
 import { unsubscribeAll } from "../src/actions/marketing-public";
 import { canSend } from "../src/lib/marketing/suppression";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const PREFIX = "MKT/SEED/";
 const SEED_COMPANY = "Seedwell Reseller Client Pvt Ltd";

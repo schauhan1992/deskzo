@@ -32,7 +32,7 @@ const nextConfig: NextConfig = {
    * Prisma's main client. Bundled, a client's search for its own query engine on disk makes the
    * build trace the entire project.
    */
-  serverExternalPackages: ["@wroffy/control-client", "@wroffy/reference-client"],
+  serverExternalPackages: ["@wroffy/control-client", "@wroffy/reference-client", "@prisma/adapter-pg"],
 
   /**
    * eSSL / ZKTeco terminals post to a fixed path.

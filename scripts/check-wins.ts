@@ -18,7 +18,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { dealWonCopy, firstOrderCopy, inrSpoken, splashes, targetHitCopy, topPerformerCopy } from "../src/lib/wins/copy";
 import { momentsFor } from "../src/lib/hr/celebrations";
 import { istDateParts, istMidnight } from "../src/lib/india-time";
@@ -49,7 +49,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_WINS";
 const MAIL = "@zzprobe-wins.invalid";
 const DAY = 86_400_000;

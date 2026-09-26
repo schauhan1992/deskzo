@@ -7,10 +7,10 @@
  *
  *   npm run ledger:backfill
  */
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { ensureChartOfAccounts, postDocumentToLedger, postPaymentToLedger } from "../src/lib/ledger/journal";
 
-const db = new PrismaClient();
+const db = directClient();
 
 async function main() {
   await ensureChartOfAccounts();

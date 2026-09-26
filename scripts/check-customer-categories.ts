@@ -19,7 +19,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   categoryAndChildren,
   categoryFilterOptions,
@@ -55,7 +55,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZCAT";
 const MAIL = "@zzprobe-categories.invalid";
 let failures = 0;

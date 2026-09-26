@@ -28,6 +28,7 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { closeControlDb, controlConfigured, controlDb } from "../src/lib/platform/control-db";
 import { openForTenant, sealForTenant } from "../src/lib/platform/kek";
 import { decryptWith } from "../src/lib/crypto";
@@ -76,7 +77,7 @@ async function main() {
   const dbName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
 
   const control = controlDb();
-  const workspace = new PrismaClient({ datasourceUrl: databaseUrl });
+  const workspace = directClient(databaseUrl);
   try {
     say(`Workspace #1: "${name}" at ${slug}.${process.env.PLATFORM_DOMAIN ?? "localhost"}, database ${dbName}${dryRun ? " — dry run, nothing will be written" : ""}`);
 

@@ -19,7 +19,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import JSZip from "jszip";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { absolutiseAssets, composeEmail, escapeHtml, htmlToText, removedInCleaning, rewriteLinks, sanitizeEmailHtml, textToHtml } from "../src/lib/marketing/html";
 import { render } from "../src/lib/marketing/merge";
 import { extractInlineImages, normalisePath, readTemplateUpload, rewriteImageRefs, sniffImage } from "../src/lib/marketing/template-upload";
@@ -72,7 +72,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZMM";
 const MAIL = "@zzprobe-massmail.invalid";
 let failures = 0;

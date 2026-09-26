@@ -18,7 +18,7 @@
  */
 import "dotenv/config";
 import Module from "node:module";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { LEAD_FIELDS, RATE_LIMIT_PER_MINUTE, renderMarkdown } from "../src/lib/lead-capture/spec";
 import { ACCEPTED_FIELDS, companyNameFor, designationFromTitle } from "../src/lib/lead-capture/intake";
 
@@ -33,7 +33,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-const db = new PrismaClient();
+const db = directClient();
 const TAG = "ZZPROBE_CAPTURE";
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {

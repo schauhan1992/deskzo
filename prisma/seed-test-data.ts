@@ -10,9 +10,10 @@
  *
  * The randomness is seeded, so a re-run produces the same catalogue rather than a different one.
  */
-import { PrismaClient, type CompanyStage, type ItemType, type OrderStatus, type OrderBusinessType } from "@prisma/client";
+import { type CompanyStage, type ItemType, type OrderStatus, type OrderBusinessType } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const SEED_TAG = "seed-test";
 const TEST_SKU_PREFIX = "TST-";

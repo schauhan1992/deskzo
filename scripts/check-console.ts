@@ -27,7 +27,7 @@ import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 process.env.WROFFY_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -140,7 +140,7 @@ async function main() {
   if (!local) throw new Error("not a local database");
   const controlName = `${realName}_conscheck_control`;
   const controlUrl = withDatabase(url, controlName);
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
+  const admin = directClient(withDatabase(url, "postgres"));
   const made = new Set<string>();
   let cleanup: (() => Promise<void>) | null = null;
   try {

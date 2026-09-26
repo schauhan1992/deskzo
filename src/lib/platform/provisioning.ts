@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "@/lib/tenancy/direct-client";
 import { WORLD_COUNTRIES } from "@/lib/geo/world-countries";
 import { bootstrapOwner } from "@/lib/platform/bootstrap-owner";
 import { controlDb } from "@/lib/platform/control-db";
@@ -201,7 +201,7 @@ async function runJob(claimed: ClaimedJob): Promise<void> {
   }
 
   // 2. The owner, and the organisation they signed up for.
-  const workspace = new PrismaClient({ datasourceUrl: url });
+  const workspace = directClient(url);
   try {
     await step(job.id, "Creating your account");
     const owner = await workspace.user.findUnique({ where: { email: job.ownerEmail }, select: { id: true } });

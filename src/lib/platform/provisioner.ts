@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import { directClient } from "@/lib/tenancy/direct-client";
 
 /**
  * Making and removing a workspace's database on the Postgres server.
@@ -90,7 +91,7 @@ function provisionerUrl(): string {
 }
 
 async function withProvisioner<T>(work: (admin: PrismaClient) => Promise<T>): Promise<T> {
-  const admin = new PrismaClient({ datasourceUrl: provisionerUrl() });
+  const admin = directClient(provisionerUrl());
   try {
     return await work(admin);
   } finally {

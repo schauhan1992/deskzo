@@ -24,9 +24,9 @@
  */
 import "dotenv/config";
 import Module from "node:module";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
-const probe = new PrismaClient();
+const probe = directClient();
 let actor: { id: string; name: string; email: string; role: string } | null = null;
 
 const load = Module.createRequire(__filename);

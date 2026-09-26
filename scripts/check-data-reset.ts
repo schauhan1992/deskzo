@@ -23,7 +23,7 @@ import path from "node:path";
 import Module from "node:module";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement } from "react";
-import { PrismaClient } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -129,8 +129,8 @@ async function main() {
   const scratchName = `${new URL(url).pathname.slice(1)}_reset_check`;
   const scratchUrl = withDatabase(url, scratchName);
   ok("  and the scratch one is never the real one", scratchUrl !== url && scratchName !== new URL(url).pathname.slice(1));
-  const admin = new PrismaClient({ datasourceUrl: withDatabase(url, "postgres") });
-  const scratch = new PrismaClient({ datasourceUrl: scratchUrl });
+  const admin = directClient(withDatabase(url, "postgres"));
+  const scratch = directClient(scratchUrl);
   try {
     await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
     await admin.$executeRawUnsafe(`CREATE DATABASE "${scratchName}"`);
@@ -183,7 +183,7 @@ async function main() {
     ok("the starter categories are back exactly as the migration wrote them", JSON.stringify(categories) === JSON.stringify(starter) && categories.length > 20, categories.length);
 
     const keptNames = new Set([...reset.keptTables().map((k) => k.table), "_prisma_migrations", "customer_categories"]);
-    const tables = await scratch.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname = current_schema()`;
+    const tables = await scratch.$queryRaw<{ tablename: string }[]>`SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = current_schema()`;
     const notEmpty: string[] = [];
     for (const { tablename } of tables) {
       if (keptNames.has(tablename)) continue;
@@ -208,7 +208,7 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("The button, on the real database — only the paths that refuse");
 
-  const db = new PrismaClient();
+  const db = directClient();
   const actions = require("../src/actions/data-reset") as typeof import("../src/actions/data-reset");
   const BackupsPage = (require("../src/app/(dashboard)/settings/backups/page") as { default: () => Promise<ReactElement> }).default;
   /**

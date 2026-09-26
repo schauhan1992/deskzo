@@ -10,10 +10,11 @@
  *   npm run db:seed:assets -- --reset remove what this made first
  *   npm run db:seed:assets -- --verify-only
  */
-import { PrismaClient, Prisma, type AssetKind, type AssetOwnership } from "@prisma/client";
+import { Prisma, type AssetKind, type AssetOwnership } from "@prisma/client";
+import { directClient } from "../src/lib/tenancy/direct-client";
 import { awayFromSite, coverState, ewayBillRequired, statusAfter } from "../src/lib/assets/lifecycle";
 
-const db = new PrismaClient();
+const db = directClient();
 
 const TAG_PREFIX = "WRF-IT-";
 const CLIENT_TAG_PREFIX = "CL-IT-";
