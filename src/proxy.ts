@@ -145,17 +145,25 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
     return NextResponse.json({ error: "No such workspace." }, { status: 404, headers: { "cache-control": "no-store" } });
   }
   /**
-   * The public site — signing up — on the platform's own address (the bare domain, www.). Served from
-   * src/app/platform-site, which reads no workspace's data; nothing under that path answers on any
-   * other address.
+   * The platform's own pages, each on its own address and nowhere else:
+   *
+   *   · the public site — signing up — on the bare domain and www., from src/app/platform-site;
+   *   · the staff console on admin., from src/app/platform-console (its own sign-in —
+   *     src/lib/platform/staff-session.ts; no workspace's session means anything there).
+   *
+   * Neither reads a workspace's data. Their folders answer on no other address, so a workspace's host
+   * can never serve the console, nor the console's host a workspace.
    */
-  const platformSitePath = pathname === "/platform-site" || pathname.startsWith("/platform-site/");
-  if (!tenant && kind?.kind === "root" && !platformSitePath) {
+  const inPlatformFolder = /^\/platform-(site|console)(\/|$)/.test(pathname);
+  const platformFolder = kind?.kind === "root" ? "/platform-site" : kind?.kind === "console" ? "/platform-console" : null;
+  if (!tenant && platformFolder && !inPlatformFolder) {
     const url = req.nextUrl.clone();
-    url.pathname = `/platform-site${pathname === "/" ? "" : pathname}`;
-    return harden(NextResponse.rewrite(url) as NextResponse, pathname);
+    url.pathname = `${platformFolder}${pathname === "/" ? "" : pathname}`;
+    const response = harden(NextResponse.rewrite(url) as NextResponse, pathname);
+    if (platformFolder === "/platform-console") response.headers.set("cache-control", "no-store");
+    return response;
   }
-  if (platformSitePath && kind?.kind !== "root") {
+  if (inPlatformFolder) {
     return harden(new NextResponse("Not found.", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }) as NextResponse, pathname);
   }
   if (!tenant) {

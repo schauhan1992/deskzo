@@ -3,9 +3,11 @@ import { Fingerprint, ScrollText } from "lucide-react";
 import { currentUser } from "@/lib/session";
 import { getSecurityPolicyForAdmin } from "@/actions/security-policy";
 import { getSecuritySettings } from "@/actions/security";
+import { getSupportAccess } from "@/actions/support-access";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SecurityPolicyForm } from "@/components/settings/security-policy-form";
 import { SecuritySettingsForm } from "@/components/settings/security-settings-form";
+import { SupportAccessCard } from "@/components/settings/support-access-card";
 import { can } from "@/lib/authz/resolve";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 
@@ -21,7 +23,7 @@ export default async function SecuritySettingsPage() {
     );
   }
 
-  const [policy, loginSettings, origin] = await Promise.all([getSecurityPolicyForAdmin(), getSecuritySettings(), tenantOrigin()]);
+  const [policy, loginSettings, origin, support] = await Promise.all([getSecurityPolicyForAdmin(), getSecuritySettings(), tenantOrigin(), getSupportAccess()]);
 
   return (
     <div>
@@ -46,6 +48,16 @@ export default async function SecuritySettingsPage() {
           <Fingerprint className="h-5 w-5 shrink-0 text-brand" aria-hidden />
         </Card>
       </Link>
+
+      {/* The super admin's alone — null for everybody else, who never sees the card. */}
+      {support && (
+        <Card className="mt-6">
+          <CardHeader className="text-sm font-medium text-text">Platform support access</CardHeader>
+          <CardContent>
+            <SupportAccessCard state={support} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mt-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

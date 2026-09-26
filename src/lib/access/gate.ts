@@ -1,5 +1,7 @@
 import type { ActivityKind, ActivitySeverity, DeviceKind, DeviceStatus, Prisma } from "@prisma/client";
 import { tenantKey } from "@/lib/tenancy/cache";
+import { currentTenant } from "@/lib/tenancy/resolve";
+import { activeSupportGrant } from "@/lib/platform/support";
 import { db } from "@/lib/db";
 import { activityKind } from "@/lib/security/activity-kinds";
 import { throttle } from "@/lib/security/throttle";
@@ -164,7 +166,7 @@ export async function evaluateAccess(input: GateInput): Promise<GateVerdict> {
 
   const user = await db.user.findUnique({
     where: { id: input.userId },
-    select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true, lockedAt: true, lockedUntil: true },
+    select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true, lockedAt: true, lockedUntil: true, kind: true },
   });
   if (!user) {
     const verdict: GateVerdict = { ok: false, reason: "SESSION_ENDED", deviceId: null, deviceStatus: null, kind };
@@ -234,9 +236,16 @@ export async function evaluateAccess(input: GateInput): Promise<GateVerdict> {
 
   if (ip) await noteNetwork({ ip, user, network, policy, geo, input });
 
+  /**
+   * Platform support is here on the super admin's grant and nothing else (src/lib/platform/support.ts):
+   * no grant, no session — checked again within a minute. The grant is the approval, so a support
+   * account is not held for a device or a network the way a member would be.
+   */
+  const support = user.kind === "SUPPORT";
+  const supportGranted = support ? !!(await activeSupportGrant((await currentTenant()).id)) : true;
   const verdict = decideAccess({
-    sessionEnded: !user.active || !!signIn?.endedAt,
-    exempt: user.isSuperAdmin,
+    sessionEnded: !user.active || !!signIn?.endedAt || !supportGranted,
+    exempt: user.isSuperAdmin || support,
     policy,
     network,
     device: { kind, status: device?.status ?? null },

@@ -78,7 +78,7 @@ export function platformKeyConfigured(): boolean {
   return !!process.env.PLATFORM_MASTER_KEY?.trim();
 }
 
-export type PlatformSealPurpose = "reference-sync-key" | "warm-db-url";
+export type PlatformSealPurpose = "reference-sync-key" | "warm-db-url" | "staff-totp";
 
 /**
  * Sealing for something that belongs to no workspace — the data.gov.in key that refreshes the shared

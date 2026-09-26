@@ -1,3 +1,4 @@
+import { SUPPORT_READONLY_ROLE } from "@/lib/roles";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { clientFor, closeAllClients } from "@/lib/tenancy/clients";
 import { currentTenant } from "@/lib/tenancy/resolve";
@@ -38,12 +39,36 @@ export async function getTenantDb(): Promise<PrismaClient> {
 
 type Callable = (...args: unknown[]) => unknown;
 
+/**
+ * Lists that never include the platform's support staff.
+ *
+ * A support user (User.kind SUPPORT — src/lib/platform/support.ts) is a real account while a grant
+ * lasts, but must not appear among the people: not in a picker, a report, a count or a seat. Rather
+ * than sixty call sites each remembering, every listing of users made through `db` leaves them out,
+ * and every listing of roles leaves out the role they sign in with. A query that names its rows —
+ * by id, by key, or by kind itself — is left as it is: resolving "who did this" still finds them.
+ *
+ * Queries inside a transaction (`tx.user…`) are not touched; none of those list people.
+ */
+const LISTINGS = new Set(["findMany", "findFirst", "findFirstOrThrow", "count", "aggregate", "groupBy"]);
+
+function withoutSupport(model: string, method: string, args: unknown[]): unknown[] {
+  if (!LISTINGS.has(method) || (model !== "user" && model !== "role")) return args;
+  const [first, ...rest] = args;
+  const options = (first ?? {}) as { where?: Record<string, unknown> };
+  const where = options.where ?? {};
+  const pinned = model === "user" ? "id" in where || "kind" in where : "key" in where;
+  if (pinned) return args;
+  const exclude = model === "user" ? { kind: "MEMBER" } : { key: { not: SUPPORT_READONLY_ROLE } };
+  return [{ ...options, where: { AND: [where, exclude] } }, ...rest];
+}
+
 function forward(path: [string] | [string, string]) {
   return async (...args: unknown[]) => {
     const client = (await getTenantDb()) as unknown as Record<string, Record<string, Callable> & Callable>;
     if (path.length === 1) return (client[path[0]] as Callable).apply(client, args);
     const delegate = client[path[0]];
-    return (delegate[path[1]] as Callable).apply(delegate, args);
+    return (delegate[path[1]] as Callable).apply(delegate, withoutSupport(path[0], path[1], args));
   };
 }
 

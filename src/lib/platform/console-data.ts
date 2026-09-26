@@ -1,0 +1,133 @@
+import { controlDb } from "@/lib/platform/control-db";
+import { latestMigrationName } from "@/lib/platform/migrate";
+import { activeSupportGrant } from "@/lib/platform/support";
+import { subdomainHost } from "@/lib/tenancy/registry";
+
+/**
+ * What the console shows — read from the control plane only. The console never opens a workspace's
+ * database to look at it; staff who need to see inside one go in as support, on its grant.
+ *
+ * Every function here is called by a console page after `requireStaff` (src/lib/platform/
+ * staff-session.ts); none is an action, so none can be called from a browser.
+ */
+
+export async function overview() {
+  const control = controlDb();
+  const version = latestMigrationName();
+  const [byStatus, failedJobs, pendingJobs, drift, warm, grants, recent] = await Promise.all([
+    control.tenant.groupBy({ by: ["status"], _count: { _all: true } }),
+    control.provisioningJob.count({ where: { status: "FAILED" } }),
+    control.provisioningJob.count({ where: { status: { in: ["PENDING", "RUNNING"] } } }),
+    control.tenant.count({ where: { status: { in: ["ACTIVE", "MIGRATING"] }, NOT: { schemaVersion: version } } }),
+    control.warmDatabase.count({ where: { claimedAt: null } }),
+    control.supportAccessGrant.count({ where: { revokedAt: null, expiresAt: { gt: new Date() } } }),
+    control.platformAuditLog.findMany({ orderBy: { at: "desc" }, take: 12, include: { tenant: { select: { slug: true } } } }),
+  ]);
+  return {
+    version,
+    workspaces: Object.fromEntries(byStatus.map((s) => [s.status, s._count._all])) as Partial<Record<string, number>>,
+    failedJobs,
+    pendingJobs,
+    drift,
+    warm,
+    grants,
+    recent,
+  };
+}
+
+export async function listTenants(search: string) {
+  const q = search.trim();
+  return controlDb().tenant.findMany({
+    where: q ? { OR: [{ slug: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }, { ownerEmail: { contains: q, mode: "insensitive" } }] } : undefined,
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    select: { id: true, slug: true, name: true, status: true, isDefault: true, country: true, schemaVersion: true, ownerEmail: true, createdAt: true },
+  });
+}
+
+export async function tenantDetail(slug: string) {
+  const control = controlDb();
+  const tenant = await control.tenant.findUnique({
+    where: { slug },
+    include: {
+      domains: { orderBy: { createdAt: "asc" } },
+      deviceRoutes: { orderBy: { createdAt: "asc" } },
+      provisioningJobs: { orderBy: { createdAt: "desc" }, take: 5 },
+      migrationRuns: { orderBy: { startedAt: "desc" }, take: 10 },
+      auditLog: { orderBy: { at: "desc" }, take: 30 },
+    },
+  });
+  if (!tenant) return null;
+  const [grant, grants, leases] = await Promise.all([
+    activeSupportGrant(tenant.id, true),
+    control.supportAccessGrant.findMany({ where: { tenantId: tenant.id }, orderBy: { createdAt: "desc" }, take: 10 }),
+    control.tenantJobLease.findMany({ where: { tenantId: tenant.id }, orderBy: { job: "asc" } }),
+  ]);
+  return { tenant, host: subdomainHost(tenant.slug), grant, grants, leases, latest: latestMigrationName() };
+}
+
+export async function provisioningQueue() {
+  const control = controlDb();
+  const [jobs, warm] = await Promise.all([
+    control.provisioningJob.findMany({ orderBy: { createdAt: "desc" }, take: 50, include: { tenant: { select: { slug: true, name: true, status: true } } } }),
+    control.warmDatabase.findMany({ orderBy: { createdAt: "desc" }, take: 50 }),
+  ]);
+  return { jobs, warm, version: latestMigrationName() };
+}
+
+export async function migrationRuns() {
+  const control = controlDb();
+  const version = latestMigrationName();
+  const [runs, behind] = await Promise.all([
+    control.tenantMigrationRun.findMany({ orderBy: { startedAt: "desc" }, take: 80 }),
+    control.tenant.findMany({
+      where: { status: { in: ["ACTIVE", "MIGRATING"] }, NOT: { schemaVersion: version } },
+      select: { id: true, slug: true, name: true, status: true, schemaVersion: true },
+      orderBy: { slug: "asc" },
+    }),
+  ]);
+  return { version, runs, behind };
+}
+
+export async function deviceRoutes() {
+  return controlDb().biometricDeviceRoute.findMany({ orderBy: { createdAt: "desc" }, take: 500, include: { tenant: { select: { slug: true, name: true } } } });
+}
+
+/** Each with whether it still works: not expired, and not used up. */
+export async function invites() {
+  const rows = await controlDb().signupInvite.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+  const now = Date.now();
+  return rows.map((i) => ({ ...i, live: (!i.expiresAt || i.expiresAt.getTime() > now) && i.uses < i.maxUses }));
+}
+
+export async function staffMembers() {
+  return controlDb().platformUser.findMany({
+    orderBy: [{ active: "desc" }, { name: "asc" }],
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      active: true,
+      totpEnabledAt: true,
+      lastSignInAt: true,
+      sessions: { where: { revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true } },
+    },
+  });
+}
+
+export async function auditLog(search: string) {
+  const q = search.trim();
+  return controlDb().platformAuditLog.findMany({
+    where: q ? { OR: [{ action: { contains: q, mode: "insensitive" } }, { actor: { contains: q, mode: "insensitive" } }, { tenant: { slug: { contains: q, mode: "insensitive" } } }] } : undefined,
+    orderBy: { at: "desc" },
+    take: 200,
+    include: { tenant: { select: { slug: true } } },
+  });
+}
+
+/** Staff ids to names, for audit rows whose actor is a staff member. */
+export async function staffNames(): Promise<Map<string, string>> {
+  const rows = await controlDb().platformUser.findMany({ select: { id: true, name: true } });
+  return new Map(rows.map((r) => [r.id, r.name]));
+}

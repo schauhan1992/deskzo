@@ -11,7 +11,7 @@ import { doorCheck, recordSignIn } from "@/lib/access/record";
 import type { Role } from "@/lib/roles";
 import { sessionOptions } from "@/lib/auth-session";
 import { currentTenantOrNull } from "@/lib/tenancy/resolve";
-import { spendHandoffTicket } from "@/lib/platform/handoff";
+import { handoffAccount } from "@/lib/platform/handoff-sign-in";
 import type { Provider } from "@auth/core/providers";
 
 declare module "next-auth" {
@@ -118,9 +118,8 @@ async function buildConfig(req?: Request) {
 
   /**
    * A one-time pass from the platform instead of a password (src/lib/platform/handoff.ts): the owner
-   * straight after signing up. Spent against the workspace this request is on, so a pass for one
-   * workspace signs nobody into another; and refused for an account with two-factor on, which a
-   * pass must never be a way around.
+   * straight after signing up, or platform support on the workspace's grant. Who it signs in, if
+   * anybody, is decided in src/lib/platform/handoff-sign-in.ts.
    */
   providers.push(
     Credentials({
@@ -131,12 +130,8 @@ async function buildConfig(req?: Request) {
         const ticket = typeof credentials?.ticket === "string" ? credentials.ticket : "";
         const tenant = await currentTenantOrNull();
         if (!ticket || !tenant) return null;
-        const pass = await spendHandoffTicket(ticket, tenant.id);
-        if (!pass) return null;
-        const user = await db.user.findUnique({ where: { email: pass.email } });
-        if (!user || !user.active || user.twoFactorEnabledAt) return null;
-        if (await doorCheck(user)) return null;
-        return { id: user.id, name: user.name, email: user.email, role: user.role };
+        const user = await handoffAccount(ticket, tenant.id);
+        return user ? { id: user.id, name: user.name, email: user.email, role: user.role } : null;
       },
     }),
   );

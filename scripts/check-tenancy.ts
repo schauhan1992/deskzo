@@ -56,9 +56,10 @@ const FORWARDED_HOST: Record<string, Allowed> = {};
 
 /** Worker processes: each must be told its workspace (WROFFY_TENANT_ID) rather than inherit the install's. */
 const SPAWNS: Record<string, Allowed> = {
-  "src/actions/reference-data.ts": { reason: "PIN and GeoNames sync workers write the shared reference database, which belongs to no workspace" },
+  "src/lib/platform/reference-sync.ts": { reason: "PIN and GeoNames sync workers write the shared reference database, which belongs to no workspace" },
   "src/lib/platform/migrate.ts": { reason: "prisma migrate deploy, told the one database it migrates — not a workspace" },
   "src/actions/platform/signup.ts": { reason: "the platform worker, which sets workspaces up — it belongs to none of them" },
+  "src/actions/platform/console.ts": { reason: "the platform worker, started from the console to retry a job or top up the warm pool" },
 };
 
 /**
@@ -92,6 +93,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/companies/merge.ts:cached": { reason: "shared: relation map derived from the schema, identical everywhere" },
   "src/lib/email-verification-lookup.ts:mxCache": { reason: "shared: public DNS answers" },
   "src/lib/finance/exchange-rate.ts:cache": { reason: "shared: public exchange rates" },
+  "src/lib/platform/support.ts:grantCache": CALLER_KEYED("keyed by the workspace's id, which every caller passes"),
   "src/lib/platform/kek.ts:cached": { reason: "shared: the platform key, derived once from PLATFORM_MASTER_KEY" },
 
   "src/lib/access/lock.ts:testLock": { reason: "test override, set only by check scripts" },

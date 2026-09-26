@@ -42,3 +42,8 @@ export const SYSTEM_ROLE_KEYS = ["ADMIN", "PROFILE", "CALLING", "SALES", "SUPPOR
 
 /** The one key the application compares against by name. */
 export const ADMIN_ROLE: Role = "ADMIN";
+/**
+ * The role platform support staff sign in with on a read-only grant (src/lib/platform/support.ts).
+ * A row in `roles` like any other, but never listed, never assignable, and computed in the resolver.
+ */
+export const SUPPORT_READONLY_ROLE: Role = "SUPPORT_READONLY";

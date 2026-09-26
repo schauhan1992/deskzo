@@ -22,8 +22,13 @@ import { runAsTenant } from "@/lib/tenancy/resolve";
 
 export const RETENTION_DAYS = 90;
 
+/** A change refused for a reason worth telling whoever asked — shown as it is, in the console. */
+export class LifecycleRefused extends Error {}
+
+/** `actor`: "staff:<id>" from the console, or a script's name. */
 async function audit(tenantId: string, actor: string, action: string, detail?: Record<string, unknown>) {
-  await controlDb().platformAuditLog.create({ data: { actorKind: "SCRIPT", actor, action, tenantId, detail: detail as never } });
+  const staff = actor.startsWith("staff:");
+  await controlDb().platformAuditLog.create({ data: { actorKind: staff ? "STAFF" : "SCRIPT", actor: staff ? actor.slice(6) : actor, action, tenantId, detail: detail as never } });
 }
 
 export async function suspendTenant(tenantId: string, actor: string, reason: string): Promise<void> {
@@ -34,7 +39,7 @@ export async function suspendTenant(tenantId: string, actor: string, reason: str
 
 export async function resumeTenant(tenantId: string, actor: string): Promise<void> {
   const tenant = await controlDb().tenant.findUniqueOrThrow({ where: { id: tenantId } });
-  if (tenant.status !== "SUSPENDED") throw new Error(`Workspace ${tenant.slug} is ${tenant.status}, not suspended.`);
+  if (tenant.status !== "SUSPENDED") throw new LifecycleRefused(`Workspace ${tenant.slug} is ${tenant.status}, not suspended.`);
   await controlDb().tenant.update({ where: { id: tenantId }, data: { status: "ACTIVE", suspendedAt: null } });
   await audit(tenantId, actor, "tenant.resume");
   forgetRegistry();
@@ -43,8 +48,8 @@ export async function resumeTenant(tenantId: string, actor: string): Promise<voi
 export async function deprovisionTenant(tenantId: string, actor: string, options: { finalBackup?: boolean } = {}): Promise<{ backup: string | null }> {
   const control = controlDb();
   const row = await control.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-  if (row.isDefault) throw new Error("The first workspace is the installation's own and is not closed this way.");
-  if (row.status === "DEPROVISIONED") throw new Error(`Workspace ${row.slug} is already closed.`);
+  if (row.isDefault) throw new LifecycleRefused("The first workspace is the installation's own and is not closed this way.");
+  if (row.status === "DEPROVISIONED") throw new LifecycleRefused(`Workspace ${row.slug} is already closed.`);
 
   // Held first, so nobody is working in it while it is backed up and dropped.
   if (row.status !== "SUSPENDED") await control.tenant.update({ where: { id: tenantId }, data: { status: "SUSPENDED", suspendedAt: new Date() } });
@@ -53,10 +58,10 @@ export async function deprovisionTenant(tenantId: string, actor: string, options
   let backup: string | null = null;
   if (options.finalBackup !== false && row.dbUrlCipher) {
     const tenant = await tenantById(tenantId);
-    if (!tenant) throw new Error("The workspace could not be read back for its final backup.");
+    if (!tenant) throw new LifecycleRefused("The workspace could not be read back for its final backup.");
     // The registry serves only active workspaces to requests; a script may still act as a held one.
     const outcome = await runAsTenant(tenant, () => runBackup({ kind: "FULL" }));
-    if (!outcome.ok) throw new Error(`The final backup failed, so nothing was dropped: ${outcome.error}`);
+    if (!outcome.ok) throw new LifecycleRefused(`The final backup failed, so nothing was dropped: ${outcome.error}`);
     backup = outcome.filename;
   }
 
@@ -74,9 +79,9 @@ export async function deprovisionTenant(tenantId: string, actor: string, options
 export async function purgeTenant(tenantId: string, actor: string, options: { force?: boolean } = {}): Promise<void> {
   const control = controlDb();
   const row = await control.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-  if (row.status !== "DEPROVISIONED" || !row.deprovisionedAt) throw new Error(`Workspace ${row.slug} has not been closed.`);
+  if (row.status !== "DEPROVISIONED" || !row.deprovisionedAt) throw new LifecycleRefused(`Workspace ${row.slug} has not been closed.`);
   const due = new Date(row.deprovisionedAt.getTime() + RETENTION_DAYS * 86_400_000);
-  if (!options.force && due > new Date()) throw new Error(`Workspace ${row.slug} is kept until ${due.toISOString().slice(0, 10)}.`);
+  if (!options.force && due > new Date()) throw new LifecycleRefused(`Workspace ${row.slug} is kept until ${due.toISOString().slice(0, 10)}.`);
   await rm(backupRootFor({ id: row.id, isDefault: false }), { recursive: true, force: true });
   await control.tenant.update({ where: { id: tenantId }, data: { keyBundleCipher: "" } });
   await audit(tenantId, actor, "tenant.purge");

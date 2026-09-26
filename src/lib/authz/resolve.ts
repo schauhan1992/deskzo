@@ -1,5 +1,5 @@
 import { cache } from "react";
-import type { Role } from "@/lib/roles";
+import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
@@ -37,6 +37,7 @@ export type PermissionSource =
   | { via: "roleOverride"; role: Role; allowed: boolean }
   | { via: "roleDefault"; role: Role }
   | { via: "adminDefault" }
+  | { via: "supportReadOnly"; allowed: boolean }
   | { via: "downline"; role: Role; through: { id: string; name: string } }
   | { via: "none" };
 
@@ -60,10 +61,17 @@ function allowed(source: PermissionSource): boolean {
       return source.allowed;
     case "roleOverride":
       return source.allowed;
+    case "supportReadOnly":
+      return source.allowed;
     case "inactive":
     case "none":
       return false;
   }
+}
+
+/** A permission that only lets somebody look: `leads.view`, `companies.viewAll`, `hr.viewReports`. */
+export function isViewPermission(key: string): boolean {
+  return /\.view(?:[A-Z]\w*)?$/.test(key);
 }
 
 /**
@@ -100,6 +108,16 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
   if (!user.active) {
     for (const def of PERMISSIONS) sources.set(def.key, { via: "inactive" });
     return { userId, role: user.role, isSuperAdmin: false, active: false, sources };
+  }
+
+  /**
+   * The platform's support staff on a read-only grant (src/lib/platform/support.ts): every "view"
+   * permission and nothing else — computed, like the admin's, so each new view permission is theirs on
+   * the day it ships and each new change permission never is. No grant, override or downline applies.
+   */
+  if (user.role === SUPPORT_READONLY_ROLE) {
+    for (const def of PERMISSIONS) sources.set(def.key, { via: "supportReadOnly", allowed: isViewPermission(def.key) });
+    return { userId, role: user.role, isSuperAdmin: false, active: true, sources };
   }
 
   const [userRows, roleRows] = await Promise.all([
@@ -268,6 +286,8 @@ export function describeSource(source: PermissionSource): string {
       return `Comes with the ${source.role} role.`;
     case "adminDefault":
       return "Admins hold everything not explicitly switched off.";
+    case "supportReadOnly":
+      return source.allowed ? "Platform support on a read-only grant: may look." : "Platform support on a read-only grant: may not change anything.";
     case "downline":
       return `Inherited from ${source.through.name}, who reports to them and holds it as ${source.role}.`;
     case "none":

@@ -425,6 +425,12 @@ model User {
   name                   String
   email                  String    @unique
   /**
+   * MEMBER: somebody who works here. SUPPORT: the platform's support staff, let in for a while by
+   * the super admin's grant (src/lib/platform/support.ts) — never listed among the people, never
+   * a seat, never assignable. Every list of users leaves them out (src/lib/db.ts).
+   */
+  kind                   UserKind  @default(MEMBER)
+  /**
    * A work contact number, for putting on a quote so the customer can reach whoever sent it.
    * Deliberately on User rather than reusing `EmployeeProfile.personalPhone`: that field is what
    * it says it is, and printing somebody's personal mobile on a document that goes to a customer
@@ -10394,4 +10400,9 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+enum UserKind {
+  MEMBER
+  SUPPORT
 }

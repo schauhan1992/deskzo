@@ -19,6 +19,7 @@
     "platform:adopt": "tsx scripts/platform-adopt.ts",
     "platform:worker": "tsx scripts/platform-worker.ts",
     "platform:tenant": "tsx scripts/platform-tenant.ts",
+    "platform:staff": "tsx scripts/platform-staff.ts",
     "tenants:migrate": "tsx scripts/tenants-migrate.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
@@ -123,6 +124,7 @@
     "check:auth-tenancy": "tsx scripts/check-auth-tenancy.ts",
     "check:fanout": "tsx scripts/check-fanout.ts",
     "check:provisioning": "tsx scripts/check-provisioning.ts",
+    "check:console": "tsx scripts/check-console.ts",
     "check:access-lock": "tsx scripts/check-access-lock.ts"
   },
   "dependencies": {

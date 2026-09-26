@@ -302,3 +302,87 @@ model TenantMigrationRun {
   @@index([tenantId, startedAt])
   @@map("tenant_migration_runs")
 }
+
+enum StaffRole {
+  /// Everything, including managing staff.
+  OWNER
+  /// Workspaces: hold, reopen, close; plans; the platform's data.
+  ADMIN
+  /// Looking at workspaces, and entering one on its super admin's grant.
+  SUPPORT
+  /// Plans, subscriptions and invoices.
+  BILLING
+  /// Looking only.
+  READONLY
+}
+
+/// Somebody who works on the platform — signs in to the console (admin.<domain>), never to a workspace
+/// directly. Two-factor is required: enrolled at the first sign-in, before anything else opens.
+model PlatformUser {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  name             String
+  role             StaffRole
+  passwordHash     String
+  /// SHA-256 of a one-time link to choose a password: a new staff member's first, or a reset. It
+  /// works until `passwordSetupExpiresAt`, once.
+  passwordSetupHash      String?   @unique
+  passwordSetupExpiresAt DateTime?
+  /// The authenticator secret, sealed under the platform key. Null until enrolment starts.
+  totpSecretCipher String?
+  /// When enrolment finished. Until then only the enrolment page opens.
+  totpEnabledAt    DateTime?
+  active           Boolean   @default(true)
+  lastSignInAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sessions PlatformSession[]
+
+  @@map("platform_users")
+}
+
+/// One staff sign-in. Checked on every console request: thirty minutes idle, twelve hours at most,
+/// and revocable from the console.
+model PlatformSession {
+  /// SHA-256 of the cookie's token; the token itself is only ever in the cookie.
+  id         String       @id
+  userId     String
+  user       PlatformUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime     @default(now())
+  lastSeenAt DateTime     @default(now())
+  expiresAt  DateTime
+  /// When the second factor was passed in this session. Null: only enrolment opens.
+  mfaAt      DateTime?
+  revokedAt  DateTime?
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+  @@map("platform_sessions")
+}
+
+enum SupportAccessLevel {
+  /// Every "view" permission, nothing else.
+  READONLY
+  /// An administrator's permissions — never the super admin's.
+  ADMIN
+}
+
+/// A workspace's super admin letting platform support in, for a while. Given and ended from the
+/// workspace's own Security settings; staff can see it and use it, never make one.
+model SupportAccessGrant {
+  id              String             @id @default(cuid())
+  tenantId        String
+  level           SupportAccessLevel
+  reason          String
+  /// Who in the workspace gave it — their id and name there, for the record.
+  grantedByUserId String
+  grantedByName   String
+  createdAt       DateTime           @default(now())
+  expiresAt       DateTime
+  revokedAt       DateTime?
+
+  @@index([tenantId, expiresAt])
+  @@map("support_access_grants")
+}

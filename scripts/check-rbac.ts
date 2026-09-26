@@ -203,7 +203,8 @@ console.log("\n— No ungated endpoint —\n");
  * list of 81 "holes" that were almost entirely false. A check nobody believes is worse than none,
  * because the real entries get waved through with the noise.
  */
-const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext(", "currentUser(", "auth()"];
+// requireStaff: the platform console's actions are gated by a staff session, not a workspace's.
+const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext(", "currentUser(", "auth()", "requireStaff("];
 
 /**
  * Local helpers in the same file that themselves reach a base marker.
@@ -216,7 +217,8 @@ function guardingHelpers(source: string): string[] {
   const declarations = source
     .split(/\n(?:export )?async function /)
     .slice(1)
-    .map((decl) => ({ name: decl.slice(0, decl.indexOf("(")).trim(), decl }))
+    // A generic helper — `asStaff<T>(…)` — is named without its type parameters.
+    .map((decl) => ({ name: decl.slice(0, decl.indexOf("(")).replace(/<.*$/, "").trim(), decl }))
     .filter((d) => d.name && /^[A-Za-z_$][\w$]*$/.test(d.name));
   // Transitively: a helper that calls a guarding helper guards too — `workable()` calling `who()`
   // calling `requireUser()`. Repeated until nothing new is found.
@@ -251,6 +253,9 @@ const PUBLIC_ACTIONS = new Set([
   // Signing up for a workspace, on the platform's own address, where there are no accounts yet. By
   // invitation, limited per address, and it touches only the control plane.
   "src/actions/platform/signup.ts",
+  // Signing in to the platform console: its own sign-in, enrolling two-factor, choosing a password from
+  // a one-time link, signing out — each touching only the caller's own console session.
+  "src/actions/platform/staff-auth.ts",
   // The access page: a person held at the door shares their location or signs out. `requireUser`
   // refuses exactly these people by design, so the session is read directly — and each action does
   // one narrow thing to the caller's own session. See src/actions/access-gate.ts.
