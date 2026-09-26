@@ -29,6 +29,7 @@ process.env.TENANCY_POOLER_URL = "";
 process.env.TENANCY_CONNECTION_LIMIT = "";
 process.env.TENANCY_IDLE_CONNECTION_S = "";
 process.env.TRUST_PROXY = "";
+process.env.TRUST_PROXY_HOPS = "";
 
 let failures = 0;
 // Straight to stdout: console itself is under test below.
@@ -278,6 +279,34 @@ async function main() {
   ok("…a custom domain forwarded → the custom domain", trusted.custom === "crm.example.org", String(trusted.custom));
   ok("…Host one workspace, forwarded another: not the proxy's header — refused (421)", trusted.spoofed === HOST_MISMATCH, String(trusted.spoofed));
   ok("…Host a workspace, forwarded the console: refused too", trusted.spoofedConsole === HOST_MISMATCH, String(trusted.spoofedConsole));
+
+  // ─── The caller's address ───────────────────────────────────────────────────────────────────
+  section("The caller's address: only what our own proxy added");
+  const { clientIpFrom } = await import("../src/lib/client-ip");
+  const from = (h: Record<string, string>) => clientIpFrom(new Headers(h));
+  ok("no trusted proxy: X-Forwarded-For is not believed", from({ "x-forwarded-for": "203.0.113.9" }) === null);
+  ok("…nor X-Real-IP", from({ "x-real-ip": "203.0.113.9" }) === null);
+  process.env.TRUST_PROXY = "1";
+  const proxied = {
+    last: from({ "x-forwarded-for": "10.0.0.1, 203.0.113.9" }),
+    single: from({ "x-forwarded-for": "203.0.113.9" }),
+    port: from({ "x-forwarded-for": "10.0.0.1, 203.0.113.9:51234" }),
+    v6: from({ "x-forwarded-for": "2401:4900:0:0::1" }),
+    garbage: from({ "x-forwarded-for": "203.0.113.9, not-an-address" }),
+    realIp: from({ "x-real-ip": "198.51.100.7" }),
+    both: from({ "x-forwarded-for": "203.0.113.9", "x-real-ip": "198.51.100.7" }),
+  };
+  process.env.TRUST_PROXY_HOPS = "2";
+  const chain = { right: from({ "x-forwarded-for": "10.0.0.1, 203.0.113.9, 198.51.100.2" }), short: from({ "x-forwarded-for": "203.0.113.9" }) };
+  process.env.TRUST_PROXY_HOPS = "";
+  process.env.TRUST_PROXY = "";
+  ok("behind a trusted proxy: the last entry — the one it added — not the caller's first", proxied.last === "203.0.113.9", String(proxied.last));
+  ok("…one entry is that entry", proxied.single === "203.0.113.9");
+  ok("…a port glued on is dropped, IPv6 written the one way", proxied.port === "203.0.113.9" && proxied.v6 === "2401:4900::1", `${proxied.port} ${proxied.v6}`);
+  ok("…a last entry that is not an address gives none — never an earlier one", proxied.garbage === null, String(proxied.garbage));
+  ok("…X-Real-IP only when there is no list", proxied.realIp === "198.51.100.7" && proxied.both === "203.0.113.9");
+  ok("TRUST_PROXY_HOPS=2 (a CDN in front of nginx): the second from the end", chain.right === "203.0.113.9", String(chain.right));
+  ok("…and a list shorter than the chain gives none", chain.short === null);
 
   // ─── Log lines ──────────────────────────────────────────────────────────────────────────────
   section("Log lines name their workspace");

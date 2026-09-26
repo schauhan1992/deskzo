@@ -34,7 +34,8 @@ Set in the server's environment (pm2 ecosystem file or systemd unit), never in t
 | `PLATFORM_MASTER_KEY` | yes — **back it up (§4)** | Seals every workspace's database address and key bundle, and the platform's secrets |
 | `AUTH_SECRET` | yes | Kept for the first workspace's older sessions and links |
 | `PLATFORM_DOMAIN`, `PLATFORM_PORT` | yes / no | Workspaces are `<slug>.<domain>`; `admin.` is the console, `www.` the public site |
-| `TRUST_PROXY` | yes, `1` behind the proxy | Believe the proxy's forwarded host and address — and nothing else's |
+| `TRUST_PROXY` | yes, `1` behind the proxy | Believe the proxy's forwarded host and address — and nothing else's. Without it no caller's address is known: IP rules match nobody, lockouts are per account only, and the activity log records no address |
+| `TRUST_PROXY_HOPS` | with a chain of proxies (1) | How many proxies of ours append to X-Forwarded-For — 2 for a CDN in front of nginx; the caller is that many entries from the end |
 | `PLATFORM_PROVISIONER_URL` | yes | A role with CREATEDB and CREATEROLE, on the maintenance database |
 | `PLATFORM_WARM_POOL` | no (2) | Databases made ahead of signups |
 | `PLATFORM_SMTP_URL`, `PLATFORM_MAIL_FROM` | yes | The platform's own mail (signup codes, billing reminders); unset, mail is written to `platform-outbox/` |

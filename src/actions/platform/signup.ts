@@ -13,6 +13,7 @@ import { sendPlatformMail } from "@/lib/platform/mailer";
 import { signupOpen } from "@/lib/platform/settings";
 import { ProvisioningRefused, slugProblem, startProvisioning } from "@/lib/platform/provisioning";
 import { lockoutState, recordFailure } from "@/lib/security/lockout";
+import { clientIpFrom } from "@/lib/client-ip";
 import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { subdomainHost } from "@/lib/tenancy/registry";
 
@@ -40,14 +41,18 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest("hex
 
 export type SignupResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
-async function callerKey(): Promise<string> {
-  const head = await headers();
-  const ip = head.get("x-forwarded-for")?.split(",")[0]?.trim() || head.get("x-real-ip") || "unknown";
-  return `platform|signup:${ip}`;
+/**
+ * Signups are limited per caller — or, when the caller's address cannot be known (no trusted proxy,
+ * src/lib/client-ip.ts), per address being signed up: one shared bucket would let anybody stop
+ * everybody signing up.
+ */
+async function callerKey(email: string): Promise<string> {
+  const ip = clientIpFrom(await headers());
+  return ip ? `platform|signup:${ip}` : `platform|signup-email:${String(email ?? "").trim().toLowerCase()}`;
 }
 
-async function limited(): Promise<string | null> {
-  const key = await callerKey();
+async function limited(email: string): Promise<string | null> {
+  const key = await callerKey(email);
   const state = lockoutState([key]);
   if (state.lockedOut) return `Too many attempts from here. Try again in ${Math.ceil(state.retryInSeconds / 60)} minute(s).`;
   recordFailure([key]);
@@ -80,7 +85,7 @@ async function inviteProblem(code: string, open: boolean): Promise<string | null
 }
 
 export async function startSignup(form: SignupForm): Promise<SignupResult<{ email: string }>> {
-  const slow = await limited();
+  const slow = await limited(form.email);
   if (slow) return { ok: false, error: slow };
 
   const companyName = String(form.companyName ?? "").trim();
@@ -122,7 +127,7 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
       codeHash: sha256(code),
       codeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
       browserSecretHash: sha256(secret),
-      ip: head.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
+      ip: clientIpFrom(head),
     },
     select: { id: true },
   });

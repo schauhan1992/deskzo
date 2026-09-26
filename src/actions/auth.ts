@@ -10,19 +10,20 @@ import { clearFailures, lockoutState, recordFailure } from "@/lib/security/locko
 import { throttle } from "@/lib/security/throttle";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { logActivity } from "@/lib/activity";
+import { clientIpFrom } from "@/lib/client-ip";
 
 /**
  * Who is asking, as well as it can be known behind a proxy.
  *
- * Falls back to a constant when no forwarding header is present, which makes the per-caller budget
- * a global one in that deployment — weaker, but never weaker than having no budget at all.
+ * Null when it cannot be known (no trusted proxy — src/lib/client-ip.ts). Then the per-caller budget
+ * is left out rather than shared: one "unknown" bucket for everybody would let anybody lock everybody
+ * out by failing eight times. The per-account budget still stands.
  */
-async function callerKey(): Promise<string> {
+async function callerIp(): Promise<string | null> {
   try {
-    const h = await headers();
-    return (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "unknown").trim();
+    return clientIpFrom(await headers());
   } catch {
-    return "unknown";
+    return null;
   }
 }
 
@@ -52,11 +53,11 @@ export async function checkCredentials(email: string, password: string): Promise
   }
 
   const address = email.trim().toLowerCase();
-  const caller = await callerKey();
+  const caller = await callerIp();
   // Per workspace too: failures in one workspace must not lock the same address or office network
   // out of another's.
   const workspace = await tenantKey();
-  const keys = [`${workspace}|account:${address}`, `${workspace}|caller:${caller}`];
+  const keys = [`${workspace}|account:${address}`, ...(caller ? [`${workspace}|caller:${caller}`] : [])];
 
   const locked = lockoutState(keys);
   if (locked.lockedOut) {

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { resolveViewAs } from "@/lib/impersonation";
 import { activityKind } from "@/lib/security/activity-kinds";
+import { clientIpFrom } from "@/lib/client-ip";
 
 /**
  * Writing the activity log.
@@ -60,16 +61,12 @@ async function requestHeaders(): Promise<Headers | null> {
 }
 
 /**
- * The request's origin address.
- *
- * Behind a proxy `x-forwarded-for` is a list and the first entry is the client; behind nothing it
- * is absent and we get null rather than a fabricated address. Worth being careful: an audit trail
- * that confidently records the load balancer's address for every user is actively misleading.
+ * The request's origin address — as our own proxy saw it, or null (src/lib/client-ip.ts). Worth
+ * being careful: an audit trail that confidently records an address the caller made up, or the
+ * load balancer's for everybody, is worse than one that records none.
  */
 function clientIp(head: Headers): string | null {
-  const forwarded = head.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]!.trim() || null;
-  return head.get("x-real-ip") ?? null;
+  return clientIpFrom(head);
 }
 
 export async function logActivity(input: LogActivityInput) {

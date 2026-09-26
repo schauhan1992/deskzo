@@ -73,6 +73,12 @@ export function IpRules({
                 .
               </>
             )}
+            {!currentIp && (
+              <span className="mt-1 block text-warning">
+                Your address can&apos;t be seen: the server is not behind a proxy it trusts (TRUST_PROXY), so no address is believed. Until it is,
+                rules match nobody — an allow list would hold everybody.
+              </span>
+            )}
           </p>
         </CardHeader>
         <CardContent className="space-y-3">

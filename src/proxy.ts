@@ -8,6 +8,7 @@ import { recordBotHit } from "@/lib/security/bot-log";
 import { restoreInProgressFor } from "@/lib/backup/maintenance";
 import { currentMaintenance, maintenanceAppName, maintenancePage, maintenanceVerdict, mayBypassMaintenance } from "@/lib/maintenance";
 import { evaluateAccess } from "@/lib/access/gate";
+import { clientIpFrom } from "@/lib/client-ip";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, newDeviceToken, validDeviceToken } from "@/lib/access/device-token";
 import { HOST_MISMATCH, classifyHost, requestHost } from "@/lib/tenancy/host";
 import { tenantForKind } from "@/lib/tenancy/registry";
@@ -93,15 +94,9 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-/**
- * Behind a proxy `x-forwarded-for` is a list whose first entry is the client; behind nothing it is
- * absent, and null is the right answer rather than the load balancer's address recorded as if it
- * were a user's.
- */
+/** The caller's address as our own proxy saw it, or null — src/lib/client-ip.ts. */
 function clientIp(req: NextRequest): string | null {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]!.trim() || null;
-  return req.headers.get("x-real-ip") ?? null;
+  return clientIpFrom(req.headers);
 }
 
 /** Applied to everything that leaves here, including redirects. */

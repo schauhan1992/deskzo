@@ -11,6 +11,8 @@
  *   · `new PrismaClient()` outside the files allowed to open one;
  *   · reading the install's own DATABASE_URL, AUTH_SECRET or public address directly;
  *   · trusting `x-forwarded-host` outside the one place that validates it;
+ *   · reading the caller's address (`x-forwarded-for`, `x-real-ip`) outside the one place that knows
+ *     which entry to believe;
  *   · module-level caches, counters and timers — each must be listed below as per-workspace,
  *     shared on purpose (public data), a read-only lookup, or a test override;
  *   · Next's data cache (`"use cache"`, `unstable_cache`) and a bare `after()`;
@@ -53,6 +55,9 @@ const ENV_READS: Record<string, Allowed> = {
 
 /** `x-forwarded-host` is a claim anybody can send; only src/lib/tenancy/host.ts may weigh it. */
 const FORWARDED_HOST: Record<string, Allowed> = {};
+
+/** The caller's address: its first X-Forwarded-For entry is the caller's own claim; only src/lib/client-ip.ts may read it. */
+const FORWARDED_FOR: Record<string, Allowed> = {};
 
 /** Worker processes: each must be told its workspace (WROFFY_TENANT_ID) rather than inherit the install's. */
 const SPAWNS: Record<string, Allowed> = {
@@ -135,6 +140,7 @@ const found = {
   clients: new Set<string>(),
   env: new Set<string>(),
   xfh: new Set<string>(),
+  xff: new Set<string>(),
   spawns: new Map<string, boolean>(),
   state: new Set<string>(),
   nextCache: [] as string[],
@@ -154,6 +160,7 @@ for (const { file, text, client } of files) {
   if ([...clientNames].some((name) => new RegExp(`new\\s+${name}\\s*\\(`).test(text))) found.clients.add(file);
   if (PLATFORM_ENV.test(text)) found.env.add(file);
   if (/["'`]x-forwarded-host["'`]/i.test(text) && file !== "src/lib/tenancy/host.ts") found.xfh.add(file);
+  if (/["'`]x-(forwarded-for|real-ip)["'`]/i.test(text) && file !== "src/lib/client-ip.ts") found.xff.add(file);
   if (/^\s*["']use cache["']/m.test(text) || /\bunstable_cache\b/.test(text)) found.nextCache.push(file);
   if (/import\s*\{[^}]*\bafter\b[^}]*\}\s*from\s*["']next\/server["']/.test(text) && !file.startsWith("src/lib/tenancy/")) found.after.push(file);
 
@@ -215,6 +222,7 @@ judge("new PrismaClient()", found.clients, PRISMA_CLIENTS);
 section("The install's own database, secret and address");
 judge("platform env reads", found.env, ENV_READS);
 judge("x-forwarded-host", found.xfh, FORWARDED_HOST);
+judge("x-forwarded-for / x-real-ip", found.xff, FORWARDED_FOR);
 
 section("Worker processes");
 const unscoped = [...found.spawns].filter(([, scoped]) => !scoped).map(([f]) => f);
@@ -296,7 +304,7 @@ section("Browser bundles");
 
 section("What is left, by milestone");
 const pending = new Map<string, number>();
-for (const list of [PRISMA_CLIENTS, ENV_READS, FORWARDED_HOST, SPAWNS, STATE]) {
+for (const list of [PRISMA_CLIENTS, ENV_READS, FORWARDED_HOST, FORWARDED_FOR, SPAWNS, STATE]) {
   for (const entry of Object.values(list)) if (entry.pending) pending.set(entry.pending, (pending.get(entry.pending) ?? 0) + 1);
 }
 for (const [milestone, count] of [...pending].sort()) console.log(`  ${milestone}: ${count} place${count === 1 ? "" : "s"} to convert`);

@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
+import { clientIpFrom } from "@/lib/client-ip";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { tenantKey } from "@/lib/tenancy/cache";
@@ -29,16 +30,16 @@ const TTL_MS = 60 * 60_000;
 const MIN_PASSWORD = 10;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
-async function callerIp(): Promise<string> {
-  const head = await headers();
-  return head.get("x-forwarded-for")?.split(",")[0]?.trim() || head.get("x-real-ip") || "unknown";
+/** As our own proxy saw it, or null — then asks are limited per address asked for only (src/lib/client-ip.ts). */
+async function callerIp(): Promise<string | null> {
+  return clientIpFrom(await headers());
 }
 
 export async function requestPasswordReset(input: string): Promise<{ ok: true }> {
   const email = String(input ?? "").trim().toLowerCase();
   const workspace = await tenantKey();
   const ip = await callerIp();
-  const keys = [`${workspace}|reset:${email}`, `${workspace}|reset-caller:${ip}`];
+  const keys = [`${workspace}|reset:${email}`, ...(ip ? [`${workspace}|reset-caller:${ip}`] : [])];
   if (lockoutState(keys).lockedOut || !email.includes("@")) return { ok: true };
   recordFailure(keys);
 

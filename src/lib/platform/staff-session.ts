@@ -7,6 +7,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { openForPlatform, sealForPlatform } from "@/lib/platform/kek";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { staffTwoFactorPolicy } from "@/lib/platform/settings";
+import { clientIpFrom } from "@/lib/client-ip";
 import { protocolFor, requestHost } from "@/lib/tenancy/host";
 import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/totp";
 
@@ -58,16 +59,11 @@ async function secureRequest(): Promise<boolean> {
 }
 
 /**
- * The caller's address as our own reverse proxy saw it — only when there is one (TRUST_PROXY=1), and
- * then the last X-Forwarded-For entry, the one it added: the entries before it are whatever the caller
- * chose to send. Without a trusted proxy no address is worth believing, so none is used — an
- * allowlist then refuses everybody rather than trusting a header anyone can write.
+ * The caller's address as our own reverse proxy saw it, or null without one (src/lib/client-ip.ts)
+ * — an allowlist then refuses everybody rather than trusting a header anyone can write.
  */
 async function callerIp(): Promise<string | null> {
-  if (process.env.TRUST_PROXY !== "1") return null;
-  const head = await headers();
-  const hops = (head.get("x-forwarded-for") ?? "").split(",").map((hop) => hop.trim()).filter(Boolean);
-  return hops.at(-1) || head.get("x-real-ip")?.trim() || null;
+  return clientIpFrom(await headers());
 }
 
 /** Whether the caller's address may reach the console at all. */

@@ -1,4 +1,5 @@
 import { DEVICE_COOKIE } from "@/lib/access/device-token";
+import { clientIpFrom } from "@/lib/client-ip";
 
 /**
  * What the current request says about where it came from: the address, the browser, and the
@@ -23,7 +24,7 @@ export async function requestFacts(): Promise<RequestFacts> {
     const [head, jar] = await Promise.all([headers(), cookies()]);
     return {
       inRequest: true,
-      ip: head.get("x-forwarded-for")?.split(",")[0]?.trim() || head.get("x-real-ip") || null,
+      ip: clientIpFrom(head),
       userAgent: head.get("user-agent"),
       mobileHint: head.get("sec-ch-ua-mobile"),
       deviceToken: jar.get(DEVICE_COOKIE)?.value ?? null,
