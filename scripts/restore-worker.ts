@@ -44,6 +44,9 @@ import { parseDatabaseUrl } from "../src/lib/backup/policy";
 import { controlDb } from "../src/lib/platform/control-db";
 import { forgetRegistry, tenantById } from "../src/lib/tenancy/registry";
 import { runAsTenant } from "../src/lib/tenancy/resolve";
+import { installLogLabels } from "../src/lib/tenancy/log-labels";
+
+installLogLabels();
 import type { Tenant } from "../src/lib/tenancy/state";
 import { resolveDumpTool } from "../src/lib/backup/run";
 import {

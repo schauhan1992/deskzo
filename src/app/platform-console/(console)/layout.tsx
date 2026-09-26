@@ -1,9 +1,7 @@
-import Link from "next/link";
 import { consoleSignOut } from "@/actions/platform/staff-auth";
 import { ConsoleNav } from "@/components/console/console-nav";
 import { Button } from "@/components/ui/button";
 import { consoleStaff } from "@/lib/platform/console-page";
-import { currentStaffSession } from "@/lib/platform/staff-session";
 
 /**
  * The staff console's frame, on admin. only (src/proxy.ts rewrites there into this folder and refuses
@@ -11,8 +9,6 @@ import { currentStaffSession } from "@/lib/platform/staff-session";
  */
 export default async function ConsoleLayout({ children }: LayoutProps<"/platform-console">) {
   const staff = await consoleStaff();
-  // Somebody in without an authenticator — two-factor is optional — is offered one.
-  const enrolled = (await currentStaffSession())?.enrolled ?? true;
   return (
     <div className="min-h-screen bg-surface-sunken">
       <header className="border-b border-line bg-surface">
@@ -21,14 +17,6 @@ export default async function ConsoleLayout({ children }: LayoutProps<"/platform
             <p className="text-sm font-semibold text-text">Wroffy platform console</p>
             <p className="text-xs text-muted">
               {staff.name} · {staff.role.toLowerCase()}
-              {!enrolled && (
-                <>
-                  {" · "}
-                  <Link href="/enrol" className="text-brand hover:underline">
-                    Set up two-factor
-                  </Link>
-                </>
-              )}
             </p>
           </div>
           <form action={consoleSignOut}>

@@ -6,6 +6,7 @@
  *   npm run platform:tenant -- create --slug acme --company "Acme Ltd" --owner-name "Asha" --owner-email asha@acme.com --country IN [--plan crm-starter]
  *   npm run platform:tenant -- plans <slug> crm-starter extra-seats:2      the plans it is on, with quantities
  *   npm run platform:tenant -- entitlements <slug>                          what it may use, worked out again
+ *   npm run platform:tenant -- limits                                       every workspace role's timeouts and connection limit, set again
  *   npm run platform:tenant -- suspend <slug> --reason "unpaid"
  *   npm run platform:tenant -- resume <slug>
  *   npm run platform:tenant -- deprovision <slug> [--no-backup]
@@ -23,6 +24,7 @@ import { deprovisionTenant, purgeTenant, resumeTenant, suspendTenant } from "../
 import { startProvisioning } from "../src/lib/platform/provisioning";
 import { setWorkspacePlans } from "../src/lib/platform/plans";
 import { refreshEntitlements } from "../src/lib/platform/entitlements";
+import { ROLE_LIMITS, applyRoleLimits } from "../src/lib/platform/provisioner";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -98,6 +100,16 @@ async function main() {
       console.log(`  seats: ${e.seats ?? "no limit"}   copilot tokens a month: ${e.copilotTokens ?? "no limit"}`);
       return;
     }
+    case "limits": {
+      // Workspaces made before the limits existed, the warm pool, and after changing TENANCY_* limits.
+      const roles = [
+        ...(await controlDb().tenant.findMany({ where: { dbRole: { not: null }, status: { not: "DEPROVISIONED" } }, select: { dbRole: true } })).map((t) => t.dbRole!),
+        ...(await controlDb().warmDatabase.findMany({ where: { claimedAt: null }, select: { dbRole: true } })).map((w) => w.dbRole),
+      ];
+      for (const role of roles) await applyRoleLimits(role);
+      console.log(`${roles.length} role(s): statements ${ROLE_LIMITS.statementTimeoutMs} ms, locks ${ROLE_LIMITS.lockTimeoutMs} ms, idle in a transaction ${ROLE_LIMITS.idleInTransactionMs} ms, ${ROLE_LIMITS.connections} connections.`);
+      return;
+    }
     case "suspend": {
       const t = await bySlug(target);
       await suspendTenant(t.id, ACTOR, flag("reason") ?? "held from the server");
@@ -123,7 +135,7 @@ async function main() {
       return;
     }
     default:
-      console.log("Commands: list, invite, create, plans, entitlements, suspend, resume, deprovision, purge — see the top of scripts/platform-tenant.ts.");
+      console.log("Commands: list, invite, create, plans, entitlements, limits, suspend, resume, deprovision, purge — see the top of scripts/platform-tenant.ts.");
       process.exitCode = 1;
   }
 }

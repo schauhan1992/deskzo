@@ -1,0 +1,145 @@
+{
+  "workspaces": 200,
+  "requests": 6000,
+  "concurrency": 32,
+  "templateMb": 19,
+  "copySeconds": 19,
+  "postgres": {
+    "version": "16.14",
+    "max": "100"
+  },
+  "results": [
+    {
+      "scenario": {
+        "name": "defaults",
+        "env": {
+          "TENANCY_MAX_CLIENTS": "35",
+          "TENANCY_CONNECTION_LIMIT": "2",
+          "TENANCY_IDLE_CONNECTION_S": "30"
+        },
+        "note": "35 workspace clients per process, 2 connections each, closed after 30 s unused — as shipped"
+      },
+      "result": {
+        "ops": 6000,
+        "errors": 0,
+        "errorKinds": {},
+        "ms": 104717,
+        "latency": {
+          "p50": 533.014700000007,
+          "p95": 945.3882999999987,
+          "p99": 1155.8827999999994,
+          "max": 1410.0315999999998
+        },
+        "rss": {
+          "start": 233406464,
+          "peak": 1291444224,
+          "end": 1072320512
+        },
+        "clientsOpened": 2639,
+        "peakClients": 35,
+        "peakClosing": 0,
+        "closingAtEnd": 0,
+        "workspacesTouched": 200,
+        "loop": {
+          "utilization": 0.9995392967746525,
+          "delayP99": 231.604223,
+          "delayMax": 286.785535
+        },
+        "coldMs": 47.2494999999999,
+        "warmMs": 0.9673999999999978
+      },
+      "peakPg": 56,
+      "peakAll": 70,
+      "output": ""
+    },
+    {
+      "scenario": {
+        "name": "more kept",
+        "env": {
+          "TENANCY_MAX_CLIENTS": "50",
+          "TENANCY_CONNECTION_LIMIT": "2",
+          "TENANCY_IDLE_CONNECTION_S": "30"
+        },
+        "note": "50 clients, 2 connections each"
+      },
+      "result": {
+        "ops": 6000,
+        "errors": 0,
+        "errorKinds": {},
+        "ms": 65103,
+        "latency": {
+          "p50": 316.8636999999944,
+          "p95": 613.0581999999999,
+          "p99": 865.6883000000016,
+          "max": 1771.7025
+        },
+        "rss": {
+          "start": 215207936,
+          "peak": 1354297344,
+          "end": 1354252288
+        },
+        "clientsOpened": 1462,
+        "peakClients": 50,
+        "peakClosing": 0,
+        "closingAtEnd": 0,
+        "workspacesTouched": 200,
+        "loop": {
+          "utilization": 0.9997082650685337,
+          "delayP99": 164.757503,
+          "delayMax": 220.332031
+        },
+        "coldMs": 44.61029999999994,
+        "warmMs": 1.2449000000001433
+      },
+      "peakPg": 80,
+      "peakAll": 94,
+      "output": ""
+    },
+    {
+      "scenario": {
+        "name": "all kept",
+        "env": {
+          "TENANCY_MAX_CLIENTS": "250",
+          "TENANCY_CONNECTION_LIMIT": "1",
+          "TENANCY_IDLE_CONNECTION_S": "5"
+        },
+        "note": "every workspace kept, 1 connection each, closed after 5 s unused"
+      },
+      "result": {
+        "ops": 6000,
+        "errors": 1323,
+        "errorKinds": {
+          "remaining connection slots": 1283,
+          "too many clients": 40
+        },
+        "ms": 25775,
+        "latency": {
+          "p50": 124.67189999999937,
+          "p95": 321.07990000000063,
+          "p99": 620.9196000000002,
+          "max": 1615.4714
+        },
+        "rss": {
+          "start": 215117824,
+          "peak": 1958023168,
+          "end": 1958023168
+        },
+        "clientsOpened": 200,
+        "peakClients": 200,
+        "peakClosing": 0,
+        "closingAtEnd": 0,
+        "workspacesTouched": 200,
+        "loop": {
+          "utilization": 0.999434630972458,
+          "delayP99": 109.510655,
+          "delayMax": 260.702207
+        },
+        "coldMs": 45.89460000000008,
+        "warmMs": 1.3956000000000586
+      },
+      "peakPg": 83,
+      "peakAll": 97,
+      "output": ""
+    }
+  ]
+}

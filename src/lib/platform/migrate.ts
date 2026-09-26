@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
 import path from "node:path";
+import { withoutRoleLimits } from "@/lib/platform/provisioner";
 
 /**
  * Running Prisma's migrations against one database — a new workspace's, a warm one, a restored one,
@@ -35,8 +36,22 @@ export function latestMigrationName(schema: Schema = "workspace"): string | null
   return names.at(-1) ?? null;
 }
 
-/** `prisma migrate deploy` against `databaseUrl`. Resolves with Prisma's output; rejects with its tail. */
+/**
+ * `prisma migrate deploy` against `databaseUrl`. Resolves with Prisma's output; rejects with its tail.
+ * A workspace's role has its time limits lifted while it runs (src/lib/platform/provisioner.ts).
+ */
 export function migrateDeploy(databaseUrl: string, schema: Schema = "workspace"): Promise<string> {
+  if (schema !== "workspace") return deploy(databaseUrl, schema);
+  let role: string | null = null;
+  try {
+    role = decodeURIComponent(new URL(databaseUrl).username) || null;
+  } catch {
+    role = null;
+  }
+  return withoutRoleLimits(role, () => deploy(databaseUrl, schema));
+}
+
+function deploy(databaseUrl: string, schema: Schema): Promise<string> {
   const { config, env } = CONFIG[schema];
   const cli = path.join(process.cwd(), "node_modules", "prisma", "build", "index.js");
   const args = [cli, "migrate", "deploy", ...(config ? ["--config", config] : [])];

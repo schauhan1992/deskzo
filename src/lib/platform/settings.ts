@@ -41,16 +41,18 @@ export async function secretsSet(): Promise<Record<SecretKey, boolean>> {
 }
 
 /** What staff two-factor is when an owner has never said: required in production, optional elsewhere. */
-export const staffTwoFactorDefault = (): "required" | "optional" => (process.env.NODE_ENV === "production" ? "required" : "optional");
+export const staffTwoFactorDefault = (): "required" | "off" => (process.env.NODE_ENV === "production" ? "required" : "off");
 
 /**
- * Whether every staff member must use an authenticator to reach the console (src/lib/platform/
- * staff-session.ts) — "required", or "optional": then only those who set one up are asked for it.
- * An owner chooses on the console's Staff page; until then it follows the environment.
+ * Whether staff use an authenticator to reach the console (src/lib/platform/staff-session.ts) —
+ * "required" of everyone, or "off": a password alone for everyone, owners and whoever set one up
+ * included (their authenticators are kept, for when it is required again). An owner chooses on the
+ * console's Staff page; until then it follows the environment. "optional", stored before, meant off.
  */
-export async function staffTwoFactorPolicy(): Promise<{ mode: "required" | "optional"; chosen: boolean }> {
+export async function staffTwoFactorPolicy(): Promise<{ mode: "required" | "off"; chosen: boolean }> {
   const value = await getSetting("staff.twoFactor");
-  if (value === "required" || value === "optional") return { mode: value, chosen: true };
+  if (value === "required") return { mode: "required", chosen: true };
+  if (value === "off" || value === "optional") return { mode: "off", chosen: true };
   return { mode: staffTwoFactorDefault(), chosen: false };
 }
 

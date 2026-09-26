@@ -14,15 +14,15 @@ export default async function ConsoleStaffPage() {
   return (
     <>
       <PageTitle title="Staff">
-        Everyone signs in with a password{twoFactor.mode === "required" ? " and an authenticator" : ", and an authenticator if they set one up"}. The first owner is made on the server:
+        Everyone signs in with a password{twoFactor.mode === "required" ? " and an authenticator" : " alone — two-factor is off"}. The first owner is made on the server:
         npm run platform:staff.
       </PageTitle>
-      <Section title={`Two-factor — ${twoFactor.mode === "required" ? "required for everyone" : "optional"}`}>
+      <Section title={`Two-factor — ${twoFactor.mode === "required" ? "required for everyone" : "off"}`}>
         {owner ? (
           <TwoFactorPolicyForm mode={twoFactor.mode} chosen={twoFactor.chosen} defaultMode={staffTwoFactorDefault()} />
         ) : (
           <p className="text-sm text-muted">
-            {twoFactor.mode === "required" ? "Every staff member needs an authenticator." : "An authenticator is optional; those who set one up are asked for its code."} Only an owner changes this.
+            {twoFactor.mode === "required" ? "Every staff member needs an authenticator." : "Two-factor is off: a password is enough for everyone."} Only an owner changes this.
           </p>
         )}
       </Section>
@@ -32,7 +32,7 @@ export default async function ConsoleStaffPage() {
         </Section>
       )}
       <Section title={`${members.filter((m) => m.active).length} active`}>
-        <DataTable head={owner ? ["Name", "Role", "Two-factor", "Last sign-in", "Signed in now", ""] : ["Name", "Role", "Two-factor", "Last sign-in", "Signed in now"]}>
+        <DataTable head={owner ? ["Name", "Role", "Authenticator", "Last sign-in", "Signed in now", ""] : ["Name", "Role", "Authenticator", "Last sign-in", "Signed in now"]}>
           {members.map((m) => (
             <tr key={m.id} className={m.active ? undefined : "opacity-60"}>
               <Cell>
@@ -42,7 +42,7 @@ export default async function ConsoleStaffPage() {
                 {!m.active && <span className="block text-xs text-muted">switched off</span>}
               </Cell>
               <Cell>{owner && m.active && m.id !== staff.id ? <StaffRoleSelect userId={m.id} role={m.role} /> : m.role.toLowerCase()}</Cell>
-              <Cell>{m.totpEnabledAt ? "on" : <span className="text-warning">not yet</span>}</Cell>
+              <Cell>{m.totpEnabledAt ? "set up" : <span className={twoFactor.mode === "required" ? "text-warning" : "text-muted"}>not yet</span>}</Cell>
               <Cell className="whitespace-nowrap text-muted">{when(m.lastSignInAt)}</Cell>
               <Cell>{m.sessions.length}</Cell>
               {owner && (

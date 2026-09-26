@@ -7,7 +7,7 @@
  *   npm run platform:staff -- role <email> <OWNER|ADMIN|SUPPORT|BILLING|READONLY>
  *   npm run platform:staff -- reset-2fa <email>     a lost phone: they enrol again at their next sign-in
  *   npm run platform:staff -- deactivate <email>
- *   npm run platform:staff -- two-factor <required|optional>   whether everybody must use an authenticator
+ *   npm run platform:staff -- two-factor <required|off>   whether everybody must use an authenticator
  *
  * No password is ever given here: `create` and `link` print a link to choose one (it is emailed too),
  * and two-factor is enrolled at the first sign-in. The last active owner cannot be demoted or switched
@@ -90,9 +90,9 @@ async function main() {
     }
     case "two-factor": {
       // The same switch as the console's Staff page — here for when no owner can reach the console.
-      if (target !== "required" && target !== "optional") {
+      if (target !== "required" && target !== "off") {
         const now = await staffTwoFactorPolicy();
-        console.log(`Two-factor is ${now.mode}${now.chosen ? "" : " (this environment's default — nobody has chosen)"}. Set it with: two-factor required | optional`);
+        console.log(`Two-factor is ${now.mode}${now.chosen ? "" : " (this environment's default — nobody has chosen)"}. Set it with: two-factor required | off`);
         return;
       }
       await setSetting("staff.twoFactor", target, "platform:staff");

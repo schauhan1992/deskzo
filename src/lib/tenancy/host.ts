@@ -14,8 +14,9 @@
  * to be believed. So it is weighed only when TRUST_PROXY=1 says the edge sets it. Without that, a
  * forwarded host naming a *different* workspace from the real one is an attempt to be answered as
  * another customer, and is refused outright (421) rather than quietly ignored — code that read the
- * header directly would otherwise have been fooled. This file is the only one allowed to read it
- * (check:tenancy).
+ * header directly would otherwise have been fooled. Behind the proxy too, the two naming different
+ * workspaces is refused: the proxy did not write that header. This file is the only one allowed to
+ * read it (check:tenancy).
  */
 
 export const PLATFORM_DOMAIN = (process.env.PLATFORM_DOMAIN ?? "localhost").trim().toLowerCase().replace(/\.$/, "");
@@ -78,15 +79,26 @@ export const HOST_MISMATCH = Symbol("host-mismatch");
 export function requestHost(headers: Headers): string | null | typeof HOST_MISMATCH {
   const host = normaliseHost(headers.get("host"));
   const forwarded = normaliseHost(headers.get("x-forwarded-host"));
-  if (process.env.TRUST_PROXY === "1") return forwarded ?? host;
+  if (process.env.TRUST_PROXY === "1") {
+    // Behind the proxy the plain Host is its own upstream address, or the same host passed on. Both
+    // naming *different* places on the platform means the forwarded one was not the proxy's — one that
+    // passes a caller's header through (AWS's load balancer sets none of its own) — so it is refused
+    // as without a proxy. A custom domain cannot be told from an upstream name, so it is believed.
+    if (forwarded && host && forwarded !== host) {
+      const a = classifyHost(forwarded);
+      const b = classifyHost(host);
+      if (onPlatform(a) && onPlatform(b) && !sameSite(a, b)) return HOST_MISMATCH;
+    }
+    return forwarded ?? host;
+  }
   if (forwarded && host && forwarded !== host) {
-    const a = classifyHost(forwarded);
-    const b = classifyHost(host);
-    const same = a.kind === b.kind && (a.kind !== "tenant" || (b.kind === "tenant" && a.slug === b.slug));
-    if (!same) return HOST_MISMATCH;
+    if (!sameSite(classifyHost(forwarded), classifyHost(host))) return HOST_MISMATCH;
   }
   return host;
 }
+
+const onPlatform = (h: HostKind) => h.kind === "tenant" || h.kind === "console" || h.kind === "root";
+const sameSite = (a: HostKind, b: HostKind) => a.kind === b.kind && (a.kind !== "tenant" || (b.kind === "tenant" && a.slug === b.slug));
 
 /** http for local development hosts, https everywhere else. */
 export function protocolFor(host: string): "http" | "https" {

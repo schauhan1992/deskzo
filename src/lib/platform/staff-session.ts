@@ -19,9 +19,10 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  *     every request — thirty minutes idle, twelve hours at most, revocable from the console.
  *   · Two-factor, when an owner requires it (src/lib/platform/settings.ts — required in production
  *     unless they say otherwise): a first sign-in opens only the enrolment page, and a session is
- *     not a console session until its second factor is passed (`mfaAt`). When it is optional,
- *     somebody without an authenticator signs in with their password alone; somebody with one is
- *     still asked for its code. The policy is read on every request, so changing it applies at once.
+ *     not a console session until its second factor is passed (`mfaAt`). When it is off, everybody
+ *     signs in with their password alone — owners, and whoever set up an authenticator, included;
+ *     the authenticators are kept for when it is required again, and a session begun while it was
+ *     off must sign in again then. The policy is read on every request, so a change applies at once.
  *   · Failed attempts lock out by address and by caller, in a namespace of their own ("console|").
  *   · PLATFORM_CONSOLE_IP_ALLOWLIST (comma-separated CIDRs), when set, refuses everywhere else. It
  *     needs TRUST_PROXY=1: the caller's address is only known from our own reverse proxy (callerIp).
@@ -38,7 +39,7 @@ export type Staff = { id: string; email: string; name: string; role: StaffRole }
 export type StaffSession = {
   staff: Staff;
   sessionId: string;
-  /** Through the second factor — or not asked for one: optional, and no authenticator set up. */
+  /** Through the second factor — or not asked for one: two-factor is off. */
   mfaDone: boolean;
   enrolled: boolean;
   twoFactorRequired: boolean;
@@ -101,7 +102,7 @@ export async function currentStaffSession(): Promise<StaffSession | null> {
   return {
     staff: { id: user.id, email: user.email, name: user.name, role: user.role },
     sessionId: session.id,
-    mfaDone: !!session.mfaAt || (!required && !user.totpEnabledAt),
+    mfaDone: !!session.mfaAt || !required,
     enrolled: !!user.totpEnabledAt,
     twoFactorRequired: required,
   };
@@ -134,8 +135,9 @@ export async function signInStaff(input: { email: string; password: string; code
   // Compared either way, so a wrong address and a wrong password take the same time.
   const passwordOk = await bcrypt.compare(String(input.password ?? ""), user?.passwordHash ?? NOBODY_HASH);
   if (!user || !user.active || !passwordOk) return refuse();
+  const required = (await staffTwoFactorPolicy()).mode === "required";
   let mfaAt: Date | null = null;
-  if (user.totpEnabledAt) {
+  if (required && user.totpEnabledAt) {
     const code = String(input.code ?? "").trim();
     if (!code) return { ok: false, error: "Enter the code from your authenticator.", needsCode: true };
     if (!user.totpSecretCipher || !verifyTotpCode(openForPlatform("staff-totp", user.totpSecretCipher), code)) return refuse(true);
@@ -153,7 +155,7 @@ export async function signInStaff(input: { email: string; password: string; code
   await controlDb().platformAuditLog.create({ data: { actorKind: "STAFF", actor: user.id, action: "staff.sign-in", detail: { twoFactor: !!mfaAt } } });
   (await cookies()).set(await cookieName(), token, { httpOnly: true, sameSite: "strict", path: "/", secure: await secureRequest(), maxAge: MAX_MS / 1000 });
   // Sent to enrol only where the policy asks for it; otherwise straight in.
-  return { ok: true, enrol: !mfaAt && (await staffTwoFactorPolicy()).mode === "required" };
+  return { ok: true, enrol: required && !mfaAt };
 }
 
 /** The enrolment page: a secret for this staff member's authenticator, made once and kept sealed. */

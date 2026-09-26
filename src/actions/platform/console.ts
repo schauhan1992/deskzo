@@ -265,9 +265,9 @@ export async function consoleSaveGatewayKeys(input: { values: Partial<Record<Sec
  * Whether every staff member must use an authenticator. Owners only, and recorded: turning it off
  * lets anybody with a staff password into the console.
  */
-export async function consoleSetStaffTwoFactor(mode: "required" | "optional") {
+export async function consoleSetStaffTwoFactor(mode: "required" | "off") {
   return asStaff(["OWNER"], async (staff) => {
-    if (mode !== "required" && mode !== "optional") throw new StaffChangeRefused("Required or optional.");
+    if (mode !== "required" && mode !== "off") throw new StaffChangeRefused("Required or off.");
     await setSetting("staff.twoFactor", mode, staff.id);
     await audit(staff, "staff.two-factor.policy", { mode });
     return null;

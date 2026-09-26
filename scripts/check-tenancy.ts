@@ -95,6 +95,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/finance/exchange-rate.ts:cache": { reason: "shared: public exchange rates" },
   "src/lib/platform/support.ts:grantCache": CALLER_KEYED("keyed by the workspace's id, which every caller passes"),
   "src/lib/platform/kek.ts:cached": { reason: "shared: the platform key, derived once from PLATFORM_MASTER_KEY" },
+  "src/lib/tenancy/log-labels.ts:requestStore": { reason: "shared: a reference to Next's own request store, looked up once — it holds no workspace's data" },
 
   "src/lib/access/lock.ts:testLock": { reason: "test override, set only by check scripts" },
   "src/lib/copilot/providers/index.ts:override": { reason: "test override, set only by check scripts" },

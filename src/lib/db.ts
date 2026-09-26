@@ -1,6 +1,6 @@
 import { SUPPORT_READONLY_ROLE } from "@/lib/roles";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { clientFor, closeAllClients } from "@/lib/tenancy/clients";
+import { clientFor, closeAllClients, withClient } from "@/lib/tenancy/clients";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
 /**
@@ -64,12 +64,14 @@ function withoutSupport(model: string, method: string, args: unknown[]): unknown
 }
 
 function forward(path: [string] | [string, string]) {
-  return async (...args: unknown[]) => {
-    const client = (await getTenantDb()) as unknown as Record<string, Record<string, Callable> & Callable>;
-    if (path.length === 1) return (client[path[0]] as Callable).apply(client, args);
-    const delegate = client[path[0]];
-    return (delegate[path[1]] as Callable).apply(delegate, withoutSupport(path[0], path[1], args));
-  };
+  return async (...args: unknown[]) =>
+    // Counted while it runs, so the client is not closed under it (src/lib/tenancy/clients.ts).
+    withClient(await currentTenant(), async (prisma) => {
+      const client = prisma as unknown as Record<string, Record<string, Callable> & Callable>;
+      if (path.length === 1) return await (client[path[0]] as Callable).apply(client, args);
+      const delegate = client[path[0]];
+      return await (delegate[path[1]] as Callable).apply(delegate, withoutSupport(path[0], path[1], args));
+    });
 }
 
 export const db = new Proxy({} as TenantDb, {

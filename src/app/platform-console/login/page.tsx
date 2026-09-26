@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ConsoleSignInForm } from "@/components/console/console-auth-forms";
 import { consoleAddressAllowed, currentStaffSession } from "@/lib/platform/staff-session";
 
-/** Staff sign-in. Two-factor is not optional: somebody without it enrols straight after (/enrol). */
+/** Staff sign-in. Where two-factor is required, somebody without an authenticator enrols straight after (/enrol). */
 export default async function ConsoleLoginPage() {
   const session = await currentStaffSession();
   if (session?.mfaDone) redirect("/");

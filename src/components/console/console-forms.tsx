@@ -241,9 +241,9 @@ export function NewSetupLink({ userId }: { userId: string }) {
 
 /**
  * Whether staff must use an authenticator — an owner's choice (src/lib/platform/settings.ts). Until it
- * is made, it follows the environment: required in production, optional in development.
+ * is made, it follows the environment: required in production, off in development.
  */
-export function TwoFactorPolicyForm({ mode, chosen, defaultMode }: { mode: "required" | "optional"; chosen: boolean; defaultMode: "required" | "optional" }) {
+export function TwoFactorPolicyForm({ mode, chosen, defaultMode }: { mode: "required" | "off"; chosen: boolean; defaultMode: "required" | "off" }) {
   const router = useRouter();
   const [value, setValue] = useState(mode);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -253,7 +253,7 @@ export function TwoFactorPolicyForm({ mode, chosen, defaultMode }: { mode: "requ
       className="space-y-3 text-sm"
       onSubmit={(e) => {
         e.preventDefault();
-        if (value === "optional" && !window.confirm("Make two-factor optional? Staff without an authenticator will reach the console with their password alone.")) return;
+        if (value === "off" && !window.confirm("Turn two-factor off? Everyone, owners included, will reach the console with their password alone.")) return;
         setMessage(null);
         startTransition(async () => {
           const r = await consoleSetStaffTwoFactor(value);
@@ -270,10 +270,10 @@ export function TwoFactorPolicyForm({ mode, chosen, defaultMode }: { mode: "requ
         </span>
       </label>
       <label className="flex items-start gap-2 text-text">
-        <input type="radio" name="two-factor" className="mt-1" checked={value === "optional"} onChange={() => setValue("optional")} />
+        <input type="radio" name="two-factor" className="mt-1" checked={value === "off"} onChange={() => setValue("off")} />
         <span>
-          Optional
-          <span className="block text-xs text-muted">A password is enough for anybody without an authenticator; anybody who set one up is still asked for its code.</span>
+          Off
+          <span className="block text-xs text-muted">A password is enough for everyone, owners included. Authenticators already set up are kept, and asked for again if it is required.</span>
         </span>
       </label>
       {!chosen && <p className="text-xs text-muted">Not chosen yet — following this environment&apos;s default: {defaultMode}.</p>}

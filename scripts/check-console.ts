@@ -179,8 +179,8 @@ async function main() {
     const mail: { to: string; subject: string; text: string }[] = [];
     mailer.setTestPlatformMailer(async (m) => void mail.push(m));
     const unchosen = await settings.staffTwoFactorPolicy();
-    ok("until an owner chooses, staff two-factor follows the environment — optional outside production", unchosen.mode === "optional" && !unchosen.chosen);
-    // What follows is about the console with two-factor required; optional has a section of its own.
+    ok("until an owner chooses, staff two-factor follows the environment — off outside production", unchosen.mode === "off" && !unchosen.chosen);
+    // What follows is about the console with two-factor required; off has a section of its own.
     await settings.setSetting("staff.twoFactor", "required", "check");
 
     /** Signed in as this staff member, two-factor passed — for the role checks, which are not about signing in. */
@@ -320,22 +320,20 @@ async function main() {
     const reenrol = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
     ok("  (a password alone now, to enrol)", reenrol.ok && reenrol.enrol);
 
-    section("Two-factor, optional");
+    section("Two-factor off");
     await actAs(adminId);
-    ok("only an owner makes it optional", !(await consoleActions.consoleSetStaffTwoFactor("optional")).ok);
+    ok("only an owner turns it off", !(await consoleActions.consoleSetStaffTwoFactor("off")).ok);
     await actAs(ownerRow.id);
-    ok("an owner does", (await consoleActions.consoleSetStaffTwoFactor("optional")).ok && (await settings.staffTwoFactorPolicy()).mode === "optional");
-    jar.delete(COOKIE);
+    const kept = await sessions.enrolmentChallenge();
+    ok("(the owner has an authenticator, set up while it was required)", !!kept && (await sessions.finishEnrolment(authenticator.generate(kept.secret))).ok);
+    ok("an owner does", (await consoleActions.consoleSetStaffTwoFactor("off")).ok && (await settings.staffTwoFactorPolicy()).mode === "off");
+    ok("  and it answers \"required or off\" to anything else", !(await consoleActions.consoleSetStaffTwoFactor("sometimes" as "off")).ok);
+    await sessions.signOutStaff();
     const passwordOnly = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
     const through = await sessions.currentStaffSession();
-    ok("without an authenticator, a password alone signs in — straight to the console", passwordOnly.ok && !passwordOnly.enrol && !!through?.mfaDone && !through.enrolled);
+    ok("an owner with an authenticator signs in on a password alone — not asked for its code", passwordOnly.ok && !passwordOnly.enrol && !!through?.mfaDone && through.enrolled);
     ok("  its pages and actions answer", (await consolePage.consoleStaff()).email === ownerEmail && (await thrown(() => sessions.requireStaff())) === "");
-    const voluntary = await sessions.enrolmentChallenge();
-    ok("  and it may still set one up", !!voluntary && (await sessions.finishEnrolment(authenticator.generate(voluntary.secret))).ok);
-    await sessions.signOutStaff();
-    const stillAsked = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
-    ok("whoever has an authenticator is still asked for its code", !stillAsked.ok && stillAsked.needsCode === true);
-    ok("  and signs in with it", (await sessions.signInStaff({ email: ownerEmail, password: PASSWORD, code: authenticator.generate(voluntary!.secret) })).ok);
+    ok("  and its authenticator is kept", !!(await control.platformUser.findUniqueOrThrow({ where: { id: ownerRow.id } })).totpEnabledAt);
     const ownerToken = jar.get(COOKIE)!;
     const adminLink = await staffLib.issuePasswordSetup(adminId);
     await staffLib.completePasswordSetup(tokenOf(adminLink), PASSWORD);
@@ -345,8 +343,12 @@ async function main() {
     ok("  (an admin without one, in on a password)", adminIn.ok && !!(await sessions.currentStaffSession())?.mfaDone);
     jar.set(COOKIE, ownerToken);
     ok("required again, by an owner", (await consoleActions.consoleSetStaffTwoFactor("required")).ok);
+    ok("  the owner's own password-only session stops at once", (await thrown(() => sessions.requireStaff())) !== "");
+    jar.delete(COOKIE);
+    const askedAgain = await sessions.signInStaff({ email: ownerEmail, password: PASSWORD });
+    ok("  and the kept authenticator is asked for again — no new enrolment", !askedAgain.ok && askedAgain.needsCode === true && (await sessions.signInStaff({ email: ownerEmail, password: PASSWORD, code: authenticator.generate(kept!.secret) })).ok);
     jar.set(COOKIE, adminToken);
-    ok("  a session without the second factor stops at once — sent to set one up", (await thrown(() => sessions.requireStaff())) !== "" && (await thrown(() => consolePage.consoleStaff())) === "redirect /enrol");
+    ok("  an admin's session without one stops too — sent to set one up", (await thrown(() => sessions.requireStaff())) !== "" && (await thrown(() => consolePage.consoleStaff())) === "redirect /enrol");
     ok("every change of the policy is in the audit log", (await control.platformAuditLog.count({ where: { action: "staff.two-factor.policy" } })) === 2);
 
     section("A workspace to support");

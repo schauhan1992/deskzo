@@ -16,6 +16,10 @@ import "dotenv/config";
 import { closeControlDb } from "../src/lib/platform/control-db";
 import { withPlatformLease } from "../src/lib/platform/fanout";
 import { fillWarmPool, runNextJob } from "../src/lib/platform/provisioning";
+import { installLogLabels } from "../src/lib/tenancy/log-labels";
+
+// Each line it writes names the workspace it was working on.
+installLogLabels();
 
 const once = process.argv.includes("--once");
 const POLL_MS = 2_000;

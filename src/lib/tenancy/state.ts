@@ -34,7 +34,19 @@ export type Tenant = {
   holdReason: "STAFF" | "BILLING" | null;
 };
 
-export type ClientEntry = { client: PrismaClient; url: string; lastUsed: number };
+export type ClientEntry = {
+  client: PrismaClient;
+  url: string;
+  lastUsed: number;
+  /** Queries (or transactions) running on it now, through `db`. */
+  inFlight: number;
+  /** Handed out whole (getTenantDb) — not closed before this, whatever inFlight says. */
+  heldUntil: number;
+  /** Evicted: closed as soon as nothing is running on it. */
+  retired: boolean;
+  closed: boolean;
+  backstop?: ReturnType<typeof setTimeout>;
+};
 
 type TenancyState = {
   /** The workspace a piece of work is for, where there is no request to say so. */
@@ -43,6 +55,8 @@ type TenancyState = {
   registry: Map<string, { tenant: Tenant | null; at: number }>;
   /** One database client per workspace, least recently used first out. */
   clients: Map<string, ClientEntry>;
+  /** Clients made and closed since the process started — for the load test and diagnostics. */
+  clientCounts: { opened: number; closed: number };
   /** Each workspace's opened key bundle, briefly (src/lib/tenancy/keys.ts). */
   keys: Map<string, { cipher: string | null; keys: unknown; at: number }>;
 };
@@ -58,8 +72,9 @@ type TenancyState = {
 export function tenancyState(): TenancyState {
   const g = globalThis as { [key: symbol]: TenancyState | undefined };
   const key = Symbol.for("wroffy.tenancy");
-  if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), clients: new Map(), keys: new Map() };
+  if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), clients: new Map(), clientCounts: { opened: 0, closed: 0 }, keys: new Map() };
   // A process that loaded an older copy of this module (a dev server across a hot reload).
   g[key]!.keys ??= new Map();
+  g[key]!.clientCounts ??= { opened: 0, closed: 0 };
   return g[key]!;
 }
