@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { dateRangeFilter } from "@/lib/utils";
 import { pageSlice } from "@/lib/pagination";
@@ -25,7 +25,7 @@ async function assertValidAssignee(userId: string) {
 }
 
 export async function createTask(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("tasks");
   const parsed = createTaskSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -66,7 +66,7 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function updateTask(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("tasks");
   const parsed = updateTaskSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -109,7 +109,7 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
-  await requireUser();
+  await requireModuleUser("tasks");
   const task = await db.task.findUnique({ where: { id } });
   if (!task) {
     return { ok: false, error: "Task not found." };
@@ -126,7 +126,7 @@ export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
 }
 
 export async function deleteTask(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("tasks");
   const task = await db.task.findUnique({ where: { id } });
   if (!task) {
     return { ok: false, error: "Task not found." };
@@ -194,7 +194,7 @@ export type RailTask = {
  * panel is a reminder and not a backlog — somebody with two hundred open tasks needs the page.
  */
 export async function myOpenTasks(): Promise<RailTask[]> {
-  const user = await requireUser();
+  const user = await requireModuleUser("tasks");
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -216,7 +216,7 @@ export async function myOpenTasks(): Promise<RailTask[]> {
 }
 
 export async function listTasks(params?: TaskListParams) {
-  await requireUser();
+  await requireModuleUser("tasks");
   return db.task.findMany({
     where: taskListWhere(params),
     orderBy: [{ done: "asc" }, { dueDate: "asc" }],
@@ -225,7 +225,7 @@ export async function listTasks(params?: TaskListParams) {
 }
 
 export async function listTasksPaged(params: TaskListParams & { page: number; pageSize: number }) {
-  await requireUser();
+  await requireModuleUser("tasks");
   const where = taskListWhere(params);
   const [rows, total] = await Promise.all([
     db.task.findMany({
@@ -241,7 +241,7 @@ export async function listTasksPaged(params: TaskListParams & { page: number; pa
 
 /** Open and overdue counts across the whole filtered set, so the header holds steady while paging. */
 export async function countTasks(params?: TaskListParams) {
-  await requireUser();
+  await requireModuleUser("tasks");
   const where = taskListWhere(params);
   const [open, overdue] = await Promise.all([
     db.task.count({ where: { ...where, done: false } }),

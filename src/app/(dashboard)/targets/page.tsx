@@ -8,6 +8,7 @@ import { TargetCard } from "@/components/targets/target-card";
 import { SetTargetsDialog } from "@/components/targets/set-targets-dialog";
 import { METRICS, scopeLabels } from "@/lib/targets/metrics";
 import type { TargetScope } from "@prisma/client";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function TargetsPage({
   searchParams,
@@ -22,8 +23,9 @@ export default async function TargetsPage({
     listTargets(params),
     targetCapabilities(),
     targetOptions(),
-    // Empty for anybody who may not manage incentives, which is what hides the picker.
-    listSchemes(),
+    // Empty for anybody who may not manage incentives, which is what hides the picker — and for a
+    // workspace whose plan has no incentives.
+    isModuleEntitled("incentives").then((has) => (has ? listSchemes() : [])),
   ]);
 
   // Counted from the measured figures, so the summary can't disagree with the cards below it.

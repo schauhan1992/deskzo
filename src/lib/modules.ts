@@ -17,6 +17,8 @@ export type NavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
+  /** Shown only to a workspace in one of these countries (ISO 3166-1 alpha-2) — see `countries` below. */
+  countries?: readonly string[];
   /**
    * Hidden unless the viewer holds this permission.
    *
@@ -45,7 +47,30 @@ export type ModuleDefinition = {
    * The sidebar hides the module's links to people without it. See the `*.view` permissions.
    */
   viewPermission?: PermissionKey;
+  /**
+   * Modules this one cannot work without: a plan that includes it includes these too
+   * (src/lib/platform/entitlements.ts). An order is for items; a renewal renews an order.
+   */
+  requires?: readonly string[];
+  /** In every plan, whatever it lists: the basics every workspace has, like its own notifications. */
+  inEveryPlan?: boolean;
+  /**
+   * Sold only to workspaces in these countries (ISO 3166-1 alpha-2) — India's tax law is built into
+   * it, and no other country's is yet. Left out elsewhere whatever the plan says.
+   */
+  countries?: readonly string[];
 };
+
+/**
+ * Pieces of a module that only make sense in some countries: the government's e-invoice and e-way
+ * bill systems are India's. The rest of the module works anywhere.
+ */
+export const COUNTRY_FEATURES = {
+  einvoice: ["IN"],
+  eway: ["IN"],
+} as const satisfies Record<string, readonly string[]>;
+
+export type CountryFeature = keyof typeof COUNTRY_FEATURES;
 
 export const MODULE_REGISTRY: ModuleDefinition[] = [
   {
@@ -78,6 +103,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "orders",
+    requires: ["items"],
     viewPermission: "orders.view",
     label: "Orders",
     description:
@@ -87,6 +113,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "sales_documents",
+    requires: ["items"],
     viewPermission: "documents.view",
     label: "Sales Documents",
     description:
@@ -100,11 +127,12 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       // With the other trade documents, because it is one. E-way bills directly below cover
       // invoices, credit notes *and* challans, so filing the challan elsewhere split a set of three.
       { href: "/sales/challans", label: "Delivery Challans", icon: PackageCheck },
-      { href: "/sales/eway-bills", label: "E-Way Bills", icon: Truck },
+      { href: "/sales/eway-bills", label: "E-Way Bills", icon: Truck, countries: COUNTRY_FEATURES.eway },
     ],
   },
   {
     key: "purchase_documents",
+    requires: ["items"],
     viewPermission: "documents.view",
     label: "Purchase Documents",
     description: "Purchase orders raised on vendors, and the bills they send back against them.",
@@ -117,6 +145,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "renewals",
+    requires: ["orders"],
     viewPermission: "orders.view",
     label: "Renewals",
     description:
@@ -134,6 +163,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "receivables",
+    requires: ["sales_documents", "payments"],
     viewPermission: "payments.view",
     label: "Receivables",
     description:
@@ -147,6 +177,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "payables",
+    requires: ["purchase_documents"],
     label: "Payables",
     description:
       "What we owe vendors, aged from each bill's due date — bills settled by payments out, with a statement of account per vendor.",
@@ -155,6 +186,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "accounting",
+    countries: ["IN"],
     label: "Accounting",
     description:
       "The general ledger: a chart of accounts, double-entry postings raised automatically as invoices, bills, payments, expense claims and payroll are recorded, hand-written journal entries, and the statements built from them — trial balance, P&L, balance sheet and cash flow. Plus the bits that keep books defensible: bank reconciliation, a fixed asset register with depreciation, GST and TDS returns, and closing a period so a filed figure can't change afterwards.",
@@ -215,6 +247,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "incentives",
+    requires: ["targets"],
     label: "Incentives",
     description:
       "What hitting a target is worth: schemes with thresholds, bands and caps, worked out against what was actually achieved and paid through payroll. What somebody was paid is frozen at the moment it is worked out — editing a scheme next quarter can't rewrite what went out last quarter.",
@@ -289,6 +322,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "payroll",
+    requires: ["hr"],
+    countries: ["IN"],
     label: "Payroll",
     description:
       "Salary structures, the monthly payroll run, and payslips — with PF, ESI and professional tax computed from the Indian rules. Needs the People module for the attendance and leave that drive loss of pay.",
@@ -344,6 +379,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "notifications",
+    inEveryPlan: true,
     label: "Notifications",
     description:
       "Everything the app has told you, past the twenty the bell holds — searchable, archivable, and with a switch per kind so people can turn down what they do not need rather than learning to ignore the bell entirely.",
@@ -352,6 +388,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "tasks",
+    inEveryPlan: true,
     label: "Tasks",
     description: "Assignable to-dos, optionally linked to a company, lead, or ticket — with due dates and reminders.",
     navGroup: "My work",
@@ -359,6 +396,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "notes",
+    inEveryPlan: true,
     label: "Sticky Notes",
     description:
       "Quick notes that do not warrant a task — kept to yourself, shared with your reporting line, or stuck to a company, lead or ticket so the context lives with the record rather than in somebody's head.",
@@ -367,6 +405,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "marketing",
+    requires: ["workspace"],
     label: "Marketing Automation",
     description:
       "Campaigns and triggered journeys built from what the ERP already knows — a renewal coming up, a warranty running out, more staff than seats. Every send is checked against consent and suppression first, and a step can hand one of ours a task instead of mailing the customer. A reseller's end customers are never reachable from here.",
@@ -464,6 +503,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     key: "reports",
+    requires: ["workspace"],
     label: "Reports",
     description:
       "Any figure in the system broken down by anything else — month, salesperson, team, brand, product family, category, tag, lead source, industry, city. One screen rather than a list of fixed reports, because the useful question is always the one nobody wrote a page for.",

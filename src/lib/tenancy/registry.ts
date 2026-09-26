@@ -1,3 +1,4 @@
+import { UNRESTRICTED, parseEntitlements } from "@/lib/entitlements";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { openForTenant } from "@/lib/platform/kek";
 import { PLATFORM_DOMAIN, classifyHost, legacyHosts, normaliseHost, type HostKind } from "@/lib/tenancy/host";
@@ -56,6 +57,9 @@ function environmentDefault(): Tenant | null {
     source: "env",
     isDefault: true,
     keyBundleCipher: null,
+    country: "IN",
+    // The installation as it was before plans: nothing it had is taken away.
+    entitlements: UNRESTRICTED,
   };
 }
 
@@ -65,7 +69,7 @@ function environmentExtras(): Tenant[] {
     const m = key.match(/^TENANT_DB_([A-Z0-9_]+)$/);
     if (!m || !url) continue;
     const slug = m[1].toLowerCase().replace(/_/g, "-");
-    tenants.push({ id: slug, slug, name: slug, status: "ACTIVE", dbUrl: url, primaryHost: subdomainHost(slug), hosts: [subdomainHost(slug)], source: "env", isDefault: false, keyBundleCipher: null });
+    tenants.push({ id: slug, slug, name: slug, status: "ACTIVE", dbUrl: url, primaryHost: subdomainHost(slug), hosts: [subdomainHost(slug)], source: "env", isDefault: false, keyBundleCipher: null, country: "IN", entitlements: UNRESTRICTED });
   }
   return tenants;
 }
@@ -80,6 +84,8 @@ type ControlRow = {
   isDefault: boolean;
   dbUrlCipher: string | null;
   keyBundleCipher: string;
+  country: string;
+  entitlements: unknown;
   domains: { host: string; isPrimary: boolean }[];
 };
 
@@ -91,6 +97,8 @@ const SELECT = {
   isDefault: true,
   dbUrlCipher: true,
   keyBundleCipher: true,
+  country: true,
+  entitlements: true,
   domains: { select: { host: true, isPrimary: true }, orderBy: { createdAt: "asc" as const } },
 };
 
@@ -109,6 +117,9 @@ function fromControl(row: ControlRow): Tenant {
     source: "control",
     isDefault: row.isDefault,
     keyBundleCipher: row.keyBundleCipher,
+    country: row.country,
+    // Malformed or never worked out: the core only.
+    entitlements: parseEntitlements(row.entitlements),
   };
 }
 

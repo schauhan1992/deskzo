@@ -94,7 +94,9 @@ function main() {
   section("Every module named is a real module");
 
   for (const item of SETTINGS_ITEMS.filter((i) => i.module)) {
-    ok(`${item.key} → ${item.module}`, moduleKeys.has(item.module!));
+    // One module, or several of which any will do.
+    const named: readonly string[] = typeof item.module === "string" ? [item.module] : item.module!;
+    ok(`${item.key} → ${named.join(" | ")}`, named.length > 0 && named.every((key) => moduleKeys.has(key)));
   }
 
   section("Every destination exists");

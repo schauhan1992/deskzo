@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type ExpenseCategory, type ExpenseStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { rolePermits } from "@/lib/authz/role-permission";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { dateRangeFilter } from "@/lib/utils";
@@ -142,7 +142,7 @@ const expenseListInclude = {
 } as const;
 
 export async function listExpensesPaged(params: ExpenseListParams & { page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const where = await expenseListWhere(user.id, params);
   const [rows, total] = await Promise.all([
     db.expense.findMany({
@@ -162,7 +162,7 @@ export async function listExpensesPaged(params: ExpenseListParams & { page: numb
  * which a flat total can't tell you because company-card spend was never out of anyone's pocket.
  */
 export async function expenseSummary(params?: ExpenseListParams) {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const where = await expenseListWhere(user.id, params);
 
   const [all, byStatus, payable, pendingMine] = await Promise.all([
@@ -192,7 +192,7 @@ export async function expenseSummary(params?: ExpenseListParams) {
 
 /** Spend per category over the filtered set — the breakdown the Expenses page leads with. */
 export async function expenseByCategory(params?: ExpenseListParams) {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const where = await expenseListWhere(user.id, params);
   const rows = await db.expense.groupBy({
     by: ["category"],
@@ -206,7 +206,7 @@ export async function expenseByCategory(params?: ExpenseListParams) {
 }
 
 export async function getExpense(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const expense = await db.expense.findUnique({ where: { id }, include: expenseListInclude });
   if (!expense) return null;
   const allowed = await visibleUserIds(user.id);
@@ -217,7 +217,7 @@ export async function getExpense(id: string) {
 }
 
 export async function createExpense(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const parsed = createExpenseSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -289,7 +289,7 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
 }
 
 export async function updateExpense(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const parsed = updateExpenseSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -329,7 +329,7 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
 
 /** Hands a draft (or a rejected claim being re-tried) to the manager's queue. */
 export async function submitExpense(id: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const expense = await db.expense.findUnique({
     where: { id },
     select: { userId: true, status: true, category: true, amount: true, expenseSeq: true },
@@ -360,7 +360,7 @@ export async function submitExpense(id: string): Promise<ActionResult<{ id: stri
 }
 
 export async function decideExpense(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const parsed = decideExpenseSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -437,7 +437,7 @@ export async function decideExpense(input: unknown): Promise<ActionResult<{ id: 
  * batch payment run, and forcing it one row at a time would just mean the reference gets retyped.
  */
 export async function reimburseExpenses(input: unknown): Promise<ActionResult<{ count: number; skipped: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   if (!(await hasEffectivePermission(user.id, "expenses.reimburse"))) {
     return { ok: false, error: "You don't have permission to mark expenses reimbursed." };
   }
@@ -485,7 +485,7 @@ export async function reimburseExpenses(input: unknown): Promise<ActionResult<{ 
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const expense = await db.expense.findUnique({ where: { id }, select: { userId: true, status: true, visitId: true } });
   if (!expense) return { ok: false, error: "That expense no longer exists." };
   if (expense.userId !== user.id) return { ok: false, error: "You can only delete your own claims." };
@@ -501,7 +501,7 @@ export async function deleteExpense(id: string): Promise<ActionResult<{ id: stri
 
 /** The people whose names can appear in the Expenses filter, matching what the viewer can see. */
 export async function listExpenseUsers() {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const allowed = await visibleUserIds(user.id);
   return db.user.findMany({
     where: { active: true, ...(allowed ? { id: { in: allowed } } : {}) },
@@ -512,7 +512,7 @@ export async function listExpenseUsers() {
 
 /** A visit's own claims, for the visit detail page. */
 export async function listVisitExpenses(visitId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   const where = await expenseListWhere(user.id, { visitId });
   const rows = await db.expense.findMany({ where, orderBy: { spentOn: "desc" }, include: expenseListInclude });
   return toPlain(rows);
@@ -556,7 +556,7 @@ async function postExpensePayment(expenseId: string, userId: string, paidOn: Dat
  * is somewhere the failures show up.
  */
 export async function unpostedExpenses() {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   if (!(await hasEffectivePermission(user.id, "expenses.reimburse"))) return [];
   return toPlain(
     await db.expense.findMany({
@@ -576,7 +576,7 @@ export async function unpostedExpenses() {
 
 /** Posts a batch of claims the ledger missed. */
 export async function postExpensesToLedger(expenseIds: string[]): Promise<ActionResult<{ posted: number; failed: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("expenses");
   if (!(await hasEffectivePermission(user.id, "expenses.reimburse"))) {
     return { ok: false, error: "You don't have permission to post expenses." };
   }

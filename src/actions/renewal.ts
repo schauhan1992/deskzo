@@ -2,7 +2,7 @@
 
 import { db } from "@/lib/db";
 import { toPlain } from "@/lib/serialize";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { resolveRenewalStage, type RenewalStageKey } from "@/lib/renewals";
@@ -287,7 +287,7 @@ async function withRenewalStage<T extends StageSource & { renewalStage: unknown;
  * remember that it grows with the subscription book: 181 rows today, unbounded tomorrow.
  */
 export async function listRenewals(params?: { window?: RenewalWindow; search?: string }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   if (!(await viewerHas("orders.view"))) return [];
   const rows = await db.companyProduct.findMany({
     where: await renewalWhere(params, new Date(), user.id),
@@ -305,7 +305,7 @@ export async function listRenewals(params?: { window?: RenewalWindow; search?: s
  * only goes one way.
  */
 export async function listRenewalsPaged(params: { window?: RenewalWindow; search?: string; page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   if (!(await viewerHas("orders.view"))) return { rows: [], total: 0, expired: 0 };
   const now = new Date();
   const where = await renewalWhere(params, now, user.id);
@@ -336,7 +336,7 @@ export async function listRenewalsPaged(params: { window?: RenewalWindow; search
  * bulk action after adding a few more rows doesn't produce duplicates.
  */
 export async function bulkCreateRenewalTasks(input: unknown): Promise<ActionResult<{ count: number; skipped: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   const parsed = bulkRenewalTasksSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

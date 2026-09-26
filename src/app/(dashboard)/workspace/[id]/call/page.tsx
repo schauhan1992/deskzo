@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CallingStation } from "@/components/workspace/calling-station";
 import { formatDate } from "@/lib/utils";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 /**
  * A caller's own queue. Shows only the records assigned to them — a shared campaign has to feel
@@ -15,6 +16,7 @@ import { formatDate } from "@/lib/utils";
 export default async function CallingPage({ params }: { params: Promise<{ id: string }> }) {
   const enabled = await isModuleEnabled("workspace");
   if (!enabled) return <ModuleDisabledNotice moduleKey="workspace" />;
+  if (!(await isModuleEntitled("calls"))) return <ModuleDisabledNotice moduleKey="calls" />;
 
   const { id } = await params;
   const queue = await myCallingQueue(id);

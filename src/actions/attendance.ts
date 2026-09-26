@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type AttendanceStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -40,7 +40,7 @@ function minutesBetween(from: Date, to: Date) {
 
 /** Today's row for the signed-in user, or null before they have clocked in. */
 export async function myToday() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const today = dateOnly(new Date());
   const row = await db.attendanceDay.findUnique({
     where: { userId_date: { userId: user.id, date: today } },
@@ -49,7 +49,7 @@ export async function myToday() {
 }
 
 export async function clockIn(): Promise<ActionResult<{ at: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const today = dateOnly(new Date());
   const now = new Date();
 
@@ -73,7 +73,7 @@ export async function clockIn(): Promise<ActionResult<{ at: string }>> {
 }
 
 export async function clockOut(): Promise<ActionResult<{ minutes: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const today = dateOnly(new Date());
   const now = new Date();
 
@@ -96,7 +96,7 @@ export async function clockOut(): Promise<ActionResult<{ minutes: number }>> {
  * is a conversation that needs an answer.
  */
 export async function markAttendance(input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const parsed = attendanceMarkSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const data = parsed.data;
@@ -193,7 +193,7 @@ export async function attendanceMonth(params: {
   /** "absent" | "unrecorded" | "leave" — narrows to rows worth chasing. */
   flag?: string;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   const { from, to } = monthRange(params.year, params.month);
 

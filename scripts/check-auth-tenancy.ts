@@ -99,6 +99,8 @@ async function main() {
           dbName: new URL(dbUrl).pathname.slice(1),
           dbUrlCipher: sealForTenant(id, "db-url", dbUrl),
           keyBundleCipher: keys.sealKeyBundle(id, keys.newKeyBundle()),
+          // Everything, as the installation's own workspace has: this check is about signing in, not plans.
+          entitlements: { v: 1, all: true, modules: [], seats: null, copilotTokens: null, plans: ["internal-everything"] },
           domains: extra.domain ? { create: { host: extra.domain, kind: "CUSTOM", isPrimary: true } } : undefined,
         },
       });

@@ -83,8 +83,8 @@ export type SettingsItem = {
   permission: string | string[] | null;
   /** True when the key is a prefix — `data.` opens on any one of ten export and import keys. */
   permissionPrefix?: boolean;
-  /** The module that has to be switched on for this to exist at all. */
-  module?: string;
+  /** The module that has to be switched on for this to exist at all — or, given several, any of them. */
+  module?: string | readonly string[];
   /** Lives outside /settings, inside the module it configures. */
   external?: boolean;
 };
@@ -175,6 +175,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/document-emails",
             icon: MailPlus,
             permission: "settings.manage",
+            module: ["sales_documents", "purchase_documents"],
           },
         ],
       },
@@ -244,6 +245,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/eway",
             icon: Truck,
             permission: "settings.manage",
+            module: "sales_documents",
           },
           {
             key: "numbering",
@@ -252,6 +254,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/numbering",
             icon: Hash,
             permission: "settings.manage",
+            module: ["sales_documents", "purchase_documents"],
           },
           {
             key: "approvals",
@@ -260,6 +263,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/approvals",
             icon: ShieldCheck,
             permission: "settings.manage",
+            module: ["sales_documents", "purchase_documents"],
           },
         ],
       },
@@ -283,6 +287,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/messaging",
             icon: Send,
             permission: "settings.manage",
+            module: "marketing",
           },
           {
             key: "feedback",
@@ -586,6 +591,12 @@ export function mayOpen(item: SettingsItem, permissions: string[]): boolean {
     : wanted.some((w) => permissions.includes(w));
 }
 
+function moduleShown(item: SettingsItem, enabledModules: string[]): boolean {
+  if (!item.module) return true;
+  const wanted: readonly string[] = typeof item.module === "string" ? [item.module] : item.module;
+  return wanted.some((key) => enabledModules.includes(key));
+}
+
 /** The catalogue as this person would see it: nothing they cannot open, nothing switched off. */
 export function visibleSettings(permissions: string[], enabledModules: string[]): SettingsSection[] {
   return SETTINGS.map((section) => ({
@@ -594,7 +605,7 @@ export function visibleSettings(permissions: string[], enabledModules: string[])
       .map((group) => ({
         ...group,
         items: group.items.filter(
-          (item) => mayOpen(item, permissions) && (!item.module || enabledModules.includes(item.module)),
+          (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules),
         ),
       }))
       .filter((group) => group.items.length > 0),
@@ -624,7 +635,7 @@ export function activeSettingsKey(pathname: string): string | null {
  */
 export function visibleSettingsKeys(permissions: string[], enabledModules: string[]): string[] {
   return SETTINGS_ITEMS.filter(
-    (item) => mayOpen(item, permissions) && (!item.module || enabledModules.includes(item.module)),
+    (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules),
   ).map((item) => item.key);
 }
 

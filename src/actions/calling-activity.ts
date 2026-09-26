@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CallerAllocationMethod, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canViewContacts } from "@/lib/authz/contact-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
@@ -28,7 +28,7 @@ export async function startCallingActivity(input: {
   dueAt?: string;
   note?: string;
 }): Promise<ActionResult<{ records: number; callers: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
 
   const workbook = await db.workbook.findUnique({
     where: { id: input.workbookId },
@@ -136,7 +136,7 @@ export async function redistributeActivity(input: {
   callerIds: string[];
   method: CallerAllocationMethod;
 }): Promise<ActionResult<{ moved: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   const workbook = await db.workbook.findUnique({
     where: { id: input.workbookId },
     select: { id: true, name: true, ownerUserId: true },
@@ -217,7 +217,7 @@ const queueSelect = {
 
 /** One caller's queue: their records only, in their order, unworked first. */
 export async function myCallingQueue(workbookId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   const [workbook, records] = await Promise.all([
     db.workbook.findUnique({
       where: { id: workbookId },
@@ -275,7 +275,7 @@ export async function myCallingQueue(workbookId: string) {
  * redistributeActivity, which reassigns it properly and is permission-gated above.
  */
 export async function openRecord(recordId: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   const record = await db.workbookRecord.findUnique({
     where: { id: recordId },
     select: { id: true, workbookId: true, assignedToUserId: true, status: true, openedAt: true },
@@ -313,7 +313,7 @@ export async function completeRecord(input: {
   note?: string;
   callId?: string;
 }): Promise<ActionResult<{ nextId: string | null }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   const record = await db.workbookRecord.findUnique({
     where: { id: input.recordId },
     select: { id: true, workbookId: true, assignedToUserId: true, openedAt: true },
@@ -376,7 +376,7 @@ export async function completeRecord(input: {
  * either long calls or long silences, and the fix is different for each.
  */
 export async function activityReport(workbookId: string) {
-  await requireUser();
+  await requireModuleUser("calls");
   const [workbook, records] = await Promise.all([
     db.workbook.findUnique({
       where: { id: workbookId },

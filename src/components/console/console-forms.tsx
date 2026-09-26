@@ -21,9 +21,10 @@ function Once({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function InviteForm({ signupUrl }: { signupUrl: string }) {
+export function InviteForm({ signupUrl, plans }: { signupUrl: string; plans: { key: string; name: string }[] }) {
   const router = useRouter();
   const [note, setNote] = useState("");
+  const [planKey, setPlanKey] = useState("");
   const [uses, setUses] = useState("1");
   const [days, setDays] = useState("14");
   const [code, setCode] = useState<string | null>(null);
@@ -37,7 +38,7 @@ export function InviteForm({ signupUrl }: { signupUrl: string }) {
         setError(null);
         setCode(null);
         startTransition(async () => {
-          const r = await consoleCreateInvite({ note, uses: Number(uses), days: Number(days) });
+          const r = await consoleCreateInvite({ note, uses: Number(uses), days: Number(days), planKey: planKey || null });
           if (!r.ok) return setError(r.error);
           setCode(r.data.code);
           setNote("");
@@ -45,10 +46,21 @@ export function InviteForm({ signupUrl }: { signupUrl: string }) {
         });
       }}
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_100px_100px_auto] sm:items-end">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px_90px_90px_auto] sm:items-end">
         <div>
           <Label htmlFor="invite-note">Who it is for</Label>
           <Input id="invite-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="Acme Pvt Ltd — Priya" />
+        </div>
+        <div>
+          <Label htmlFor="invite-plan">Starts on</Label>
+          <Select id="invite-plan" value={planKey} onChange={(e) => setPlanKey(e.target.value)}>
+            <option value="">The default plan</option>
+            {plans.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
         </div>
         <div>
           <Label htmlFor="invite-uses">Uses</Label>

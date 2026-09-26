@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type EmployeeDocumentType, type LetterType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -40,7 +40,7 @@ import type { ActionResult } from "@/actions/company";
  * somebody forgetting the check.
  */
 async function access(targetUserId: string | null) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const manage = await hasEffectivePermission(user.id, "hr.manage");
   if (!targetUserId) {
     return { user, manage, isSelf: false, isManager: false, canRead: manage };

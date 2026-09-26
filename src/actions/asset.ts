@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type DepreciationMethod } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -20,7 +20,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function requireAssets() {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   return { user, allowed: await hasEffectivePermission(user.id, "payments.manage") };
 }
 
@@ -379,7 +379,7 @@ export async function disposeAsset(input: {
 
 /** The accounts an asset's cost can sit in — the postable ones under Fixed Assets. */
 export async function listAssetAccounts() {
-  await requireUser();
+  await requireModuleUser("accounting");
   return db.ledgerAccount.findMany({
     where: { type: "ASSET", isGroup: false, active: true, systemKey: null },
     orderBy: { code: "asc" },

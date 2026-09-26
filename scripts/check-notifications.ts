@@ -40,6 +40,12 @@ internals._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request.includes("lib/session")) {
     return { ...resolved, requireUser: async () => actor, currentUser: async () => actor };
   }
+  // The plan-aware way in (src/lib/modules-access.ts). It is loaded by this file's own imports —
+  // src/lib/notify.ts asks it about modules — before this hook exists, so its binding to the session
+  // above is the real one; the workspace here has every module, so only the person is substituted.
+  if (request.includes("lib/modules-access")) {
+    return { ...resolved, requireModuleUser: async () => actor };
+  }
   return resolved;
 };
 

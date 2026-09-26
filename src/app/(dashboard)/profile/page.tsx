@@ -13,13 +13,14 @@ import { placeText } from "@/lib/access/geo";
 import { formatIstDateTime } from "@/lib/india-time";
 import { getMailConnection } from "@/actions/document-mail";
 import { OutlookConnection } from "@/components/profile/outlook-connection";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ outlook?: string }> }) {
   const [profile, security, access, mail, { outlook }] = await Promise.all([
     getOwnProfile(),
     getCachedSecuritySettings(),
     myAccess(),
-    getMailConnection(),
+    isModuleEntitled("sales_documents").then(async (has) => (has || (await isModuleEntitled("purchase_documents")) ? getMailConnection() : null)),
     searchParams,
   ]);
   if (!profile) notFound();

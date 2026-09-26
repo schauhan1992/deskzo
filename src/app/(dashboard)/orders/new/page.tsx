@@ -3,6 +3,7 @@ import { listItemOptions } from "@/actions/item";
 import { listCompanyLocationOptions } from "@/actions/company-location";
 import { listProposalOptions } from "@/actions/order";
 import { isModuleEnabled } from "@/actions/module";
+import { isModuleEntitled } from "@/lib/modules-access";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
@@ -69,6 +70,8 @@ export default async function NewOrderPage({
           initialLocations={initialLocations}
           initialProposals={initialProposals}
           initialEndCustomers={initialEndCustomers}
+          creditInPlan={await isModuleEntitled("receivables")}
+          resellersInPlan={await isModuleEntitled("resellers")}
         />
       </div>
     </div>

@@ -6,6 +6,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { resellerRelationshipTypeValues } from "@/lib/validation/company";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function NewResellerPage() {
   const enabled = await isModuleEnabled("resellers");
@@ -13,7 +14,7 @@ export default async function NewResellerPage() {
     return <ModuleDisabledNotice moduleKey="resellers" />;
   }
 
-  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), newCustomerTermsAdvice(), listCustomerCategories()]);
+  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories()]);
 
   return (
     <div>

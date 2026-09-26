@@ -2,6 +2,7 @@
 
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { getOrganisation } from "@/lib/organisation";
 import { intakeSchema } from "@/lib/validation/intake";
 import type { ActionResult } from "@/actions/company";
@@ -27,6 +28,7 @@ import type { ActionResult } from "@/actions/company";
 /** What the form needs to render itself, and nothing more. */
 export async function getIntake(token: string) {
   if (!token || token.length < 10) return null;
+  if (!(await moduleAvailableForTenant("hr"))) return null;
 
   const candidate = await db.candidate.findUnique({
     where: { intakeToken: token },
@@ -60,6 +62,7 @@ export async function submitIntake(input: unknown): Promise<ActionResult<null>> 
   const parsed = intakeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the form." };
   const { token, ...data } = parsed.data;
+  if (!(await moduleAvailableForTenant("hr"))) return { ok: false, error: "This form is no longer available." };
 
   const candidate = await db.candidate.findUnique({
     where: { intakeToken: token },

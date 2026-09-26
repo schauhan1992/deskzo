@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -29,7 +29,7 @@ const dec = (v: number) => new Prisma.Decimal(v);
 const n = (v: Prisma.Decimal | Prisma.Decimal.Value | null | undefined) => Number(v ?? 0);
 
 async function payrollAccess() {
-  const user = await requireUser();
+  const user = await requireModuleUser("payroll");
   return { user, allowed: await hasEffectivePermission(user.id, "payroll.manage") };
 }
 
@@ -195,7 +195,7 @@ export async function buildSettlement(
 }
 
 export async function getSettlement(userId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payroll");
   const isSelf = user.id === userId;
   const allowed = await hasEffectivePermission(user.id, "payroll.manage");
   if (!allowed && !isSelf) return null;

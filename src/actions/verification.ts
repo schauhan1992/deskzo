@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Prisma, VerifiedField, VerificationStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canViewContacts, mayWorkWithContactsOf } from "@/lib/authz/contact-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
@@ -30,7 +30,7 @@ export async function verifyContactDetail(input: {
   correctedValue?: string;
   note?: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
 
   const corrected = input.correctedValue?.trim();
   if (input.status === "CORRECTED" && !corrected) {
@@ -118,7 +118,7 @@ export async function verifyContactDetail(input: {
  * is attributable to whoever pressed this rather than to whoever was on the phone.
  */
 export async function applyVerification(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const verification = await db.contactVerification.findUnique({
     where: { id },
     select: {
@@ -176,7 +176,7 @@ export async function applyVerification(id: string): Promise<ActionResult<null>>
 
 /** Dismisses a correction without applying it — wrong claims need closing too. */
 export async function dismissVerification(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const verification = await db.contactVerification.findUnique({ where: { id }, select: { id: true, appliedAt: true, companyId: true } });
   if (!verification || !(await mayWorkWithContactsOf(user.id, verification.companyId))) {
     return { ok: false, error: "That verification no longer exists." };
@@ -219,7 +219,7 @@ const verificationSelect = {
 
 /** Corrections waiting for somebody to accept or reject them. */
 export async function pendingVerifications(params: { page: number; pageSize: number; onlyCorrections?: boolean }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const where: Prisma.ContactVerificationWhereInput = {
     AND: [await verificationScope(user.id), { appliedAt: null, ...(params.onlyCorrections ? { status: "CORRECTED" as const } : {}) }],
   };
@@ -238,7 +238,7 @@ export async function pendingVerifications(params: { page: number; pageSize: num
 
 /** Everything ever said about this company's details, for its own 360 view. */
 export async function companyVerifications(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   if (!(await mayWorkWithContactsOf(user.id, companyId))) return [];
   return toPlain(
     await db.contactVerification.findMany({
@@ -251,7 +251,7 @@ export async function companyVerifications(companyId: string) {
 }
 
 export async function verificationSummary() {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const scope = await verificationScope(user.id);
   const [pending, corrections, wrong] = await Promise.all([
     db.contactVerification.count({ where: { AND: [scope, { appliedAt: null }] } }),

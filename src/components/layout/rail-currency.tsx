@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeftRight } from "lucide-react";
-import { lookupExchangeRate } from "@/actions/finance";
+import { lookupExchangeRate } from "@/actions/exchange-rate";
 import { BASE_CURRENCY, CURRENCIES, formatMoney, formatRate } from "@/lib/currency";
 import { Input, Label, Select } from "@/components/ui/input";
 

@@ -11,6 +11,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, assertNotSelf, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
 import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
+import { seatProblem } from "@/lib/seats";
 
 function refuse(err: unknown): ActionResult<never> {
   if (err instanceof AuthzError) return { ok: false, error: err.message };
@@ -176,6 +177,9 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
     }
   }
 
+  const seats = await seatProblem();
+  if (seats) return { ok: false, error: seats };
+
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
 
   try {
@@ -209,8 +213,13 @@ export async function setUserActive(id: string, active: boolean): Promise<Action
     return { ok: false, error: "You can't deactivate your own account." };
   }
 
-  const target = await db.user.findUnique({ where: { id }, select: { id: true, isSuperAdmin: true } });
+  const target = await db.user.findUnique({ where: { id }, select: { id: true, isSuperAdmin: true, active: true } });
   if (!target) return { ok: false, error: "That user no longer exists." };
+  // Switching somebody back on takes a seat again.
+  if (active && !target.active) {
+    const seats = await seatProblem();
+    if (seats) return { ok: false, error: seats };
+  }
 
   try {
     assertMayActOnTarget(admin, target);

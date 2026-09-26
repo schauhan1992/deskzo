@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
+import { isModuleEntitled } from "@/lib/modules-access";
 import { requestHost } from "@/lib/tenancy/host";
 
 /**
@@ -27,6 +28,7 @@ export async function checkUploadRequest(request: Request, maxBytes: number): Pr
   if (length > maxBytes) return { ok: false, status: 413, error: `That's over ${Math.round(maxBytes / 1024 / 1024)} MB.` };
 
   const user = await requireUser();
+  if (!(await isModuleEntitled("marketing"))) return { ok: false, status: 403, error: "Marketing isn't part of this workspace's plan." };
   if (!(await can(user.id, "marketing.manage"))) return { ok: false, status: 403, error: "You can't upload marketing templates or lists." };
   return { ok: true, userId: user.id };
 }

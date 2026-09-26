@@ -5,7 +5,7 @@ import { randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import type { VisitorPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
@@ -34,7 +34,7 @@ async function access(userId: string) {
 }
 
 export async function listVisitors(filters?: { onDate?: string; status?: "IN" | "OUT" | "ALL" }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { view } = await access(user.id);
   if (!view) return null;
 
@@ -63,7 +63,7 @@ export async function listVisitors(filters?: { onDate?: string; status?: "IN" | 
 
 /** Who is in the building right now — the list a fire marshal wants. */
 export async function visitorsOnSite() {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { view } = await access(user.id);
   if (!view) return null;
   return toPlain(
@@ -79,7 +79,7 @@ export async function visitorsOnSite() {
 }
 
 export async function checkOut(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { view } = await access(user.id);
   if (!view) return { ok: false, error: "You can't see the visitor book." };
 
@@ -98,7 +98,7 @@ export async function checkOut(id: string): Promise<ActionResult<null>> {
 // ─── Kiosks ─────────────────────────────────────────────────────────────────────────────────────
 
 export async function listKiosks() {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return null;
   return toPlain(
@@ -113,7 +113,7 @@ export async function listKiosks() {
 }
 
 export async function saveKiosk(input: { id?: string; name: string; active?: boolean }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't set up reception tablets." };
 
@@ -143,7 +143,7 @@ export async function saveKiosk(input: { id?: string; name: string; active?: boo
  * unexpected is a new link. The tablet has to be re-opened afterwards, and the screen says so.
  */
 export async function rotateKioskToken(id: string): Promise<ActionResult<{ token: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't set up reception tablets." };
 
@@ -161,7 +161,7 @@ export async function rotateKioskToken(id: string): Promise<ActionResult<{ token
 }
 
 export async function deleteKiosk(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't set up reception tablets." };
   const kiosk = await db.visitorKiosk.findUnique({ where: { id }, select: { name: true, _count: { select: { entries: true } } } });
@@ -183,7 +183,7 @@ export async function deleteKiosk(id: string): Promise<ActionResult<null>> {
  * Marked ABANDONED rather than OUT, because nobody actually saw them leave.
  */
 export async function closeStaleVisits(): Promise<ActionResult<{ closed: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { view } = await access(user.id);
   if (!view) return { ok: false, error: "You can't see the visitor book." };
 
@@ -221,7 +221,7 @@ export async function createInvite(input: {
   expectedAt: string;
   expectedCompanions?: number;
 }): Promise<ActionResult<{ id: string; code: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
 
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Who are you expecting?" };
@@ -287,7 +287,7 @@ export async function createInvite(input: {
  * knowing who is expected today is the whole job of a front desk.
  */
 export async function listInvites(filters?: { mine?: boolean; upcomingOnly?: boolean }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { view } = await access(user.id);
   const mineOnly = filters?.mine ?? !view;
 
@@ -311,7 +311,7 @@ export async function listInvites(filters?: { mine?: boolean; upcomingOnly?: boo
 }
 
 export async function cancelInvite(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { view } = await access(user.id);
   const invite = await db.visitorInvite.findUnique({
     where: { id },
@@ -341,7 +341,7 @@ export async function cancelInvite(id: string): Promise<ActionResult<null>> {
  * sweep if one is wired to it later.
  */
 export async function expireStaleInvites(): Promise<ActionResult<{ expired: number }>> {
-  await requireUser();
+  await requireModuleUser("visitors");
   // The same 36-hour window the code itself honours, so nothing is expired while it still works.
   const cutoff = new Date(Date.now() - 36 * 3600_000);
   const { count } = await db.visitorInvite.updateMany({
@@ -355,7 +355,7 @@ export async function expireStaleInvites(): Promise<ActionResult<{ expired: numb
 // ─── The visitor-company list ───────────────────────────────────────────────────────────────────
 
 export async function listVisitorCompanies() {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return null;
   return toPlain(
@@ -380,7 +380,7 @@ export async function listVisitorCompanies() {
  * adopted rather than duplicated, and running it twice adds nothing the second time.
  */
 export async function importVendorCompanies(): Promise<ActionResult<{ added: number; adopted: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't manage the visitor company list." };
 
@@ -427,7 +427,7 @@ export async function saveVisitorCompany(input: {
   name: string;
   active?: boolean;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't manage the visitor company list." };
 
@@ -462,7 +462,7 @@ export async function saveVisitorCompany(input: {
  * which row the desk offers next time.
  */
 export async function mergeVisitorCompanies(fromId: string, intoId: string): Promise<ActionResult<{ moved: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visitors");
   const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't manage the visitor company list." };
   if (fromId === intoId) return { ok: false, error: "That's the same company." };

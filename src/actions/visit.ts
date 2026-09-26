@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type VisitStatus, type VisitPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { dateRangeFilter } from "@/lib/utils";
@@ -89,7 +89,7 @@ const visitListInclude = {
 } as const;
 
 export async function listVisitsPaged(params: VisitListParams & { page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   if (!(await viewerHas("visits.view"))) return { rows: [], total: 0, openCount: 0 };
   const where = await visitListWhere(user.id, params);
   const [rows, total, openCount] = await Promise.all([
@@ -107,7 +107,7 @@ export async function listVisitsPaged(params: VisitListParams & { page: number; 
 
 /** A company's visits, for its 360 view — scoped the same way as the list. */
 export async function listCompanyVisits(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   if (!(await viewerHas("visits.view"))) return [];
   const where = await visitListWhere(user.id, { companyId });
   const rows = await db.visit.findMany({ where, orderBy: { scheduledFor: "desc" }, include: visitListInclude });
@@ -121,7 +121,7 @@ export async function listCompanyVisits(companyId: string) {
  * a way around the "your own and your team's" rule that applies everywhere else.
  */
 export async function listLeadVisits(leadId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   if (!(await viewerHas("visits.view"))) return [];
   const where = await visitListWhere(user.id, { leadId });
   const rows = await db.visit.findMany({ where, orderBy: { scheduledFor: "desc" }, include: visitListInclude });
@@ -129,7 +129,7 @@ export async function listLeadVisits(leadId: string) {
 }
 
 export async function getVisit(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   if (!(await viewerHas("visits.view"))) return null;
   const visit = await db.visit.findUnique({
     where: { id },
@@ -159,7 +159,7 @@ export async function getVisit(id: string) {
 }
 
 export async function createVisit(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const parsed = createVisitSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -232,7 +232,7 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
 }
 
 export async function updateVisit(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const parsed = updateVisitSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -267,7 +267,7 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
 
 /** Stamps arrival. Kept separate from the write-up so it can be tapped on a phone at the door. */
 export async function checkInVisit(id: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const visit = await db.visit.findUnique({ where: { id }, select: { userId: true, status: true } });
   if (!visit) return { ok: false, error: "That visit no longer exists." };
   if (!(await canActFor(user.id, visit.userId))) return { ok: false, error: "That isn't your visit." };
@@ -280,7 +280,7 @@ export async function checkInVisit(id: string): Promise<ActionResult<{ id: strin
 }
 
 export async function completeVisit(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const parsed = completeVisitSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -315,7 +315,7 @@ export async function completeVisit(input: unknown): Promise<ActionResult<{ id: 
 }
 
 export async function setVisitStatus(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const parsed = setVisitStatusSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -344,7 +344,7 @@ export async function setVisitStatus(input: unknown): Promise<ActionResult<{ id:
 }
 
 export async function deleteVisit(id: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const visit = await db.visit.findUnique({
     where: { id },
     select: { userId: true, companyId: true, status: true, _count: { select: { expenses: true } } },
@@ -366,7 +366,7 @@ export async function deleteVisit(id: string): Promise<ActionResult<{ id: string
 
 /** People a manager can plan visits for: themselves plus their downline. */
 export async function listVisitAssignees() {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
   const ids = [user.id, ...(await getDownlineUserIds(user.id))];
   return db.user.findMany({
     where: { id: { in: ids }, active: true },
@@ -377,7 +377,7 @@ export async function listVisitAssignees() {
 
 /** Contacts, locations and open leads for one company — the dependent pickers on the visit form. */
 export async function visitFormOptions(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("visits");
 
   /**
    * The one place in this file the *account* scope applies, because nothing it returns is a visit.

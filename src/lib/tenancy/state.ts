@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { PrismaClient } from "@prisma/client";
+import type { Entitlements } from "@/lib/entitlements";
 
 /**
  * A workspace — one customer of the SaaS, with its own database.
@@ -25,6 +26,10 @@ export type Tenant = {
   isDefault: boolean;
   /** Its key bundle, sealed under the platform key. Null for a workspace from the environment. */
   keyBundleCipher: string | null;
+  /** ISO 3166-1 alpha-2 — which country-bound modules and features it may have. */
+  country: string;
+  /** What its plans let it use (src/lib/entitlements.ts). Everything, for one from the environment. */
+  entitlements: Entitlements;
 };
 
 export type ClientEntry = { client: PrismaClient; url: string; lastUsed: number };

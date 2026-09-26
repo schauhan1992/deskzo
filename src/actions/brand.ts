@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { createBrandSchema, updateBrandSchema, createProductFamilySchema, updateProductFamilySchema } from "@/lib/validation/brand";
 import type { ActionResult } from "@/actions/company";
@@ -40,7 +40,7 @@ async function familyNamed(brandId: string, name: string, exceptId?: string) {
  * reads. The Brands page, which does show them, pages through `listBrandsPaged` instead.
  */
 export async function listBrands() {
-  await requireUser();
+  await requireModuleUser("items");
   return db.brand.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true, families: { orderBy: { name: "asc" }, select: { id: true, name: true } } },
@@ -54,7 +54,7 @@ export async function listBrands() {
  * Autodesk, and a thousand brands is too many to open one by one to find which one owns a line.
  */
 export async function listBrandsPaged(params: { q?: string; page: number; pageSize: number }) {
-  await requireUser();
+  await requireModuleUser("items");
   const q = params.q?.trim();
   const where: Prisma.BrandWhereInput = q
     ? {
@@ -81,7 +81,7 @@ export async function listBrandsPaged(params: { q?: string; page: number; pageSi
 }
 
 export async function createBrand(input: unknown): Promise<ActionResult<{ id: string; name: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   if (!(await hasEffectivePermission(user.id, "catalog.manage"))) {
     return { ok: false, error: "You can't manage the product catalog." };
   }
@@ -107,7 +107,7 @@ export async function createBrand(input: unknown): Promise<ActionResult<{ id: st
 }
 
 export async function updateBrand(input: unknown): Promise<ActionResult<{ id: string; name: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   if (!(await hasEffectivePermission(user.id, "catalog.manage"))) {
     return { ok: false, error: "You can't manage the product catalog." };
   }
@@ -133,7 +133,7 @@ export async function updateBrand(input: unknown): Promise<ActionResult<{ id: st
 }
 
 export async function deleteBrand(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   if (!(await hasEffectivePermission(user.id, "catalog.manage"))) {
     return { ok: false, error: "You can't manage the product catalog." };
   }
@@ -150,7 +150,7 @@ export async function deleteBrand(id: string): Promise<ActionResult<null>> {
 }
 
 export async function createProductFamily(input: unknown): Promise<ActionResult<{ id: string; name: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   if (!(await hasEffectivePermission(user.id, "catalog.manage"))) {
     return { ok: false, error: "You can't manage the product catalog." };
   }
@@ -178,7 +178,7 @@ export async function createProductFamily(input: unknown): Promise<ActionResult<
 }
 
 export async function updateProductFamily(input: unknown): Promise<ActionResult<{ id: string; name: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   if (!(await hasEffectivePermission(user.id, "catalog.manage"))) {
     return { ok: false, error: "You can't manage the product catalog." };
   }
@@ -209,7 +209,7 @@ export async function updateProductFamily(input: unknown): Promise<ActionResult<
 }
 
 export async function deleteProductFamily(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   if (!(await hasEffectivePermission(user.id, "catalog.manage"))) {
     return { ok: false, error: "You can't manage the product catalog." };
   }

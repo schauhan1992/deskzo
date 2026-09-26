@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { AwardAudience } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { isModuleEnabled } from "@/actions/module";
@@ -49,7 +49,7 @@ export async function getActivityAwards(): Promise<{
   current: { label: string; announcesOn: string; standings: Standing[] | null; mine: Standing | null };
   history: AwardView[];
 } | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   // Part of the wins wall: switched off with it.
   if (!(await isModuleEnabled("wins"))) return null;
   const now = new Date();
@@ -99,7 +99,7 @@ export async function getActivityAwards(): Promise<{
 }
 
 export async function saveActivityAwardSettings(input: AwardSettings): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't change the most-active awards." };
   if (!AUDIENCES.includes(input.audience)) return { ok: false, error: "Pick who hears about the awards." };
   const topCount = Math.round(Number(input.topCount));

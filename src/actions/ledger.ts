@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -22,7 +22,7 @@ export async function reverseJournalEntry(input: {
   date?: Date;
   reason?: string;
 }): Promise<ActionResult<{ id: string; entryNumber: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   if (!(await hasEffectivePermission(user.id, "ledger.post"))) {
     return { ok: false, error: "You can't reverse a ledger entry." };
   }
@@ -84,7 +84,7 @@ export async function createManualJournal(input: {
   source?: "MANUAL" | "OPENING";
   lines: { accountId: string; debit: string; credit: string; companyId?: string; narration?: string }[];
 }): Promise<ActionResult<{ id: string; entryNumber: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   if (!(await hasEffectivePermission(user.id, "ledger.post"))) {
     return { ok: false, error: "You can't write a journal entry." };
   }
@@ -149,7 +149,7 @@ export async function createManualJournal(input: {
 }
 
 export async function listAccounts(opts?: { postableOnly?: boolean }) {
-  await requireUser();
+  await requireModuleUser("accounting");
   await ensureChartOfAccounts();
   return toPlain(
     await db.ledgerAccount.findMany({
@@ -173,7 +173,7 @@ export async function saveAccount(input: {
   description?: string;
   active?: boolean;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   if (!(await hasEffectivePermission(user.id, "ledger.manageAccounts"))) {
     return { ok: false, error: "You can't change the chart of accounts." };
   }
@@ -227,7 +227,7 @@ export async function saveAccount(input: {
 }
 
 export async function deleteAccount(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   if (!(await hasEffectivePermission(user.id, "ledger.manageAccounts"))) {
     return { ok: false, error: "You can't change the chart of accounts." };
   }

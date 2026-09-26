@@ -88,6 +88,7 @@ import { formatOrderId } from "@/lib/order-id";
 import { paymentTermsLabels } from "@/lib/gst";
 import { relationshipTypeLabels, vendorStatusLabels } from "@/lib/validation/company";
 import { headcountLabel } from "@/lib/company-size";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
 
@@ -212,6 +213,14 @@ export async function CompanyDetail({
   const isCommissionParty = company.relationshipType === "COMMISSION_PARTY";
   const isReseller = company.relationshipType === "RESELLER";
   const managedByReseller = company.managedByReseller;
+  // Modules this page borrows from without a switch of their own here: each only where the plan has it.
+  const [commissionsInPlan, expensesInPlan, resellersInPlan, portalInPlan] = await Promise.all([
+    isModuleEntitled("commission_parties"),
+    isModuleEntitled("expenses"),
+    isModuleEntitled("resellers"),
+    isModuleEntitled("customer_portal"),
+  ]);
+  const resellerTools = isReseller && resellersInPlan;
 
   // The estate tab earns its place when there is an estate to show, or when this is somebody we
   // actually serve and whoever manages assets needs a way in to record their first machine. A
@@ -221,7 +230,7 @@ export async function CompanyDetail({
     assetsVisible &&
     ((canManageAssets && !isVendor && company.stage === "CUSTOMER") || (await estateCount(company.id)) > 0);
 
-  const [linkedCompanies, commissionPartyAccounts, clientCompanyOptions, commissionEarnings] = isCommissionParty
+  const [linkedCompanies, commissionPartyAccounts, clientCompanyOptions, commissionEarnings] = isCommissionParty && commissionsInPlan
     ? await Promise.all([
         listLinkedCompanies(company.id),
         listCommissionPartyAccounts(company.id),
@@ -234,7 +243,7 @@ export async function CompanyDetail({
   // rather than per-tab because the header counts need them regardless of which tab is open.
   const documentsEnabled = isVendor ? purchaseDocsEnabled : salesDocsEnabled;
   const [visits, visitExpenses] = visitsEnabled
-    ? await Promise.all([listCompanyVisits(company.id), expenseSummary({ companyId: company.id })])
+    ? await Promise.all([listCompanyVisits(company.id), expensesInPlan ? expenseSummary({ companyId: company.id }) : null])
     : [[], null];
 
   // The statement is a customer-side view; a vendor has no receivable against us.
@@ -246,19 +255,20 @@ export async function CompanyDetail({
     documentsEnabled ? listCompanyDocuments(company.id) : Promise.resolve([]),
     paymentsEnabled ? listCompanyPayments(company.id) : Promise.resolve([]),
     paymentsEnabled ? companyPaymentSummary(company.id) : Promise.resolve(null),
-    paymentsEnabled && !isVendor ? getCreditProfile(company.id) : Promise.resolve(null),
+    // The credit engine is Receivables': a plan with payments and without it has no profile to show.
+    paymentsEnabled && !isVendor && (await isModuleEntitled("receivables")) ? getCreditProfile(company.id) : Promise.resolve(null),
     // How much support they take against what they pay — beside their tickets, where it is judged.
     helpdeskEnabled && !isVendor ? getSupportLoad(company.id) : Promise.resolve(null),
     // Null without `emails.view` or outside the account scope — and then there is no Emails tab.
     !isVendor ? companyMailSummary(company.id) : Promise.resolve(null),
     // Only the forms whose answers are shared with this viewer — and no tab when there are none.
-    !isVendor ? companyFormResponses(company.id) : Promise.resolve(null),
+    !isVendor && (await isModuleEntitled("forms")) ? companyFormResponses(company.id) : Promise.resolve(null),
   ]);
   const showFormsTab = Boolean(companyForms && (companyForms.responses.length > 0 || companyForms.waiting.length > 0));
 
   // Commission is paid on a customer's business, so it's a customer-side view; a commission party
   // sees the mirror of it (what they earned) on their own Details tab instead.
-  const showCommissionTab = !isVendor;
+  const showCommissionTab = !isVendor && commissionsInPlan;
   const [commissionParties, commissions, commissionPartyOptions] = showCommissionTab
     ? await Promise.all([
         listCompanyCommissionParties(company.id),
@@ -267,7 +277,7 @@ export async function CompanyDetail({
       ])
     : [[], [], []];
   const endCustomers = isReseller ? await listEndCustomers(company.id) : [];
-  const [resellerOnboarding, resellerCredit, resellerPrices] = isReseller
+  const [resellerOnboarding, resellerCredit, resellerPrices] = resellerTools
     ? await Promise.all([
         getResellerOnboarding(company.id),
         getResellerCreditSummary(company.id),
@@ -307,7 +317,7 @@ export async function CompanyDetail({
     ...(mailSummary ? [{ key: "emails", label: "Emails" }] : []),
     ...(showFormsTab ? [{ key: "forms", label: "Forms" }] : []),
     ...(tasksEnabled ? [{ key: "tasks", label: "Tasks" }] : []),
-    ...(canManagePortal && !isVendor ? [{ key: "portal", label: "Portal" }] : []),
+    ...(canManagePortal && portalInPlan && !isVendor ? [{ key: "portal", label: "Portal" }] : []),
   ];
   /** A link to one of the tabs below, keeping the list filters when embedded — as `TabNav` builds them. */
   const tabHref = (key: string) => {
@@ -628,7 +638,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isReseller && (
+            {resellerTools && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Special reseller pricing</CardHeader>
                 <CardContent>
@@ -736,7 +746,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isCommissionParty && (
+            {isCommissionParty && commissionsInPlan && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Linked companies</CardHeader>
                 <CardContent>
@@ -754,7 +764,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isCommissionParty && (
+            {isCommissionParty && commissionsInPlan && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Commission earned</CardHeader>
                 <CardContent>
@@ -763,7 +773,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isCommissionParty && (
+            {isCommissionParty && commissionsInPlan && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Related parties (payee accounts)</CardHeader>
                 <CardContent>
@@ -887,8 +897,10 @@ export async function CompanyDetail({
                   vendors={vendorOptions}
                   canEdit={canEditProducts}
                   canDelete={canDeleteProducts}
-                  canRecordPayments={canRecordPayments}
-                  canDeletePayments={canDeletePayments}
+                  // Payments against an order are the Payments module's; seats added mid-term, Renewals'.
+                  canRecordPayments={canRecordPayments && paymentsEnabled}
+                  canDeletePayments={canDeletePayments && paymentsEnabled}
+                  canAddSeats={await isModuleEntitled("renewals")}
                 />
               </CardContent>
             </Card>
@@ -1120,7 +1132,7 @@ export async function CompanyDetail({
             <CompanyFeedback companyId={company.id} companyName={company.name} />
           )}
 
-          {activeTab === "portal" && canManagePortal && !isVendor && (
+          {activeTab === "portal" && canManagePortal && portalInPlan && !isVendor && (
             <CompanyPortalTab companyId={company.id} contacts={company.contacts} />
           )}
 

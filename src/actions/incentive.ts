@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type IncentiveBasis, type IncentiveStatus, type TargetMetric } from "@prisma/client";
 import { db, getTenantDb } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -44,7 +44,7 @@ import type { ActionResult } from "@/actions/company";
  * hid the approval queue from the very people meant to work it.
  */
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("incentives");
   const manage = await hasEffectivePermission(user.id, "incentives.manage");
   const approve = await hasEffectivePermission(user.id, "incentives.approve");
   return { user, manage, approve, queue: manage || approve };
@@ -524,7 +524,7 @@ export async function listEarnings(filters?: { status?: string; userId?: string 
 }
 
 export async function myEarnings() {
-  const user = await requireUser();
+  const user = await requireModuleUser("incentives");
   return listEarnings({ userId: user.id });
 }
 
@@ -658,7 +658,7 @@ export async function payableForPayroll(month: number, year: number) {
   // signed-in user could read every colleague's approved incentive amount for the month. Payroll,
   // not incentives — it answers "what goes on this month's payslips", and `runPayroll` is its only
   // legitimate caller.
-  const user = await requireUser();
+  const user = await requireModuleUser("incentives");
   if (!(await hasEffectivePermission(user.id, "payroll.manage"))) return [];
 
   const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));

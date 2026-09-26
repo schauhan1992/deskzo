@@ -1,8 +1,11 @@
 import { listNumberSettings } from "@/actions/document-number";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { NumberingManager } from "@/components/settings/numbering-manager";
+import { planGate } from "@/components/settings/module-disabled-notice";
 
 export default async function Page() {
+  const gate = await planGate(["sales_documents", "purchase_documents"], "Document numbering");
+  if (gate) return gate;
   const settings = await listNumberSettings();
 
   return (

@@ -204,7 +204,8 @@ console.log("\n— No ungated endpoint —\n");
  * because the real entries get waved through with the noise.
  */
 // requireStaff: the platform console's actions are gated by a staff session, not a workspace's.
-const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext(", "currentUser(", "auth()", "requireStaff("];
+// requireModuleUser: requireUser, plus the workspace's plan (src/lib/modules-access.ts).
+const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext(", "currentUser(", "auth()", "requireStaff(", "requireModuleUser("];
 
 /**
  * Local helpers in the same file that themselves reach a base marker.

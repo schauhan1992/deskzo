@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { adapterFor } from "@/lib/copilot/providers";
-import { copilotConfig, providerKey, recordUsage, usedToday } from "@/lib/copilot/settings";
+import { copilotConfig, providerKey, recordUsage, usedToday, planStopsCopilot } from "@/lib/copilot/settings";
 import { indianToday, outputText, runTool, toolSpec, toolsFor } from "@/lib/copilot/tools";
 import { systemPrompt } from "@/lib/copilot/prompt";
 import type { ChatEvent, DisplayBlock, ToolCall, ToolResult, Turn } from "@/lib/copilot/types";
@@ -46,6 +46,8 @@ export async function unavailableBecause(userId: string): Promise<string | null>
   if (!config.hasKey[config.provider]) return "The copilot has no API key for its provider yet — an admin adds it in Settings → AI copilot.";
   if (!config.model.trim()) return "No model is chosen for the copilot yet — an admin picks one in Settings → AI copilot.";
   if (!(await can(userId, "copilot.use"))) return "You don't have access to the AI copilot.";
+  const planned = await planStopsCopilot();
+  if (planned) return planned;
   if ((await usedToday(userId)) >= config.dailyTokenLimit) return "You've used today's copilot allowance. It resets at midnight.";
   return null;
 }
@@ -122,8 +124,9 @@ export async function runCopilot(input: RunInput): Promise<void> {
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       if (step > 0) {
-        if ((await usedToday(input.userId)) >= config.dailyTokenLimit) {
-          const note = "\n\n_(Stopped: today's copilot allowance is used up.)_";
+        // The workspace's month runs out the same way as a person's day: between steps, never mid-answer.
+        if ((await planStopsCopilot()) || (await usedToday(input.userId)) >= config.dailyTokenLimit) {
+          const note = "\n\n_(Stopped: the copilot allowance is used up.)_";
           input.emit({ type: "text", delta: note });
           await save("assistant", { text: note.trim(), toolCalls: [] });
           break;

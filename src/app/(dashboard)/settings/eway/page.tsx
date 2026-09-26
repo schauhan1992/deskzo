@@ -8,8 +8,20 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EwaySettingsForm } from "@/components/settings/eway-settings-form";
 import { EwayEnableToggle } from "@/components/settings/eway-enable-toggle";
 import { EwayFlow } from "@/components/settings/eway-flow";
+import { planGate } from "@/components/settings/module-disabled-notice";
+import { countryFeatureAvailable } from "@/lib/modules-access";
 
 export default async function EwaySettingsPage() {
+  const gate = await planGate("sales_documents", "E-way bills");
+  if (gate) return gate;
+  if (!(await countryFeatureAvailable("eway"))) {
+    return (
+      <div className="max-w-md">
+        <h1 className="text-xl font-semibold text-text">E-way bills</h1>
+        <p className="mt-2 text-sm text-muted">E-way bills are India&apos;s, and this workspace is set up for another country.</p>
+      </div>
+    );
+  }
   const sessionUser = await currentUser();
   if (!sessionUser || !(await can(sessionUser.id, "settings.manage"))) {
     return (

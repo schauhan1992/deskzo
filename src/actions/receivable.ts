@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany, paymentScope, viaCompanyScope } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
@@ -64,7 +64,7 @@ async function syncInvoiceStatus(invoiceId: string) {
  * settle more than the invoice is worth.
  */
 export async function recordInvoicePayment(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await hasEffectivePermission(user.id, "payments.record"))) {
     return { ok: false, error: "You don't have permission to record payments." };
   }
@@ -147,7 +147,7 @@ export async function applyPaymentToInvoice(
   invoiceId: string,
   amount: number,
 ): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await hasEffectivePermission(user.id, "payments.record"))) {
     return { ok: false, error: "You don't have permission to allocate payments." };
   }
@@ -206,7 +206,7 @@ export async function applyPaymentToInvoice(
  * own ledger rather than a payment with a negative sign, which is what keeps "received" honest.
  */
 export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await hasEffectivePermission(user.id, "payments.record"))) {
     return { ok: false, error: "You don't have permission to apply credit notes." };
   }
@@ -275,7 +275,7 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
 }
 
 export async function removeCreditNoteApplication(id: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await hasEffectivePermission(user.id, "payments.delete"))) {
     return { ok: false, error: "You don't have permission to remove a credit application." };
   }
@@ -306,7 +306,7 @@ async function maySeeCustomer(userId: string, companyId: string): Promise<boolea
 
 /** One invoice's settlement, with the payments and credits that produced it. */
 export async function getInvoiceSettlement(invoiceId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
   const invoice = await db.tradeDocument.findFirst({
     // Reached through the party, like the invoice itself: what has been paid and what is still
@@ -350,7 +350,7 @@ export async function getInvoiceSettlement(invoiceId: string) {
 
 /** How much of a credit note is still available to apply. */
 export async function getCreditNoteBalance(creditNoteId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
   const creditNote = await db.tradeDocument.findFirst({
     where: { id: creditNoteId, ...(await viaCompanyScope(user.id)) },
@@ -374,7 +374,7 @@ export async function getCreditNoteBalance(creditNoteId: string) {
 
 /** Open invoices for a customer — the picker when applying a payment or a credit note. */
 export async function listOpenInvoices(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return [];
   // Every unpaid invoice a customer has, with what is still owed on each — the picker is reached
   // from a credit note the viewer is already on, so this only refuses an id passed in by hand.
@@ -400,7 +400,7 @@ export async function listOpenInvoices(companyId: string) {
  * running balance, plus the aging of what's still outstanding.
  */
 export async function customerStatement(companyId: string, opts?: { from?: string; to?: string }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
   const asOf = new Date();
 
@@ -535,7 +535,7 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
  * which SQL can't group on without a date-arithmetic expression per bucket.
  */
 export async function agingReport(params?: { search?: string }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return { rows: [], totals: { buckets: emptyAging(), total: 0 } };
   const asOf = new Date();
 
@@ -609,7 +609,7 @@ export async function agingReport(params?: { search?: string }) {
 
 /** Issued credit notes for a customer that still have an unapplied balance. */
 export async function listAvailableCredits(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return [];
   if (!(await maySeeCustomer(user.id, companyId))) return [];
   const creditNotes = await db.tradeDocument.findMany({

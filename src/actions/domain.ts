@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { toDomain } from "@/lib/domain-intel/signatures";
@@ -49,7 +49,7 @@ const profileSelect = {
  * stale answer for a current one.
  */
 export async function refreshDomainProfile(companyId: string): Promise<ActionResult<{ domain: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("domains");
 
   const company = await db.company.findUnique({
     where: { id: companyId },
@@ -129,14 +129,14 @@ export async function refreshDomainProfile(companyId: string): Promise<ActionRes
 }
 
 export async function getDomainProfile(companyId: string) {
-  await requireUser();
+  await requireModuleUser("domains");
   const profile = await db.domainProfile.findUnique({ where: { companyId }, select: profileSelect });
   return profile ? toPlain(profile) : null;
 }
 
 /** The profile plus the sales reading of it — computed, never stored, so the rules stay editable. */
 export async function getDomainBriefing(companyId: string) {
-  await requireUser();
+  await requireModuleUser("domains");
   const [profile, company] = await Promise.all([
     db.domainProfile.findUnique({ where: { companyId }, select: profileSelect }),
     db.company.findUnique({
@@ -186,7 +186,7 @@ export async function listDomainProfiles(params: {
   /** "unscanned" narrows to companies with a website nobody has looked up yet. */
   view?: string;
 }) {
-  await requireUser();
+  await requireModuleUser("domains");
 
   const where: Prisma.CompanyWhereInput = {
     website: { not: null },
@@ -229,7 +229,7 @@ export async function listDomainProfiles(params: {
 
 /** Distinct values actually present, so the filters only offer things that will match something. */
 export async function domainFilterOptions() {
-  await requireUser();
+  await requireModuleUser("domains");
   const [platforms, providers] = await Promise.all([
     db.domainProfile.findMany({
       where: { platform: { not: null } },
@@ -251,7 +251,7 @@ export async function domainFilterOptions() {
 }
 
 export async function domainSummary() {
-  await requireUser();
+  await requireModuleUser("domains");
   const [withWebsite, scanned, noDmarc, googleWorkspace, selfHosted] = await Promise.all([
     db.company.count({ where: { website: { not: null } } }),
     db.domainProfile.count(),

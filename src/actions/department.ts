@@ -9,6 +9,25 @@ import { createDepartmentSchema, updateDepartmentSchema } from "@/lib/validation
 import { DASHBOARD_WIDGET_REGISTRY } from "@/lib/dashboard-widgets";
 import type { ActionResult } from "@/actions/company";
 
+/**
+ * Departments, for a filter or a form — the directory's, the employee form's, the fixed asset
+ * register's. Here rather than with HR: every workspace has departments, whatever its plan.
+ */
+export async function listDepartmentOptions() {
+  await requireUser();
+  return db.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+}
+
+/** Active people who can be named as somebody's manager, or as an asset's custodian. */
+export async function listManagerOptions() {
+  await requireUser();
+  return db.user.findMany({
+    where: { active: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+}
+
 export async function listDepartments() {
   await requireUser();
   return db.department.findMany({

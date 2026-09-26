@@ -49,7 +49,13 @@ export function NewOrderForm({
   initialLocations = [],
   initialProposals = [],
   initialEndCustomers = [],
+  creditInPlan = true,
+  resellersInPlan = true,
 }: {
+  /** Receivables are in the workspace's plan: the customer's credit is shown as they are chosen. */
+  creditInPlan?: boolean;
+  /** Resellers are: a reseller's own price is filled in for them. */
+  resellersInPlan?: boolean;
   companies: CompanyComboOption[];
   items: ItemComboOption[];
   users: AssignableUser[];
@@ -104,7 +110,7 @@ export function NewOrderForm({
    */
   const [credit, setCredit] = useState<Awaited<ReturnType<typeof getCreditSnapshot>>>(null);
   useEffect(() => {
-    if (!selectedCompanyId) {
+    if (!selectedCompanyId || !creditInPlan) {
       setCredit(null);
       return;
     }
@@ -115,7 +121,7 @@ export function NewOrderForm({
     return () => {
       cancelled = true;
     };
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, creditInPlan]);
   const chosenTerms = (watch("paymentTerms") || "") as TermsKey | "";
   const orderAmount = calculateOrderAmount({
     quantity: Number(watch("quantity")) || 0,
@@ -185,7 +191,7 @@ export function NewOrderForm({
   // A reseller's price comes from their own deal, not the catalog — fill the sale price in and say
   // where the number came from, so nobody quietly bills a partner at list price.
   useEffect(() => {
-    if (!isResellerCustomer || !selectedCompanyId || !selectedItemId) {
+    if (!isResellerCustomer || !resellersInPlan || !selectedCompanyId || !selectedItemId) {
       setPriceNote(null);
       return;
     }
@@ -199,7 +205,7 @@ export function NewOrderForm({
     return () => {
       cancelled = true;
     };
-  }, [isResellerCustomer, selectedCompanyId, selectedItemId, setValue]);
+  }, [isResellerCustomer, resellersInPlan, selectedCompanyId, selectedItemId, setValue]);
 
   // Suggest Renewal when this customer already has a (non-cancelled/rejected) order for the same
   // item — re-checked whenever either changes. Can't detect "new to us but renewal elsewhere",

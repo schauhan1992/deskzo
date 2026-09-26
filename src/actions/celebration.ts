@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CelebrationAudience, CelebrationKind } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -20,7 +20,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function requireHr() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   return { user, allowed: await hasEffectivePermission(user.id, "hr.manage") };
 }
 
@@ -33,7 +33,7 @@ async function requireHr() {
  * yourself.
  */
 export async function dismissMoment(occasionKey: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   if (!occasionKey || occasionKey.length > 200) return { ok: false, error: "Unknown occasion." };
   await db.celebrationSeen.upsert({
     where: { userId_occasionKey: { userId: user.id, occasionKey } },

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { getPayrollRun, payrollRunTotals } from "@/actions/payroll";
-import { listDepartmentOptions } from "@/actions/hr";
+import { listDepartmentOptions } from "@/actions/department";
 import { PayrollRegister } from "@/components/hr/payroll-register";
 
 export default async function PayrollRunPage({

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type MessageClass, type ProviderKind } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
@@ -22,7 +22,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function requireAdmin() {
-  const user = await requireUser();
+  const user = await requireModuleUser("marketing");
   if (!(await hasEffectivePermission(user.id, "settings.manage"))) {
     return { user: null, error: "You can't configure mail providers." };
   }

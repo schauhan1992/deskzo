@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import type { SurveyAudience, SurveyKind, SurveyQuestionKind, SurveyStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -46,7 +46,7 @@ async function me(userId: string) {
 
 /** The forms waiting on this person, newest first. */
 export async function myOpenSurveys() {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   const viewer = await me(user.id);
   const now = new Date();
 
@@ -82,7 +82,7 @@ export async function myOpenSurveys() {
  * splash is that it comes back.
  */
 export async function pendingSplash(skippedInSession: string[]) {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   const viewer = await me(user.id);
   const now = new Date();
 
@@ -106,7 +106,7 @@ export async function pendingSplash(skippedInSession: string[]) {
 }
 
 export async function getSurveyToFill(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   const viewer = await me(user.id);
   const now = new Date();
 
@@ -134,7 +134,7 @@ export async function submitResponse(input: {
   surveyId: string;
   answers: { questionId: string; number?: number; text?: string; choices?: string[] }[];
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   const viewer = await me(user.id);
   const now = new Date();
 
@@ -216,7 +216,7 @@ export async function submitResponse(input: {
 
 /** They pushed the splash away. Recorded so the nag is honest about having been dismissed. */
 export async function skipSplash(surveyId: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   await db.surveyParticipation.upsert({
     where: { surveyId_userId: { surveyId, userId: user.id } },
     create: { surveyId, userId: user.id, skippedAt: new Date() },
@@ -228,7 +228,7 @@ export async function skipSplash(surveyId: string): Promise<ActionResult<null>> 
 // ─── Building and reading them ──────────────────────────────────────────────────────────────────
 
 export async function listSurveys() {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await manager(user.id))) return null;
   return toPlain(
     await db.survey.findMany({
@@ -258,7 +258,7 @@ export async function saveSurvey(input: {
   targetDepartmentIds?: string[];
   questions: { id?: string; kind: SurveyQuestionKind; prompt: string; helpText?: string; required: boolean; options: string[] }[];
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await manager(user.id))) return { ok: false, error: "You can't create forms." };
 
   const title = input.title.trim();
@@ -359,7 +359,7 @@ async function audienceUsers(surveyId: string): Promise<string[]> {
 }
 
 export async function setSurveyStatus(id: string, status: SurveyStatus): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await manager(user.id))) return { ok: false, error: "You can't change forms." };
   await db.survey.update({ where: { id }, data: { status } });
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Survey", entityId: id, entityLabel: `Marked ${status.toLowerCase()}` });
@@ -386,7 +386,7 @@ export type SurveyResults = {
  * accidentally skip it.
  */
 export async function surveyResults(id: string): Promise<SurveyResults | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await manager(user.id))) return null;
 
   const survey = await db.survey.findUnique({
@@ -428,7 +428,7 @@ export async function surveyResults(id: string): Promise<SurveyResults | null> {
 }
 
 export async function surveyOptions() {
-  await requireUser();
+  await requireModuleUser("engagement");
   const [users, departments] = await Promise.all([
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     db.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
@@ -437,7 +437,7 @@ export async function surveyOptions() {
 }
 
 export async function deleteSurvey(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await manager(user.id))) return { ok: false, error: "You can't delete forms." };
   const survey = await db.survey.findUnique({ where: { id }, select: { title: true, _count: { select: { responses: true } } } });
   if (!survey) return { ok: false, error: "That form no longer exists." };

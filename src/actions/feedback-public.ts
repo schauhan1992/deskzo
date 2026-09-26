@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { getOrganisation } from "@/lib/organisation";
 import { notifyUser } from "@/lib/notify";
 import { linkState, reviewInvitation, subjectOf } from "@/lib/feedback/rating";
@@ -31,6 +32,8 @@ import type { ActionResult } from "@/actions/company";
 /** What the form needs to render itself, and nothing more. */
 export async function getFeedbackForm(token: string) {
   if (!token || token.length < 10) return null;
+  // Outside the plan, or switched off: the same as a link that never worked.
+  if (!(await moduleAvailableForTenant("feedback"))) return null;
 
   const request = await db.feedbackRequest.findUnique({
     where: { token },
@@ -86,6 +89,7 @@ export async function submitFeedback(input: unknown): Promise<ActionResult<Feedb
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Please pick a rating." };
   }
   const { token, rating, personRating, serviceRating, comment } = parsed.data;
+  if (!(await moduleAvailableForTenant("feedback"))) return { ok: false, error: "This feedback link is no longer active." };
 
   const request = await db.feedbackRequest.findUnique({
     where: { token },
@@ -176,6 +180,7 @@ export async function submitFeedback(input: unknown): Promise<ActionResult<Feedb
  */
 export async function noteReviewOpened(token: string): Promise<ActionResult<null>> {
   if (!token || token.length < 10) return { ok: true, data: null };
+  if (!(await moduleAvailableForTenant("feedback"))) return { ok: true, data: null };
   const request = await db.feedbackRequest.findUnique({
     where: { token },
     select: { response: { select: { id: true, reviewInvited: true, reviewOpenedAt: true } } },

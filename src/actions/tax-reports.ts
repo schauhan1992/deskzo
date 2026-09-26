@@ -2,7 +2,7 @@
 
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission } from "@/actions/permission";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
@@ -20,7 +20,7 @@ import { profitAndLoss } from "@/actions/ledger-reports";
  */
 
 async function requireAccounts() {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   const allowed = await hasEffectivePermission(user.id, "payments.manage");
   return { user, allowed };
 }
@@ -279,7 +279,7 @@ export async function tdsSummary(params: { month: number; year: number }) {
  * function that can be checked — see src/lib/ledger/cashflow.ts.
  */
 export async function cashFlow(params: { from: string; to: string }) {
-  await requireUser();
+  await requireModuleUser("accounting");
   const from = new Date(`${params.from}T00:00:00.000Z`);
   const to = new Date(`${params.to}T23:59:59.999Z`);
 

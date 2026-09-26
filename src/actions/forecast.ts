@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { LeadStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { accountScopeIds } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
@@ -46,7 +46,7 @@ function startOfToday(now: Date): Date {
 const money = (v: Prisma.Decimal | number | null | undefined) => (v === null || v === undefined ? 0 : Number(v));
 
 async function viewer() {
-  const user = await requireUser();
+  const user = await requireModuleUser("forecast");
   if (!(await isModuleEnabled("forecast"))) return null;
   const [scope, manage] = await Promise.all([accountScopeIds(user.id), can(user.id, "forecast.manage")]);
   return { user, scope, manage };
@@ -388,7 +388,7 @@ async function bookings(periods: Pick<Period, "key" | "from" | "to">[], who: { i
 // ─── Weights ─────────────────────────────────────────────────────────────────
 
 export async function saveStageWeight(stage: string, percent: number | null): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forecast");
   if (!(await can(user.id, "forecast.manage"))) return { ok: false, error: "You can't change how deals are weighted." };
   if (!isOpenStage(stage)) return { ok: false, error: "That isn't an open stage." };
   if (percent === null) {
@@ -471,7 +471,7 @@ export async function getCommits() {
 
 /** Your own number for a month — this month or a later one. A past month's call stays as it was made. */
 export async function saveCommit(input: { month: string; commit: number; bestCase?: number | null; note?: string | null }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forecast");
   if (!(await isModuleEnabled("forecast"))) return { ok: false, error: "Forecasting is switched off." };
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) return { ok: false, error: "Pick a month." };
   const current = periodContaining(new Date(), "month").key;

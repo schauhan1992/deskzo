@@ -9,6 +9,7 @@ import {
   listOpenInvoices,
 } from "@/actions/receivable";
 import { hasEffectivePermission } from "@/actions/permission";
+import { isModuleEntitled } from "@/lib/modules-access";
 import { auth } from "@/lib/auth";
 import { getOrganisation } from "@/lib/organisation";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
@@ -55,12 +56,16 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
   const isOpenCreditNote = document.docType === "CREDIT_NOTE" && document.status !== "DRAFT" && document.status !== "CANCELLED";
   // The other side of the ledger, which had no way to be settled at all — see bill-settlement.tsx.
   const isOpenBill = document.docType === "BILL" && document.status !== "DRAFT" && document.status !== "CANCELLED";
+  // Settling is Receivables' and Payables' work: a plan without them shows the document alone.
+  const [receivablesInPlan, payablesInPlan] = await Promise.all([isModuleEntitled("receivables"), isModuleEntitled("payables")]);
+  const settleInvoice = isOpenInvoice && receivablesInPlan;
+  const settleCreditNote = isOpenCreditNote && receivablesInPlan;
   const [settlement, billSettlement, availableCredits, creditBalance, openInvoices, canRecord, canRemove] = await Promise.all([
-    isOpenInvoice ? getInvoiceSettlement(document.id) : Promise.resolve(null),
-    isOpenBill ? getBillSettlement(document.id) : Promise.resolve(null),
-    isOpenInvoice ? listAvailableCredits(document.companyId) : Promise.resolve([]),
-    isOpenCreditNote ? getCreditNoteBalance(document.id) : Promise.resolve(null),
-    isOpenCreditNote ? listOpenInvoices(document.companyId) : Promise.resolve([]),
+    settleInvoice ? getInvoiceSettlement(document.id) : Promise.resolve(null),
+    isOpenBill && payablesInPlan ? getBillSettlement(document.id) : Promise.resolve(null),
+    settleInvoice ? listAvailableCredits(document.companyId) : Promise.resolve([]),
+    settleCreditNote ? getCreditNoteBalance(document.id) : Promise.resolve(null),
+    settleCreditNote ? listOpenInvoices(document.companyId) : Promise.resolve([]),
     hasEffectivePermission(session!.user.id, "payments.record"),
     hasEffectivePermission(session!.user.id, "payments.delete"),
   ]);

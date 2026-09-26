@@ -24,6 +24,7 @@ import { ActivityDashboard } from "@/components/workspace/activity-dashboard";
 import { activityReport } from "@/actions/calling-activity";
 import { countActiveFilters, filterLabels, type WorkbookFilters } from "@/lib/workspace/filters";
 import { can } from "@/lib/authz/resolve";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function WorkbookPage({
   params,
@@ -43,6 +44,8 @@ export default async function WorkbookPage({
   const pageSize = resolvePageSize(query.pageSize);
 
   const isActivity = workbook.mode === "COLD_CALLING";
+  // A calling campaign is the Calls module's: without it in the plan, none is started or reported.
+  const callsInPlan = await isModuleEntitled("calls");
 
   const [session, viewMode, result, users, report] = await Promise.all([
     auth(),
@@ -53,7 +56,7 @@ export default async function WorkbookPage({
       ? Promise.resolve({ rows: [], total: 0 })
       : runWorkbook({ filters: workbook.filters, page, pageSize, search: query.q }),
     listAssignableUsers(),
-    isActivity ? activityReport(id) : Promise.resolve(null),
+    isActivity && callsInPlan ? activityReport(id) : Promise.resolve(null),
   ]);
 
   const selected = !isActivity && viewMode === "split" ? resolveSelected(result.rows, query.sel) : null;
@@ -98,7 +101,7 @@ export default async function WorkbookPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!isActivity && <ViewModeToggle viewKey="workspace" mode={viewMode} />}
-          {!isActivity && workbook.canEdit && (
+          {!isActivity && workbook.canEdit && callsInPlan && (
             <StartActivity workbookId={workbook.id} matchCount={result.total} users={users} />
           )}
           {isActivity && (

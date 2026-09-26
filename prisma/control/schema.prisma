@@ -75,6 +75,15 @@ model Tenant {
 
   ownerEmail String?
 
+  /// What it may use — its plans' modules and limits, with staff overrides — worked out whenever one
+  /// of those changes (src/lib/platform/entitlements.ts) and read from here with the rest of the
+  /// workspace, so no request queries plans to ask "is this module in the plan". Null: never worked
+  /// out, which means the core only.
+  entitlements         Json?
+  /// Staff overrides of the plans' limits, for this workspace alone. Null: the plans decide.
+  seatOverride         Int?
+  copilotTokenOverride Int?
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   suspendedAt     DateTime?
@@ -86,6 +95,8 @@ model Tenant {
   provisioningJobs ProvisioningJob[]
   handoffTickets   PlatformHandoffTicket[]
   migrationRuns    TenantMigrationRun[]
+  subscriptions    Subscription[]
+  moduleOverrides  TenantModuleOverride[]
 
   @@map("tenants")
 }
@@ -195,6 +206,8 @@ model ProvisioningJob {
   /// The organisation's legal name, and its country (ISO 3166-1 alpha-2).
   companyName String
   country     String
+  /// The plan it starts on — its invitation's, or the default plan's when null.
+  planKey     String?
 
   createdAt DateTime @default(now())
 
@@ -228,6 +241,8 @@ model SignupInvite {
   uses      Int       @default(0)
   expiresAt DateTime?
   createdBy String?
+  /// The plan a workspace set up with it starts on; null: the default plan.
+  planKey   String?
   createdAt DateTime  @default(now())
 
   @@map("signup_invites")
@@ -385,4 +400,122 @@ model SupportAccessGrant {
 
   @@index([tenantId, expiresAt])
   @@map("support_access_grants")
+}
+
+// ─── Plans and what a workspace may use (M7) ─────────────────────────────────────────────────────
+
+enum PlanKind {
+  /// A workspace's base: the modules it runs on and the people included.
+  EDITION
+  /// Several modules sold together, on top of an edition.
+  BUNDLE
+  /// One more thing: a module, more seats, more copilot.
+  ADDON
+  /// Never sold: the installation's own workspace, and workspaces staff use for testing.
+  INTERNAL
+}
+
+/// Something a workspace can be on. Prices, and the gateways that charge them, arrive with billing.
+model Plan {
+  id          String   @id @default(cuid())
+  /// Stable, for invitations and scripts: "crm-starter", "internal-everything".
+  key         String   @unique
+  name        String
+  kind        PlanKind
+  description String?
+  /// Every module there is, including ones added later.
+  allModules  Boolean  @default(false)
+  /// ISO 3166-1 alpha-2 codes of the countries it is sold in; empty: everywhere. A module sold only
+  /// in some countries (src/lib/modules.ts) is left out elsewhere whatever the plan says.
+  countries   String[] @default([])
+  /// People included, for each unit of quantity. Null: no limit.
+  seats         Int?
+  /// AI copilot tokens a month, for each unit of quantity. Null: no limit; 0: none.
+  copilotTokens Int?
+  /// New workspaces start on it unless their invitation names another. At most one (a partial
+  /// unique index).
+  isDefault   Boolean  @default(false)
+  /// Retired plans stay on the workspaces already on them, but are not given to any more.
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  modules PlanModule[]
+  items   SubscriptionItem[]
+
+  @@map("plans")
+}
+
+model PlanModule {
+  planId    String
+  plan      Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  /// A key from src/lib/modules.ts.
+  moduleKey String
+
+  @@id([planId, moduleKey])
+  @@map("plan_modules")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum BillingGateway {
+  /// Given by staff from the console: no gateway charges it.
+  MANUAL
+  STRIPE
+  RAZORPAY
+}
+
+/// A workspace's plans, and how they are paid for. Every live subscription (trialing, active or past
+/// due) counts towards what it may use.
+model Subscription {
+  id               String             @id @default(cuid())
+  tenantId         String
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  status           SubscriptionStatus @default(ACTIVE)
+  gateway          BillingGateway     @default(MANUAL)
+  trialEndsAt      DateTime?
+  currentPeriodEnd DateTime?
+  cancelledAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  items SubscriptionItem[]
+
+  @@index([tenantId, status])
+  @@map("subscriptions")
+}
+
+model SubscriptionItem {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  planId         String
+  plan           Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  /// How many of it: an add-on of five seats bought twice is ten.
+  quantity       Int          @default(1)
+  createdAt      DateTime     @default(now())
+
+  @@unique([subscriptionId, planId])
+  @@map("subscription_items")
+}
+
+/// Staff adding a module to one workspace, or taking one away, whatever its plans say — a pilot, a
+/// favour, a dispute. Kept with who and why.
+model TenantModuleOverride {
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  moduleKey     String
+  granted       Boolean
+  reason        String
+  byStaffId     String
+  createdAt     DateTime @default(now())
+
+  @@id([tenantId, moduleKey])
+  @@map("tenant_module_overrides")
 }

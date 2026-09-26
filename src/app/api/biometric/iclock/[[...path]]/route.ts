@@ -6,6 +6,7 @@ import { tenantForDeviceSerial, touchDeviceRoute } from "@/lib/platform/device-r
 import { HOST_MISMATCH, requestHost } from "@/lib/tenancy/host";
 import { tenantForHost } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { Tenant } from "@/lib/tenancy/state";
 
 /**
@@ -100,16 +101,25 @@ async function workspaceFor(request: Request): Promise<Routed> {
   return { tenant };
 }
 
+/**
+ * Attendance is HR's. A workspace whose plan leaves HR out is answered like a held one: the terminal
+ * keeps its punches and tries again, so nothing is lost if HR comes back.
+ */
+async function withHr(work: () => Promise<NextResponse>): Promise<NextResponse> {
+  if (!(await moduleAvailableForTenant("hr"))) return text("Unavailable", 503);
+  return work();
+}
+
 export async function GET(request: Request, context: { params: Promise<{ path?: string[] }> }) {
   const routed = await workspaceFor(request);
   if ("error" in routed) return routed.error;
-  return runAsTenant(routed.tenant, () => handleGet(request, context));
+  return runAsTenant(routed.tenant, () => withHr(() => handleGet(request, context)));
 }
 
 export async function POST(request: Request, context: { params: Promise<{ path?: string[] }> }) {
   const routed = await workspaceFor(request);
   if ("error" in routed) return routed.error;
-  return runAsTenant(routed.tenant, () => handlePost(request, context));
+  return runAsTenant(routed.tenant, () => withHr(() => handlePost(request, context)));
 }
 
 async function handleGet(request: Request, context: { params: Promise<{ path?: string[] }> }) {

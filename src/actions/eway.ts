@@ -5,7 +5,7 @@ import { Prisma, type TradeDocumentType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { ewayEnabled, intraStateThreshold } from "@/lib/eway/settings";
 import { EWAY_CLAIM_STALE_MS } from "@/lib/eway/rules";
-import { requireUser } from "@/lib/session";
+import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { getOrganisation, getEInvoiceConfig } from "@/lib/organisation";
@@ -45,7 +45,8 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function gate() {
-  const user = await requireUser();
+  const user = await requireModuleUser("sales_documents");
+  if (!(await countryFeatureAvailable("eway"))) return { user, error: "E-way bills are India's, and this workspace is set up for another country." };
   // Raising a bill is a filing on the company's GSTIN against a government portal — the same weight
   // as issuing the invoice it covers, so the same permission governs it.
   if (!(await can(user.id, "orders.process"))) {
@@ -980,7 +981,8 @@ export type EwaySettings = {
  * make the encryption decorative.
  */
 export async function ewaySettings(): Promise<ActionResult<EwaySettings>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("sales_documents");
+  if (!(await countryFeatureAvailable("eway"))) return { ok: false, error: "E-way bills are India's, and this workspace is set up for another country." };
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "Only an admin can change this." };
 
   const [row, org] = await Promise.all([
@@ -1028,7 +1030,8 @@ export async function ewaySettings(): Promise<ActionResult<EwaySettings>> {
  * bill already raised, which belongs to the portal and to the lorry it is travelling on.
  */
 export async function setEwayEnabled(input: { enabled: boolean }): Promise<ActionResult<{ enabled: boolean }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("sales_documents");
+  if (!(await countryFeatureAvailable("eway"))) return { ok: false, error: "E-way bills are India's, and this workspace is set up for another country." };
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "Only an admin can change this." };
 
   await db.organisationSettings.upsert({
@@ -1053,7 +1056,8 @@ export async function setEwayEnabled(input: { enabled: boolean }): Promise<Actio
 export async function saveEwayThreshold(input: { intraStateThreshold: number | null }): Promise<
   ActionResult<{ intraStateThreshold: number | null }>
 > {
-  const user = await requireUser();
+  const user = await requireModuleUser("sales_documents");
+  if (!(await countryFeatureAvailable("eway"))) return { ok: false, error: "E-way bills are India's, and this workspace is set up for another country." };
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "Only an admin can change this." };
 
   const value = input.intraStateThreshold;

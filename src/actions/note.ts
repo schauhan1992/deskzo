@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { mayAttachTo } from "@/lib/authz/attachments";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { accountScopeIds } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
@@ -209,7 +209,7 @@ type NoteListParams = {
 };
 
 export async function listNotes(params?: NoteListParams): Promise<NoteListItem[]> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
 
   const rows = await db.stickyNote.findMany({
     where: {
@@ -237,7 +237,7 @@ export async function listNotes(params?: NoteListParams): Promise<NoteListItem[]
 }
 
 export async function createNote(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
   const parsed = createNoteSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -293,7 +293,7 @@ export async function createNote(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function updateNote(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
   const parsed = updateNoteSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -348,7 +348,7 @@ export async function updateNote(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function setNoteArchived(id: string, archived: boolean): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
   const existing = await ownedNote(id, user.id);
   if (!existing) {
     return { ok: false, error: "Note not found." };
@@ -379,7 +379,7 @@ export async function setNoteArchived(id: string, archived: boolean): Promise<Ac
  * somebody reaching for this has decided the note should stop existing.
  */
 export async function deleteNote(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
   const existing = await ownedNote(id, user.id);
   if (!existing) {
     return { ok: false, error: "Note not found." };
@@ -403,7 +403,7 @@ export async function deleteNote(id: string): Promise<ActionResult<null>> {
 }
 
 export async function reorderNotes(input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
   const parsed = reorderNotesSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -452,6 +452,6 @@ export async function reorderNotes(input: unknown): Promise<ActionResult<null>> 
 
 /** Whether to offer "Everyone" in the visibility picker at all, rather than offering it and failing. */
 export async function canBroadcastNotes(): Promise<boolean> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notes");
   return can(user.id, "notes.broadcast");
 }

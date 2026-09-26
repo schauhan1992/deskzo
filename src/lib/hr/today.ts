@@ -6,6 +6,7 @@ import { greeting, momentsFor, type Moment } from "@/lib/hr/celebrations";
 import { detectSalesWinsLazily, withoutOrphanedWins } from "@/lib/wins/detect";
 import { announceActivityAwardsLazily } from "@/lib/performance/announce";
 import { announcePrizesLazily } from "@/lib/wins/prize-announce";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 /**
  * What to greet the signed-in person with today.
@@ -29,12 +30,7 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
   if (!user) return empty;
 
   try {
-    const [hr, wins] = await Promise.all([
-      db.systemModule.findUnique({ where: { key: "hr" }, select: { enabled: true } }),
-      db.systemModule.findUnique({ where: { key: "wins" }, select: { enabled: true } }),
-    ]);
-    const hrOn = !hr || hr.enabled;
-    const winsOn = !wins || wins.enabled;
+    const [hrOn, winsOn] = await Promise.all([moduleAvailableForTenant("hr"), moduleAvailableForTenant("wins")]);
     // Sales wins celebrate themselves even where nobody has set up the scheduler, and the fortnight's
     // most active and the prizes up for grabs are announced the same way. All throttled inside.
     if (winsOn) {

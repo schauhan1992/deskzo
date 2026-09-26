@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { Prisma, type CandidateStatus, type EmployeeDocumentType, type EmploymentType, type LetterType } from "@prisma/client";
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -17,6 +17,7 @@ import { dateOnly } from "@/lib/hr/calendar";
 import { canConvert, CANDIDATE_LETTERS, ONBOARDING_TASKS } from "@/lib/hr/onboarding";
 import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@/lib/hr/letters";
 import type { ActionResult } from "@/actions/company";
+import { seatProblem } from "@/lib/seats";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -29,7 +30,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function requireHr() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   return { user, allowed: await hasEffectivePermission(user.id, "hr.manage") };
 }
 
@@ -294,6 +295,9 @@ export async function convertCandidate(
 
   const clash = await db.user.findUnique({ where: { email: candidate.email }, select: { name: true } });
   if (clash) return { ok: false, error: `${clash.name} already has an account with that email.` };
+  // Becoming an employee means an account, and an account takes a seat.
+  const seats = await seatProblem();
+  if (seats) return { ok: false, error: seats };
 
   if (input.employeeCode) {
     const codeClash = await db.employeeProfile.findFirst({

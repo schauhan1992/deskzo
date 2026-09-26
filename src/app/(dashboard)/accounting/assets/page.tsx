@@ -1,7 +1,7 @@
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { listAssetAccounts, listAssets, previewDepreciation } from "@/actions/asset";
-import { listDepartmentOptions, listManagerOptions } from "@/actions/hr";
+import { listDepartmentOptions, listManagerOptions } from "@/actions/department";
 import { getOrganisation } from "@/lib/organisation";
 import { Card } from "@/components/ui/card";
 import { ReportHeader } from "@/components/accounting/report-chrome";

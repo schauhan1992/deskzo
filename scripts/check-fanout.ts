@@ -86,6 +86,8 @@ async function main() {
           dbName: new URL(dbUrl).pathname.slice(1),
           dbUrlCipher: sealForTenant(id, "db-url", dbUrl),
           keyBundleCipher: keys.sealKeyBundle(id, keys.newKeyBundle()),
+          // Everything, as the installation's own workspace has: this check is about routing, not plans.
+          entitlements: { v: 1, all: true, modules: [], seats: null, copilotTokens: null, plans: ["internal-everything"] },
         },
       });
       return id;

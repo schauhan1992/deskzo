@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { isModuleEnabled } from "@/actions/module";
@@ -32,7 +32,7 @@ const n = (value: Prisma.Decimal | Prisma.Decimal.Value | null | undefined) => N
 const dec = (value: number) => new Prisma.Decimal(value);
 
 async function requirePayrollAccess() {
-  const user = await requireUser();
+  const user = await requireModuleUser("payroll");
   const allowed = await hasEffectivePermission(user.id, "payroll.manage");
   return { user, allowed };
 }
@@ -541,7 +541,7 @@ export async function postPayrollRunToLedger(runId: string): Promise<ActionResul
 
 /** Somebody's own payslips — the one payroll read that needs no permission. */
 export async function myPayslips() {
-  const user = await requireUser();
+  const user = await requireModuleUser("payroll");
   return toPlain(
     await db.payslip.findMany({
       where: { userId: user.id, run: { status: { in: ["LOCKED", "PAID"] } } },
@@ -553,7 +553,7 @@ export async function myPayslips() {
 
 /** One payslip, for the person it belongs to or for payroll. */
 export async function getPayslip(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payroll");
   const slip = await db.payslip.findUnique({
     where: { id },
     include: {

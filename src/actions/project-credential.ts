@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -74,7 +74,7 @@ export type CredentialSummary = {
  * Note what is absent from the select. That absence is the feature.
  */
 export async function listCredentials(projectId: string): Promise<ActionResult<CredentialSummary[]>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { project, mayUse } = await credentialAccess(projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!mayUse) return { ok: false, error: "You can't see stored credentials." };
@@ -126,7 +126,7 @@ export async function saveCredential(input: {
   secret?: string;
   expiresAt?: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
 
   /**
    * On an edit, the row's own project decides who may write it — not the one the caller sent.
@@ -191,7 +191,7 @@ export async function revealCredential(
   credentialId: string,
   password: string,
 ): Promise<ActionResult<{ secret: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
 
   const credential = await db.projectCredential.findUnique({
     where: { id: credentialId },
@@ -253,7 +253,7 @@ export async function revealCredential(
 }
 
 export async function deleteCredential(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const credential = await db.projectCredential.findUnique({
     where: { id },
     select: { id: true, label: true, projectId: true },

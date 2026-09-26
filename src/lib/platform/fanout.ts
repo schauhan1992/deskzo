@@ -77,7 +77,7 @@ async function runOne<T>(job: string, tenant: Tenant, run: (tenant: Tenant) => P
   // Async, so a job that throws before its first await is a rejection like any other.
   const work = (async () => runAsTenant(tenant, () => run(tenant)))();
   // Released when the work really ends, whether or not the caller stopped waiting for it.
-  work.then(
+  const released = work.then(
     () => releaseLease(tenant.id, job, true, null),
     (err: unknown) => releaseLease(tenant.id, job, false, err instanceof Error ? err.message : String(err)),
   );
@@ -89,8 +89,13 @@ async function runOne<T>(job: string, tenant: Tenant, run: (tenant: Tenant) => P
   });
   try {
     const value = await Promise.race([work, limit]);
+    // Finished in time: its record is written before the outcome is reported, so whoever reads the
+    // one straight after the other — the console, a check — sees them agree.
+    await released;
     return { ...base, ok: true, value, ms: Date.now() - started };
   } catch (err) {
+    // A job that failed has ended, and its record is waited for too; one past its limit has not.
+    if (!(err instanceof JobTimeout)) await released;
     console.error(`[fanout] ${job} failed for ${tenant.slug}`, err);
     return { ...base, ok: false, error: err instanceof Error ? err.message : String(err), ms: Date.now() - started };
   } finally {

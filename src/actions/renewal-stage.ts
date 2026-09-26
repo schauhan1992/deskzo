@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -24,7 +24,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   // The same pair the renewal order itself needs. Recording where a renewal has got to is part of
   // working it, not a separate privilege.
   const allowed =

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { ProjectDocumentType, ProjectTemplateMilestone } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { checkUpload } from "@/lib/hr/document-upload";
@@ -39,7 +39,7 @@ export async function uploadProjectDocument(input: {
   fileDataUrl: string;
   mimeType: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { project, manage } = await reachable(input.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!manage) return { ok: false, error: "You can't add documents to this project." };
@@ -81,7 +81,7 @@ export async function uploadProjectDocument(input: {
 export async function getProjectDocumentFile(
   id: string,
 ): Promise<ActionResult<{ name: string; mimeType: string; fileDataUrl: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const doc = await db.projectDocument.findUnique({
     where: { id },
     select: { id: true, name: true, mimeType: true, fileDataUrl: true, projectId: true },
@@ -95,7 +95,7 @@ export async function getProjectDocumentFile(
 }
 
 export async function deleteProjectDocument(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const doc = await db.projectDocument.findUnique({ where: { id }, select: { id: true, name: true, projectId: true } });
   if (!doc) return { ok: false, error: "That document no longer exists." };
 
@@ -118,7 +118,7 @@ export async function deleteProjectDocument(id: string): Promise<ActionResult<nu
 // ─── Project types and their templates ──────────────────────────────────────────────────────────
 
 export async function listProjectTypes(includeInactive = false) {
-  await requireUser();
+  await requireModuleUser("projects");
   const rows = await db.projectType.findMany({
     where: includeInactive ? {} : { active: true },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -139,7 +139,7 @@ export async function saveProjectType(input: {
   /** The whole template, replaced wholesale — see below. */
   milestones?: { name: string; note?: string; dayOffset: number }[];
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   if (!(await hasEffectivePermission(user.id, "projects.manage"))) {
     return { ok: false, error: "You can't manage project types." };
   }
@@ -191,7 +191,7 @@ export async function saveProjectType(input: {
 }
 
 export async function deleteProjectType(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   if (!(await hasEffectivePermission(user.id, "projects.manage"))) {
     return { ok: false, error: "You can't manage project types." };
   }
@@ -208,7 +208,7 @@ export async function deleteProjectType(id: string): Promise<ActionResult<null>>
 
 /** Put a type's standard plan onto a project that doesn't have one yet. */
 export async function applyTemplateToProject(projectId: string): Promise<ActionResult<{ added: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { project, manage } = await reachable(projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };

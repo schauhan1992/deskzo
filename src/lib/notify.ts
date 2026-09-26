@@ -9,6 +9,7 @@ import {
 } from "@/lib/vault/policy";
 import { sendEmailNotification } from "@/lib/email";
 import { wants } from "@/lib/notifications/catalogue";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 /**
  * Server-only helpers for creating notifications — deliberately NOT exported from a "use server"
@@ -280,8 +281,7 @@ async function peopleCandidates(
 ): Promise<
   { userId: string; type: NotificationType; title: string; message: string | null; link: string | null; dedupeKey: string }[]
 > {
-  const hrEnabled = await db.systemModule.findUnique({ where: { key: "hr" }, select: { enabled: true } });
-  if (hrEnabled && !hrEnabled.enabled) return [];
+  if (!(await moduleAvailableForTenant("hr"))) return [];
 
   const out: Awaited<ReturnType<typeof peopleCandidates>> = [];
   const todayMonth = now.getUTCMonth() + 1;

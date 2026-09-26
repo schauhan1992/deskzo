@@ -1,6 +1,7 @@
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
-import { hrCapabilities, listDepartmentOptions, listManagerOptions } from "@/actions/hr";
+import { hrCapabilities } from "@/actions/hr";
+import { listDepartmentOptions, listManagerOptions } from "@/actions/department";
 import { listCandidates } from "@/actions/candidate";
 import { Card } from "@/components/ui/card";
 import { SearchParamInput } from "@/components/ui/search-param-input";

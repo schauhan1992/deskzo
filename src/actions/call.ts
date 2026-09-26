@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CallOutcome, CallDirection, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
@@ -51,7 +51,7 @@ export async function logCall(input: {
   ticketId?: string;
   companyProductId?: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
 
   if (!callOutcomeValues.includes(input.outcome as CallOutcome)) {
     return { ok: false, error: "Pick how the call went." };
@@ -160,7 +160,7 @@ export async function logCall(input: {
 
 /** Marks a promised callback as done, without deleting the promise that was made. */
 export async function completeFollowUp(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   const call = await db.callLog.findUnique({ where: { id }, select: { id: true, followUpAt: true, followUpTaskId: true } });
   if (!call) return { ok: false, error: "That call no longer exists." };
   if (!call.followUpAt) return { ok: false, error: "There's no callback set on that call." };
@@ -187,7 +187,7 @@ export async function completeFollowUp(id: string): Promise<ActionResult<null>> 
  * switchboard field would just be a box to ignore.
  */
 export async function listCompanyNumbers(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return [];
 
   /**
@@ -233,7 +233,7 @@ export async function listCalls(params: {
   /** "due" narrows to callbacks that are promised and not yet done. */
   view?: string;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return { rows: [], total: 0 };
 
   const where: Prisma.CallLogWhereInput = {
@@ -289,7 +289,7 @@ export async function listCalls(params: {
 
 /** Headline figures for the calling team: dials, how many reached a person, and time on the phone. */
 export async function callSummary(params?: { from?: string; to?: string; userId?: string }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return { total: 0, connected: 0, connectRate: 0, talkTimeSeconds: 0, companiesReached: 0, dueCallbacks: 0 };
   const from = params?.from ? startOfDay(params.from) : startOfDay(new Date().toISOString());
   const to = params?.to ? endOfDay(params.to) : endOfDay(new Date().toISOString());
@@ -321,7 +321,7 @@ export async function callSummary(params?: { from?: string; to?: string; userId?
 
 /** A company's call history, for the 360 view. */
 export async function listCompanyCalls(companyId: string, take = 50) {
-  const user = await requireUser();
+  const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return [];
   return toPlain(
     await db.callLog.findMany({
@@ -342,7 +342,7 @@ export async function listCompanyCalls(companyId: string, take = 50) {
  * leave the filter offering a different set of names on every page.
  */
 export async function listCallers() {
-  await requireUser();
+  await requireModuleUser("calls");
   return db.user.findMany({
     where: { active: true, callsLogged: { some: {} } },
     orderBy: { name: "asc" },

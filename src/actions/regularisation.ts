@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -66,7 +66,7 @@ const selectShape = {
 } satisfies Prisma.AttendanceRegularisationSelect;
 
 export async function requestRegularisation(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const parsed = regularisationSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const data = parsed.data;
@@ -130,7 +130,7 @@ export async function requestRegularisation(input: unknown): Promise<ActionResul
 }
 
 export async function decideRegularisation(input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const parsed = decisionSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const { id, approve, note } = parsed.data;
@@ -206,7 +206,7 @@ export async function decideRegularisation(input: unknown): Promise<ActionResult
 }
 
 export async function cancelRegularisation(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const request = await db.attendanceRegularisation.findUnique({ where: { id }, select: { userId: true, status: true } });
   if (!request) return { ok: false, error: "That request no longer exists." };
   if (request.userId !== user.id) return { ok: false, error: "That isn't your request." };
@@ -218,7 +218,7 @@ export async function cancelRegularisation(id: string): Promise<ActionResult<nul
 }
 
 export async function myRegularisations() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   return toPlain(
     await db.attendanceRegularisation.findMany({
       where: { userId: user.id },
@@ -231,7 +231,7 @@ export async function myRegularisations() {
 
 /** Corrections waiting on this user to decide. */
 export async function regularisationQueue() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const wide =
     (await hasEffectivePermission(user.id, "hr.manage")) || (await hasEffectivePermission(user.id, "hr.approveLeave"));
   const downline = await getDownlineUserIds(user.id);

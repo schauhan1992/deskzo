@@ -32,6 +32,7 @@ import { WidgetGrid, type GridItem } from "@/components/dashboard/widget-grid";
 import { getPageLayout, setPageLayout } from "@/actions/page-layout";
 import { getPageLayoutDefinition } from "@/lib/page-layouts";
 import type { ReactNode } from "react";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function AccountingOverviewPage() {
   const enabled = await isModuleEnabled("accounting");
@@ -66,8 +67,9 @@ export default async function AccountingOverviewPage() {
     balanceSheet(),
     getOrganisation(),
     getBooksStatus(),
-    unpostedExpenses(),
-    unpostedPayrollRuns(),
+    // Only for the modules this workspace has: a plan without Payroll has no runs to post.
+    isModuleEntitled("expenses").then((has) => (has ? unpostedExpenses() : [])),
+    isModuleEntitled("payroll").then((has) => (has ? unpostedPayrollRuns() : [])),
     // The same five figures the main dashboard shows, from the same functions. Somebody who
     // checks one against the other should find them identical, and the only way to guarantee
     // that is for there to be one implementation.

@@ -2,6 +2,7 @@ import type { AiProvider } from "@prisma/client";
 import { db } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 import { istDateParts } from "@/lib/india-time";
+import { currentTenant } from "@/lib/tenancy/resolve";
 
 /**
  * The copilot's configuration and the daily allowance. Server-only: this is where the provider keys
@@ -67,6 +68,30 @@ export function usageDay(now = new Date()): Date {
 export async function usedToday(userId: string, now = new Date()): Promise<number> {
   const u = await db.copilotUsage.findUnique({ where: { userId_day: { userId, day: usageDay(now) } } });
   return u ? u.inputTokens + u.outputTokens : 0;
+}
+
+/** The first day of this month in India, as a `@db.Date` column holds it. */
+export function usageMonthStart(now = new Date()): Date {
+  const { year, month } = istDateParts(now);
+  return new Date(Date.UTC(year, month, 1));
+}
+
+/** Tokens the whole workspace has used this month, everybody together — what the plan allows is counted in. */
+export async function usedThisMonth(now = new Date()): Promise<number> {
+  const sum = await db.copilotUsage.aggregate({ where: { day: { gte: usageMonthStart(now) } }, _sum: { inputTokens: true, outputTokens: true } });
+  return (sum._sum.inputTokens ?? 0) + (sum._sum.outputTokens ?? 0);
+}
+
+/**
+ * Why the workspace's plan stops the copilot, or null when it does not: none in the plan, or this
+ * month's allowance spent. Separate from each person's daily limit, which the workspace sets itself.
+ */
+export async function planStopsCopilot(now = new Date()): Promise<string | null> {
+  const { copilotTokens } = (await currentTenant()).entitlements;
+  if (copilotTokens === null) return null;
+  if (copilotTokens === 0) return "The AI copilot isn't part of this workspace's plan.";
+  if ((await usedThisMonth(now)) >= copilotTokens) return "This workspace has used this month's copilot allowance. It renews on the 1st.";
+  return null;
 }
 
 export async function recordUsage(userId: string, usage: { input: number; output: number }, now = new Date()) {

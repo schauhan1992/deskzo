@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { parseFile } from "@/lib/portability/import";
@@ -29,7 +29,7 @@ import type { ActionResult } from "@/actions/company";
 const MAX_BYTES = 5 * 1024 * 1024;
 
 async function gate() {
-  const user = await requireUser();
+  const user = await requireModuleUser("purchase_documents");
   if (!(await can(user.id, "purchase.reconcile"))) {
     return { user, error: "You don't have access to vendor reconciliation." };
   }

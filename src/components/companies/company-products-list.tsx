@@ -196,7 +196,10 @@ export function CompanyProductsList({
   canDelete,
   canRecordPayments,
   canDeletePayments,
+  canAddSeats = true,
 }: {
+  /** Renewals are in the workspace's plan — seats added mid-term are quoted and raised there. */
+  canAddSeats?: boolean;
   companyId: string;
   companyName: string;
   products: Product[];
@@ -334,7 +337,7 @@ export function CompanyProductsList({
                     {p.parentId && <span className="block text-[11px] text-subtle">added mid-term</span>}
                     {/* Extra seats are raised from the subscription itself, where the term and the
                         price to pro-rate against are already known. */}
-                    {!p.parentId && p.item.type === "SUBSCRIPTION" && p.endDate && p.orderStatus !== "CANCELLED" && (
+                    {canAddSeats && !p.parentId && p.item.type === "SUBSCRIPTION" && p.endDate && p.orderStatus !== "CANCELLED" && (
                       <span className="mt-1 block">
                         <AddSeatsDialog subscription={{ id: p.id, quantity: p.quantity, endDate: p.endDate }} />
                       </span>

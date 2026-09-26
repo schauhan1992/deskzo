@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import type { FormCategory, MarketingTopic, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { isResellerManaged } from "@/lib/reseller";
 import { getOrganisation } from "@/lib/organisation";
 import { normalizeCompanyName } from "@/lib/validation/company";
@@ -219,6 +220,7 @@ const publicFormSelect = {
  */
 export async function getForm(slug: string) {
   if (!slug) return null;
+  if (!(await moduleAvailableForTenant("forms"))) return null;
   const form = await db.inboundForm.findUnique({ where: { slug }, select: publicFormSelect });
   if (!form || !form.active || !allowsLink(form.fillMode)) return null;
   return presentForm(form);
@@ -234,6 +236,7 @@ export async function getForm(slug: string) {
  */
 export async function getInvitedForm(slug: string, token: string) {
   if (!slug || !token || token.length < 20) return null;
+  if (!(await moduleAvailableForTenant("forms"))) return null;
   const invite = await db.formInvite.findUnique({
     where: { token },
     select: {
@@ -308,6 +311,7 @@ export async function submitForm(input: {
   /** Milliseconds the form was on screen. */
   elapsedMs?: number;
 }): Promise<ActionResult<{ thankYou: string }>> {
+  if (!(await moduleAvailableForTenant("forms"))) return { ok: false, error: "This form is closed." };
   if (input.inviteToken) return submitInvited({ ...input, inviteToken: input.inviteToken });
 
   const form = await db.inboundForm.findUnique({ where: { slug: input.slug } });

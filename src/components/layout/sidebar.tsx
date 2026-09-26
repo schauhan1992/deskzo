@@ -120,11 +120,14 @@ export function Sidebar({
   /** Permission keys this viewer holds, for nav items that name one. */
   permissions = [],
   branding,
+  country = "IN",
 }: {
   enabledKeys: string[];
   canViewPerformance: boolean;
   permissions?: string[];
   branding: Branding;
+  /** The workspace's, for links that only exist in some countries (the e-way bill register). */
+  country?: string;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -217,6 +220,7 @@ export function Sidebar({
           .flatMap((m) => m.navItems)
           // An array means any one of them will do — the same rule the settings catalogue uses.
           .filter((i) => {
+            if (i.countries && !i.countries.includes(country)) return false;
             const keys = navPermissionKeys(i);
             return keys.length === 0 || keys.some((k) => permissions.includes(k));
           })

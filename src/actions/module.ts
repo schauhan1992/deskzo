@@ -1,66 +1,57 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cache } from "react";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
+import { isModuleEntitled, moduleAccessFor, switchedOn, type ModuleAccess } from "@/lib/modules-access";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import type { ActionResult } from "@/actions/company";
 
+export type { ModuleAccess } from "@/lib/modules-access";
+
+/**
+ * Every module, with whether this workspace's plan includes it and whether the company has it
+ * switched on. `enabled` is both — what the sidebar and the settings list go by. A nav link bound to
+ * other countries (the e-way bill register is India's) is left out.
+ */
 export async function getModuleStates() {
   await requireUser();
-  const rows = await db.systemModule.findMany();
-  const overrides = new Map(rows.map((r) => [r.key, r.enabled]));
-
-  return MODULE_REGISTRY.map((mod) => ({
-    ...mod,
-    enabled: mod.core ? true : (overrides.get(mod.key) ?? true),
-  }));
+  const { country } = await currentTenant();
+  return Promise.all(
+    MODULE_REGISTRY.map(async (mod) => {
+      const entitled = await isModuleEntitled(mod.key);
+      const on = await switchedOn(mod.key);
+      return {
+        ...mod,
+        navItems: mod.navItems.filter((item) => !item.countries || item.countries.includes(country)),
+        entitled,
+        switchedOn: on,
+        enabled: entitled && on,
+      };
+    }),
+  );
 }
 
 /**
- * The module rows, read once per request.
+ * Whether this module is available to the person asking: in the plan, switched on for the company,
+ * and — for a module with a `viewPermission` — theirs to see.
  *
- * `isModuleEnabled` is called from almost every page, several of them more than once, and each call
- * was its own round trip — while the permission resolver sitting beside it has been memoised since
- * it was written. One query per request instead of one per question.
- *
- * Deliberately not exported: a "use server" module publishes every export as an endpoint, and this
- * returns the whole module table rather than an answer to a question.
- */
-const moduleStates = cache(async (): Promise<Map<string, boolean>> => {
-  const rows = await db.systemModule.findMany({ select: { key: true, enabled: true } });
-  return new Map(rows.map((r) => [r.key, r.enabled]));
-});
-
-/**
- * Whether this module is available to the person asking: switched on for the company, and — for a
- * module with a `viewPermission` — theirs to see.
- *
- * The second half is what makes the `*.view` permissions real rather than cosmetic. There are ~150
- * calls to this across pages, actions and the dashboard, each already refusing when a module is off;
- * answering "off" to somebody without the module's view permission makes every one of them refuse
- * that person too, with nothing new at any call site and so nothing to forget at the next one.
+ * The last half is what makes the `*.view` permissions real rather than cosmetic, and the first is
+ * what makes the plan real: there are ~180 calls to this across pages, actions and the dashboard,
+ * each already refusing when a module is off. Answering "off" for a module outside the plan, or to
+ * somebody without its view permission, makes every one of them refuse too, with nothing new at any
+ * call site and so nothing to forget at the next one.
  */
 export async function isModuleEnabled(key: string): Promise<boolean> {
   return (await moduleAccess(key)) === "available";
 }
 
-export type ModuleAccess = "available" | "switched-off" | "no-permission";
-
 /** The same answer as `isModuleEnabled`, with the reason — so a page can say which it is. */
 export async function moduleAccess(key: string): Promise<ModuleAccess> {
   const user = await requireUser();
-  const def = getModuleDefinition(key);
-  if (!def) return "available";
-  if (!def.core) {
-    const states = await moduleStates();
-    // Absent means on: a module nobody has switched off has no row.
-    if (!(states.get(key) ?? true)) return "switched-off";
-  }
-  if (def.viewPermission && !(await hasEffectivePermission(user.id, def.viewPermission))) return "no-permission";
-  return "available";
+  return moduleAccessFor(user.id, key);
 }
 
 export async function setModuleEnabled(key: string, enabled: boolean): Promise<ActionResult<null>> {
@@ -75,6 +66,10 @@ export async function setModuleEnabled(key: string, enabled: boolean): Promise<A
   }
   if (def.core) {
     return { ok: false, error: "This module is core to the app and cannot be disabled." };
+  }
+  // Switching off stays possible, so a module can be tidied away before a plan changes.
+  if (enabled && !(await isModuleEntitled(key))) {
+    return { ok: false, error: `${def.label} isn't part of this workspace's plan.` };
   }
 
   await db.systemModule.upsert({

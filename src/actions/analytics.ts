@@ -1,7 +1,7 @@
 "use server";
 
 import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { isModuleEnabled } from "@/actions/module";
 import { logActivity } from "@/lib/activity";
@@ -33,7 +33,7 @@ export type SourceOption = {
 
 /** Every source this person can actually run, with everything it can be sliced by. */
 export async function reportOptions(): Promise<{ sources: SourceOption[]; grains: typeof GRAINS }> {
-  await requireUser();
+  await requireModuleUser("reports");
   const enabled = await Promise.all(
     FACT_SOURCES.map(async (s) => (s.moduleKey === null ? true : isModuleEnabled(s.moduleKey))),
   );
@@ -126,7 +126,7 @@ export async function reportFilterOptions(input: {
     capped: boolean;
   }>
 > {
-  const user = await requireUser();
+  const user = await requireModuleUser("reports");
   const source = getSource(input.source);
   if (!source) return { ok: false, error: "Unknown report." };
   if (source.moduleKey && !(await isModuleEnabled(source.moduleKey))) {
@@ -159,7 +159,7 @@ export async function reportFilterOptions(input: {
 }
 
 export async function runAnalyticsReport(input: ReportRequest): Promise<ActionResult<ReportResult>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("reports");
   const source = getSource(input.source);
   if (!source) return { ok: false, error: "Unknown report." };
   if (source.moduleKey && !(await isModuleEnabled(source.moduleKey))) {
@@ -244,7 +244,7 @@ const EXPORT_PERMISSION: Record<string, "data.exportCrm" | "data.exportFinance">
  * hide, and a download that logs only as a SEARCH is a download nobody reviewing that log can see.
  */
 export async function exportReportCsv(input: ReportRequest): Promise<ActionResult<{ filename: string; csv: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("reports");
   const permission = EXPORT_PERMISSION[input.source];
   if (!permission) return { ok: false, error: "That report cannot be exported." };
   if (!(await can(user.id, permission))) {

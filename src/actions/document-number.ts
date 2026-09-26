@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { TradeDocumentType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { buildDocumentNumber, defaultNumberSetting, startingSerial } from "@/lib/document-numbering";
@@ -17,7 +17,7 @@ import type { ActionResult } from "@/actions/company";
  * immediately propose a number that's taken.
  */
 export async function getNumberSetting(docType: TradeDocumentType) {
-  await requireUser();
+  await requireModuleUser(["sales_documents", "purchase_documents"]);
   const row = await db.documentNumberSetting.findUnique({ where: { docType } });
   if (row) return { mode: row.mode, prefix: row.prefix, nextNumber: row.nextNumber, padding: row.padding };
 
@@ -26,7 +26,7 @@ export async function getNumberSetting(docType: TradeDocumentType) {
 }
 
 export async function listNumberSettings() {
-  await requireUser();
+  await requireModuleUser(["sales_documents", "purchase_documents"]);
   const rows = await db.documentNumberSetting.findMany();
   const byType = new Map(rows.map((r) => [r.docType, r]));
   return (Object.keys(tradeDocumentLabels) as TradeDocumentType[]).map((docType) => {
@@ -46,14 +46,14 @@ export async function listNumberSettings() {
  * abandoning it doesn't burn a number.
  */
 export async function previewNextNumber(docType: TradeDocumentType) {
-  await requireUser();
+  await requireModuleUser(["sales_documents", "purchase_documents"]);
   const setting = await getNumberSetting(docType);
   if (setting.mode === "MANUAL") return "";
   return buildDocumentNumber(setting.prefix, setting.nextNumber, setting.padding, new Date());
 }
 
 export async function saveNumberSetting(input: unknown): Promise<ActionResult<{ docType: TradeDocumentType }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   /**
    * Numbering is an organisation-wide setting.
    *

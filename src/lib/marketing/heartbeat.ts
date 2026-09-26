@@ -5,18 +5,25 @@ import { detectSalesWins } from "@/lib/wins/detect";
 import { announceActivityAwards } from "@/lib/performance/announce";
 import { announcePrizes } from "@/lib/wins/prize-announce";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
+import type { TickResult } from "@/lib/marketing/tick";
+
+/** What the tick reports for a workspace that has no campaigns to run. */
+const NO_MARKETING: TickResult = { runId: "", enrolled: 0, stepped: 0, exited: 0, claimed: 0, sent: 0, failed: 0, tasks: 0, ms: 0 };
 
 /**
  * Everything the app does on its five-minute heartbeat, for the workspace in hand — called by
  * /api/marketing/tick, once or for every workspace (src/lib/platform/fanout.ts).
  *
  * The marketing tick itself decides whether it succeeded; the rest ride along and are isolated, so
- * a scoring failure never reports the heartbeat as failed or stops it.
+ * a scoring failure never reports the heartbeat as failed or stops it. Each part runs only where the
+ * workspace has its module — in the plan and switched on; the wins announcements ask for themselves.
  */
 export async function runHeartbeat() {
   // Links in the mail have to be absolute and work from outside: the workspace's own address.
   const origin = await tenantOrigin();
-  const result = await runMarketingTick(origin);
+  // A plan without marketing sends nothing, even a campaign queued before the plan changed.
+  const result = (await moduleAvailableForTenant("marketing")) ? await runMarketingTick(origin) : NO_MARKETING;
   /**
    * Lead scores. Part of a score is time — a lead nobody has touched gets colder by the day with
    * nothing about it changing — so scores not refreshed in 12 hours are recomputed, 500 at a time.
@@ -30,7 +37,7 @@ export async function runHeartbeat() {
    * nothing being written. Only the stored copy the Customer credit list sorts by — decisions always
    * recompute — so a failure here costs freshness, never a wrong approval.
    */
-  const creditRatingsRefreshed = await refreshStaleCreditRatings({ limit: 500 }).catch((err) => {
+  const creditRatingsRefreshed = !(await moduleAvailableForTenant("receivables")) ? 0 : await refreshStaleCreditRatings({ limit: 500 }).catch((err) => {
     console.error("credit rating refresh failed", err);
     return 0;
   });

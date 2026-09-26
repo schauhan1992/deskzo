@@ -24,6 +24,7 @@ import {
   type ImportContext,
   type Resolved,
 } from "./types";
+import { seatProblem } from "@/lib/seats";
 
 /**
  * User accounts, their roles, and the reporting line everything else is scoped against.
@@ -366,6 +367,13 @@ export const usersImporter: Importer = {
     const departmentId = u.departmentName
       ? (u.departmentId ?? (await upsertDepartment(u.departmentName))?.id)
       : undefined;
+
+    // A new active account, or one switched back on, takes a seat — the row fails when none is free.
+    const takesSeat = u.existing === null ? u.active !== false : u.active === true && !u.existing.active;
+    if (takesSeat) {
+      const seats = await seatProblem();
+      if (seats) throw new Error(seats);
+    }
 
     const assignments = {
       ...(u.active !== undefined ? { active: u.active } : {}),

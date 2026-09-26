@@ -2,11 +2,14 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { getDocumentEmailTemplates } from "@/actions/document-mail";
 import { DocumentEmailTemplates } from "@/components/settings/document-email-templates";
+import { planGate } from "@/components/settings/module-disabled-notice";
 
 export const metadata = { title: "Document emails" };
 
 /** The wording that goes with an emailed proposal, proforma, tax invoice or credit note. */
 export default async function DocumentEmailsSettingsPage() {
+  const gate = await planGate(["sales_documents", "purchase_documents"], "Document emails");
+  if (gate) return gate;
   const user = await requireUser();
   if (!(await can(user.id, "settings.manage"))) {
     return (

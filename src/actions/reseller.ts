@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type ResellerOnboardingStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { calculateOrderAmount } from "@/lib/gst";
 import {
@@ -17,7 +17,7 @@ import type { ActionResult } from "@/actions/company";
 
 /** The profile plus the company/location fields the onboarding checklist reads. */
 export async function getResellerOnboarding(companyId: string) {
-  await requireUser();
+  await requireModuleUser("resellers");
   const company = await db.company.findUnique({
     where: { id: companyId },
     select: {
@@ -45,7 +45,7 @@ export async function getResellerOnboarding(companyId: string) {
 
 /** Unpaid balance across the reseller's orders, against the credit limit they were granted. */
 export async function getResellerCreditSummary(companyId: string) {
-  await requireUser();
+  await requireModuleUser("resellers");
   const [profile, orders] = await Promise.all([
     db.resellerProfile.findUnique({ where: { companyId }, select: { creditLimit: true } }),
     db.companyProduct.findMany({
@@ -82,7 +82,7 @@ export async function getResellerCreditSummary(companyId: string) {
 }
 
 export async function updateResellerProfile(companyId: string, input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("resellers");
   const parsed = resellerProfileSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -117,7 +117,7 @@ export async function updateResellerProfile(companyId: string, input: unknown): 
  * being ACTIVE is exactly what unblocks order punching.
  */
 export async function setResellerStatus(companyId: string, status: ResellerOnboardingStatus): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("resellers");
   const onboarding = await getResellerOnboarding(companyId);
   if (!onboarding) {
     return { ok: false, error: "That company isn't a reseller." };
@@ -146,7 +146,7 @@ export async function setResellerStatus(companyId: string, status: ResellerOnboa
 }
 
 export async function listResellerItemPrices(resellerId: string) {
-  await requireUser();
+  await requireModuleUser("resellers");
   return toPlain(
     await db.resellerItemPrice.findMany({
       where: { resellerId },
@@ -157,7 +157,7 @@ export async function listResellerItemPrices(resellerId: string) {
 }
 
 export async function upsertResellerItemPrice(resellerId: string, input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("resellers");
   const parsed = resellerItemPriceSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -187,7 +187,7 @@ export async function upsertResellerItemPrice(resellerId: string, input: unknown
 }
 
 export async function deleteResellerItemPrice(id: string): Promise<ActionResult<null>> {
-  await requireUser();
+  await requireModuleUser("resellers");
   const existing = await db.resellerItemPrice.findUnique({ where: { id } });
   if (!existing) {
     return { ok: false, error: "Price not found." };
@@ -199,7 +199,7 @@ export async function deleteResellerItemPrice(id: string): Promise<ActionResult<
 
 /** The price a reseller pays for one item — used by the punch form to fill in the sale price. */
 export async function getResellerPriceForItem(resellerId: string, itemId: string) {
-  await requireUser();
+  await requireModuleUser("resellers");
   const [profile, special, item] = await Promise.all([
     db.resellerProfile.findUnique({ where: { companyId: resellerId }, select: { discountPercent: true } }),
     db.resellerItemPrice.findUnique({ where: { resellerId_itemId: { resellerId, itemId } }, select: { price: true } }),
@@ -220,7 +220,7 @@ export async function getResellerPriceForItem(resellerId: string, itemId: string
  * Resellers that fail the gate are reported by name rather than failing the whole batch.
  */
 export async function bulkUpdateResellers(input: unknown): Promise<ActionResult<{ count: number; blocked: string[] }>> {
-  await requireUser();
+  await requireModuleUser("resellers");
   const parsed = bulkUpdateResellersSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

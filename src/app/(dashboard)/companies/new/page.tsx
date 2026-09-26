@@ -4,9 +4,10 @@ import { viewerHas } from "@/actions/permission";
 import { newCustomerTermsAdvice } from "@/actions/credit";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { clientRelationshipTypeValues } from "@/lib/validation/company";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function NewCompanyPage() {
-  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), newCustomerTermsAdvice(), listCustomerCategories()]);
+  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories()]);
 
   return (
     <div>

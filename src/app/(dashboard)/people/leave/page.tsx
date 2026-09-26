@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
-import { hrCapabilities, listDepartmentOptions, listLeaveTypes, listPeople } from "@/actions/hr";
+import { hrCapabilities, listLeaveTypes, listPeople } from "@/actions/hr";
+import { listDepartmentOptions } from "@/actions/department";
 import { allLeaveRequests, leaveApprovalQueue, leaveBalances, myLeaveRequests, upcomingLeave } from "@/actions/leave";
 import { LeaveWorkspace } from "@/components/hr/leave-workspace";
 import { LeaveRegister } from "@/components/hr/leave-register";

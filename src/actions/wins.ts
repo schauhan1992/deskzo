@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { SplashScope, TargetMetric } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { isModuleEnabled } from "@/actions/module";
@@ -35,7 +35,7 @@ function agoText(ms: number): string {
 }
 
 export async function getWinsWall() {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return null;
   const now = new Date();
   const month = periodContaining(now, "month");
@@ -119,7 +119,7 @@ export async function getWinsWall() {
 }
 
 export async function getWinsSettings() {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return null;
   return toPlain(await winsSettings());
 }
@@ -138,7 +138,7 @@ export async function saveWinsSettings(input: {
   topPerformerCount: number;
   showAmounts: boolean;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't change how wins are celebrated." };
   const minimum = Number(input.dealWonMinimum);
   if (!Number.isFinite(minimum) || minimum < 0) return { ok: false, error: "The deal size is an amount, 0 or more." };
@@ -171,7 +171,7 @@ export async function saveWinsSettings(input: {
 
 /** Look for wins now rather than at the next tick — after changing a setting, say. */
 export async function runWinsDetection(): Promise<ActionResult<{ created: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't do that." };
   const result = await detectSalesWins();
   revalidatePath("/wins");

@@ -6,6 +6,7 @@ import path from "node:path";
 import type { StaffRole } from "@wroffy/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { LifecycleRefused, deprovisionTenant, resumeTenant, suspendTenant } from "@/lib/platform/lifecycle";
+import { PlanRefused, savePlan, setLimitOverrides, setModuleOverride, setWorkspacePlans, type PlanInput } from "@/lib/platform/plans";
 import { removePinApiKey, savePinApiKey, startPinSync, startWorldSync } from "@/lib/platform/reference-sync";
 import { enterAsSupport } from "@/lib/platform/support";
 import { StaffChangeRefused, createStaff, deactivateStaff, endStaffSessions, issuePasswordSetup, resetStaffTwoFactor, setStaffRole } from "@/lib/platform/staff";
@@ -18,7 +19,7 @@ import { migrateEverything } from "@/lib/platform/tenant-migrations";
  *   OWNER      everything, and the only one who manages staff or closes a workspace;
  *   ADMIN      workspaces held and reopened, jobs, migrations, invitations, terminals, reference data;
  *   SUPPORT    into a workspace on its super admin's grant;
- *   BILLING    (plans and invoices, when billing arrives);
+ *   BILLING    plans, and which plans a workspace is on (and invoices, when billing arrives);
  *   READONLY   nothing here — the console's pages only.
  *
  * — and everything that changes something is in the platform's audit log, under the staff member.
@@ -39,7 +40,7 @@ async function asStaff<T>(roles: readonly StaffRole[], work: (staff: Staff) => P
   try {
     return { ok: true, data: await work(staff) };
   } catch (err) {
-    if (err instanceof StaffChangeRefused || err instanceof LifecycleRefused) return { ok: false, error: err.message };
+    if (err instanceof StaffChangeRefused || err instanceof LifecycleRefused || err instanceof PlanRefused) return { ok: false, error: err.message };
     throw err;
   }
 }
@@ -113,10 +114,15 @@ export async function consoleTopUpWarmPool() {
 // ─── Invitations, terminals, reference data ─────────────────────────────────────────────────────
 
 /** The code is shown once, to whoever made it; only its hash is kept. */
-export async function consoleCreateInvite(input: { note: string; uses: number; days: number }) {
+export async function consoleCreateInvite(input: { note: string; uses: number; days: number; planKey?: string | null }) {
   return asStaff(MANAGERS, async (staff) => {
     const code = randomBytes(9).toString("base64url");
     const days = Math.min(90, Math.max(1, Math.round(Number(input.days) || 14)));
+    const planKey = input.planKey ? String(input.planKey) : null;
+    if (planKey) {
+      const plan = await controlDb().plan.findUnique({ where: { key: planKey }, select: { active: true, kind: true } });
+      if (!plan || !plan.active || plan.kind === "INTERNAL") throw new StaffChangeRefused("That plan is not one a new workspace can start on.");
+    }
     await controlDb().signupInvite.create({
       data: {
         codeHash: createHash("sha256").update(code).digest("hex"),
@@ -124,9 +130,10 @@ export async function consoleCreateInvite(input: { note: string; uses: number; d
         maxUses: Math.min(100, Math.max(1, Math.round(Number(input.uses) || 1))),
         expiresAt: new Date(Date.now() + days * 86_400_000),
         createdBy: staff.id,
+        planKey,
       },
     });
-    await audit(staff, "invite.create", { note: input.note, days });
+    await audit(staff, "invite.create", { note: input.note, days, planKey });
     return { code };
   });
 }
@@ -169,6 +176,43 @@ export async function consoleStartSync(which: "pin" | "world") {
     const started = which === "pin" ? await startPinSync(`staff:${staff.id}`) : await startWorldSync(`staff:${staff.id}`);
     if (!started.ok) throw new StaffChangeRefused(started.error);
     await audit(staff, `reference.${which}.sync`, {});
+    return null;
+  });
+}
+
+// ─── Plans ──────────────────────────────────────────────────────────────────────────────────────
+
+/** Who sells: owners, admins and billing. An internal plan — never sold, everything free — is an owner's. */
+const SELLERS: readonly StaffRole[] = ["OWNER", "ADMIN", "BILLING"];
+
+export async function consoleSavePlan(input: PlanInput) {
+  return asStaff(SELLERS, async (staff) => {
+    if (input.kind === "INTERNAL" && staff.role !== "OWNER") throw new StaffChangeRefused("Only an owner makes or changes an internal plan.");
+    return savePlan(input, `staff:${staff.id}`);
+  });
+}
+
+export async function consoleSetWorkspacePlans(tenantId: string, items: { planKey: string; quantity: number }[]) {
+  return asStaff(SELLERS, async (staff) => {
+    const keys = (Array.isArray(items) ? items : []).map((i) => String(i.planKey));
+    const internal = await controlDb().plan.count({ where: { key: { in: keys }, kind: "INTERNAL" } });
+    if (internal && staff.role !== "OWNER") throw new StaffChangeRefused("Only an owner puts a workspace on an internal plan.");
+    await setWorkspacePlans(String(tenantId), Array.isArray(items) ? items : [], `staff:${staff.id}`);
+    return null;
+  });
+}
+
+/** `granted`: true adds the module, false takes it away, null goes back to what the plans say. */
+export async function consoleSetModuleOverride(tenantId: string, moduleKey: string, granted: boolean | null, reason: string) {
+  return asStaff(MANAGERS, async (staff) => {
+    await setModuleOverride(String(tenantId), String(moduleKey), granted === null ? null : !!granted, String(reason ?? ""), staff.id);
+    return null;
+  });
+}
+
+export async function consoleSetLimitOverrides(tenantId: string, input: { seats: string | number | null; copilotTokens: string | number | null }) {
+  return asStaff(SELLERS, async (staff) => {
+    await setLimitOverrides(String(tenantId), input ?? { seats: null, copilotTokens: null }, `staff:${staff.id}`);
     return null;
   });
 }

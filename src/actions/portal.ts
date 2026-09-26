@@ -3,7 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { logActivity } from "@/lib/activity";
@@ -20,7 +20,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function gate() {
-  const user = await requireUser();
+  const user = await requireModuleUser("customer_portal");
   if (!(await can(user.id, "portal.manage"))) {
     return { user, error: "You don't have access to the customer portal settings." };
   }

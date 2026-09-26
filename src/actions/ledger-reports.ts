@@ -3,7 +3,7 @@
 import type { AccountType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { ensureChartOfAccounts } from "@/lib/ledger/journal";
 import { isDebitNatured, isProfitAndLoss, SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 
@@ -116,7 +116,7 @@ function rollUp(rows: AccountBalance[]): AccountBalance[] {
  * read the balance sheet.
  */
 async function mayReadBooks() {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   if (!(await can(user.id, "ledger.viewReports"))) {
     return { ok: false as const, error: "You don't have permission to see the books." };
   }
@@ -126,7 +126,7 @@ async function mayReadBooks() {
 export async function trialBalance(params?: { to?: string }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
-  await requireUser();
+  await requireModuleUser("accounting");
   const to = params?.to ? endOfDay(params.to) : undefined;
   const rows = (await accountsWithBalances({ to })).filter((r) => !r.isGroup);
   const withMovement = rows.filter((r) => r.debit !== 0 || r.credit !== 0);
@@ -150,7 +150,7 @@ export async function trialBalance(params?: { to?: string }) {
 export async function profitAndLoss(params: { from: string; to: string }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
-  await requireUser();
+  await requireModuleUser("accounting");
   const rows = rollUp(await accountsWithBalances({ from: startOfDay(params.from), to: endOfDay(params.to) }));
   const income = rows.filter((r) => r.type === "INCOME");
   const expense = rows.filter((r) => r.type === "EXPENSE");
@@ -177,7 +177,7 @@ export async function profitAndLoss(params: { from: string; to: string }) {
 export async function balanceSheet(params?: { to?: string }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
-  await requireUser();
+  await requireModuleUser("accounting");
   const to = params?.to ? endOfDay(params.to) : new Date();
   const rows = rollUp(await accountsWithBalances({ to }));
 
@@ -213,7 +213,7 @@ export async function balanceSheet(params?: { to?: string }) {
 export async function accountLedger(params: { accountId: string; from?: string; to?: string }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
-  await requireUser();
+  await requireModuleUser("accounting");
   const account = await db.ledgerAccount.findUnique({
     where: { id: params.accountId },
     select: { id: true, code: true, name: true, type: true, description: true },
@@ -296,7 +296,7 @@ export async function listJournalEntries(params: {
 }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
-  await requireUser();
+  await requireModuleUser("accounting");
   const where = {
     ...(params.source ? { source: params.source as never } : {}),
     ...(params.from || params.to
@@ -349,7 +349,7 @@ export async function listJournalEntries(params: {
 
 /** Where a system account lives, for linking a report row straight to its ledger. */
 export async function systemAccountId(key: keyof typeof SYSTEM_ACCOUNTS) {
-  await requireUser();
+  await requireModuleUser("accounting");
   const row = await db.ledgerAccount.findUnique({ where: { systemKey: key }, select: { id: true } });
   return row?.id ?? null;
 }

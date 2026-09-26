@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { revalidatePath } from "next/cache";
 import type { NotificationType } from "@prisma/client";
 import { syncSystemNotifications } from "@/lib/notify";
@@ -10,7 +10,7 @@ import { dateRangeFilter } from "@/lib/utils";
 import type { ActionResult } from "@/actions/company";
 
 export async function getNotifications(params?: { unreadOnly?: boolean; limit?: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   await syncSystemNotifications(user.id);
   return db.notification.findMany({
     where: { userId: user.id, ...(params?.unreadOnly ? { read: false } : {}) },
@@ -20,13 +20,13 @@ export async function getNotifications(params?: { unreadOnly?: boolean; limit?: 
 }
 
 export async function getUnreadNotificationCount() {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   await syncSystemNotifications(user.id);
   return db.notification.count({ where: { userId: user.id, read: false } });
 }
 
 export async function markNotificationRead(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   const notification = await db.notification.findUnique({ where: { id } });
   if (!notification || notification.userId !== user.id) {
     return { ok: false, error: "Notification not found." };
@@ -36,7 +36,7 @@ export async function markNotificationRead(id: string): Promise<ActionResult<nul
 }
 
 export async function markAllNotificationsRead(): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   await db.notification.updateMany({ where: { userId: user.id, read: false }, data: { read: true, readAt: new Date() } });
   return { ok: true, data: null };
 }
@@ -79,7 +79,7 @@ export async function listNotifications(params: {
   from?: string;
   to?: string;
 }): Promise<NotificationPage> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   await syncSystemNotifications(user.id);
 
   const view = params.view === "archived" ? "archived" : "inbox";
@@ -120,7 +120,7 @@ export async function listNotifications(params: {
 }
 
 export async function archiveNotification(input: { ids: string[] }): Promise<ActionResult<{ archived: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   if (input.ids.length === 0) return { ok: true, data: { archived: 0 } };
 
   // Scoped by userId as well as by id, so an id from anywhere else matches nothing rather than
@@ -135,7 +135,7 @@ export async function archiveNotification(input: { ids: string[] }): Promise<Act
 }
 
 export async function unarchiveNotification(input: { ids: string[] }): Promise<ActionResult<{ restored: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   if (input.ids.length === 0) return { ok: true, data: { restored: 0 } };
 
   const result = await db.notification.updateMany({
@@ -155,7 +155,7 @@ export async function unarchiveNotification(input: { ids: string[] }): Promise<A
  * rather than another flag on top of a flag.
  */
 export async function deleteNotifications(input: { ids: string[] }): Promise<ActionResult<{ deleted: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   if (input.ids.length === 0) return { ok: true, data: { deleted: 0 } };
 
   const result = await db.notification.deleteMany({ where: { id: { in: input.ids }, userId: user.id } });
@@ -166,7 +166,7 @@ export async function deleteNotifications(input: { ids: string[] }): Promise<Act
 
 /** Empties the archive. The one bulk action worth asking about, so the UI confirms first. */
 export async function emptyNotificationArchive(): Promise<ActionResult<{ deleted: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   const result = await db.notification.deleteMany({ where: { userId: user.id, archivedAt: { not: null } } });
   revalidatePath("/notifications");
   return { ok: true, data: { deleted: result.count } };
@@ -181,7 +181,7 @@ export type PreferenceRow = { type: NotificationType; inApp: boolean; email: boo
  * of them — and "no row" means on, not missing.
  */
 export async function notificationPreferences(): Promise<ActionResult<PreferenceRow[]>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   const stored = await db.notificationPreference.findMany({
     where: { userId: user.id },
     select: { type: true, inApp: true, email: true },
@@ -204,7 +204,7 @@ export async function setNotificationPreference(input: {
   inApp: boolean;
   email: boolean;
 }): Promise<ActionResult<{ type: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
 
   const definition = describeNotification(input.type as NotificationType);
   if (!definition) return { ok: false, error: "That isn't a notification we send." };
@@ -235,7 +235,7 @@ export async function setNotificationPreference(input: {
 
 /** Back to the defaults — every type on — by deleting the opinions rather than rewriting them. */
 export async function resetNotificationPreferences(): Promise<ActionResult<{ cleared: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("notifications");
   const result = await db.notificationPreference.deleteMany({ where: { userId: user.id } });
   revalidatePath("/notifications");
   return { ok: true, data: { cleared: result.count } };

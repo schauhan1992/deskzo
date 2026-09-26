@@ -18,6 +18,7 @@ import { HrChecklist } from "@/components/hr/hr-checklist";
 import { HrTasks } from "@/components/hr/hr-tasks";
 import { handoverHistory } from "@/actions/handover";
 import { HandoverHistory } from "@/components/people/handover-history";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const enabled = await isModuleEnabled("hr");
@@ -51,9 +52,11 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
    * `leaveBalances` opens the year's balance on first read, so it tried to *write* a row against
    * that string and the page died on a foreign-key violation.
    */
+  // Salary is the payroll module's: a plan without it shows no salary card, and asks for none.
+  const payrollInPlan = await isModuleEntitled("payroll");
   const [balances, structures, documents, history, letters, checklist, tasks, handovers] = await Promise.all([
     leaveBalances(person.id),
-    salaryHistory(person.id),
+    payrollInPlan ? salaryHistory(person.id) : Promise.resolve([]),
     listEmployeeDocuments(person.id),
     listEmploymentHistory(person.id),
     listEmployeeLetters(person.id),
@@ -91,7 +94,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
       {/* Pay sits behind its own permission, so the card only renders for payroll or for the
           person themselves — and salaryHistory returns nothing to anybody else regardless. */}
-      {(caps.payroll || caps.userId === person.id) && structures.length >= 0 && (
+      {payrollInPlan && (caps.payroll || caps.userId === person.id) && (
         <div className="mt-5 max-w-md">
           <SalaryCard userId={person.id} name={person.name} structures={structures} canEdit={caps.payroll} />
         </div>

@@ -11,7 +11,7 @@ import type {
   ProjectStatus,
 } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -80,7 +80,7 @@ export type ProjectFilters = {
 };
 
 export async function listProjects(filters?: ProjectFilters) {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   if (!(await viewerHas("projects.view"))) return [];
   const { viewAll: mayViewAll } = await access(user.id);
   const viewAll = filters?.mineOnly ? false : mayViewAll;
@@ -130,7 +130,7 @@ export async function listProjects(filters?: ProjectFilters) {
 }
 
 export async function getProject(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   if (!(await viewerHas("projects.view"))) return null;
   const { viewAll } = await access(user.id);
 
@@ -194,7 +194,7 @@ export async function saveProject(input: {
   /** Only on create, and only when a type is chosen. */
   applyTemplate?: boolean;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't create or edit projects." };
 
@@ -318,7 +318,7 @@ export async function addStakeholder(input: {
   role: ProjectStakeholderRole;
   note?: string;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't change who's on a project." };
 
@@ -369,7 +369,7 @@ export async function addStakeholder(input: {
 }
 
 export async function removeStakeholder(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't change who's on a project." };
 
@@ -409,7 +409,7 @@ export async function saveMilestone(input: {
   dueDate?: string;
   sortOrder?: number;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };
   const project = await readable(input.projectId, user.id, viewAll);
@@ -430,7 +430,7 @@ export async function saveMilestone(input: {
 }
 
 export async function setMilestoneDone(id: string, done: boolean): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };
 
@@ -448,7 +448,7 @@ export async function setMilestoneDone(id: string, done: boolean): Promise<Actio
 }
 
 export async function deleteMilestone(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };
   const row = await db.projectMilestone.findUnique({ where: { id }, select: { projectId: true } });
@@ -472,7 +472,7 @@ export async function saveRisk(input: {
   mitigation?: string;
   ownerId?: string;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project." };
   const project = await readable(input.projectId, user.id, viewAll);
@@ -510,7 +510,7 @@ export async function postUpdate(input: {
   body: string;
   health: ProjectHealth;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't post updates on this project." };
   const project = await readable(input.projectId, user.id, viewAll);
@@ -539,7 +539,7 @@ export async function saveBillingMilestone(input: {
   documentId?: string;
   sortOrder?: number;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's billing." };
   const project = await readable(input.projectId, user.id, viewAll);
@@ -564,7 +564,7 @@ export async function saveBillingMilestone(input: {
 }
 
 export async function deleteBillingMilestone(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("projects");
   const { viewAll, manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's billing." };
   const row = await db.projectBillingMilestone.findUnique({ where: { id }, select: { projectId: true } });
@@ -580,7 +580,7 @@ export async function deleteBillingMilestone(id: string): Promise<ActionResult<n
 // ─── Options ────────────────────────────────────────────────────────────────────────────────────
 
 export async function projectFormOptions(companyId?: string) {
-  await requireUser();
+  await requireModuleUser("projects");
   const [types, users, contacts, companies] = await Promise.all([
     db.projectType.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),

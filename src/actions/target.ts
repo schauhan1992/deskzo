@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type TargetMetric, type TargetPeriod, type TargetScope } from "@prisma/client";
 import { db, getTenantDb } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -24,7 +24,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("targets");
   const manage = await hasEffectivePermission(user.id, "targets.manage");
   const viewAll = manage || (await hasEffectivePermission(user.id, "targets.viewAll"));
   return { user, manage, viewAll };

@@ -2,10 +2,13 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { portalSettings } from "@/actions/portal";
 import { PortalSettingsForm } from "@/components/settings/portal-settings-form";
+import { planGate } from "@/components/settings/module-disabled-notice";
 
 export const dynamic = "force-dynamic";
 
 export default async function PortalSettingsPage() {
+  const gate = await planGate("customer_portal", "Customer portal");
+  if (gate) return gate;
   const user = await requireUser();
   if (!(await can(user.id, "portal.manage"))) {
     return (

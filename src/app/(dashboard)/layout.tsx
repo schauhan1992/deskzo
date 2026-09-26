@@ -8,6 +8,7 @@ import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { getModuleStates } from "@/actions/module";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import { canViewPerformance } from "@/actions/performance";
 import { navPermissions } from "@/actions/permission";
 import { canBroadcastNotes } from "@/actions/note";
@@ -40,6 +41,7 @@ import { HeaderSearch } from "@/components/layout/header-search";
 import { searchScopesForMe } from "@/actions/search";
 import { unreadUpdateCount } from "@/actions/help";
 import { can } from "@/lib/authz/resolve";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
@@ -71,7 +73,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     shownUser ? canBroadcastNotes() : Promise.resolve(false),
       // The skip is per session, so nothing is passed in: a dismissal the server remembered would
     // make "not now" permanent, which is the opposite of what a mandatory form needs.
-    pendingSplash([]),
+    isModuleEntitled("engagement").then((has) => (has ? pendingSplash([]) : null)),
     // Not while viewing as somebody: a copilot chat is private, and would open as theirs.
     shownUser && !viewAs ? getCopilotAvailability().catch(() => null) : Promise.resolve(null),
     // The header search offers only the lists this person can open — src/actions/search.ts. Like
@@ -168,6 +170,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         canViewPerformance={canSeePerformance}
         permissions={permissions}
         branding={branding}
+        country={(await currentTenant()).country}
       />
 
       <div className={`flex min-w-0 flex-1 flex-col${viewAs ? " ring-2 ring-inset ring-warning/50" : ""}`}>
@@ -242,7 +245,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
         for a convenience. The tools it offers all have pages of their own.
       */}
       <div className="hidden xl:block">
-        <SideRail copilot={!!copilot} unreadUpdates={unreadUpdates} canManageHelp={canManageHelp} />
+        <SideRail
+          copilot={!!copilot}
+          unreadUpdates={unreadUpdates}
+          canManageHelp={canManageHelp}
+          proRata={await isModuleEntitled("renewals")}
+          country={(await currentTenant()).country}
+        />
       </div>
     </div>
     </TableColumnsProvider>

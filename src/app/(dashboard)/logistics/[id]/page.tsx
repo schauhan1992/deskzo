@@ -9,6 +9,7 @@ import { transporterOptions } from "@/actions/transporter";
 import { ConsignmentRecord } from "@/components/assets/consignment-record";
 import { EwayPanel } from "@/components/logistics/eway-panel";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { countryFeatureAvailable, isModuleEntitled } from "@/lib/modules-access";
 
 export default async function ConsignmentPage({ params }: { params: Promise<{ id: string }> }) {
   const enabled = await isModuleEnabled("it_assets");
@@ -28,7 +29,8 @@ export default async function ConsignmentPage({ params }: { params: Promise<{ id
    * A refusal from `ewayForDocument` is treated as "not your business" rather than an error: a
    * storeman who can read a consignment but not despatch it has no use for portal buttons.
    */
-  const view = consignment.document ? await ewayForDocument(consignment.document.id) : null;
+  const ewayHere = (await isModuleEntitled("sales_documents")) && (await countryFeatureAvailable("eway"));
+  const view = consignment.document && ewayHere ? await ewayForDocument(consignment.document.id) : null;
   const transporters = view?.ok ? await transporterOptions() : null;
 
   return (

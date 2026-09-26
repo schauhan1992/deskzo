@@ -1,11 +1,10 @@
 "use server";
 
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { isModuleEnabled } from "@/actions/module";
 import { cashFlow, incomeAndExpense, topExpenses, type Basis, type CashFlow, type IncomeExpense } from "@/lib/finance/dashboard";
 import { resolvePeriod, type PeriodKey } from "@/lib/finance/periods";
-import { lookupRate, type RateLookup } from "@/lib/finance/exchange-rate";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -21,7 +20,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function gate() {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   if (!(await isModuleEnabled("accounting"))) return { error: "The accounting module is switched off." };
   if (!(await can(user.id, "payments.manage"))) return { error: "You can't see the company's books." };
   return { error: null };
@@ -66,16 +65,4 @@ export async function cashFlowForPeriod(period: PeriodKey): Promise<ActionResult
       periodLabel: window.label,
     },
   };
-}
-
-/**
- * What a currency was worth in rupees on a given day.
- *
- * A `"use server"` export, so it checks a session — but nothing stronger: the only thing it reveals
- * is a published exchange rate, which is not the company's information. The outbound call happens
- * here rather than in the browser; see lib/finance/exchange-rate.ts for why.
- */
-export async function lookupExchangeRate(code: string, onDate: string): Promise<RateLookup> {
-  await requireUser();
-  return lookupRate(code, onDate);
 }

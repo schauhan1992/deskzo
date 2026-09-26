@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { syncInvoiceStatus } from "@/lib/receivables/sync";
 import { reversePaymentPosting } from "@/lib/ledger/journal";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import {
   canSeeCompany,
   paymentScope,
@@ -72,7 +72,7 @@ async function canSeeCompanyMoney(userId: string, companyId: string) {
 export async function recordPayment(
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await hasEffectivePermission(user.id, "payments.record"))) {
     return {
       ok: false,
@@ -159,7 +159,7 @@ export async function recordPayment(
 export async function allocatePayment(
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await hasEffectivePermission(user.id, "payments.record"))) {
     return {
       ok: false,
@@ -236,7 +236,7 @@ export async function allocatePayment(
 export async function deleteAllocation(
   id: string,
 ): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await hasEffectivePermission(user.id, "payments.delete"))) {
     return {
       ok: false,
@@ -259,7 +259,7 @@ export async function deleteAllocation(
 }
 
 export async function deletePayment(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await hasEffectivePermission(user.id, "payments.delete"))) {
     return {
       ok: false,
@@ -334,7 +334,7 @@ export type PaymentStatusFilter = "unpaid" | "partial" | "paid";
  * total on CompanyProduct maintained by the same helper — not a second copy of the arithmetic.
  */
 export async function paymentsSnapshot() {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await viewerHas("payments.view"))) return { outstandingBalance: 0, unpaidCount: 0, partialCount: 0 };
 
   const orders = await db.companyProduct.findMany({
@@ -373,7 +373,7 @@ export async function listOrdersWithPayments(params?: {
   search?: string;
   status?: PaymentStatusFilter;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await viewerHas("payments.view"))) return [];
 
   const orders = await db.companyProduct.findMany({
@@ -422,7 +422,7 @@ export async function listOrdersWithPayments(params?: {
 
 /** A company's orders with their financials, for the "select an order to allocate against" step. */
 export async function listCompanyOrdersForPayment(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await viewerHas("payments.view"))) return [];
   // What each order is worth and how much of it is still owed — the account's commercials, for a
   // company this person may not manage. No orders rather than a refusal, so the dialog that calls
@@ -448,7 +448,7 @@ export async function listPayments(params?: {
   search?: string;
   unallocatedOnly?: boolean;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await viewerHas("payments.view"))) return [];
 
   const payments = await db.payment.findMany({
@@ -514,7 +514,7 @@ export async function listPayments(params?: {
  * effectively invisible from the customer's own page.
  */
 export async function listCompanyPayments(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await viewerHas("payments.view"))) return [];
   if (!(await canSeeCompanyMoney(user.id, companyId))) return [];
 
@@ -554,7 +554,7 @@ export async function listCompanyPayments(companyId: string) {
 
 /** Billed / received / outstanding for one company, across every order on its account. */
 export async function companyPaymentSummary(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await viewerHas("payments.view"))) return { billed: 0, received: 0, outstanding: 0, credit: 0, unallocated: 0 };
   // Zeros rather than `null`: this is the stat row at the top of the 360 view, so the shape has to
   // survive — and for an account somebody does not manage, "nothing billed, nothing received" is
@@ -645,7 +645,7 @@ export async function listPaymentsPaged(params: {
 export async function bulkDeletePayments(
   paymentIds: string[],
 ): Promise<ActionResult<{ count: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("payments");
   if (!(await hasEffectivePermission(user.id, "payments.delete"))) {
     return {
       ok: false,

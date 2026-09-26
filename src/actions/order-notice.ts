@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { queueCustomerNotice, resolveNoticeRecipients } from "@/lib/marketing/order-notice";
@@ -19,7 +19,7 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /** The same population that may change an order may write to the customer about one. */
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser(["orders", "renewals"]);
   const allowed =
     (await hasEffectivePermission(user.id, "products.edit")) ||
     (await hasEffectivePermission(user.id, "orders.process")) ||

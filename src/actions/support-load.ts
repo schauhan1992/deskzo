@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
 import { isCustomerRelationshipType } from "@/lib/validation/company";
@@ -47,7 +47,7 @@ async function present(facts: SupportFacts, window: { from: Date; to: Date }, mo
 
 /** One customer's support over the last `months` — for the customer page. Null when not theirs to see. */
 export async function getSupportLoad(companyId: string, months = 12) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   const parts = await viewerParts();
   if (!parts.tickets) return null;
   const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
@@ -69,7 +69,7 @@ export type SupportSort = "tickets" | "intensity" | "hours";
  * database cannot sort by without computing it anyway.
  */
 export async function listSupportLoad(params: { months: number; sort: SupportSort; page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   const parts = await viewerParts();
   if (!parts.tickets) return { rows: [], total: 0 };
   const months = [3, 6, 12, 24].includes(params.months) ? params.months : 12;

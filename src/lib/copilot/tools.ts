@@ -309,6 +309,7 @@ const TOOLS: CopilotTool[] = [
 
   tool({
     name: "report_options",
+    module: "reports",
     description: "What reports can be run: each source (orders, leads, invoices, payments, tickets, visits…) with its measures, the dimensions it can be broken down by, and its date fields. Call this before run_report.",
     schema: z.object({}),
     async run() {
@@ -331,6 +332,7 @@ const TOOLS: CopilotTool[] = [
 
   tool({
     name: "run_report",
+    module: "reports",
     description:
       "Run a report and show it in the chat as a chart and table. Totals, breakdowns and trends always come from here — never add up list results yourself. Use report_options for the valid keys. For a trend over time, use the date dimension as `column` or `dimension` with a grain.",
     schema: z.object({

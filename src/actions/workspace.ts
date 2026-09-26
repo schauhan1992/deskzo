@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { companyScope } from "@/lib/authz/company-scope";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -46,7 +46,7 @@ export async function runWorkbook(params: {
   pageSize: number;
   search?: string;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
 
   /**
    * A saved list is a view of the company table, and it was the one that forgot to say whose.
@@ -89,7 +89,7 @@ export async function runWorkbook(params: {
 
 /** Just the count, for the live "matches N companies" figure as filters are toggled. */
 export async function countWorkbook(filters: WorkbookFilters) {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   // The live count under the filter builder. Unscoped, it told somebody how many companies match
   // across the whole business — a smaller leak than the rows, and the same one.
   return db.company.count({ where: { AND: [await companyScope(user.id), buildWhere(filters)] } });
@@ -102,7 +102,7 @@ export async function saveWorkbook(input: {
   filters: WorkbookFilters;
   shared?: boolean;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
 
   const name = input.name?.trim();
   if (!name) return { ok: false, error: "Give the list a name — it's how anyone finds it again." };
@@ -140,7 +140,7 @@ export async function saveWorkbook(input: {
 }
 
 export async function deleteWorkbook(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const workbook = await db.workbook.findUnique({ where: { id }, select: { name: true, ownerUserId: true } });
   if (!workbook) return { ok: false, error: "That list no longer exists." };
   if (workbook.ownerUserId !== user.id && !(await hasEffectivePermission(user.id, "workspace.manageAny"))) {
@@ -161,7 +161,7 @@ export async function deleteWorkbook(id: string): Promise<ActionResult<null>> {
 
 /** Copies someone else's list so it can be changed without touching theirs. */
 export async function duplicateWorkbook(id: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const source = await db.workbook.findUnique({ where: { id }, select: { name: true, description: true, filters: true } });
   if (!source) return { ok: false, error: "That list no longer exists." };
 
@@ -179,7 +179,7 @@ export async function duplicateWorkbook(id: string): Promise<ActionResult<{ id: 
 }
 
 export async function getWorkbook(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const workbook = await db.workbook.findUnique({
     where: { id },
     select: {
@@ -222,7 +222,7 @@ export async function getWorkbook(id: string) {
 }
 
 export async function listWorkbooks() {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const rows = await db.workbook.findMany({
     where: { OR: [{ shared: true }, { ownerUserId: user.id }] },
     orderBy: [{ lastOpenedAt: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }],
@@ -261,7 +261,7 @@ export async function listWorkbooks() {
  * is the fastest way to make a list builder feel broken.
  */
 export async function workbookFilterOptions() {
-  await requireUser();
+  await requireModuleUser("workspace");
   const [industries, cities, states, categories, users, tags, providers, platforms, brands, families, items] = await Promise.all([
     db.industry.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     db.companyLocation.findMany({
@@ -332,7 +332,7 @@ export async function assignWorkbook(input: {
   userIds: string[];
   note?: string;
 }): Promise<ActionResult<{ assigned: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("workspace");
   const workbook = await db.workbook.findUnique({
     where: { id: input.id },
     select: { id: true, name: true, ownerUserId: true, assignees: { select: { userId: true } } },

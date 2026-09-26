@@ -1,6 +1,7 @@
 import { controlDb } from "@/lib/platform/control-db";
 import { latestMigrationName } from "@/lib/platform/migrate";
 import { activeSupportGrant } from "@/lib/platform/support";
+import { parseEntitlements } from "@/lib/entitlements";
 import { subdomainHost } from "@/lib/tenancy/registry";
 
 /**
@@ -58,12 +59,28 @@ export async function tenantDetail(slug: string) {
     },
   });
   if (!tenant) return null;
-  const [grant, grants, leases] = await Promise.all([
+  const [grant, grants, leases, subscriptions, overrides] = await Promise.all([
     activeSupportGrant(tenant.id, true),
     control.supportAccessGrant.findMany({ where: { tenantId: tenant.id }, orderBy: { createdAt: "desc" }, take: 10 }),
     control.tenantJobLease.findMany({ where: { tenantId: tenant.id }, orderBy: { job: "asc" } }),
+    control.subscription.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: { createdAt: "desc" },
+      include: { items: { include: { plan: { select: { key: true, name: true, kind: true, active: true } } } } },
+    }),
+    control.tenantModuleOverride.findMany({ where: { tenantId: tenant.id }, orderBy: { moduleKey: "asc" } }),
   ]);
-  return { tenant, host: subdomainHost(tenant.slug), grant, grants, leases, latest: latestMigrationName() };
+  return {
+    tenant,
+    host: subdomainHost(tenant.slug),
+    grant,
+    grants,
+    leases,
+    latest: latestMigrationName(),
+    subscriptions,
+    overrides,
+    entitlements: parseEntitlements(tenant.entitlements),
+  };
 }
 
 export async function provisioningQueue() {
@@ -94,6 +111,19 @@ export async function deviceRoutes() {
 }
 
 /** Each with whether it still works: not expired, and not used up. */
+/** Every plan, with its modules and how many workspaces are on it. */
+export async function plansList() {
+  const plans = await controlDb().plan.findMany({
+    orderBy: [{ active: "desc" }, { sortOrder: "asc" }, { name: "asc" }],
+    include: { modules: { select: { moduleKey: true } }, items: { where: { subscription: { status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } } }, select: { subscription: { select: { tenantId: true } } } } },
+  });
+  return plans.map(({ items, modules, ...plan }) => ({
+    ...plan,
+    modules: modules.map((m) => m.moduleKey),
+    workspaces: new Set(items.map((i) => i.subscription.tenantId)).size,
+  }));
+}
+
 export async function invites() {
   const rows = await controlDb().signupInvite.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
   const now = Date.now();

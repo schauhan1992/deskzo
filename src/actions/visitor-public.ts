@@ -2,6 +2,7 @@
 
 import type { VisitorPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { notifyUser } from "@/lib/notify";
 import { checkUpload } from "@/lib/hr/document-upload";
 import { toPlain } from "@/lib/serialize";
@@ -46,6 +47,8 @@ import {
 
 async function liveKiosk(token: string) {
   if (!token || token.length < 16) return null;
+  // Outside the plan, or switched off: the same as a tablet that was never set up.
+  if (!(await moduleAvailableForTenant("visitors"))) return null;
   return db.visitorKiosk.findFirst({
     where: { token, active: true },
     // The failure counters come back with every kiosk, because every path that takes a code needs
@@ -304,10 +307,7 @@ export async function lookupInvite(
   token: string,
   code: string,
 ): Promise<{ ok: true; name: string; hostName: string; purpose: VisitorPurpose; expectedCompanions: number } | { ok: false; error: string }> {
-  const kiosk = await db.visitorKiosk.findFirst({
-    where: { token, active: true },
-    select: { id: true, failedLookups: true, failedSince: true },
-  });
+  const kiosk = await liveKiosk(token);
   if (!kiosk) return { ok: false, error: "This tablet isn't set up. Please ask at the desk." };
 
   const now = new Date();

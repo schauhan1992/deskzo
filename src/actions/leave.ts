@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -102,7 +102,7 @@ export type BalanceRow = {
 };
 
 export async function leaveBalances(userId: string, year?: number): Promise<BalanceRow[]> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   if (allowed && !allowed.includes(userId)) return [];
 
@@ -146,7 +146,7 @@ export async function previewLeaveDays(input: {
   fromHalfDay?: boolean;
   toHalfDay?: boolean;
 }) {
-  await requireUser();
+  await requireModuleUser("hr");
   if (!input.fromDate || !input.toDate) return { days: 0, skipped: [] as { date: string; why: string }[] };
   if (new Date(input.toDate) < new Date(input.fromDate)) return { days: 0, skipped: [] };
 
@@ -162,7 +162,7 @@ export async function previewLeaveDays(input: {
 }
 
 export async function applyForLeave(input: unknown): Promise<ActionResult<{ id: string; days: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const parsed = leaveRequestSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const data = parsed.data;
@@ -259,7 +259,7 @@ export async function applyForLeave(input: unknown): Promise<ActionResult<{ id: 
  * there is no window in which a request is approved but the days it consumed are not recorded.
  */
 export async function decideLeave(input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const parsed = leaveDecisionSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const { id, approve, note } = parsed.data;
@@ -365,7 +365,7 @@ function halfDayOn(day: Date, request: { fromDate: Date; toDate: Date; fromHalfD
  * against, which is an HR correction, not a self-service action.
  */
 export async function cancelLeave(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const request = await db.leaveRequest.findUnique({ where: { id }, include: { type: true } });
   if (!request) return { ok: false, error: "That request no longer exists." };
   if (request.userId !== user.id) return { ok: false, error: "That isn't your request." };
@@ -452,7 +452,7 @@ function leaveWhere(filters?: LeaveFilters): Prisma.LeaveRequestWhereInput {
 }
 
 export async function myLeaveRequests(filters?: LeaveFilters) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   return toPlain(
     await db.leaveRequest.findMany({
       where: { ...leaveWhere(filters), userId: user.id },
@@ -470,7 +470,7 @@ export async function myLeaveRequests(filters?: LeaveFilters) {
  * and HR sees the company; the filters narrow that, they never widen it.
  */
 export async function allLeaveRequests(filters?: LeaveFilters & { page?: number; pageSize?: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   const where: Prisma.LeaveRequestWhereInput = {
     ...leaveWhere(filters),
@@ -495,7 +495,7 @@ export async function allLeaveRequests(filters?: LeaveFilters & { page?: number;
 
 /** Requests waiting on this user, plus what they have decided recently. */
 export async function leaveApprovalQueue(filters?: LeaveFilters) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const canApproveAnyone = await hasEffectivePermission(user.id, "hr.approveLeave");
   const downline = await getDownlineUserIds(user.id);
   // Never your own, whatever else is true.
@@ -518,7 +518,7 @@ export async function leaveApprovalQueue(filters?: LeaveFilters) {
 
 /** Who is off, for the next few weeks — the thing a manager actually plans around. */
 export async function upcomingLeave(days = 30) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   const from = dateOnly(new Date());
   const to = dateOnly(new Date(Date.now() + days * 86400000));

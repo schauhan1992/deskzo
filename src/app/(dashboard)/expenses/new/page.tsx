@@ -4,6 +4,7 @@ import { getVisit } from "@/actions/visit";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { ExpenseForm } from "@/components/expenses/expense-form";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function NewExpensePage({
   searchParams,
@@ -16,7 +17,7 @@ export default async function NewExpensePage({
   const params = await searchParams;
   const [companies, visit] = await Promise.all([
     listCompanyOptions(),
-    params.visitId ? getVisit(params.visitId) : Promise.resolve(null),
+    params.visitId && (await isModuleEntitled("visits")) ? getVisit(params.visitId) : Promise.resolve(null),
   ]);
 
   return (

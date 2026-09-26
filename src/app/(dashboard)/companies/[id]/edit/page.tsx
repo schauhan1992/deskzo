@@ -7,6 +7,7 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { EditCompanyForm } from "@/components/companies/edit-company-form";
 import { customerTermsAdvice } from "@/actions/credit";
 import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function EditCompanyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,7 +19,7 @@ export default async function EditCompanyPage({ params }: { params: Promise<{ id
   // edit URL is no more informative than the detail one it is reached from.
   if (!(await canSeeCompany(user.id, company.ownerUserId))) notFound();
   // Null for a vendor, whose terms are ours to pay — see `customerTermsAdvice`.
-  const termsAdvice = await customerTermsAdvice(company.id);
+  const termsAdvice = (await isModuleEntitled("receivables")) ? await customerTermsAdvice(company.id) : null;
 
   return (
     <div>

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { TradeDocumentType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
@@ -50,7 +50,7 @@ export async function listApprovalPolicies(): Promise<
     (ApprovalPolicy & { approvers: { id: string; name: string }[]; updatedAt: Date | null; updatedBy: string | null })[]
   >
 > {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change these settings." };
 
   const rows = await db.documentApprovalPolicy.findMany({
@@ -98,7 +98,7 @@ export async function saveApprovalPolicy(input: {
   /** Also needs approval when any line is discounted by more than this percent. Null or left out: no rule. */
   maxDiscountPercent?: number | null;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change these settings." };
 
   if (!(tradeDocumentTypeValues as readonly string[]).includes(input.docType)) {
@@ -206,7 +206,7 @@ async function loadForApproval(id: string, userId: string) {
 }
 
 export async function submitForApproval(input: { id: string }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const document = await loadForApproval(input.id, user.id);
   if (!document) return { ok: false, error: "That document no longer exists." };
 
@@ -288,7 +288,7 @@ export async function decideApproval(input: {
   approved: boolean;
   note?: string;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const document = await loadForApproval(input.id, user.id);
   if (!document) return { ok: false, error: "That document no longer exists." };
 
@@ -373,7 +373,7 @@ export async function approvalContext(id: string): Promise<{
   mayApprove: boolean;
   maySubmit: boolean;
 } | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const document = await loadForApproval(id, user.id);
   if (!document) return null;
 

@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { commissionPartyAccountSchema } from "@/lib/validation/commission-party";
 import type { ActionResult } from "@/actions/company";
 
 /** The customer companies a commission party is linked to (referral source) — shown on the commission party's own page. */
 export async function listLinkedCompanies(commissionPartyId: string) {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   const links = await db.commissionPartyLink.findMany({
     where: { commissionPartyId },
     orderBy: { createdAt: "desc" },
@@ -20,7 +20,7 @@ export async function listLinkedCompanies(commissionPartyId: string) {
 }
 
 export async function linkCommissionPartyToCompany(commissionPartyId: string, companyId: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("commission_parties");
   const [commissionParty, company] = await Promise.all([
     db.company.findUnique({ where: { id: commissionPartyId } }),
     db.company.findUnique({ where: { id: companyId } }),
@@ -58,7 +58,7 @@ export async function linkCommissionPartyToCompany(commissionPartyId: string, co
 }
 
 export async function unlinkCommissionPartyFromCompany(linkId: string): Promise<ActionResult<null>> {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   const link = await db.commissionPartyLink.findUnique({ where: { id: linkId } });
   if (!link) {
     return { ok: false, error: "Link not found." };
@@ -71,7 +71,7 @@ export async function unlinkCommissionPartyFromCompany(linkId: string): Promise<
 
 /** A commission party's payee accounts (related parties) — label, PAN, bank, UPI — for both display and the order-expense "pay into account" picker. */
 export async function listCommissionPartyAccounts(commissionPartyId: string) {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   return db.commissionPartyAccount.findMany({
     where: { commissionPartyId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
@@ -79,7 +79,7 @@ export async function listCommissionPartyAccounts(commissionPartyId: string) {
 }
 
 export async function createCommissionPartyAccount(commissionPartyId: string, input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("commission_parties");
   const parsed = commissionPartyAccountSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -116,7 +116,7 @@ export async function createCommissionPartyAccount(commissionPartyId: string, in
 }
 
 export async function updateCommissionPartyAccount(id: string, input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("commission_parties");
   const parsed = commissionPartyAccountSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -156,7 +156,7 @@ export async function updateCommissionPartyAccount(id: string, input: unknown): 
 }
 
 export async function deleteCommissionPartyAccount(id: string): Promise<ActionResult<null>> {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   const existing = await db.commissionPartyAccount.findUnique({ where: { id } });
   if (!existing) {
     return { ok: false, error: "Account not found." };
@@ -182,7 +182,7 @@ export async function deleteCommissionPartyAccount(id: string): Promise<ActionRe
  * 360 view should show who gets paid on their deals without having to open every commission party.
  */
 export async function listCompanyCommissionParties(companyId: string) {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   const links = await db.commissionPartyLink.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
@@ -193,7 +193,7 @@ export async function listCompanyCommissionParties(companyId: string) {
 
 /** Commission parties available to link, for the picker on a customer's page. */
 export async function listCommissionPartyOptions() {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   return db.company.findMany({
     where: { relationshipType: "COMMISSION_PARTY" },
     orderBy: { name: "asc" },
@@ -206,7 +206,7 @@ export async function listCommissionPartyOptions() {
  * the relationship. Read from the customer's end, so `companyProduct.companyId` is the filter.
  */
 export async function listCompanyCommissions(companyId: string) {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   const rows = await db.orderExpense.findMany({
     where: { type: "COMMISSION", companyProduct: { companyId } },
     orderBy: { createdAt: "desc" },
@@ -239,7 +239,7 @@ export async function listCompanyCommissions(companyId: string) {
  * which customer each payout came from.
  */
 export async function listCommissionPartyEarnings(commissionPartyId: string) {
-  await requireUser();
+  await requireModuleUser("commission_parties");
   const rows = await db.orderExpense.findMany({
     where: { type: "COMMISSION", payeeCompanyId: commissionPartyId },
     orderBy: { createdAt: "desc" },

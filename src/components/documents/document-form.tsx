@@ -24,7 +24,7 @@ import { computeDocument, resolveSupplyType, stateCodeFromGstin, GST_STATE_OPTIO
 import { isIndia } from "@/lib/geo/countries";
 import { gstTreatmentValues, gstTreatmentLabels } from "@/lib/gst";
 import { BASE_CURRENCY, CURRENCIES, getCurrency, isBaseCurrency, rateHint } from "@/lib/currency";
-import { lookupExchangeRate } from "@/actions/finance";
+import { lookupExchangeRate } from "@/actions/exchange-rate";
 import { documentDirection, documentListPath, tradeDocumentLabels } from "@/lib/trade-documents";
 import { registeredTreatments } from "@/lib/validation/trade-document";
 import { blankLine, type AddressDraft, type DocumentFormDefaults, type LineDraft } from "@/lib/document-draft";

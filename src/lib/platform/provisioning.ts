@@ -10,6 +10,8 @@ import { createWorkspaceDatabase } from "@/lib/platform/provisioner";
 import { newKeyBundle, sealKeyBundle } from "@/lib/tenancy/keys";
 import { PLATFORM_DOMAIN, RESERVED_SLUGS, SLUG_PATTERN, protocolFor } from "@/lib/tenancy/host";
 import { forgetRegistry, subdomainHost } from "@/lib/tenancy/registry";
+import { PlanRefused, planForNewWorkspace, startOnPlan } from "@/lib/platform/plans";
+import { refreshEntitlements } from "@/lib/platform/entitlements";
 
 /**
  * Setting a workspace up, from a name to a working address.
@@ -42,6 +44,8 @@ export type ProvisioningInput = {
   ownerPasswordHash: string;
   /** ISO 3166-1 alpha-2. */
   country: string;
+  /** The plan it starts on — an invitation's; the default plan when absent. */
+  planKey?: string | null;
 };
 
 /** Why a workspace name cannot be had, or null when it can — the signup form asks this live. */
@@ -58,6 +62,13 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
   if (problem) throw new ProvisioningRefused(problem);
   const country = WORLD_COUNTRIES.find((c) => c.code === input.country.toUpperCase());
   if (!country) throw new ProvisioningRefused("Choose a country from the list.");
+  let plan: Awaited<ReturnType<typeof planForNewWorkspace>>;
+  try {
+    plan = await planForNewWorkspace(input.planKey, country.code);
+  } catch (err) {
+    if (err instanceof PlanRefused) throw new ProvisioningRefused(err.message);
+    throw err;
+  }
 
   const tenantId = randomUUID();
   const control = controlDb();
@@ -84,12 +95,16 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
         ownerPasswordHash: input.ownerPasswordHash,
         companyName: input.companyName.trim(),
         country: country.code,
+        planKey: plan?.key ?? null,
       },
       select: { id: true },
     });
+    // Without a plan offered it has the core alone, until staff give it one from the console.
+    if (plan) await startOnPlan(tx, tenantId, plan.id);
     await tx.platformAuditLog.create({ data: { actorKind: "SYSTEM", actor: "signup", action: "tenant.provision.requested", tenantId, detail: { slug } } });
     return created;
   });
+  await refreshEntitlements(tenantId);
   return { tenantId, jobId: job.id };
 }
 

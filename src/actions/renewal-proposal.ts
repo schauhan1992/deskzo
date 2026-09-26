@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { renewalOrderDraft } from "@/lib/subscriptions/renewal-order";
@@ -35,7 +35,7 @@ import type { ActionResult } from "@/actions/company";
 export async function createProposalFromRenewal(input: {
   companyProductId: string;
 }): Promise<ActionResult<{ id: string; docNumber: string | null; total: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
 
   const product = await db.companyProduct.findFirst({
     /**

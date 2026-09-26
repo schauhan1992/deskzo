@@ -5,7 +5,7 @@ import { detectSalesWins } from "@/lib/wins/detect";
 import { Prisma, type OrderStatus, type OrderBusinessType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
@@ -56,7 +56,7 @@ async function validateExpensePayees(
 
 /** The order-punching form (sales). Vendor/purchase price aren't collected here — that's the purchase team's job once accounts approves. */
 export async function createOrder(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   const parsed = createOrderSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -188,7 +188,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
 
 /** Accounts reviews payment terms and gives (or refuses) the go-ahead. */
 export async function approveOrder(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   if (!(await hasEffectivePermission(user.id, "orders.approve"))) {
     return { ok: false, error: "You don't have permission to approve orders." };
   }
@@ -285,7 +285,7 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
 
 /** Purchase team sets the vendor, cost price, and our PO once an order is approved. */
 export async function processOrder(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   if (!(await hasEffectivePermission(user.id, "orders.process"))) {
     return { ok: false, error: "You don't have permission to process orders." };
   }
@@ -328,7 +328,7 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
 
 /** Purchase team marks the order complete — this is what makes it a normal, fully-live line in the customer's Products & Subscriptions. */
 export async function fulfillOrder(orderId: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   if (!(await hasEffectivePermission(user.id, "orders.process"))) {
     return { ok: false, error: "You don't have permission to process orders." };
   }
@@ -376,7 +376,7 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
 }
 
 export async function cancelOrder(orderId: string, reason?: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   const order = await db.companyProduct.findUnique({ where: { id: orderId } });
   if (!order) {
     return { ok: false, error: "Order not found." };
@@ -458,7 +458,7 @@ const orderListInclude = {
 } as const;
 
 export async function listOrders(params?: OrderListParams) {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   if (!(await viewerHas("orders.view"))) return [];
   return db.companyProduct.findMany({
     where: await orderListWhere(user.id, params),
@@ -468,7 +468,7 @@ export async function listOrders(params?: OrderListParams) {
 }
 
 export async function listOrdersPaged(params: OrderListParams & { page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   if (!(await viewerHas("orders.view"))) return { rows: [], total: 0, pendingApproval: 0 };
   // All three queries below take this same `where`, scope included — the page, the total the pager
   // counts against, and the badge. A scoped page with an unscoped total is a pager that walks off
@@ -490,7 +490,7 @@ export async function listOrdersPaged(params: OrderListParams & { page: number; 
 }
 
 export async function getOrder(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   if (!(await viewerHas("orders.view"))) return null;
   // Scoped in the `where` so the include stays exactly as the detail page expects it, and so an
   // order on somebody else's account answers the same way a made-up id does. This page carries the
@@ -527,7 +527,7 @@ export async function getOrder(id: string) {
 
 /** Proposals belonging to leads of this company, for the order-punch "link to proposal" picker. */
 export async function listProposalOptions(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   return db.proposal.findMany({
     // A proposal reaches the account through its lead, so the scope goes inside the `lead` clause
     // rather than beside it. Scoped as well as filtered by the caller's `companyId`: a company id
@@ -545,7 +545,7 @@ export async function listProposalOptions(companyId: string) {
  * sales person punching the order has.
  */
 export async function hasExistingOrderForItem(companyId: string, itemId: string): Promise<boolean> {
-  const user = await requireUser();
+  const user = await requireModuleUser("orders");
   const existing = await db.companyProduct.findFirst({
     // Scoped as well as filtered by id: unscoped, this is a yes/no oracle over the whole order
     // book — pass a company id and an item id and it answers whether that account buys that

@@ -11,6 +11,7 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { clientRelationshipTypeValues } from "@/lib/validation/company";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function NewEndCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const enabled = await isModuleEnabled("resellers");
@@ -24,7 +25,7 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
     listIndustries(),
     requireUser(),
     viewerHas("contacts.view"),
-    newCustomerTermsAdvice(),
+    isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)),
   ]);
   if (!reseller || reseller.relationshipType !== "RESELLER") notFound();
 

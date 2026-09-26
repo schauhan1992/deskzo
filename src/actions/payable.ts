@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
@@ -51,7 +51,7 @@ export async function recordBillPayment(input: {
   reference?: string;
   notes?: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("payables");
   const amount = Number(input.amount);
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   if (!input.paidOn) return { ok: false, error: "Pick the date it was paid." };
@@ -132,7 +132,7 @@ export async function recordBillPayment(input: {
 }
 
 export async function getBillSettlement(billId: string) {
-  await requireUser();
+  await requireModuleUser("payables");
   const bill = await db.tradeDocument.findUnique({
     where: { id: billId },
     select: {
@@ -162,7 +162,7 @@ export async function getBillSettlement(billId: string) {
  * impossible to read side by side.
  */
 export async function payablesAging(params?: { search?: string }) {
-  await requireUser();
+  await requireModuleUser("payables");
   const asOf = new Date();
 
   const bills = await db.tradeDocument.findMany({
@@ -215,7 +215,7 @@ export async function payablesAging(params?: { search?: string }) {
 
 /** A vendor's account: bills credit what we owe, payments out debit it back down. */
 export async function vendorStatement(companyId: string, opts?: { from?: string; to?: string }) {
-  await requireUser();
+  await requireModuleUser("payables");
   const range = {
     ...(opts?.from ? { gte: new Date(opts.from) } : {}),
     ...(opts?.to ? { lte: new Date(opts.to) } : {}),
@@ -277,7 +277,7 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
 
 /** Bills a payment can still be put against, for the record-payment picker. */
 export async function listOpenBills(companyId: string) {
-  await requireUser();
+  await requireModuleUser("payables");
   const bills = await db.tradeDocument.findMany({
     where: { companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
     orderBy: { issueDate: "asc" },

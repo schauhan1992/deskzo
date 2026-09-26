@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type AssetKind, type AssetMovementType, type AssetOwnership, type AssetStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -23,7 +23,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("it_assets");
   const [manage, viewAll] = await Promise.all([
     hasEffectivePermission(user.id, "assets.manage"),
     hasEffectivePermission(user.id, "assets.viewAll"),
@@ -371,7 +371,7 @@ export async function moveAsset(input: {
 
 /** Somebody confirming they actually have it — the step that stops handovers going quiet. */
 export async function acknowledgeMovement(movementId: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("it_assets");
   const movement = await db.assetMovement.findUnique({
     where: { id: movementId },
     select: { id: true, toUserId: true, acknowledgedAt: true, asset: { select: { id: true, assetTag: true } } },
@@ -546,7 +546,7 @@ export async function assetFormOptions() {
 
 /** Sites for one company, for the location pickers. */
 export async function locationsFor(companyId: string) {
-  await requireUser();
+  await requireModuleUser("it_assets");
   return db.companyLocation.findMany({
     where: { companyId },
     orderBy: { label: "asc" },

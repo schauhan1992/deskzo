@@ -1,6 +1,7 @@
 import type { AwardAudience, Prize, PrizeRace } from "@prisma/client";
 import { db } from "@/lib/db";
 import { prizesFor, type Slot } from "@/lib/wins/prizes";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 /**
  * Prizes from the database — read for a period, and copied onto the winners' lines when a result is
@@ -17,10 +18,9 @@ export function prizeNames(prizes: Map<Slot, Prize>): Partial<Record<string, str
   return Object.fromEntries([...prizes].map(([slot, p]) => [slot, p.name]));
 }
 
-/** Whether the wins module is on. A missing row means it has never been switched off. */
+/** Whether the wins module is on: in the workspace's plan, and not switched off. */
 export async function winsModuleOn(): Promise<boolean> {
-  const row = await db.systemModule.findUnique({ where: { key: "wins" }, select: { enabled: true } });
-  return !row || row.enabled;
+  return moduleAvailableForTenant("wins");
 }
 
 /**

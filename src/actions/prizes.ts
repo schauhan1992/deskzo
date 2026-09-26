@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { AwardAudience, PrizeRace } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -25,7 +25,7 @@ export type ShowcaseRace = { race: PrizeRace; label: string; periodLabel: string
 
 /** The prizes up for grabs right now, for every race run where everybody can see it. */
 export async function getPrizeShowcase(): Promise<ShowcaseRace[]> {
-  await requireUser();
+  await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return [];
   const [awards, wins] = await Promise.all([awardSettings(), winsSettings()]);
   const now = new Date();
@@ -51,7 +51,7 @@ export async function getPrizesAdmin(): Promise<{
   isPublic: Record<PrizeRace, boolean>;
   lastAnnounced: Record<PrizeRace, Date | null>;
 } | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins")) || !(await can(user.id, "wins.manage"))) return null;
   const now = new Date();
   const periods = {
@@ -91,7 +91,7 @@ export async function savePrize(input: {
   note?: string | null;
   image?: string | null;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't set the prizes." };
   if (!RACES.includes(input.race)) return { ok: false, error: "Pick which prizes these are." };
   if (!isSlot(input.race, input.slot)) return { ok: false, error: "That place doesn't carry a prize." };
@@ -134,7 +134,7 @@ export async function savePrize(input: {
 }
 
 export async function deletePrize(input: { race: PrizeRace; period: string; slot: string }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't set the prizes." };
   const removed = await db.prize.deleteMany({ where: { race: input.race, period: input.period ?? "", slot: input.slot } });
   if (removed.count) {
@@ -154,7 +154,7 @@ export async function deletePrize(input: { race: PrizeRace; period: string; slot
 const ANNOUNCE_GAP_MS = 10 * 60_000;
 
 export async function announcePrizesNow(race: PrizeRace): Promise<ActionResult<{ period: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't announce the prizes." };
   if (!RACES.includes(race)) return { ok: false, error: "Pick which prizes to announce." };
   if (!(await isModuleEnabled("wins"))) return { ok: false, error: "The wins module is switched off." };
@@ -185,7 +185,7 @@ export async function announcePrizesNow(race: PrizeRace): Promise<ActionResult<{
 }
 
 export async function setPrizeHandedOver(id: string, handedOver: boolean): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await can(user.id, "wins.manage"))) return { ok: false, error: "You can't mark prizes as handed over." };
   const winner = await db.prizeWinner.findUnique({ where: { id }, select: { id: true, prizeName: true, periodLabel: true } });
   if (!winner) return { ok: false, error: "That win isn't there any more." };
@@ -228,7 +228,7 @@ export type HallOfFameRow = {
  * performance, sees all of it — they are the ones handing the prizes over.
  */
 export async function getHallOfFame(): Promise<{ canManage: boolean; rows: HallOfFameRow[] } | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return null;
   const [canManage, canSeeAll] = await Promise.all([can(user.id, "wins.manage"), can(user.id, "performance.view")]);
   const rows = await db.prizeWinner.findMany({

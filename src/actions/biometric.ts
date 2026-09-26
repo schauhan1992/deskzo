@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -20,7 +20,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function requireHr() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await hasEffectivePermission(user.id, "hr.manage");
   return { user, allowed };
 }
@@ -294,7 +294,7 @@ export async function reprocessPunches(): Promise<ActionResult<{ days: number; p
 
 /** The raw log for one person and day, for settling a dispute about a time. */
 export async function punchesFor(userId: string, date: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const canSeeOthers =
     (await hasEffectivePermission(user.id, "hr.manage")) || (await hasEffectivePermission(user.id, "hr.viewAll"));
   if (userId !== user.id && !canSeeOthers) return [];

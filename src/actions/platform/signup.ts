@@ -170,6 +170,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
     WHERE "codeHash" = ${pending.inviteCodeHash} AND "uses" < "maxUses" AND ("expiresAt" IS NULL OR "expiresAt" > now())`;
   if (spent !== 1) return { ok: false, error: "That invitation has been used in the meantime." };
 
+  const invite = await controlDb().signupInvite.findUnique({ where: { codeHash: pending.inviteCodeHash }, select: { planKey: true } });
   let tenantId: string;
   try {
     ({ tenantId } = await startProvisioning({
@@ -179,6 +180,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
       ownerEmail: pending.email,
       ownerPasswordHash: pending.passwordHash,
       country: pending.country,
+      planKey: invite?.planKey ?? null,
     }));
   } catch (err) {
     // The invitation goes back: nothing was made with it.

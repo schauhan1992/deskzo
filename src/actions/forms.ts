@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { FormAttendance, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -70,7 +70,7 @@ function refresh(formId?: string) {
 // ─── The list ────────────────────────────────────────────────────────────────
 
 export async function listForms(params: { category?: string; q?: string; state?: string } = {}) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return null;
 
@@ -148,7 +148,7 @@ export async function listForms(params: { category?: string; q?: string; state?:
 // ─── One form ────────────────────────────────────────────────────────────────
 
 export async function getFormDetail(formId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return null;
   const found = await formFor(formId, viewer);
@@ -216,7 +216,7 @@ export async function getFormDetail(formId: string) {
 
 /** The people a form can be routed to — for the builder's "send new answers to" picker. */
 export async function formEditorOptions() {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return null;
   const users = await db.user.findMany({
@@ -229,7 +229,7 @@ export async function formEditorOptions() {
 
 /** The questions and settings, for the builder. Edit access only. */
 export async function getFormForEdit(formId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return null;
   const found = await formFor(formId, viewer);
@@ -261,7 +261,7 @@ export async function getFormForEdit(formId: string) {
 export async function saveForm(
   input: FormSettingsInput & { id?: string; fields: unknown; active?: boolean },
 ): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return { ok: false, error: "Forms are switched off." };
 
@@ -317,7 +317,7 @@ export async function saveForm(
 }
 
 export async function setFormActive(formId: string, active: boolean): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found) return { ok: false, error: "That form isn't available." };
@@ -337,7 +337,7 @@ export async function setFormActive(formId: string, active: boolean): Promise<Ac
 
 /** A copy to build the next one from — the questions and settings, none of the people or answers. */
 export async function duplicateForm(formId: string): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found) return { ok: false, error: "That form isn't available." };
@@ -382,7 +382,7 @@ export async function duplicateForm(formId: string): Promise<ActionResult<{ id: 
  * form would delete them with it — close it instead, which keeps everything and takes nothing new.
  */
 export async function deleteForm(formId: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found) return { ok: false, error: "That form isn't available." };
@@ -406,7 +406,7 @@ export async function deleteForm(formId: string): Promise<ActionResult<null>> {
 // ─── Sharing ─────────────────────────────────────────────────────────────────
 
 export async function getFormSharing(formId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found) return null;
@@ -447,7 +447,7 @@ export async function saveFormSharing(
   formId: string,
   input: { userId?: string | null; roleKey?: string | null; canEdit?: boolean; canViewResponses?: boolean; canInvite?: boolean }[],
 ): Promise<ActionResult<{ count: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found) return { ok: false, error: "That form isn't available." };
@@ -538,7 +538,7 @@ export async function listFormResponses(
   formId: string,
   params: { page?: number; pageSize?: number; q?: string; rsvp?: string; attendance?: string } = {},
 ) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found || !found.access.responses) return null;
@@ -575,7 +575,7 @@ export async function listFormResponses(
 
 /** Every response as a spreadsheet — the same people who can read them, and nobody else. */
 export async function exportFormResponses(formId: string): Promise<ActionResult<{ filename: string; csv: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found || !found.access.responses) return { ok: false, error: "You can't read this form's responses." };
@@ -625,7 +625,7 @@ export async function exportFormResponses(formId: string): Promise<ActionResult<
 
 /** On the day: who came. Only somebody who said they were coming is marked; null clears it. */
 export async function markAttendance(submissionId: string, attendance: FormAttendance | null): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const submission = await db.formSubmission.findUnique({ where: { id: submissionId }, select: { formId: true, attending: true, name: true } });
   const found = viewer && submission ? await formFor(submission.formId, viewer) : null;
@@ -656,7 +656,7 @@ export async function markAttendance(submissionId: string, attendance: FormAtten
  * so the address book's rules apply exactly as they do everywhere else.
  */
 export async function searchInvitees(formId: string, query: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   if (!found || !found.access.invite) return null;
@@ -713,7 +713,7 @@ async function invitable(formId: string, user: { id: string; role: string }, con
 }
 
 export async function previewInvites(formId: string, contactIds: string[]) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const checked = await invitable(formId, user, contactIds);
   if (!checked.ok) return { ok: false as const, error: checked.error };
   return toPlain({ ok: true as const, people: await inviteCandidates(checked.form, checked.contactIds) });
@@ -723,7 +723,7 @@ export async function sendFormInvites(
   formId: string,
   input: { contactIds: string[]; subject: string; body: string },
 ): Promise<ActionResult<{ sent: number; failed: number; queued: number; skipped: { name: string; reason: string }[] }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const checked = await invitable(formId, user, input.contactIds);
   if (!checked.ok) return { ok: false, error: checked.error };
   if (checked.contactIds.length === 0) return { ok: false, error: "None of those people are on your accounts." };
@@ -752,7 +752,7 @@ export async function sendFormInvites(
 }
 
 export async function listFormInvites(formId: string, params: { page?: number; pageSize?: number; status?: string; q?: string } = {}) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   // Inviting people and reading their answers both come with seeing who was asked.
@@ -819,7 +819,7 @@ export async function listFormInvites(formId: string, params: { page?: number; p
 }
 
 export async function revokeInvite(inviteId: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const invite = await db.formInvite.findUnique({ where: { id: inviteId }, select: { formId: true, email: true } });
   const found = viewer && invite ? await formFor(invite.formId, viewer) : null;
@@ -836,7 +836,7 @@ export async function revokeInvite(inviteId: string): Promise<ActionResult<null>
  * from the link updates it rather than adding a second person.
  */
 export async function recordRsvp(inviteId: string, attending: boolean): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const invite = await db.formInvite.findUnique({
     where: { id: inviteId },
@@ -911,7 +911,7 @@ export async function recordRsvp(inviteId: string, attending: boolean): Promise<
  * open up a form they were not given.
  */
 export async function companyFormResponses(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return null;
   const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
@@ -943,7 +943,7 @@ export async function companyFormResponses(companyId: string) {
 
 /** A viewer's standing on a form, for a page that needs only that. */
 export async function formAccess(formId: string): Promise<FormAccess | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   const found = viewer ? await formFor(formId, viewer) : null;
   return found?.access ?? null;

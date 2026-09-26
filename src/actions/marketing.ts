@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type CampaignStatus, type JourneyStatus, type MarketingTopic, type MessageChannel, type TemplateFormat } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { financialYearOf } from "@/lib/gst-engine";
@@ -28,7 +28,7 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
  */
 
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("marketing");
   const [manage, send, approve, viewAll] = await Promise.all([
     hasEffectivePermission(user.id, "marketing.manage"),
     hasEffectivePermission(user.id, "marketing.send"),
@@ -1115,6 +1115,6 @@ export async function runTickNow(): Promise<ActionResult<{ sent: number; enrolle
 
 /** The registry, for the journey builder. Async because everything in a "use server" file must be. */
 export async function listTriggers() {
-  await requireUser();
+  await requireModuleUser("marketing");
   return TRIGGERS;
 }

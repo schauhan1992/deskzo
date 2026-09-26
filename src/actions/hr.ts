@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -93,7 +93,7 @@ export type PeopleFilters = {
  * so the exited filter is refused to anybody else rather than quietly returning nothing.
  */
 export async function listPeople(filters?: PeopleFilters) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   const isHr = allowed === null;
 
@@ -151,7 +151,7 @@ export async function listPeople(filters?: PeopleFilters) {
  * record is worse than a clear "not yours", because it looks like the data is missing.
  */
 export async function getPerson(userId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   if (allowed && !allowed.includes(userId)) return null;
 
@@ -170,7 +170,7 @@ export async function getPerson(userId: string) {
 }
 
 export async function saveEmployeeProfile(input: unknown): Promise<ActionResult<{ userId: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const parsed = employeeProfileSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const data = parsed.data;
@@ -258,7 +258,7 @@ export async function saveEmployeeProfile(input: unknown): Promise<ActionResult<
  * it matters.
  */
 export async function recordExit(input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   if (!(await canManage(user.id))) return { ok: false, error: "You can't record an exit." };
 
   const parsed = exitEmployeeSchema.safeParse(input);
@@ -311,7 +311,7 @@ export async function recordExit(input: unknown): Promise<ActionResult<null>> {
 // ─── Holidays ─────────────────────────────────────────────────────────────────
 
 export async function listHolidays(year?: number) {
-  await requireUser();
+  await requireModuleUser("hr");
   const where = year
     ? { date: { gte: new Date(Date.UTC(year, 0, 1)), lte: new Date(Date.UTC(year, 11, 31)) } }
     : {};
@@ -319,7 +319,7 @@ export async function listHolidays(year?: number) {
 }
 
 export async function saveHoliday(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   if (!(await canManage(user.id))) return { ok: false, error: "You can't edit the holiday calendar." };
 
   const parsed = holidaySchema.safeParse(input);
@@ -346,7 +346,7 @@ export async function saveHoliday(input: unknown): Promise<ActionResult<{ id: st
 }
 
 export async function deleteHoliday(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   if (!(await canManage(user.id))) return { ok: false, error: "You can't edit the holiday calendar." };
   const holiday = await db.holiday.findUnique({ where: { id }, select: { name: true, date: true } });
   if (!holiday) return { ok: false, error: "That holiday no longer exists." };
@@ -366,7 +366,7 @@ export async function deleteHoliday(id: string): Promise<ActionResult<null>> {
 // ─── Leave types ──────────────────────────────────────────────────────────────
 
 export async function listLeaveTypes(includeInactive = false) {
-  await requireUser();
+  await requireModuleUser("hr");
   return toPlain(
     await db.leaveType.findMany({
       where: includeInactive ? {} : { active: true },
@@ -376,7 +376,7 @@ export async function listLeaveTypes(includeInactive = false) {
 }
 
 export async function saveLeaveType(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   if (!(await canManage(user.id))) return { ok: false, error: "You can't edit leave types." };
 
   const parsed = leaveTypeSchema.safeParse(input);
@@ -408,25 +408,9 @@ export async function saveLeaveType(input: unknown): Promise<ActionResult<{ id: 
   }
 }
 
-/** Departments, for the directory's filter and the employee form. */
-export async function listDepartmentOptions() {
-  await requireUser();
-  return db.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
-}
-
-/** Active people who can be named as somebody's manager. */
-export async function listManagerOptions() {
-  await requireUser();
-  return db.user.findMany({
-    where: { active: true },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
-}
-
 /** Whether the signed-in user may act as HR — drives what the pages offer. */
 export async function hrCapabilities() {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const [manage, viewAll, approveAnyLeave, payroll, handover] = await Promise.all([
     hasEffectivePermission(user.id, "hr.manage"),
     hasEffectivePermission(user.id, "hr.viewAll"),
@@ -449,7 +433,7 @@ export async function hrCapabilities() {
  * states a person can be in and nobody needs both at once.
  */
 export async function personChecklist(userId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   if (allowed && !allowed.includes(userId)) return null;
 
@@ -530,7 +514,7 @@ export async function personChecklist(userId: string) {
  * tasks can be raised by hand for somebody whose exit was entered before this existed.
  */
 export async function raiseOffboardingTasks(userId: string): Promise<ActionResult<{ tasks: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   if (!(await canManage(user.id))) return { ok: false, error: "Only HR can raise offboarding tasks." };
   return raiseOffboardingTasksFor(user.id, userId);
 }
@@ -584,7 +568,7 @@ async function raiseOffboardingTasksFor(actorId: string, userId: string): Promis
 
 /** The tasks raised for somebody joining or leaving, for the checklist card. */
 export async function hrTasksFor(userId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
   if (allowed && !allowed.includes(userId)) return [];
   return toPlain(

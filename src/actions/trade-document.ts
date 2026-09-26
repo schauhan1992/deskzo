@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany, companyScope, viaCompanyScope } from "@/lib/authz/company-scope";
-import { requireUser } from "@/lib/session";
+import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { postDocumentToLedger, reverseDocumentPosting } from "@/lib/ledger/journal";
 import { toPlain } from "@/lib/serialize";
@@ -310,13 +310,13 @@ async function validateLinkedLead(leadId: string | undefined, companyId: string)
  * because its bar is "resolves a session or checks a permission", which is deliberately lower than
  * correctness — resolving a session is not authorising anything.
  *
- * Reads stay on `requireUser()` for the *permission* half: who may see a quote is a different
+ * Reads stay on `requireModuleUser(["sales_documents", "purchase_documents"])` for the *permission* half: who may see a quote is a different
  * question from who may issue one, and gating reads on `documents.issue` would empty the document
  * lists embedded in the company, lead and project screens. The reads are narrowed instead by the
  * account scope below, which answers "whose customer is this" rather than "what may you do".
  */
 async function mayWrite(key: "documents.issue" | "documents.void") {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, key))) {
     return {
       user,
@@ -342,7 +342,7 @@ export async function createTradeDocument(
 ): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = tradeDocumentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -397,7 +397,8 @@ export async function createTradeDocument(
       docNumber,
       status: "DRAFT",
       origin,
-      einvoiceStatus: isEInvoiceEligible(data.docType) ? "PENDING" : "NOT_APPLICABLE",
+      // Only India has the government's e-invoice system; elsewhere it never applies.
+      einvoiceStatus: isEInvoiceEligible(data.docType) && (await countryFeatureAvailable("einvoice")) ? "PENDING" : "NOT_APPLICABLE",
       sourceDocumentId: data.sourceDocumentId || null,
       againstDocumentId: data.againstDocumentId || null,
       leadId: data.leadId || null,
@@ -422,7 +423,7 @@ export async function createTradeDocument(
 export async function updateTradeDocument(input: unknown): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = updateTradeDocumentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -497,7 +498,7 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
 export async function deleteTradeDocument(id: string): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.void");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const existing = await db.tradeDocument.findUnique({
     where: { id },
     select: { id: true, status: true, docType: true, docNumber: true, conversions: { select: { id: true } } },
@@ -530,7 +531,7 @@ export async function deleteTradeDocument(id: string): Promise<ActionResult<{ id
 export async function issueTradeDocument(input: unknown): Promise<ActionResult<{ id: string; docNumber: string; einvoiceError?: string }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = issueTradeDocumentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -705,6 +706,7 @@ async function loadEInvoiceDocument(id: string): Promise<{ doc: EInvoiceDocument
  * retryable instead of disappearing into a stack trace.
  */
 async function generateEInvoice_internal(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!(await countryFeatureAvailable("einvoice"))) return { ok: false, error: "E-invoicing is India's, and this workspace is set up for another country." };
   const loaded = await loadEInvoiceDocument(id);
   if ("error" in loaded) return { ok: false, error: loaded.error };
 
@@ -744,7 +746,8 @@ async function generateEInvoice_internal(id: string): Promise<{ ok: true } | { o
 export async function generateEInvoice(id: string): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
+  if (!(await countryFeatureAvailable("einvoice"))) return { ok: false, error: "E-invoicing is India's, and this workspace is set up for another country." };
   const document = await db.tradeDocument.findUnique({
     where: { id },
     select: { status: true, docType: true, irn: true, total: true },
@@ -777,7 +780,8 @@ export async function generateEInvoice(id: string): Promise<ActionResult<{ id: s
 export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.void");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
+  if (!(await countryFeatureAvailable("einvoice"))) return { ok: false, error: "E-invoicing is India's, and this workspace is set up for another country." };
   const parsed = cancelEInvoiceSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -838,7 +842,7 @@ export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id:
 export async function convertTradeDocument(input: unknown): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = convertTradeDocumentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -968,7 +972,7 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
 export async function setTradeDocumentStatus(id: string, status: TradeDocumentStatus): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.void");
   if (gate.error) return { ok: false, error: gate.error };
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const document = await db.tradeDocument.findUnique({
     where: { id },
     select: { docType: true, status: true, docNumber: true, einvoiceStatus: true },
@@ -1015,7 +1019,7 @@ async function maySeeParty(userId: string, companyId: string): Promise<boolean> 
 
 /** Full document for the detail and print views, with Decimals flattened for the client. */
 export async function getTradeDocument(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return null;
   return findTradeDocumentFor(user.id, id);
 }
@@ -1027,7 +1031,7 @@ export async function getTradeDocument(id: string) {
  * opening a lead is almost always after.
  */
 export async function listLeadDocuments(leadId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return [];
   const rows = await db.tradeDocument.findMany({
     // Scoped through the party rather than through the lead: a document is only ever raised for the
@@ -1064,7 +1068,7 @@ export async function listTradeDocuments(params: {
   page: number;
   pageSize: number;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return { rows: [], total: 0 };
   const dateWindow = dateRangeFilter(params.from, params.to);
   const where: Prisma.TradeDocumentWhereInput = {
@@ -1141,7 +1145,7 @@ export async function listTradeDocuments(params: {
 
 /** Totals for the cards above a list — what's outstanding, and what's stuck in draft. */
 export async function tradeDocumentSummary(docType: TradeDocumentType) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return [];
   // The same scope as the list under it, in both halves: a card reading "₹4.2 crore outstanding"
   // over a list of eleven invoices is the whole book by another route, and the count and the value
@@ -1179,7 +1183,7 @@ export async function tradeDocumentSummary(docType: TradeDocumentType) {
  * documents go to vendors — mixing them is how a PO ends up addressed to a client.
  */
 export async function listDocumentParties(docType: TradeDocumentType) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const salesTypes: Prisma.EnumCompanyRelationshipTypeFilter = { in: ["CLIENT", "RESELLER"] };
   const purchaseTypes: Prisma.EnumCompanyRelationshipTypeFilter = {
     in: ["VENDOR", "OEM", "DISTRIBUTOR", "PARTNER"],
@@ -1200,7 +1204,7 @@ export async function listDocumentParties(docType: TradeDocumentType) {
 
 /** The party's locations, with the GST details the form needs to show the place of supply. */
 export async function listPartyLocations(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   // The form only offers parties from `listDocumentParties`, which is now scoped — but this is a
   // server action reachable with any id, and a location carries the customer's address and GSTIN.
   if (!(await maySeeParty(user.id, companyId))) return [];
@@ -1213,7 +1217,7 @@ export async function listPartyLocations(companyId: string) {
 
 /** Catalogue lookup for the line-item picker, pre-filled with price, tax rate, HSN and unit. */
 export async function listDocumentItems(search?: string) {
-  await requireUser();
+  await requireModuleUser(["sales_documents", "purchase_documents"]);
   const rows = await db.item.findMany({
     where: {
       active: true,
@@ -1228,7 +1232,7 @@ export async function listDocumentItems(search?: string) {
 
 /** Open invoices a credit note can be raised against, for the "against" picker. */
 export async function listCreditableInvoices(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return [];
   if (!(await maySeeParty(user.id, companyId))) return [];
   const rows = await db.tradeDocument.findMany({
@@ -1246,7 +1250,7 @@ export async function listCreditableInvoices(companyId: string) {
  * one of them on its own page is exactly the kind of gap the 360 view exists to close.
  */
 export async function listCompanyDocuments(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return [];
   // The 360 view is only as private as the account it hangs off: every invoice ever raised for a
   // company, with its numbers and its totals, answered to whoever knew the id.
@@ -1281,7 +1285,7 @@ export async function listCompanyDocuments(companyId: string) {
 export async function bulkUpdateTradeDocuments(input: unknown): Promise<ActionResult<{ count: number; skipped: number }>> {
   const gate = await mayWrite("documents.issue");
   if (gate.error) return { ok: false, error: gate.error };
-  await requireUser();
+  await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = bulkUpdateTradeDocumentsSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

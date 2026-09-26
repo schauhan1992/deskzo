@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { getOrganisation } from "@/lib/organisation";
 import { notifyUser } from "@/lib/notify";
 import {
@@ -66,8 +67,28 @@ type Resolved = {
  * that makes the rest of the file safe to read: there is no path to another customer's data
  * because there is no argument that could describe one.
  */
+/** The module each section shows — a section whose module is gone is not shown, whatever the settings say. */
+const SECTION_MODULES: Record<Section, string | null> = {
+  subscriptions: "orders",
+  invoices: "sales_documents",
+  payments: "payments",
+  tickets: "helpdesk",
+  assets: "it_assets",
+  contacts: null,
+};
+
+async function withinPlan(sections: Set<Section>): Promise<Set<Section>> {
+  const kept = new Set<Section>();
+  for (const section of sections) {
+    const key = SECTION_MODULES[section];
+    if (!key || (await moduleAvailableForTenant(key))) kept.add(section);
+  }
+  return kept;
+}
+
 async function resolve(token: string): Promise<Resolved | null> {
   if (!token || token.length < 20) return null;
+  if (!(await moduleAvailableForTenant("customer_portal"))) return null;
 
   const login = await db.portalLogin.findUnique({
     where: { token },
@@ -98,14 +119,22 @@ async function resolve(token: string): Promise<Resolved | null> {
   const allowed = companyMayUsePortal(settings, login.company);
   if (!allowed.ok) return null;
 
+  const sections = await withinPlan(visibleSections(settings));
+  const actions = allowedActions(settings);
+  // Renewals and seats are asked for against a subscription; no subscriptions shown, nothing to ask.
+  if (!sections.has("subscriptions")) {
+    actions.delete("renewal");
+    actions.delete("seats");
+  }
+
   return {
     loginId: login.id,
     companyId: login.company.id,
     companyName: login.company.name,
     personName: login.personName,
     personEmail: login.personEmail,
-    sections: visibleSections(settings),
-    actions: allowedActions(settings),
+    sections,
+    actions,
     settings: { welcomeMessage: settings.welcomeMessage },
   };
 }

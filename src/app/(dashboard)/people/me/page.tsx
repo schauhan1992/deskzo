@@ -11,6 +11,7 @@ import { MyHandover } from "@/components/hr/my-handover";
 import { handoverHistory } from "@/actions/handover";
 import { db } from "@/lib/db";
 import { dateOnly } from "@/lib/hr/calendar";
+import { isModuleEntitled } from "@/lib/modules-access";
 
 export default async function MyHrPage() {
   const enabled = await isModuleEnabled("hr");
@@ -25,7 +26,7 @@ export default async function MyHrPage() {
     myLeaveRequests(),
     myRegularisations(),
     regularisationQueue(),
-    myPayslips(),
+    isModuleEntitled("payroll").then((has) => (has ? myPayslips() : [])),
     // This year and next, so late December still finds a "next holiday" rather than going blank.
     listHolidays(year).then(async (rows) => [...rows, ...(await listHolidays(year + 1))]),
     /**

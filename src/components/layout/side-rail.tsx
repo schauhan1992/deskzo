@@ -39,7 +39,13 @@ export function SideRail({
   copilot = false,
   unreadUpdates = 0,
   canManageHelp = false,
+  proRata = true,
+  country = "IN",
 }: {
+  /** Renewals are in the workspace's plan — the pro-rata tool quotes seats onto a subscription. */
+  proRata?: boolean;
+  /** The workspace's: the GST calculator and the GSTIN check are India's. */
+  country?: string;
   /** The copilot is on and this person may use it — the rail then offers it beside Help. */
   copilot?: boolean;
   /** What's new posts they have not seen, for the dot on its button. */
@@ -84,7 +90,9 @@ export function SideRail({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, choose]);
 
-  const active = TOOLS.find((t) => t.key === open);
+  // Only the tools this workspace has: nothing here asks for a module outside its plan.
+  const tools = TOOLS.filter((t) => (t.key !== "prorata" || proRata) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN"));
+  const active = tools.find((t) => t.key === open);
 
   return (
     /*
@@ -132,11 +140,11 @@ export function SideRail({
         {/* The header’s height and its border, continued. */}
         <div className="h-14 w-full shrink-0 border-b border-line" />
         <div className="flex flex-col items-center gap-1 py-2">
-        {TOOLS.map((tool, index) => {
+        {tools.map((tool, index) => {
           const Icon = tool.icon;
           const isOpen = open === tool.key;
           const dot = tool.key === "updates" && unread > 0;
-          const startsGroup = index > 0 && TOOLS[index - 1].group !== tool.group;
+          const startsGroup = index > 0 && tools[index - 1].group !== tool.group;
           return (
             <div key={tool.key} className="flex flex-col items-center">
               {startsGroup && <div className="my-1.5 h-px w-6 bg-line" aria-hidden="true" />}

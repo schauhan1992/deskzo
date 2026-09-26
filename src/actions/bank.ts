@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -28,14 +28,14 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function requireAccounts() {
-  const user = await requireUser();
+  const user = await requireModuleUser("accounting");
   return { user, allowed: await hasEffectivePermission(user.id, "payments.manage") };
 }
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
 export async function listBankAccounts() {
-  await requireUser();
+  await requireModuleUser("accounting");
   return toPlain(
     await db.bankAccount.findMany({
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -188,7 +188,7 @@ export async function setDefaultBankAccount(id: string): Promise<ActionResult<nu
 
 /** Cheques written or received that the bank hasn't shown yet. */
 export async function unclearedCheques() {
-  await requireUser();
+  await requireModuleUser("accounting");
   return toPlain(
     await db.payment.findMany({
       where: { method: "CHEQUE", clearedOn: null },
@@ -319,7 +319,7 @@ export async function importStatement(input: {
 
 /** Everything the reconciliation screen needs: both sides, what is matched, and what is suggested. */
 export async function reconciliationView(params: { bankAccountId: string; to?: string; statementBalance?: number }) {
-  await requireUser();
+  await requireModuleUser("accounting");
   const account = await db.bankAccount.findUnique({
     where: { id: params.bankAccountId },
     select: { id: true, name: true, ledgerAccountId: true },

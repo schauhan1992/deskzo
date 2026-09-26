@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { InternalFeedbackKind } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
@@ -41,7 +41,7 @@ export async function submitAnonymousFeedback(input: {
   rating?: number;
   body: string;
 }): Promise<ActionResult<{ remainingToday: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   const body = input.body.trim();
   if (body.length < 10) {
     return { ok: false, error: "Say a little more — ten characters isn't enough for anybody to act on." };
@@ -108,7 +108,7 @@ export async function submitAnonymousFeedback(input: {
 
 /** How many more this person may send today. Shown on the form so the limit is not a surprise. */
 export async function remainingFeedbackToday(): Promise<number> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   const row = await db.feedbackQuota.findUnique({
     where: { user_day: { userId: user.id, onDate: submissionDate(new Date()) } },
     select: { count: true },
@@ -124,7 +124,7 @@ export async function remainingFeedbackToday(): Promise<number> {
  * becoming a way to say something to somebody's face without owning it.
  */
 export async function listInternalFeedback(filters?: { kind?: InternalFeedbackKind; aboutUserId?: string; unreviewed?: boolean }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await hasEffectivePermission(user.id, "engagement.readFeedback"))) return null;
 
   const rows = await db.internalFeedback.findMany({
@@ -146,7 +146,7 @@ export async function listInternalFeedback(filters?: { kind?: InternalFeedbackKi
 }
 
 export async function reviewFeedback(id: string, note: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("engagement");
   if (!(await hasEffectivePermission(user.id, "engagement.readFeedback"))) {
     return { ok: false, error: "You can't review internal feedback." };
   }
@@ -161,7 +161,7 @@ export async function reviewFeedback(id: string, note: string): Promise<ActionRe
 
 /** Colleagues feedback can be written about. Everyone active, including the writer's own manager. */
 export async function feedbackSubjects() {
-  await requireUser();
+  await requireModuleUser("engagement");
   return toPlain(
     await db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   );

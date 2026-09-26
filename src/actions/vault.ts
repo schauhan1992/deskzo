@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import type { CredentialTagKind, VaultAccessLevel, VaultField, VaultOwnership } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { decryptSecret, digestSecret, encryptSecret } from "@/lib/crypto";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -177,7 +177,7 @@ export async function listVault(filters?: {
   page?: number;
   pageSize?: number;
 }): Promise<ActionResult<VaultPage>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.use"))) {
     return { ok: false, error: "You don't have access to the credential vault." };
   }
@@ -393,7 +393,7 @@ const TRAIL_LIMIT = 200;
  * had checked.
  */
 export async function credentialTrail(id: string): Promise<ActionResult<TrailEntry[]>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.use"))) {
     return { ok: false, error: "You don't have access to the credential vault." };
   }
@@ -462,7 +462,7 @@ export async function saveCredential(input: {
   /** Which client, when it is theirs. Ignored — and cleared — when the record is ours. */
   companyId?: string | null;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.use"))) {
     return { ok: false, error: "You don't have access to the credential vault." };
   }
@@ -571,7 +571,7 @@ export async function revealSecret(
   password: string,
   field: VaultField = "PASSWORD",
 ): Promise<ActionResult<{ secret: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.use"))) {
     return { ok: false, error: "You don't have access to the credential vault." };
   }
@@ -646,7 +646,7 @@ export async function revealSecret(
  * co-owner rotating a password is routine; a shared co-owner making it disappear is not.
  */
 export async function deleteCredential(id: string, reason?: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   const credential = await db.vaultCredential.findFirst({
     where: { id, archivedAt: null },
     select: { id: true, loginName: true, ownerId: true, shares: { select: { userId: true, departmentId: true, level: true, expiresAt: true } } },
@@ -716,7 +716,7 @@ export type ArchivedRow = {
  * restoring is what makes it readable again, through the ordinary reveal path.
  */
 export async function listArchivedVault(): Promise<ActionResult<ArchivedRow[]>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.viewAll"))) {
     return { ok: false, error: "Only an administrator can see the vault's archive." };
   }
@@ -764,7 +764,7 @@ export async function listArchivedVault(): Promise<ActionResult<ArchivedRow[]>> 
  * one mechanism for reassigning ownership rather than two.
  */
 export async function restoreCredential(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.viewAll"))) {
     return { ok: false, error: "Only an administrator can restore from the vault's archive." };
   }
@@ -809,7 +809,7 @@ export async function restoreCredential(id: string): Promise<ActionResult<null>>
  * while believing they did the first.
  */
 export async function destroyArchivedCredential(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.viewAll"))) {
     return { ok: false, error: "Only an administrator can empty the vault's archive." };
   }
@@ -844,7 +844,7 @@ export async function destroyArchivedCredential(id: string): Promise<ActionResul
  * that fills up with them is one nobody reads when it matters.
  */
 export async function setCredentialPin(id: string, pinned: boolean): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.use"))) {
     return { ok: false, error: "You don't have access to the credential vault." };
   }
@@ -894,7 +894,7 @@ export async function shareCredential(input: {
   level: VaultAccessLevel;
   expiresAt?: string;
 }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   const credential = await db.vaultCredential.findFirst({
     where: { id: input.credentialId, archivedAt: null },
     select: {
@@ -962,7 +962,7 @@ export async function shareCredential(input: {
  * question is who may change access to this record, and a share id on its own answers nothing.
  */
 export async function unshareCredential(shareId: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   const share = await db.vaultShare.findUnique({
     where: { id: shareId },
     select: {
@@ -1000,7 +1000,7 @@ export async function unshareCredential(shareId: string): Promise<ActionResult<n
 // ─── Options and tags ───────────────────────────────────────────────────────────────────────────
 
 export async function vaultOptions() {
-  await requireUser();
+  await requireModuleUser("vault");
   const [tags, users, departments, companies] = await Promise.all([
     db.credentialTag.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     db.user.findMany({
@@ -1032,7 +1032,7 @@ export async function vaultOptions() {
 
 /** Both lists for the settings screen. Inactive ones included there and nowhere else. */
 export async function listCredentialTags(includeInactive = false) {
-  await requireUser();
+  await requireModuleUser("vault");
   return toPlain(
     await db.credentialTag.findMany({
       where: includeInactive ? {} : { active: true },
@@ -1048,7 +1048,7 @@ export async function saveCredentialTag(input: {
   active?: boolean;
   sortOrder?: number;
 }): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.manageTags"))) {
     return { ok: false, error: "You can't change the vault's categories." };
   }
@@ -1072,7 +1072,7 @@ export async function saveCredentialTag(input: {
 }
 
 export async function deleteCredentialTag(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("vault");
   if (!(await hasEffectivePermission(user.id, "vault.manageTags"))) {
     return { ok: false, error: "You can't change the vault's categories." };
   }

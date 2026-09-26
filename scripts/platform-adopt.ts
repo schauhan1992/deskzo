@@ -34,6 +34,8 @@ import { decryptWith } from "../src/lib/crypto";
 import { adoptedKeyBundle, openKeyBundle, sealKeyBundle } from "../src/lib/tenancy/keys";
 import { legacyHosts, SLUG_PATTERN, RESERVED_SLUGS } from "../src/lib/tenancy/host";
 import { defaultSlug, forgetRegistry } from "../src/lib/tenancy/registry";
+import { INTERNAL_PLAN_KEY, startOnPlan } from "../src/lib/platform/plans";
+import { refreshEntitlements } from "../src/lib/platform/entitlements";
 
 const dryRun = process.argv.includes("--dry-run");
 const say = (line: string) => console.log(line);
@@ -164,6 +166,12 @@ async function main() {
         },
       });
     });
+    // Everything it had before plans existed, and no limits — the installation's own workspace.
+    const internal = await control.plan.findUnique({ where: { key: INTERNAL_PLAN_KEY }, select: { id: true } });
+    if (!internal) throw new Error(`The ${INTERNAL_PLAN_KEY} plan is missing — run the control plane's migrations first.`);
+    const onPlan = await control.subscriptionItem.count({ where: { subscription: { tenantId }, planId: internal.id } });
+    if (!onPlan) await control.$transaction((tx) => startOnPlan(tx, tenantId, internal.id));
+    await refreshEntitlements(tenantId);
     forgetRegistry();
 
     // Read back, through the same functions the app uses.

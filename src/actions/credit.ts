@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { CreditRating, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
@@ -25,7 +25,7 @@ import type { ActionResult } from "@/actions/company";
 
 /** The customer, when this person may see its credit — otherwise null, the same as "no such customer". */
 async function readableCustomer(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
   const company = await db.company.findUnique({
     where: { id: companyId },
@@ -71,14 +71,14 @@ export async function getCreditSnapshot(companyId: string) {
  * answer `checkTerms` will give when the form is saved.
  */
 export async function newCustomerTermsAdvice() {
-  await requireUser();
+  await requireModuleUser("receivables");
   const a = assessCredit([], { asOf: new Date() });
   return { rating: a.rating, score: a.score, recommendedTerms: a.recommendedTerms, canOverride: await viewerHas("credit.override"), currentTerms: null };
 }
 
 /** The same for an existing customer's edit form — null for a vendor, or without the payments view. */
 export async function customerTermsAdvice(companyId: string) {
-  await requireUser();
+  await requireModuleUser("receivables");
   const snapshot = await getCreditSnapshot(companyId);
   if (!snapshot) return null;
   return {
@@ -185,7 +185,7 @@ const BILLED = ["ISSUED", "PARTIALLY_PAID", "PAID"] as const;
  * page itself.
  */
 export async function listCreditRisks(params: { rating?: CreditRating; q?: string; page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return { rows: [], total: 0, counts: {} as Partial<Record<CreditRating, number>> };
 
   const base: Prisma.CompanyWhereInput = {

@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -27,7 +27,7 @@ import type { ActionResult } from "@/actions/company";
 const TOKEN_BYTES = 24;
 
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("feedback");
   const [request, viewAll] = await Promise.all([
     hasEffectivePermission(user.id, "feedback.request"),
     hasEffectivePermission(user.id, "feedback.viewAll"),

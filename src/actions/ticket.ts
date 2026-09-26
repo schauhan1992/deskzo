@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type TicketStatus, type TicketPriority, type TicketType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
@@ -32,7 +32,7 @@ async function isSupportAgent(userId: string): Promise<boolean> {
 
 /** Active users belonging to a department marked as a support team — the only people a ticket can be assigned to. */
 export async function listSupportAgents() {
-  await requireUser();
+  await requireModuleUser("helpdesk");
   return db.user.findMany({
     where: { active: true, department: { isSupportTeam: true } },
     orderBy: { name: "asc" },
@@ -41,7 +41,7 @@ export async function listSupportAgents() {
 }
 
 export async function createTicket(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   if (!(await hasEffectivePermission(user.id, "tickets.create"))) {
     return { ok: false, error: "You don't have permission to create tickets." };
   }
@@ -100,7 +100,7 @@ export async function createTicket(input: unknown): Promise<ActionResult<{ id: s
 
 /** Lightweight order list for the ticket "which order is this support for?" picker — no Decimal fields, so it's safe to pass straight to a Client Component. */
 export async function listCompanyOrderOptions(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   return db.companyProduct.findMany({
     // Scoped as well as filtered by id: the company id arrives from the caller and is not a
     // secret, so without this the picker would list what any account has bought to anyone who
@@ -159,7 +159,7 @@ const ticketListInclude = {
 } as const;
 
 export async function listTickets(params?: TicketListParams) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   if (!(await viewerHas("tickets.view"))) return [];
   return db.ticket.findMany({
     where: await ticketListWhere(user.id, params),
@@ -169,7 +169,7 @@ export async function listTickets(params?: TicketListParams) {
 }
 
 export async function listTicketsPaged(params: TicketListParams & { page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   if (!(await viewerHas("tickets.view"))) return { rows: [], total: 0 };
   const where = await ticketListWhere(user.id, params);
   const [rows, total] = await Promise.all([
@@ -191,7 +191,7 @@ export async function listTicketsPaged(params: TicketListParams & { page: number
  * already renders `notFound()` for `null`.
  */
 export async function getTicket(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   if (!(await viewerHas("tickets.view"))) return null;
   return db.ticket.findFirst({
     where: { id, ...(await viaCompanyScope(user.id)) },
@@ -207,7 +207,7 @@ export async function getTicket(id: string) {
 }
 
 export async function updateTicketStatus(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   const parsed = updateTicketStatusSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -256,7 +256,7 @@ export async function updateTicketStatus(input: unknown): Promise<ActionResult<{
 }
 
 export async function updateTicketPriority(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  await requireModuleUser("helpdesk");
   const parsed = updateTicketPrioritySchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -276,7 +276,7 @@ export async function updateTicketPriority(input: unknown): Promise<ActionResult
 }
 
 export async function assignTicket(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const actor = await requireUser();
+  const actor = await requireModuleUser("helpdesk");
   const parsed = assignTicketSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -310,7 +310,7 @@ export async function assignTicket(input: unknown): Promise<ActionResult<{ id: s
 }
 
 export async function addTicketComment(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   const parsed = addTicketCommentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -339,7 +339,7 @@ export async function addTicketComment(input: unknown): Promise<ActionResult<{ i
 }
 
 export async function deleteTicket(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   if (!(await hasEffectivePermission(user.id, "tickets.delete"))) {
     return { ok: false, error: "You don't have permission to delete tickets." };
   }
@@ -362,7 +362,7 @@ export async function deleteTicket(id: string): Promise<ActionResult<null>> {
  * depending on how the change happened to be made.
  */
 export async function bulkUpdateTickets(input: unknown): Promise<ActionResult<{ count: number }>> {
-  await requireUser();
+  await requireModuleUser("helpdesk");
   const parsed = bulkUpdateTicketsSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -396,7 +396,7 @@ export async function bulkUpdateTickets(input: unknown): Promise<ActionResult<{ 
 
 /** Open tickets across the whole filtered set, so the header count doesn't shrink as you page. */
 export async function countOpenTickets(params?: TicketListParams) {
-  const user = await requireUser();
+  const user = await requireModuleUser("helpdesk");
   if (!(await viewerHas("tickets.view"))) return 0;
   return db.ticket.count({
     // Scoped through the same `where` as the list it sits above, or the header would count

@@ -3,8 +3,11 @@ import { listAssignableUsers } from "@/actions/company";
 import { listRoles } from "@/lib/authz/role-registry";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { ApprovalPolicies } from "@/components/settings/approval-policies";
+import { planGate } from "@/components/settings/module-disabled-notice";
 
 export default async function Page() {
+  const gate = await planGate(["sales_documents", "purchase_documents"], "Document approvals");
+  if (gate) return gate;
   const [policies, users, roles] = await Promise.all([
     listApprovalPolicies(),
     listAssignableUsers(),

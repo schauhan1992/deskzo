@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
@@ -22,7 +22,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function access() {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   return { user, allowed: await hasEffectivePermission(user.id, "orders.process") };
 }
 
@@ -38,7 +38,7 @@ export async function quoteAddon(params: {
   quantity: number;
   startDate: string;
 }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   const parent = await db.companyProduct.findUnique({
     where: { id: params.parentId },
     select: {
@@ -197,7 +197,7 @@ export async function createAddon(input: {
  * and, separately, 5 seats".
  */
 export async function subscriptionWithAddons(id: string) {
-  await requireUser();
+  await requireModuleUser("renewals");
   const parent = await db.companyProduct.findUnique({
     where: { id },
     include: {
@@ -243,7 +243,7 @@ export async function subscriptionWithAddons(id: string) {
  * real subscription.
  */
 export async function addableSubscriptions(companyId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
   const now = new Date();
   return toPlain(
     await db.companyProduct.findMany({

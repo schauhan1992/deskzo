@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import Papa from "papaparse";
 import { Prisma, type ItemType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
@@ -48,7 +48,7 @@ async function validateBrandFamily(brandId?: string, productFamilyId?: string): 
 }
 
 export async function createItem(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
   const parsed = createItemSchema.safeParse(input);
@@ -116,7 +116,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function updateItem(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
   const parsed = updateItemSchema.safeParse(input);
@@ -167,7 +167,7 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQuantity: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
   const parsed = adjustStockSchema.safeParse(input);
@@ -212,7 +212,7 @@ export async function listItems(params?: {
   page?: number;
   pageSize?: number;
 }) {
-  await requireUser();
+  await requireModuleUser("items");
 
   const seq = params?.search ? parseSeqQuery(params.search) : null;
   const where = {
@@ -257,7 +257,7 @@ export async function listItems(params?: {
  * touched, so "assign a brand" doesn't quietly blank out everything else.
  */
 export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ count: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
 
@@ -306,7 +306,7 @@ export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ co
 }
 
 export async function listItemOptions() {
-  await requireUser();
+  await requireModuleUser("items");
   return toPlain(
     await db.item.findMany({
       where: { active: true },
@@ -317,7 +317,7 @@ export async function listItemOptions() {
 }
 
 export async function getItem(id: string) {
-  await requireUser();
+  await requireModuleUser("items");
   const item = await db.item.findUnique({
     where: { id },
     include: {
@@ -335,7 +335,7 @@ export async function getItem(id: string) {
 }
 
 export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; filename: string }>> {
-  await requireUser();
+  await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
 
@@ -477,7 +477,7 @@ async function catalogueResolver(canCreate: boolean, result: ImportItemsResult) 
  * would strip the brand off every item it touched.
  */
 export async function importItems(formData: FormData): Promise<ActionResult<ImportItemsResult>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
 

@@ -4,7 +4,8 @@ import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import type { TradeDocumentType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser, refuseWhileViewingAs, viewAsContext } from "@/lib/session";
+import { refuseWhileViewingAs, viewAsContext } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -171,7 +172,7 @@ async function mailboxState(userId: string): Promise<MailboxState> {
 }
 
 export async function prepareDocumentEmail(documentId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, "documents.send"))) return { ok: false as const, error: NOT_ALLOWED };
   const doc = await getTradeDocument(String(documentId));
   if (!doc) return { ok: false as const, error: "That document isn't there, or isn't one you can see." };
@@ -210,7 +211,7 @@ export async function prepareDocumentEmail(documentId: string) {
 export type SendDocumentInput = { documentId: string; contactIds: string[]; subject: string; body: string };
 
 export async function sendDocumentEmail(input: SendDocumentInput): Promise<ActionResult<{ sentTo: string[]; from: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const blockedWhileViewing = await refuseWhileViewingAs();
   if (blockedWhileViewing) return { ok: false, error: blockedWhileViewing };
   if (!(await can(user.id, "documents.send"))) return { ok: false, error: NOT_ALLOWED };
@@ -317,7 +318,7 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
 
 /** Every time this document was emailed from here: when, by whom, from which mailbox, to whom. */
 export async function listDocumentEmails(documentId: string) {
-  await requireUser();
+  await requireModuleUser(["sales_documents", "purchase_documents"]);
   const doc = await getTradeDocument(String(documentId));
   if (!doc) return [];
   const rows = await db.marketingMessage.findMany({
@@ -343,7 +344,7 @@ export async function listDocumentEmails(documentId: string) {
 // ─── The sender's own mailbox ────────────────────────────────────────────────────────────────────
 
 export async function getMailConnection() {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   // Viewing as somebody shows nothing: whose mailbox is connected is theirs to see.
   if (await viewAsContext()) return null;
   const [connection, app] = await Promise.all([
@@ -357,7 +358,7 @@ export async function getMailConnection() {
 }
 
 export async function disconnectMailbox(): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const blockedWhileViewing = await refuseWhileViewingAs();
   if (blockedWhileViewing) return { ok: false, error: blockedWhileViewing };
   const removed = await db.mailConnection.deleteMany({ where: { userId: user.id } });
@@ -371,7 +372,7 @@ export async function disconnectMailbox(): Promise<ActionResult<null>> {
 // ─── Templates ───────────────────────────────────────────────────────────────────────────────────
 
 export async function getDocumentEmailTemplates() {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, "settings.manage"))) return null;
   const rows = await db.documentEmailTemplate.findMany({ include: { updatedBy: { select: { name: true } } } });
   return toPlain(
@@ -391,7 +392,7 @@ export async function getDocumentEmailTemplates() {
 }
 
 export async function saveDocumentEmailTemplate(input: { docType: TradeDocumentType; subject: string; body: string }): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change the document email wording." };
   if (!input || !isEmailable(input.docType)) return { ok: false, error: "That document type isn't emailed." };
   const subject = typeof input.subject === "string" ? input.subject.trim() : "";
@@ -430,7 +431,7 @@ export async function saveDocumentEmailTemplate(input: { docType: TradeDocumentT
 }
 
 export async function resetDocumentEmailTemplate(docType: TradeDocumentType): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change the document email wording." };
   if (!isEmailable(docType)) return { ok: false, error: "That document type isn't emailed." };
   await db.documentEmailTemplate.deleteMany({ where: { docType } });

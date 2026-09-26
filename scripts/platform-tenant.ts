@@ -2,8 +2,10 @@
  * Looking after workspaces from the server, until the platform console does it.
  *
  *   npm run platform:tenant -- list
- *   npm run platform:tenant -- invite [--note "Acme, via Ravi"] [--uses 1] [--days 14]
- *   npm run platform:tenant -- create --slug acme --company "Acme Ltd" --owner-name "Asha" --owner-email asha@acme.com --country IN
+ *   npm run platform:tenant -- invite [--note "Acme, via Ravi"] [--uses 1] [--days 14] [--plan crm-starter]
+ *   npm run platform:tenant -- create --slug acme --company "Acme Ltd" --owner-name "Asha" --owner-email asha@acme.com --country IN [--plan crm-starter]
+ *   npm run platform:tenant -- plans <slug> crm-starter extra-seats:2      the plans it is on, with quantities
+ *   npm run platform:tenant -- entitlements <slug>                          what it may use, worked out again
  *   npm run platform:tenant -- suspend <slug> --reason "unpaid"
  *   npm run platform:tenant -- resume <slug>
  *   npm run platform:tenant -- deprovision <slug> [--no-backup]
@@ -11,7 +13,7 @@
  *
  * `create` sets a workspace up without the signup form; the owner's password comes from the
  * environment (OWNER_PASSWORD), never the command line, and the worker does the rest. `invite` prints
- * a signup code once — only its hash is kept.
+ * a signup code once — only its hash is kept. Without --plan, a workspace starts on the default plan.
  */
 import "dotenv/config";
 import { createHash, randomBytes } from "node:crypto";
@@ -19,6 +21,8 @@ import bcrypt from "bcryptjs";
 import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
 import { deprovisionTenant, purgeTenant, resumeTenant, suspendTenant } from "../src/lib/platform/lifecycle";
 import { startProvisioning } from "../src/lib/platform/provisioning";
+import { setWorkspacePlans } from "../src/lib/platform/plans";
+import { refreshEntitlements } from "../src/lib/platform/entitlements";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -45,6 +49,8 @@ async function main() {
     case "invite": {
       const code = randomBytes(9).toString("base64url");
       const days = Number(flag("days") ?? 14);
+      const planKey = flag("plan") ?? null;
+      if (planKey && !(await controlDb().plan.findFirst({ where: { key: planKey, active: true } }))) throw new Error(`There is no plan "${planKey}" on offer.`);
       await controlDb().signupInvite.create({
         data: {
           codeHash: createHash("sha256").update(code).digest("hex"),
@@ -52,6 +58,7 @@ async function main() {
           maxUses: Number(flag("uses") ?? 1),
           expiresAt: days > 0 ? new Date(Date.now() + days * 86_400_000) : null,
           createdBy: ACTOR,
+          planKey,
         },
       });
       console.log(`Invitation code (shown once): ${code}`);
@@ -67,8 +74,28 @@ async function main() {
         ownerEmail: flag("owner-email") ?? "",
         ownerPasswordHash: await bcrypt.hash(password, 10),
         country: flag("country") ?? "IN",
+        planKey: flag("plan") ?? null,
       });
       console.log(`Queued ${flag("slug")} (${created.tenantId}). npm run platform:worker -- --once sets it up now.`);
+      return;
+    }
+    case "plans": {
+      const t = await bySlug(target);
+      const items = args.slice(2).filter((a) => !a.startsWith("--")).map((a) => {
+        const [planKey, qty] = a.split(":");
+        return { planKey: planKey!, quantity: qty ? Number(qty) : 1 };
+      });
+      if (!items.length) throw new Error("Which plans? e.g. plans acme crm-starter extra-seats:2");
+      await setWorkspacePlans(t.id, items, `script:${ACTOR}`);
+      console.log(`${t.slug} is on ${items.map((i) => (i.quantity > 1 ? `${i.planKey} ×${i.quantity}` : i.planKey)).join(", ")}.`);
+      return;
+    }
+    case "entitlements": {
+      const t = await bySlug(target);
+      const e = await refreshEntitlements(t.id);
+      console.log(`${t.slug} (${t.country}) — plans: ${e.plans.join(", ") || "none"}`);
+      console.log(`  modules: ${e.all ? "every module" : e.modules.join(", ") || "the core only"}`);
+      console.log(`  seats: ${e.seats ?? "no limit"}   copilot tokens a month: ${e.copilotTokens ?? "no limit"}`);
       return;
     }
     case "suspend": {
@@ -96,7 +123,7 @@ async function main() {
       return;
     }
     default:
-      console.log("Commands: list, invite, create, suspend, resume, deprovision, purge — see the top of scripts/platform-tenant.ts.");
+      console.log("Commands: list, invite, create, plans, entitlements, suspend, resume, deprovision, purge — see the top of scripts/platform-tenant.ts.");
       process.exitCode = 1;
   }
 }

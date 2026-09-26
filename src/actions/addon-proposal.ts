@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { proRata, proRataMonths, canAddTo } from "@/lib/subscriptions/proration";
 import { partyDetails, todayInIndia } from "@/lib/proposals/party";
@@ -47,7 +47,7 @@ export async function createProposalFromAddonQuote(input: {
    */
   basis?: "DAY" | "MONTH";
 }): Promise<ActionResult<{ id: string; docNumber: string | null }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("renewals");
 
   const parent = await db.companyProduct.findUnique({
     where: { id: input.parentId },
