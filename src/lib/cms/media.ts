@@ -177,11 +177,11 @@ export async function updateMediaAlt(id: string, altInput: unknown, actor: CmsAc
   return (await toRows([row]))[0];
 }
 
-/** Where an image is used: pages, posts and the site's settings, draft and published. */
+/** Where an image is used: pages, posts and the site's settings, draft and published — and categories' and tags' sharing images. */
 export async function mediaUsage(id: string): Promise<MediaUsage[]> {
   if (!MEDIA_ID.test(String(id))) return [];
   const like = `%"/media/${id}"%`;
-  const [pages, posts, settings] = await Promise.all([
+  const [pages, posts, settings, categories, tags] = await Promise.all([
     controlDb().$queryRaw<{ id: string; slug: string; title: string; inDraft: boolean; inPublished: boolean }[]>`
       SELECT id, slug, title, (draft::text LIKE ${like}) AS "inDraft", (coalesce(published::text, '') LIKE ${like}) AS "inPublished"
       FROM site_pages WHERE draft::text LIKE ${like} OR coalesce(published::text, '') LIKE ${like}`,
@@ -191,6 +191,8 @@ export async function mediaUsage(id: string): Promise<MediaUsage[]> {
     controlDb().$queryRaw<{ inDraft: boolean; inPublished: boolean }[]>`
       SELECT (draft::text LIKE ${like}) AS "inDraft", (coalesce(published::text, '') LIKE ${like}) AS "inPublished"
       FROM site_settings WHERE key = 'site' AND (draft::text LIKE ${like} OR coalesce(published::text, '') LIKE ${like})`,
+    controlDb().siteCategory.findMany({ where: { seo: { path: ["imageMediaId"], equals: id } }, select: { id: true, name: true } }),
+    controlDb().siteTag.findMany({ where: { seo: { path: ["imageMediaId"], equals: id } }, select: { id: true, name: true } }),
   ]);
   const out: MediaUsage[] = [];
   for (const p of pages) {
@@ -199,6 +201,8 @@ export async function mediaUsage(id: string): Promise<MediaUsage[]> {
   }
   for (const p of posts) out.push({ kind: "post", id: p.id, title: p.title, href: `/posts/${p.id}`, where: p.status === "DRAFT" ? "draft" : "published" });
   for (const s of settings) out.push({ kind: "settings", id: "site", title: "Site settings", href: "/settings", where: s.inPublished ? "published" : "draft" });
+  for (const c of categories) out.push({ kind: "category", id: c.id, title: c.name, href: "/categories", where: "published" });
+  for (const t of tags) out.push({ kind: "tag", id: t.id, title: t.name, href: "/tags", where: "published" });
   return out;
 }
 

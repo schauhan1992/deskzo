@@ -1,4 +1,4 @@
-import type { CmsRole, SiteLeadStatus, SitePageStatus, SitePostStatus } from "@wroffy/control-client";
+import type { CmsRole, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch } from "@wroffy/control-client";
 import type { BlockType, SiteBlock, SiteSeo, SiteSettings } from "@/components/site/blocks/types";
 
 /**
@@ -9,7 +9,7 @@ import type { BlockType, SiteBlock, SiteSeo, SiteSettings } from "@/components/s
  * the CMS's client components import from here freely. The server side is src/lib/cms/*.ts.
  */
 
-export type { CmsRole, SiteLeadStatus, SitePageStatus, SitePostStatus };
+export type { CmsRole, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch };
 
 // ─── Roles ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -188,8 +188,11 @@ export type PageDetail = {
 
 export type PageVersionRow = { id: string; note: string | null; createdAt: Date; createdBy: string; title: string; blocks: number };
 
-/** What a page save, publish or restore answers: enough to carry on editing (a built-in page's first save gives it its real `id`). */
-export type PageSaved = { id: string; slug: string; version: string; status: PageStatus; changed: boolean; updatedAt: Date; publishedAt: Date | null };
+/**
+ * What a page save, publish or restore answers: enough to carry on editing (a built-in page's first save gives it its real `id`).
+ * `redirect`: the 301 made automatically when a published page's address changed (cmsChangePageSlug), for the editor's notice.
+ */
+export type PageSaved = { id: string; slug: string; version: string; status: PageStatus; changed: boolean; updatedAt: Date; publishedAt: Date | null; redirect?: AutoRedirect | null };
 
 // ─── Site settings ───────────────────────────────────────────────────────────────────────────────
 
@@ -251,7 +254,11 @@ export type PostListRow = {
   live: boolean;
   publishAt: Date | null;
   publishedAt: Date | null;
+  /** Its tags' slugs, by name. The same tags with their names: `tagRefs`. */
   tags: string[];
+  tagRefs: CmsTermRef[];
+  /** Its categories, the main one (breadcrumbs) first. */
+  categories: CmsTermRef[];
   coverMediaId: string | null;
   author: { id: string; name: string };
   archived: boolean;
@@ -265,9 +272,12 @@ export type PostDetail = PostListRow & {
   seo: PostSeo | null;
   version: string;
   createdAt: Date;
+  /** Live now, or published or scheduled at some point: deleting it offers a redirect (default /blog). */
+  wasPublished: boolean;
 };
 
-export type PostSaved = { id: string; slug: string; version: string; status: SitePostStatus; live: boolean; publishAt: Date | null; updatedAt: Date };
+/** `redirect`: the 301 made automatically when a live post's address changed, for the editor's notice. */
+export type PostSaved = { id: string; slug: string; version: string; status: SitePostStatus; live: boolean; publishAt: Date | null; updatedAt: Date; redirect?: AutoRedirect | null };
 
 /** What a post's editor saves. Every field is sent every time. */
 export type PostInput = {
@@ -275,10 +285,162 @@ export type PostInput = {
   slug: string;
   excerpt: string | null;
   coverMediaId: string | null;
+  /**
+   * At most ten. Each is a tag's slug, or a name: an existing tag is matched by slug, then by name
+   * (any case), then by the name's slug; anything else becomes a new tag (writers may create them;
+   * a new tag's name is at most 40 characters). Stored as SiteTag records — never as free text.
+   */
   tags: string[];
+  /** Category ids, the main one first (at most ten). Left out: the post's categories stay as they are. */
+  categories?: string[];
   body: SiteBlock[];
   seo: PostSeo | null;
 };
+
+// ─── Categories and tags ─────────────────────────────────────────────────────────────────────────
+
+/** A category or tag as a post and a list refer to it. */
+export type CmsTermRef = { id: string; slug: string; name: string };
+
+/** A category's or tag's own search and sharing details. Each falls back: title → the name, description → the description. */
+export type TermSeo = { title?: string; description?: string; imageMediaId?: string };
+
+/** Category and tag slugs: lower-case words and hyphens, at most 60 (the database's CHECKs). */
+export const TERM_SLUG_MAX = 60;
+export const CATEGORY_NAME_MAX = 60;
+export const TAG_NAME_MAX = 40;
+export const TERM_DESCRIPTION_MAX = 500;
+
+export type CategoryRow = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  parentId: string | null;
+  position: number;
+  seo: TermSeo | null;
+  /** "/blog/category/<slug>". */
+  path: string;
+  /** Posts in it, not archived — its own only. */
+  posts: number;
+  /** Of those, on the site now. */
+  livePosts: number;
+  updatedAt: Date;
+  /** A name ("Asha Rao", "Script"). */
+  updatedBy: string;
+};
+
+/** A top-level category and its children (one level: children have none). */
+export type CategoryNode = CategoryRow & { children: CategoryRow[] };
+
+export type CategoryInput = {
+  name: string;
+  /** Blank: made from the name. */
+  slug?: string;
+  description?: string | null;
+  /** A top-level category's id, or null for a top-level one. */
+  parentId?: string | null;
+  seo?: TermSeo | null;
+};
+
+export type TagRow = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  seo: TermSeo | null;
+  /** "/blog/tag/<slug>". */
+  path: string;
+  posts: number;
+  livePosts: number;
+  updatedAt: Date;
+  updatedBy: string;
+};
+
+export type TagInput = { name: string; slug?: string; description?: string | null; seo?: TermSeo | null };
+
+// ─── Redirects ───────────────────────────────────────────────────────────────────────────────────
+
+export const REDIRECT_STATUSES = [301, 302, 307, 308] as const;
+export type RedirectStatus = (typeof REDIRECT_STATUSES)[number];
+/** Saving the 5,001st is refused. */
+export const MAX_REDIRECTS = 5_000;
+/** A visitor passes through at most this many redirects in a row; a longer chain is refused on save. */
+export const MAX_REDIRECT_HOPS = 3;
+export const REDIRECT_IMPORT_MAX_ROWS = 1_000;
+
+/**
+ * The public site's own routes: never redirected, and a redirect from one (or from anything under it)
+ * is refused — "That page is part of the site and can't be redirected". The home page is too.
+ */
+export const SITE_BUILTIN_ROUTES = ["/signup", "/signin", "/contact", "/pricing", "/security", "/privacy", "/terms", "/partners"] as const;
+
+/** What a redirect's form sends. `match` left out: PREFIX when `from` ends in "/*", else EXACT. */
+export type RedirectInput = { from: string; to: string; status?: number; match?: SiteRedirectMatch; enabled?: boolean; note?: string | null };
+
+/** Where a redirect leads a visitor, following the redirects after it. Only for 2 hops or more. */
+export type RedirectChain = { hops: number; final: string; loop: boolean; through: string[] };
+
+export type RedirectRow = {
+  id: string;
+  /** Normalised: lower-case, no query, no trailing slash; a PREFIX one ends in "/*". */
+  fromPath: string;
+  /** A site path ("/pricing", "/new/*") or an https:// address. */
+  toUrl: string;
+  status: RedirectStatus;
+  match: SiteRedirectMatch;
+  enabled: boolean;
+  /** Made by a slug change or a tag merge ("created automatically"). */
+  automatic: boolean;
+  note: string | null;
+  hits: number;
+  lastHitAt: Date | null;
+  /** Its target is another site: only admins create or change these. */
+  external: boolean;
+  /** Set when a visitor goes through 2–3 redirects in a row from here: "Point it straight at `final`". */
+  chain: RedirectChain | null;
+  createdAt: Date;
+  updatedAt: Date;
+  updatedBy: string;
+};
+
+export type RedirectFilters = { q?: string; match?: SiteRedirectMatch; enabled?: boolean; automatic?: boolean; external?: boolean; chained?: boolean; sort?: "recent" | "from" | "hits"; page?: number };
+
+/** A redirect as it would be saved, and what is wrong with it — the dialog's live checks. */
+export type RedirectCheck = {
+  ok: boolean;
+  issues: CmsIssue[];
+  /** Normalised, once `from` and `to` are readable. */
+  normalised: { fromPath: string; toUrl: string; match: SiteRedirectMatch; status: RedirectStatus; external: boolean } | null;
+  /** Another redirect already from the same address (a save then updates nothing: it is refused). */
+  existingId: string | null;
+  chain: RedirectChain | null;
+};
+
+/** One row of an import file, and what importing it would do. */
+export type RedirectImportRow = {
+  /** The file's line number (the header is line 1). */
+  line: number;
+  from: string;
+  to: string;
+  status: number | null;
+  match: SiteRedirectMatch | null;
+  note: string | null;
+  outcome: "create" | "update" | "unchanged" | "refuse";
+  reason: string | null;
+  /** The redirect it updates (or leaves unchanged). */
+  id: string | null;
+};
+
+export type RedirectImportResult = {
+  rows: RedirectImportRow[];
+  counts: { create: number; update: number; unchanged: number; refuse: number };
+  /** False for a preview; true once imported (refused rows are skipped, the rest applied). */
+  applied: boolean;
+};
+
+/** A 301 made automatically (a slug change, a tag merge). `created` false: an existing one was updated. */
+export type AutoRedirect = { id: string; from: string; to: string; created: boolean };
 
 // ─── Media ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -302,7 +464,7 @@ export type MediaRow = {
   createdBy: string;
 };
 
-export type MediaUsage = { kind: "page" | "post" | "settings"; id: string; title: string; href: string; where: "published" | "draft" };
+export type MediaUsage = { kind: "page" | "post" | "settings" | "category" | "tag"; id: string; title: string; href: string; where: "published" | "draft" };
 
 // ─── Leads ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -380,6 +542,17 @@ export const CMS_AUDIT_ACTIONS = [
   "lead.update",
   "lead.export",
   "preview.link",
+  "category.create",
+  "category.update",
+  "category.delete",
+  "tag.create",
+  "tag.update",
+  "tag.merge",
+  "tag.delete",
+  "redirect.create",
+  "redirect.update",
+  "redirect.delete",
+  "redirect.import",
 ] as const;
 export type CmsAuditAction = (typeof CMS_AUDIT_ACTIONS)[number];
 

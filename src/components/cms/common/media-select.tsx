@@ -133,8 +133,12 @@ export function MediaSelect({
 
 type LoadState = { rows: MediaRow[]; total: number; page: number; loading: boolean; error: string | null; loaded: boolean };
 
-/** The library inside the dialog. Mounted while the dialog is open, so each opening starts fresh. */
-function LibraryGrid({ current, onChoose }: { current: string; onChoose: (row: MediaRow) => void }) {
+/**
+ * The library inside the dialog. Mounted while the dialog is open, so each opening starts fresh.
+ * Exported for a dialog that picks an image in place (a category's or tag's sharing image), where a
+ * second dialog on top of the first would fight it for the focus trap.
+ */
+export function LibraryGrid({ current, onChoose }: { current: string; onChoose: (row: MediaRow) => void }) {
   const id = useId();
   const [query, setQuery] = useState("");
   const [state, setState] = useState<LoadState>({ rows: [], total: 0, page: 0, loading: true, error: null, loaded: false });

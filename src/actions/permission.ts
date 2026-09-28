@@ -12,6 +12,7 @@ import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
 import { actorContext, assertGrantWithinOwnAuthority, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
 import type { ActionResult } from "@/actions/company";
+import { AWAITING_SETUP } from "@/lib/no-password";
 
 /**
  * The action surface over the resolver in src/lib/authz/resolve.ts.
@@ -354,7 +355,7 @@ export async function accessRoster() {
   const session = await requireUser();
   if (!(await can(session.id, "permissions.view"))) return [];
 
-  const [users, exceptions] = await Promise.all([
+  const [users, exceptions, awaitingSetup] = await Promise.all([
     db.user.findMany({
       orderBy: [{ active: "desc" }, { name: "asc" }],
       select: {
@@ -369,7 +370,10 @@ export async function accessRoster() {
       },
     }),
     db.userPermission.groupBy({ by: ["userId"], _count: { _all: true } }),
+    // Nobody has chosen a password for these yet: "Invitation pending" (src/lib/account-setup.ts).
+    db.user.findMany({ where: AWAITING_SETUP, select: { id: true } }),
   ]);
+  const pendingSetup = new Set(awaitingSetup.map((u) => u.id));
 
   const exceptionCount = new Map(exceptions.map((e) => [e.userId, e._count._all]));
   const now = Date.now();
@@ -411,6 +415,7 @@ export async function accessRoster() {
         // Amber on the roster rather than buried in a drawer: an expiry nobody notices is the
         // reason "temporary" access stops being temporary.
         lapsingSoon: lapsingSoon.has(user.id),
+        setupPending: pendingSetup.has(user.id),
       };
     }),
   );

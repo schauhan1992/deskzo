@@ -15,6 +15,7 @@ import { withParams } from "@/lib/console-shared/params";
 import { listPostTags, listPosts } from "@/lib/cms/content";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
+import { listCategories } from "@/lib/cms/taxonomy";
 import { cmsCapsFor, type SitePostStatus } from "@/lib/cms/types";
 import { listCmsUsers } from "@/lib/cms/users";
 import { formatIstDateTime } from "@/lib/india-time";
@@ -36,8 +37,8 @@ const VIEWS: { key: View; label: string }[] = [
 
 /**
  * Posts: the blog and news, newest change first, 30 at a time — with their state (a scheduled post
- * says when it goes live), author, tags and cover. Views by state, filters by tag and author, a
- * search, all in the address. Writers get "New post".
+ * says when it goes live), author, categories, tags and cover. Views by state, filters by category,
+ * tag and author, a search, all in the address. Writers get "New post".
  */
 export default async function CmsPostsPage({ searchParams }: PageProps<"/platform-cms/posts">) {
   const session = await cmsPage(CMS_PAGE_ROLES.posts);
@@ -46,28 +47,34 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
   const viewRaw = one(sp.view);
   const view: View = VIEWS.some((v) => v.key === viewRaw) ? (viewRaw as View) : "all";
   const q = (one(sp.q) ?? "").trim().slice(0, 100);
-  const tag = (one(sp.tag) ?? "").trim().toLowerCase().slice(0, 32);
+  const tag = (one(sp.tag) ?? "").trim().toLowerCase().slice(0, 60);
+  const category = (one(sp.category) ?? "").trim().toLowerCase().slice(0, 60);
   const author = (one(sp.author) ?? "").trim().slice(0, 40);
   const page = Math.min(1000, Math.max(1, Math.floor(Number(one(sp.page)) || 1)));
 
-  const [posts, tags, users] = await Promise.all([
+  const [posts, tags, users, tree] = await Promise.all([
     listPosts({
       status: view !== "all" && view !== "archived" ? (view as SitePostStatus) : undefined,
       archived: view === "archived",
       tag: tag || undefined,
+      category: category || undefined,
       authorId: author || undefined,
       q: q || undefined,
       page,
     }),
     listPostTags(),
     listCmsUsers(),
+    listCategories(),
   ]);
+  const categoryOptions = tree.flatMap((top) => [{ value: top.slug, label: top.name }, ...top.children.map((c) => ({ value: c.slug, label: `${top.name} › ${c.name}` }))]);
+  const categoryName = category ? (categoryOptions.find((c) => c.value === category)?.label ?? category) : null;
   const origin = siteOrigin();
   const siteHost = new URL(origin).host;
   const totalPages = Math.max(1, Math.ceil(posts.total / posts.pageSize));
   const authorName = author ? (users.find((u) => u.id === author)?.name ?? "Somebody removed") : null;
   const chips = [
     ...(q ? [{ key: "q", label: `Search: ${q}`, removeHref: withParams(PATH, sp, { q: null }) }] : []),
+    ...(categoryName ? [{ key: "category", label: `Category: ${categoryName}`, removeHref: withParams(PATH, sp, { category: null }) }] : []),
     ...(tag ? [{ key: "tag", label: `Tag: #${tag}`, removeHref: withParams(PATH, sp, { tag: null }) }] : []),
     ...(authorName ? [{ key: "author", label: `Author: ${authorName}`, removeHref: withParams(PATH, sp, { author: null }) }] : []),
   ];
@@ -79,15 +86,16 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
 
       <FilterBar trailing={<SearchField label="Search posts by title or address" placeholder="Search by title or address" />}>
         <ViewTabs label="Post state" items={VIEWS.map((v) => ({ key: v.key, label: v.label, href: withParams(PATH, sp, { view: v.key === "all" ? null : v.key }), active: view === v.key }))} />
+        {categoryOptions.length > 0 && <SelectFilter param="category" label="Category" allLabel="Any category" options={categoryOptions} />}
         {tags.length > 0 && <SelectFilter param="tag" label="Tag" allLabel="Any tag" options={tags.map((t) => ({ value: t, label: `#${t}` }))} />}
         <SelectFilter param="author" label="Author" allLabel="Anybody" options={users.map((u) => ({ value: u.id, label: u.active ? u.name : `${u.name} (switched off)` }))} />
       </FilterBar>
-      <FilterChips chips={chips} clearHref={filtered ? withParams(PATH, sp, { q: null, tag: null, author: null }) : undefined} />
+      <FilterChips chips={chips} clearHref={filtered ? withParams(PATH, sp, { q: null, category: null, tag: null, author: null }) : undefined} />
 
       {posts.rows.length === 0 ? (
         <Panel padded={false}>
           {filtered ? (
-            <EmptyState variant="filtered" title="No post matches" body="Try another search, tag or author." clearHref={withParams(PATH, sp, { q: null, tag: null, author: null })} />
+            <EmptyState variant="filtered" title="No post matches" body="Try another search, category, tag or author." clearHref={withParams(PATH, sp, { q: null, category: null, tag: null, author: null })} />
           ) : view === "archived" ? (
             <EmptyState icon={<Newspaper className="h-5 w-5" />} title="Nothing archived" body="Archived posts are off the site and wait here to be restored or deleted." />
           ) : (
@@ -107,7 +115,7 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
                 <Th>Post</Th>
                 <Th>State</Th>
                 <Th>Author</Th>
-                <Th>Tags</Th>
+                <Th>Filed under</Th>
                 <Th>Last changed</Th>
                 <Th srOnly>View on the site</Th>
               </THead>
@@ -140,11 +148,16 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
                       {post.author.name}
                     </Td>
                     <Td>
-                      {post.tags.length ? (
-                        <ul className="flex max-w-56 flex-wrap gap-1">
-                          {post.tags.map((t) => (
-                            <li key={t} className="rounded-full border border-line bg-surface-sunken px-1.5 text-[11px] text-muted">
-                              #{t}
+                      {post.categories.length || post.tagRefs.length ? (
+                        <ul aria-label="Categories and tags" className="flex max-w-64 flex-wrap gap-1">
+                          {post.categories.map((c, i) => (
+                            <li key={c.id} className="rounded-full border border-line bg-brand-subtle px-1.5 text-[11px] text-brand" title={i === 0 ? "Main category" : "Category"}>
+                              {c.name}
+                            </li>
+                          ))}
+                          {post.tagRefs.map((t) => (
+                            <li key={t.id} className="rounded-full border border-line bg-surface-sunken px-1.5 text-[11px] text-muted">
+                              #{t.name}
                             </li>
                           ))}
                         </ul>

@@ -64,7 +64,7 @@ export default async function CmsDashboardPage() {
   const siteHost = new URL(siteOrigin()).host;
   const firstName = me.name.trim().split(/\s+/)[0] || me.name;
   const drafts = data.pages.drafts + data.posts.drafts;
-  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin });
+  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish });
 
   return (
     <>

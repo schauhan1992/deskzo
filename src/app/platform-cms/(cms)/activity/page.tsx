@@ -27,7 +27,7 @@ const PATH = CMS_ROUTES.activity;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const one = (v: string | string[] | undefined) => (typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined);
 
-const ENTITY_LABEL: Record<string, string> = { page: "Page", post: "Post", media: "Image", lead: "Lead", user: "Users", settings: "Settings" };
+const ENTITY_LABEL: Record<string, string> = { page: "Page", post: "Post", media: "Image", lead: "Lead", user: "Users", settings: "Settings", category: "Categories", tag: "Tags", redirect: "Redirects" };
 
 /** Where a change made outside the CMS came from — the console, the command line, the site's contact form. */
 function actorOrigin(label: string): string {
@@ -70,7 +70,7 @@ export default async function CmsActivityPage({ searchParams }: PageProps<"/plat
   const sp = await searchParams;
   const f = parseFilters(sp);
   const { log, users, todayKey } = await loadActivity(f.filters);
-  const opts = { canOpenUsers: caps.admin, canOpenSecurity: caps.admin };
+  const opts = { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish };
 
   const actorName = f.actor ? (users.find((u) => u.id === f.actor)?.name ?? "Somebody removed") : null;
   const chips = [

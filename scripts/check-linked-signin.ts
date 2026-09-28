@@ -15,6 +15,10 @@
  *   9.    nobody is shown another workspace's name;
  *   10.   the email index, and the lookup ceiling it raises (decision 6);
  *   11.   the pages and cards render with no session;
+ *   11b.  every new account's setup email, and the one-step invite: added with "already uses another
+ *         workspace", set up and linked in one go;
+ *   11c.  no password until its person chooses one; the setup link when mail fails; "Resend setup email";
+ *         "Invitation pending"; HR's conversion and an import made the same way;
  *   12.   every database made is dropped.
  *
  * The library (src/lib/platform/linked/) is called directly, with sessions made as a sign-in makes them
@@ -25,7 +29,7 @@
  */
 import "dotenv/config";
 import { execSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import Module from "node:module";
 import path from "node:path";
@@ -158,21 +162,27 @@ type AuthConfig = {
 let authConfig: ((request?: Request) => Promise<AuthConfig>) | null = null;
 let realNextAuth: { CredentialsSignin: new () => Error } | null = null;
 
-/** NextAuth's signIn for a Credentials provider, as far as this check needs: authorize, the callbacks, the event, the session. */
-async function fakeSignIn(provider: string, options: Record<string, unknown> = {}, params?: unknown): Promise<never> {
-  signIns.push({ provider, options: { ...options }, params });
-  if (provider === "linked" && authConfig && realNextAuth) {
+/**
+ * NextAuth's signIn for a Credentials provider — "linked", and the ordinary "credentials" the one-step invite's
+ * setup page signs in with — as far as this check needs: authorize, the callbacks, the event, the session.
+ * `redirect: false` answers with the URL, as NextAuth's does, instead of throwing the redirect.
+ */
+async function fakeSignIn(provider: string, options: Record<string, unknown> = {}, params?: unknown): Promise<string> {
+  signIns.push({ provider, options: { ...options, ...(typeof options.password === "string" ? { password: "(hidden)" } : {}) }, params });
+  if ((provider === "linked" || provider === "credentials") && authConfig && realNextAuth) {
     const config = await authConfig();
-    const linked = config.providers.find((p) => (p.options?.id ?? p.id) === "linked");
-    const user = (await linked?.options?.authorize?.({ proof: options.proof })) as SessionUser | null | undefined;
+    const found = config.providers.find((p) => (p.options?.id ?? p.id) === provider);
+    const credentials = Object.fromEntries(Object.entries(options).filter(([key]) => key !== "redirect" && key !== "redirectTo"));
+    const user = (await found?.options?.authorize?.(credentials)) as SessionUser | null | undefined;
     if (!user) throw new realNextAuth.CredentialsSignin();
-    const account = { provider: "linked", type: "credentials" };
+    const account = { provider, type: "credentials" };
     if (!(await config.callbacks.signIn({ user, account }))) throw new realNextAuth.CredentialsSignin();
     const token = await config.callbacks.jwt({ token: { name: user.name, email: user.email, sub: user.id }, user, account });
     const session = await config.callbacks.session({ session: { user: { name: user.name, email: user.email }, expires: "" }, token });
     await config.events.signIn({ user, account });
     req.b.session = session;
   }
+  if (options.redirect === false) return String(options.redirectTo ?? "/");
   throw new Redirect(String(options.redirectTo ?? "/"), `signIn:${provider}`);
 }
 const fakeNextAuth = (config: (request?: Request) => Promise<AuthConfig>) => {
@@ -1384,6 +1394,507 @@ async function main() {
     html.push(switcherHtml);
     ok("WorkspaceSwitcher: its trigger, named for this workspace", switcherHtml.includes(`aria-label="Workspaces: ${C.name}"`) && switcherHtml.includes('aria-expanded="false"'), switcherHtml.slice(0, 400));
     ok("no dark: class, no fragment and no token in any of them", html.every((h) => !/\bdark:/.test(h) && !/#[ict]=/.test(h) && !TOKEN.test(h)));
+
+    // ═══ 11b. The setup email, and the one-step invite ════════════════════════════════════════════
+    section("11b. The setup email, and the one-step invite: added here, then set up and linked in one go");
+    finder.resetSiteAllowances();
+    lockout.resetLockouts();
+    const USERS = require("../src/actions/user") as typeof import("../src/actions/user");
+    const FORM = require("../src/components/auth/password-reset-forms") as typeof import("../src/components/auth/password-reset-forms");
+    const SETUP = require("../src/lib/account-setup") as typeof import("../src/lib/account-setup");
+    const resetPage = require("../src/app/(auth)/reset-password/page") as { default: (props: { searchParams: Promise<Record<string, string>> }) => Promise<ReactElement> };
+    const CHOSEN = "zz-linkcheck chosen at set-up";
+    const hashOf = (value: string) => createHash("sha256").update(value).digest("hex");
+    const bOwnerAdding = browser("B: the owner, adding people");
+    await signInAt(B, ownerB, bOwnerAdding);
+    // The scratch control plane sells no plans, so B has no seats: an override gives it room to add people.
+    await control.tenant.update({ where: { id: B.id }, data: { seatOverride: 1000 } });
+    await (require("../src/lib/platform/entitlements") as typeof import("../src/lib/platform/entitlements")).refreshEntitlements(B.id);
+    const bWithSeats = (await registry.tenantBySlug(B.slug))!;
+    ok("set-up: B has seats to add people into", bWithSeats.entitlements.seats === 1000, bWithSeats.entitlements);
+    const linkIn = (text = "") => text.split("\n").find((line) => line.includes("/reset-password?")) ?? "";
+    const tokenOf = (url: string) => (url ? (new URL(url).searchParams.get("t") ?? "") : "");
+    /** The add-user dialog's submit, as B's owner: the account, the mail it sent, and the setup link in it. */
+    const addUser = async (name: string, email: string, usesAnotherWorkspace?: boolean) => {
+      const from = mail.length;
+      const made = await act(bOwnerAdding, bWithSeats, () => USERS.createUser({ name, email, role: "SALES", departmentId: "", ...(usesAnotherWorkspace === undefined ? {} : { usesAnotherWorkspace }) }));
+      const sent = mail.slice(from).filter((m) => m.to === email);
+      const url = linkIn(sent[0]?.text);
+      const token = tokenOf(url);
+      const user = await inT(B, () => db.user.findUnique({ where: { email }, select: { ...ACCOUNT, mustChangePassword: true } }));
+      if (!user) throw new Error(`createUser made no account for ${email}: ${show(made.value ?? made.threw ?? made.redirect)}`);
+      return { made, sent, url, token, user };
+    };
+    const accountNow = (id: string) => inT(B, () => db.user.findUniqueOrThrow({ where: { id }, select: { passwordHash: true, mustChangePassword: true } }));
+    const pendingNow = (id: string) => inT(B, () => SETUP.awaitingSetup(id));
+    /** Nothing anybody could type matches it: not a bcrypt hash, not 60 characters — and not even itself. */
+    const unusable = async (stored: string) =>
+      stored.length !== 60 && !stored.startsWith("$2") && !(await bcrypt.compare(stored, stored)) && !(await bcrypt.compare("", stored)) && !(await bcrypt.compare(CHOSEN, stored));
+    const setupLinkOf = (token: string) => inT(B, () => db.passwordResetToken.findUnique({ where: { tokenHash: hashOf(token) } }));
+    const forThreeDays = (row: { expiresAt: Date; createdAt: Date } | null) => !!row && Math.abs(row.expiresAt.getTime() - row.createdAt.getTime() - SETUP.SETUP_LINK_TTL_MS) < 60_000;
+    const indexed = async (userId: string) => (await control.workspaceEmail.count({ where: { tenantId: B.id, userId } })) === 1;
+    const linkSpent = async (token: string) => !!(await setupLinkOf(token))?.usedAt;
+    const intentsFrom = (userId: string) => control.linkIntent.count({ where: { sourceTenantId: B.id, sourceUserId: userId } });
+    const namesNoOther = (text: string) => ![A, C].some((t) => text.includes(t.name) || text.includes(t.slug)) && !TOKEN.test(text) && !/#[ict]=/.test(text);
+
+    // The admin's side: every new user is emailed — without the tick and with it.
+    const plain = await addUser("Zz Plain Person", "zz.plain@zzlink-b.example");
+    const setupMail = plain.sent[0] ?? { subject: "", text: "" };
+    ok(
+      "added without the tick: created, and the setup email sent — nothing else comes back",
+      plain.made.value?.ok === true && Object.keys(plain.made.value.data).sort().join() === "emailed,id" && plain.made.value.data.emailed && plain.sent.length === 1,
+      plain.made,
+    );
+    ok(
+      "  the email: \"You've been given an account in <B>. Set it up by choosing your password.\"",
+      setupMail.subject === `Set up your account in ${B.name}` &&
+        setupMail.text.startsWith("Hello Zz Plain Person,") &&
+        setupMail.text.includes(`You've been given an account in ${B.name}. Set it up by choosing your password.`) &&
+        !setupMail.text.includes("link it to the workspace you already use"),
+      setupMail,
+    );
+    const plainUrl = plain.url ? new URL(plain.url) : null;
+    ok("  its link: B's own setup page, with setup=1 and no link=1", !!plainUrl && plainUrl.origin === keys.originOf(B) && plainUrl.pathname === "/reset-password" && plainUrl.searchParams.get("setup") === "1" && !plainUrl.searchParams.has("link"), plain.url);
+    const plainLink = await setupLinkOf(plain.token);
+    ok("  a one-time password link for that account — only its hash kept — for three days", !!plainLink && plainLink.userId === plain.user.id && !plainLink.usedAt && plainLink.tokenHash !== plain.token && forThreeDays(plainLink));
+    ok("  naming no other workspace, and carrying no link token", namesNoOther(setupMail.text));
+    ok(
+      "  the account: no usable password, no change to ask for, waiting to be set up, the role chosen here",
+      (await unusable(plain.user.passwordHash)) && !plain.user.mustChangePassword && (await pendingNow(plain.user.id)) && plain.user.role === "SALES",
+    );
+    ok("  and the email index follows it, as it follows every new account (accountsChanged)", await indexed(plain.user.id));
+    const aMeera = await person(A, "Meera Nair", { email: "meera@zzlink-a.example" });
+    const meera = await addUser("Meera Nair", "meera.nair@zzlink-b.example", true);
+    ok("added with the tick: created, and the invitation sent", meera.made.value?.ok === true && meera.made.value.data.emailed && meera.sent.length === 1, meera.made);
+    ok(
+      "  the account as without it: no usable password, the role chosen here, waiting to be set up",
+      (await unusable(meera.user.passwordHash)) && !meera.user.mustChangePassword && meera.user.role === "SALES" && (await pendingNow(meera.user.id)),
+    );
+    const invitation = meera.sent[0] ?? { subject: "", text: "" };
+    ok(
+      "  the email: \"Set up your account in <B> and link it to the workspace you already use.\"",
+      invitation.subject === `Set up your account in ${B.name}` && invitation.text.includes(`Set up your account in ${B.name} and link it to the workspace you already use.`) && invitation.text.startsWith("Hello Meera Nair,"),
+      invitation,
+    );
+    ok(
+      "  its link: B's own setup page, with link=1",
+      !!meera.url && new URL(meera.url).origin === keys.originOf(B) && new URL(meera.url).pathname === "/reset-password" && new URL(meera.url).searchParams.get("link") === "1" && !new URL(meera.url).searchParams.has("setup"),
+      meera.url,
+    );
+    const invitedLink = await setupLinkOf(meera.token);
+    ok("  a one-time password link for that account — only its hash kept — for three days", !!invitedLink && invitedLink.userId === meera.user.id && !invitedLink.usedAt && invitedLink.tokenHash !== meera.token && forThreeDays(invitedLink));
+    ok("  naming no other workspace, and carrying no link token", namesNoOther(invitation.text));
+
+    // The setup page: headed as setting up with either flag; the optional field only with link=1.
+    const setupPage = async (params: Record<string, string>) => {
+      const rendered = await act(nobody, B, () => resetPage.default({ searchParams: Promise.resolve(params) }));
+      if (!rendered.value) throw new Error(`the setup page did not render: ${show(rendered.threw ?? rendered.redirect)}`);
+      return renderToStaticMarkup(rendered.value);
+    };
+    const pagePlain = await setupPage({ t: "zz-not-a-token" });
+    const pageSetup = await setupPage({ t: "zz-not-a-token", setup: "1" });
+    const pageOther = await setupPage({ t: "zz-not-a-token", link: "yes" });
+    const pageFlagged = await setupPage({ t: "zz-not-a-token", link: "1" });
+    const hasField = (h: string) => h.includes('id="link-workspace"') || h.includes("Link it to the workspace you already use");
+    ok("the password page without a flag: as it was — \"Choose a new password.\", no link field", pagePlain.includes("Choose a new password.") && !hasField(pagePlain) && pagePlain.includes(">Set my password</button>"), pagePlain.slice(0, 400));
+    ok("  with setup=1: \"Set up your account: choose a password.\", and still no link field", pageSetup.includes("Set up your account: choose a password.") && !hasField(pageSetup) && pageSetup.includes(">Set my password</button>"), pageSetup.slice(0, 400));
+    ok("  nor with any other value of link", !hasField(pageOther));
+    const workspaceInput = pageFlagged.match(/<input[^>]*id="link-workspace"[^>]*>/)?.[0] ?? "";
+    ok(
+      "with link=1: set up, and the optional section \"Link it to the workspace you already use\", its field labelled, not required",
+      pageFlagged.includes("Set up your account: choose a password.") &&
+        pageFlagged.includes(">Link it to the workspace you already use</legend>") &&
+        /<label[^>]*for="link-workspace"[^>]*>Workspace address \(optional\)<\/label>/.test(pageFlagged) &&
+        !!workspaceInput &&
+        !/\brequired\b/.test(workspaceInput) &&
+        /aria-describedby="link-workspace-help/.test(workspaceInput),
+      pageFlagged.slice(0, 900),
+    );
+    ok("  after the password fields, with no dark: class", pageFlagged.indexOf('id="again"') < pageFlagged.indexOf('id="link-workspace"') && ![pagePlain, pageSetup, pageFlagged].some((h) => /\bdark:/.test(h)));
+
+    // Set up without an address: exactly as before.
+    const nikhil = await addUser("Nikhil Bose", "nikhil.bose@zzlink-b.example", true);
+    const pendingStamp = keys.credentialStamp(B.id, nikhil.user);
+    const bNikhil = browser("B: Nikhil, setting up");
+    let signInsFrom = signIns.length;
+    let opsFrom = cookieOps.length;
+    const noAddress = await act(bNikhil, B, () => FORM.setUpAccount({ token: nikhil.token, password: CHOSEN, workspace: "   " }));
+    const nikhilNow = await accountNow(nikhil.user.id);
+    ok("set up with the address left empty: done, the page as it always was", noAddress.value?.next === "done", noAddress);
+    ok("  the password chosen is set, and no change asked for", (await bcrypt.compare(CHOSEN, nikhilNow.passwordHash)) && !nikhilNow.mustChangePassword);
+    ok(
+      "  no longer waiting to be set up, and linked sign-in's stamp — an ordinary one before — has moved with it",
+      !(await pendingNow(nikhil.user.id)) && /^[0-9a-f]{64}$/.test(pendingStamp) && keys.credentialStamp(B.id, { ...nikhil.user, passwordHash: nikhilNow.passwordHash }) !== pendingStamp,
+    );
+    ok("  the link is spent", await linkSpent(nikhil.token));
+    ok(
+      "  nobody signed in, no cookie, nothing asked of another workspace",
+      bNikhil.session === null && signIns.length === signInsFrom && lastCall(cookieOps, opsFrom).length === 0 && (await intentsFrom(nikhil.user.id)) === 0,
+    );
+    const again = await act(bNikhil, B, () => FORM.setUpAccount({ token: nikhil.token, password: `${CHOSEN} again`, workspace: "" }));
+    ok("  and the link a second time: refused, as before", again.value?.next === "retry" && again.value.error === "This link has expired or been used. Ask for a new one from the sign-in page.", again);
+
+    // Set up with an address: set, signed in, and linking started.
+    const bMeera = browser("B: Meera, setting up");
+    signInsFrom = signIns.length;
+    opsFrom = cookieOps.length;
+    const withAddress = await act(bMeera, B, () => FORM.setUpAccount({ token: meera.token, password: CHOSEN, workspace: A.slug }));
+    const startUrl = withAddress.value?.next === "leave" ? withAddress.value.url : "";
+    ok("set up with A's address: on to A's /link/start, the token in #i=", startUrl.startsWith(`${keys.originOf(A)}/link/start#i=`) && keys.tokenHashOf(frag(startUrl, "i")) !== null, withAddress);
+    const meeraNow = await accountNow(meera.user.id);
+    ok("  the password chosen is set, and the link spent", (await bcrypt.compare(CHOSEN, meeraNow.passwordHash)) && !meeraNow.mustChangePassword && (await linkSpent(meera.token)));
+    const setupSid = bMeera.session?.user.sid ?? "none";
+    const setupSignIn = await inT(B, () => db.signIn.findUnique({ where: { sid: setupSid }, select: { userId: true, provider: true, endedAt: true } }));
+    ok(
+      "  signed in at B with it: the ordinary password sign-in, a session of B's own",
+      bMeera.session?.user.id === meera.user.id && bMeera.session.user.tid === B.id && signIns.slice(signInsFrom).some((s) => s.provider === "credentials" && s.options.redirect === false) && setupSignIn?.userId === meera.user.id && setupSignIn.provider === "credentials" && !setupSignIn.endedAt,
+      { session: bMeera.session, setupSignIn },
+    );
+    const setupIntent = await control.linkIntent.findUnique({ where: { tokenHash: keys.tokenHashOf(frag(startUrl, "i")) ?? "none" } });
+    ok(
+      "  the link request: from Meera at B, asked by that session, for A, with her new credentials' stamp",
+      setupIntent?.sourceTenantId === B.id && setupIntent.sourceUserId === meera.user.id && setupIntent.sourceSid === setupSid && setupIntent.targetTenantId === A.id && setupIntent.sourceStamp === keys.credentialStamp(B.id, await reread(B, meera.user.id)),
+      setupIntent,
+    );
+    const meeraLinkCookie = lastCall(cookieOps, opsFrom).find((o) => o.op === "set" && o.browser === bMeera.name && o.name === linkName);
+    ok("  and this browser holds wroffy.link for it", !!meeraLinkCookie?.value && keys.sha256Hex(meeraLinkCookie.value) === setupIntent?.browserSecretHash);
+    keep(meeraLinkCookie?.value ?? "");
+    const bMeeraAtA = browser("A: Meera, confirming");
+    const openedAtA = await act(bMeeraAtA, A, () => L.openLinkRequest(frag(startUrl, "i")));
+    await signInAt(A, aMeera, bMeeraAtA);
+    const confirmedAtA = await act(bMeeraAtA, A, () => L.confirmLinkRequest());
+    const finishedAtB = await act(bMeera, B, () => L.finishLinkRequest(confirmedAtA.value?.ok ? frag(confirmedAtA.value.url, "c") : ""));
+    ok(
+      "then as any link: a sign-in at A and its confirmation, finished back at B in the session the set-up made",
+      openedAtA.value?.ok === true && confirmedAtA.value?.ok === true && finishedAtB.value?.ok === true && finishedAtB.value.workspace === A.name,
+      { openedAtA, confirmedAtA, finishedAtB },
+    );
+    const [meeraAtA, meeraAtB] = [await G.memberOf(A.id, aMeera.id), await G.memberOf(B.id, meera.user.id)];
+    ok("  one group: her account in A and her new one in B", !!meeraAtA && !!meeraAtB && meeraAtA.groupId === meeraAtB.groupId);
+    const adminView = await act(bOwnerAdding, B, () => ADM.getLinkedSignInAdmin());
+    ok(
+      "  B's admin sees that she is linked, and nothing of A",
+      !!adminView.value?.people.some((p) => p.userId === meera.user.id) && ![A.name, A.slug, A.id].some((v) => JSON.stringify(adminView.value).includes(v)) && !JSON.stringify(meera.made.value).includes(A.name),
+    );
+
+    // A link that is refused, or a sign-in: the password is kept all the same.
+    const omar = await addUser("Omar Khan", "omar.khan@zzlink-b.example", true);
+    const bOmar = browser("B: Omar, setting up");
+    opsFrom = cookieOps.length;
+    const refusedLink = await act(bOmar, B, () => FORM.setUpAccount({ token: omar.token, password: CHOSEN, workspace: "zzlink-nowhere" }));
+    ok(
+      "an address that is no workspace: linking refused with its own message — later, from Profile",
+      refusedLink.value?.next === "later" && refusedLink.value.error === "There's no workspace at that address." && refusedLink.value.signedIn,
+      refusedLink,
+    );
+    const omarNow = await accountNow(omar.user.id);
+    ok("  the password is saved all the same, and the link spent", (await bcrypt.compare(CHOSEN, omarNow.passwordHash)) && !omarNow.mustChangePassword && (await linkSpent(omar.token)));
+    ok("  signed in here; no request, and no wroffy.link", bOmar.session?.user.id === omar.user.id && (await intentsFrom(omar.user.id)) === 0 && !lastCall(cookieOps, opsFrom).some((o) => o.name === linkName));
+    const priti = await addUser("Priti Das", "priti.das@zzlink-b.example", true);
+    await setSecurity(B, { enforceSso: true });
+    const bPriti = browser("B: Priti, setting up");
+    const refusedSignIn = await act(bPriti, B, () => FORM.setUpAccount({ token: priti.token, password: CHOSEN, workspace: A.slug }));
+    await setSecurity(B, { enforceSso: false });
+    const pritiNow = await accountNow(priti.user.id);
+    ok(
+      "B enforcing Microsoft sign-in: the password sign-in is refused, so linking doesn't start — later",
+      refusedSignIn.value?.next === "later" && !refusedSignIn.value.signedIn && bPriti.session === null && (await intentsFrom(priti.user.id)) === 0,
+      refusedSignIn,
+    );
+    ok("  and the password is saved all the same", (await bcrypt.compare(CHOSEN, pritiNow.passwordHash)) && !pritiNow.mustChangePassword && (await linkSpent(priti.token)));
+    const ravi = await addUser("Ravi Iyer", "ravi.iyer@zzlink-b.example", true);
+    await setSecurity(B, { enforceTwoFactor: true });
+    const bRavi = browser("B: Ravi, setting up");
+    const withTwoFactorRule = await act(bRavi, B, () => FORM.setUpAccount({ token: ravi.token, password: CHOSEN, workspace: A.slug }));
+    await setSecurity(B, { enforceTwoFactor: false });
+    ok(
+      "B requiring two-factor: nothing at B refuses linking from it (the target's rule, L3) — it starts, and B's pages ask for two-factor as at any first sign-in",
+      withTwoFactorRule.value?.next === "leave" && bRavi.session?.user.id === ravi.user.id && (await intentsFrom(ravi.user.id)) === 1,
+      withTwoFactorRule,
+    );
+
+    // ═══ 11c. Every new user ═════════════════════════════════════════════════════════════════════
+    section("11c. Every new user: no password until they choose one, the link when mail fails, resend, \"Invitation pending\"");
+    lockout.resetLockouts();
+    const AUTH = require("../src/lib/auth") as typeof import("../src/lib/auth");
+    const LOGIN = require("../src/actions/auth") as typeof import("../src/actions/auth");
+    const RESET = require("../src/actions/password-reset") as typeof import("../src/actions/password-reset");
+    const DIALOG = require("../src/components/settings/new-user-dialog") as typeof import("../src/components/settings/new-user-dialog");
+    const { TeamManager } = require("../src/components/settings/team-manager") as typeof import("../src/components/settings/team-manager");
+    const PERM = require("../src/actions/permission") as typeof import("../src/actions/permission");
+    const CANDIDATES = require("../src/actions/candidate") as typeof import("../src/actions/candidate");
+    const { usersImporter } = require("../src/lib/portability/importers/users") as typeof import("../src/lib/portability/importers/users");
+    const plans = require("../src/lib/platform/plans") as typeof import("../src/lib/platform/plans");
+    /** Mail to these addresses fails, as it does when the mail server is down. */
+    const mailDownFor = new Set<string>();
+    mailer.setTestPlatformMailer(async (m) => {
+      if (mailDownFor.has(m.to)) throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+      mail.push(m);
+    });
+    const sentTo = (from: number, email: string) => mail.slice(from).filter((m) => m.to === email);
+
+    // No password is usable until the person chooses one.
+    const pat = await addUser("Zz Pending Person", "zz.pending@zzlink-b.example");
+    const bGuess = browser("B: somebody guessing");
+    const guesses = ["", CHOSEN, pat.user.passwordHash, "no-password-yet:"];
+    const tried: Outcome<unknown>[] = [];
+    for (const password of guesses) tried.push(await act(bGuess, B, () => AUTH.signIn("credentials", { email: pat.user.email, password, totpCode: "", redirect: false })));
+    ok(
+      "nothing signs in to a new account before its person chooses a password — not blank, not a guess, not the stored value itself",
+      tried.every((t) => !!t.threw && t.value === undefined) && bGuess.session === null,
+      tried.map((t) => show(t.threw ?? t.value ?? "signed in")),
+    );
+    const preCheck = await act(bGuess, B, () => LOGIN.checkCredentials(pat.user.email, pat.user.passwordHash));
+    ok("  nor passes the sign-in form's password check", preCheck.value?.ok === false, preCheck);
+    let from = mail.length;
+    await act(nobody, B, () => RESET.requestPasswordReset(pat.user.email));
+    ok("  and somebody who lost the email can ask for a link from the sign-in page, as anybody can", sentTo(from, pat.user.email).some((m) => m.subject === "Set a new password"));
+    lockout.resetLockouts();
+
+    // The mail can't be sent: the link, once, for the admin to pass on.
+    const downEmail = "zz.mailfails@zzlink-b.example";
+    mailDownFor.add(downEmail);
+    const logged: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+    const down = await addUser("Zz Mail Fails", downEmail).finally(() => {
+      console.error = realError;
+    });
+    const downData = down.made.value?.ok ? down.made.value.data : null;
+    const fallback = downData && !downData.emailed ? (downData.setupUrl ?? "") : "";
+    const fallbackUrl = fallback ? new URL(fallback) : null;
+    const fallbackToken = keep(tokenOf(fallback));
+    ok(
+      "mail down: the account is made, and its setup link comes back instead",
+      !!downData && !downData.emailed && !!fallbackUrl && fallbackUrl.origin === keys.originOf(B) && fallbackUrl.pathname === "/reset-password" && fallbackUrl.searchParams.get("setup") === "1" && down.sent.length === 0,
+      down.made,
+    );
+    const fallbackRow = await setupLinkOf(fallbackToken);
+    ok(
+      "  stored only as its hash, for three days",
+      !!fallbackRow && fallbackRow.userId === down.user.id && forThreeDays(fallbackRow) && (await inT(B, () => db.passwordResetToken.count({ where: { tokenHash: fallbackToken } }))) === 0,
+    );
+    ok(
+      "  the failure logged by its code only — neither the link nor the address",
+      logged.some((line) => line.includes("[setup] a setup email could not be sent: ECONNREFUSED")) && !logged.some((line) => line.includes(fallbackToken) || line.includes(downEmail)),
+      logged,
+    );
+    const doneHtml = renderToStaticMarkup(createElement(DIALOG.NewUserCreated, { created: { email: downEmail, linking: false, emailed: false, setupUrl: fallback }, onDone() {} }));
+    ok(
+      "  the dialog shows it once, to copy: \"Copy setup link\", the link itself, and why",
+      doneHtml.includes("Copy setup link</button>") && doneHtml.includes(fallback.replace(/&/g, "&amp;")) && /role="alert"[^>]*>The setup email to zz\.mailfails@zzlink-b\.example couldn&#x27;t be sent\./.test(doneHtml) && doneHtml.includes("Shown once"),
+      doneHtml.slice(0, 900),
+    );
+    const usedFallback = await act(browser("B: Mail Fails, setting up"), B, () => FORM.setUpAccount({ token: fallbackToken, password: CHOSEN, workspace: "" }));
+    ok(
+      "  and it works as the email's would: the password is theirs, and they're no longer waiting",
+      usedFallback.value?.next === "done" && (await bcrypt.compare(CHOSEN, (await accountNow(down.user.id)).passwordHash)) && !(await pendingNow(down.user.id)),
+      usedFallback,
+    );
+    const bDown = browser("B: Mail Fails, signing in");
+    const downSignIn = await act(bDown, B, () => AUTH.signIn("credentials", { email: downEmail, password: CHOSEN, totpCode: "", redirect: false }));
+    ok("  so the sign-in that refused every guess above lets them in with it", !downSignIn.threw && bDown.session?.user.id === down.user.id, downSignIn);
+    const sentHtml = renderToStaticMarkup(createElement(DIALOG.NewUserCreated, { created: { email: "zz.sent@zzlink-b.example", linking: false, emailed: true }, onDone() {} }));
+    const sentLinkingHtml = renderToStaticMarkup(createElement(DIALOG.NewUserCreated, { created: { email: "zz.sent@zzlink-b.example", linking: true, emailed: true }, onDone() {} }));
+    ok(
+      "when it went, the dialog says so — where, and what the link does — and shows no link",
+      sentHtml.includes("We&#x27;ve emailed zz.sent@zzlink-b.example a link to choose their own password") &&
+        sentHtml.includes("Invitation pending") &&
+        sentLinkingHtml.includes("a link to set up their account and link it to the workspace they already use") &&
+        ![sentHtml, sentLinkingHtml].some((h) => h.includes("Copy setup link") || h.includes("/reset-password")),
+      sentHtml,
+    );
+
+    // The add-user form itself: no password, and it says an email will be sent.
+    const formHtml = (offerLinking: boolean) => renderToStaticMarkup(createElement(DIALOG.NewUserForm, { roles: ["SALES", "SUPPORT"], departments: [], offerLinking, onCreated() {}, onCancel() {} }));
+    const [formPlain, formLinking] = [formHtml(false), formHtml(true)];
+    ok("the add-user form: no password field of any kind", [formPlain, formLinking].every((h) => !/type="password"/.test(h) && !/nu-password|emporary password|Regenerate/.test(h)), formPlain.slice(0, 600));
+    const emailInput = formPlain.match(/<input[^>]*id="nu-email"[^>]*>/)?.[0] ?? "";
+    ok(
+      "  it says an email will be sent: under the address, tied to it, and on the button",
+      emailInput.includes('aria-describedby="nu-setup-help"') &&
+        /<p id="nu-setup-help"[^>]*>We&#x27;ll email them a link to choose their own password\./.test(formPlain) &&
+        formPlain.includes(">Create and send setup email</button>"),
+      emailInput,
+    );
+    ok(
+      "  the tick only where linking is offered, and no dark: class",
+      formLinking.includes("This person already uses another workspace on this platform") && !formPlain.includes("This person already uses another workspace") && ![formPlain, formLinking, doneHtml, sentHtml].some((h) => /\bdark:/.test(h)),
+    );
+
+    // Resend.
+    const resendAs = (b: Browser, id: string) => act(b, bWithSeats, () => USERS.resendSetupEmail(id));
+    const rhea = await addUser("Rhea Kapoor", "rhea.kapoor@zzlink-b.example");
+    from = mail.length;
+    const resent = await resendAs(bOwnerAdding, rhea.user.id);
+    const resentMail = sentTo(from, rhea.user.email);
+    const resentToken = tokenOf(linkIn(resentMail[0]?.text));
+    ok(
+      "\"Resend setup email\": the same email again, with a new link",
+      resent.value?.ok === true && resent.value.data.emailed && resentMail.length === 1 && resentMail[0].subject === `Set up your account in ${B.name}` && !!resentToken && resentToken !== rhea.token && new URL(linkIn(resentMail[0].text)).searchParams.get("setup") === "1",
+      resent,
+    );
+    ok(
+      "  replacing the unused one: its row gone, one live link for her, for three days",
+      !(await setupLinkOf(rhea.token)) && forThreeDays(await setupLinkOf(resentToken)) && (await inT(B, () => db.passwordResetToken.count({ where: { userId: rhea.user.id, usedAt: null } }))) === 1,
+    );
+    const oldLink = await act(browser("B: Rhea, the first email"), B, () => FORM.setUpAccount({ token: rhea.token, password: CHOSEN, workspace: "" }));
+    ok(
+      "  so the first email's link is refused, and she's still waiting",
+      oldLink.value?.next === "retry" && oldLink.value.error === "This link has expired or been used. Ask for a new one from the sign-in page." && (await pendingNow(rhea.user.id)),
+      oldLink,
+    );
+    mailDownFor.add(rhea.user.email);
+    const resentDown = await resendAs(bOwnerAdding, rhea.user.id);
+    mailDownFor.delete(rhea.user.email);
+    const resentUrl = resentDown.value?.ok && !resentDown.value.data.emailed ? (resentDown.value.data.setupUrl ?? "") : "";
+    const resentDownToken = keep(tokenOf(resentUrl));
+    ok("  mail down: the new link comes back to pass on, and the one before it stops working", !!resentDownToken && !(await setupLinkOf(resentToken)) && !!(await setupLinkOf(resentDownToken)), resentDown);
+    const rheaSetUp = await act(browser("B: Rhea, setting up"), B, () => FORM.setUpAccount({ token: resentDownToken, password: CHOSEN, workspace: "" }));
+    ok("  and with it she sets her password", rheaSetUp.value?.next === "done" && !(await pendingNow(rhea.user.id)), rheaSetUp);
+    from = mail.length;
+    const afterSetUp = await resendAs(bOwnerAdding, rhea.user.id);
+    ok(
+      "  once she has one: refused, and nothing sent — resending is never an admin's password reset",
+      afterSetUp.value?.ok === false && afterSetUp.value.error.startsWith("They've already chosen a password.") && sentTo(from, rhea.user.email).length === 0,
+      afterSetUp,
+    );
+    const sam = await addUser("Sam Pending", "sam.pending@zzlink-b.example");
+    const rep = await person(B, "Zz Sales Rep");
+    const bRep = browser("B: a sales rep");
+    await signInAt(B, rep, bRep);
+    const byRep = await resendAs(bRep, sam.user.id);
+    ok("  somebody without users.manage: refused", byRep.value?.ok === false && byRep.value.error === "You can't send setup emails.", byRep);
+    const plainAdmin = await person(B, "Zz Plain Admin", { role: "ADMIN" });
+    const bPlainAdmin = browser("B: an admin, not the super admin");
+    await signInAt(B, plainAdmin, bPlainAdmin);
+    const onOwner = await resendAs(bPlainAdmin, ownerB.id);
+    ok("  an admin who isn't the super admin, on the super admin's account: refused", onOwner.value?.ok === false && onOwner.value.error === "Only a super admin can change another super admin's account.", onOwner);
+    await setUser(B, sam.user.id, { active: false });
+    const switchedOff = await resendAs(bOwnerAdding, sam.user.id);
+    await setUser(B, sam.user.id, { active: true });
+    ok("  a switched-off account: refused", switchedOff.value?.ok === false && switchedOff.value.error.startsWith("Activate them first"), switchedOff);
+    // Mail down, the link comes back only to somebody who could have made the account with all it holds.
+    await inT(B, () => db.userPermission.create({ data: { userId: rep.id, permission: "users.manage", allowed: true } }));
+    const pendingAdminEmail = "zz.pending.admin@zzlink-b.example";
+    const madeAdmin = await act(bOwnerAdding, bWithSeats, () => USERS.createUser({ name: "Zz Pending Admin", email: pendingAdminEmail, role: "ADMIN", departmentId: "" }));
+    const pendingAdmin = await inT(B, () => db.user.findUniqueOrThrow({ where: { email: pendingAdminEmail }, select: { id: true } }));
+    mailDownFor.add(pendingAdminEmail);
+    mailDownFor.add(sam.user.email);
+    const repOnAdmin = await resendAs(bRep, pendingAdmin.id);
+    const repOnSales = await resendAs(bRep, sam.user.id);
+    const ownerOnAdmin = await resendAs(bOwnerAdding, pendingAdmin.id);
+    mailDownFor.delete(pendingAdminEmail);
+    mailDownFor.delete(sam.user.email);
+    ok(
+      "  mail down, asked by somebody with users.manage who doesn't hold all an ADMIN account does: not sent, and no link for them",
+      madeAdmin.value?.ok === true && repOnAdmin.value?.ok === false && repOnAdmin.value.error === "The setup email couldn't be sent. Try again in a while." && !JSON.stringify(repOnAdmin).includes("/reset-password"),
+      repOnAdmin,
+    );
+    const repSalesUrl = repOnSales.value?.ok && !repOnSales.value.data.emailed ? keep(repOnSales.value.data.setupUrl ?? "") : "";
+    const ownerAdminUrl = ownerOnAdmin.value?.ok && !ownerOnAdmin.value.data.emailed ? keep(ownerOnAdmin.value.data.setupUrl ?? "") : "";
+    ok("  the same person, for a SALES account whose every permission they hold: the link", repSalesUrl.includes("/reset-password?t="), repOnSales);
+    ok("  the super admin, for the ADMIN account: the link", ownerAdminUrl.includes("/reset-password?t="), ownerOnAdmin);
+    lockout.resetLockouts();
+    const asks: boolean[] = [];
+    for (let i = 0; i < lockout.MAX_FAILURES; i += 1) asks.push((await resendAs(bOwnerAdding, sam.user.id)).value?.ok === true);
+    const tooMany = await resendAs(bOwnerAdding, sam.user.id);
+    from = mail.length;
+    await act(nobody, B, () => RESET.requestPasswordReset(sam.user.email));
+    ok(
+      `  ${lockout.MAX_FAILURES} in a row, then refused — one limit with "Forgot your password?", which then sends nothing either`,
+      asks.every(Boolean) && tooMany.value?.ok === false && tooMany.value.error.startsWith("Too many setup emails for this address.") && sentTo(from, sam.user.email).length === 0,
+      { asks, tooMany },
+    );
+    lockout.resetLockouts();
+
+    // HR converting a candidate.
+    await plans.setModuleOverride(B.id, "hr", true, "zz candidate conversion, from check:linked-signin", "zz-staff");
+    const bWithHr = (await registry.tenantBySlug(B.slug))!;
+    ok("set-up: B has the HR module", bWithHr.entitlements.all || bWithHr.entitlements.modules.includes("hr"), bWithHr.entitlements);
+    const newJoiner = (name: string, email: string) => inT(B, () => db.candidate.create({ data: { name, email, status: "ACCEPTED", role: "SALES" }, select: { id: true } }));
+    const convert = (id: string) => act(bOwnerAdding, bWithHr, () => CANDIDATES.convertCandidate(id, { joinedOn: "2026-10-05", probationMonths: 6 }));
+    const accountOf = (email: string) => inT(B, () => db.user.findUnique({ where: { email }, select: { ...ACCOUNT, mustChangePassword: true } }));
+    const priyaEmail = "priya.menon@zzlink-b.example";
+    const priya = await newJoiner("Priya Menon", priyaEmail);
+    from = mail.length;
+    const converted = await convert(priya.id);
+    const priyaMail = sentTo(from, priyaEmail);
+    const priyaUser = await accountOf(priyaEmail);
+    ok(
+      "HR converting a candidate: the login and its setup email — no password HR chose",
+      converted.value?.ok === true && converted.value.data.emailed && priyaMail.length === 1 && priyaMail[0].subject === `Set up your account in ${B.name}` && new URL(linkIn(priyaMail[0].text) || "http://x").searchParams.get("setup") === "1",
+      converted,
+    );
+    ok(
+      "  the login: no usable password, no change to ask for, waiting to be set up, and in the email index",
+      !!priyaUser && (await unusable(priyaUser.passwordHash)) && !priyaUser.mustChangePassword && (await pendingNow(priyaUser.id)) && (await indexed(priyaUser.id)),
+    );
+    const arjunEmail = "arjun.rao@zzlink-b.example";
+    const arjun = await newJoiner("Arjun Rao", arjunEmail);
+    mailDownFor.add(arjunEmail);
+    const convertedDown = await convert(arjun.id);
+    mailDownFor.delete(arjunEmail);
+    const arjunUrl = convertedDown.value?.ok && !convertedDown.value.data.emailed ? (convertedDown.value.data.setupUrl ?? "") : "";
+    const arjunToken = keep(tokenOf(arjunUrl));
+    const arjunLink = arjunToken ? await setupLinkOf(arjunToken) : null;
+    ok(
+      "  mail down: converted all the same, and the setup link comes back for HR to pass on",
+      convertedDown.value?.ok === true && !!arjunUrl && new URL(arjunUrl).origin === keys.originOf(B) && arjunLink?.userId === (await accountOf(arjunEmail))?.id,
+      convertedDown,
+    );
+
+    // An import: the same account, and no email.
+    from = mail.length;
+    const importedEmail = "zz.imported@zzlink-b.example";
+    const imported = await act(bOwnerAdding, bWithSeats, () =>
+      usersImporter.apply({ Name: "Zz Imported Person", Email: importedEmail, Role: "SALES", Active: "true" }, { actorUserId: ownerB.id, area: "users", pendingKeys: new Set() }),
+    );
+    const importedUser = await accountOf(importedEmail);
+    ok(
+      "an import creates the same account: no usable password, no change to ask for, waiting — and sends no email",
+      imported.threw === undefined && !!importedUser && (await unusable(importedUser.passwordHash)) && !importedUser.mustChangePassword && (await pendingNow(importedUser.id)) && sentTo(from, importedEmail).length === 0,
+      imported.threw,
+    );
+    const earlier = await inT(B, () =>
+      db.user.create({ data: { name: "Zz Imported Earlier", email: "zz.imported.earlier@zzlink-b.example", role: "SALES", passwordHash: "no-password-set-by-import", mustChangePassword: true }, select: { id: true, name: true, email: true } }),
+    );
+    ok("  one an import made before this is waiting to be set up too", await pendingNow(earlier.id));
+
+    // "Invitation pending".
+    const listed = await act(bOwnerAdding, B, () => USERS.listUsers());
+    const listedRow = (id: string) => listed.value?.find((u) => u.id === id);
+    ok(
+      "\"Invitation pending\" in the list: whoever hasn't chosen a password yet — and whether a link has gone to them",
+      listedRow(sam.user.id)?.setupPending === true && listedRow(sam.user.id)?.setupLinkIssued === true && listedRow(pat.user.id)?.setupPending === true && listedRow(importedUser?.id ?? "")?.setupPending === true && listedRow(importedUser?.id ?? "")?.setupLinkIssued === false && listedRow(earlier.id)?.setupPending === true,
+      listed.threw,
+    );
+    ok("  and nobody who has one: the owner, and everybody set up above", [ownerB.id, rhea.user.id, down.user.id, nikhil.user.id, meera.user.id, rep.id].every((id) => listedRow(id)?.setupPending === false));
+    const roster = await act(bOwnerAdding, B, () => PERM.accessRoster());
+    const rosterRow = (id: string) => roster.value?.find((r) => r.id === id);
+    ok("  on the People roster too", rosterRow(sam.user.id)?.setupPending === true && rosterRow(rhea.user.id)?.setupPending === false && rosterRow(ownerB.id)?.setupPending === false, roster.threw);
+    const teamHtml = renderToStaticMarkup(createElement(TeamManager, { users: listed.value ?? [], departments: [], roles: ["ADMIN", "SALES"] }));
+    const rowFor = (email: string) => {
+      const at = teamHtml.indexOf(`>${email}<`);
+      return at < 0 ? "" : teamHtml.slice(teamHtml.lastIndexOf("<tr", at), teamHtml.indexOf("</tr>", at));
+    };
+    const [samRow, rheaRow, importedRow, earlierRow] = [rowFor(sam.user.email), rowFor(rhea.user.email), rowFor(importedEmail), rowFor(earlier.email)];
+    ok(
+      "  the team table: the badge, and \"Resend setup email\" named for the person",
+      samRow.includes(">Invitation pending</span>") && samRow.includes(`aria-label="Resend setup email to ${sam.user.name}"`) && samRow.includes(">Resend setup email</button>"),
+      samRow.slice(0, 700),
+    );
+    ok("  \"Send setup email\" for one no link has gone to yet, and never \"Temp password\" beside the badge", importedRow.includes(">Send setup email</button>") && earlierRow.includes(">Invitation pending</span>") && !earlierRow.includes("Temp password"));
+    ok("  neither for somebody set up", !!rheaRow && !rheaRow.includes("Invitation pending") && !rheaRow.includes("setup email") && !/\bdark:/.test(teamHtml));
+    from = mail.length;
+    const toEarlier = await resendAs(bOwnerAdding, earlier.id);
+    const listedAfter = await act(bOwnerAdding, B, () => USERS.listUsers());
+    ok(
+      "  sending it to one imported before this: the setup email, and the list now offers to resend",
+      toEarlier.value?.ok === true && toEarlier.value.data.emailed && sentTo(from, earlier.email).length === 1 && listedAfter.value?.find((u) => u.id === earlier.id)?.setupLinkIssued === true,
+      toEarlier,
+    );
+    mailer.setTestPlatformMailer(async (m) => void mail.push(m));
 
     section("Every email");
     const linkedMails = mail.filter((m) => ["Your workspaces were linked", "A workspace was unlinked"].includes(m.subject) || m.to === SHARED);

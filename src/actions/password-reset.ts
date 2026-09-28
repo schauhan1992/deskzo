@@ -2,7 +2,9 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { AuthError } from "next-auth";
 import { headers } from "next/headers";
+import { signIn } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { clientIpFrom } from "@/lib/client-ip";
@@ -25,6 +27,11 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
  *   · Two-factor stays on: a new password is not a way around it.
  *
  * Asks are limited per workspace and address as sign-in failures are (src/lib/security/lockout.ts).
+ *
+ * The same link is a new account's setup email (src/lib/account-setup.ts): three days rather than an hour,
+ * for somebody who has no password yet. With `&link=1` it is the one-step invite of linked sign-in: its
+ * page can also start linking the account to a workspace the person already uses — see
+ * `setPasswordAndSignIn`. An admin's "Resend setup email" shares this form's per-address limit.
  */
 
 const TTL_MS = 60 * 60_000;
@@ -61,7 +68,8 @@ export async function requestPasswordReset(input: string): Promise<{ ok: true }>
   return { ok: true };
 }
 
-export async function resetPassword(input: { token: string; password: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+/** The link spent and the password set — what `resetPassword` and `setPasswordAndSignIn` share. */
+async function setPasswordFromLink(input: { token: string; password: string }): Promise<{ ok: true; email: string } | { ok: false; error: string }> {
   const token = String(input?.token ?? "");
   const password = String(input?.password ?? "");
   if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
@@ -91,5 +99,34 @@ export async function resetPassword(input: { token: string; password: string }):
     userEmail: row.user.email,
     summary: `${row.user.name} set a new password from an emailed link`,
   });
-  return { ok: true };
+  return { ok: true, email: row.user.email };
+}
+
+export async function resetPassword(input: { token: string; password: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const set = await setPasswordFromLink(input);
+  return set.ok ? { ok: true } : set;
+}
+
+/**
+ * The invitation's setup page, when the person also typed the address of a workspace they already use:
+ * the password is set exactly as `resetPassword` sets it, then they are signed in here with it — the
+ * ordinary password sign-in, so each of this workspace's rules still applies (Microsoft sign-in
+ * enforced, a blocked network, a two-factor code).
+ *
+ * The page then starts linking with `startLinkingWorkspace` and the same password, in its next request:
+ * the first that carries the new session. This one cannot — the session is only in its response.
+ * `signedIn: false` when the sign-in was refused; the password is set all the same, and linking waits
+ * for Profile.
+ */
+export async function setPasswordAndSignIn(input: { token: string; password: string }): Promise<{ ok: true; signedIn: boolean } | { ok: false; error: string }> {
+  const set = await setPasswordFromLink(input);
+  if (!set.ok) return set;
+  try {
+    await signIn("credentials", { email: set.email, password: String(input?.password ?? ""), totpCode: "", redirect: false });
+    return { ok: true, signedIn: true };
+  } catch (err) {
+    // The password is set whatever happens here, and the answer has to say so.
+    if (!(err instanceof AuthError)) console.error(`[password-reset] signing in after setting a password failed: ${err instanceof Error ? err.name : "error"}`);
+    return { ok: true, signedIn: false };
+  }
 }

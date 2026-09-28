@@ -227,6 +227,19 @@ export const PAGE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*
 /** Post slugs: one level. */
 export const POST_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * Post slugs the blog's own routes need: /blog/category/<slug>, /blog/tag/<slug>, and "page" for
+ * paging. A post may not take one — nor may a new post's address made from its title (it gets "-2").
+ */
+export const RESERVED_POST_SLUGS = ["category", "tag", "page"] as const;
+
+export function isReservedPostSlug(slug: string): boolean {
+  return (RESERVED_POST_SLUGS as readonly string[]).includes(slug);
+}
+
+/** Category and tag slugs: the post slug's format, at most 60 (the database's CHECKs). */
+export const TERM_SLUG = POST_SLUG;
+
 /** "Hello, World!" → "hello-world". */
 export function slugify(value: string, max = 80): string {
   return value

@@ -3,28 +3,30 @@
 import type { SitePostStatus } from "@wroffy/control-client";
 import { archivePost, createPost, deletePost, getPost, listPostTags, listPosts, postPreviewLink, publishPost, savePost, unarchivePost, unpublishPost } from "@/lib/cms/content";
 import { cmsAction, revalidateCms } from "@/lib/cms/guard";
-import { CMS_EVERYONE, CMS_PUBLISHERS, CMS_WRITERS, type CmsResult, type Paged, type PostDetail, type PostInput, type PostListRow, type PostSaved } from "@/lib/cms/types";
+import { CMS_EVERYONE, CMS_PUBLISHERS, CMS_WRITERS, type CmsResult, type Paged, type PostDetail, type PostInput, type PostListRow, type PostSaved, type RedirectRow } from "@/lib/cms/types";
 
 /**
  * Blog and news posts. A post has one body: saving a live one changes the site at once (and is
  * checked as fully as publishing). Authors create posts and change only their own drafts; editors and
  * admins publish, schedule, unpublish and change anybody's. src/lib/cms/content.ts does the work.
  *
- *   cmsListPosts        everybody    filtered, 30 a page
- *   cmsPostTags         everybody    every tag in use
+ *   cmsListPosts        everybody    filtered (status, tag and category slugs, author, q, archived), 30 a page
+ *   cmsPostTags         everybody    every tag's slug (names and counts: cmsListTags / cmsSearchTags)
  *   cmsCreatePost       writers      a new draft (title, optional slug), authored by the caller
  *   cmsGetPost          everybody
- *   cmsSavePost         writers      every field; `conflict` over a newer save unless `force`
+ *   cmsSavePost         writers      every field; `conflict` over a newer save unless `force`; tags by slug or name
+ *                                    (new ones added), categories by id; a live post's new slug leaves a 301 (`redirect`)
  *   cmsPublishPost      publishers   now, or scheduled: `publishAt` ("yyyy-mm-ddThh:mm" India time, or ISO)
  *   cmsUnpublishPost    publishers
- *   cmsArchivePost / cmsUnarchivePost / cmsDeletePost   writers (authors: their own drafts); delete needs archive first
+ *   cmsArchivePost / cmsUnarchivePost / cmsDeletePost   writers (authors: their own drafts); delete needs archive first,
+ *                                    and may send the old address on: { redirectTo } ("" for /blog; editors and admins)
  *   cmsPostPreviewLink  everybody    a 15-minute link to the post as it is now, on the public site
  */
 
 const pid = (value: unknown) => String(value ?? "").slice(0, 40);
 
 export async function cmsListPosts(
-  filters: { status?: SitePostStatus; tag?: string; authorId?: string; q?: string; archived?: boolean; page?: number } = {},
+  filters: { status?: SitePostStatus; tag?: string; category?: string; authorId?: string; q?: string; archived?: boolean; page?: number } = {},
 ): Promise<CmsResult<Paged<PostListRow>>> {
   return cmsAction(CMS_EVERYONE, async () => listPosts(filters ?? {}));
 }
@@ -85,11 +87,12 @@ export async function cmsUnarchivePost(postId: string): Promise<CmsResult<null>>
   });
 }
 
-export async function cmsDeletePost(postId: string): Promise<CmsResult<null>> {
+export async function cmsDeletePost(postId: string, options: { redirectTo?: string | null } = {}): Promise<CmsResult<{ redirect: RedirectRow | null }>> {
   return cmsAction(CMS_WRITERS, async ({ user }) => {
-    await deletePost(pid(postId), user);
+    const redirectTo = options?.redirectTo === undefined || options?.redirectTo === null ? null : String(options.redirectTo).slice(0, 2000);
+    const deleted = await deletePost(pid(postId), user, { redirectTo });
     revalidateCms();
-    return null;
+    return deleted;
   });
 }
 

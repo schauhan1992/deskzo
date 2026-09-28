@@ -506,6 +506,27 @@ async function main() {
     const mapped = rootMap.map((e) => new URL(e.url).pathname).sort().join(" ");
     ok("the sitemap: the public pages, not signup", mapped === "/ /contact /partners /pricing /privacy /security /signin /terms", mapped);
     ok("  and nothing on a workspace's host", wsMap.length === 0);
+    // The blog's archives: a category with a child, a tag and one live post (in the child); a category with only a draft, and a tag with no posts.
+    const siteContent = require("../src/lib/platform/site-content") as typeof import("../src/lib/platform/site-content");
+    const archiveAuthor = await control.cmsUser.create({ data: { email: "archive-author.zz@example.invalid", name: "Zz Archive Author", role: "EDITOR", createdBy: "script" } });
+    const guides = await control.siteCategory.create({ data: { slug: "zz-guides", name: "Zz Guides", updatedBy: "script" } });
+    const howTo = await control.siteCategory.create({ data: { slug: "zz-how-to", name: "Zz How-to", parentId: guides.id, updatedBy: "script" } });
+    const draftsOnly = await control.siteCategory.create({ data: { slug: "zz-drafts-only", name: "Zz Drafts only", updatedBy: "script" } });
+    const newsTag = await control.siteTag.create({ data: { slug: "zz-news", name: "Zz News", updatedBy: "script" } });
+    await control.siteTag.create({ data: { slug: "zz-unused", name: "Zz Unused", updatedBy: "script" } });
+    const liveAt = new Date(Date.now() - 60_000);
+    await control.sitePost.create({
+      data: { slug: "zz-archive-post", title: "Zz archive post", body: [], status: "PUBLISHED", publishAt: liveAt, publishedAt: liveAt, authorId: archiveAuthor.id, updatedBy: "script", categories: { create: [{ categoryId: howTo.id }] }, tagLinks: { create: [{ tagId: newsTag.id }] } },
+    });
+    await control.sitePost.create({ data: { slug: "zz-draft-post", title: "Zz draft post", body: [], authorId: archiveAuthor.id, updatedBy: "script", categories: { create: [{ categoryId: draftsOnly.id }] } } });
+    siteContent.invalidateSiteContent();
+    at(ROOT);
+    const withArchives = (await sitemap()).map((e) => new URL(e.url).pathname).sort().join(" ");
+    ok(
+      "  a live post adds the blog, the post and the archives it is in (a child's post counts for its parent) — not a category with only a draft, nor an unused tag",
+      withArchives === "/ /blog /blog/category/zz-guides /blog/category/zz-how-to /blog/tag/zz-news /blog/zz-archive-post /contact /partners /pricing /privacy /security /signin /terms",
+      withArchives,
+    );
 
     try {
       const { NextRequest } = require("next/server") as typeof import("next/server");
@@ -527,6 +548,84 @@ async function main() {
       ok("  but not signup, nor an address with a query", /noindex/.test(signup.robots) && /noindex/.test(query.robots));
       ok("  the sitemap is served from the root, not the folder", !sitemapXml.rewrite);
       ok("  a workspace and the console stay noindex", /noindex/.test(workspace.robots) && /noindex/.test(consoleHome.robots), `${workspace.robots} | ${consoleHome.robots}`);
+      // The blog's pages of posts are real pages with canonicals of their own: a lone ?page=N there may be indexed.
+      const [blogPage2, categoryPage2, tagPage3] = [await through(ROOT, "/blog?page=2"), await through(ROOT, "/blog/category/x?page=2"), await through(ROOT, "/blog/tag/x?page=3")];
+      ok("a lone ?page=N on the blog and its archives may be indexed", [blogPage2, categoryPage2, tagPage3].every((r) => r.robots === "index, follow"), `${blogPage2.robots} | ${categoryPage2.robots} | ${tagPage3.robots}`);
+      const [pageAndMore, pricingPage2, badPage, zeroPage] = [await through(ROOT, "/blog?page=2&x=1"), await through(ROOT, "/pricing?page=2"), await through(ROOT, "/blog?page=abc"), await through(ROOT, "/blog?page=0")];
+      ok(
+        "  but ?page= with anything else, on a page that isn't the blog's, or not a page number, stays noindex",
+        [pageAndMore, pricingPage2, badPage, zeroPage].every((r) => /noindex/.test(r.robots)),
+        `${pageAndMore.robots} | ${pricingPage2.robots} | ${badPage.robots} | ${zeroPage.robots}`,
+      );
+
+      // The CMS's redirects, as the proxy applies them (src/lib/cms/redirects.ts).
+      const redirects = require("../src/lib/cms/redirects") as typeof import("../src/lib/cms/redirects");
+      const moved = await control.siteRedirect.create({ data: { fromPath: "/zz-old-page", toUrl: "/pricing", status: 301, updatedBy: "script" } });
+      await control.siteRedirect.create({ data: { fromPath: "/zz-docs/*", toUrl: "/blog/*", match: "PREFIX", status: 308, updatedBy: "script" } });
+      await control.siteRedirect.create({ data: { fromPath: "/zz-off", toUrl: "/pricing", enabled: false, updatedBy: "script" } });
+      // Rows the CMS refuses to save, written straight to the database: the proxy must not apply them either.
+      await control.siteRedirect.create({ data: { fromPath: "/signup", toUrl: "/pricing", updatedBy: "script" } });
+      await control.siteRedirect.create({ data: { fromPath: "/api/zz", toUrl: "/pricing", updatedBy: "script" } });
+      redirects.invalidateRedirects();
+      await redirects.matchRedirect("/zz-old-page", { waitMs: 10_000 });
+      const go = async (host: string, pathAndQuery: string, method = "GET") => {
+        const res = await proxy(new NextRequest(`http://${host}${pathAndQuery}`, { method, headers: { host, "user-agent": "Mozilla/5.0 (check:site)" } }), {});
+        return { status: res.status, location: res.headers.get("location") ?? "", cache: res.headers.get("cache-control") ?? "", rewrite: res.headers.get("x-middleware-rewrite") ?? "" };
+      };
+      const old = await go(ROOT, "/ZZ-Old-Page/?utm_source=zz");
+      ok("a redirect answers on the public host: its status, its target on that host with the query kept, never cached", old.status === 301 && old.location === `http://${ROOT}/pricing?utm_source=zz` && old.cache === "no-store", `${old.status} ${old.location} ${old.cache}`);
+      const splat = await go(ROOT, "/zz-docs/Guides/Start");
+      ok("  a “starts with” one carries the rest of the path over", splat.status === 308 && splat.location === `http://${ROOT}/blog/Guides/Start`, `${splat.status} ${splat.location}`);
+      const elsewhere = [await go(`zzsite-a.${ROOT}`, "/zz-old-page"), await go(`admin.${ROOT}`, "/zz-old-page"), await go(`cms.${ROOT}`, "/zz-old-page"), await go(`partners.${ROOT}`, "/zz-old-page")];
+      ok("  and on no other host: not a workspace's, the console's, the CMS's or the partner portal's", elsewhere.every((r) => !r.location.includes("/pricing")), elsewhere.map((r) => `${r.status} ${r.location}`).join(" | "));
+      const [apiPath, signupPath, off, posted] = [await go(ROOT, "/api/zz"), await go(ROOT, "/signup"), await go(ROOT, "/zz-off"), await go(ROOT, "/zz-old-page", "POST")];
+      ok("  never /api or the site's own routes, even with such a row in the database", !apiPath.location && !signupPath.location && signupPath.rewrite.includes("/platform-site/signup"), `${apiPath.status} ${signupPath.status} ${signupPath.location}`);
+      ok("  a disabled redirect does nothing, and a POST is never redirected", !off.location && off.rewrite.includes("/platform-site/zz-off") && !posted.location.includes("/pricing"));
+      ok("  hits are counted in memory and written in one go per redirect", (await redirects.flushRedirectHits()) === 2 && (await control.siteRedirect.findUniqueOrThrow({ where: { id: moved.id } })).hits === 1);
+      redirects.setTestRedirectLoader(async () => {
+        throw new Error("zz: the database is down");
+      });
+      const down = await go(ROOT, "/zz-old-page");
+      ok("  a database failure means no redirect: the page is served as usual", !down.location && down.rewrite.includes("/platform-site/zz-old-page"), `${down.status} ${down.location}`);
+      redirects.setTestRedirectLoader(() => new Promise<never>(() => {}));
+      const t0 = Date.now();
+      const hung = await go(ROOT, "/zz-old-page");
+      ok("  and one that never answers is waited for a moment only", !hung.location && hung.rewrite.includes("/platform-site/zz-old-page") && Date.now() - t0 < 2_000, `${Date.now() - t0} ms`);
+      let loads = 0;
+      redirects.setTestRedirectLoader(async () => {
+        loads += 1;
+        throw new Error("zz: the database is still down");
+      });
+      const whileDown = [await go(ROOT, "/zz-old-page"), await go(ROOT, "/zz-old-page"), await go(`www.${ROOT}`, "/zz-old-page")];
+      ok("  after a failure the database is left alone for a while, not asked again by every request — and every one is served", loads === 1 && whileDown.every((r) => !r.location && r.rewrite.includes("/platform-site/zz-old-page")), `${loads} loads`);
+      redirects.setTestRedirectLoader(null);
+
+      // More of the proxy's rules for redirects: www., HEAD, another site's address, the machinery, and back after a failure.
+      await control.siteRedirect.createMany({
+        data: [
+          { fromPath: "/zz-away", toUrl: "https://example.com/zz", status: 302, updatedBy: "script" },
+          // Rows the CMS refuses to save, written straight to the database.
+          { fromPath: "/_next/zz", toUrl: "/pricing", updatedBy: "script" },
+          { fromPath: "/signup/zz", toUrl: "/pricing", updatedBy: "script" },
+          { fromPath: "/zz-static.png", toUrl: "/pricing", updatedBy: "script" },
+          { fromPath: "/api/zz/*", toUrl: "/pricing/*", match: "PREFIX", updatedBy: "script" },
+        ],
+      });
+      redirects.invalidateRedirects();
+      await redirects.matchRedirect("/zz-old-page", { waitMs: 10_000 });
+      const back = await go(ROOT, "/zz-old-page");
+      ok("  once the redirects load again, they apply", back.status === 301 && back.location === `http://${ROOT}/pricing`, `${back.status} ${back.location}`);
+      const www = await go(`www.${ROOT}`, "/Zz-Old-Page?utm_source=zz");
+      ok("the www. host is the public site too: redirected there, on that host, never cached", www.status === 301 && www.location === `http://www.${ROOT}/pricing?utm_source=zz` && www.cache === "no-store", `${www.status} ${www.location} ${www.cache}`);
+      const head = await go(ROOT, "/zz-docs/a/b", "HEAD");
+      ok("  a HEAD is answered as a GET is", head.status === 308 && head.location === `http://${ROOT}/blog/a/b` && head.cache === "no-store", `${head.status} ${head.location}`);
+      const away = await go(ROOT, "/zz-away?ref=zz");
+      ok("  another site's address is used as it is — the visitor's query never goes with it", away.status === 302 && away.location === "https://example.com/zz" && away.cache === "no-store", `${away.status} ${away.location}`);
+      const machinery = [await go(ROOT, "/_next/zz"), await go(ROOT, "/signup/zz"), await go(ROOT, "/zz-static.png"), await go(ROOT, "/api/zz/x"), await go(`www.${ROOT}`, "/api/zz/x")];
+      ok("  never /_next, a page under the site's own routes, a static file or anything under /api, whatever the database holds", machinery.every((r) => !r.location), machinery.map((r) => `${r.status} ${r.location}`).join(" | "));
+      const prefixElsewhere = [await go(`zzsite-a.${ROOT}`, "/zz-docs/a"), await go(`admin.${ROOT}`, "/zz-docs/a"), await go(`cms.${ROOT}`, "/zz-docs/a"), await go(`partners.${ROOT}`, "/zz-docs/a"), await go(`zzsite-a.${ROOT}`, "/zz-away")];
+      ok("  a “starts with” one, or one to another site, applies on no other host either", prefixElsewhere.every((r) => !r.location.includes("/blog/") && !r.location.includes("example.com")), prefixElsewhere.map((r) => `${r.status} ${r.location}`).join(" | "));
+      await redirects.flushRedirectHits();
     } catch (err) {
       ok("the proxy can be called", false, err instanceof Error ? err.stack?.split("\n").slice(0, 4).join(" | ") : String(err));
     }

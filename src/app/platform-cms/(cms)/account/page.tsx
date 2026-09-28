@@ -45,7 +45,7 @@ export default async function CmsAccountPage() {
   const me = session.user;
   const caps = cmsCapsFor(me.role);
   const data = await loadAccount(me, session.sessionId, session.enrolled);
-  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, hideActor: true });
+  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish, hideActor: true });
 
   return (
     <>

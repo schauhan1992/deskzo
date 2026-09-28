@@ -26,6 +26,7 @@ import {
 } from "./types";
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
+import { noPasswordYet } from "@/lib/no-password";
 
 /**
  * User accounts, their roles, and the reporting line everything else is scoped against.
@@ -73,13 +74,19 @@ import { accountsChanged } from "@/lib/platform/account-hooks";
  * ## No password, ever
  *
  * There is no password column and nothing writes `passwordHash` on an existing account. A created one
- * gets a placeholder that is not a bcrypt hash and — the part that matters — is not 60 characters,
- * which is the length `bcrypt.compare` demands before it will even attempt a comparison. It returns
- * false without hashing anything, so nothing that can be typed into the login form matches. The
- * account exists, appears in the org chart and can be given work; it cannot be signed into until an
- * admin issues credentials through `createUser` in src/actions/user.ts, which is also where
- * `mustChangePassword` comes from. A bulk file that could set passwords is a bulk file that can mint
- * accounts somebody else already knows the password to.
+ * starts as every new account does: with no usable password (src/lib/no-password.ts) — a placeholder
+ * that is not a bcrypt hash and, the part that matters, not 60 characters, the length `bcrypt.compare`
+ * demands before it will even attempt a comparison. It returns false without hashing anything, so
+ * nothing that can be typed into the login form matches. The account exists, appears in the org chart
+ * and can be given work; it cannot be signed into until its person chooses a password from a setup
+ * link. A bulk file that could set passwords is a bulk file that can mint accounts somebody else
+ * already knows the password to.
+ *
+ * An import sends no email. Adding somebody by hand sends their setup email at once, but an import is
+ * as often a migration or a rehearsal of one as a day's new joiners, and a file of five hundred rows
+ * should not be five hundred emails as a side effect of pressing Commit. The accounts it creates show
+ * as "Invitation pending" on Users & access, where "Send setup email" sends each one's when the admin
+ * decides; and "Forgot your password?" on the sign-in page works for them too.
  *
  * ## No role an admin could not grant by hand
  *
@@ -122,12 +129,6 @@ import { accountsChanged } from "@/lib/platform/account-hooks";
  * behind it, so a file that closes a loop takes the application down with no way back in through the
  * application. `wouldCreateCycle` is checked before the value is ever proposed.
  */
-
-/**
- * Not a hash. Chosen for its length as much as its content: `bcrypt.compare` returns false for any
- * stored value that is not exactly 60 characters, without hashing anything, so this can never match.
- */
-const NO_PASSWORD = "no-password-set-by-import";
 
 async function loadUser(where: { userSeq: number } | { email: string }) {
   return db.user.findUnique({
@@ -389,11 +390,9 @@ export const usersImporter: Importer = {
           email: u.email,
           role: u.role,
           ...assignments,
-          // Unusable by construction, and flagged so the first real password has to be changed —
-          // the same state createUser leaves an account in, minus the temporary password nobody
-          // should be typing into a spreadsheet.
-          passwordHash: NO_PASSWORD,
-          mustChangePassword: true,
+          // Unusable by construction — the state createUser leaves an account in — until its person
+          // chooses their own password from a setup link. No email from here: see "No password, ever".
+          passwordHash: noPasswordYet(),
         },
         select: { id: true },
       });

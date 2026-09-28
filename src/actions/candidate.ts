@@ -2,7 +2,6 @@
 
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { Prisma, type CandidateStatus, type EmployeeDocumentType, type EmploymentType, type LetterType } from "@prisma/client";
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
@@ -19,6 +18,9 @@ import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
+import { actorContext } from "@/lib/authz/guards";
+import { sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
+import { noPasswordYet } from "@/lib/no-password";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -273,11 +275,15 @@ export async function revokeIntakeLink(id: string): Promise<ActionResult<null>> 
  *
  * What the candidate typed is applied here, not earlier — that is the whole reason it was held in
  * `intakeData` rather than written on arrival.
+ *
+ * The login starts with no usable password, and they're sent the setup email to choose their own
+ * (src/lib/account-setup.ts) — HR never knows it. When the email can't be sent, the setup link comes
+ * back (`setupUrl`) for HR to pass on, shown once and never stored.
  */
 export async function convertCandidate(
   id: string,
-  input: { joinedOn: string; employeeCode?: string; temporaryPassword: string; probationMonths?: number },
-): Promise<ActionResult<{ userId: string; tasks: number }>> {
+  input: { joinedOn: string; employeeCode?: string; probationMonths?: number },
+): Promise<ActionResult<{ userId: string; tasks: number } & SetupInvitation>> {
   const { user, allowed } = await requireHr();
   if (!allowed) return { ok: false, error: "Only HR can convert a candidate." };
 
@@ -290,10 +296,6 @@ export async function convertCandidate(
   if (!canConvert(candidate.status)) {
     return { ok: false, error: "Mark the offer accepted first — only somebody who has said yes can be converted." };
   }
-  if (input.temporaryPassword.length < 8) {
-    return { ok: false, error: "The temporary password needs at least 8 characters." };
-  }
-
   const clash = await db.user.findUnique({ where: { email: candidate.email }, select: { name: true } });
   if (clash) return { ok: false, error: `${clash.name} already has an account with that email.` };
   // Becoming an employee means an account, and an account takes a seat.
@@ -312,7 +314,6 @@ export async function convertCandidate(
   const probationMonths = input.probationMonths ?? 6;
   const probationEndsOn = new Date(joinedOn.getTime() + probationMonths * 30 * 86400000);
   const intake = (candidate.intakeData ?? {}) as Record<string, string | undefined>;
-  const passwordHash = await bcrypt.hash(input.temporaryPassword, 10);
 
   const created = await db.$transaction(async (tx) => {
     const newUser = await tx.user.create({
@@ -320,13 +321,12 @@ export async function convertCandidate(
         name: candidate.name,
         email: candidate.email,
         role: candidate.role,
-        passwordHash,
-        // They set their own on first sign-in; HR never knows the real one.
-        mustChangePassword: true,
+        // No usable password: they choose their own from the setup email, and HR never knows it.
+        passwordHash: noPasswordYet(),
         departmentId: candidate.departmentId,
         managerId: candidate.managerId,
       },
-      select: { id: true },
+      select: { id: true, name: true, email: true },
     });
 
     await tx.employeeProfile.create({
@@ -388,6 +388,8 @@ export async function convertCandidate(
     return newUser;
   });
   await accountsChanged([created.id], { by: `admin:${user.id}` });
+  // HR is handed the link, when the email can't be sent, only if they hold everything the new login does.
+  const invitation = await sendSetupInvitation(created, { by: await actorContext(user.id) });
 
   // Tasks are raised after the transaction: they are useful but not worth failing a conversion for.
   const hrPeople = await db.user.findMany({
@@ -436,7 +438,7 @@ export async function convertCandidate(
   });
   revalidatePath("/people");
   revalidatePath("/people/hiring");
-  return { ok: true, data: { userId: created.id, tasks: taskCount } };
+  return { ok: true, data: { userId: created.id, tasks: taskCount, ...invitation } };
 }
 
 // ─── Letters before employment ────────────────────────────────────────────────

@@ -103,6 +103,8 @@ export function AccessRoster({
                       </Badge>
                     )}
                     {!r.active && <Badge tone="red">Deactivated</Badge>}
+                    {/* No password chosen yet: they can't sign in until they use their setup email. */}
+                    {r.setupPending && <Badge tone="blue">Invitation pending</Badge>}
                   </div>
                   <span className="text-xs text-subtle">{r.email}</span>
                 </td>

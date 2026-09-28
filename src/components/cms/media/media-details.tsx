@@ -19,6 +19,9 @@ import { SidePane } from "@/components/ui/side-pane";
 import type { CmsCaps, MediaRow, MediaUsage } from "@/lib/cms/types";
 import { formatIstDateTime } from "@/lib/india-time";
 
+/** What each kind of place that uses an image is called in "Used in". */
+const USAGE_KIND: Record<MediaUsage["kind"], string> = { page: "Page", post: "Post", settings: "Site settings", category: "Category", tag: "Tag" };
+
 /**
  * One image's details, beside the library: the picture, its file name, type, size and dimensions,
  * who uploaded it and when, its address to copy, its alt text (writers change it here), where it is
@@ -116,10 +119,15 @@ function DetailsBody({ row, usage, caps, siteOrigin, onClose }: { row: MediaRow;
             {usage.map((u) => (
               <li key={`${u.kind}-${u.id}-${u.where}`} className="flex items-center justify-between gap-2 text-sm">
                 <Link href={u.href} className="inline-flex min-w-0 items-center gap-1 font-medium text-text hover:text-brand">
-                  <span className="truncate">{u.kind === "settings" ? "Site settings" : `${u.kind === "page" ? "Page" : "Post"}: ${u.title}`}</span>
+                  <span className="truncate">{u.kind === "settings" ? "Site settings" : `${USAGE_KIND[u.kind]}: ${u.title}`}</span>
                   <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                 </Link>
-                <StatusPill tone={u.where === "published" ? "success" : "warning"}>{u.where === "published" ? "Published" : "Draft"}</StatusPill>
+                {u.kind === "category" || u.kind === "tag" ? (
+                  // A category's or tag's sharing image is used by its archive page as soon as it is saved.
+                  <StatusPill tone="info">Sharing image</StatusPill>
+                ) : (
+                  <StatusPill tone={u.where === "published" ? "success" : "warning"}>{u.where === "published" ? "Published" : "Draft"}</StatusPill>
+                )}
               </li>
             ))}
           </ul>

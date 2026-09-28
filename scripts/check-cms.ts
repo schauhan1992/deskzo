@@ -23,6 +23,15 @@
  *     use cannot be deleted; the public route serves it with its stored type;
  *   · leads come from the contact form with its honeypot and limits intact;
  *   · a preview token shows the draft, and an expired, stale or tampered one does not;
+ *   · categories and tags: who may make and change them, one level of nesting, merging (the posts
+ *     move, a 301 is left), deleting, and the migration's backfill of old free-text tags; their
+ *     archives: published posts only, 12 a page, a subcategory's posts in its parent's, a 404 when
+ *     there is nothing, the canonical, the sitemap (never a redirect's source);
+ *   · redirects: how an address is keyed, exact and "starts with" matching, loops, long chains,
+ *     reserved sources, another site's address for admins only, javascript: and data: never, a
+ *     switched-off one ignored, hits written in batches, the 301 a live post's new address leaves,
+ *     CSV in and out, and the proxy applying them on the public site's hosts only — and the CMS's
+ *     screens and activity log showing all of it in words;
  *   · the activity log holds no document bodies, and no action result a hash, secret or token.
  *
  * No mail leaves: the platform mailer is replaced. No password is typed anywhere: the check makes its
@@ -31,6 +40,7 @@
 import "dotenv/config";
 import { createHash, randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import Module from "node:module";
 import path from "node:path";
 import bcrypt from "bcryptjs";
@@ -564,7 +574,10 @@ async function main() {
     ok("an author creates a post of their own", ownPost.ok && ownPost.data.author.id === author.id);
     const postInput = (title: string, slug: string, body: object[] = [{ id: "b", type: "richText", props: { content: [{ type: "paragraph", text: `${BODY_MARKER} post` }] } }]) => ({ title, slug, excerpt: "An excerpt.", coverMediaId: null, tags: ["News", "zz-tag"], body, seo: null });
     const ownSave = ownPost.ok ? await act(postActions.cmsSavePost(ownPost.data.id, { post: postInput("Zz Author's post", ownPost.data.slug) as never, version: ownPost.data.version })) : null;
-    ok("  and saves it (tags cleaned to lower case)", !!ownSave?.ok && (await control.sitePost.findUniqueOrThrow({ where: { id: ownPost.ok ? ownPost.data.id : "" } })).tags.join() === "news,zz-tag");
+    ok(
+      "  and saves it (its tags become tag records, by lower-case address)",
+      !!ownSave?.ok && (await control.sitePostTag.findMany({ where: { postId: ownPost.ok ? ownPost.data.id : "" }, select: { tag: { select: { slug: true } } } })).map((l) => l.tag.slug).sort().join() === "news,zz-tag",
+    );
     const othersSave = editorPost.ok ? await act(postActions.cmsSavePost(editorPost.data.id, { post: postInput("Mine now", editorPost.data.slug) as never, version: editorPost.data.version })) : null;
     const othersArchive = editorPost.ok ? await act(postActions.cmsArchivePost(editorPost.data.id)) : null;
     ok("  but not somebody else's, nor archive it", !!othersSave && !othersSave.ok && !!othersArchive && !othersArchive.ok);
@@ -940,6 +953,479 @@ async function main() {
     ok("  but not to somebody who is not a CMS admin", !(await act(consoleWebsite.consoleCmsAdminLink(editorId))).ok);
     await asStaff(staffRead.id);
     ok("read-only staff do not get the page", (await thrown(() => renderPage(WebsitePage))) === "notFound");
+
+    // ─── Categories, tags, archives and redirects ─────────────────────────────────────────────
+    // Everything here is this block's own: "zz-" categories, tags, posts and redirects made below, asserted by name.
+    {
+      const taxonomy = require("../src/lib/cms/taxonomy") as typeof import("../src/lib/cms/taxonomy");
+      const redirects = require("../src/lib/cms/redirects") as typeof import("../src/lib/cms/redirects");
+      const rules = require("../src/lib/cms/redirect-rules") as typeof import("../src/lib/cms/redirect-rules");
+      const categoryActions = require("../src/actions/cms/categories") as typeof import("../src/actions/cms/categories");
+      const tagActions = require("../src/actions/cms/tags") as typeof import("../src/actions/cms/tags");
+      const redirectActions = require("../src/actions/cms/redirects") as typeof import("../src/actions/cms/redirects");
+      const activityWords = require("../src/components/cms/common/activity") as typeof import("../src/components/cms/common/activity");
+      const { CMS_AUDIT_ACTIONS } = require("../src/lib/cms/types") as typeof import("../src/lib/cms/types");
+      const { NextRequest } = require("next/server") as typeof import("next/server");
+      const proxy = (require("../src/proxy") as { default: (req: unknown, ctx: unknown) => Promise<Response> }).default;
+      const sitemapOf = (require("../src/app/sitemap") as typeof import("../src/app/sitemap")).default;
+      type Route = { default: Page; generateMetadata: (props: unknown) => Promise<{ alternates?: { canonical?: unknown }; robots?: unknown }> };
+      const CategoryRoute = require("../src/app/platform-site/blog/category/[slug]/page") as Route;
+      const TagRoute = require("../src/app/platform-site/blog/tag/[slug]/page") as Route;
+      const said = (r: { ok: boolean; error?: string }) => (r.ok ? "ok" : (r.error ?? ""));
+      const idOf = (r: { ok: boolean; data?: { id: string } }) => (r.ok && r.data ? r.data.id : "");
+      const richBody = [{ id: "b", type: "richText", props: { content: [{ type: "paragraph", text: "Zz words" }] } }];
+
+      section("Categories and tags: who may do what");
+      await actAs(author.id);
+      const authorCategory = await act(categoryActions.cmsCreateCategory({ name: "Zz Author Category" }));
+      const authorTag = await act(tagActions.cmsCreateTag({ name: "Zz Author Tag" }));
+      ok("an author can make a tag but not a category", !authorCategory.ok && /role/i.test(said(authorCategory)) && authorTag.ok && authorTag.data.slug === "zz-author-tag", `${said(authorCategory)} | ${said(authorTag)}`);
+      const authorTagId = idOf(authorTag);
+      const authorTagChanges = [await act(tagActions.cmsUpdateTag(authorTagId, { name: "Zz Renamed" })), await act(tagActions.cmsMergeTags(authorTagId, authorTagId)), await act(tagActions.cmsDeleteTag(authorTagId))];
+      ok("  nor rename, merge or delete one", authorTagChanges.every((r) => !r.ok && /role/i.test(said(r))), authorTagChanges.map(said).join(" | "));
+      await actAs(viewer.id);
+      const viewerTag = await act(tagActions.cmsCreateTag({ name: "Zz Viewer Tag" }));
+      const viewerReads = await act(categoryActions.cmsListCategories());
+      ok("a viewer makes no tag, and reads the categories", !viewerTag.ok && /role/i.test(said(viewerTag)) && viewerReads.ok, said(viewerTag));
+      await actAs(editorId);
+      const guidesMade = await act(categoryActions.cmsCreateCategory({ name: "Zz Guides", description: "How we do things." }));
+      const guidesId = idOf(guidesMade);
+      const howToMade = await act(categoryActions.cmsCreateCategory({ name: "Zz How-to", parentId: guidesId }));
+      const howToId = idOf(howToMade);
+      const newsMade = await act(categoryActions.cmsCreateCategory({ name: "Zz News desk" }));
+      const newsId = idOf(newsMade);
+      ok(
+        "an editor makes a category: its address from its name, its archive's path",
+        guidesMade.ok && guidesMade.data.slug === "zz-guides" && guidesMade.data.path === "/blog/category/zz-guides" && guidesMade.data.parentId === null && newsMade.ok,
+        said(guidesMade),
+      );
+      const tree = await act(categoryActions.cmsListCategories());
+      const guidesNode = tree.ok ? tree.data.find((c) => c.id === guidesId) : undefined;
+      ok("  and a nested one, under its parent in the tree", howToMade.ok && howToMade.data.parentId === guidesId && guidesNode?.children.map((c) => c.slug).join() === "zz-how-to" && tree.ok && !tree.data.some((c) => c.id === howToId), said(howToMade));
+      const deeper = await act(categoryActions.cmsCreateCategory({ name: "Zz Too deep", parentId: howToId }));
+      ok("  one level only: nothing under a subcategory", !deeper.ok && /one level/i.test(said(deeper)), said(deeper));
+      const renamedCategory = await act(categoryActions.cmsUpdateCategory(newsId, { name: "Zz News" }));
+      ok("  renamed, it keeps its address (and with nothing live, leaves no redirect)", renamedCategory.ok && renamedCategory.data.name === "Zz News" && renamedCategory.data.slug === "zz-news-desk" && renamedCategory.data.redirect === null, said(renamedCategory));
+      const withChildren = await act(categoryActions.cmsDeleteCategory(guidesId));
+      ok("deleting a category that has a subcategory is refused, and it stays", !withChildren.ok && /subcategor/i.test(said(withChildren)) && !!(await control.siteCategory.findUnique({ where: { id: guidesId } })), said(withChildren));
+      const alphaId = idOf(await act(tagActions.cmsCreateTag({ name: "Zz Alpha" })));
+      const betaId = idOf(await act(tagActions.cmsCreateTag({ name: "Zz Beta" })));
+      const emptyTag = await act(tagActions.cmsCreateTag({ name: "Zz Empty" }));
+      const emptyRenamed = await act(tagActions.cmsUpdateTag(idOf(emptyTag), { name: "Zz Empty tag" }));
+      ok("an editor makes tags and renames one, its address kept", !!alphaId && !!betaId && emptyRenamed.ok && emptyRenamed.data.name === "Zz Empty tag" && emptyRenamed.data.slug === "zz-empty", said(emptyRenamed));
+
+      // The archives' posts, written straight to the database: 12 live in the subcategory, one live in the parent itself
+      // (the newest), and a draft, an archived and a scheduled one that must never show. All tagged Zz Alpha.
+      const nowMs = Date.now();
+      const archivePost = (slug: string, categories: string[], at: number, state: "live" | "draft" | "archived" | "scheduled" = "live") =>
+        control.sitePost.create({
+          data: {
+            slug,
+            title: `Zz ${slug}`,
+            excerpt: "An archive post.",
+            body: [],
+            status: state === "draft" ? "DRAFT" : state === "scheduled" ? "SCHEDULED" : "PUBLISHED",
+            publishAt: state === "draft" ? null : new Date(at),
+            publishedAt: state === "draft" || state === "scheduled" ? null : new Date(at),
+            archivedAt: state === "archived" ? new Date(nowMs) : null,
+            authorId: editorId,
+            updatedBy: "script",
+            categories: { create: categories.map((categoryId, position) => ({ categoryId, position })) },
+            tagLinks: { create: [{ tagId: alphaId }] },
+          },
+          select: { id: true, slug: true },
+        });
+      const numbered: { id: string; slug: string }[] = [];
+      for (let i = 1; i <= 12; i++) numbered.push(await archivePost(`zz-arch-${String(i).padStart(2, "0")}`, [howToId], nowMs - (i + 1) * 60_000));
+      await archivePost("zz-arch-own", [guidesId], nowMs - 30_000);
+      await archivePost("zz-arch-draft", [guidesId, newsId], nowMs, "draft");
+      await archivePost("zz-arch-archived", [howToId], nowMs - 10_000, "archived");
+      await archivePost("zz-arch-later", [howToId], nowMs + 3_600_000, "scheduled");
+      site.invalidateSiteContent();
+
+      const merged = await act(tagActions.cmsMergeTags(alphaId, betaId));
+      const movedPost = await control.sitePostTag.findMany({ where: { postId: numbered[0].id }, select: { tag: { select: { slug: true } } } });
+      ok(
+        "merging a tag moves its posts to the other and deletes it",
+        merged.ok && merged.data.moved === 16 && !(await control.siteTag.findUnique({ where: { id: alphaId } })) && (await control.sitePostTag.count({ where: { tagId: betaId } })) === 16 && movedPost.map((l) => l.tag.slug).join() === "zz-beta",
+        merged.ok ? `${merged.data.moved} moved` : said(merged),
+      );
+      const mergeRow = await control.siteRedirect.findUnique({ where: { fromPath: "/blog/tag/zz-alpha" } });
+      ok(
+        "  and leaves a 301 from its archive to the other's, made automatically",
+        merged.ok && merged.data.redirect?.from === "/blog/tag/zz-alpha" && merged.data.redirect.to === "/blog/tag/zz-beta" && mergeRow?.automatic === true && mergeRow.enabled && mergeRow.status === 301 && mergeRow.toUrl === "/blog/tag/zz-beta",
+        JSON.stringify(mergeRow),
+      );
+      ok("  which the site answers", (await redirects.matchRedirect("/blog/tag/zz-alpha", { waitMs: 10_000 }))?.target === "/blog/tag/zz-beta");
+      const doomedId = idOf(await act(categoryActions.cmsCreateCategory({ name: "Zz Doomed" })));
+      await control.sitePostCategory.create({ data: { postId: numbered[11].id, categoryId: doomedId, position: 1 } });
+      const doomedDelete = await act(categoryActions.cmsDeleteCategory(doomedId));
+      ok(
+        "a category without subcategories is deleted: its posts lose it, and stay",
+        doomedDelete.ok && !(await control.siteCategory.findUnique({ where: { id: doomedId } })) && (await control.sitePost.count({ where: { id: numbered[11].id } })) === 1 && (await control.sitePostCategory.findMany({ where: { postId: numbered[11].id } })).map((l) => l.categoryId).join() === howToId,
+        said(doomedDelete),
+      );
+      const authorTagGone = await act(tagActions.cmsDeleteTag(authorTagId));
+      ok("an editor deletes a tag", authorTagGone.ok && !(await control.siteTag.findUnique({ where: { id: authorTagId } })), said(authorTagGone));
+
+      section("The tag backfill: old free-text tags become records");
+      const existingTag = await act(tagActions.cmsCreateTag({ name: "Zz Existing" }));
+      const legacyPost = (slug: string, tags: string[]) => control.sitePost.create({ data: { slug, title: `Zz ${slug}`, body: [], authorId: editorId, updatedBy: "script", tags }, select: { id: true } });
+      const legacyA = await legacyPost("zz-legacy-a", ["Zz Legacy", "zz-legacy", "Zz Café Crème"]);
+      const legacyB = await legacyPost("zz-legacy-b", ["ZZ LEGACY", "---", "Zz Solo", "ZZ Existing"]);
+      const legacyC = await legacyPost("zz-legacy-c", []);
+      const migration = readFileSync(path.join(__dirname, "..", "prisma", "control", "migrations", "20261006100000_cms_taxonomy_redirects", "migration.sql"), "utf8");
+      const backfillAt = migration.indexOf("-- Written by hand: the backfill.");
+      // Its comments first (one has a semicolon in it), then one statement per semicolon.
+      const backfill = backfillAt < 0 ? [] : migration.slice(backfillAt).replace(/^[ \t]*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean);
+      ok("the migration's backfill, sliced from it: two statements", backfill.length === 2 && backfill.every((s) => s.startsWith("INSERT INTO")), backfill.length);
+      const slugsNow = async () => new Set((await control.siteTag.findMany({ select: { slug: true } })).map((t) => t.slug));
+      const tagsBefore = await slugsNow();
+      for (const statement of backfill) await control.$executeRawUnsafe(statement);
+      const added = [...(await slugsNow())].filter((s) => !tagsBefore.has(s)).sort();
+      const legacyTags = await control.siteTag.findMany({ where: { slug: { in: added } }, orderBy: { slug: "asc" }, select: { slug: true, name: true, updatedBy: true } });
+      ok(
+        "each distinct value is a tag, its address slugified as the app does it, named by the value that is its own address (else the first)",
+        JSON.stringify(legacyTags.map((t) => [t.slug, t.name])) === JSON.stringify([["zz-cafe-creme", "Zz Café Crème"], ["zz-legacy", "zz-legacy"], ["zz-solo", "Zz Solo"]]) &&
+          validate.slugify("Zz Café Crème", 60) === "zz-cafe-creme" &&
+          legacyTags.every((t) => t.updatedBy === "script"),
+        JSON.stringify(legacyTags.map((t) => [t.slug, t.name])),
+      );
+      ok("  a value that makes no address is left out; one matching a tag already there is that tag", existingTag.ok && added.length === 3 && !added.includes("zz-existing"), added.join());
+      const linksOf = async (postId: string) => (await control.sitePostTag.findMany({ where: { postId }, select: { tag: { select: { slug: true } } } })).map((l) => l.tag.slug).sort().join();
+      const joined = [await linksOf(legacyA.id), await linksOf(legacyB.id), await linksOf(legacyC.id)];
+      ok("  each post is joined to its tags, once each", joined.join(" | ") === "zz-cafe-creme,zz-legacy | zz-existing,zz-legacy,zz-solo | ", joined.join(" | "));
+      const joinsBefore = await control.sitePostTag.count();
+      for (const statement of backfill) await control.$executeRawUnsafe(statement);
+      ok("  run again, it adds nothing", (await slugsNow()).size === tagsBefore.size + 3 && (await control.sitePostTag.count()) === joinsBefore);
+      const legacyRefs = (await content.getPost(legacyB.id)).tagRefs.map((t) => t.name).sort();
+      ok("  and the CMS reads them as the post's tags", legacyRefs.join("|") === "Zz Existing|Zz Solo|zz-legacy", legacyRefs.join("|"));
+
+      section("Archives");
+      site.invalidateSiteContent();
+      const g1 = await taxonomy.categoryArchive("zz-guides", 1);
+      const g2 = await taxonomy.categoryArchive("zz-guides", "2");
+      const slugsIn = (a: { posts: { slug: string }[] } | null) => (a?.posts ?? []).map((p) => p.slug);
+      ok(
+        "a category's archive: 12 a page, newest first",
+        !!g1 && g1.posts.length === 12 && g1.total === 13 && g1.pages === 2 && slugsIn(g1)[0] === "zz-arch-own" && slugsIn(g1)[1] === "zz-arch-01" && slugsIn(g1)[11] === "zz-arch-11",
+        g1 ? `${g1.total} posts, ${g1.pages} pages: ${slugsIn(g1).slice(0, 3).join(", ")}…` : "none",
+      );
+      ok("  a subcategory's posts are in its parent's archive; the oldest on page 2", slugsIn(g1).filter((s) => /^zz-arch-\d\d$/.test(s)).length === 11 && !!g2 && g2.page === 2 && slugsIn(g2).join() === "zz-arch-12", slugsIn(g2).join());
+      const beta1 = await taxonomy.tagArchive("zz-beta");
+      const beta2 = await taxonomy.tagArchive("zz-beta", 2);
+      const everyListed = [...slugsIn(g1), ...slugsIn(g2), ...slugsIn(beta1), ...slugsIn(beta2)];
+      ok("  only published posts: never a draft, an archived or a scheduled one", everyListed.length === 26 && !everyListed.some((s) => ["zz-arch-draft", "zz-arch-archived", "zz-arch-later"].includes(s)), everyListed.length);
+      const child = await taxonomy.categoryArchive("zz-how-to");
+      ok("  exactly 12 live is one page, and its page 2 is nothing", !!child && child.total === 12 && child.pages === 1 && child.parent?.slug === "zz-guides" && (await taxonomy.categoryArchive("zz-how-to", 2)) === null, child ? `${child.total}/${child.pages}` : "none");
+      ok("a tag's archive: the merged posts, 12 a page", !!beta1 && beta1.kind === "tag" && beta1.total === 13 && beta1.posts.length === 12 && beta1.pages === 2 && slugsIn(beta2).join() === "zz-arch-12", beta1 ? `${beta1.total}` : "none");
+      ok(
+        "the canonical: page 1 (or ?page=1) is the bare path; page 2 its own, linked both ways",
+        g1?.canonical === "/blog/category/zz-guides" && (await taxonomy.categoryArchive("zz-guides", "1"))?.canonical === "/blog/category/zz-guides" && g2?.canonical === "/blog/category/zz-guides?page=2" && g1.next === g2.canonical && g2.prev === g1.canonical && beta1?.canonical === "/blog/tag/zz-beta",
+      );
+      at(ROOT);
+      const metaFor = (route: Route, slug: string, searchParams: Record<string, string>) => route.generateMetadata({ params: Promise.resolve({ slug }), searchParams: Promise.resolve(searchParams) });
+      const [meta0, meta1, meta2, metaTag1] = [await metaFor(CategoryRoute, "zz-guides", {}), await metaFor(CategoryRoute, "zz-guides", { page: "1" }), await metaFor(CategoryRoute, "zz-guides", { page: "2" }), await metaFor(TagRoute, "zz-beta", { page: "1" })];
+      ok(
+        "  and the page says so: ?page=1 canonicalises to the bare path, ?page=2 to itself",
+        meta0.alternates?.canonical === "/blog/category/zz-guides" && meta1.alternates?.canonical === "/blog/category/zz-guides" && meta2.alternates?.canonical === "/blog/category/zz-guides?page=2" && metaTag1.alternates?.canonical === "/blog/tag/zz-beta" && meta1.robots === undefined,
+        `${String(meta1.alternates?.canonical)} | ${String(meta2.alternates?.canonical)}`,
+      );
+      const archiveHtml = await renderPage(CategoryRoute.default, { slug: "zz-guides" }, { page: "1" });
+      ok("the archive renders: one h1, its name, its posts", (archiveHtml.match(/<h1/g) ?? []).length === 1 && archiveHtml.includes("Zz Guides") && archiveHtml.includes("Zz zz-arch-own") && archiveHtml.includes("Zz zz-arch-01") && !archiveHtml.includes("Zz zz-arch-draft"));
+      const missing = [
+        await thrown(() => renderPage(CategoryRoute.default, { slug: "zz-news-desk" })),
+        await thrown(() => renderPage(TagRoute.default, { slug: "zz-empty" })),
+        await thrown(() => renderPage(CategoryRoute.default, { slug: "zz-guides" }, { page: "3" })),
+        await thrown(() => renderPage(CategoryRoute.default, { slug: "zz-no-such" })),
+        await thrown(() => renderPage(TagRoute.default, { slug: "zz-alpha" })),
+      ];
+      ok("404 when there is nothing: a category with only a draft, a tag with no posts, a page past the last, an unknown category, a merged-away tag", missing.every((e) => e === "notFound"), missing.join(", "));
+      // A redirect made by hand from a live post's own address: the post is still published, but its address now redirects.
+      await actAs(editorId);
+      const byHand = await act(redirectActions.cmsCreateRedirect({ from: "/blog/zz-arch-05", to: "/blog" }));
+      site.invalidateSiteContent();
+      at(ROOT);
+      const mapped = (await sitemapOf()).map((e) => new URL(e.url).pathname);
+      at(CMS);
+      ok("the sitemap lists the archives with a published post", ["/blog/category/zz-guides", "/blog/category/zz-how-to", "/blog/tag/zz-beta"].every((p) => mapped.includes(p)), mapped.filter((p) => p.startsWith("/blog/")).join(" "));
+      ok("  not those with nothing published", !mapped.includes("/blog/category/zz-news-desk") && !mapped.includes("/blog/tag/zz-empty") && !mapped.includes("/blog/tag/zz-existing"));
+      const enabledIndex = rules.indexRules(await control.siteRedirect.findMany({ where: { enabled: true }, select: { id: true, fromPath: true, toUrl: true, match: true } }));
+      const sources = mapped.filter((p) => {
+        const key = rules.normalisePath(p);
+        return !!key && rules.reservedSource(key) === null && rules.findRule(enabledIndex, key) !== null;
+      });
+      ok("  and never a redirect's source: not a merged tag's archive, nor a live post an editor has redirected", byHand.ok && !mapped.includes("/blog/tag/zz-alpha") && sources.length === 0, sources.join(" "));
+
+      section("Redirects: keys and matching");
+      const np = rules.normalisePath;
+      ok("normalisePath: lower case, no query, fragment or trailing slash", np("/Old/Page/?utm=1#top") === "/old/page" && np("/Zz-A/") === "/zz-a");
+      ok("  a leading slash added, doubled slashes made one", np("old//page///") === "/old/page" && np("//x") === "/x");
+      ok("  '/' stays '/', and a “starts with” keeps its /*", np("/") === "/" && np("/Docs/*") === "/docs/*" && np("/docs/*/") === "/docs/*");
+      ok("  a full address keeps only its path; an accent is keyed as a browser sends it", np("https://Old.Example/Café/?q=1") === "/caf%c3%a9" && np("/caf%C3%A9") === np("/café"));
+      ok("  nothing, spaces, control characters and non-strings are no path", np("") === null && np("   ") === null && np(`/a${String.fromCharCode(10)}b`) === null && np(`/a${String.fromCharCode(0)}`) === null && np(42) === null);
+      await actAs(editorId);
+      const exact = await act(redirectActions.cmsCreateRedirect({ from: "/Zz-Old/?x=1", to: "/zz-new" }));
+      const exactId = idOf(exact);
+      ok(
+        "an editor adds a redirect: its address keyed, 301 and exact unless said",
+        exact.ok && exact.data.fromPath === "/zz-old" && exact.data.toUrl === "/zz-new" && exact.data.status === 301 && exact.data.match === "EXACT" && exact.data.enabled && !exact.data.automatic && !exact.data.external,
+        said(exact),
+      );
+      const prefix = await act(redirectActions.cmsCreateRedirect({ from: "/zz-docs/*", to: "/zz-handbook/*", status: 308 }));
+      const prefixId = idOf(prefix);
+      const prefixApi = await act(redirectActions.cmsCreateRedirect({ from: "/zz-docs/api/*", to: "/zz-api-docs" }));
+      const prefixIntro = await act(redirectActions.cmsCreateRedirect({ from: "/zz-docs/intro", to: "/zz-start" }));
+      ok("  one from an address ending /* matches everything under it", prefix.ok && prefix.data.match === "PREFIX" && prefix.data.fromPath === "/zz-docs/*" && prefix.data.status === 308 && prefixApi.ok && prefixIntro.ok, said(prefix));
+      const m = (p: string) => redirects.matchRedirect(p, { waitMs: 10_000 });
+      const hitOld = await m("/ZZ-OLD/");
+      ok("EXACT: the address in any case, with a trailing slash", hitOld?.target === "/zz-new" && hitOld.status === 301 && hitOld.id === exactId, JSON.stringify(hitOld));
+      const [under, itself, intro, api] = [await m("/zz-docs/Guide/One"), await m("/zz-docs"), await m("/zz-docs/intro"), await m("/zz-docs/api/v2/Keys")];
+      ok("PREFIX: the rest of the path carried over as it was asked for, and the address itself", under?.target === "/zz-handbook/Guide/One" && under.status === 308 && itself?.target === "/zz-handbook", `${under?.target} | ${itself?.target}`);
+      ok("  an EXACT one first, then the longest PREFIX", intro?.target === "/zz-start" && api?.target === "/zz-api-docs", `${intro?.target} | ${api?.target}`);
+      ok("  nothing for an address none covers", (await m("/zz-docsx")) === null && (await m("/zz-nowhere")) === null);
+
+      section("Redirects: what can't be saved");
+      const loop = await act(redirectActions.cmsCreateRedirect({ from: "/zz-new", to: "/zz-old" }));
+      ok("a loop is refused (/zz-old → /zz-new → /zz-old)", !loop.ok && /loop/i.test(said(loop)), said(loop));
+      const loopA = await act(redirectActions.cmsCreateRedirect({ from: "/zz-loop-a", to: "/zz-loop-b" }));
+      const loopB = await act(redirectActions.cmsCreateRedirect({ from: "/zz-loop-b", to: "/zz-loop-c" }));
+      const loopC = await act(redirectActions.cmsCreateRedirect({ from: "/zz-loop-c", to: "/zz-loop-a" }));
+      ok("  and one through three", loopA.ok && loopB.ok && !loopC.ok && /loop/i.test(said(loopC)), said(loopC));
+      const hops = [await act(redirectActions.cmsCreateRedirect({ from: "/zz-h1", to: "/zz-h2" })), await act(redirectActions.cmsCreateRedirect({ from: "/zz-h2", to: "/zz-h3" })), await act(redirectActions.cmsCreateRedirect({ from: "/zz-h3", to: "/zz-h4" }))];
+      const fourthAfter = await act(redirectActions.cmsCreateRedirect({ from: "/zz-h4", to: "/zz-h5" }));
+      const fourthBefore = await act(redirectActions.cmsCreateRedirect({ from: "/zz-h0", to: "/zz-h1" }));
+      ok("a chain of three is allowed; a fourth hop is refused, after it or before it", hops.every((r) => r.ok) && !fourthAfter.ok && /chain of 4/.test(said(fourthAfter)) && !fourthBefore.ok && /chain of 4/.test(said(fourthBefore)), `${said(fourthAfter)} | ${said(fourthBefore)}`);
+      const chained = await act(redirectActions.cmsListRedirects({ chained: true, q: "/zz-h" }));
+      const h1Row = chained.ok ? chained.data.rows.find((r) => r.fromPath === "/zz-h1") : undefined;
+      ok("  the chain is flagged in the list, with where to point it", h1Row?.chain?.hops === 3 && h1Row.chain.final === "/zz-h4", JSON.stringify(h1Row?.chain));
+      const signup = await act(redirectActions.cmsCreateRedirect({ from: "/signup", to: "/zz-new" }));
+      ok("a source that is the site's own page is refused, in the spec's words", !signup.ok && said(signup).startsWith("That page is part of the site and can't be redirected"), said(signup));
+      const reservedTries: string[] = [];
+      for (const from of ["/Pricing/", "/partners/zz", "/", "/*", "/api/zz", "/_next/zz", "/media/zz", "/zz-logo.png", "/robots.txt"]) {
+        const r = await act(redirectActions.cmsCreateRedirect({ from, to: "/zz-new" }));
+        if (r.ok) reservedTries.push(from);
+      }
+      ok("  so are its pages under them, the home page, the whole site, /api, /_next, the media, static files and robots.txt", reservedTries.length === 0, reservedTries.join(" "));
+      const editorExternal = await act(redirectActions.cmsCreateRedirect({ from: "/zz-ext", to: "https://example.com/zz" }));
+      ok("another site's address: refused for an editor", !editorExternal.ok && /admin/i.test(said(editorExternal)) && !(await control.siteRedirect.findUnique({ where: { fromPath: "/zz-ext" } })), said(editorExternal));
+      await actAs(adminRow.id);
+      const adminExternal = await act(redirectActions.cmsCreateRedirect({ from: "/zz-ext", to: "https://Example.COM/zz" }));
+      ok("  allowed for an admin, normalised and marked as another site's", adminExternal.ok && adminExternal.data.external && adminExternal.data.toUrl === "https://example.com/zz", said(adminExternal));
+      const scripted: string[] = [];
+      for (const to of ["javascript:alert(1)", " JavaScript:alert(1)", `java${String.fromCharCode(9)}script:alert(1)`, "data:text/html,<script>alert(1)</script>", "DATA:text/html;base64,PHNjcmlwdD4=", "http://example.com/zz", "//example.com/zz", "/\\example.com/zz", "https:example.com"]) {
+        const r = await act(redirectActions.cmsCreateRedirect({ from: "/zz-js", to }));
+        if (r.ok) scripted.push(to);
+      }
+      ok("  javascript:, data:, http: and tricks to leave the site are refused, even for an admin", scripted.length === 0 && !(await control.siteRedirect.findUnique({ where: { fromPath: "/zz-js" } })), scripted.join(" "));
+      await actAs(editorId);
+      const editorMoves = await act(redirectActions.cmsUpdateRedirect(idOf(adminExternal), { to: "https://example.org/zz" }));
+      const editorOff = await act(redirectActions.cmsUpdateRedirect(idOf(adminExternal), { enabled: false }));
+      const editorOn = await act(redirectActions.cmsUpdateRedirect(idOf(adminExternal), { enabled: true }));
+      ok("  an editor may switch the admin's off, but not point it elsewhere nor switch it back on", !editorMoves.ok && editorOff.ok && !editorOff.data.enabled && !editorOn.ok, `${said(editorMoves)} | ${said(editorOn)}`);
+
+      section("Redirects: switched off, and hits");
+      const switchedOff = await act(redirectActions.cmsUpdateRedirect(exactId, { enabled: false }));
+      ok("a switched-off redirect is ignored", switchedOff.ok && !switchedOff.data.enabled && (await m("/zz-old")) === null && (await m("/zz-ext")) === null);
+      const switchedOn = await act(redirectActions.cmsUpdateRedirect(exactId, { enabled: true }));
+      ok("  and applies again once switched back on", switchedOn.ok && (await m("/zz-old"))?.target === "/zz-new");
+      await redirects.flushRedirectHits();
+      const hitsOf = (id: string) => control.siteRedirect.findUniqueOrThrow({ where: { id }, select: { hits: true, lastHitAt: true } });
+      const [exactBefore, prefixBefore] = [await hitsOf(exactId), await hitsOf(prefixId)];
+      const hitAt = Date.now();
+      for (let i = 0; i < 3; i++) redirects.recordHit(exactId);
+      redirects.recordHit(prefixId);
+      ok("hits are counted in memory at once, not written one by one", redirects.pendingRedirectHits() === 2 && (await hitsOf(exactId)).hits === exactBefore.hits);
+      const writes = await redirects.flushRedirectHits();
+      const exactAfter = await hitsOf(exactId);
+      ok(
+        "  a flush writes each redirect once: 2 writes for 4 hits",
+        writes === 2 && exactAfter.hits === exactBefore.hits + 3 && (await hitsOf(prefixId)).hits === prefixBefore.hits + 1 && redirects.pendingRedirectHits() === 0,
+        `${writes} writes, ${exactAfter.hits - exactBefore.hits} hits`,
+      );
+      ok("  with the last hit's time", !!exactAfter.lastHitAt && Math.abs(exactAfter.lastHitAt.getTime() - hitAt) < 60_000, exactAfter.lastHitAt?.toISOString());
+      ok("  and a flush with nothing counted writes nothing", (await redirects.flushRedirectHits()) === 0);
+
+      section("Redirects: the one a new address leaves");
+      const movesId = idOf(await act(categoryActions.cmsCreateCategory({ name: "Zz Moves" })));
+      const moving = await act(postActions.cmsCreatePost({ title: "Zz Moving post" }));
+      const movingId = idOf(moving);
+      const firstSlug = moving.ok ? moving.data.slug : "";
+      const moveInput = (slug: string) => ({ title: "Zz Moving post", slug, excerpt: "It moves.", coverMediaId: null, tags: ["Zz Gamma", "zz-beta"], categories: [movesId, newsId], body: richBody, seo: null });
+      const savedA = moving.ok ? await act(postActions.cmsSavePost(movingId, { post: moveInput("zz-moving-a") as never, version: moving.data.version })) : null;
+      const movingCats = (await control.sitePostCategory.findMany({ where: { postId: movingId }, orderBy: { position: "asc" }, select: { categoryId: true } })).map((c) => c.categoryId);
+      const movingTags = await linksOf(movingId);
+      ok("a post's save writes its categories in order, the main one first, and its tags as records", !!savedA?.ok && movingCats.join() === [movesId, newsId].join() && movingTags === "zz-beta,zz-gamma", `${movingCats.length} categories; tags ${movingTags}`);
+      ok("  a draft's new address leaves no redirect", !!savedA?.ok && savedA.data.redirect === null && !(await control.siteRedirect.findUnique({ where: { fromPath: `/blog/${firstSlug}` } })));
+      const livePost = await act(postActions.cmsPublishPost(movingId, {}));
+      const savedB = livePost.ok ? await act(postActions.cmsSavePost(movingId, { post: moveInput("zz-moving-b") as never, version: livePost.data.version })) : null;
+      const autoRow = await control.siteRedirect.findUnique({ where: { fromPath: "/blog/zz-moving-a" } });
+      ok(
+        "a published post's new address leaves an automatic 301 from the old one",
+        !!savedB?.ok && savedB.data.redirect?.from === "/blog/zz-moving-a" && savedB.data.redirect.to === "/blog/zz-moving-b" && savedB.data.redirect.created && autoRow?.automatic === true && autoRow.status === 301 && autoRow.match === "EXACT" && autoRow.enabled && autoRow.toUrl === "/blog/zz-moving-b",
+        savedB?.ok ? JSON.stringify(savedB.data.redirect) : savedB ? said(savedB) : said(livePost),
+      );
+      ok("  which the site answers", (await m("/blog/zz-moving-a"))?.target === "/blog/zz-moving-b");
+      const savedBack = savedB?.ok ? await act(postActions.cmsSavePost(movingId, { post: moveInput("zz-moving-a") as never, version: savedB.data.version })) : null;
+      const between = await control.siteRedirect.findMany({ where: { fromPath: { in: ["/blog/zz-moving-a", "/blog/zz-moving-b"] } } });
+      ok(
+        "  changing it back updates that redirect rather than adding another",
+        !!savedBack?.ok && savedBack.data.redirect?.created === false && savedBack.data.redirect.id === autoRow?.id && between.length === 1 && between[0].fromPath === "/blog/zz-moving-b" && between[0].toUrl === "/blog/zz-moving-a" && between[0].automatic,
+        between.map((r) => `${r.fromPath}→${r.toUrl}`).join(" "),
+      );
+      ok("  and the post's own address is not redirected", (await m("/blog/zz-moving-a")) === null && (await m("/blog/zz-moving-b"))?.target === "/blog/zz-moving-a");
+      const movingPage = await act(pageActions.cmsCreatePage({ slug: "zz-moving-page", title: "Zz Moving page" }));
+      if (movingPage.ok) await act(pageActions.cmsPublishPage(movingPage.data.id, { document: pageDoc("Zz Moving page") as never, force: true }));
+      const pageMoved = movingPage.ok ? await act(pageActions.cmsChangePageSlug(movingPage.data.id, "zz-moved-page")) : null;
+      ok("a published page's new address leaves one too", !!pageMoved?.ok && pageMoved.data.redirect?.from === "/zz-moving-page" && pageMoved.data.redirect.to === "/zz-moved-page", pageMoved ? (pageMoved.ok ? JSON.stringify(pageMoved.data.redirect) : said(pageMoved)) : said(movingPage));
+
+      section("Redirects: the proxy applies them on the public site only");
+      const go = async (h: string, pathAndQuery: string) => {
+        const res = await proxy(new NextRequest(`http://${h}${pathAndQuery}`, { headers: { host: h, "user-agent": "Mozilla/5.0 (check:cms)" } }), {});
+        return { status: res.status, location: res.headers.get("location") ?? "", cache: res.headers.get("cache-control") ?? "", rewrite: res.headers.get("x-middleware-rewrite") ?? "" };
+      };
+      await m("/zz-old");
+      const onRoot = await go(ROOT, "/Zz-Old?ref=zz");
+      ok("a redirect saved in the CMS answers on the site's host: its status, its target with the query, never cached", onRoot.status === 301 && onRoot.location === `http://${ROOT}/zz-new?ref=zz` && onRoot.cache === "no-store", `${onRoot.status} ${onRoot.location} ${onRoot.cache}`);
+      const onWww = await go(`www.${ROOT}`, "/zz-docs/Guide");
+      ok("  and on www., there", onWww.status === 308 && onWww.location === `http://www.${ROOT}/zz-handbook/Guide` && onWww.cache === "no-store", `${onWww.status} ${onWww.location}`);
+      const elsewhere = [await go(`zzcms-a.${ROOT}`, "/zz-old"), await go(CONSOLE, "/zz-old"), await go(CMS, "/zz-old"), await go(`partners.${ROOT}`, "/zz-old")];
+      ok("  but not on a workspace's host, the console's, the CMS's or the partner portal's", elsewhere.every((r) => !r.location.includes("zz-new")), elsewhere.map((r) => `${r.status} ${r.location}`).join(" | "));
+      // Rows the CMS refuses to save, written straight to the database: still never applied.
+      await control.siteRedirect.createMany({ data: [{ fromPath: "/api/zz-cms", toUrl: "/zz-new", updatedBy: "script" }, { fromPath: "/signup", toUrl: "/zz-new", updatedBy: "script" }] });
+      redirects.invalidateRedirects();
+      await m("/zz-old");
+      const [apiTry, signupTry] = [await go(ROOT, "/api/zz-cms"), await go(ROOT, "/signup")];
+      ok("  never /api or /signup, even with such a row in the database", !apiTry.location && !signupTry.location && signupTry.rewrite.includes("/platform-site/signup"), `${apiTry.status} ${signupTry.status} ${signupTry.location}`);
+      await control.siteRedirect.deleteMany({ where: { fromPath: { in: ["/api/zz-cms", "/signup"] } } });
+      redirects.invalidateRedirects();
+      redirects.setTestRedirectLoader(async () => {
+        throw new Error("zz: the database is down");
+      });
+      let downPage = "";
+      let down = { status: 0, location: "", cache: "", rewrite: "" };
+      try {
+        down = await go(ROOT, "/blog/zz-arch-05");
+        at(ROOT);
+        downPage = await renderPage(PostPage, { slug: "zz-arch-05" });
+      } finally {
+        redirects.setTestRedirectLoader(null);
+        at(CMS);
+      }
+      ok("the redirects failing to load means no redirect: the request goes on, and the page renders", !down.location && down.rewrite.includes("/platform-site/blog/zz-arch-05") && downPage.includes("Zz zz-arch-05"), `${down.status} ${down.location} ${down.rewrite}`);
+      await m("/blog/zz-arch-05");
+      const recovered = await go(ROOT, "/blog/zz-arch-05");
+      ok("  and once they load again, it redirects", recovered.status === 301 && recovered.location === `http://${ROOT}/blog`, `${recovered.status} ${recovered.location}`);
+      await redirects.flushRedirectHits();
+
+      section("Redirects as CSV");
+      await act(redirectActions.cmsUpdateRedirect(exactId, { note: '=HYPERLINK("http://evil.example")' }));
+      await act(redirectActions.cmsUpdateRedirect(idOf(prefixApi), { note: "+SUM(1,2)" }));
+      await act(redirectActions.cmsUpdateRedirect(idOf(prefixIntro), { note: "@zz" }));
+      const exported = await act(redirectActions.cmsExportRedirects());
+      const csvText = exported.ok ? exported.data.csv : "";
+      ok(
+        "export: from, to, status, match, note; CRLF; every redirect; formulas guarded",
+        exported.ok && csvText.startsWith("from,to,status,match,note\r\n") && exported.data.rows === (await control.siteRedirect.count()) && csvText.includes("'=HYPERLINK(") && csvText.includes("'+SUM(1,2)") && csvText.includes("'@zz") && !/(^|,)"?=HYPERLINK/m.test(csvText),
+        csvText.split("\r\n").find((l) => l.includes("HYPERLINK")),
+      );
+      const roundTrip = await act(redirectActions.cmsPreviewRedirectImport(csvText));
+      ok(
+        "  read back, the guard comes off: every row unchanged, the formula its own text again",
+        roundTrip.ok && exported.ok && roundTrip.data.rows.length === exported.data.rows && roundTrip.data.counts.unchanged === roundTrip.data.rows.length && roundTrip.data.rows.find((r) => r.from === "/zz-old")?.note === '=HYPERLINK("http://evil.example")',
+        roundTrip.ok ? JSON.stringify(roundTrip.data.counts) : said(roundTrip),
+      );
+      const importText = [
+        "from,to,status,match,note",
+        "/zz-csv-new,/zz-csv-target,,,",
+        "/ZZ-OLD,/zz-newer,302,exact,changed by import",
+        "/signup,/zz-x,,,",
+        "/zz-csv-ext,https://example.com/zz,,,",
+        "/zz-csv-loop-a,/zz-csv-loop-b,,,",
+        "/zz-csv-loop-b,/zz-csv-loop-a,,,",
+        "/zz-csv-new,/zz-csv-other,,,",
+        "/zz-csv-p/*,/zz-csv-q/*,,prefix,",
+        "'=zz-formula,/zz-csv-target,,,",
+        "/zz-csv-js,javascript:alert(1),,,",
+      ].join("\r\n");
+      const previewed = await act(redirectActions.cmsPreviewRedirectImport(importText));
+      const outcomes = previewed.ok ? previewed.data.rows.map((r) => `${r.line}:${r.outcome}`).join(" ") : said(previewed);
+      ok(
+        "import preview: created, updated, refused (the site's own page, another site for an editor, a loop, a repeat, javascript:)",
+        outcomes === "2:create 3:update 4:refuse 5:refuse 6:refuse 7:refuse 8:refuse 9:create 10:create 11:refuse",
+        outcomes,
+      );
+      ok("  a preview writes nothing", !(await control.siteRedirect.findUnique({ where: { fromPath: "/zz-csv-new" } })) && (await control.siteRedirect.findUniqueOrThrow({ where: { fromPath: "/zz-old" } })).toUrl === "/zz-new");
+      const importsBefore = await control.cmsAuditLog.count({ where: { action: "redirect.import" } });
+      const imported = await act(redirectActions.cmsImportRedirects(importText));
+      const oldNow = await control.siteRedirect.findUniqueOrThrow({ where: { fromPath: "/zz-old" } });
+      ok(
+        "import applies what the preview said and skips the refused",
+        imported.ok && imported.data.applied && imported.data.counts.create === 3 && imported.data.counts.update === 1 && imported.data.counts.refuse === 6 && oldNow.status === 302 && oldNow.toUrl === "/zz-newer" && !!(await control.siteRedirect.findUnique({ where: { fromPath: "/zz-csv-p/*" } })) && !(await control.siteRedirect.findUnique({ where: { fromPath: "/zz-csv-ext" } })),
+        imported.ok ? JSON.stringify(imported.data.counts) : said(imported),
+      );
+      ok("  a guarded formula comes in as its plain value: the path /=zz-formula", !!(await control.siteRedirect.findUnique({ where: { fromPath: "/=zz-formula" } })));
+      ok("  one line in the activity log for the file", (await control.cmsAuditLog.count({ where: { action: "redirect.import" } })) === importsBefore + 1);
+      const tooBig = await act(redirectActions.cmsPreviewRedirectImport(["from,to", ...Array.from({ length: 1001 }, (_, i) => `/zz-big-${i},/zz-x`)].join("\n")));
+      ok("  a file of more than 1,000 rows is refused", !tooBig.ok && /1,000/.test(said(tooBig)), said(tooBig));
+      const byHandGone = await act(redirectActions.cmsDeleteRedirect(idOf(byHand)));
+      ok("a redirect is deleted", byHandGone.ok && !(await control.siteRedirect.findUnique({ where: { fromPath: "/blog/zz-arch-05" } })) && (await m("/blog/zz-arch-05")) === null, said(byHandGone));
+
+      section("The CMS's screens: categories, tags, redirects, and the activity they leave");
+      await actAs(editorId);
+      const [categoriesHtml, tagsHtml, redirectsHtml] = [await renderPage(cmsScreen("(cms)/categories/page")), await renderPage(cmsScreen("(cms)/tags/page")), await renderPage(cmsScreen("(cms)/redirects/page"))];
+      ok(
+        "an editor's Categories, Tags and Redirects screens render what was made here",
+        categoriesHtml.includes("Zz Guides") && categoriesHtml.includes("Zz How-to") && tagsHtml.includes("Zz Beta") && tagsHtml.includes("Zz Empty tag") && redirectsHtml.includes("/zz-docs/*") && redirectsHtml.includes("/zz-handbook/*"),
+      );
+      const newActions = CMS_AUDIT_ACTIONS.filter((a) => /^(category|tag|redirect)\./.test(a));
+      ok(`each of the ${newActions.length} new actions has a label of its own`, newActions.length === 11 && newActions.every((a) => !!activityWords.CMS_ACTION_LABELS[a]?.label && activityWords.actionLabel(a).label !== a));
+      const loggedActions = new Set((await control.cmsAuditLog.findMany({ where: { action: { in: newActions } }, select: { action: true } })).map((a) => a.action));
+      ok("  and every one of them was written to the log by this section", newActions.every((a) => loggedActions.has(a)), newActions.filter((a) => !loggedActions.has(a)).join(", "));
+      const unread: string[] = [];
+      for (const action of newActions) {
+        try {
+          const html = await renderPage(ActivityScreen, {}, { action });
+          const rows = (html.match(/<time dateTime=/g) ?? []).length;
+          if (!rows || !html.includes(activityWords.actionLabel(action).label) || html.includes("Nothing matches those filters")) unread.push(`${action}: ${rows} rows`);
+        } catch (err) {
+          unread.push(`${action}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
+        }
+      }
+      ok("the activity page renders each of them, in words", unread.length === 0, unread.join(" | "));
+      const kinds = [await renderPage(ActivityScreen, {}, { kind: "category" }), await renderPage(ActivityScreen, {}, { kind: "tag" }), await renderPage(ActivityScreen, {}, { kind: "redirect" })];
+      ok("  filtered by kind — categories, tags, redirects — each with its rows, linked to its screen", kinds[0].includes('href="/categories"') && kinds[1].includes('href="/tags"') && kinds[2].includes('href="/redirects"') && kinds.every((h) => (h.match(/<time dateTime=/g) ?? []).length > 0));
+      await actAs(viewer.id);
+      const viewerActivity = await renderPage(ActivityScreen, {}, { kind: "redirect" });
+      ok("  a viewer reads them too, with no link to Redirects", (viewerActivity.match(/<time dateTime=/g) ?? []).length > 0 && !viewerActivity.includes('href="/redirects"'));
+      const newRows = await control.cmsAuditLog.findMany({ where: { action: { in: newActions } } });
+      let feedProblem = "";
+      try {
+        const items = activityWords.activityFeedItems(
+          newRows.map((r) => ({ ...r, detail: (r.detail as Record<string, unknown> | null) ?? null })),
+          { canOpenUsers: true, canOpenSecurity: true, canOpenRedirects: true },
+        );
+        feedProblem = items.filter((i) => !i.title || newActions.some((a) => i.title.startsWith(a))).map((i) => i.title).join(" | ");
+      } catch (err) {
+        feedProblem = err instanceof Error ? err.message : String(err);
+      }
+      ok(`every one of their ${newRows.length} rows reads as words in a feed, never as the raw action`, newRows.length > 20 && feedProblem === "", feedProblem);
+      await actAs(editorId);
+      const latest = await control.cmsAuditLog.findFirstOrThrow({ orderBy: [{ at: "desc" }, { id: "desc" }], select: { action: true } });
+      let dashboardHtml = "";
+      const dashboardError = await thrown(async () => {
+        dashboardHtml = await renderPage(DashboardScreen);
+      });
+      ok(
+        "the dashboard renders, its recent activity in words (the latest: a new action)",
+        dashboardError === "" && dashboardHtml.includes("Recent activity") && (newActions as readonly string[]).includes(latest.action) && dashboardHtml.includes(activityWords.actionLabel(latest.action).label),
+        dashboardError || latest.action,
+      );
+      await actAs(adminRow.id);
+      const adminDashboardError = await thrown(() => renderPage(DashboardScreen));
+      const adminActivityError = await thrown(() => renderPage(ActivityScreen));
+      ok("  as the admin's, and the admin's activity page", adminDashboardError === "" && adminActivityError === "", `${adminDashboardError} ${adminActivityError}`);
+    }
 
     // ─── What was kept ────────────────────────────────────────────────────────────────────────
     section("The activity log, and what actions hand back");

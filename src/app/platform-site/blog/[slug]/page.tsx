@@ -16,7 +16,16 @@ export async function generateMetadata({ params }: PageProps<"/platform-site/blo
     title,
     description,
     alternates: { canonical: post.path },
-    openGraph: { type: "article", title, description, url: post.path, publishedTime: post.publishedAt.toISOString(), tags: post.tags, images: image ? [image] : undefined },
+    openGraph: {
+      type: "article",
+      title,
+      description,
+      url: post.path,
+      publishedTime: post.publishedAt.toISOString(),
+      section: post.categories[0]?.name,
+      tags: post.tagLinks.map((t) => t.name),
+      images: image ? [image] : undefined,
+    },
     twitter: { card: image ? "summary_large_image" : "summary", title, description },
     robots: post.seo?.noindex ? { index: false, follow: false } : undefined,
   };

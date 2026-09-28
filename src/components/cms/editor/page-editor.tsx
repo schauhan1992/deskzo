@@ -40,7 +40,8 @@ import { ActionNotice } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label } from "@/components/ui/input";
-import type { CmsCaps, CmsIssue, MediaRow, PageDetail, PageDocument, PageSaved, PageVersionRow } from "@/lib/cms/types";
+import { CMS_ROUTES } from "@/lib/cms/nav";
+import type { AutoRedirect, CmsCaps, CmsIssue, MediaRow, PageDetail, PageDocument, PageSaved, PageVersionRow } from "@/lib/cms/types";
 import { checkPageDocument, PAGE_SLUG, stableJson } from "@/lib/cms/validate";
 import { formatIstDateTime } from "@/lib/india-time";
 
@@ -158,6 +159,8 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [slugInput, setSlugInput] = useState(page.slug);
+  /** The 301 the last move of a published page left behind, for its banner. */
+  const [moved, setMoved] = useState<AutoRedirect | null>(null);
   const [busy, startBusy] = useTransition();
 
   const setOpen = (id: string, open: boolean) =>
@@ -366,9 +369,19 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
           notice.show("error", result.error);
           return;
         }
+        const oldPath = meta.path;
         setMeta((m) => ({ ...m, slug: result.data.slug, path: `/${result.data.slug}` }));
         setSlugInput(result.data.slug);
-        notice.show("success", `The page is at /${result.data.slug} now. The old address no longer works — update any links to it.`);
+        const redirect = result.data.redirect;
+        if (redirect) setMoved(redirect);
+        notice.show(
+          "success",
+          redirect
+            ? `The page is at /${result.data.slug} now. A redirect was created from ${redirect.from}, so old links still work.`
+            : meta.status === "PUBLISHED"
+              ? `The page is at /${result.data.slug} now. No redirect could be made from ${oldPath} — update any links to it, or add one in Redirects.`
+              : `The page is at /${result.data.slug} now.`,
+        );
       } catch {
         notice.show("error", "The address didn't change. Try again.");
       }
@@ -545,6 +558,22 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
           The fields are marked below{grouped.document.length ? `, and ${grouped.document.length === 1 ? "one is" : "some are"} in Page settings` : ""}.
         </EditorBanner>
       )}
+      {moved && (
+        <EditorBanner
+          tone="success"
+          title={`A redirect was created from ${moved.from}`}
+          action={
+            <Button type="button" variant="ghost" size="sm" onClick={() => setMoved(null)}>
+              Dismiss
+            </Button>
+          }
+        >
+          {`Anyone who asks for ${moved.from} — an old link, a search engine — is sent to ${moved.to} (301, permanent)${moved.created ? "" : "; the redirect that was already there is updated"}. `}
+          <Link href={CMS_ROUTES.redirects} className="font-medium underline">
+            See the redirects
+          </Link>
+        </EditorBanner>
+      )}
       {publishCheck && publishIssues.length > 0 && !editor.serverIssues.length && (
         <EditorBanner tone="warning" title={`${publishIssues.length === 1 ? "One field needs" : `${publishIssues.length} fields need`} attention before publishing`} action={<Button type="button" variant="ghost" size="sm" onClick={() => setPublishCheck(false)}>Hide</Button>}>
           They are marked in red. Drafts can be saved as they are.
@@ -629,6 +658,7 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
               onMove={changeSlug}
               busy={busy}
               current={meta.slug}
+              published={meta.status === "PUBLISHED"}
               siteOrigin={siteOrigin}
             />
           </section>
@@ -756,6 +786,7 @@ function SlugSection({
   onMove,
   busy,
   current,
+  published,
   siteOrigin,
 }: {
   builtin: boolean;
@@ -766,6 +797,8 @@ function SlugSection({
   onMove: () => void;
   busy: boolean;
   current: string;
+  /** On the site now: moving it leaves a 301 from the old address. */
+  published: boolean;
   siteOrigin: string;
 }) {
   const clean = value.trim().toLowerCase().replace(/^\/+|\/+$/g, "");
@@ -797,7 +830,11 @@ function SlugSection({
         </Button>
       </div>
       <p id="page-slug-hint" className={!valid ? "text-xs text-danger" : "text-xs text-subtle"}>
-        {!valid ? "Lower-case words and hyphens, with / between levels — like about or solutions/retail." : "Moving it takes effect at once: the old address stops working."}
+        {!valid
+          ? "Lower-case words and hyphens, with / between levels — like about or solutions/retail."
+          : published
+            ? "Moving it takes effect at once, and a redirect from the old address is made for you — old links keep working."
+            : "Moving it takes effect at once."}
       </p>
     </div>
   );

@@ -24,6 +24,8 @@ import { ChangeHistory } from "@/components/settings/change-history";
 import { can } from "@/lib/authz/resolve";
 import { listUserBranchAssignments } from "@/actions/branch";
 import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
+import { linkedSignInEnabled } from "@/lib/platform/linked/groups";
+import { currentTenant } from "@/lib/tenancy/resolve";
 
 /**
  * Users & access, as four questions rather than one long page.
@@ -110,6 +112,9 @@ async function PeopleTab({ mayManage, viewerId }: { mayManage: boolean; viewerId
   ]);
   const allRoles = await roleKeys();
   const nonAdminRoles = allRoles.filter((r: Role) => r !== ADMIN_ROLE);
+  // The add dialog offers the one-step invite (set up here, and link it to the workspace they already use)
+  // only where linking can happen: a workspace in the control plane, with linked sign-in not paused.
+  const offerLinking = mayManage && (await currentTenant()).source === "control" && (await linkedSignInEnabled());
 
   return (
     <div className="space-y-6">
@@ -118,7 +123,7 @@ async function PeopleTab({ mayManage, viewerId }: { mayManage: boolean; viewerId
           How much of the app each person can reach. Open anybody to see every permission they hold and where it
           came from — their role, an exception somebody made for them, or a report they inherit it through.
         </p>
-        {mayManage && <NewUserDialog roles={nonAdminRoles} departments={departments} />}
+        {mayManage && <NewUserDialog roles={nonAdminRoles} departments={departments} offerLinking={offerLinking} />}
       </div>
 
       <AccessRoster rows={roster} mayManage={mayManage} />

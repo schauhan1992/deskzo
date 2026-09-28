@@ -1,4 +1,4 @@
-import { CMS_ADMINS, type CmsRole } from "@/lib/cms/types";
+import { CMS_ADMINS, CMS_PUBLISHERS, type CmsRole } from "@/lib/cms/types";
 
 /**
  * The website CMS's pages, once: the sidebar, the page gates (`cmsPage(CMS_PAGE_ROLES.users)`), the
@@ -14,12 +14,12 @@ import { CMS_ADMINS, type CmsRole } from "@/lib/cms/types";
  * Pure and client-safe: nothing here reaches the database.
  */
 
-export type CmsPageKey = "dashboard" | "pages" | "posts" | "media" | "leads" | "navigation" | "settings" | "users" | "activity" | "account";
+export type CmsPageKey = "dashboard" | "pages" | "posts" | "categories" | "tags" | "media" | "leads" | "navigation" | "redirects" | "settings" | "users" | "activity" | "account";
 
 export type CmsNavGroup = "home" | "content" | "inbox" | "site" | "team";
 
 /** lucide-react names; the shell turns them into glyphs (src/components/cms/shell/nav-icons.tsx). */
-export type CmsNavIconName = "LayoutDashboard" | "FileText" | "Newspaper" | "Images" | "Inbox" | "PanelsTopLeft" | "Settings" | "Users" | "Activity" | "UserRound";
+export type CmsNavIconName = "LayoutDashboard" | "FileText" | "Newspaper" | "FolderTree" | "Tags" | "Images" | "Inbox" | "PanelsTopLeft" | "Signpost" | "Settings" | "Users" | "Activity" | "UserRound";
 
 /** A count the layout works out for the sidebar. */
 export type CmsNavBadgeKey = "leads";
@@ -43,15 +43,20 @@ export type CmsNavPage = {
 
 /**
  * Each page's gate, for `cmsPage(CMS_PAGE_ROLES.x)` on the page itself. Sub-routes gate themselves:
- * /settings/security is ADMIN only; /pages/[id] and /posts/[id] follow their list.
+ * /settings/security is ADMIN only; /pages/[id] and /posts/[id] follow their list. Categories and
+ * tags are read by everybody (the post editor's pickers) and changed by editors and admins; the
+ * redirect manager is theirs alone.
  */
 export const CMS_PAGE_ROLES: Record<CmsPageKey, readonly CmsRole[] | undefined> = {
   dashboard: undefined,
   pages: undefined,
   posts: undefined,
+  categories: undefined,
+  tags: undefined,
   media: undefined,
   leads: undefined,
   navigation: undefined,
+  redirects: CMS_PUBLISHERS,
   settings: undefined,
   users: CMS_ADMINS,
   activity: undefined,
@@ -67,6 +72,8 @@ export const CMS_ROUTES = {
   builtinPage: (slug: string) => `/pages/builtin-${encodeURIComponent(slug)}`,
   posts: "/posts",
   post: (id: string) => `/posts/${encodeURIComponent(id)}`,
+  categories: "/categories",
+  tags: "/tags",
   media: "/media",
   /** The library with one item's details open (never /media/<id>: on this host that is the image itself). */
   mediaItem: (id: string) => `/media?id=${encodeURIComponent(id)}`,
@@ -76,6 +83,7 @@ export const CMS_ROUTES = {
   lead: (id: string) => `/leads/${encodeURIComponent(id)}`,
   settings: "/settings",
   navigation: "/settings/navigation",
+  redirects: "/redirects",
   security: "/settings/security",
   users: "/users",
   activity: "/activity",
@@ -86,9 +94,12 @@ export const CMS_PAGES: readonly CmsNavPage[] = [
   { key: "dashboard", href: CMS_ROUTES.dashboard, label: "Dashboard", group: "home", icon: "LayoutDashboard", description: "What's live, what's in progress, what just happened", shortcut: "d", inNav: true },
   { key: "pages", href: CMS_ROUTES.pages, label: "Pages", group: "content", icon: "FileText", description: "The site's pages, drafts and published versions", roles: CMS_PAGE_ROLES.pages, shortcut: "p", inNav: true },
   { key: "posts", href: CMS_ROUTES.posts, label: "Posts", group: "content", icon: "Newspaper", description: "Blog and news posts, scheduled or live", roles: CMS_PAGE_ROLES.posts, shortcut: "o", inNav: true },
+  { key: "categories", href: CMS_ROUTES.categories, label: "Categories", group: "content", icon: "FolderTree", description: "The blog's categories, one level deep, each with its own archive page", roles: CMS_PAGE_ROLES.categories, shortcut: "c", inNav: true },
+  { key: "tags", href: CMS_ROUTES.tags, label: "Tags", group: "content", icon: "Tags", description: "The blog's tags: rename, merge and tidy them", roles: CMS_PAGE_ROLES.tags, shortcut: "t", inNav: true },
   { key: "media", href: CMS_ROUTES.media, label: "Media", group: "content", icon: "Images", description: "Images for pages, posts and sharing", roles: CMS_PAGE_ROLES.media, shortcut: "m", inNav: true },
   { key: "leads", href: CMS_ROUTES.leads, label: "Leads", group: "inbox", icon: "Inbox", description: "Requests sent through the contact form", roles: CMS_PAGE_ROLES.leads, badge: "leads", shortcut: "l", inNav: true },
   { key: "navigation", href: CMS_ROUTES.navigation, label: "Navigation", group: "site", icon: "PanelsTopLeft", description: "The header menu, the footer's columns and the sign-up button", roles: CMS_PAGE_ROLES.navigation, shortcut: "n", inNav: true },
+  { key: "redirects", href: CMS_ROUTES.redirects, label: "Redirects", group: "site", icon: "Signpost", description: "Old addresses on the site sent on to new ones", roles: CMS_PAGE_ROLES.redirects, shortcut: "r", inNav: true },
   { key: "settings", href: CMS_ROUTES.settings, label: "Settings", group: "site", icon: "Settings", description: "Site name, tagline, contact email, social links and search defaults", roles: CMS_PAGE_ROLES.settings, shortcut: "s", inNav: true },
   { key: "users", href: CMS_ROUTES.users, label: "Users", group: "team", icon: "Users", description: "Who can sign in to the CMS, and as what", roles: CMS_PAGE_ROLES.users, shortcut: "u", inNav: true },
   { key: "activity", href: CMS_ROUTES.activity, label: "Activity", group: "team", icon: "Activity", description: "Everything changed in the CMS, by whom and when", roles: CMS_PAGE_ROLES.activity, shortcut: "a", inNav: true },

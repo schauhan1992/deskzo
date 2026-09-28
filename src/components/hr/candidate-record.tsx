@@ -35,6 +35,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { CANDIDATE_LETTERS, candidateStatusLabels, candidateStatusTone } from "@/lib/hr/onboarding";
 import { letterTypeLabels } from "@/lib/hr/letters";
 import { employmentTypeLabels } from "@/lib/validation/hr";
+import { SetupLinkOnce } from "@/components/settings/setup-link-once";
 
 type Candidate = NonNullable<Awaited<ReturnType<typeof getCandidate>>>;
 
@@ -615,10 +616,14 @@ function ConvertPanel({ candidate }: { candidate: Candidate }) {
     candidate.expectedJoining ? String(candidate.expectedJoining).slice(0, 10) : new Date().toISOString().slice(0, 10),
   );
   const [employeeCode, setEmployeeCode] = useState("");
-  const [temporaryPassword, setTemporaryPassword] = useState("");
   const [probationMonths, setProbationMonths] = useState("6");
+  // Converted, but the setup email didn't go: the step that says so — with the link to pass on, once.
+  const [unsent, setUnsent] = useState<{ userId: string; setupUrl?: string } | null>(null);
 
-  if (candidate.status === "JOINED") return null;
+  // Once they have joined the panel goes — unless it is still showing the link to pass on: the conversion
+  // re-renders this page with the candidate joined, and the link must not vanish before it is copied.
+  const joined = candidate.status === "JOINED";
+  if (joined && !unsent) return null;
 
   const ready = candidate.status === "ACCEPTED";
 
@@ -628,104 +633,124 @@ function ConvertPanel({ candidate }: { candidate: Candidate }) {
       const result = await convertCandidate(candidate.id, {
         joinedOn,
         employeeCode: employeeCode.trim() || undefined,
-        temporaryPassword,
         probationMonths: Number(probationMonths) || 6,
       });
       if (!result.ok) {
         setError(result.error);
         return;
       }
+      const made = result.data;
+      if (!made.emailed) {
+        setUnsent({ userId: made.userId, ...(made.setupUrl ? { setupUrl: made.setupUrl } : {}) });
+        return;
+      }
       setOpen(false);
-      router.push(`/people/${result.data.userId}`);
+      router.push(`/people/${made.userId}`);
     });
+  }
+
+  function finish() {
+    const userId = unsent?.userId;
+    setUnsent(null);
+    setOpen(false);
+    if (userId) router.push(`/people/${userId}`);
   }
 
   return (
     <>
-      <Card>
-        <CardHeader className="text-sm font-medium text-text">Joining</CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-xs text-muted">
-            Converting creates their login and employee record, moves their documents and letters across, and raises
-            the onboarding tasks for IT, HR and their manager.
-          </p>
-          {!candidate.intakeSubmittedAt && (
-            <p className="flex items-start gap-2 text-xs text-warning">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Their intake form has not come back. You can still convert them — the record will just have gaps you
-              will have to fill by hand.
+      {!joined && (
+        <Card>
+          <CardHeader className="text-sm font-medium text-text">Joining</CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted">
+              Converting creates their login and employee record, moves their documents and letters across, and raises
+              the onboarding tasks for IT, HR and their manager.
             </p>
-          )}
-          <Button className="w-full" disabled={!ready} onClick={() => setOpen(true)}>
-            <UserCheck className="mr-1.5 h-3.5 w-3.5" />
-            Convert to employee
-          </Button>
-          {!ready && (
-            <p className="text-xs text-subtle">
-              Available once the offer is marked accepted — only somebody who has said yes should get an account.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Dialog open={open} onClose={() => setOpen(false)} title={`Convert ${candidate.name}`}>
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            This creates a login for <span className="text-text">{candidate.email}</span> with the{" "}
-            <span className="text-text">{candidate.role}</span> role. It happens once, and it cannot be undone from
-            here.
-          </p>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="joinedOn">Joining date</Label>
-              <Input id="joinedOn" type="date" value={joinedOn} onChange={(e) => setJoinedOn(e.target.value)} />
-              <p className="text-xs text-subtle">Probation, leave accrual and gratuity all measure from here.</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="employeeCode">Employee code</Label>
-              <Input id="employeeCode" value={employeeCode} onChange={(e) => setEmployeeCode(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="probation">Probation (months)</Label>
-              <Input
-                id="probation"
-                type="number"
-                value={probationMonths}
-                onChange={(e) => setProbationMonths(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tempPassword">Temporary password</Label>
-              <Input
-                id="tempPassword"
-                value={temporaryPassword}
-                onChange={(e) => setTemporaryPassword(e.target.value)}
-                autoComplete="off"
-              />
-              {/* Said plainly, because the alternative is HR inventing a password and never telling
-                  them to change it. */}
-              <p className="text-xs text-subtle">
-                They must change it at first sign-in. Send it to them separately, not in the same message as the link.
+            {!candidate.intakeSubmittedAt && (
+              <p className="flex items-start gap-2 text-xs text-warning">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Their intake form has not come back. You can still convert them — the record will just have gaps you
+                will have to fill by hand.
               </p>
+            )}
+            <Button className="w-full" disabled={!ready} onClick={() => setOpen(true)}>
+              <UserCheck className="mr-1.5 h-3.5 w-3.5" />
+              Convert to employee
+            </Button>
+            {!ready && (
+              <p className="text-xs text-subtle">
+                Available once the offer is marked accepted — only somebody who has said yes should get an account.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={open} onClose={unsent ? finish : () => setOpen(false)} title={`Convert ${candidate.name}`}>
+        {unsent ? (
+          unsent.setupUrl ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">{candidate.name} is now an employee, with a login.</p>
+              <SetupLinkOnce email={candidate.email} setupUrl={unsent.setupUrl} onDone={finish} />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">
+                {candidate.name} is now an employee, but the setup email couldn&apos;t be sent. Send it again from
+                Settings → Users &amp; access, where they show as Invitation pending.
+              </p>
+              <div className="flex justify-end">
+                <Button size="sm" onClick={finish}>
+                  Done
+                </Button>
+              </div>
+            </div>
+          )
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">
+              This creates a login for <span className="text-text">{candidate.email}</span> with the{" "}
+              <span className="text-text">{candidate.role}</span> role, and emails them a link to choose their own
+              password. It happens once, and it cannot be undone from here.
+            </p>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="joinedOn">Joining date</Label>
+                <Input id="joinedOn" type="date" value={joinedOn} onChange={(e) => setJoinedOn(e.target.value)} />
+                <p className="text-xs text-subtle">Probation, leave accrual and gratuity all measure from here.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="employeeCode">Employee code</Label>
+                <Input id="employeeCode" value={employeeCode} onChange={(e) => setEmployeeCode(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="probation">Probation (months)</Label>
+                <Input
+                  id="probation"
+                  type="number"
+                  value={probationMonths}
+                  onChange={(e) => setProbationMonths(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <p className="text-xs text-muted">
+              Set their salary structure straight afterwards — payroll skips anybody who has none, silently.
+            </p>
+
+            {error && <p className="text-sm text-danger">{error}</p>}
+
+            <div className="flex gap-2">
+              <Button disabled={pending || !joinedOn} onClick={convert}>
+                {pending ? "Converting…" : "Create their record"}
+              </Button>
+              <Button variant="secondary" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
             </div>
           </div>
-
-          <p className="text-xs text-muted">
-            Set their salary structure straight afterwards — payroll skips anybody who has none, silently.
-          </p>
-
-          {error && <p className="text-sm text-danger">{error}</p>}
-
-          <div className="flex gap-2">
-            <Button disabled={pending || temporaryPassword.length < 8 || !joinedOn} onClick={convert}>
-              {pending ? "Converting…" : "Create their record"}
-            </Button>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
+        )}
       </Dialog>
     </>
   );

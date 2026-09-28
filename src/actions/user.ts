@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -13,30 +12,43 @@ import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/u
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
+import { awaitingSetup, sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
+import { AWAITING_SETUP, noPasswordYet } from "@/lib/no-password";
+import { lockoutState, recordFailure } from "@/lib/security/lockout";
+import { tenantKey } from "@/lib/tenancy/cache";
 
 function refuse(err: unknown): ActionResult<never> {
   if (err instanceof AuthzError) return { ok: false, error: err.message };
   throw err;
 }
 
+/**
+ * `setupPending`: nobody has chosen a password for the account yet — "Invitation pending" (src/lib/account-setup.ts).
+ * `setupLinkIssued`: a setup or password link has been issued for it before, so the list offers to resend one.
+ */
 export async function listUsers() {
   await requireUser();
-  return db.user.findMany({
-    orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      active: true,
-      mustChangePassword: true,
-      twoFactorEnabledAt: true,
-      departmentId: true,
-      department: { select: { id: true, name: true } },
-      managerId: true,
-      manager: { select: { id: true, name: true } },
-    },
-  });
+  const [users, pending] = await Promise.all([
+    db.user.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        active: true,
+        mustChangePassword: true,
+        twoFactorEnabledAt: true,
+        departmentId: true,
+        department: { select: { id: true, name: true } },
+        managerId: true,
+        manager: { select: { id: true, name: true } },
+      },
+    }),
+    db.user.findMany({ where: AWAITING_SETUP, select: { id: true, _count: { select: { passwordResetTokens: true } } } }),
+  ]);
+  const issued = new Map(pending.map((p) => [p.id, p._count.passwordResetTokens > 0]));
+  return users.map((user) => ({ ...user, setupPending: issued.has(user.id), setupLinkIssued: issued.get(user.id) ?? false }));
 }
 
 export async function updateUserAssignment(input: unknown): Promise<ActionResult<null>> {
@@ -133,7 +145,17 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
   return { ok: true, data: null };
 }
 
-export async function createUser(input: unknown): Promise<ActionResult<{ id: string }>> {
+/**
+ * A new account, and its setup email: the person chooses their own password from a one-time link
+ * (src/lib/account-setup.ts). Until then the account has no usable password, and nobody can sign in as it.
+ *
+ * With "This person already uses another workspace on this platform" ticked, the email is the one-step
+ * invite of linked sign-in: the same link with `&link=1`, whose page also offers to link the two.
+ *
+ * `emailed: false` comes with the link itself (`setupUrl`) for the admin to pass on — shown once, never
+ * stored — unless the link couldn't be issued either, when "Resend setup email" tries again.
+ */
+export async function createUser(input: unknown): Promise<ActionResult<{ id: string } & SetupInvitation>> {
   const session = await requireUser();
   const admin = await actorContext(session.id);
   if (!(await hasEffectivePermission(admin.id, "users.manage"))) {
@@ -143,7 +165,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { name, email, role, departmentId, temporaryPassword } = parsed.data;
+  const { name, email, role, departmentId, usesAnotherWorkspace } = parsed.data;
 
   // The role picker already leaves ADMIN out (see the access page), but the form is not the
   // authority — this action is. Creating a fresh admin is the same escalation as promoting an
@@ -156,10 +178,12 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
    * The same rule for every other role, for the same reason.
    *
    * The comment above already argues that minting an admin is the escalation that promoting one is.
-   * It stopped at ADMIN — but MANAGEMENT carries 47 of the 74 keys by default, and the creator
-   * chooses the temporary password, so somebody holding only `users.manage` could create a
-   * MANAGEMENT account, sign in as it, and hold far more than they were given. `mustChangePassword`
-   * does not help: they are the one who would be asked to change it.
+   * It stopped at ADMIN — but MANAGEMENT carries 47 of the 74 keys by default, and the creator can
+   * end up choosing the account's password: when the setup email can't be sent, the setup link comes
+   * back to them to pass on. So somebody holding only `users.manage` could create a MANAGEMENT
+   * account, set it up themselves, sign in as it, and hold far more than they were given. (This was
+   * true of the temporary password the creator chose before, which `mustChangePassword` didn't help:
+   * they were the one who would be asked to change it.)
    *
    * So the creator must already hold everything the new account would start with — the same test
    * `assertGrantWithinOwnAuthority` applies one key at a time when granting directly.
@@ -181,28 +205,75 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
   const seats = await seatProblem();
   if (seats) return { ok: false, error: seats };
 
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
-
+  let user: { id: string; name: string; email: string };
   try {
-    const user = await db.user.create({
+    user = await db.user.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         role,
         departmentId: departmentId || null,
-        passwordHash,
-        mustChangePassword: true,
+        // No usable password until they choose one from the setup link.
+        passwordHash: noPasswordYet(),
       },
+      select: { id: true, name: true, email: true },
     });
-    await accountsChanged([user.id], { by: `admin:${admin.id}` });
-    revalidatePath("/settings/access");
-    return { ok: true, data: { id: user.id } };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "A user with this email already exists." };
     }
     throw err;
   }
+  await accountsChanged([user.id], { by: `admin:${admin.id}` });
+  // With the tick, the one-step invite: set up here, and link it to the workspace they already use. The account
+  // is made exactly as without it — the role chosen here — and the admin never learns which workspace.
+  const invitation = await sendSetupInvitation(user, { by: admin, linking: usesAnotherWorkspace === true });
+  revalidatePath("/settings/access");
+  return { ok: true, data: { id: user.id, ...invitation } };
+}
+
+/**
+ * "Resend setup email", for somebody who hasn't chosen a password yet: a new link replaces the unused one
+ * (the earlier email's link stops working), mailed as when they were added. Always the plain setup email —
+ * linking to another workspace can be done from Profile once they're in.
+ *
+ * The rules of any re-issued password link: `users.manage`, an ordinary admin can't act on a super admin,
+ * not for a switched-off account, and asks for one address share one limit with "Forgot your password?"
+ * (src/actions/password-reset.ts). Somebody who has set a password is pointed there instead — this is
+ * never a way for an admin to reset somebody's password.
+ */
+export async function resendSetupEmail(id: string): Promise<ActionResult<SetupInvitation>> {
+  const session = await requireUser();
+  const admin = await actorContext(session.id);
+  if (!(await hasEffectivePermission(admin.id, "users.manage"))) {
+    return { ok: false, error: "You can't send setup emails." };
+  }
+  const target = await db.user.findUnique({
+    where: { id: String(id ?? "") },
+    select: { id: true, name: true, email: true, active: true, kind: true, isSuperAdmin: true },
+  });
+  if (!target || target.kind !== "MEMBER") return { ok: false, error: "That user no longer exists." };
+  try {
+    assertMayActOnTarget(admin, target);
+  } catch (err) {
+    return refuse(err);
+  }
+  if (!target.active) return { ok: false, error: "Activate them first — a switched-off account can't be set up." };
+  if (!(await awaitingSetup(target.id))) {
+    return { ok: false, error: "They've already chosen a password. If they've forgotten it, they can ask for a new one from the sign-in page." };
+  }
+
+  const keys = [`${await tenantKey()}|reset:${target.email.trim().toLowerCase()}`];
+  const limit = lockoutState(keys);
+  if (limit.lockedOut) {
+    return { ok: false, error: `Too many setup emails for this address. Try again in ${Math.ceil(limit.retryInSeconds / 60)} minutes.` };
+  }
+  recordFailure(keys);
+
+  const invitation = await sendSetupInvitation(target, { by: admin });
+  if (!invitation.emailed && !invitation.setupUrl) return { ok: false, error: "The setup email couldn't be sent. Try again in a while." };
+  revalidatePath("/settings/access");
+  return { ok: true, data: invitation };
 }
 
 export async function setUserActive(id: string, active: boolean): Promise<ActionResult<null>> {

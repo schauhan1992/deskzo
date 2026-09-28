@@ -970,6 +970,8 @@ model SitePost {
   /// A SiteMedia id (a soft reference: deleting media in use is refused by the app).
   coverMediaId String?
   body         Json
+  /// Superseded by `tagLinks` (SiteTag records). Kept for one release (expand/contract): the app no
+  /// longer reads or writes it; the taxonomy migration copied it into site_tags/site_post_tags.
   tags         String[]       @default([])
   status       SitePostStatus @default(DRAFT)
   publishAt    DateTime?
@@ -982,8 +984,122 @@ model SitePost {
   updatedBy    String
   archivedAt   DateTime?
 
+  categories SitePostCategory[]
+  tagLinks   SitePostTag[]
+
   @@index([status, publishAt])
   @@map("site_posts")
+}
+
+/// A blog category: a curated list ADMIN and EDITOR manage, nested one level at most (a parent, then
+/// children — the app keeps it to one level). Its archive is /blog/category/<slug>, and includes its
+/// children's posts.
+model SiteCategory {
+  id          String             @id @default(cuid())
+  /// Lower-case words and hyphens, 1–60 (a CHECK in the migration).
+  slug        String             @unique
+  /// 1–60 (a CHECK in the migration).
+  name        String
+  /// Plain text, at most 500 (a CHECK in the migration).
+  description String?
+  /// Never its own id (a CHECK in the migration).
+  parentId    String?
+  /// Deleting a category that still has children is refused.
+  parent      SiteCategory?      @relation("SiteCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children    SiteCategory[]     @relation("SiteCategoryTree")
+  position    Int                @default(0)
+  /// { title?, description?, imageMediaId? }, as pages and posts store theirs.
+  seo         Json?
+  posts       SitePostCategory[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  updatedBy   String
+
+  @@index([parentId, position])
+  @@map("site_categories")
+}
+
+/// A blog tag. ADMIN, EDITOR and AUTHOR create them while writing; only ADMIN and EDITOR rename,
+/// merge or delete. Its archive is /blog/tag/<slug>.
+model SiteTag {
+  id          String        @id @default(cuid())
+  /// Lower-case words and hyphens, 1–60 (a CHECK in the migration).
+  slug        String        @unique
+  /// 1–40 (a CHECK in the migration).
+  name        String
+  /// Plain text, at most 500 (a CHECK in the migration).
+  description String?
+  /// { title?, description?, imageMediaId? }, as pages and posts store theirs.
+  seo         Json?
+  posts       SitePostTag[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  updatedBy   String
+
+  @@map("site_tags")
+}
+
+/// A post in a category. A category in use cannot be deleted from under its posts (Restrict): the app
+/// removes these rows first.
+model SitePostCategory {
+  postId     String
+  post       SitePost     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   SiteCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  /// The lowest is the post's main category (breadcrumbs).
+  position   Int          @default(0)
+
+  @@id([postId, categoryId])
+  @@index([categoryId])
+  @@map("site_post_categories")
+}
+
+/// A post's tag.
+model SitePostTag {
+  postId String
+  post   SitePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tagId  String
+  tag    SiteTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+  @@map("site_post_tags")
+}
+
+enum SiteRedirectMatch {
+  /// `fromPath` is the whole path.
+  EXACT
+  /// `fromPath` ends in "/*" and matches everything under it; the rest carries over to a target that
+  /// also ends in "/*".
+  PREFIX
+}
+
+/// A redirect on the public site's own host (root and www) only, applied in the proxy before the
+/// platform-site rewrite. Managed by ADMIN and EDITOR; an external (https://) target is ADMIN only.
+model SiteRedirect {
+  id        String            @id @default(cuid())
+  /// Normalised: starts with "/", lower-case, no query, no trailing slash except "/" itself; a PREFIX
+  /// one, and only a PREFIX one, ends in "/*". At most 2000 (CHECKs in the migration).
+  fromPath  String            @unique
+  /// A site path (not "//…") or an absolute https:// URL; no spaces. Ends in "/*" only on a PREFIX
+  /// one. At most 2000 (CHECKs in the migration).
+  toUrl     String
+  /// 301, 302, 307 or 308 (a CHECK in the migration).
+  status    Int               @default(301)
+  match     SiteRedirectMatch @default(EXACT)
+  enabled   Boolean           @default(true)
+  /// Made by a published post's or page's slug change, not by hand.
+  automatic Boolean           @default(false)
+  /// At most 500 (a CHECK in the migration).
+  note      String?
+  /// Counted in batches, one write per redirect per minute. Never negative (a CHECK in the migration).
+  hits      Int               @default(0)
+  lastHitAt DateTime?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  updatedBy String
+
+  @@map("site_redirects")
 }
 
 /// An image in the website's media library, served publicly at /media/<id>. List queries never

@@ -370,7 +370,7 @@ async function main() {
 
     section("Seats");
     await plans.setLimitOverrides(TID, { seats: 2, copilotTokens: null }, "script:check");
-    const newUser = (n: number) => ({ name: `Zz Person ${n}`, email: `person${n}@zzent.example`, role: "SALES", temporaryPassword: `zz-${randomBytes(9).toString("base64url")}` });
+    const newUser = (n: number) => ({ name: `Zz Person ${n}`, email: `person${n}@zzent.example`, role: "SALES" });
     const second = await inWs(() => userActions.createUser(newUser(2)));
     const third = await inWs(() => userActions.createUser(newUser(3)));
     ok("with two seats, the owner and one more", second.ok && !third.ok && /every seat is taken/.test(third.ok ? "" : third.error), third.ok ? "third was made" : third.error);

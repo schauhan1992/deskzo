@@ -1,11 +1,12 @@
 "use client";
 
-import { useDeferredValue, useId, useMemo, useState, useTransition, type KeyboardEvent } from "react";
+import { useCallback, useDeferredValue, useId, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarClock, ChevronRight, Eye, LoaderCircle, Redo2, Send, Undo2, X } from "lucide-react";
+import { CalendarClock, ChevronRight, Eye, LoaderCircle, Redo2, Send, Undo2 } from "lucide-react";
 import { cmsArchivePost, cmsDeletePost, cmsGetPost, cmsPostPreviewLink, cmsPublishPost, cmsSavePost, cmsUnarchivePost, cmsUnpublishPost } from "@/actions/cms/posts";
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
+import { useConsoleNotice } from "@/components/console/kit/notice";
 import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import type { SiteBlock, SiteRenderContext } from "@/components/site/blocks/types";
 import { BlockList } from "@/components/cms/editor/block-list";
@@ -19,6 +20,7 @@ import { EditorShell, PaneTabs } from "@/components/cms/editor/editor-shell";
 import { ImageField, TextField } from "@/components/cms/editor/fields";
 import { PreviewBlocks, PreviewChrome, PreviewPostHeader } from "@/components/cms/editor/preview-blocks";
 import { PreviewFrame } from "@/components/cms/editor/preview-frame";
+import { CategoriesField, TagsTokenField, type TagNames } from "@/components/cms/editor/post-terms";
 import { PostSeoFields } from "@/components/cms/editor/seo-fields";
 import { useAutosave, useBeforeUnload, useDraftEditor, useEditorKeys, useLinkGuard } from "@/components/cms/editor/use-draft-editor";
 import { MediaPicker } from "@/components/cms/media/media-picker";
@@ -27,15 +29,32 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label } from "@/components/ui/input";
-import { POST_BLOCK_TYPES, type CmsCaps, type CmsIssue, type CmsMe, type MediaRow, type PostDetail, type PostInput, type PostSaved, type SitePostStatus } from "@/lib/cms/types";
+import { CMS_ROUTES } from "@/lib/cms/nav";
+import { normaliseTarget } from "@/lib/cms/redirect-rules";
+import {
+  POST_BLOCK_TYPES,
+  type AutoRedirect,
+  type CategoryNode,
+  type CmsCaps,
+  type CmsIssue,
+  type CmsMe,
+  type CmsTermRef,
+  type MediaRow,
+  type PostDetail,
+  type PostInput,
+  type PostSaved,
+  type SitePostStatus,
+} from "@/lib/cms/types";
 import { mediaIdOf, slugify, stableJson } from "@/lib/cms/validate";
 import { formatIstDate, formatIstDateTime, istDateTimeInput } from "@/lib/india-time";
 import { cn } from "@/lib/utils";
 
 /**
  * The post editor: the same block editor and live preview as pages, for a post's body, with what a
- * post has besides — title, excerpt, cover image, tags, its address under /blog, the author, and
- * publishing now or at a set time (India time).
+ * post has besides — title, excerpt, cover image, categories and tags (./post-terms.tsx), its
+ * address under /blog, the author, and publishing now or at a set time (India time). A live post's
+ * new address leaves a 301 from the old one, and the editor says so; deleting a post that was ever
+ * on the site offers editors and admins a redirect for its old address.
  *
  * A post has one body, not a draft and a published copy: while it is a draft, it saves itself every 30
  * seconds; once it is published or scheduled, a save changes what the site shows, so it is saved only
@@ -51,21 +70,40 @@ export type PostEditorProps = {
   siteOrigin: string;
   sitePaths: string[];
   media: MediaRow[];
-  allTags: string[];
+  /** The category tree, for the post's categories checklist. */
+  categories: CategoryNode[];
 };
 
-type Meta = { status: SitePostStatus; live: boolean; archived: boolean; publishAt: Date | null; slug: string };
+type Meta = { status: SitePostStatus; live: boolean; archived: boolean; publishAt: Date | null; slug: string; wasPublished: boolean };
 type Confirm = "unpublish" | "archive" | "delete" | null;
 
 const postFingerprint = (doc: PostInput) => stableJson(doc);
-const inputOf = (post: PostDetail): PostInput => ({ title: post.title, slug: post.slug, excerpt: post.excerpt, coverMediaId: post.coverMediaId, tags: post.tags, body: post.body, seo: post.seo });
+const inputOf = (post: PostDetail): PostInput => ({
+  title: post.title,
+  slug: post.slug,
+  excerpt: post.excerpt,
+  coverMediaId: post.coverMediaId,
+  tags: post.tags,
+  categories: post.categories.map((c) => c.id),
+  body: post.body,
+  seo: post.seo,
+});
 const toFieldIssues = (issues: CmsIssue[]): FieldIssue[] => issues.map((i) => ({ path: i.path, message: i.message }));
-const CONTENT_PATHS = /^(title|excerpt|coverMediaId|tags)/;
+const CONTENT_PATHS = /^(title|excerpt|coverMediaId|tags|categories)/;
+const namesOf = (refs: CmsTermRef[]): TagNames => Object.fromEntries(refs.map((t) => [t.slug, t.name]));
 
-export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, media: initialMedia, allTags }: PostEditorProps) {
+export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, media: initialMedia, categories }: PostEditorProps) {
   const router = useRouter();
   const notice = useEditorNotice();
-  const [meta, setMeta] = useState<Meta>(() => ({ status: post.status, live: post.live, archived: post.archived, publishAt: post.publishAt, slug: post.slug }));
+  const pageNotice = useConsoleNotice();
+  const [meta, setMeta] = useState<Meta>(() => ({ status: post.status, live: post.live, archived: post.archived, publishAt: post.publishAt, slug: post.slug, wasPublished: post.wasPublished }));
+  // Tag names by address — the post's own, then whatever a search turns up — so a chip reads "Product news", not "product-news".
+  const [tagNames, setTagNames] = useState<TagNames>(() => namesOf(post.tagRefs));
+  const learnTags = useCallback((refs: CmsTermRef[]) => {
+    setTagNames((known) => (refs.every((t) => known[t.slug] === t.name) ? known : { ...known, ...namesOf(refs) }));
+  }, []);
+  /** The 301 the last save of a live post left behind when its address changed. */
+  const [autoRedirect, setAutoRedirect] = useState<AutoRedirect | null>(null);
   const onSite = meta.status !== "DRAFT";
   const mayChange = caps.write && !meta.archived && (me.role !== "AUTHOR" || (post.author.id === me.id && meta.status === "DRAFT"));
   const readOnly = !mayChange;
@@ -79,7 +117,15 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
     fingerprint: postFingerprint,
     canSave: !readOnly,
     send: (doc, version, force) => cmsSavePost(post.id, { post: doc, version, force }),
-    onSaved: (data) => setMeta((m) => ({ ...m, status: data.status, live: data.live, publishAt: data.publishAt, slug: data.slug })),
+    onSaved: (data, saved) => {
+      setMeta((m) => ({ ...m, status: data.status, live: data.live, publishAt: data.publishAt, slug: data.slug }));
+      if (data.redirect) setAutoRedirect(data.redirect);
+      // Tags named for the first time exist now, so their chips stop saying "new".
+      setTagNames((known) => {
+        const fresh = saved.tags.filter((t) => !known[t] && !Object.values(known).some((name) => name.toLowerCase() === t.toLowerCase()));
+        return fresh.length ? { ...known, ...Object.fromEntries(fresh.map((t) => [t, t])) } : known;
+      });
+    },
   });
   const doc = editor.doc;
   const deferred = useDeferredValue(doc);
@@ -199,7 +245,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
           return;
         }
         editor.markSaved(doc, result.data.version);
-        setMeta((m) => ({ ...m, status: result.data.status, live: result.data.live, publishAt: result.data.publishAt }));
+        setMeta((m) => ({ ...m, status: result.data.status, live: result.data.live, publishAt: result.data.publishAt, wasPublished: true }));
         setPublishCheck(false);
         notice.show(
           "success",
@@ -250,12 +296,6 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         notice.show("success", "Restored from the archive, as a draft.");
       },
     );
-  const remove = () =>
-    simple(
-      () => cmsDeletePost(post.id),
-      () => router.push("/posts"),
-    );
-
   const reloadTheirs = () =>
     startBusy(async () => {
       try {
@@ -264,8 +304,9 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
           notice.show("error", fresh.error);
           return;
         }
+        learnTags(fresh.data.tagRefs);
         editor.load(inputOf(fresh.data), fresh.data.version);
-        setMeta({ status: fresh.data.status, live: fresh.data.live, archived: fresh.data.archived, publishAt: fresh.data.publishAt, slug: fresh.data.slug });
+        setMeta({ status: fresh.data.status, live: fresh.data.live, archived: fresh.data.archived, publishAt: fresh.data.publishAt, slug: fresh.data.slug, wasPublished: fresh.data.wasPublished });
         notice.show("info", "Their version is loaded. Yours is one Undo away (Ctrl/⌘+Z) if you need anything from it.");
       } catch {
         notice.show("error", "Their version didn't load. Try again.");
@@ -423,6 +464,24 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         </EditorBanner>
       )}
       {editor.serverIssues.length > 0 && <EditorBanner tone="danger" title={editor.failure ?? "Some fields need attention"}>The fields are marked in red.</EditorBanner>}
+      {autoRedirect && (
+        <EditorBanner
+          tone="success"
+          title={`A redirect was created from ${autoRedirect.from}`}
+          action={
+            <Button type="button" variant="ghost" size="sm" onClick={() => setAutoRedirect(null)}>
+              Dismiss
+            </Button>
+          }
+        >
+          {`Anyone who asks for ${autoRedirect.from} — an old link, a search engine — is sent to ${autoRedirect.to} (301, permanent)${autoRedirect.created ? "" : "; the redirect that was already there is updated"}. `}
+          {caps.publish && (
+            <Link href={CMS_ROUTES.redirects} className="font-medium underline">
+              See the redirects
+            </Link>
+          )}
+        </EditorBanner>
+      )}
       {publishCheck && publishIssues.length > 0 && !editor.serverIssues.length && (
         <EditorBanner tone="warning" title={`${publishIssues.length === 1 ? "One field needs" : `${publishIssues.length} fields need`} attention before publishing`} action={<Button type="button" variant="ghost" size="sm" onClick={() => setPublishCheck(false)}>Hide</Button>}>
           They are marked in red. The draft can be saved as it is.
@@ -455,7 +514,8 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
               onChange={(src) => set("coverMediaId", mediaIdOf(src))}
               hint={coverRow?.needsAlt ? undefined : "Across the top of the post and on its card in the blog."}
             />
-            <TagsField value={doc.tags} onChange={(v) => set("tags", v)} suggestions={allTags} />
+            <CategoriesField value={doc.categories ?? []} onChange={(v) => set("categories", v)} categories={categories} canManage={caps.publish} />
+            <TagsTokenField value={doc.tags} onChange={(v) => set("tags", v)} names={tagNames} onLearn={learnTags} />
           </IssueRoot>
         </fieldset>
         <section aria-labelledby="post-body-heading" className="space-y-2 border-t border-line pt-5">
@@ -491,7 +551,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         <legend className="sr-only">Address, SEO and author</legend>
         <IssueRoot issues={toFieldIssues(settingsIssues)}>
           <section className="space-y-2">
-            <SlugField value={doc.slug} onChange={(v) => set("slug", v)} onSuggest={() => set("slug", slugify(doc.title) || doc.slug)} live={onSite} siteOrigin={siteOrigin} />
+            <SlugField value={doc.slug} onChange={(v) => set("slug", v)} onSuggest={() => set("slug", slugify(doc.title) || doc.slug)} onSite={onSite} live={meta.live} siteOrigin={siteOrigin} />
           </section>
           <section className="space-y-3 border-t border-line pt-5">
             <h2 className="text-sm font-semibold text-text">Search and sharing</h2>
@@ -533,7 +593,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         <PreviewPostHeader
           title={deferred.title}
           excerpt={deferred.excerpt}
-          tags={deferred.tags}
+          tags={deferred.tags.map((t) => tagNames[t] ?? t)}
           author={post.author.name}
           dateLabel={dateLabel}
           cover={deferred.coverMediaId ? { src: `/media/${deferred.coverMediaId}`, alt: media[deferred.coverMediaId]?.alt ?? "" } : null}
@@ -549,24 +609,35 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
 
       <PublishDialog state={scheduling} busy={busy} onChange={setScheduling} onCancel={() => setScheduling(null)} onConfirm={publish} dirty={editor.dirty} slug={meta.slug} />
       <ConfirmDialog
-        open={confirm !== null}
+        open={confirm === "unpublish" || confirm === "archive"}
         onClose={() => setConfirm(null)}
-        title={confirm === "unpublish" ? "Unpublish this post" : confirm === "archive" ? "Archive this post" : "Delete this post for good"}
+        title={confirm === "unpublish" ? "Unpublish this post" : "Archive this post"}
         pending={busy}
         error={null}
         tone="danger"
-        confirmLabel={confirm === "unpublish" ? "Unpublish" : confirm === "archive" ? "Archive" : "Delete for good"}
-        typed={confirm === "delete" ? meta.slug : undefined}
+        confirmLabel={confirm === "unpublish" ? "Unpublish" : "Archive"}
         onConfirm={() => {
           if (confirm === "unpublish") unpublish();
           else if (confirm === "archive") archive();
-          else if (confirm === "delete") remove();
         }}
       >
         {confirm === "unpublish" && <p>{`/blog/${meta.slug} stops working at once and the post becomes a draft again.`}</p>}
         {confirm === "archive" && <p>The post comes off the site and out of the list. It can be restored until it is deleted.</p>}
-        {confirm === "delete" && <p>The post is deleted. This cannot be undone.</p>}
       </ConfirmDialog>
+      {confirm === "delete" && (
+        <DeletePostDialog
+          postId={post.id}
+          slug={meta.slug}
+          offerRedirect={meta.wasPublished && caps.publish}
+          admin={me.role === "ADMIN"}
+          siteHost={new URL(siteOrigin).host}
+          onClose={() => setConfirm(null)}
+          onDeleted={(message) => {
+            pageNotice.show("success", message);
+            router.push("/posts");
+          }}
+        />
+      )}
       <ConflictDialog
         conflict={editor.conflict}
         what="post"
@@ -644,7 +715,23 @@ function PublishDialog({
   );
 }
 
-function SlugField({ value, onChange, onSuggest, live, siteOrigin }: { value: string; onChange: (next: string) => void; onSuggest: () => void; live: boolean; siteOrigin: string }) {
+function SlugField({
+  value,
+  onChange,
+  onSuggest,
+  onSite,
+  live,
+  siteOrigin,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onSuggest: () => void;
+  /** Published or scheduled: a new address takes effect on "Update post". */
+  onSite: boolean;
+  /** On the site now: the old address gets a 301 to the new one. */
+  live: boolean;
+  siteOrigin: string;
+}) {
   const id = useId();
   const messages = useIssuesAt("slug");
   return (
@@ -672,7 +759,13 @@ function SlugField({ value, onChange, onSuggest, live, siteOrigin }: { value: st
           Make it from the title
         </button>
       </p>
-      {live && <p className="text-xs text-warning">The post is on the site: a new address takes effect when you update it, and links to the old one stop working.</p>}
+      {onSite && (
+        <p className="text-xs text-warning">
+          {live
+            ? "The post is on the site: a new address takes effect when you update it, and a redirect from the old one is made for you, so links keep working."
+            : "The post is scheduled: a new address takes effect when you update it."}
+        </p>
+      )}
       {messages.map((m, i) => (
         <p key={i} className="text-xs text-danger">
           {m}
@@ -682,81 +775,131 @@ function SlugField({ value, onChange, onSuggest, live, siteOrigin }: { value: st
   );
 }
 
-/** Tags as chips: type and press Enter or a comma; Backspace in the empty box takes the last one off. */
-function TagsField({ value, onChange, suggestions }: { value: string[]; onChange: (next: string[]) => void; suggestions: string[] }) {
-  const id = useId();
-  const [text, setText] = useState("");
-  const messages = useIssuesAt("tags");
-  const add = (raw: string) => {
-    const tag = raw.trim().toLowerCase().replace(/\s+/g, "-").replace(/^#/, "");
-    if (!tag || value.includes(tag) || value.length >= 10) return;
-    onChange([...value, tag]);
-  };
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if ((e.key === "Enter" || e.key === ",") && text.trim()) {
-      e.preventDefault();
-      add(text);
-      setText("");
-    } else if (e.key === "Backspace" && !text && value.length) {
-      e.preventDefault();
-      onChange(value.slice(0, -1));
-    }
-  };
-  const bad = value.filter((t) => !/^[a-z0-9][a-z0-9-]{0,31}$/.test(t));
+type RedirectChoice = "blog" | "path" | "none";
+
+/** What was typed as a place on the site ("pricing" is "/pricing"); an address with a scheme is left as it is. */
+const asTarget = (raw: string) => {
+  const t = raw.trim();
+  return !t || t.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(t) ? t : `/${t}`;
+};
+
+/**
+ * "Delete for good", for an archived post. When the post was ever on the site and the person may
+ * publish, its old address can be sent on: to the blog (the default), to another address, or nowhere
+ * (it then answers "not found"). The server checks the redirect before anything is deleted, and its
+ * refusal — another site's address is an admin's to choose — is shown here.
+ */
+function DeletePostDialog({
+  postId,
+  slug,
+  offerRedirect,
+  admin,
+  siteHost,
+  onClose,
+  onDeleted,
+}: {
+  postId: string;
+  slug: string;
+  offerRedirect: boolean;
+  admin: boolean;
+  siteHost: string;
+  onClose: () => void;
+  onDeleted: (message: string) => void;
+}) {
+  const pathId = useId();
+  const choiceName = useId();
+  const [choice, setChoice] = useState<RedirectChoice>("blog");
+  const [path, setPath] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startPending] = useTransition();
+  const from = `/blog/${slug}`;
+  const typed = asTarget(path);
+  const checked = choice === "path" && typed ? normaliseTarget(typed, { ownHosts: [siteHost, `www.${siteHost}`] }) : null;
+  const pathProblem = !checked
+    ? null
+    : !checked.ok
+      ? checked.message
+      : checked.splat
+        ? "Give one address, without /* at the end."
+        : checked.external && !admin
+          ? "Only an admin can send visitors to another site."
+          : checked.toUrl.split(/[?#]/)[0] === from
+            ? "That is the post's own address."
+            : null;
+  const ready = !offerRedirect || choice !== "path" || (!!typed && !pathProblem);
+  const redirectTo = !offerRedirect || choice === "none" ? null : choice === "blog" ? "" : typed;
+
+  const confirm = () =>
+    startPending(async () => {
+      setError(null);
+      try {
+        const result = await cmsDeletePost(postId, { redirectTo });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        const r = result.data.redirect;
+        onDeleted(r ? `The post is deleted. Visitors to ${r.fromPath} now go to ${r.toUrl}.` : "The post is deleted.");
+      } catch {
+        setError("The post wasn't deleted — nothing changed. Try again.");
+      }
+    });
+
+  const option = (value: RedirectChoice, title: string, detail: string) => (
+    <label className="flex cursor-pointer items-start gap-2">
+      <input type="radio" name={choiceName} value={value} checked={choice === value} onChange={() => setChoice(value)} disabled={pending} className="mt-1 accent-brand" />
+      <span>
+        <span className="font-medium text-text">{title}</span>
+        <span className="block text-xs text-muted">{detail}</span>
+      </span>
+    </label>
+  );
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between">
-        <Label htmlFor={id}>
-          Tags<span className="font-normal text-subtle"> (optional)</span>
-        </Label>
-        <span className="text-[11px] text-subtle tabular-nums">{value.length}/10</span>
-      </div>
-      <div className={cn("flex min-h-9 flex-wrap items-center gap-1.5 rounded-base border bg-surface px-2 py-1.5 shadow-sm", messages.length || bad.length ? "border-danger" : "border-line-strong")}>
-        <ul aria-label="Tags on this post" className="contents">
-          {value.map((tag) => (
-            <li key={tag} className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs", bad.includes(tag) ? "border-danger/40 bg-danger-bg text-danger" : "border-line bg-surface-sunken text-text")}>
-              #{tag}
-              <button type="button" onClick={() => onChange(value.filter((t) => t !== tag))} aria-label={`Remove the tag ${tag}`} className="rounded-full text-subtle hover:text-text">
-                <X aria-hidden="true" className="h-3 w-3" />
-              </button>
-            </li>
-          ))}
-        </ul>
-        <input
-          id={id}
-          list={`${id}-tags`}
-          value={text}
-          onChange={(e) => {
-            const next = e.target.value;
-            if (next.endsWith(",")) {
-              add(next.slice(0, -1));
-              setText("");
-            } else setText(next);
-          }}
-          onKeyDown={onKeyDown}
-          onBlur={() => {
-            if (text.trim()) {
-              add(text);
-              setText("");
-            }
-          }}
-          placeholder={value.length ? "" : "product, india, updates…"}
-          disabled={value.length >= 10}
-          className="min-w-24 flex-1 rounded-sm bg-transparent text-sm text-text placeholder:text-subtle focus-visible:outline-offset-1"
-        />
-        <datalist id={`${id}-tags`}>
-          {suggestions.filter((s) => !value.includes(s)).map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
-      </div>
-      <p className="text-xs text-subtle">Enter or a comma adds a tag. Lower-case, with hyphens for spaces.</p>
-      {bad.length > 0 && <p className="text-xs text-danger">A tag is lower-case letters, digits and hyphens (at most 32): {bad.map((t) => `#${t}`).join(", ")}.</p>}
-      {messages.map((m, i) => (
-        <p key={i} className="text-xs text-danger">
-          {m}
-        </p>
-      ))}
-    </div>
+    <ConfirmDialog
+      open
+      onClose={onClose}
+      title="Delete this post for good"
+      pending={pending}
+      error={error}
+      tone="danger"
+      confirmLabel="Delete for good"
+      typed={slug}
+      confirmDisabled={!ready}
+      onConfirm={confirm}
+    >
+      <p>The post is deleted. This cannot be undone.</p>
+      {offerRedirect && (
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-[13px] font-medium text-muted">{`It was on the site at ${from}. Anyone who follows an old link there:`}</legend>
+          {option("blog", "Goes to the blog (/blog)", "Recommended: old links and search results still lead somewhere. A 301 redirect is added.")}
+          {option("path", "Goes to another address", "A related post, or any page on this site. A 301 redirect is added.")}
+          {choice === "path" && (
+            <div className="space-y-1 pl-6">
+              <Label htmlFor={pathId} className="sr-only">
+                Where to send them
+              </Label>
+              <Input
+                id={pathId}
+                value={path}
+                onChange={(e) => setPath(e.target.value.slice(0, 2000))}
+                placeholder={admin ? "/blog/a-related-post or https://…" : "/blog/a-related-post"}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoComplete="off"
+                readOnly={pending}
+                aria-invalid={pathProblem ? true : undefined}
+                aria-describedby={`${pathId}-hint`}
+                className={cn("font-mono text-[13px]", pathProblem && "border-danger")}
+              />
+              <p id={`${pathId}-hint`} className={cn("text-xs", pathProblem ? "text-danger" : "text-subtle")}>
+                {pathProblem ?? (admin ? "A path on this site, or another site's https:// address." : "A path on this site, like /blog/a-related-post.")}
+              </p>
+            </div>
+          )}
+          {option("none", "Finds nothing", "No redirect: the address answers “page not found”.")}
+        </fieldset>
+      )}
+    </ConfirmDialog>
   );
 }

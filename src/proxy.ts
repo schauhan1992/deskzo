@@ -12,6 +12,8 @@ import { clientIpFrom } from "@/lib/client-ip";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, newDeviceToken, validDeviceToken } from "@/lib/access/device-token";
 import { HOST_MISMATCH, classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { referralCookieDays } from "@/lib/partners/settings";
+import { redirectablePath } from "@/lib/cms/redirect-rules";
+import { matchRedirect, recordHit } from "@/lib/cms/redirects";
 import { tenantForKind } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
@@ -105,6 +107,27 @@ function clientIp(req: NextRequest): string | null {
   return clientIpFrom(req.headers);
 }
 
+/**
+ * Where a CMS redirect sends the browser: a site path on the host the request came to (with the
+ * request's query when the target has none of its own), or another site's https:// address as it
+ * is. Null for anything else — the database's CHECKs already refuse it, so this is the second lock.
+ */
+function redirectLocation(target: string, origin: string, search: string): URL | null {
+  try {
+    if (target.startsWith("/")) {
+      if (target.startsWith("//") || target.startsWith("/\\")) return null;
+      const url = new URL(target, origin);
+      if (url.origin !== origin) return null;
+      if (search && !url.search) url.search = search;
+      return url;
+    }
+    const url = new URL(target);
+    return url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Applied to everything that leaves here, including redirects. */
 function harden(response: NextResponse, pathname: string): NextResponse {
   response.headers.set("X-Robots-Tag", ROBOTS_HEADER);
@@ -179,6 +202,26 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   if (!tenant && platformFolder && !inPlatformFolder) {
     // The public site's sitemap is src/app/sitemap.ts, at the root like robots.txt — not in the folder.
     if (platformFolder === "/platform-site" && pathname === "/sitemap.xml") return harden(NextResponse.next() as NextResponse, pathname);
+    /**
+     * The CMS's redirects (src/lib/cms/redirects.ts) — on the public site's own hosts only (the bare
+     * domain and www.), before the rewrite into its folder, for a GET or a HEAD. /api never gets here
+     * (answered above), /_next and robots.txt are outside the matcher, and the site's own routes
+     * (/signup, /pricing…), its machinery and static files are never looked up (`redirectablePath`).
+     * The lookup is a map kept in this process: it never throws, and a slow or failed database means
+     * no redirect and the page as usual. no-store, so a changed or removed redirect takes effect at
+     * once for everybody. A site-path target keeps the request's query (a `?ref=` still reaches the
+     * page it lands on); another site's address never gets it.
+     */
+    if (platformFolder === "/platform-site" && kind && (req.method === "GET" || req.method === "HEAD") && redirectablePath(pathname)) {
+      const hit = await matchRedirect(pathname);
+      const location = hit ? redirectLocation(hit.target, `${protocolFor(kind.host)}://${kind.host}`, req.nextUrl.search) : null;
+      if (hit && location) {
+        recordHit(hit.id);
+        const redirected = harden(NextResponse.redirect(location, hit.status) as NextResponse, pathname);
+        redirected.headers.set("cache-control", "no-store");
+        return redirected;
+      }
+    }
     const url = req.nextUrl.clone();
     url.pathname = `${platformFolder}${pathname === "/" ? "" : pathname}`;
     /**
@@ -194,10 +237,15 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
      * draft's preview (its address carries a token, and it is not published), and any address with a
      * query, which may carry a code or a token (and is otherwise a variant of a page that has its own
      * canonical address). Every other host keeps harden()'s noindex.
+     *
+     * One query is let through: a lone `?page=N` on the blog and its archives. It carries no code or
+     * token, and page N is a real page with its own canonical address — noindexing it would hide older
+     * posts' only links from anything that follows pages rather than reading the sitemap.
      */
     const preview = /^\/preview(\/|$)/.test(pathname);
+    const blogPage = /^\/blog(\/|$)/.test(pathname) && /^\?page=[1-9][0-9]{0,4}$/.test(req.nextUrl.search);
     if (platformFolder === "/platform-site" && preview) response.headers.set("cache-control", "no-store");
-    if (platformFolder === "/platform-site" && !preview && !/^\/signup(\/|$)/.test(pathname) && !req.nextUrl.search) {
+    if (platformFolder === "/platform-site" && !preview && !/^\/signup(\/|$)/.test(pathname) && (!req.nextUrl.search || blogPage)) {
       response.headers.set("X-Robots-Tag", "index, follow");
     }
     /**

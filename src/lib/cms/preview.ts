@@ -91,7 +91,19 @@ export async function loadPreview(token: string, now = Date.now()): Promise<Prev
 
   const post = await controlDb().sitePost.findUnique({
     where: { id: i },
-    select: { slug: true, title: true, excerpt: true, coverMediaId: true, tags: true, body: true, seo: true, publishAt: true, updatedAt: true, author: { select: { name: true } } },
+    select: {
+      slug: true,
+      title: true,
+      excerpt: true,
+      coverMediaId: true,
+      body: true,
+      seo: true,
+      publishAt: true,
+      updatedAt: true,
+      author: { select: { name: true } },
+      categories: { orderBy: { position: "asc" }, select: { category: { select: { slug: true, name: true } } } },
+      tagLinks: { orderBy: { tag: { name: "asc" } }, select: { tag: { select: { slug: true, name: true } } } },
+    },
   });
   if (!post) return { ok: false, reason: "gone" };
   if (post.updatedAt.getTime() !== u) return { ok: false, reason: "stale" };
@@ -105,7 +117,9 @@ export async function loadPreview(token: string, now = Date.now()): Promise<Prev
       title: post.title,
       excerpt: post.excerpt,
       cover: cover ? { src: `/media/${cover.id}`, alt: cover.alt, width: cover.width, height: cover.height } : null,
-      tags: post.tags,
+      tags: post.tagLinks.map((l) => l.tag.slug),
+      categories: post.categories.map((c) => ({ slug: c.category.slug, name: c.category.name, path: `/blog/category/${c.category.slug}` })),
+      tagLinks: post.tagLinks.map((l) => ({ slug: l.tag.slug, name: l.tag.name, path: `/blog/tag/${l.tag.slug}` })),
       publishedAt: post.publishAt ?? new Date(now),
       author: post.author.name,
       body: Array.isArray(post.body) ? (post.body as unknown as SiteBlock[]) : [],

@@ -3,13 +3,14 @@
 import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Role } from "@/lib/roles";
-import { updateUserAssignment, setUserActive, resetUserTwoFactor } from "@/actions/user";
+import { updateUserAssignment, setUserActive, resetUserTwoFactor, resendSetupEmail } from "@/actions/user";
 import { setUserBranch } from "@/actions/branch";
 import { branchLabel } from "@/lib/branches/format";
 import { Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { SetupLinkOnce } from "@/components/settings/setup-link-once";
 
 /** A branch somebody can be said to work at. An inactive one appears only while somebody still does. */
 type WorkBranch = { id: string; name: string; code: string; isHeadOffice: boolean; active: boolean };
@@ -24,6 +25,10 @@ type TeamUser = {
   role: Role;
   active: boolean;
   mustChangePassword: boolean;
+  /** Nobody has chosen a password for the account yet: "Invitation pending" (src/lib/account-setup.ts). */
+  setupPending?: boolean;
+  /** A setup or password link was issued for it before, so the button offers to resend one. */
+  setupLinkIssued?: boolean;
   twoFactorEnabledAt: Date | string | null;
   departmentId: string | null;
   managerId: string | null;
@@ -54,6 +59,10 @@ function TeamRow({
   const [branchId, setBranchId] = useState(worksAt?.branchId ?? "");
   const [isSavingBranch, startBranchTransition] = useTransition();
   const [branchError, setBranchError] = useState<string | null>(null);
+  const [isResending, startResendTransition] = useTransition();
+  const [resent, setResent] = useState(false);
+  // The link to pass on when the email couldn't be sent — held only while its dialog is open.
+  const [setupUrl, setSetupUrl] = useState<string | null>(null);
 
   const dirty = role !== user.role || departmentId !== (user.departmentId ?? "") || managerId !== (user.managerId ?? "");
 
@@ -82,6 +91,22 @@ function TeamRow({
         setError(result.error);
         return;
       }
+      router.refresh();
+    });
+  }
+
+  /** A new setup link replaces the unused one; when its email can't be sent, the link itself, once. */
+  function resendSetup() {
+    setError(null);
+    setResent(false);
+    startResendTransition(async () => {
+      const result = await resendSetupEmail(user.id);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (result.data.emailed) setResent(true);
+      else if (result.data.setupUrl) setSetupUrl(result.data.setupUrl);
       router.refresh();
     });
   }
@@ -129,8 +154,33 @@ function TeamRow({
         <div className="text-muted">{user.email}</div>
         <div className="mt-1 flex flex-wrap gap-1">
           {!user.active && <Badge tone="amber">Inactive</Badge>}
-          {user.mustChangePassword && <Badge tone="default">Temp password</Badge>}
+          {user.setupPending ? (
+            <Badge tone="blue">Invitation pending</Badge>
+          ) : (
+            user.mustChangePassword && <Badge tone="default">Temp password</Badge>
+          )}
         </div>
+        {user.setupPending && user.active && (
+          <div className="mt-1">
+            <button
+              type="button"
+              disabled={isResending}
+              onClick={resendSetup}
+              aria-label={`${user.setupLinkIssued ? "Resend setup email" : "Send setup email"} to ${user.name}`}
+              className="text-xs text-muted underline decoration-dotted hover:text-text disabled:opacity-40"
+            >
+              {isResending ? "Sending…" : user.setupLinkIssued ? "Resend setup email" : "Send setup email"}
+            </button>
+            {resent && (
+              <p role="status" className="text-xs text-success">
+                Sent. The earlier link no longer works.
+              </p>
+            )}
+          </div>
+        )}
+        <Dialog open={setupUrl !== null} onClose={() => setSetupUrl(null)} title="Setup link">
+          {setupUrl && <SetupLinkOnce email={user.email} setupUrl={setupUrl} onDone={() => setSetupUrl(null)} />}
+        </Dialog>
       </td>
       {/* One row per member, so the column header alone would name every row's control identically.
           The name carries the member it belongs to — an id/htmlFor pairing has nothing to point at

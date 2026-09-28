@@ -177,11 +177,14 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "platform/staff-auth.ts": "platform",
   // The website CMS (cms.<domain>): its own accounts, and only the control plane's site tables.
   "cms/auth.ts": "platform",
+  "cms/categories.ts": "platform",
   "cms/leads.ts": "platform",
   "cms/media.ts": "platform",
   "cms/pages.ts": "platform",
   "cms/posts.ts": "platform",
+  "cms/redirects.ts": "platform",
   "cms/settings.ts": "platform",
+  "cms/tags.ts": "platform",
   "cms/users.ts": "platform",
   // The partner portal (partners.<domain>): its own accounts, and only the control plane's partner tables.
   "partners/auth.ts": "platform",
@@ -203,4 +206,5 @@ export const ALWAYS_OPEN: Record<string, string> = {
   "marketing-public.ts:unsubscribeAll": "and always stop it",
   "password-reset.ts:requestPasswordReset": "signing in belongs to every plan",
   "password-reset.ts:resetPassword": "signing in belongs to every plan",
+  "password-reset.ts:setPasswordAndSignIn": "signing in belongs to every plan",
 };

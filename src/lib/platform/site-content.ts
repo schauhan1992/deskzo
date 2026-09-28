@@ -1,4 +1,5 @@
 import { cache as requestCache } from "react";
+import type { Prisma } from "@wroffy/control-client";
 import type { SiteBlock, SitePage, SiteSettings } from "@/components/site/blocks/types";
 import { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } from "@/components/site/defaults";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
@@ -31,9 +32,9 @@ export function sitePath(slug: string): string {
 
 /** Lower-case words and hyphens, "/" between levels: "pricing", "solutions/retail". */
 export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
-/** A post's slug, and a tag. */
+/** A post's slug, and a category's or tag's (at most 60). */
 const POST_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const TAG = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const TERM_SLUG_MAX = 60;
 export const POSTS_PER_PAGE = 12;
 
 /** The public site's own address: <PLATFORM_DOMAIN>[:PLATFORM_PORT], for links made elsewhere (the CMS's preview links). */
@@ -92,6 +93,15 @@ async function cached<T>(key: string, load: () => Promise<T>, fallback: () => T)
     cache.set(key, { at: now, ttl, value });
   }
   return value;
+}
+
+/**
+ * A read of the site's published content through the same cache — for the blog's category and tag
+ * archives (src/lib/cms/taxonomy.ts): 45 seconds, cleared by `invalidateSiteContent`, `fallback`
+ * when the control plane is missing or fails. Keys are the caller's: prefix them ("taxonomy:…").
+ */
+export function cachedSiteRead<T>(key: string, load: () => Promise<T>, fallback: () => T): Promise<T> {
+  return cached(key, load, fallback);
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -179,13 +189,19 @@ export async function listSitePages(): Promise<SitePageSummary[]> {
 
 export type SitePostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean };
 export type SitePostCover = { src: string; alt: string; width: number | null; height: number | null };
+/** A category or tag as the site links to it: its name and its archive's address. */
+export type SiteTermLink = { slug: string; name: string; path: string };
 export type SitePostSummary = {
   slug: string;
   path: string;
   title: string;
   excerpt: string | null;
   cover: SitePostCover | null;
+  /** Its tags' slugs, by name (the same tags, linked: `tagLinks`). */
   tags: string[];
+  /** Its categories, the main one first — the breadcrumb is Blog › categories[0] › the post. */
+  categories: SiteTermLink[];
+  tagLinks: SiteTermLink[];
   /** When it went (or goes) live: its publishAt. */
   publishedAt: Date;
   author: string;
@@ -193,48 +209,67 @@ export type SitePostSummary = {
 export type SitePost = SitePostSummary & { body: SiteBlock[]; seo: SitePostSeo | null; updatedAt: Date };
 
 /** On the site: published or scheduled, not archived, and its time has come. */
-const liveWhere = (now: Date) => ({ status: { in: ["PUBLISHED" as const, "SCHEDULED" as const] }, archivedAt: null, publishAt: { lte: now } });
+export const livePostWhere = (now: Date) => ({ status: { in: ["PUBLISHED" as const, "SCHEDULED" as const] }, archivedAt: null, publishAt: { lte: now } });
+const liveWhere = livePostWhere;
 
-async function covers(ids: (string | null)[]): Promise<Map<string, SitePostCover>> {
+/** Images from the media library by id, with their alt text and size — a post's cover, an archive's sharing image. */
+export async function siteImages(ids: (string | null | undefined)[]): Promise<Map<string, SitePostCover>> {
   const wanted = [...new Set(ids.filter((id): id is string => !!id))];
   if (!wanted.length) return new Map();
   const rows = await controlDb().siteMedia.findMany({ where: { id: { in: wanted } }, select: { id: true, alt: true, width: true, height: true } });
   return new Map(rows.map((m) => [m.id, { src: `/media/${m.id}`, alt: m.alt, width: m.width, height: m.height }]));
 }
+const covers = siteImages;
 
-const POST_SUMMARY_SELECT = { slug: true, title: true, excerpt: true, coverMediaId: true, tags: true, publishAt: true, author: { select: { name: true } } } as const;
+const POST_SUMMARY_SELECT = {
+  slug: true,
+  title: true,
+  excerpt: true,
+  coverMediaId: true,
+  publishAt: true,
+  author: { select: { name: true } },
+  categories: { orderBy: { position: "asc" }, select: { category: { select: { slug: true, name: true } } } },
+  tagLinks: { orderBy: { tag: { name: "asc" } }, select: { tag: { select: { slug: true, name: true } } } },
+} as const satisfies Prisma.SitePostSelect;
+type PostSummaryRow = Prisma.SitePostGetPayload<{ select: typeof POST_SUMMARY_SELECT }>;
 
-/** One page of the blog, newest first — optionally one tag's. */
+function summaryOf(r: PostSummaryRow, cover: SitePostCover | null): SitePostSummary {
+  return {
+    slug: r.slug,
+    path: `/blog/${r.slug}`,
+    title: r.title,
+    excerpt: r.excerpt,
+    cover,
+    tags: r.tagLinks.map((l) => l.tag.slug),
+    categories: r.categories.map((c) => ({ slug: c.category.slug, name: c.category.name, path: `/blog/category/${c.category.slug}` })),
+    tagLinks: r.tagLinks.map((l) => ({ slug: l.tag.slug, name: l.tag.name, path: `/blog/tag/${l.tag.slug}` })),
+    publishedAt: r.publishAt!,
+    author: r.author.name,
+  };
+}
+
+/**
+ * One page of live posts matching `where` (laid over "live now"), newest first, 12 a page — not
+ * cached: the callers cache (the blog here, the archives in src/lib/cms/taxonomy.ts).
+ */
+export async function livePostsPage(where: Prisma.SitePostWhereInput, page: number, now = new Date()): Promise<{ posts: SitePostSummary[]; total: number; page: number; pages: number }> {
+  const filter: Prisma.SitePostWhereInput = { AND: [liveWhere(now), where] };
+  const [rows, total] = await Promise.all([
+    controlDb().sitePost.findMany({ where: filter, orderBy: [{ publishAt: "desc" }, { id: "desc" }], skip: (page - 1) * POSTS_PER_PAGE, take: POSTS_PER_PAGE, select: POST_SUMMARY_SELECT }),
+    controlDb().sitePost.count({ where: filter }),
+  ]);
+  const coverMap = await covers(rows.map((r) => r.coverMediaId));
+  return { posts: rows.map((r) => summaryOf(r, (r.coverMediaId && coverMap.get(r.coverMediaId)) || null)), total, page, pages: Math.ceil(total / POSTS_PER_PAGE) };
+}
+
+/** One page of the blog, newest first — optionally one tag's (by its slug). */
 export async function getPublishedPosts(options: { tag?: string | null; page?: number } = {}): Promise<{ posts: SitePostSummary[]; total: number; page: number; pages: number; tag: string | null }> {
-  const tag = options.tag && TAG.test(options.tag) ? options.tag : null;
+  const tag = options.tag && options.tag.length <= TERM_SLUG_MAX && POST_SLUG.test(options.tag) ? options.tag : null;
   const page = Math.min(1000, Math.max(1, Math.floor(Number(options.page) || 1)));
   const empty = { posts: [], total: 0, page, pages: 0, tag };
   return cached(
     `posts:${tag ?? ""}:${page}`,
-    async () => {
-      const where = { ...liveWhere(new Date()), ...(tag ? { tags: { has: tag } } : {}) };
-      const [rows, total] = await Promise.all([
-        controlDb().sitePost.findMany({ where, orderBy: [{ publishAt: "desc" }, { id: "desc" }], skip: (page - 1) * POSTS_PER_PAGE, take: POSTS_PER_PAGE, select: POST_SUMMARY_SELECT }),
-        controlDb().sitePost.count({ where }),
-      ]);
-      const coverMap = await covers(rows.map((r) => r.coverMediaId));
-      return {
-        posts: rows.map((r) => ({
-          slug: r.slug,
-          path: `/blog/${r.slug}`,
-          title: r.title,
-          excerpt: r.excerpt,
-          cover: (r.coverMediaId && coverMap.get(r.coverMediaId)) || null,
-          tags: r.tags,
-          publishedAt: r.publishAt!,
-          author: r.author.name,
-        })),
-        total,
-        page,
-        pages: Math.ceil(total / POSTS_PER_PAGE),
-        tag,
-      };
-    },
+    async () => ({ ...(await livePostsPage(tag ? { tagLinks: { some: { tag: { slug: tag } } } } : {}, page)), tag }),
     () => empty,
   );
 }
@@ -249,14 +284,7 @@ export async function getPublishedPost(slug: string): Promise<SitePost | null> {
       if (!row) return null;
       const cover = row.coverMediaId ? ((await covers([row.coverMediaId])).get(row.coverMediaId) ?? null) : null;
       return {
-        slug: row.slug,
-        path: `/blog/${row.slug}`,
-        title: row.title,
-        excerpt: row.excerpt,
-        cover,
-        tags: row.tags,
-        publishedAt: row.publishAt!,
-        author: row.author.name,
+        ...summaryOf(row, cover),
         body: Array.isArray(row.body) ? (row.body as unknown as SiteBlock[]) : [],
         seo: isObj(row.seo) ? (row.seo as SitePostSeo) : null,
         updatedAt: row.updatedAt,

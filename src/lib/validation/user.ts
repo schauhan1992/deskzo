@@ -20,12 +20,17 @@ export const updateUserAssignmentSchema = z.object({
 
 export type UpdateUserAssignmentInput = z.infer<typeof updateUserAssignmentSchema>;
 
+/**
+ * No password: the person chooses their own from the setup email (src/lib/account-setup.ts). A
+ * `temporaryPassword` an older caller still sends is dropped, like any other key the schema doesn't know.
+ */
 export const createUserSchema = z.object({
   name: z.string().trim().min(2, "Name is required"),
   email: z.string().trim().email("Enter a valid email"),
   role: roleKey,
   departmentId: z.string().optional().or(z.literal("")),
-  temporaryPassword: z.string().min(8, "Temporary password must be at least 8 characters"),
+  /** "This person already uses another workspace on this platform": the setup email is the one-step invite, which also offers linking. */
+  usesAnotherWorkspace: z.boolean().optional(),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;

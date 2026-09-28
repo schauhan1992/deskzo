@@ -1,7 +1,7 @@
 import type { BlockType, SiteBlock } from "@/components/site/blocks/types";
 import { BLOCK_INFO } from "@/components/cms/editor/catalog";
-import { POST_BLOCK_TYPES, type CmsIssue, type MediaRow, type PageDocument, type PostInput } from "@/lib/cms/types";
-import { checkPageDocument, checkPostBody, checkPostSeo, mediaIdsIn, mediaIssues, POST_SLUG, stableJson } from "@/lib/cms/validate";
+import { POST_BLOCK_TYPES, TAG_NAME_MAX, TERM_SLUG_MAX, type CmsIssue, type MediaRow, type PageDocument, type PostInput } from "@/lib/cms/types";
+import { checkPageDocument, checkPostBody, checkPostSeo, isReservedPostSlug, mediaIdsIn, mediaIssues, POST_SLUG, slugify, stableJson, TERM_SLUG } from "@/lib/cms/validate";
 
 /**
  * The browser's half of the checks the server makes (src/lib/cms/content.ts), run on the document as
@@ -39,9 +39,21 @@ export function publishNormalised(doc: PageDocument): PageDocument | null {
   return checked.ok ? checked.value : null;
 }
 
-const TAG = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/**
+ * One of a post's tags as the editor holds it: an existing tag's address ("product-news") or a name
+ * ("Product news") — the server matches a slug, then a name, then the name's slug, and makes a new
+ * tag of anything else (src/lib/cms/taxonomy.ts planPostTerms). So an address may run to the
+ * address limit, a name to a new tag's name limit, and either needs a letter or a digit.
+ */
+export function tagProblem(tag: string): string | null {
+  const t = tag.trim();
+  if (!t || !slugify(t, TERM_SLUG_MAX)) return "A tag needs a letter or a digit.";
+  if (t.length <= TERM_SLUG_MAX && TERM_SLUG.test(t)) return null;
+  if (t.length > TAG_NAME_MAX) return `Keep a tag's name to ${TAG_NAME_MAX} characters.`;
+  return null;
+}
 
-/** A post's own fields, checked as the server does (title, address, excerpt, tags, body, SEO). */
+/** A post's own fields, checked as the server does (title, address, excerpt, tags, categories, body, SEO). */
 export function postIssues(post: PostInput, mode: "draft" | "publish", media: Record<string, MediaRow>): CmsIssue[] {
   const out: CmsIssue[] = [];
   const title = post.title.trim();
@@ -49,11 +61,14 @@ export function postIssues(post: PostInput, mode: "draft" | "publish", media: Re
   else if (title.length > 200) out.push({ path: "title", message: "Keep the title to 200 characters." });
   const slug = post.slug.trim().toLowerCase();
   if (!POST_SLUG.test(slug) || slug.length > 120) out.push({ path: "slug", message: "Use lower-case words and hyphens, like spring-update." });
+  else if (isReservedPostSlug(slug)) out.push({ path: "slug", message: "The blog uses that address for its own pages (category, tag and page). Choose another." });
   if ((post.excerpt ?? "").trim().length > 500) out.push({ path: "excerpt", message: "Keep the excerpt to 500 characters." });
   post.tags.forEach((tag, i) => {
-    if (!TAG.test(tag)) out.push({ path: `tags[${i}]`, message: "A tag is lower-case letters, digits and hyphens (at most 32)." });
+    const problem = tagProblem(tag);
+    if (problem) out.push({ path: `tags[${i}]`, message: problem });
   });
   if (post.tags.length > 10) out.push({ path: "tags", message: "At most ten tags." });
+  if ((post.categories?.length ?? 0) > 10) out.push({ path: "categories", message: "At most ten categories." });
   const body = checkPostBody(post.body, mode, POST_BLOCK_TYPES);
   if (!body.ok) out.push(...body.issues);
   if (mode === "publish" && body.ok && body.value.length === 0) out.push({ path: "body", message: "Write something first." });

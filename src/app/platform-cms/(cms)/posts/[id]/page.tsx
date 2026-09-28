@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { editorEnvironment, mediaRowsFor } from "@/components/cms/editor/editor-data";
 import { PostEditor } from "@/components/cms/editor/post-editor";
-import { getPost, listPostTags } from "@/lib/cms/content";
+import { getPost } from "@/lib/cms/content";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES } from "@/lib/cms/nav";
+import { listCategories } from "@/lib/cms/taxonomy";
 import { CmsRefused, cmsCapsFor, type PostDetail } from "@/lib/cms/types";
 
 export const metadata: Metadata = { title: "Edit post" };
@@ -12,7 +13,8 @@ export const metadata: Metadata = { title: "Edit post" };
 /**
  * The post editor. Everybody may open a post; who may change it follows the role and, for authors,
  * whose post it is and whether it is still a draft (src/lib/cms/content.ts) — the editor shows the
- * controls that apply, and every action checks again.
+ * controls that apply, and every action checks again. The category tree comes with it, for the
+ * post's categories; its tags are searched as they are typed.
  */
 export default async function CmsPostEditorPage({ params }: PageProps<"/platform-cms/posts/[id]">) {
   const session = await cmsPage(CMS_PAGE_ROLES.posts);
@@ -27,7 +29,7 @@ export default async function CmsPostEditorPage({ params }: PageProps<"/platform
     throw err;
   }
 
-  const [env, media, tags] = await Promise.all([editorEnvironment(), mediaRowsFor({ body: post.body, seo: post.seo }, [post.coverMediaId]), listPostTags()]);
+  const [env, media, categories] = await Promise.all([editorEnvironment(), mediaRowsFor({ body: post.body, seo: post.seo }, [post.coverMediaId]), listCategories()]);
 
   return (
     <PostEditor
@@ -40,7 +42,7 @@ export default async function CmsPostEditorPage({ params }: PageProps<"/platform
       siteOrigin={env.siteOrigin}
       sitePaths={env.sitePaths}
       media={media}
-      allTags={tags}
+      categories={categories}
     />
   );
 }

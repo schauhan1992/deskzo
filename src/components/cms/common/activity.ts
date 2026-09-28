@@ -13,13 +13,16 @@ import { CMS_AUDIT_ACTIONS, CMS_ROLE_LABELS, LEAD_STATUS_LABELS, LEAD_TOPIC_LABE
  * Pure and client-safe.
  */
 
-export type ActionCategory = "auth" | "account" | "user" | "security" | "page" | "post" | "media" | "settings" | "lead" | "preview";
+export type ActionCategory = "auth" | "account" | "user" | "security" | "page" | "post" | "category" | "tag" | "media" | "settings" | "redirect" | "lead" | "preview";
 
 export const ACTION_CATEGORIES: readonly { key: ActionCategory; label: string }[] = [
   { key: "page", label: "Pages" },
   { key: "post", label: "Posts" },
+  { key: "category", label: "Categories" },
+  { key: "tag", label: "Tags" },
   { key: "media", label: "Media" },
   { key: "settings", label: "Settings & navigation" },
+  { key: "redirect", label: "Redirects" },
   { key: "lead", label: "Leads" },
   { key: "preview", label: "Previews" },
   { key: "user", label: "Users" },
@@ -73,6 +76,17 @@ export const CMS_ACTION_LABELS: Record<CmsAuditAction, { label: string; tone: To
   "lead.update": { label: "Updated a lead", tone: "neutral" },
   "lead.export": { label: "Exported leads", tone: "neutral" },
   "preview.link": { label: "Opened a draft preview", tone: "neutral" },
+  "category.create": { label: "Added a category", tone: "brand" },
+  "category.update": { label: "Changed a category", tone: "neutral" },
+  "category.delete": { label: "Deleted a category", tone: "danger" },
+  "tag.create": { label: "Added a tag", tone: "brand" },
+  "tag.update": { label: "Changed a tag", tone: "neutral" },
+  "tag.merge": { label: "Merged tags", tone: "info" },
+  "tag.delete": { label: "Deleted a tag", tone: "danger" },
+  "redirect.create": { label: "Added a redirect", tone: "brand" },
+  "redirect.update": { label: "Changed a redirect", tone: "neutral" },
+  "redirect.delete": { label: "Deleted a redirect", tone: "danger" },
+  "redirect.import": { label: "Imported redirects", tone: "info" },
 };
 
 /** The actions, as filter options, in the log's own order. */
@@ -96,10 +110,14 @@ export function actorParts(label: string): { name: string; email: string | null 
 }
 
 /**
- * The screen a row is about, where there is one: a page, a post, an image, a lead — and people and
- * settings, for those who may open them. Deleted things still link; their screen says they are gone.
+ * The screen a row is about, where there is one: a page, a post, an image, a lead, the categories and
+ * tags — and people, settings and redirects, for those who may open them. Deleted things still link;
+ * their screen says they are gone.
  */
-export function entityHref(row: Pick<CmsAuditRow, "entity" | "entityId" | "action">, opts: { canOpenUsers: boolean; canOpenSecurity: boolean }): string | null {
+export function entityHref(
+  row: Pick<CmsAuditRow, "entity" | "entityId" | "action">,
+  opts: { canOpenUsers: boolean; canOpenSecurity: boolean; canOpenRedirects?: boolean },
+): string | null {
   const id = row.entityId;
   switch (row.entity) {
     case "page":
@@ -112,6 +130,12 @@ export function entityHref(row: Pick<CmsAuditRow, "entity" | "entityId" | "actio
       return id ? CMS_ROUTES.lead(id) : CMS_ROUTES.leads;
     case "user":
       return opts.canOpenUsers ? CMS_ROUTES.users : null;
+    case "category":
+      return CMS_ROUTES.categories;
+    case "tag":
+      return CMS_ROUTES.tags;
+    case "redirect":
+      return opts.canOpenRedirects ? CMS_ROUTES.redirects : null;
     case "settings":
       if (row.action === "security.two-factor-policy") return opts.canOpenSecurity ? CMS_ROUTES.security : null;
       return CMS_ROUTES.settings;
@@ -139,6 +163,21 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 const roleName = (v: unknown) => (typeof v === "string" && v in CMS_ROLE_LABELS ? CMS_ROLE_LABELS[v as CmsRole] : String(v ?? "?"));
 const leadStatusName = (v: unknown) => (typeof v === "string" && v in LEAD_STATUS_LABELS ? LEAD_STATUS_LABELS[v as SiteLeadStatus] : String(v ?? "?"));
 const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-IN")} ${n === 1 ? one : many}`;
+const joined = (parts: (string | null | false | undefined)[]) => parts.filter((p): p is string => !!p).join(" · ") || null;
+
+const TERM_FIELD_NAMES: Record<string, string> = { name: "name", slug: "address", description: "description", seo: "search details", parent: "parent" };
+
+/** A category's or tag's change: its old and new address when that moved, else which fields changed — and the redirect left behind. */
+function termChange(d: Record<string, unknown>, archive: (slug: string) => string): string | null {
+  const slug = str(d.slug);
+  const from = str(d.from);
+  const fields = Array.isArray(d.changed) ? d.changed.filter((f): f is string => typeof f === "string" && f !== "slug").map((f) => TERM_FIELD_NAMES[f] ?? f) : [];
+  return joined([from && slug ? `${archive(from)} → ${archive(slug)}` : null, fields.length ? fields.join(", ") : null, str(d.redirectId) ? "a redirect was made from the old address" : null]);
+}
+
+const categoryArchive = (slug: string) => `/blog/category/${slug}`;
+const tagArchive = (slug: string) => `/blog/tag/${slug}`;
+const REDIRECT_FIELD_NAMES: Record<string, string> = { from: "old address", to: "target", status: "status", match: "match", enabled: "on/off", note: "note" };
 
 function sizeText(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -226,6 +265,64 @@ export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">): {
       const n = num(d.rows);
       return { subject: null, note: n !== null ? count(n, "row") : null };
     }
+    case "category.create":
+      return { subject: str(d.name) ?? slug, note: joined([slug ? categoryArchive(slug) : null, str(d.parent) ? `under ${str(d.parent)}` : null]) };
+    case "category.update":
+      if (d.reorder === true) return { subject: null, note: str(d.parent) ? `Put the subcategories of ${str(d.parent)} in a new order` : "Put the top-level categories in a new order" };
+      return { subject: str(d.name) ?? slug, note: termChange(d, categoryArchive) };
+    case "category.delete": {
+      const n = num(d.posts);
+      return { subject: str(d.name) ?? slug, note: joined([slug ? categoryArchive(slug) : null, n ? `taken off ${count(n, "post")}` : null]) };
+    }
+    case "tag.create":
+      return { subject: str(d.name) ?? slug, note: str(d.post) ? "Added while writing a post" : slug ? tagArchive(slug) : null };
+    case "tag.update":
+      return { subject: str(d.name) ?? slug, note: termChange(d, tagArchive) };
+    case "tag.merge": {
+      const n = num(d.posts);
+      const from = str(d.from);
+      return {
+        subject: str(d.fromName) ?? from,
+        note: joined([str(d.into) ? `into #${str(d.into)}` : null, n !== null ? `${count(n, "post")} moved` : null, str(d.redirectId) && from ? `${tagArchive(from)} now redirects` : null]),
+      };
+    }
+    case "tag.delete": {
+      const n = num(d.posts);
+      return { subject: str(d.name) ?? slug, note: joined([slug ? tagArchive(slug) : null, n ? `taken off ${count(n, "post")}` : null]) };
+    }
+    case "redirect.create": {
+      const from = str(d.from);
+      const to = str(d.to);
+      return {
+        subject: from && to ? `${from} → ${to}` : from,
+        note: d.automatic === true ? "Made automatically when an address changed" : joined([num(d.status) !== null ? String(num(d.status)) : null, d.match === "PREFIX" ? "everything under it" : null, d.enabled === false ? "switched off" : null]),
+      };
+    }
+    case "redirect.update": {
+      const from = str(d.from);
+      const to = str(d.to);
+      const fields = Array.isArray(d.changed) ? d.changed.filter((f): f is string => typeof f === "string").map((f) => REDIRECT_FIELD_NAMES[f] ?? f) : [];
+      const toggled = d.enabled === false ? "switched off" : d.enabled === true ? "switched on" : null;
+      return {
+        subject: from && to ? `${from} → ${to}` : from,
+        note: str(d.reason) ?? (d.automatic === true ? "Updated automatically when an address changed" : joined([toggled, str(d.fromBefore) ? `was from ${str(d.fromBefore)}` : null, str(d.toBefore) ? `was to ${str(d.toBefore)}` : null, !toggled && fields.length ? fields.join(", ") : null])),
+      };
+    }
+    case "redirect.delete": {
+      const from = str(d.from);
+      const to = str(d.to);
+      return { subject: from && to ? `${from} → ${to}` : from, note: str(d.reason) ?? (d.automatic === true ? "It had been made automatically" : null) };
+    }
+    case "redirect.import": {
+      const parts = [
+        num(d.created) ? `${num(d.created)!.toLocaleString("en-IN")} created` : null,
+        num(d.updated) ? `${num(d.updated)!.toLocaleString("en-IN")} updated` : null,
+        num(d.unchanged) ? `${num(d.unchanged)!.toLocaleString("en-IN")} unchanged` : null,
+        num(d.refused) ? `${num(d.refused)!.toLocaleString("en-IN")} refused` : null,
+      ];
+      const rows = num(d.rows);
+      return { subject: rows !== null ? count(rows, "row") : null, note: joined(parts) };
+    }
     default:
       return { subject: null, note: null };
   }
@@ -235,7 +332,7 @@ export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">): {
  * Log rows as the console's `ActivityFeed` draws them (the dashboard, My account): "Published a page
  * — About us", the note under it, who, and when. `hideActor` for a feed that is all one person's.
  */
-export function activityFeedItems(rows: CmsAuditRow[], opts: { canOpenUsers: boolean; canOpenSecurity: boolean; hideActor?: boolean }): ActivityFeedItem[] {
+export function activityFeedItems(rows: CmsAuditRow[], opts: { canOpenUsers: boolean; canOpenSecurity: boolean; canOpenRedirects?: boolean; hideActor?: boolean }): ActivityFeedItem[] {
   return rows.map((row) => {
     const { label, tone } = actionLabel(row.action);
     const { subject, note } = describeActivity(row);
