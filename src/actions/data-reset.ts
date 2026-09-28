@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
 import { runBackup } from "@/lib/backup/run";
 import { dataResetEnabled, keptTables, RESET_PHRASE, resetAllData, resetOverview } from "@/lib/data-reset";
+import { workspaceAccountsReset } from "@/lib/platform/account-hooks";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -55,6 +56,11 @@ export async function resetAllDataNow(input: { confirm: string; backupFirst: boo
     console.error("data reset failed", err);
     return { ok: false, error: `The reset failed and nothing was changed: ${err instanceof Error ? err.message : String(err)}` };
   }
+
+  // Every account the reset deleted loses its links to other workspaces, and the email index follows.
+  // Here, from the workspace's own request, not in resetAllData: that also runs against scratch
+  // databases in check:data-reset, where "the current workspace" would be the developer's own.
+  await workspaceAccountsReset("reset");
 
   // The audit log was just emptied with everything else; this is its first line.
   await recordAudit({

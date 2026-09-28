@@ -47,6 +47,9 @@ import { activeAnnouncementsFor } from "@/lib/platform/announcements";
 import { PlatformAnnouncements } from "@/components/platform/platform-announcements";
 import { supportLauncherState } from "@/actions/support";
 import { SupportLauncher } from "@/components/support/support-launcher";
+import { linkedSignInEnabled } from "@/lib/platform/linked/groups";
+import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
+import { WorkspaceSwitcher } from "@/components/linked/workspace-switcher";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
@@ -125,9 +128,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // The session token has no photo marker on it, so it is read here. One tiny column, and it
   // resolves against whoever the request is acting as — an admin viewing as somebody should see
   // that person's face in the header, for the same reason the name and role already change.
-  const viewerPhotoUpdatedAt = shownUser
-    ? (await db.user.findUnique({ where: { id: shownUser.id }, select: { photoUpdatedAt: true } }))?.photoUpdatedAt ?? null
+  // The same read carries the account's kind, for the workspace switcher below.
+  const viewer = shownUser
+    ? await db.user.findUnique({ where: { id: shownUser.id }, select: { photoUpdatedAt: true, kind: true } })
     : null;
+  const viewerPhotoUpdatedAt = viewer?.photoUpdatedAt ?? null;
+  // Linked sign-in's workspace switcher (spec §2.1): the person's own member account only — never while
+  // viewing as somebody (then `viewer` is them), never a platform support account — and only while the
+  // platform's switch is on, which it never is without a control plane. That answer is cached for 30 s;
+  // the list itself is asked for only when the switcher is opened.
+  const canSwitch = !viewAs && !!session?.user && viewer?.kind === "MEMBER" && (await linkedSignInEnabled());
 
   const dlpOn = dlpApplies(shownUser?.role, securityPolicy) && hasAnyDeterrent(securityPolicy);
 
@@ -204,6 +214,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </span>
           )}
           <div className="ml-auto flex items-center gap-2 md:gap-3">
+            {canSwitch && (
+              <WorkspaceSwitcher
+                // The workspace's own name, as the panel lists every workspace: an unbranded workspace's app
+                // name is the product's default, the same for all of them, and a switcher can't tell them apart.
+                // Initials come from that name too (blank lets the mark work them out).
+                current={{ name: (await currentTenant()).name, initials: "", logoDataUrl: branding.logoDataUrl }}
+                domain={PLATFORM_DOMAIN}
+              />
+            )}
             {/* Resolved for whoever the request is acting as, like everything else in this header —
                 an admin viewing as a salesperson should be offered the salesperson's options. */}
             <CreateMenu

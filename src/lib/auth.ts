@@ -12,6 +12,7 @@ import type { Role } from "@/lib/roles";
 import { sessionOptions } from "@/lib/auth-session";
 import { currentTenantOrNull } from "@/lib/tenancy/resolve";
 import { handoffAccount } from "@/lib/platform/handoff-sign-in";
+import { linkedAccount } from "@/lib/platform/linked/switch";
 import type { Provider } from "@auth/core/providers";
 
 declare module "next-auth" {
@@ -136,6 +137,28 @@ async function buildConfig(req?: Request) {
     }),
   );
 
+  /**
+   * A switch from a linked workspace: the pass is a READY switch ticket's proof, spent here once. Who it
+   * signs in, if anybody, is decided in src/lib/platform/linked/switch.ts, which checks the account
+   * against this workspace's rules again — this is the only thing that makes the session, so it never
+   * trusts an earlier step.
+   */
+  providers.push(
+    Credentials({
+      id: "linked",
+      name: "Linked workspace",
+      credentials: { proof: { label: "Proof", type: "text" } },
+      authorize: async (credentials) => {
+        const proof = credentials?.proof;
+        if (typeof proof !== "string" || !proof) return null;
+        const tenant = await currentTenantOrNull();
+        if (!tenant) return null;
+        const user = await linkedAccount(proof, tenant.id);
+        return user ? { id: user.id, name: user.name, email: user.email, role: user.role as Role } : null;
+      },
+    }),
+  );
+
   if (
     security?.ssoEnabled &&
     security.microsoftClientId &&
@@ -211,7 +234,7 @@ async function buildConfig(req?: Request) {
           userId: user.id ?? null,
           userName: user.name ?? null,
           userEmail: user.email ?? null,
-          summary: `${user.name ?? user.email ?? "Somebody"} signed in${account?.provider === "microsoft-entra-id" ? " with Microsoft" : ""}`,
+          summary: `${user.name ?? user.email ?? "Somebody"} signed in${account?.provider === "microsoft-entra-id" ? " with Microsoft" : account?.provider === "linked" ? " from a linked workspace" : ""}`,
           metadata: { provider: account?.provider ?? "credentials" },
         });
       },

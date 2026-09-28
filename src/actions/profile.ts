@@ -16,6 +16,7 @@ import {
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import type { ActionResult } from "@/actions/company";
+import { accountsChanged } from "@/lib/platform/account-hooks";
 
 export async function getOwnProfile() {
   const user = await requireUser();
@@ -80,6 +81,8 @@ export async function changeOwnPassword(input: unknown): Promise<ActionResult<nu
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
   await db.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: false } });
+  // A new password unlinks this account from its other workspaces too (owner decision 4): "change your password" is the way to be safe.
+  await accountsChanged([user.id], { revoke: "credentials", by: `user:${user.id}` });
 
   revalidatePath("/profile");
   return { ok: true, data: null };
@@ -201,6 +204,7 @@ export async function disableOwnTwoFactor(input: unknown): Promise<ActionResult<
     where: { id: user.id },
     data: { twoFactorSecretCipher: null, twoFactorPendingCipher: null, twoFactorEnabledAt: null },
   });
+  await accountsChanged([user.id], { revoke: "two-factor-reset", by: `user:${user.id}` });
 
   await notifyUser({
     userId: user.id,

@@ -126,6 +126,15 @@ model Tenant {
   commissionEntries CommissionEntry[]
   deals             DealRegistration[]
 
+  /// Linked sign-in: its accounts in link groups, links asked from and to it, switches into it, its own
+  /// switch-in rule, and the "find my workspace" index of its members' addresses.
+  linkMembers       LinkMember[]
+  linkIntentsOut    LinkIntent[]       @relation("LinkIntentSource")
+  linkIntentsIn     LinkIntent[]       @relation("LinkIntentTarget")
+  linkSwitchTickets LinkSwitchTicket[]
+  signInPolicy      TenantSignInPolicy?
+  emailIndex        WorkspaceEmail[]
+
   @@index([tags], type: Gin)
   @@index([partnerId])
   @@map("tenants")
@@ -1729,4 +1738,164 @@ model PartnerAuditLog {
   @@index([at])
   @@index([action, at])
   @@map("partner_audit_log")
+}
+
+// ─── Linked sign-in (one person, several workspaces) ─────────────────────────────────────────────
+
+enum LinkSwitchStage {
+  /// Seen at the target once; being checked.
+  PRESENTED
+  /// The target asked for a two-factor code, in the browser that saw it.
+  CODE
+  /// Every check passed: the "linked" sign-in may spend it, once.
+  READY
+  DONE
+  /// Sent to Microsoft sign-in instead; nothing more to spend.
+  SSO
+  REFUSED
+}
+
+/// One person's accounts in several workspaces, each joined by signing in to that workspace under its own
+/// rules. Being signed in as any member lets the person switch into the others, as each target allows.
+/// Deleted once fewer than two members remain.
+model LinkGroup {
+  id        String       @id @default(cuid())
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  members   LinkMember[]
+
+  @@map("link_groups")
+}
+
+/// One workspace account in a group — by its id there, never by its address. An account is in at most one
+/// group; a group holds at most one account per workspace.
+model LinkMember {
+  id               String    @id @default(cuid())
+  groupId          String
+  group            LinkGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// User.id in that workspace's database.
+  userId           String
+  /// The account's address and name there when last proven or switched into — shown to the person only,
+  /// never matched on.
+  email            String
+  name             String
+  /// HMAC of the account's id, address and password hash when proven (spec §4.4). Stale: unlinked.
+  stamp            String
+  provenAt         DateTime
+  lastSwitchedInAt DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@unique([tenantId, userId])
+  @@unique([groupId, tenantId])
+  @@map("link_members")
+}
+
+/// "Add a workspace": asked for at the source, proven at the target, finished back at the source — ten
+/// minutes from asking to proving. The proof's way back lasts a minute and is spent on first sight.
+model LinkIntent {
+  /// SHA-256 of the token's random part; the token travels once, to the target, in the address fragment.
+  tokenHash         String    @id
+  sourceTenantId    String
+  sourceTenant      Tenant    @relation("LinkIntentSource", fields: [sourceTenantId], references: [id], onDelete: Cascade)
+  sourceUserId      String
+  /// The sign-in (sid) of the session that asked — only it can finish.
+  sourceSid         String
+  /// Where it was asked from (the host the person was on) — the proof returns there, and only if that host
+  /// still reaches the source workspace.
+  sourceOrigin      String
+  sourceStamp       String
+  sourceEmail       String
+  sourceName        String
+  /// SHA-256 of the secret in the asking browser's cookie at the source.
+  browserSecretHash String
+  targetTenantId    String
+  targetTenant      Tenant    @relation("LinkIntentTarget", fields: [targetTenantId], references: [id], onDelete: Cascade)
+  expiresAt         DateTime
+  /// Opened at the target — once, by one browser, whose cookie secret this is the SHA-256 of.
+  presentedAt       DateTime?
+  targetBrowserHash String?   @unique
+  /// The account that signed in at the target and confirmed.
+  targetUserId      String?
+  targetEmail       String?
+  targetName        String?
+  targetStamp       String?
+  provenAt          DateTime?
+  /// SHA-256 of the one-minute token that carries the proof back; spent the first time it is seen.
+  completionHash    String?   @unique
+  completionSeenAt  DateTime?
+  completedAt       DateTime?
+  failedAt          DateTime?
+  /// Why it ended unfinished: a LinkRefusal code (spec §8.1).
+  failure           String?
+  ip                String?
+  createdAt         DateTime  @default(now())
+
+  @@index([sourceTenantId, sourceUserId, createdAt])
+  @@index([targetTenantId, createdAt])
+  @@index([expiresAt])
+  @@map("link_intents")
+}
+
+/// A switch between linked accounts: made at the source, spent at the target. Sixty seconds to its first
+/// sight, once; then five minutes, in the browser that saw it, while the target asks for a code.
+model LinkSwitchTicket {
+  tokenHash      String           @id
+  targetTenantId String
+  targetTenant   Tenant           @relation(fields: [targetTenantId], references: [id], onDelete: Cascade)
+  /// User.id at the target — never an address.
+  targetUserId   String
+  /// The target's LinkMember and group when made (re-checked at the target).
+  memberId       String
+  groupId        String
+  sourceTenantId String
+  sourceUserId   String
+  sourceSid      String
+  expiresAt      DateTime
+  /// Its first sight at the target.
+  usedAt         DateTime?
+  /// SHA-256 of the secret in the cookie of the browser that saw it: only that browser finishes.
+  presentHash    String?          @unique
+  stage          LinkSwitchStage?
+  attempts       Int              @default(0)
+  finishBy       DateTime?
+  completedAt    DateTime?
+  /// A SwitchRefusal code (spec §8.1).
+  refusal        String?
+  ip             String?
+  createdAt      DateTime         @default(now())
+
+  @@index([targetTenantId, createdAt])
+  @@index([sourceTenantId, sourceUserId, createdAt])
+  @@index([expiresAt])
+  @@map("link_switch_tickets")
+}
+
+/// A workspace's own rule for linked sign-in, set from its Security settings. No row: the defaults.
+model TenantSignInPolicy {
+  tenantId        String   @id
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// "Allow switching into this workspace from linked accounts".
+  allowSwitchIn   Boolean  @default(true)
+  updatedByUserId String?
+  updatedByName   String?
+  updatedAt       DateTime @updatedAt
+
+  @@map("tenant_sign_in_policies")
+}
+
+/// Which workspaces an address is an active member of, for "find my workspaces" only — the address kept as an
+/// HMAC under the platform key ("email-index"), never in the clear. Linked sign-in never reads it.
+model WorkspaceEmail {
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// User.id there.
+  userId    String
+  emailHmac String
+  updatedAt DateTime @updatedAt
+
+  @@id([tenantId, userId])
+  @@index([emailHmac])
+  @@map("workspace_emails")
 }

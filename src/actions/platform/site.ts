@@ -5,7 +5,7 @@ import { CONTACT_LIMITS, CONTACT_TOPICS, type ContactInput, type ContactResult, 
 import { recordLead } from "@/lib/cms/leads";
 import { clientIpFrom } from "@/lib/client-ip";
 import { parseEmailAddress } from "@/lib/email-verification";
-import { addressKey, siteAllowance, startWorkspaceLookup } from "@/lib/platform/find-workspaces";
+import { addressKey, findLookupsPerHour, siteAllowance, startWorkspaceLookup } from "@/lib/platform/find-workspaces";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 
 /**
@@ -43,11 +43,14 @@ export async function findMyWorkspaces(input: { email: string; website?: string 
     if (!parsed) return answer;
     const email = `${parsed.local}@${parsed.domain}`;
     const ip = await caller();
+    const ceiling = await findLookupsPerHour();
     const allowed = siteAllowance([
       { key: `platform|find:${addressKey(email)}`, max: 3 },
       ...(ip ? [{ key: `platform|find-caller:${ip}`, max: 10 }] : []),
-      // Each lookup queries every workspace's database: a ceiling for the whole process.
-      { key: "platform|find:all", max: 60 },
+      // A ceiling for the whole process: 60 an hour while each lookup queries every workspace's database,
+      // 300 once the email index is built and a lookup asks only the workspaces that name the address
+      // (owner decision 6).
+      { key: "platform|find:all", max: ceiling },
     ]);
     if (allowed) startWorkspaceLookup(email);
   } catch (err) {

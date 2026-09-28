@@ -4,7 +4,9 @@ import { currentUser } from "@/lib/session";
 import { getSecurityPolicyForAdmin } from "@/actions/security-policy";
 import { getSecuritySettings } from "@/actions/security";
 import { getSupportAccess } from "@/actions/support-access";
+import { getLinkedSignInAdmin } from "@/actions/linked-sign-in-admin";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { LinkedSignInCard } from "@/components/settings/linked-sign-in-card";
 import { SecurityPolicyForm } from "@/components/settings/security-policy-form";
 import { SecuritySettingsForm } from "@/components/settings/security-settings-form";
 import { SupportAccessCard } from "@/components/settings/support-access-card";
@@ -23,7 +25,14 @@ export default async function SecuritySettingsPage() {
     );
   }
 
-  const [policy, loginSettings, origin, support] = await Promise.all([getSecurityPolicyForAdmin(), getSecuritySettings(), tenantOrigin(), getSupportAccess()]);
+  const [policy, loginSettings, origin, support, linked] = await Promise.all([
+    getSecurityPolicyForAdmin(),
+    getSecuritySettings(),
+    tenantOrigin(),
+    getSupportAccess(),
+    // One card, never a reason for the page to fail: a control plane out of reach just hides it.
+    getLinkedSignInAdmin().catch(() => null),
+  ]);
 
   return (
     <div>
@@ -36,6 +45,16 @@ export default async function SecuritySettingsPage() {
         <CardHeader className="text-sm font-medium text-text">Sign-in</CardHeader>
         <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} origin={origin} />}</CardContent>
       </Card>
+
+      {/* Linked sign-in (spec §2.5) — null while viewing as somebody and in a workspace outside the control plane. */}
+      {linked && (
+        <Card className="mt-6">
+          <CardHeader className="text-sm font-medium text-text">Linked sign-in</CardHeader>
+          <CardContent>
+            <LinkedSignInCard state={linked} />
+          </CardContent>
+        </Card>
+      )}
 
       <Link href="/settings/security/access" className="mt-6 block">
         <Card className="flex items-center justify-between gap-3 px-5 py-4 hover:border-brand">

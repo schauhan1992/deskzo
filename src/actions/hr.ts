@@ -12,6 +12,7 @@ import { dateOnly } from "@/lib/hr/calendar";
 import { employeeProfileSchema, exitEmployeeSchema, holidaySchema, leaveTypeSchema } from "@/lib/validation/hr";
 import { OFFBOARDING_TASKS, offboardingChecklist, onboardingChecklist } from "@/lib/hr/onboarding";
 import type { ActionResult } from "@/actions/company";
+import { accountsChanged } from "@/lib/platform/account-hooks";
 
 /**
  * Employee records, the holiday calendar, and the leave types everything else is measured against.
@@ -289,6 +290,7 @@ export async function recordExit(input: unknown): Promise<ActionResult<null>> {
     });
     for (const op of (data.deactivateLogin ? [tx.user.update({ where: { id: data.userId }, data: { active: false } })] : [])) await op;
   });
+  if (data.deactivateLogin) await accountsChanged([data.userId], { revoke: "deactivated", by: `admin:${user.id}` });
 
   await recordAudit({
     userId: user.id,

@@ -25,6 +25,7 @@ import {
   type Resolved,
 } from "./types";
 import { seatProblem } from "@/lib/seats";
+import { accountsChanged } from "@/lib/platform/account-hooks";
 
 /**
  * User accounts, their roles, and the reporting line everything else is scoped against.
@@ -382,7 +383,7 @@ export const usersImporter: Importer = {
     };
 
     if (u.existing === null) {
-      await db.user.create({
+      const created = await db.user.create({
         data: {
           name: u.name,
           email: u.email,
@@ -394,7 +395,9 @@ export const usersImporter: Importer = {
           passwordHash: NO_PASSWORD,
           mustChangePassword: true,
         },
+        select: { id: true },
       });
+      await accountsChanged([created.id], { by: "import" });
       return;
     }
 
@@ -413,5 +416,6 @@ export const usersImporter: Importer = {
       }
       await tx.user.update({ where: { id: target.id }, data });
     });
+    await accountsChanged([target.id], { revoke: target.active && u.active === false ? "deactivated" : undefined, by: "import" });
   },
 };

@@ -62,7 +62,11 @@ export function openForTenant(tenantId: string, purpose: SealPurpose, sealed: st
   return open(tenantId, purpose, sealed);
 }
 
-export type SignPurpose = "backup-archive" | "cms-preview";
+/**
+ * "link-*": linked sign-in's tokens and credential stamps (src/lib/platform/linked/keys.ts), keyed per
+ * verifying workspace. "email-index": find-my-workspace's address index, keyed to "platform".
+ */
+export type SignPurpose = "backup-archive" | "cms-preview" | "link-intent" | "link-completion" | "link-switch" | "link-stamp" | "email-index";
 
 /**
  * A signature only the platform can make, for one workspace and one purpose — derived from the

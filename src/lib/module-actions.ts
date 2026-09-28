@@ -92,6 +92,9 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "leave.ts": ["hr"],
   "ledger-reports.ts": ["accounting"],
   "ledger.ts": ["accounting"],
+  // Linked sign-in: a person's own accounts in other workspaces, and the Security card's rule — every plan (owner decision 10).
+  "linked-sign-in.ts": "core",
+  "linked-sign-in-admin.ts": "core",
   "mail-log.ts": "core",
   "maintenance.ts": "core",
   "marketing-public.ts": "public",
@@ -161,6 +164,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "platform/console-billing.ts": "platform",
   "platform/console-commissions.ts": "platform",
   "platform/console-directory.ts": "platform",
+  "platform/console-linked.ts": "platform",
   "platform/console-partners.ts": "platform",
   "platform/console-shell.ts": "platform",
   "platform/console-support.ts": "platform",

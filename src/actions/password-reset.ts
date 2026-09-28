@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { clientIpFrom } from "@/lib/client-ip";
 import { sendPlatformMail } from "@/lib/platform/mailer";
+import { accountsChanged } from "@/lib/platform/account-hooks";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
@@ -79,6 +80,7 @@ export async function resetPassword(input: { token: string; password: string }):
     return true;
   });
   if (!spent) return { ok: false, error: "This link has expired or been used. Ask for a new one from the sign-in page." };
+  await accountsChanged([row.userId], { revoke: "credentials", by: `user:${row.userId}` });
 
   const workspace = await tenantKey();
   clearFailures([`${workspace}|account:${row.user.email}`, `${workspace}|reset:${row.user.email}`]);

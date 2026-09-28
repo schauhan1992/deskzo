@@ -82,6 +82,7 @@ const MAINTENANCE_PAGE = `<!doctype html>
  * `src/actions/feedback-public.ts` and `src/actions/intake.ts` for what that does and does not
  * grant. Bouncing a customer to a sign-in they can never pass would make the link useless, which
  * is why an unsubscribe link behind a login is not an unsubscribe link.
+ * Linked sign-in's /switch, /link/start and /link/complete too: each spends its one-time token before any session is looked at (never /link/confirm, which needs the session and the gate).
  */
 /**
  * API paths answered on the platform's own address — the scheduled ticks, which fan out over every
@@ -93,7 +94,7 @@ const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platf
 const REFERRAL_COOKIE = "wroffy_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-const PUBLIC_PREFIXES = ["/login", "/handoff", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
+const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

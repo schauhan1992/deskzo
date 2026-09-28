@@ -14,19 +14,35 @@ import { formatIstDateTime } from "@/lib/india-time";
 import { getMailConnection } from "@/actions/document-mail";
 import { OutlookConnection } from "@/components/profile/outlook-connection";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { myLinkedWorkspaces } from "@/actions/linked-sign-in";
+import { LinkedWorkspacesCard } from "@/components/linked/linked-workspaces-card";
+import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
+import { currentTenant } from "@/lib/tenancy/resolve";
 
-export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ outlook?: string }> }) {
-  const [profile, security, access, mail, { outlook }] = await Promise.all([
+export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ outlook?: string; link?: string }> }) {
+  const [profile, security, access, mail, linked, { outlook, link }] = await Promise.all([
     getOwnProfile(),
     getCachedSecuritySettings(),
     myAccess(),
     isModuleEntitled("sales_documents").then(async (has) => (has || (await isModuleEntitled("purchase_documents")) ? getMailConnection() : null)),
+    // One card on this page, never a reason for the page to fail: a control plane out of reach just hides it.
+    myLinkedWorkspaces().catch(() => null),
     searchParams,
   ]);
   if (!profile) notFound();
 
   const twoFactorEnabled = !!profile.twoFactorEnabledAt;
   const mustSetUpTwoFactor = !!security?.enforceTwoFactor && !twoFactorEnabled;
+
+  // Linked workspaces (spec §2.4). Not enabled with nothing listed is viewing as somebody, platform support, a
+  // workspace outside the control plane or a pause: no card at all.
+  const showLinked = !!linked && (linked.enabled || linked.items.length > 0);
+  // `?link=` is where "Sign in with Microsoft again" comes back to (§2.2): the add dialog reopens on the address typed
+  // before it. Only shown to the person, never trusted — the action resolves it through the registry — so only
+  // something shaped like an address is taken.
+  const typedLink = typeof link === "string" ? link.trim().toLowerCase() : "";
+  const openWith = showLinked && /^[a-z0-9.-]{1,255}$/.test(typedLink) ? { workspace: typedLink, sso: true } : null;
+  const workspaceName = showLinked ? (await currentTenant()).name : undefined;
 
   return (
     <div className="space-y-6">
@@ -110,6 +126,16 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
             <TwoFactorSetup enabled={twoFactorEnabled} />
           </CardContent>
         </Card>
+
+        {/* The id is where the header switcher's "Manage" lands (/profile#linked-workspaces); scroll-mt clears the sticky header. */}
+        {showLinked && linked && (
+          <Card id="linked-workspaces" className="scroll-mt-20">
+            <CardHeader className="text-sm font-medium text-text">Linked workspaces</CardHeader>
+            <CardContent>
+              <LinkedWorkspacesCard initial={linked} domain={PLATFORM_DOMAIN} openWith={openWith} currentName={workspaceName} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Not shown while viewing as somebody: whose mailbox is connected is theirs alone. */}
         {mail && (

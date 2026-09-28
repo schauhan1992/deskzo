@@ -5,6 +5,8 @@ import { reconcileSubscriptions, snapshotUsage } from "@/lib/billing/reconcile";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { istDateParts } from "@/lib/india-time";
 import { runPartnerChores } from "@/lib/partners/commission";
+import { reconcileEmailIndex } from "@/lib/platform/email-index";
+import { sweepLinkedSignIn } from "@/lib/platform/linked/sweep";
 import { snapshotRevenue } from "@/lib/platform/revenue";
 import { getSetting, setSetting } from "@/lib/platform/settings";
 import { withPlatformLease } from "@/lib/platform/fanout";
@@ -22,6 +24,10 @@ import { runSupportRetention } from "@/lib/support/retention";
  * first call also reads every gateway subscription back, records each workspace's use
  * (src/lib/billing/reconcile.ts) and the day's revenue (src/lib/platform/revenue.ts). Under a lease,
  * so two schedulers never run it at once — nor a run started from the console.
+ *
+ * The daily call also runs linked sign-in's nightly sweep (src/lib/platform/linked/sweep.ts) and brings the
+ * "find my workspace" email index up to date (src/lib/platform/email-index.ts), each failing into the day's
+ * `failed` without stopping anything else.
  *
  * Every call also tidies Contact Support's files (src/lib/support/retention.ts): uploads never sent
  * go after a day, and closed requests' files after the retention the console sets. A failure there is
@@ -60,6 +66,19 @@ async function handle(request: Request) {
         revenue = await snapshotRevenue(now);
       } catch (err) {
         failed.push(`revenue: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      // Linked sign-in's sweep and the email index: each reports into the day's failures, never stops the day.
+      try {
+        const s = await sweepLinkedSignIn(now);
+        failed.push(...s.failed.map((f) => `linked: ${f}`));
+      } catch (err) {
+        failed.push(`linked: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        const e = await reconcileEmailIndex();
+        failed.push(...e.failed.map((f) => `email-index: ${f}`));
+      } catch (err) {
+        failed.push(`email-index: ${err instanceof Error ? err.message : String(err)}`);
       }
       await setSetting("billing.dailyRanOn", today, "tick");
       daily = { reconciled: reconciled.read, failed, usage: usage.length, revenue };

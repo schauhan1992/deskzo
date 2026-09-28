@@ -107,6 +107,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/support/settings.ts:cache": { reason: "shared: the platform's support settings and brand name, the same for every workspace — cleared by the console on save" },
   "src/lib/support/console.ts:opened": { reason: "console-wide: when each staff member last had each support attachment's opening audited (ten-minute dedupe, bounded) — platform staff, no workspace's data" },
   "src/lib/partners/settings.ts:referralCookieCache": { reason: "shared: the platform's referral-cookie lifetime, a platform setting cached for a minute — no workspace's data" },
+  "src/lib/platform/linked/groups.ts:enabledCache": { reason: "shared: the platform's linked sign-in switch (kill switch), one per install — no workspace's data" },
   "src/lib/platform/find-workspaces.ts:allowances": { reason: "shared: the public site's request counts (find my workspaces, the contact form), keyed platform|… by hashed address, caller or all — no workspace's data" },
   "src/lib/tenancy/log-labels.ts:requestStore": { reason: "shared: a reference to Next's own request store, looked up once — it holds no workspace's data" },
 

@@ -12,6 +12,7 @@ import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, asse
 import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
+import { accountsChanged } from "@/lib/platform/account-hooks";
 
 function refuse(err: unknown): ActionResult<never> {
   if (err instanceof AuthzError) return { ok: false, error: err.message };
@@ -193,6 +194,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
         mustChangePassword: true,
       },
     });
+    await accountsChanged([user.id], { by: `admin:${admin.id}` });
     revalidatePath("/settings/access");
     return { ok: true, data: { id: user.id } };
   } catch (err) {
@@ -234,6 +236,7 @@ export async function setUserActive(id: string, active: boolean): Promise<Action
     return refuse(err);
   }
 
+  await accountsChanged([id], { revoke: active ? undefined : "deactivated", by: `admin:${admin.id}` });
   revalidatePath("/settings/access");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
@@ -257,6 +260,7 @@ export async function resetUserTwoFactor(id: string): Promise<ActionResult<null>
   }
 
   await db.user.update({ where: { id }, data: { twoFactorSecretCipher: null, twoFactorEnabledAt: null } });
+  await accountsChanged([id], { revoke: "two-factor-reset", by: `admin:${admin.id}` });
   revalidatePath("/settings/access");
   return { ok: true, data: null };
 }

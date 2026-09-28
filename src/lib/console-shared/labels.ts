@@ -600,6 +600,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "announcement.archive": "Announcement archived",
   "export.workspaces": "Workspaces exported",
   "export.audit": "Audit log exported",
+  "linked.settings": "Linked sign-in setting changed",
 };
 
 /**
@@ -622,7 +623,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
-  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "export.workspaces", "export.audit", "cms."] },
+  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "export.workspaces", "export.audit", "cms.", "linked.settings"] },
 ];
 
 export function categoryOf(action: string): AuditCategoryKey | null {
@@ -716,6 +717,15 @@ export function auditLabel(action: string, detail: unknown): { title: string; to
         title = "Two-factor turned off";
         tone = "warning";
       } else if (d.mode === "required") title = "Two-factor required";
+      break;
+    case "linked.settings":
+      if (d.enabled === false) {
+        title = "Linked sign-in switched off";
+        tone = "warning";
+      } else if (d.enabled === true) {
+        title = "Linked sign-in switched on";
+        tone = "success";
+      }
       break;
     case "alert.ack":
       if (typeof d.snoozeUntil === "string" && d.snoozeUntil) title = "Alert snoozed";
@@ -873,6 +883,8 @@ export function auditSummary(action: string, detail: unknown): string | null {
       return d.session ? `session ${text(d.session, 12)}` : null;
     case "staff.two-factor.policy":
       return d.mode === "off" ? "off" : d.mode === "required" ? "required" : null;
+    case "linked.settings":
+      return d.enabled === false ? "every workspace, off" : d.enabled === true ? "every workspace, on" : null;
     case "staff.setup-link":
       return d.self === true ? "to their own address" : null;
     case "staff.sign-in":
@@ -965,6 +977,9 @@ export function auditHref(action: string, detail: unknown, workspaceSlug: string
 export function actorLabel(actorKind: "STAFF" | "SCRIPT" | "SYSTEM", actor: string, names: ReadonlyMap<string, string>): string {
   if (actorKind === "STAFF") return names.get(actor) ?? "A former staff member";
   if (actorKind === "SCRIPT") {
+    // "script:<npm script>" kept as written ("script:linked-sign-in", the kill switch): the script is what follows.
+    const scripted = /^script:([a-z][a-z0-9:-]*)$/.exec(actor);
+    if (scripted) return `npm run ${scripted[1]}`;
     // An npm script ("tenants:migrate", "platform:adopt"), or a named job ("billing").
     return /^[a-z][a-z0-9-]*:[a-z0-9:-]+$/.test(actor) ? `npm run ${actor}` : actor || "a script";
   }

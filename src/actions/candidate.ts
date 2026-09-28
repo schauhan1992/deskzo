@@ -18,6 +18,7 @@ import { canConvert, CANDIDATE_LETTERS, ONBOARDING_TASKS } from "@/lib/hr/onboar
 import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@/lib/hr/letters";
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
+import { accountsChanged } from "@/lib/platform/account-hooks";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -386,6 +387,7 @@ export async function convertCandidate(
 
     return newUser;
   });
+  await accountsChanged([created.id], { by: `admin:${user.id}` });
 
   // Tasks are raised after the transaction: they are useful but not worth failing a conversion for.
   const hrPeople = await db.user.findMany({

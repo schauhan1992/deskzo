@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, LifeBuoy, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, LifeBuoy, Link2, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
 import { Banner } from "@/components/console/kit/banner";
 import { EnvBadge } from "@/components/console/kit/env-badge";
 import { PageHeader } from "@/components/console/kit/page-header";
@@ -9,16 +9,20 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { GatewayKeysEditor } from "@/components/console/settings/gateway-keys";
+import { LinkedSignInSwitch } from "@/components/console/settings/linked-sign-in-setting";
 import { TwoFactorPolicyEditor } from "@/components/console/settings/security-settings";
 import { ChangedBy, SignupSettingsForm } from "@/components/console/settings/signup-settings";
 import type { SettingChange } from "@/components/console/settings/signup-settings";
 import { SupportSettingsForm } from "@/components/console/support/support-settings";
 import { durationText, plural } from "@/lib/console-shared/format";
+import { actorLabel } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
 import type { Tone } from "@/lib/console-shared/types";
 import { consoleStaff, platformEnv } from "@/lib/platform/console-page";
+import { controlDb } from "@/lib/platform/control-db";
 import { configurationPresence, securityFacts } from "@/lib/platform/health";
+import { linkedSignInSetting } from "@/lib/platform/linked/groups";
 import { autoDeprovision, gatewayModes, settingsOverview, signupOpen, staffTwoFactorPolicy, trialDays, type SettingRow } from "@/lib/platform/settings";
 import { lastTick, type TickSummary } from "@/lib/platform/tick-summary";
 import { SUPPORT_SETTING_KEYS, getSupportSettings } from "@/lib/support/settings";
@@ -29,6 +33,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "signup", label: "Signup & trials", icon: UserPlus },
   { id: "gateways", label: "Payment gateways", icon: CreditCard },
   { id: "security", label: "Staff security", icon: ShieldCheck },
+  { id: "linked-sign-in", label: "Linked sign-in", icon: Link2 },
   { id: "support", label: "Support", icon: LifeBuoy },
   { id: "environment", label: "Environment", icon: Server },
 ];
@@ -37,9 +42,10 @@ const LINK = "inline-flex items-center gap-1 rounded-base font-medium text-brand
 
 /**
  * Every platform-wide setting in one place (spec §3.18): who may sign up and for how long a trial
- * runs, the payment gateways' keys, how staff sign in, and what the installation was started with —
- * each with who changed it last. Owners, admins and billing staff open it; only an owner changes
- * anything, and everybody else is shown values, not disabled controls.
+ * runs, the payment gateways' keys, how staff sign in, whether linked sign-in is on in the workspaces,
+ * and what the installation was started with — each with who changed it last. Owners, admins and
+ * billing staff open it; only an owner changes anything, and everybody else is shown values, not
+ * disabled controls.
  *
  * Nothing secret reaches this page: a gateway key arrives as "set or not" and the mode worked out
  * from it on the server, the environment as present or not. Changes are made through the owner-only
@@ -49,7 +55,7 @@ export default async function ConsoleSettingsPage() {
   // First: signed out, the page ends here with a redirect to /login; support and read-only staff get "not found".
   const staff = await consoleStaff(PAGE_ROLES.settings);
   const caps = capsFor(staff.role);
-  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support] = await Promise.all([
+  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support, linked] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
@@ -60,6 +66,7 @@ export default async function ConsoleSettingsPage() {
     lastTick(),
     securityFacts(),
     getSupportSettings(),
+    linkedSignInState(),
   ]);
   const env = platformEnv();
   const production = env.key === "production";
@@ -210,6 +217,14 @@ export default async function ConsoleSettingsPage() {
                 )}
               </div>
             </div>
+          </Panel>
+
+          <Panel
+            id="linked-sign-in"
+            title="Linked sign-in"
+            description="Switching between linked workspaces from the header, without signing in again — one switch for every workspace."
+          >
+            <LinkedSignInSwitch enabled={linked.enabled} change={linked.change} readOnly={!caps.owner} />
           </Panel>
 
           <Panel id="support" title="Support" description="Contact Support in the workspaces: where requests are announced, the helpline, recording, and how long files are kept.">
@@ -382,4 +397,19 @@ function newest(list: (SettingRow | null)[]): SettingRow | null {
 
 function changeOf(r: SettingRow | null): SettingChange | null {
   return r?.updatedAt ? { by: r.updatedByName, at: r.updatedAt } : null;
+}
+
+/**
+ * Linked sign-in's switch, read fresh, and who last set it: a staff member by name, or the script
+ * (`script:linked-sign-in`) as its command. It is not one of settingsOverview's keys, so the name is
+ * looked up here.
+ */
+async function linkedSignInState(): Promise<{ enabled: boolean; change: SettingChange | null }> {
+  const setting = await linkedSignInSetting();
+  if (!setting.updatedAt) return { enabled: setting.enabled, change: null };
+  const by = setting.updatedBy;
+  let name: string | null = null;
+  if (by?.includes(":")) name = actorLabel("SCRIPT", by, new Map());
+  else if (by) name = (await controlDb().platformUser.findUnique({ where: { id: by }, select: { name: true } }))?.name ?? "a former staff member";
+  return { enabled: setting.enabled, change: { by: name, at: setting.updatedAt } };
 }

@@ -323,6 +323,19 @@ const PUBLIC_ACTIONS = new Set([
   "src/actions/portal-public.ts",
 ]);
 
+/**
+ * Single exports reachable without a session in a file whose other exports are guarded, each for a
+ * stated reason. The rest of the file is still scanned — listing the whole file in PUBLIC_ACTIONS
+ * would stop the scan checking its guarded exports.
+ */
+const PUBLIC_EXPORTS: Record<string, string> = {
+  // Linked sign-in's /switch page (spec §4.3): the person switching in has no session here yet. Each
+  // needs the `wroffy.switch` cookie, a MAC-bound secret held only by the browser that presented the
+  // ticket, and acts only on that ticket. check:linked-signin holds them.
+  "src/actions/linked-sign-in.ts:submitSwitchCode": "the two-factor step of a switch-in",
+  "src/actions/linked-sign-in.ts:continueSwitchWithMicrosoft": "the Microsoft step of a switch-in",
+};
+
 const actionsDir = join(process.cwd(), "src", "actions");
 // Every action file, in subfolders too (src/actions/platform/…): one the scan cannot see is one it
 // would wrongly pass.
@@ -375,7 +388,7 @@ for (const file of files) {
     // The body runs to the next export, which is where the split already put the boundary.
     examined += 1;
     seen.add(name);
-    if (!markers.some((m) => part.includes(m))) {
+    if (!markers.some((m) => part.includes(m)) && !PUBLIC_EXPORTS[`${rel}:${name}`]) {
       ungated.push(`${rel}:${name}`);
     }
   }
