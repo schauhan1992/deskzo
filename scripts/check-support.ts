@@ -387,6 +387,7 @@ async function main() {
         mobile: "+91 98765 43210",
         priority: "URGENT",
         uploadIds: [],
+        consent: true,
         context: { page: "/invoices/INV-42?token=zz-secret#top", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36", screen: "1920×1080@2x", viewport: "1440×900", timezone: "Asia/Kolkata", language: "en-IN" },
         ...over,
       }) as SupportSubmitInput;
@@ -639,6 +640,8 @@ async function main() {
       const count = await requestsOf(main.id);
       const refusals: [string, Promise<SupportSubmitResult>, string][] = [];
       const recordingOf = async (userId: string, consent: unknown) => ({ uploadId: (await stage(main.id, userId, WEBM, "r", "recording")).uploadId, durationMs: 5000, consent, consoleLog: [] });
+      refusals.push(["no consent in the form", submit(main, asha.id, input({ consent: undefined as never })), "Tick the box to agree to what's sent with your request."]);
+      refusals.push(["consent as the string 'true'", submit(main, asha.id, input({ consent: "true" as never })), "Tick the box to agree to what's sent with your request."]);
       refusals.push(["a recording without consent", submit(main, asha.id, input({ recording: (await recordingOf(asha.id, false)) as never })), "A recording needs your consent — tick the box before you record."]);
       refusals.push(["a recording with consent as the string 'true'", submit(main, asha.id, input({ recording: (await recordingOf(asha.id, "true")) as never })), "A recording needs your consent — tick the box before you record."]);
       refusals.push(["a recording over five minutes", submit(main, asha.id, input({ recording: { ...(await recordingOf(asha.id, true)), durationMs: 400_000 } as never })), "A recording can be at most 5 minutes long."]);
@@ -797,7 +800,7 @@ async function main() {
       ok("  no first response, but In progress", freshRow.firstResponseAt === null && freshRow.status === "IN_PROGRESS");
 
       // Settings.
-      const settingsInput = { enabled: true, email: "desk@zzsupport.example", helpline: "+91 80 4000 1234", hours: "Mon-Sat", recording: true, retentionDays: 365 };
+      const settingsInput = { enabled: true, email: "desk@zzsupport.example", helpline: "+91 80 4000 1234", hours: "Mon-Sat", languages: "English, Hindi", recording: true, retentionDays: 365 };
       for (const role of ["support", "readonly", "billing"] as const) {
         await actAs(staffIds[role]);
         ok(`${role} staff can't change the Support settings`, why(await consoleActions.saveSupportSettings(settingsInput)) === "Your role cannot do that.");
@@ -954,7 +957,7 @@ async function main() {
       const launcher = renderToStaticMarkup(createElement(SupportLauncher, { state }));
       ok("the launcher: nothing on the page until the sidebar asks — the dialog closed", !launcher.includes('role="dialog"'), launcher.slice(0, 300));
       const dialog = renderToStaticMarkup(createElement(SupportDialog, { state, open: true, onClose: () => {} }));
-      ok("the dialog: its title, the fields, the priorities, the footer and the disclosure", ["How can we help you today?", "Subject", "Tell us in detail", "Mobile number", "How critical is your request?", "Just a question", "Critical — our business is stopped", "asha@zzsup.example", "We&#x27;ll include the page you were on"].every((t) => dialog.includes(t)), ["How can we help you today?", "Subject", "Tell us in detail", "Mobile number", "How critical is your request?", "Just a question", "asha@zzsup.example"].filter((t) => !dialog.includes(t)).join(", "));
+      ok("the dialog: its title, the fields, the priorities, the footer and the disclosure", ["How can we help you today?", "Subject", "Tell us in detail", "Mobile number", "How critical is your request?", "Just a question", "Critical — our business is stopped", "asha@zzsup.example", "I agree to send this request with the page I was on"].every((t) => dialog.includes(t)), ["How can we help you today?", "Subject", "Tell us in detail", "Mobile number", "How critical is your request?", "Just a question", "asha@zzsup.example"].filter((t) => !dialog.includes(t)).join(", "));
       ok("  the phone prefilled, and NORMAL chosen", dialog.includes('value="+91 98765 43210"') && /<option value="NORMAL" selected="">/.test(dialog));
       const dlpDialog = renderToStaticMarkup(createElement(SupportDialog, { state: { ...state, recordingAllowed: false, recordingBlockedReason: "dlp" }, open: true, onClose: () => {} }));
       ok("  with DLP, Record says the organisation doesn't allow it", dlpDialog.includes("Your organisation&#x27;s security settings don&#x27;t allow screen recording."));

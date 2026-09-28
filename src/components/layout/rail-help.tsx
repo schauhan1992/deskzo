@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, FileText, Mail, Phone, PlayCircle, Search } from "lucide-react";
-import { getHelpDesk, listHelpLinks, listUpdates, type HelpDeskView, type HelpLinkView, type UpdateView } from "@/actions/help";
+import { listHelpLinks, listUpdates, type HelpLinkView, type UpdateView } from "@/actions/help";
+import { getSupportContact } from "@/actions/support";
+import type { SupportContact } from "@/lib/support/types";
 import { RecentUpdates } from "@/components/help/recent-updates";
 import { Input } from "@/components/ui/input";
 
@@ -49,9 +51,9 @@ export function RailUpdates({ canManage }: { canManage: boolean }) {
 }
 
 export function RailHelp({ canManage }: { canManage: boolean }) {
-  const { data, error } = useLoad<{ desk: HelpDeskView | null; articles: HelpLinkView[] }>(
+  const { data, error } = useLoad<{ desk: SupportContact | null; articles: HelpLinkView[] }>(
     async () => {
-      const [desk, articles] = await Promise.all([getHelpDesk(), listHelpLinks("ARTICLE")]);
+      const [desk, articles] = await Promise.all([getSupportContact(), listHelpLinks("ARTICLE")]);
       return { desk, articles };
     },
     "Could not load help.",

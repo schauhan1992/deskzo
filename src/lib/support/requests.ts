@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Prisma } from "@wroffy/control-client";
 import { controlDb } from "@/lib/platform/control-db";
-import { ATTACHMENT_EXPIRED, SupportRefused } from "@/lib/support/refused";
+import { ATTACHMENT_EXPIRED, CONSENT_MISSING, SupportRefused } from "@/lib/support/refused";
 import { claimStaged, deleteRequestFiles, readStaged, validId, type StagedMeta } from "@/lib/support/storage";
 import {
   LIMITS,
@@ -153,6 +153,10 @@ export function cleanSubmission(input: unknown): CleanSubmission {
 
   const priority = typeof x.priority === "string" && (SUPPORT_PRIORITIES as readonly string[]).includes(x.priority) ? (x.priority as SupportPriorityKey) : null;
   if (!priority) throw new SupportRefused("Choose how critical your request is.");
+
+  // Every request carries the page, the IP address and the browser and device details: nothing is
+  // created until the person has agreed to that, in the form, in so many words.
+  if (x.consent !== true) throw new SupportRefused(CONSENT_MISSING);
 
   let recording: CleanSubmission["recording"] = null;
   if (x.recording !== undefined && x.recording !== null) {

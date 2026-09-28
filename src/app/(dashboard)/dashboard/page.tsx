@@ -27,7 +27,8 @@ import {
 import { WelcomeHeader, type DashboardTab } from "@/components/dashboard/welcome-header";
 import { GettingStarted } from "@/components/dashboard/getting-started";
 import { RecentUpdates } from "@/components/help/recent-updates";
-import { getGettingStarted, getHelpDesk, listUpdates, unreadUpdateCount } from "@/actions/help";
+import { getGettingStarted, listUpdates, unreadUpdateCount } from "@/actions/help";
+import { getSupportContact } from "@/actions/support";
 import { getBranding } from "@/actions/branding";
 import { getOrganisation } from "@/lib/organisation";
 import { requireUser } from "@/lib/session";
@@ -145,7 +146,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     todaysMoments(),
     getBranding(),
     getOrganisation(),
-    getHelpDesk(),
+    // The platform's support desk, from the console — not a helpline each workspace sets for itself.
+    getSupportContact(),
     unreadUpdateCount(),
     can(user.id, "help.manage"),
   ]);

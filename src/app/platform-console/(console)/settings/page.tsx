@@ -234,6 +234,7 @@ export default async function ConsoleSettingsPage() {
                     },
                     { term: "Support email", value: <span className="break-all">{support.email}</span> },
                     { term: "Helpline", value: support.helpline ? `${support.helpline}${support.hours ? ` · ${support.hours}` : ""}` : "Not shown" },
+                    { term: "Languages", value: support.languages ?? "Not shown" },
                     {
                       term: "Screen recording",
                       value: support.recording ? (

@@ -88,6 +88,8 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<{ number: number; email: string } | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  /** The form's consent box: nothing is sent until it is ticked (the server insists too). */
+  const [agreed, setAgreed] = useState(false);
   const files = useSupportAttachments();
 
   const [phase, setPhase] = useState<Phase>("idle");
@@ -126,6 +128,7 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
     mobileError: useId(),
     priority: useId(),
     sendHint: useId(),
+    consent: useId(),
     sent: useId(),
   };
 
@@ -159,8 +162,14 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
   const takeUploading = take?.upload.state === "uploading";
   const takeUnattached = !!take && take.upload.state !== "done";
   const uploading = files.busy || takeUploading;
-  const sendBlocked = uploading || takeUnattached;
-  const sendHint = uploading ? "Waiting for the uploads to finish…" : takeUnattached ? "Attach or discard your recording first." : null;
+  const sendBlocked = uploading || takeUnattached || !agreed;
+  const sendHint = uploading
+    ? "Waiting for the uploads to finish…"
+    : takeUnattached
+      ? "Attach or discard your recording first."
+      : !agreed
+        ? "Tick the box above to send."
+        : null;
   const hasDraft = subject.trim() !== "" || body.trim() !== "" || files.items.length > 0 || take !== null;
 
   const subjectLength = chars(subject);
@@ -317,6 +326,7 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
     setSent(null);
     setConfirmingDiscard(false);
     setRecordNotice(null);
+    setAgreed(false);
   }
 
   /** The X, Escape, the backdrop and Cancel all come here. */
@@ -383,6 +393,8 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
             ? { uploadId: take.upload.uploadId, durationMs: take.durationMs, consent: true, consoleLog: take.consoleLog, perf: take.perf }
             : undefined,
         context: clientContext(),
+        // Send is disabled until the box is ticked, so reaching here means it was.
+        consent: true,
       });
     } catch {
       result = { ok: false, error: SEND_FAILED };
@@ -587,10 +599,22 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
                   Our response will be sent to your email address <strong className="font-medium text-text">{state.email}</strong>.
                 </span>
               </p>
-              <p className="text-[11px] leading-relaxed text-subtle">
-                We&apos;ll include the page you were on and your browser and device details, to help us reproduce the problem.
-              </p>
             </div>
+
+            <label className="flex items-start gap-2.5 text-[13px] leading-snug text-text">
+              <input
+                id={ids.consent}
+                type="checkbox"
+                checked={agreed}
+                onChange={(event) => setAgreed(event.target.checked)}
+                aria-required="true"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-line-strong accent-brand"
+              />
+              <span>
+                I agree to send this request with the page I was on, my IP address, and my browser and device details, so
+                support can reproduce the problem.
+              </span>
+            </label>
 
             {formError && <ActionNotice tone="error">{formError}</ActionNotice>}
 

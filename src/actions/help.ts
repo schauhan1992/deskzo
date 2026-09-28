@@ -32,6 +32,10 @@ async function mayManage(userId: string) {
 }
 
 // ─── The helpline ────────────────────────────────────────────────────────────────────────────────
+//
+// No longer shown: since the platform began selling workspaces, the dashboard and the rail's Help panel
+// show the platform's support contact from its console (`getSupportContact`, src/actions/support.ts).
+// Kept, with its data, until the workspace helpline is retired for good; check:help still covers it.
 
 export type HelpDeskView = {
   label: string | null;

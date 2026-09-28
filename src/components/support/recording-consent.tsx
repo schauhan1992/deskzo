@@ -65,6 +65,7 @@ export function RecordingConsent({
         if (!starting) onCancel();
       }}
       title="Record screen & share feedback"
+      large
     >
       <div className="space-y-4">
         <section aria-labelledby={headingId} className="rounded-lg border border-info/30 bg-info-bg p-3.5">
@@ -115,7 +116,7 @@ export function RecordingConsent({
             onClick={() => onMicrophoneChange(!microphone)}
             className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${microphone ? "bg-brand" : "bg-line-strong"}`}
           >
-            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-surface shadow transition-transform ${microphone ? "translate-x-5" : "translate-x-0.5"}`} />
+            <span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-surface shadow transition-transform ${microphone ? "translate-x-5" : "translate-x-0.5"}`} />
           </button>
         </div>
 

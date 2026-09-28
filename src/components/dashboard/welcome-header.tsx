@@ -4,7 +4,7 @@ import { Mail, Phone } from "lucide-react";
 import { IconPattern } from "@/components/layout/icon-pattern";
 import { MomentChips } from "@/components/layout/celebration-splash";
 import type { Moment } from "@/lib/hr/celebrations";
-import type { HelpDeskView } from "@/actions/help";
+import type { SupportContact } from "@/lib/support/types";
 import { cn } from "@/lib/utils";
 
 export type DashboardTab = { key: string; label: string; badge?: number };
@@ -30,7 +30,8 @@ export function WelcomeHeader({
   moments: Moment[];
   companyName: string;
   logoDataUrl: string | null;
-  helpDesk: HelpDeskView | null;
+  /** The platform's support contact (src/actions/support.ts `getSupportContact`), or null to show none. */
+  helpDesk: SupportContact | null;
   tabs: DashboardTab[];
   activeTab: string;
   /** Beside the tabs, right-aligned — the Customize button on the Dashboard tab. */
@@ -108,7 +109,7 @@ export function WelcomeHeader({
 }
 
 /** The support corner: label and number, then hours and languages, small and to the right. */
-function HelplineCorner({ helpDesk }: { helpDesk: HelpDeskView }) {
+function HelplineCorner({ helpDesk }: { helpDesk: SupportContact }) {
   return (
     <div className="min-w-0 text-left text-xs text-muted sm:text-right">
       {helpDesk.phone && (

@@ -281,10 +281,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
           canManageHelp={canManageHelp}
           proRata={await isModuleEntitled("renewals")}
           country={(await currentTenant()).country}
+          support={!!supportLauncher}
         />
       </div>
 
-      {/* The Contact Support dialog; its button is at the foot of the sidebar (the `support` prop above). */}
+      {/* The Contact Support dialog; its button is on the tool rail from xl, and at the foot of the sidebar below it. */}
       {supportLauncher && <SupportLauncher state={supportLauncher} />}
     </div>
     </TableColumnsProvider>

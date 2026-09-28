@@ -14,6 +14,7 @@ import { HELPLINE_PATTERN, RETENTION_DAYS, SETTINGS_LIMITS, SUPPORT_EMAIL_PLACEH
  *                          requester. A placeholder until somebody sets the real one.
  *   support.helpline       shown in the dialog, with support.hours; neither shows when unset.
  *   support.hours
+ *   support.languages      the languages support answers in, shown with the helpline on the dashboard.
  *   support.recording      "1" / "0" — whether screen recording is offered at all. On unless switched off.
  *   support.retentionDays  how long after a request is closed its files are kept: 30–3650, 365 unless set.
  *
@@ -30,6 +31,7 @@ export const SUPPORT_SETTING_KEYS = [
   "support.email",
   "support.helpline",
   "support.hours",
+  "support.languages",
   "support.recording",
   "support.retentionDays",
 ] as const satisfies readonly PlainKey[];
@@ -44,6 +46,7 @@ export const SUPPORT_DEFAULTS: SupportSettings = {
   email: SUPPORT_EMAIL_PLACEHOLDER,
   helpline: null,
   hours: null,
+  languages: null,
   recording: true,
   retentionDays: RETENTION_DAYS.fallback,
 };
@@ -71,12 +74,14 @@ export function parseSupportSettings(values: Partial<Record<SupportSettingKey, s
   const email = line(values["support.email"]);
   const helpline = line(values["support.helpline"]);
   const hours = line(values["support.hours"]);
+  const languages = line(values["support.languages"]);
   const days = Number(values["support.retentionDays"]);
   return {
     enabled: values["support.enabled"] !== "0",
     email: email && chars(email) <= LIMITS.email && EMAIL.test(email) ? email : SUPPORT_EMAIL_PLACEHOLDER,
     helpline: helpline && chars(helpline) <= LIMITS.helpline ? helpline : null,
     hours: hours ? [...hours].slice(0, LIMITS.hours).join("") : null,
+    languages: languages ? [...languages].slice(0, LIMITS.languages).join("") : null,
     recording: values["support.recording"] !== "0",
     retentionDays: Number.isInteger(days) && days >= RETENTION_DAYS.min && days <= RETENTION_DAYS.max ? days : RETENTION_DAYS.fallback,
   };
@@ -103,11 +108,13 @@ export function validateSupportSettings(input: unknown): SupportSettings {
   if (helpline && (chars(helpline) > LIMITS.helpline || !PHONE.test(helpline))) throw new ConsoleRefused("The helpline doesn't look like a phone number — digits, spaces, brackets, + and - only, at most 30.");
   const hours = line(x.hours);
   if (chars(hours) > LIMITS.hours) throw new ConsoleRefused(`Keep the hours to ${LIMITS.hours} characters.`);
+  const languages = line(x.languages);
+  if (chars(languages) > LIMITS.languages) throw new ConsoleRefused(`Keep the languages to ${LIMITS.languages} characters.`);
   const days = typeof x.retentionDays === "number" ? x.retentionDays : typeof x.retentionDays === "string" && x.retentionDays.trim() ? Number(x.retentionDays.trim()) : NaN;
   if (!Number.isInteger(days) || days < RETENTION_DAYS.min || days > RETENTION_DAYS.max) {
     throw new ConsoleRefused(`Keep files for ${RETENTION_DAYS.min} to ${RETENTION_DAYS.max} days after a request is closed.`);
   }
-  return { enabled: x.enabled === true, email, helpline: helpline || null, hours: hours || null, recording: x.recording === true, retentionDays: days };
+  return { enabled: x.enabled === true, email, helpline: helpline || null, hours: hours || null, languages: languages || null, recording: x.recording === true, retentionDays: days };
 }
 
 /** Saves validated settings under the staff member's id, and forgets this process's cached copy. */
@@ -117,6 +124,7 @@ export async function saveSupportSettingsValues(values: SupportSettings, by: str
     ["support.email", values.email],
     ["support.helpline", values.helpline],
     ["support.hours", values.hours],
+    ["support.languages", values.languages],
     ["support.recording", values.recording ? "1" : "0"],
     ["support.retentionDays", String(values.retentionDays)],
   ];

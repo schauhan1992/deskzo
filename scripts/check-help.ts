@@ -416,7 +416,9 @@ async function main() {
     const HelpPage = (load("../src/app/(dashboard)/settings/help/page") as { default: () => Promise<unknown> }).default;
     ok("the help settings page turns away somebody without help.manage", render(await HelpPage()).includes("Only somebody who can manage help"));
     as(manager);
-    ok("…and shows the helpline form to somebody with it", render(await HelpPage()).includes("Save helpline"));
+    const helpPage = render(await HelpPage());
+    // The support contact is the platform's now (console Settings → Support): no helpline form here.
+    ok("…and shows the help links to somebody with it, saying the support contact is the platform's — no helpline form", helpPage.includes("comes from the platform") && !helpPage.includes("Save helpline"));
   } finally {
     actor = null;
     await cleanup();

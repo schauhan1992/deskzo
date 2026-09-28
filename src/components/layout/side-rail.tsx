@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Megaphone, MonitorPlay, Sparkles, StickyNote, X } from "lucide-react";
+import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MonitorPlay, Sparkles, StickyNote, X } from "lucide-react";
 import { COPILOT_OPEN_EVENT, SIDE_RAIL_STORAGE_KEY, UPDATES_SEEN_EVENT, parseTool, type SideRailTool } from "@/lib/side-rail";
 import { RailTasks } from "@/components/layout/rail-tasks";
 import { RailNotes } from "@/components/layout/rail-notes";
@@ -10,6 +10,7 @@ import { RailCurrency } from "@/components/layout/rail-currency";
 import { RailLookup } from "@/components/layout/rail-lookup";
 import { RailProRata } from "@/components/layout/rail-prorata";
 import { RailHelp, RailUpdates, RailVideos } from "@/components/layout/rail-help";
+import { openSupport } from "@/components/support/open-support";
 
 const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group: "work" | "help" }[] = [
   { key: "tasks", label: "My tasks", icon: CheckSquare, group: "work" },
@@ -41,6 +42,7 @@ export function SideRail({
   canManageHelp = false,
   proRata = true,
   country = "IN",
+  support = false,
 }: {
   /** Renewals are in the workspace's plan — the pro-rata tool quotes seats onto a subscription. */
   proRata?: boolean;
@@ -51,6 +53,8 @@ export function SideRail({
   /** What's new posts they have not seen, for the dot on its button. */
   unreadUpdates?: number;
   canManageHelp?: boolean;
+  /** Offer Contact Support — the layout's answer from `supportLauncherState()`. */
+  support?: boolean;
 }) {
   const open = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -175,6 +179,21 @@ export function SideRail({
             className="grid h-9 w-9 place-items-center rounded-base text-muted transition-colors hover:bg-surface-sunken hover:text-brand"
           >
             <Sparkles className="h-[18px] w-[18px]" />
+          </button>
+        )}
+        {/* Contact Support: not a panel either — the dialog is the layout's
+            (src/components/support/support-launcher.tsx). In the brand's colour, because it is the way
+            out when nothing else here helped. Below xl, where this rail is hidden, the sidebar offers it. */}
+        {support && (
+          <button
+            type="button"
+            title="Contact support"
+            aria-label="Contact support"
+            aria-haspopup="dialog"
+            onClick={openSupport}
+            className="grid h-9 w-9 place-items-center rounded-base text-brand transition-colors hover:bg-brand-subtle"
+          >
+            <Headset className="h-[18px] w-[18px]" />
           </button>
         )}
         </div>

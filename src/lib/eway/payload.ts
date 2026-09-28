@@ -1,4 +1,5 @@
 import type { TransportMode, VehicleType } from "@/lib/eway/rules";
+import { istDateParts } from "@/lib/india-time";
 
 /**
  * The shape the e-way bill portal wants, built from what we hold.
@@ -86,10 +87,15 @@ const DOC_TYPE: Record<EwayDocument["documentType"], string> = {
 
 const TRANSPORT_MODE: Record<TransportMode, number> = { ROAD: 1, RAIL: 2, AIR: 3, SHIP: 4 };
 
-/** `dd/mm/yyyy` — the portal's format, and not the one anything else in this app uses. */
+/**
+ * `dd/mm/yyyy` — the portal's format, and not the one anything else in this app uses. The Indian
+ * date, whatever the server's clock: read with getDate() on a UTC server, a document issued before
+ * 05:30 IST went to the portal dated the day before.
+ */
 export function portalDate(date: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(date.getDate())}/${p(date.getMonth() + 1)}/${date.getFullYear()}`;
+  const { year, month, day } = istDateParts(date);
+  return `${p(day)}/${p(month + 1)}/${year}`;
 }
 
 export function buildEwayPayload(doc: EwayDocument) {

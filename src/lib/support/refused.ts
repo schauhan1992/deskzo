@@ -18,4 +18,7 @@ export class SupportRefused extends Error {
 
 /** What a stale, foreign or unknown attachment id is told — the same words for each, so none is a probe. */
 export const ATTACHMENT_EXPIRED = "That attachment has expired — please add it again.";
+
+/** Said when the form's consent box was not ticked. */
+export const CONSENT_MISSING = "Tick the box to agree to what's sent with your request.";
 export const TYPE_REFUSED = "That file type can't be attached.";

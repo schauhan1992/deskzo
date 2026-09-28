@@ -1,14 +1,14 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
-import { getHelpDesk, listHelpLinksForManage } from "@/actions/help";
-import { HelpDeskForm } from "@/components/settings/help-desk-form";
+import { listHelpLinksForManage } from "@/actions/help";
 import { HelpLinksManager } from "@/components/settings/help-links-manager";
 
 export const metadata = { title: "Help & support" };
 
 /**
- * Where people turn when they are stuck: the helpline on the dashboard, and the help articles and
- * videos in the rail. See src/actions/help.ts.
+ * Where people turn when they are stuck: the help articles and videos in the rail. See
+ * src/actions/help.ts. The support contact on the dashboard is the platform's, set in its console —
+ * the workspace no longer sets a helpline of its own.
  */
 export default async function HelpSettingsPage() {
   const user = await requireUser();
@@ -16,21 +16,20 @@ export default async function HelpSettingsPage() {
     return (
       <div className="max-w-md">
         <h1 className="text-xl font-semibold text-text">Help & support</h1>
-        <p className="mt-2 text-sm text-muted">Only somebody who can manage help and What&apos;s new can change the helpline and help links.</p>
+        <p className="mt-2 text-sm text-muted">Only somebody who can manage help and What&apos;s new can change the help links.</p>
       </div>
     );
   }
-  const [desk, links] = await Promise.all([getHelpDesk(), listHelpLinksForManage()]);
+  const links = await listHelpLinksForManage();
 
   return (
     <div className="max-w-3xl space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-text">Help & support</h1>
         <p className="mt-1 text-sm text-muted">
-          The helpline everybody sees on their dashboard, and the articles and walkthrough videos in the Help and Videos panels on the right-hand rail.
+          The articles and walkthrough videos in the Help and Videos panels on the right-hand rail. The support contact on everybody&apos;s dashboard comes from the platform.
         </p>
       </div>
-      <HelpDeskForm initial={desk} />
       <HelpLinksManager links={links ?? []} />
     </div>
   );

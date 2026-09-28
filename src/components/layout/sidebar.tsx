@@ -131,8 +131,9 @@ export function Sidebar({
   /** The workspace's, for links that only exist in some countries (the e-way bill register). */
   country?: string;
   /**
-   * Whether to offer "Contact Support" at the foot of the menu — the layout's answer from
-   * `supportLauncherState()`. The dialog itself is the layout's (src/components/support/support-launcher.tsx).
+   * Whether to offer "Contact Support" at the foot of the menu, below xl (the tool rail has it from xl) —
+   * the layout's answer from `supportLauncherState()`. The dialog itself is the layout's
+   * (src/components/support/support-launcher.tsx).
    */
   support?: boolean;
 }) {
@@ -294,8 +295,11 @@ export function Sidebar({
   const isGroupOpen = (group: string) =>
     group === activeGroup || (openGroups === null ? false : openGroups.includes(group));
 
-  /** "Contact Support", at the foot of the menu: the platform's help desk, not a page of this workspace. */
-  function supportButton(isCollapsed: boolean, beforeOpen?: () => void) {
+  /**
+   * "Contact Support", at the foot of the menu: the platform's help desk, not a page of this workspace.
+   * From xl the tool rail on the right has it as an icon, so the rail's copy of the menu hides it there.
+   */
+  function supportButton(isCollapsed: boolean, beforeOpen?: () => void, className?: string) {
     return (
       <button
         type="button"
@@ -310,6 +314,7 @@ export function Sidebar({
           "flex w-full items-center gap-2.5 rounded-base px-2.5 py-2 text-[13px] font-medium text-brand",
           "transition-colors hover:bg-brand/10",
           isCollapsed && "justify-center",
+          className,
         )}
       >
         <Headset aria-hidden="true" className="h-4 w-4 shrink-0" />
@@ -496,7 +501,7 @@ export function Sidebar({
         </div>
         {renderNav(collapsed)}
         <div className="space-y-0.5 border-t border-line p-2">
-          {support && supportButton(collapsed)}
+          {support && supportButton(collapsed, undefined, "xl:hidden")}
           <button
             type="button"
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}

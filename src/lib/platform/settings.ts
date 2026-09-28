@@ -28,6 +28,7 @@ export const PLAIN_KEYS = [
   "support.email",
   "support.helpline",
   "support.hours",
+  "support.languages",
   "support.recording",
   "support.retentionDays",
   "partners.twoFactor",

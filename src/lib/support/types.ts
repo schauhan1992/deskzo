@@ -137,6 +137,11 @@ export type SupportSubmitInput = {
   uploadIds: string[];
   recording?: SupportRecordingInput;
   context: ClientContext;
+  /**
+   * Ticked in the form: agreeing to what goes with every request — the page they were on, their IP
+   * address, and their browser and device. The server refuses the request without it.
+   */
+  consent: true;
 };
 
 export type SupportSubmitResult = { ok: true; number: number; email: string } | { ok: false; error: string };
@@ -296,7 +301,7 @@ export const SUPPORT_EMAIL_PLACEHOLDER = "support@yourdomain.com";
 /** How long after a request is closed its files are kept, in days. */
 export const RETENTION_DAYS = { min: 30, max: 3650, fallback: 365 } as const;
 /** The settings form's limits — the save checks them again (src/lib/support/settings.ts). */
-export const SETTINGS_LIMITS = { email: 254, helpline: 30, hours: 80 } as const;
+export const SETTINGS_LIMITS = { email: 254, helpline: 30, hours: 80, languages: 120 } as const;
 /** The helpline: the workspace helpline's own rule (src/actions/help.ts) — digits, spaces, brackets, + and -. */
 export const HELPLINE_PATTERN = /^\+?[0-9][0-9 ()-]{5,28}$/;
 
@@ -306,9 +311,17 @@ export type SupportSettingsView = {
   email: string;
   helpline: string | null;
   hours: string | null;
+  /** The languages support answers in, e.g. "English, Hindi"; null when unset. */
+  languages: string | null;
   recording: boolean;
   retentionDays: number;
 };
+
+/**
+ * The platform's support contact as a workspace shows it — the dashboard's greeting and the Help panel on
+ * the rail — built from the console's Support settings (`getSupportContact`, src/actions/support.ts).
+ */
+export type SupportContact = { label: string; phone: string | null; hours: string | null; languages: string | null; email: string | null };
 
 /** What the console's Support settings form sends (`saveSupportSettings`); empty helpline or hours clears it. */
 export type SupportSettingsInput = {
@@ -316,6 +329,7 @@ export type SupportSettingsInput = {
   email: string;
   helpline?: string | null;
   hours?: string | null;
+  languages?: string | null;
   recording: boolean;
   /** Whole days, 30–3650. */
   retentionDays: number | string;

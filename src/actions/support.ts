@@ -11,7 +11,8 @@ import { acknowledgementMail, deliver, notificationMail, type RequestMailFacts }
 import { SupportRefused } from "@/lib/support/refused";
 import { resolveRequester, type RequesterResult } from "@/lib/support/requester";
 import { cleanSubmission, createSupportRequest, stagedAttachments, type CleanClientContext } from "@/lib/support/requests";
-import type { LauncherState, PerfSnapshot, SupportSubmitInput, SupportSubmitResult } from "@/lib/support/types";
+import { cachedSupportConfig } from "@/lib/support/settings";
+import { SUPPORT_EMAIL_PLACEHOLDER, type LauncherState, type PerfSnapshot, type SupportContact, type SupportSubmitInput, type SupportSubmitResult } from "@/lib/support/types";
 import { tenantKey } from "@/lib/tenancy/cache";
 
 /**
@@ -56,6 +57,28 @@ export async function supportLauncherState(): Promise<LauncherState | null> {
       recordingBlockedReason: recording.blockedReason,
       brandName: config.brandName,
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The platform's support contact, as a workspace shows it: the dashboard's greeting and the Help panel
+ * on the rail. From the console's Support settings, the same for every workspace — the vendor's desk,
+ * not the customer's own (which is why the workspace's old helpline, src/actions/help.ts, is no longer
+ * shown). Null when support is switched off, when there is neither a number nor a real address, or when
+ * the settings can't be read. Never throws.
+ */
+export async function getSupportContact(): Promise<SupportContact | null> {
+  try {
+    const session = await auth();
+    if (!session?.user) return null;
+    const config = await cachedSupportConfig();
+    if (!config?.enabled) return null;
+    // The placeholder is the console's reminder to set one, not an address to give customers.
+    const email = config.email !== SUPPORT_EMAIL_PLACEHOLDER ? config.email : null;
+    if (!config.helpline && !email) return null;
+    return { label: `${config.brandName} Support`, phone: config.helpline, hours: config.hours, languages: config.languages, email };
   } catch {
     return null;
   }
