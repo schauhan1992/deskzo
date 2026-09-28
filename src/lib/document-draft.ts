@@ -40,8 +40,14 @@ export type DocumentFormDefaults = {
   locationId: string;
   placeOfSupplyCode: string;
   gstTreatment: string;
+  /**
+   * The party's GSTIN — the customer's on a sale, the vendor's on a purchase (stored as `sellerGstin`
+   * there). Named for the payload field it has always travelled in; our own GSTIN is the branch's.
+   */
   buyerGstin: string;
   reverseCharge: boolean;
+  /** The branch it is raised from (on a purchase, the one buying). Empty lets the server choose: the user's own, else the head office. */
+  branchId: string;
   /** What the customer is quoted in. The ledger stays in rupees whatever this is. */
   currency: string;
   /** Rupees per unit of `currency`. Always 1 on a rupee document — the schema insists. */
@@ -113,9 +119,11 @@ export function emptyDefaults(): DocumentFormDefaults {
     gstTreatment: "UNREGISTERED",
     buyerGstin: "",
     reverseCharge: false,
+    branchId: "",
     currency: BASE_CURRENCY,
     exchangeRate: 1,
-    issueDate: new Date().toISOString().slice(0, 10),
+    // Today in India. toISOString() is today in UTC, which before 05:30 IST is yesterday.
+    issueDate: istDateTimeInput(new Date()).slice(0, 10),
     dueDate: "",
     validUntil: "",
     reference: "",
@@ -163,3 +171,4 @@ export function formatAddress(parts: {
     .filter(Boolean) as string[];
 }
 import { BASE_CURRENCY } from "@/lib/currency";
+import { istDateTimeInput } from "@/lib/india-time";

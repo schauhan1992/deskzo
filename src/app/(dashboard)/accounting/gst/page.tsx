@@ -1,16 +1,25 @@
 import { AlertTriangle } from "lucide-react";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
-import { gstr1, gstr3b } from "@/actions/tax-reports";
+import { gstr1, gstr3b, listReturnRegistrations } from "@/actions/tax-reports";
 import { getOrganisation } from "@/lib/organisation";
+import { GST_STATE_CODES } from "@/lib/gst-engine";
+import type { RegistrationChoice } from "@/lib/branches/format";
 import { Badge, Card } from "@/components/ui/card";
 import { Amount, ReportHeader } from "@/components/accounting/report-chrome";
 import { MonthPicker } from "@/components/accounting/month-picker";
+import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { monthName } from "@/lib/ledger/period";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 /** Money to the paisa, so a sum of three heads can't show a floating-point tail. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** "27AAPFU0939F1ZV · Maharashtra" — the GSTIN is what a return is filed under, the state is how people tell them apart. */
+function registrationLabel(r: RegistrationChoice) {
+  const state = GST_STATE_CODES[r.stateCode] ?? r.stateCode;
+  return `${r.gstin} · ${state}${r.active ? "" : " (inactive)"}`;
+}
 
 /**
  * The two monthly GST returns.
@@ -22,7 +31,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export default async function GstPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; year?: string; view?: string }>;
+  /** `gstin` is a registration's id, not the GSTIN itself — the link names the registration, which keeps its id when its code changes. */
+  searchParams: Promise<{ month?: string; year?: string; view?: string; gstin?: string }>;
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
@@ -33,8 +43,15 @@ export default async function GstPage({
   const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const month = Number(params.month) || previous.getMonth() + 1;
   const year = Number(params.year) || previous.getFullYear();
+  // Absent means the head office's registration — the returns fall back to it themselves (spec §8.4).
+  const gstRegistrationId = params.gstin || undefined;
 
-  const [one, threeB, org] = await Promise.all([gstr1({ month, year }), gstr3b({ month, year }), getOrganisation()]);
+  const [one, threeB, org, registrations] = await Promise.all([
+    gstr1({ month, year, gstRegistrationId }),
+    gstr3b({ month, year, gstRegistrationId }),
+    getOrganisation(),
+    listReturnRegistrations(),
+  ]);
 
   if (!one || !threeB) {
     return (
@@ -51,19 +68,43 @@ export default async function GstPage({
     threeB.inward.fromOther.cgst + threeB.inward.fromOther.sgst + threeB.inward.fromOther.igst,
   );
 
+  /**
+   * The picker's blank option is the registration the returns fall back to with no `gstin` in the
+   * link (the head office's, else the first), and the rest are listed after it — so the default is
+   * never offered twice, and choosing it again drops the parameter rather than pinning an id.
+   */
+  const fallback = registrations.find((r) => r.isHeadOffice) ?? registrations[0];
+  const others = registrations.filter((r) => r.id !== fallback?.id);
+
   return (
     <div className="animate-fade-rise">
       <ReportHeader
         title="GST returns"
         subtitle={`${monthName(month)} ${year} · GSTR-1 due ${formatDate(filingDue)}, GSTR-3B by the 20th`}
-        organisation={`${org.legalName}${org.gstin ? ` · GSTIN ${org.gstin}` : ""}`}
+        // The GSTIN these figures are for, from the return itself — not the organisation's, which is
+        // only the head office's and says nothing about the registration picked here.
+        organisation={`${org.legalName}${one.registration ? ` · GSTIN ${one.registration.gstin}` : ""}`}
       >
-        <MonthPicker month={month} year={year} />
+        {/* A return is filed per GSTIN; with one registration (or none) there is nothing to choose. */}
+        {fallback && others.length > 0 ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <SelectParamFilter
+              paramName="gstin"
+              label="GST registration"
+              allLabel={registrationLabel(fallback)}
+              options={others.map((r) => ({ value: r.id, label: registrationLabel(r) }))}
+            />
+            <MonthPicker month={month} year={year} />
+          </div>
+        ) : (
+          <MonthPicker month={month} year={year} />
+        )}
       </ReportHeader>
 
-      {!org.gstin && (
+      {!one.registration && (
         <Card className="mt-4 border-warning/40 bg-warning-bg px-4 py-2.5 text-sm text-warning">
-          No GSTIN on file. Set it in Settings → Organisation — these returns are filed against it.
+          No GST registration yet. Add your GSTIN under Settings → Organisation (head office) or Settings → Branches
+          &amp; GST registrations — these returns are filed against it.
         </Card>
       )}
 

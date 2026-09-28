@@ -591,6 +591,9 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   DepreciationCharge: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   DocumentCounter: { disposition: "specification", reason: "The current value of a numbering series. The series definition exports; its counter is state." },
   DocumentNumberSetting: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  DocumentSeries: { disposition: "specification", reason: "Configuration rather than records: one GST registration's or one branch's numbering series. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  Branch: { disposition: "specification", reason: "Configuration rather than records: the company's places of business, their addresses and printed overrides. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  GstRegistration: { disposition: "specification", reason: "Configuration rather than records: the company's GSTINs and each one's intra-state e-way threshold. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded. Its IRP credentials never leave, encrypted or not — they are issued to this installation." },
   DocumentApprovalPolicy: {
     disposition: "specification",
     reason:

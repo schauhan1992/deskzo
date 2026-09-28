@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
+import { THRESHOLD } from "@/lib/eway/rules";
 
 /**
- * The two organisation settings the e-way rules need, readable from anywhere.
+ * The two e-way settings the rules need, readable from anywhere.
  *
  * Both of these lived as private helpers inside `src/actions/eway.ts`, which meant the screens that
  * do not go through that module — the consignment board, where somebody actually decides whether a
@@ -11,6 +12,8 @@ import { db } from "@/lib/db";
  * Plain reads with no authorisation of their own: a threshold and a feature flag are not secrets,
  * and every caller has already gated itself. Kept out of `"use server"` deliberately, so they can be
  * imported by anything.
+ *
+ * The switch is the company's, like the e-invoice one; the threshold is each registration's.
  */
 export async function ewayEnabled(): Promise<boolean> {
   const row = await db.organisationSettings.findUnique({
@@ -21,15 +24,21 @@ export async function ewayEnabled(): Promise<boolean> {
 }
 
 /**
- * A state's own floor for movement *inside* the state, if the business has set one.
+ * The floor for movement that stays *inside* a registration's state — each state sets its own, so it
+ * is kept per GST registration and entered by the user (CA question C6: the figure for each state).
  *
- * `undefined` rather than `THRESHOLD` when unset, so the rules module applies the central default
- * itself and there is one place that decides what "no answer" means.
+ * No argument, or null, is the head office's registration — what a document without one, or a screen
+ * with no document yet, has always meant. An unknown registration, one without a figure, or no
+ * registration at all gives the central ₹50,000, the same `THRESHOLD` the rules module falls back to.
  */
-export async function intraStateThreshold(): Promise<number | undefined> {
-  const row = await db.organisationSettings.findUnique({
-    where: { id: "global" },
-    select: { ewayIntraStateThreshold: true },
-  });
-  return row?.ewayIntraStateThreshold ? Number(row.ewayIntraStateThreshold) : undefined;
+export async function intraStateThreshold(gstRegistrationId?: string | null): Promise<number> {
+  const registration = gstRegistrationId
+    ? await db.gstRegistration.findUnique({ where: { id: gstRegistrationId }, select: { ewayIntraStateThreshold: true } })
+    : (
+        await db.branch.findFirst({
+          where: { isHeadOffice: true },
+          select: { gstRegistration: { select: { ewayIntraStateThreshold: true } } },
+        })
+      )?.gstRegistration;
+  return registration?.ewayIntraStateThreshold ? Number(registration.ewayIntraStateThreshold) : THRESHOLD;
 }

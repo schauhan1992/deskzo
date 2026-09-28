@@ -1,11 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
-import { encryptSecret } from "@/lib/crypto";
+import { GST_STATE_ABBREVIATIONS, GST_STATE_CODES, OTHER_COUNTRY_CODE, hasValidGstinChecksum, panOfGstin, stateCodeFromName } from "@/lib/gst-engine";
+import { isIndia } from "@/lib/geo/countries";
+import { ensureHeadOffice, type BranchWithRegistration } from "@/lib/branches/identity";
+import { branchLabel } from "@/lib/branches/format";
 import { organisationSettingsSchema, einvoiceSettingsSchema } from "@/lib/validation/trade-document";
 import { reviewUrlSchema } from "@/lib/validation/feedback";
 import { clampRating, MAX_RATING, MIN_RATING } from "@/lib/feedback/rating";
@@ -22,6 +26,124 @@ async function requireSettingsAccess() {
   return { user, error: null };
 }
 
+// ─── The head office's registration, from the Profile ─────────────────────────
+//
+// The Profile's GSTIN field is the head office's registration (spec §11.3). These are the rules of
+// src/actions/branch.ts, repeated rather than shared: a "use server" file can export only actions,
+// and every one of those is an endpoint.
+
+/** Where the registered office is, as GST sees it — the values being saved. */
+type RegisteredOffice = { state: string | null; country: string | null; stateCode: string | null };
+
+const stateName = (code: string) => GST_STATE_CODES[code] ?? code;
+
+function panMismatch(gstinPan: string, orgPan: string) {
+  return `That GSTIN belongs to PAN ${gstinPan}; this company's PAN is ${orgPan}. A different PAN is a different company — a separate workspace.`;
+}
+
+/** The head office's own address, or the registered office it inherits. */
+function placeOf(branch: { addressLine1?: string | null; state?: string | null; country?: string | null }, office: RegisteredOffice) {
+  const own = Boolean(branch.addressLine1?.trim());
+  const from = own ? branch : office;
+  const abroad = !isIndia(from.country);
+  const stateCode = abroad ? null : ((own ? null : office.stateCode) ?? stateCodeFromName(from.state?.trim() || null));
+  return { own, abroad, stateCode };
+}
+
+function registrationRefusal(place: ReturnType<typeof placeOf>, registration: { stateCode: string }, who: string): string | null {
+  if (place.abroad) return "A branch outside India can't hold a GST registration — clear the GSTIN, or the country.";
+  if (place.stateCode && place.stateCode !== registration.stateCode) {
+    return `A GSTIN is state-specific — ${who} in ${stateName(place.stateCode)} can't use a ${stateName(registration.stateCode)} registration.`;
+  }
+  return null;
+}
+
+/** The state's short code (MH, KA…), with a digit appended while another registration has it. */
+async function freeRegistrationCode(stateCode: string, exceptId?: string) {
+  const base = GST_STATE_ABBREVIATIONS[stateCode] ?? stateCode;
+  const rows = await db.gstRegistration.findMany({
+    where: { code: { startsWith: base }, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+    select: { code: true },
+  });
+  const taken = new Set(rows.map((r) => r.code));
+  let code = base;
+  for (let n = 2; taken.has(code); n++) code = `${base}${n}`;
+  return code;
+}
+
+const hasIssuedDocuments = async (gstRegistrationId: string) =>
+  (await db.tradeDocument.count({ where: { gstRegistrationId, status: { not: "DRAFT" } } })) > 0;
+
+type HeadOfficeSync =
+  | { kind: "keep" }
+  | { kind: "detach"; registrationId: string; label: string }
+  | { kind: "attach"; registrationId: string; label: string }
+  | { kind: "create"; gstin: string; stateCode: string; code: string; label: string }
+  | { kind: "update"; registrationId: string; gstin: string; stateCode: string; code: string; label: string };
+
+/**
+ * What saving this GSTIN does to the head office's registration — decided before the transaction,
+ * which then only writes. Blank lets it go (while nothing issued names it); the same GSTIN changes
+ * nothing; a GSTIN already registered here is taken up; otherwise a head office without one gets a new
+ * registration, and one with an unused registration has its GSTIN corrected.
+ */
+async function planHeadOfficeSync(gstin: string | null, headOffice: BranchWithRegistration, office: RegisteredOffice): Promise<HeadOfficeSync | { error: string }> {
+  const current = headOffice.gstRegistration;
+  if (!gstin) {
+    if (!current) return { kind: "keep" };
+    if (await hasIssuedDocuments(current.id)) {
+      return {
+        error: `GSTIN ${current.gstin} has issued documents, so the head office keeps it. To change registration, add the new one under Settings → Branches & GST registrations and make it the head office's.`,
+      };
+    }
+    return { kind: "detach", registrationId: current.id, label: `head office GSTIN ${current.gstin} removed` };
+  }
+  if (current?.gstin === gstin) return { kind: "keep" };
+
+  const place = placeOf(headOffice, office);
+  const who = place.own ? "the head office" : "the registered office";
+  const existing = await db.gstRegistration.findUnique({ where: { gstin }, select: { id: true, stateCode: true, active: true } });
+  if (existing) {
+    // Already one of this company's registrations: the head office takes it up, and keeps any it had.
+    if (!existing.active) return { error: `GSTIN ${gstin} is inactive — reactivate it under Settings → Branches & GST registrations first.` };
+    const refusal = registrationRefusal(place, existing, who);
+    if (refusal) return { error: refusal };
+    return { kind: "attach", registrationId: existing.id, label: `head office GSTIN ${gstin}` };
+  }
+
+  const stateCode = gstin.slice(0, 2);
+  if (!GST_STATE_CODES[stateCode] || stateCode === OTHER_COUNTRY_CODE) {
+    return { error: `${stateCode} isn't a GST state code — check the GSTIN's first two digits.` };
+  }
+  if (!hasValidGstinChecksum(gstin)) return { error: "That GSTIN's check digit is wrong — check it against the registration certificate." };
+  const refusal = registrationRefusal(place, { stateCode }, who);
+  if (refusal) return { error: refusal };
+
+  if (!current) return { kind: "create", gstin, stateCode, code: await freeRegistrationCode(stateCode), label: `head office GSTIN ${gstin}` };
+
+  // Correcting the GSTIN is only safe while nothing issued carries the old one.
+  if (await hasIssuedDocuments(current.id)) {
+    return {
+      error: `GSTIN ${current.gstin} has issued documents. To change registration, add the new one under Settings → Branches & GST registrations and make it the head office's.`,
+    };
+  }
+  if (current.stateCode !== stateCode) {
+    // Any other branch on it moves state with it.
+    const others = await db.branch.findMany({
+      where: { gstRegistrationId: current.id, NOT: { id: headOffice.id } },
+      select: { name: true, code: true, isHeadOffice: true, addressLine1: true, state: true, country: true },
+    });
+    for (const branch of others) {
+      const moved = registrationRefusal(placeOf(branch, office), { stateCode }, branchLabel(branch));
+      if (moved) return { error: moved };
+    }
+  }
+  // A code still at its state's default follows the state; one somebody chose stays.
+  const defaultCode = current.stateCode !== stateCode && current.code === (GST_STATE_ABBREVIATIONS[current.stateCode] ?? current.stateCode);
+  const code = defaultCode ? await freeRegistrationCode(stateCode, current.id) : current.code;
+  return { kind: "update", registrationId: current.id, gstin, stateCode, code, label: `head office GSTIN ${current.gstin} → ${gstin}` };
+}
+
 export async function updateOrganisation(input: unknown): Promise<ActionResult<{ ok: true }>> {
   const { user, error } = await requireSettingsAccess();
   if (!user) return { ok: false, error: error! };
@@ -33,11 +155,27 @@ export async function updateOrganisation(input: unknown): Promise<ActionResult<{
   const data = parsed.data;
   const blank = (value: string | undefined) => (value ? value : null);
 
+  // Resolved before the transaction: ensureHeadOffice may write, and must never run inside one.
+  const [headOffice, stored] = await Promise.all([
+    ensureHeadOffice(),
+    db.organisationSettings.findUnique({ where: { id: "global" }, select: { pan: true } }),
+  ]);
+
+  // An input without `gstin` at all leaves the head office's registration, and the mirror, as they are —
+  // for a Profile that shows the field read-only (a head office away from the registered office).
+  const gstinSent = data.gstin !== undefined;
+  const gstin = blank(data.gstin?.trim().toUpperCase());
+  const gstinPan = panOfGstin(gstinSent ? gstin : headOffice.gstRegistration?.gstin);
+  const typedPan = blank(data.pan?.trim().toUpperCase());
+
   const fields = {
     legalName: data.legalName.trim(),
     tradeName: blank(data.tradeName),
-    gstin: blank(data.gstin),
-    pan: blank(data.pan?.toUpperCase()),
+    // Kept on the organisation row as the previous build's copy (rollback); the head office's
+    // registration, synced below, is what everything now reads.
+    gstin: gstinSent ? gstin : undefined,
+    // A blank PAN is the GSTIN's own: characters 3–12.
+    pan: typedPan ?? gstinPan,
     cin: blank(data.cin?.toUpperCase()),
     addressLine1: blank(data.addressLine1),
     addressLine2: blank(data.addressLine2),
@@ -60,23 +198,92 @@ export async function updateOrganisation(input: unknown): Promise<ActionResult<{
     roundOffTotals: data.roundOffTotals,
   };
 
-  await db.organisationSettings.upsert({
-    where: { id: "global" },
-    create: { id: "global", ...fields },
-    update: fields,
-  });
+  const plan: HeadOfficeSync | { error: string } = gstinSent
+    ? await planHeadOfficeSync(gstin, headOffice, { state: fields.state, country: fields.country, stateCode: fields.stateCode })
+    : { kind: "keep" };
+  if ("error" in plan) return { ok: false, error: plan.error };
 
+  // One PAN, one company (spec §3.4 rule 2). Checked when the PAN or the GSTIN changes, so a mismatch
+  // already on file doesn't stop somebody saving their bank details.
+  const panChanges = fields.pan !== (stored?.pan ?? null);
+  if (typedPan && gstinPan && typedPan !== gstinPan && (panChanges || plan.kind !== "keep")) {
+    return { ok: false, error: panMismatch(gstinPan, typedPan) };
+  }
+  if (fields.pan && panChanges) {
+    // Every other registration carries the PAN too. The one being corrected is about to lose its old GSTIN.
+    const replaced = plan.kind === "update" ? plan.registrationId : null;
+    const registrations = await db.gstRegistration.findMany({ select: { id: true, gstin: true } });
+    const other = registrations.find((r) => r.id !== replaced && panOfGstin(r.gstin) && panOfGstin(r.gstin) !== fields.pan);
+    if (other) {
+      return {
+        ok: false,
+        error: `GSTIN ${other.gstin} belongs to PAN ${panOfGstin(other.gstin)}. A company has one PAN, so it can't become ${fields.pan} while that registration is here.`,
+      };
+    }
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.organisationSettings.upsert({
+        where: { id: "global" },
+        create: { id: "global", ...fields },
+        update: fields,
+      });
+      if (plan.kind === "create") {
+        // Not set up for e-invoicing until somebody enters its IRP login — never quietly the mock portal (spec §7.1).
+        const created = await tx.gstRegistration.create({
+          data: { gstin: plan.gstin, stateCode: plan.stateCode, code: plan.code, einvoiceProvider: null, createdById: user.id },
+          select: { id: true },
+        });
+        await tx.branch.update({ where: { id: headOffice.id }, data: { gstRegistrationId: created.id }, select: { id: true } });
+      } else if (plan.kind === "attach") {
+        await tx.branch.update({ where: { id: headOffice.id }, data: { gstRegistrationId: plan.registrationId }, select: { id: true } });
+      } else if (plan.kind === "update") {
+        await tx.gstRegistration.update({
+          where: { id: plan.registrationId },
+          data: { gstin: plan.gstin, stateCode: plan.stateCode, code: plan.code },
+          select: { id: true },
+        });
+      } else if (plan.kind === "detach") {
+        await tx.branch.update({ where: { id: headOffice.id }, data: { gstRegistrationId: null }, select: { id: true } });
+        // Deleted only when nothing else names it: another branch, a draft, a ledger line or a series keeps it.
+        const uses = await tx.gstRegistration.findUnique({
+          where: { id: plan.registrationId },
+          select: { _count: { select: { branches: true, documents: true, journalLines: true, documentSeries: true } } },
+        });
+        if (uses && Object.values(uses._count).every((n) => n === 0)) {
+          await tx.gstRegistration.delete({ where: { id: plan.registrationId }, select: { id: true } });
+        }
+      }
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && (err.code === "P2002" || err.code === "P2003")) {
+      return { ok: false, error: "The GST registrations changed while this was being saved — reload and try again." };
+    }
+    throw err;
+  }
+
+  const notes = [plan.kind !== "keep" && plan.label, !typedPan && gstinPan && panChanges && "PAN taken from the GSTIN"].filter(Boolean);
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
     entityType: "OrganisationSettings",
     entityId: "global",
-    entityLabel: "Organisation details",
+    entityLabel: `Organisation details${notes.length ? ` — ${notes.join("; ")}` : ""}`,
   });
   revalidatePath("/settings/organisation");
+  revalidatePath("/settings/branches");
+  if (plan.kind !== "keep") {
+    for (const path of ["/settings/einvoicing", "/settings/eway", "/settings/numbering"]) revalidatePath(path);
+  }
   return { ok: true, data: { ok: true } };
 }
 
+/**
+ * The company-wide e-invoicing switch and minimum value (spec §7.1). The IRP login is per GST
+ * registration now — `saveRegistrationEInvoice` in src/actions/branch.ts — so the credential fields an
+ * older form still sends are ignored, and the organisation's own copy of them is left as it is.
+ */
 export async function updateEInvoiceSettings(input: unknown): Promise<ActionResult<{ ok: true }>> {
   const { user, error } = await requireSettingsAccess();
   if (!user) return { ok: false, error: error! };
@@ -87,28 +294,9 @@ export async function updateEInvoiceSettings(input: unknown): Promise<ActionResu
   }
   const data = parsed.data;
 
-  if (data.einvoiceEnabled && data.einvoiceProvider !== "mock") {
-    const existing = await db.organisationSettings.findUnique({
-      where: { id: "global" },
-      select: { einvoicePasswordCipher: true, einvoiceClientSecretCipher: true },
-    });
-    const willHavePassword = data.einvoicePassword || existing?.einvoicePasswordCipher;
-    const willHaveSecret = data.einvoiceClientSecret || existing?.einvoiceClientSecretCipher;
-    if (!data.einvoiceUsername || !willHavePassword || !data.einvoiceClientId || !willHaveSecret) {
-      return { ok: false, error: "The NIC portal needs a username, password, client ID and client secret." };
-    }
-  }
-
   const fields = {
     einvoiceEnabled: data.einvoiceEnabled,
-    einvoiceProvider: data.einvoiceProvider,
-    einvoiceUsername: data.einvoiceUsername || null,
-    einvoiceClientId: data.einvoiceClientId || null,
     einvoiceMinValue: data.einvoiceMinValue ?? null,
-    // A blank secret means "keep what's stored" — the form is never sent the decrypted value, so
-    // overwriting on blank would silently wipe working credentials every time the page is saved.
-    ...(data.einvoicePassword ? { einvoicePasswordCipher: await encryptSecret(data.einvoicePassword) } : {}),
-    ...(data.einvoiceClientSecret ? { einvoiceClientSecretCipher: await encryptSecret(data.einvoiceClientSecret) } : {}),
   };
 
   await db.organisationSettings.upsert({
@@ -122,9 +310,10 @@ export async function updateEInvoiceSettings(input: unknown): Promise<ActionResu
     action: "UPDATE",
     entityType: "OrganisationSettings",
     entityId: "global",
-    entityLabel: `E-invoicing ${data.einvoiceEnabled ? "enabled" : "disabled"} (${data.einvoiceProvider})`,
+    entityLabel: `E-invoicing ${data.einvoiceEnabled ? "enabled" : "disabled"}`,
   });
   revalidatePath("/settings/organisation");
+  revalidatePath("/settings/einvoicing");
   return { ok: true, data: { ok: true } };
 }
 

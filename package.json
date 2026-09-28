@@ -94,6 +94,7 @@
     "check:migrations": "tsx scripts/check-migrations.ts",
     "check:addon-proposal": "tsx scripts/check-addon-proposal.ts",
     "check:document-print": "tsx scripts/check-document-print.ts",
+    "check:branches": "tsx scripts/check-branches.ts",
     "check:renewal-stage": "tsx scripts/check-renewal-stage.ts",
     "check:document-origin": "tsx scripts/check-document-origin.ts",
     "check:document-approval": "tsx scripts/check-document-approval.ts",

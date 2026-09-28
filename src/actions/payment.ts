@@ -16,6 +16,7 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postPaymentToLedger } from "@/lib/ledger/journal";
 import { calculateOrderAmount } from "@/lib/gst";
+import { defaultBranchIdFor } from "@/lib/branches/identity";
 import {
   recordPaymentSchema,
   allocatePaymentSchema,
@@ -114,10 +115,15 @@ export async function recordPayment(
     }
   }
 
+  // An order payment names no document, so it is the recorder's branch (spec §5.7) — resolved before
+  // the transaction, since the head office fallback uses its own connection.
+  const branchId = await defaultBranchIdFor(user.id);
+
   const payment = await db.$transaction(async (tx) => {
     const created = await tx.payment.create({
       data: {
         companyId,
+        branchId,
         amount,
         paidOn: new Date(paidOn),
         method,

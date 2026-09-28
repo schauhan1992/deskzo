@@ -14,6 +14,8 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { ColumnPicker } from "@/components/ui/table-columns";
 import { documentTableKey } from "@/lib/tables/registry";
 import { listAssignableUsers } from "@/actions/company";
+import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
+import { branchLabel } from "@/lib/branches/format";
 import { Pagination } from "@/components/ui/pagination";
 import { SplitListShell, SplitListEmpty, SplitListPage, resolveSelected } from "@/components/ui/split-list";
 import { ViewModeToggle } from "@/components/ui/view-mode-toggle";
@@ -49,6 +51,8 @@ export type DocumentListSearchParams = {
   salesperson?: string;
   /** A `DocumentOrigin`, or "none" for documents that never recorded one. */
   origin?: string;
+  /** One branch's documents (the head office's include those written before branches). */
+  branch?: string;
   page?: string;
   pageSize?: string;
   /** Which document is open beside the list. */
@@ -74,23 +78,34 @@ export async function DocumentList({
   const page = resolvePage(searchParams.page);
   const pageSize = resolvePageSize(searchParams.pageSize);
 
-  const [viewMode, { rows, total }, summary, approvalPolicy, users] = await Promise.all([
+  /**
+   * The branch filter exists only where there is more than one branch, and so does its effect: a
+   * `branch` left in a link from when there were two must not narrow a list with no control to undo it.
+   */
+  const multiBranchCheck = isMultiBranch();
+  const [viewMode, { rows, total }, summary, approvalPolicy, users, multiBranch, branches] = await Promise.all([
     getViewMode("documents"),
-    listTradeDocuments({
-      docType,
-      status,
-      search: searchParams.q,
-      from: searchParams.from,
-      to: searchParams.to,
-      salespersonId: searchParams.salesperson,
-      origin: searchParams.origin,
-      page,
-      pageSize,
-    }),
+    multiBranchCheck.then((multi) =>
+      listTradeDocuments({
+        docType,
+        status,
+        search: searchParams.q,
+        from: searchParams.from,
+        to: searchParams.to,
+        salespersonId: searchParams.salesperson,
+        origin: searchParams.origin,
+        branchId: multi ? searchParams.branch || undefined : undefined,
+        page,
+        pageSize,
+      }),
+    ),
     tradeDocumentSummary(docType),
     // One answer for the whole list rather than per row: approval is configured per type.
     approvalPolicyFor(docType),
     listAssignableUsers(),
+    multiBranchCheck,
+    // The one filtered by stays nameable after it is deactivated, as a link to it may outlive it.
+    multiBranchCheck.then((multi) => (multi ? listBranchChoices({ include: searchParams.branch ? [searchParams.branch] : [] }) : [])),
   ]);
 
   /**
@@ -159,6 +174,14 @@ export async function DocumentList({
           options={users.map((u) => ({ value: u.id, label: u.name }))}
         />
       )}
+      {multiBranch && (
+        <SelectParamFilter
+          paramName="branch"
+          label={isSales ? "Branch" : "Buying branch"}
+          allLabel="All branches"
+          options={branches.map((b) => ({ value: b.id, label: `${branchLabel(b)}${b.active ? "" : " (inactive)"}` }))}
+        />
+      )}
       <SelectParamFilter
         paramName="origin"
         label="Source"
@@ -173,7 +196,7 @@ export async function DocumentList({
       <DateRangePicker fromParam="from" toParam="to" label="Issued" />
       {/* Only in table view. The split list is a card list, not a table, so a picker there would
           offer choices that change nothing on screen. */}
-      {viewMode === "list" && <ColumnPicker tableKey={documentTableKey(docType)} className="ml-auto" />}
+      {viewMode === "list" && <ColumnPicker tableKey={documentTableKey(docType)} className="ml-auto" omit={multiBranch ? undefined : ["branch"]} />}
     </div>
   );
 
@@ -271,6 +294,7 @@ export async function DocumentList({
               eInvoiced={eInvoiced}
               approvalEnabled={approvalPolicy.enabled}
               approvalRequiredIds={approvalRequiredIds}
+              branchColumn={multiBranch}
             />
           </div>
 

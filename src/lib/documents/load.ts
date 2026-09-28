@@ -41,6 +41,10 @@ export async function findTradeDocumentFor(userId: string, id: string) {
     conversions: { select: { id: true, docNumber: true, docType: true, status: true } },
     creditNotes: { select: { id: true, docNumber: true, docType: true, status: true } },
     lead: { select: { id: true, title: true, status: true } },
+    // Who "we" were on it: the branch it was raised from (null = written before branches, the head
+    // office's) and the registration its GSTIN snapshot came from.
+    branch: { select: { id: true, name: true, code: true, isHeadOffice: true, active: true } },
+    gstRegistration: { select: { id: true, gstin: true, stateCode: true, code: true } },
   },
   });
   return document ? toPlain(document) : null;

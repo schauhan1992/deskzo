@@ -5,6 +5,8 @@
  * assessable/taxable value, `Pos` is place of supply, `Stcd` a state code), so the mapping lives
  * here alone and the rest of the app keeps its own vocabulary.
  */
+import { gstNumberProblem } from "@/lib/document-numbering";
+import { istDateParts } from "@/lib/india-time";
 
 export type EInvoiceParty = {
   gstin: string | null;
@@ -16,6 +18,11 @@ export type EInvoiceParty = {
   stateCode: string | null;
   phone?: string | null;
   email?: string | null;
+  /**
+   * The seller's branch name, so a problem says which branch to fix — with several GSTINs, "your
+   * organisation's GSTIN" no longer names one. For messages only; never sent to the IRP.
+   */
+  label?: string | null;
 };
 
 export type EInvoiceLine = {
@@ -55,11 +62,13 @@ export type EInvoiceDocument = {
   againstDocDate?: Date | null;
 };
 
-/** The portal wants DD/MM/YYYY, not ISO. */
+/**
+ * The portal wants DD/MM/YYYY, not ISO — and the Indian day. Read from the host's calendar, an
+ * invoice issued before 05:30 IST went to the IRP dated the day before on a UTC server (X6).
+ */
 function irpDate(date: Date) {
-  const d = String(date.getDate()).padStart(2, "0");
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${d}/${m}/${date.getFullYear()}`;
+  const { year, month, day } = istDateParts(date);
+  return `${String(day).padStart(2, "0")}/${String(month + 1).padStart(2, "0")}/${year}`;
 }
 
 const DOC_TYPE: Record<EInvoiceDocument["docType"], string> = { INVOICE: "INV", CREDIT_NOTE: "CRN" };
@@ -83,6 +92,7 @@ export function buildEInvoicePayload(doc: EInvoiceDocument) {
       No: doc.docNumber,
       Dt: irpDate(doc.issueDate),
     },
+    // No DispDtls: the goods leave from the seller's own address — CA question C10.
     SellerDtls: {
       Gstin: doc.seller.gstin ?? "",
       LglNm: doc.seller.legalName,
@@ -151,11 +161,32 @@ export function buildEInvoicePayload(doc: EInvoiceDocument) {
  */
 export function validateForEInvoice(doc: EInvoiceDocument): string[] {
   const problems: string[] = [];
-  if (!doc.seller.gstin) problems.push("Your organisation's GSTIN isn't set (Settings → Organisation).");
-  if (!doc.seller.stateCode) problems.push("Your organisation's state code isn't set.");
-  if (!doc.seller.address1 || !doc.seller.city || !doc.seller.pincode) {
-    problems.push("Your organisation's registered address is incomplete.");
+  // Named by branch when the caller says which one — each has its own GSTIN, state and address.
+  const branch = doc.seller.label?.trim();
+  if (!doc.seller.gstin) {
+    problems.push(
+      branch
+        ? `The GSTIN of branch ${branch} isn't set (Settings → Branches & GST registrations).`
+        : "Your organisation's GSTIN isn't set (Settings → Organisation).",
+    );
   }
+  if (!doc.seller.stateCode) {
+    problems.push(
+      branch
+        ? `The state code of branch ${branch} isn't set (Settings → Branches & GST registrations).`
+        : "Your organisation's state code isn't set.",
+    );
+  }
+  if (!doc.seller.address1 || !doc.seller.city || !doc.seller.pincode) {
+    problems.push(
+      branch
+        ? `The address of branch ${branch} is incomplete (address, city and PIN are required).`
+        : "Your organisation's registered address is incomplete.",
+    );
+  }
+  // The IRP refuses a number over 16 characters or of the wrong shape, and says so only as a code.
+  const numberProblem = gstNumberProblem(doc.docType, doc.docNumber);
+  if (numberProblem) problems.push(numberProblem);
   if (!doc.buyer.legalName) problems.push("The customer has no legal name.");
   if (!doc.buyer.address1 || !doc.buyer.city || !doc.buyer.pincode) {
     problems.push("The customer's billing address is incomplete (address, city and PIN are required).");

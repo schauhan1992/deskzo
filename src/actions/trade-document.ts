@@ -10,16 +10,18 @@ import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access
 import { recordAudit } from "@/lib/audit";
 import { postDocumentToLedger, reverseDocumentPosting } from "@/lib/ledger/journal";
 import { toPlain } from "@/lib/serialize";
-import { getOrganisation, getEInvoiceConfig } from "@/lib/organisation";
+import { getOrganisation, eInvoiceConfigFor } from "@/lib/organisation";
 import {
   computeDocument,
   resolveSupplyType,
   stateCodeFromGstin,
   GST_STATE_CODES,
 } from "@/lib/gst-engine";
-import { isDraftNumber } from "@/lib/document-numbering";
+import { GST_NUMBERED_TYPES, gstNumberProblem, isDraftNumber } from "@/lib/document-numbering";
 import { dateRangeFilter } from "@/lib/utils";
-import { nextDocumentNumber } from "@/lib/trade-number";
+import { advanceSerialPast, isAutoNumberOf, nextDocumentNumber, seriesFor } from "@/lib/trade-number";
+import { branchFilter, branchIdentity, defaultBranchIdFor, ensureHeadOffice, type BranchWithRegistration } from "@/lib/branches/identity";
+import { branchLabel, type BranchIdentity } from "@/lib/branches/format";
 import {
   documentDirection,
   documentListPath,
@@ -48,28 +50,6 @@ import { OTHER_COUNTRY_CODE } from "@/lib/gst-engine";
 import { isIndia } from "@/lib/geo/countries";
 import { viewerHas } from "@/actions/permission";
 
-/**
- * Builds the next number for a type from its own prefix and serial, bumping the serial inside the
- * caller's transaction so two people creating at the same moment queue on the row rather than both
- * taking the same number.
- *
- * The per-type setting is the format; `DocumentCounter` remains the financial-year GST series and
- * is still advanced alongside, so the statutory sequence stays intact even if someone rewrites the
- * prefix midway through a year.
- */
-/** Bumps the serial past a number typed in by hand, so auto-generation doesn't collide with it. */
-async function advanceSerialPast(docType: TradeDocumentType, docNumber: string) {
-  const setting = await db.documentNumberSetting.findUnique({ where: { docType } });
-  if (!setting) return;
-  const trailing = /(\d+)\s*$/.exec(docNumber);
-  if (!trailing) return;
-  const used = Number(trailing[1]);
-  if (Number.isFinite(used) && used >= setting.nextNumber) {
-    await db.documentNumberSetting.update({ where: { docType }, data: { nextNumber: used + 1 } });
-  }
-}
-
-
 function parseDate(value: string | undefined | null, fallback?: Date): Date | null {
   if (!value) return fallback ?? null;
   const date = new Date(value);
@@ -84,26 +64,33 @@ function stateCodeFromName(name?: string | null) {
   return found?.[0] ?? null;
 }
 
+/**
+ * Both sides of a document, as GSTINs and states. "Ours" is the branch's registration whichever way the
+ * goods go: the seller on a sale, the buyer on a purchase. `partyGstin` is the location's on file — the
+ * form's own GSTIN field overrides it in `buildDocumentData`.
+ */
 type PartyContext = {
-  sellerGstin: string | null;
-  buyerGstin: string | null;
+  ourGstin: string | null;
+  partyGstin: string | null;
   placeOfSupplyCode: string | null;
   /** The two state codes whose match decides CGST+SGST vs IGST. */
   supplyStates: { seller: string | null; destination: string | null };
 };
 
 /**
- * Who's selling to whom. On a sales document that's us to the customer; on a purchase document the
- * vendor is the seller and we're the destination — the tax split is the same comparison either way,
- * which is why both cases funnel into one pair of state codes.
+ * Who's selling to whom. On a sales document that's our branch to the customer; on a purchase document
+ * the vendor is the seller and our branch is the destination — the tax split is the same comparison
+ * either way, which is why both cases funnel into one pair of state codes. "Our" state is the branch's
+ * GST state, not the registered office's: a Bengaluru branch billing a Bengaluru customer is intra-state
+ * whatever state the company is registered in.
  */
 async function resolveParties(
   docType: TradeDocumentType,
   companyId: string,
   locationId: string | null,
   placeOfSupplyOverride: string | null,
+  identity: BranchIdentity,
 ): Promise<PartyContext> {
-  const org = await getOrganisation();
   const location = locationId
     ? await db.companyLocation.findUnique({ where: { id: locationId } })
     : await db.companyLocation.findFirst({
@@ -111,7 +98,7 @@ async function resolveParties(
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       });
 
-  const orgState = org.stateCode ?? stateCodeFromGstin(org.gstin);
+  const ourState = identity.stateCode;
   const partyGstin = location?.gstNumber?.trim() || null;
   // A location abroad is "Other Country" (96) — and its state must never reach the Indian lookup,
   // where Pakistan's Punjab would come back as India's code 03.
@@ -121,20 +108,68 @@ async function resolveParties(
   if (documentDirection[docType] === "SALES") {
     const destination = placeOfSupplyOverride || partyState;
     return {
-      sellerGstin: org.gstin,
-      buyerGstin: partyGstin,
+      ourGstin: identity.gstin,
+      partyGstin,
       placeOfSupplyCode: destination,
-      supplyStates: { seller: orgState, destination },
+      supplyStates: { seller: ourState, destination },
     };
   }
-  // Purchase: the vendor supplies us, so the place of supply is our own state.
-  const destination = placeOfSupplyOverride || orgState;
+  // Purchase: the vendor supplies our branch, so the place of supply is the buying branch's state.
+  const destination = placeOfSupplyOverride || ourState;
   return {
-    sellerGstin: partyGstin,
-    buyerGstin: org.gstin,
+    ourGstin: identity.gstin,
+    partyGstin,
     placeOfSupplyCode: destination,
     supplyStates: { seller: partyState, destination },
   };
+}
+
+function branchWithRegistration(id: string): Promise<BranchWithRegistration | null> {
+  return db.branch.findUnique({ where: { id }, include: { gstRegistration: true } });
+}
+
+/**
+ * The branch a document is raised from (on a purchase, bought by) — spec §5.1:
+ *
+ *   1. A credit note: always its invoice's, since it must go out under the GSTIN the invoice did. Any
+ *      other branch asked for is refused. Allowed on a branch deactivated since, while its GSTIN is live.
+ *   2. An update: the branch asked for, else the draft's own.
+ *   3. A create: the branch asked for, else the user's home branch, else the head office.
+ *   4. It must exist and be active — except (1), and a draft keeping the branch it already had (it can
+ *      be saved there, not issued).
+ *
+ * A document written before branches (null) is the head office's. Runs before any transaction: the
+ * helpers here use their own connection and may write (`ensureHeadOffice` adopts unassigned rows).
+ */
+async function resolveDocumentBranch(input: {
+  userId: string;
+  docType: TradeDocumentType;
+  requestedBranchId: string | null | undefined;
+  againstDocumentId: string | null | undefined;
+  existing?: { branchId: string | null };
+}): Promise<{ branch: BranchWithRegistration } | { error: string }> {
+  const requested = input.requestedBranchId?.trim() || null;
+
+  if (input.docType === "CREDIT_NOTE" && input.againstDocumentId) {
+    const invoice = await db.tradeDocument.findUnique({ where: { id: input.againstDocumentId }, select: { branchId: true } });
+    const branch = (invoice?.branchId ? await branchWithRegistration(invoice.branchId) : null) ?? (await ensureHeadOffice());
+    if (requested && requested !== branch.id) return { error: "A credit note is raised by the branch that issued the invoice." };
+    if (!branch.active && branch.gstRegistration && !branch.gstRegistration.active) {
+      return {
+        error: `Branch ${branch.name} is inactive, and so is its GSTIN ${branch.gstRegistration.gstin}. Reactivate the GSTIN under Settings → Branches & GST registrations to raise a credit note against this invoice.`,
+      };
+    }
+    return { branch };
+  }
+
+  const draft = input.existing;
+  const targetId = requested ?? (draft ? draft.branchId : await defaultBranchIdFor(input.userId));
+  // A draft written before branches has none: it is the head office's.
+  const branch = targetId ? await branchWithRegistration(targetId) : await ensureHeadOffice();
+  if (!branch) return { error: "That branch no longer exists. Choose another one." };
+  const keepsDraftBranch = draft !== undefined && (draft.branchId ? branch.id === draft.branchId : branch.isHeadOffice);
+  if (!branch.active && !keepsDraftBranch) return { error: `Branch ${branch.name} is inactive. Choose another branch.` };
+  return { branch };
 }
 
 function lineData(input: TradeDocumentInput["lines"][number], computed: ReturnType<typeof computeDocument>["lines"][number], index: number) {
@@ -160,15 +195,25 @@ function lineData(input: TradeDocumentInput["lines"][number], computed: ReturnTy
   };
 }
 
-/** Everything a create or an update writes, with the tax engine run over the submitted lines. */
-async function buildDocumentData(data: TradeDocumentInput) {
-  const org = await getOrganisation();
+/**
+ * Everything a create or an update writes, with the tax engine run over the submitted lines — as
+ * raised from (or, on a purchase, bought by) `branch`. Resolve the branch first: this reads through
+ * `db` and must not run inside a transaction.
+ */
+async function buildDocumentData(data: TradeDocumentInput, branch: { id: string }) {
+  const identity = await branchIdentity(branch.id);
   const parties = await resolveParties(
     data.docType,
     data.companyId,
     data.locationId || null,
     data.placeOfSupplyCode || null,
+    identity,
   );
+  const isSales = documentDirection[data.docType] === "SALES";
+  // The form's one GSTIN field is the *party's*, whichever side of the document they are on, and it wins
+  // over the location's: it's what was actually agreed for this document. Ours is the branch's
+  // registration — on a purchase that is the buyer, which is where the previous build put the vendor (X1).
+  const partyGstin = data.buyerGstin || parties.partyGstin || null;
   const supplyType = resolveSupplyType(parties.supplyStates.seller, parties.supplyStates.destination);
   const totals = computeDocument(
     data.lines.map((l) => ({
@@ -185,7 +230,7 @@ async function buildDocumentData(data: TradeDocumentInput) {
       withholdingMode: data.withholdingMode,
       withholdingRatePercent: data.withholdingRatePercent,
       adjustment: data.adjustment,
-      roundOff: org.roundOffTotals,
+      roundOff: identity.roundOffTotals,
     },
   );
   const issueDate = parseDate(data.issueDate, new Date()) as Date;
@@ -202,10 +247,12 @@ async function buildDocumentData(data: TradeDocumentInput) {
       direction: documentDirection[data.docType],
       companyId: data.companyId,
       locationId: data.locationId || null,
+      branchId: branch.id,
+      // The branch's registration as of this save; issuing re-reads it (spec §3.5, §5.5).
+      gstRegistrationId: identity.gstRegistrationId,
       placeOfSupplyCode: parties.placeOfSupplyCode,
-      sellerGstin: parties.sellerGstin,
-      // The form's GSTIN wins over the location's: it's what was actually agreed for this document.
-      buyerGstin: (data.buyerGstin || parties.buyerGstin) || null,
+      sellerGstin: isSales ? parties.ourGstin : partyGstin,
+      buyerGstin: isSales ? partyGstin : parties.ourGstin,
       gstTreatment: data.gstTreatment,
       reverseCharge: data.reverseCharge,
       currency: data.currency,
@@ -380,34 +427,58 @@ export async function createTradeDocument(
   const leadError = await validateLinkedLead(data.leadId, data.companyId);
   if (leadError) return { ok: false, error: leadError };
 
-  const built = await buildDocumentData(data);
-  // Zoho assigns the number when the document is created, not when it's issued, so it's visible and
-  // editable on the form. A typed-in number is kept as-is and the serial is pushed past it.
-  const docNumber = data.docNumber?.trim()
-    ? data.docNumber.trim()
-    : await db.$transaction((tx) => nextDocumentNumber(tx, data.docType, built.issueDate));
-  if (data.docNumber?.trim()) await advanceSerialPast(data.docType, docNumber);
+  const typedNumber = data.docNumber?.trim() || null;
+  const numberProblem = typedNumber ? gstNumberProblem(data.docType, typedNumber) : null;
+  if (numberProblem) return { ok: false, error: numberProblem };
 
-  const existing = await db.tradeDocument.findUnique({ where: { docNumber }, select: { id: true } });
-  if (existing) return { ok: false, error: `${docNumber} is already used by another document.` };
-
-  const created = await db.tradeDocument.create({
-    data: {
-      ...built.scalars,
-      docNumber,
-      status: "DRAFT",
-      origin,
-      // Only India has the government's e-invoice system; elsewhere it never applies.
-      einvoiceStatus: isEInvoiceEligible(data.docType) && (await countryFeatureAvailable("einvoice")) ? "PENDING" : "NOT_APPLICABLE",
-      sourceDocumentId: data.sourceDocumentId || null,
-      againstDocumentId: data.againstDocumentId || null,
-      leadId: data.leadId || null,
-      createdById: user.id,
-      salespersonId: data.salespersonId || company.ownerUserId || user.id,
-      lines: { create: built.lines },
-    },
-    select: { id: true },
+  // Before the transaction: these read through `db`, and resolving may create the head office.
+  const picked = await resolveDocumentBranch({
+    userId: user.id,
+    docType: data.docType,
+    requestedBranchId: data.branchId,
+    againstDocumentId: data.againstDocumentId,
   });
+  if ("error" in picked) return { ok: false, error: picked.error };
+  const { branch } = picked;
+  const built = await buildDocumentData(data, branch);
+  // Only India has the government's e-invoice system; elsewhere it never applies.
+  const einvoiceStatus = isEInvoiceEligible(data.docType) && (await countryFeatureAvailable("einvoice")) ? "PENDING" : "NOT_APPLICABLE";
+
+  /**
+   * Zoho assigns the number when the document is created, not when it's issued, so it's visible and
+   * editable on the form. A typed-in number is kept as-is and its branch's series is pushed past it.
+   *
+   * Allocated in the transaction that creates the document (X12): a create that fails takes its number
+   * back with it rather than leaving a gap. The one exception is an allocated number some other
+   * document already holds — that transaction commits, so the series moves past a number nobody can
+   * have anyway and the next attempt takes the one after it.
+   */
+  const outcome = await db.$transaction(async (tx) => {
+    const docNumber = typedNumber ?? (await nextDocumentNumber(tx, data.docType, built.issueDate, branch.id));
+    const clash = await tx.tradeDocument.findUnique({ where: { docNumber }, select: { id: true } });
+    if (clash) return { clash: docNumber };
+    if (typedNumber) await advanceSerialPast(tx, data.docType, typedNumber, branch.id, built.issueDate);
+
+    const created = await tx.tradeDocument.create({
+      data: {
+        ...built.scalars,
+        docNumber,
+        status: "DRAFT",
+        origin,
+        einvoiceStatus,
+        sourceDocumentId: data.sourceDocumentId || null,
+        againstDocumentId: data.againstDocumentId || null,
+        leadId: data.leadId || null,
+        createdById: user.id,
+        salespersonId: data.salespersonId || company.ownerUserId || user.id,
+        lines: { create: built.lines },
+      },
+      select: { id: true },
+    });
+    return { created };
+  });
+  if ("clash" in outcome) return { ok: false, error: `${outcome.clash} is already used by another document.` };
+  const { created } = outcome;
 
   await recordAudit({
     userId: user.id,
@@ -432,7 +503,17 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
 
   const existing = await db.tradeDocument.findUnique({
     where: { id },
-    select: { id: true, status: true, approvalStatus: true, docType: true, companyId: true, docNumber: true },
+    select: {
+      id: true,
+      status: true,
+      approvalStatus: true,
+      docType: true,
+      companyId: true,
+      docNumber: true,
+      issueDate: true,
+      branchId: true,
+      againstDocumentId: true,
+    },
   });
   if (!existing) return { ok: false, error: "That document no longer exists." };
   if (!isEditable(existing.status)) {
@@ -451,21 +532,59 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
   const leadError = await validateLinkedLead(data.leadId, data.companyId);
   if (leadError) return { ok: false, error: leadError };
 
-  if (data.docNumber?.trim() && data.docNumber.trim() !== existing.docNumber) {
-    const clash = await db.tradeDocument.findUnique({ where: { docNumber: data.docNumber.trim() }, select: { id: true } });
-    if (clash && clash.id !== id) return { ok: false, error: `${data.docNumber.trim()} is already used by another document.` };
+  // Typed in this save: the form sends the number back every time, so only a changed one counts.
+  const typedNumber = data.docNumber?.trim() && data.docNumber.trim() !== existing.docNumber ? data.docNumber.trim() : null;
+  if (typedNumber) {
+    const numberProblem = gstNumberProblem(existing.docType, typedNumber);
+    if (numberProblem) return { ok: false, error: numberProblem };
+    const clash = await db.tradeDocument.findUnique({ where: { docNumber: typedNumber }, select: { id: true } });
+    if (clash && clash.id !== id) return { ok: false, error: `${typedNumber} is already used by another document.` };
   }
 
-  const built = await buildDocumentData(data);
+  // Before the transaction, like the create. The invoice a credit note follows is the stored one: an
+  // update never re-points it.
+  const picked = await resolveDocumentBranch({
+    userId: user.id,
+    docType: existing.docType,
+    requestedBranchId: data.branchId,
+    againstDocumentId: existing.againstDocumentId,
+    existing: { branchId: existing.branchId },
+  });
+  if ("error" in picked) return { ok: false, error: picked.error };
+  const { branch } = picked;
+  const built = await buildDocumentData(data, branch);
+
   // Lines are replaced wholesale: the form submits the full set every time, and matching them up
   // row by row would only add a way for the stored totals to drift from the stored lines.
-  await db.$transaction(async (tx) => {
+  const outcome = await db.$transaction(async (tx) => {
+    let docNumber = typedNumber;
+    if (typedNumber) {
+      await advanceSerialPast(tx, existing.docType, typedNumber, branch.id, built.issueDate);
+    } else if (branch.id !== existing.branchId) {
+      /**
+       * Moved to another branch: a number its old series generated is renumbered from the new
+       * branch's series — only when the two branches count in different series (under company-wide
+       * numbering nothing changes), and never a number somebody typed. The old number becomes a gap,
+       * exactly as a deleted draft's does (owner decision Q9; CA question C2).
+       */
+      const [before, after] = [await seriesFor(tx, existing.docType, existing.branchId), await seriesFor(tx, existing.docType, branch.id)];
+      if (
+        JSON.stringify(before.ref) !== JSON.stringify(after.ref) &&
+        (await isAutoNumberOf(tx, existing.docType, existing.branchId, existing.docNumber, existing.issueDate))
+      ) {
+        docNumber = await nextDocumentNumber(tx, existing.docType, built.issueDate, branch.id);
+        const clash = await tx.tradeDocument.findUnique({ where: { docNumber }, select: { id: true } });
+        // Committed rather than rolled back, as on create: the series moves past a number that is taken.
+        if (clash) return { clash: docNumber };
+      }
+    }
+
     await tx.tradeDocumentLine.deleteMany({ where: { documentId: id } });
     await tx.tradeDocument.update({
       where: { id },
       data: {
         ...built.scalars,
-        ...(data.docNumber?.trim() ? { docNumber: data.docNumber.trim() } : {}),
+        ...(docNumber ? { docNumber } : {}),
         leadId: data.leadId || null,
         /**
          * An approved document that is then edited is not the document that was approved.
@@ -482,14 +601,18 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
         lines: { create: built.lines },
       },
     });
+    return { renumbered: !typedNumber && docNumber ? docNumber : null };
   });
+  if ("clash" in outcome) return { ok: false, error: `${outcome.clash} is already used by another document.` };
 
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
     entityType: "TradeDocument",
     entityId: id,
-    entityLabel: tradeDocumentLabels[existing.docType],
+    entityLabel: outcome.renumbered
+      ? `${tradeDocumentLabels[existing.docType]} moved to ${branchLabel(branch)} · ${existing.docNumber} renumbered ${outcome.renumbered}`
+      : tradeDocumentLabels[existing.docType],
   });
   revalidateDocument(existing.docType, id);
   return { ok: true, data: { id } };
@@ -548,12 +671,48 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
       issueDate: true,
       total: true,
       docNumber: true,
+      branchId: true,
+      againstDocument: { select: { branchId: true } },
       lines: { select: { id: true } },
     },
   });
   if (!existing) return { ok: false, error: "That document no longer exists." };
   if (existing.status !== "DRAFT") return { ok: false, error: "This document has already been issued." };
   if (existing.lines.length === 0) return { ok: false, error: "Add at least one line before issuing." };
+
+  /**
+   * The branch, re-read now rather than trusted from the last save: it may have been deactivated, or
+   * lost its registration, since the draft was written (spec §5.5). A draft from before branches is
+   * the head office's.
+   */
+  const branch = (existing.branchId ? await branchWithRegistration(existing.branchId) : null) ?? (await ensureHeadOffice());
+  // A credit note goes out from its invoice's branch even after that branch closed — it is the only
+  // branch whose GSTIN can reduce that invoice.
+  const followsInvoice =
+    existing.docType === "CREDIT_NOTE" &&
+    (existing.againstDocument?.branchId ? existing.againstDocument.branchId === branch.id : branch.isHeadOffice);
+  if (!branch.active && !followsInvoice) {
+    return { ok: false, error: `Branch ${branch.name} is inactive. Move this draft to an active branch, then issue it.` };
+  }
+  // A GST document needs a live GSTIN behind it. A company with no registration at all (unregistered, or
+  // abroad) issues as it always has.
+  if (GST_NUMBERED_TYPES.includes(existing.docType) && !branch.gstRegistration?.active && (await db.gstRegistration.count({ where: { active: true } })) > 0) {
+    return {
+      ok: false,
+      error: branch.gstRegistration
+        ? `Branch ${branch.name}'s GSTIN ${branch.gstRegistration.gstin} is inactive, so it can't issue a tax invoice. Choose another branch or reactivate the GSTIN.`
+        : `Branch ${branch.name} has no GST registration, so it can't issue a tax invoice. Choose another branch or add its GSTIN.`,
+    };
+  }
+  const ourGstin = branch.gstRegistration?.gstin ?? null;
+  // The snapshot as it stands at issue — the same as the last save's unless the branch's registration
+  // changed in between (it can only change within the branch's state, so the tax split still holds).
+  // From here on it never changes.
+  const snapshot = {
+    branchId: branch.id,
+    gstRegistrationId: branch.gstRegistrationId,
+    ...(documentDirection[existing.docType] === "SALES" ? { sellerGstin: ourGstin } : { buyerGstin: ourGstin }),
+  };
 
   /**
    * Sign-off, where this type needs it.
@@ -578,10 +737,10 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
 
   // The number was assigned at creation, so issuing only commits the document — it doesn't take a
   // new serial. A document still carrying a DRAFT- marker (created before numbering moved forward)
-  // gets one now.
+  // gets one now, from its branch's series.
   const docNumber = isDraftNumber(existing.docNumber)
     ? await db.$transaction(async (tx) => {
-        const number = await nextDocumentNumber(tx, existing.docType, existing.issueDate);
+        const number = await nextDocumentNumber(tx, existing.docType, existing.issueDate, branch.id);
         await tx.tradeDocument.update({ where: { id }, data: { docNumber: number } });
         return number;
       })
@@ -590,7 +749,7 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
   // Issuing and posting happen together: a document can't reach the customer without its ledger
   // entry, and an entry must never exist for a document that then failed to issue.
   const posting = await db.$transaction(async (tx) => {
-    await tx.tradeDocument.update({ where: { id }, data: { status: "ISSUED", issuedAt: new Date() } });
+    await tx.tradeDocument.update({ where: { id }, data: { status: "ISSUED", issuedAt: new Date(), ...snapshot } });
     return postDocumentToLedger(tx, id, user.id);
   });
 
@@ -620,8 +779,13 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
   return { ok: true, data: { id, docNumber, einvoiceError } };
 }
 
-/** Assembles the portal's view of a document from what's stored, including both parties' addresses. */
-async function loadEInvoiceDocument(id: string): Promise<{ doc: EInvoiceDocument } | { error: string }> {
+/**
+ * Assembles the portal's view of a document from what's stored, including both parties' addresses,
+ * and the registration whose IRP login reports it.
+ */
+async function loadEInvoiceDocument(
+  id: string,
+): Promise<{ doc: EInvoiceDocument; gstRegistrationId: string | null } | { error: string }> {
   const document = await db.tradeDocument.findUnique({
     where: { id },
     include: {
@@ -636,10 +800,14 @@ async function loadEInvoiceDocument(id: string): Promise<{ doc: EInvoiceDocument
     return { error: "Only a tax invoice or a credit note is reported to the portal." };
   }
 
-  const org = await getOrganisation();
+  // The branch the document was raised from, not the live organisation: an invoice reported (or
+  // re-tried) after a GSTIN change must still carry the GSTIN it was issued under (X3).
+  const identity = await branchIdentity(document.branchId);
+  const sellerGstin = document.sellerGstin ?? identity.gstin;
   const location = document.location;
 
   return {
+    gstRegistrationId: document.gstRegistrationId,
     doc: {
       docType: document.docType as "INVOICE" | "CREDIT_NOTE",
       docNumber: document.docNumber,
@@ -647,15 +815,16 @@ async function loadEInvoiceDocument(id: string): Promise<{ doc: EInvoiceDocument
       reverseCharge: document.reverseCharge,
       placeOfSupplyCode: document.placeOfSupplyCode,
       seller: {
-        gstin: org.gstin,
-        legalName: org.legalName,
-        address1: org.addressLine1,
-        address2: org.addressLine2,
-        city: org.city,
-        pincode: org.pincode,
-        stateCode: org.stateCode ?? stateCodeFromGstin(org.gstin),
-        phone: org.phone,
-        email: org.email,
+        gstin: sellerGstin,
+        legalName: identity.legalName,
+        address1: identity.addressLine1,
+        address2: identity.addressLine2,
+        city: identity.city,
+        pincode: identity.pincode,
+        stateCode: identity.stateCode ?? stateCodeFromGstin(sellerGstin),
+        phone: identity.phone,
+        email: identity.email,
+        label: identity.name,
       },
       buyer: {
         gstin: document.buyerGstin,
@@ -710,10 +879,10 @@ async function generateEInvoice_internal(id: string): Promise<{ ok: true } | { o
   const loaded = await loadEInvoiceDocument(id);
   if ("error" in loaded) return { ok: false, error: loaded.error };
 
-  const config = await getEInvoiceConfig();
-  if (!config) {
-    return { ok: false, error: "E-invoicing is switched off — turn it on in Settings → Organisation." };
-  }
+  // The IRP login of the GSTIN the document was issued under; the error names what is missing.
+  const got = await eInvoiceConfigFor(loaded.gstRegistrationId);
+  if ("error" in got) return { ok: false, error: got.error };
+  const { config } = got;
 
   const problems = validateForEInvoice(loaded.doc);
   if (problems.length > 0) {
@@ -790,7 +959,7 @@ export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id:
 
   const document = await db.tradeDocument.findUnique({
     where: { id },
-    select: { irn: true, ackDate: true, docType: true, einvoiceStatus: true },
+    select: { irn: true, ackDate: true, docType: true, einvoiceStatus: true, gstRegistrationId: true },
   });
   if (!document) return { ok: false, error: "That document no longer exists." };
   if (!document.irn || document.einvoiceStatus !== "GENERATED") {
@@ -805,10 +974,12 @@ export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id:
     };
   }
 
-  const config = await getEInvoiceConfig();
-  if (!config) return { ok: false, error: "E-invoicing is switched off." };
+  // Always the registration the IRN was generated under — even one deactivated since, whose login is
+  // kept for exactly this: an IRN can only be cancelled by the GSTIN that holds it.
+  const got = await eInvoiceConfigFor(document.gstRegistrationId, { allowInactive: true });
+  if ("error" in got) return { ok: false, error: got.error };
 
-  const provider = createEInvoiceProvider(config);
+  const provider = createEInvoiceProvider(got.config);
   const result = await provider.cancel(document.irn, reason, remark);
   if (!result.ok) return { ok: false, error: result.error };
 
@@ -864,9 +1035,22 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
   // amounts are usually different, so it's raised through the normal create path.
   const isCreditNote = target === "CREDIT_NOTE";
 
-  const created = await db.tradeDocument.create({
+  /**
+   * The branch travels with the deal: a proposal from Pune becomes Pune's invoice, a Bengaluru PO
+   * Bengaluru's bill, and a credit note stays with its invoice's branch (spec §5.1, §5.3). The GSTIN
+   * snapshots come across with it, so place of supply and tax stay as the source worked them out. A
+   * source from before branches is the head office's — resolved here, outside the transaction.
+   */
+  const { branchId, gstRegistrationId } = source.branchId
+    ? { branchId: source.branchId, gstRegistrationId: source.gstRegistrationId }
+    : await ensureHeadOffice().then((ho) => ({ branchId: ho.id, gstRegistrationId: ho.gstRegistrationId }));
+  const issueDate = new Date();
+
+  // The number comes from the source branch's series in the transaction that creates the document, so
+  // a create that fails gives it back (X12).
+  const created = await db.$transaction(async (tx) => await tx.tradeDocument.create({
     data: {
-      docNumber: await db.$transaction((tx) => nextDocumentNumber(tx, target, new Date())),
+      docNumber: await nextDocumentNumber(tx, target, issueDate, branchId),
       docType: target,
       direction: documentDirection[target],
       status: "DRAFT",
@@ -874,6 +1058,8 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
       origin: "CONVERSION",
       companyId: source.companyId,
       locationId: source.locationId,
+      branchId,
+      gstRegistrationId,
       placeOfSupplyCode: source.placeOfSupplyCode,
       sellerGstin: source.sellerGstin,
       buyerGstin: source.buyerGstin,
@@ -910,7 +1096,7 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
       withholdingAmount: source.withholdingAmount,
       adjustmentLabel: source.adjustmentLabel,
       adjustment: source.adjustment,
-      issueDate: new Date(),
+      issueDate,
       reference: source.reference,
       notes: source.notes,
       terms: source.terms,
@@ -955,7 +1141,7 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
       },
     },
     select: { id: true },
-  });
+  }));
 
   await recordAudit({
     userId: user.id,
@@ -1049,6 +1235,7 @@ export async function listLeadDocuments(leadId: string) {
       total: true,
       currency: true,
       salesperson: { select: { id: true, name: true } },
+      branch: { select: { id: true, name: true, code: true } },
     },
   });
   return toPlain(rows);
@@ -1065,6 +1252,8 @@ export async function listTradeDocuments(params: {
   salespersonId?: string;
   /** A `DocumentOrigin`, or the literal "none" for documents that never recorded one. */
   origin?: string;
+  /** One branch's documents; the head office's include those written before branches. */
+  branchId?: string;
   page: number;
   pageSize: number;
 }) {
@@ -1081,9 +1270,13 @@ export async function listTradeDocuments(params: {
      * `viaCompanyScope` returns `{ company: { ownerUserId: { in: ids } } }`, so any later `company:`
      * key in the same object literal replaces it wholesale and the access scope silently disappears.
      * Nothing did that today, but a party filter is the obvious next addition and it would — the
-     * same reasoning, and the same fix, as `listOrders` in src/actions/order.ts.
+     * same reasoning, and the same fix, as `listOrders` in src/actions/order.ts. The branch filter
+     * joins it there for the same reason: the head office's is an `OR`, which a search would replace.
      */
-    AND: [(await viaCompanyScope(user.id)) as Prisma.TradeDocumentWhereInput],
+    AND: [
+      (await viaCompanyScope(user.id)) as Prisma.TradeDocumentWhereInput,
+      ...(params.branchId ? [await branchFilter(params.branchId)] : []),
+    ],
     docType: params.docType,
     ...(params.status ? { status: params.status } : {}),
     /**
@@ -1135,6 +1328,7 @@ export async function listTradeDocuments(params: {
         company: { select: { id: true, name: true, relationshipType: true } },
         createdBy: { select: { name: true } },
         salesperson: { select: { id: true, name: true } },
+        branch: { select: { id: true, name: true, code: true } },
       },
     }),
     db.tradeDocument.count({ where }),
@@ -1239,7 +1433,8 @@ export async function listCreditableInvoices(companyId: string) {
     where: { companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
     orderBy: { issueDate: "desc" },
     take: 50,
-    select: { id: true, docNumber: true, issueDate: true, total: true },
+    // The branch, so the form can lock its picker to it: a credit note follows its invoice (null = the head office).
+    select: { id: true, docNumber: true, issueDate: true, total: true, branchId: true },
   });
   return toPlain(rows);
 }
@@ -1272,6 +1467,7 @@ export async function listCompanyDocuments(companyId: string) {
       einvoiceStatus: true,
       irn: true,
       createdBy: { select: { name: true } },
+      branch: { select: { id: true, name: true, code: true } },
     },
   });
   return toPlain(rows);

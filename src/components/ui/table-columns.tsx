@@ -95,7 +95,16 @@ export function useColumns(tableKey: string): TableColumns {
 }
 
 /** The picker. Drop it beside a table's filters. */
-export function ColumnPicker({ tableKey, className }: { tableKey: string; className?: string }) {
+export function ColumnPicker({
+  tableKey,
+  className,
+  omit,
+}: {
+  tableKey: string;
+  className?: string;
+  /** Columns not offered here: one that means nothing in this workspace, like Branch with a single branch. */
+  omit?: string[];
+}) {
   const { preferences, setPreference, clearPreference } = useContext(TableColumnsContext);
   const def = getTableDefinition(tableKey);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
@@ -112,7 +121,8 @@ export function ColumnPicker({ tableKey, className }: { tableKey: string; classN
   if (!def) return null;
 
   const isDefault = isDefaultSelection(tableKey, stored);
-  const hiddenCount = def.columns.length - visible.length;
+  const offered = omit?.length ? def.columns.filter((c) => !omit.includes(c.key)) : def.columns;
+  const hiddenCount = offered.filter((c) => !chosen.has(c.key)).length;
 
   // The context is updated first so the table re-renders on the click, and the write follows. A
   // checkbox that does nothing for 300ms and then jumps gets clicked twice.
@@ -166,7 +176,7 @@ export function ColumnPicker({ tableKey, className }: { tableKey: string; classN
           </div>
 
           <div className="max-h-72 overflow-y-auto">
-            {def.columns.map((col) => {
+            {offered.map((col) => {
               const on = chosen.has(col.key);
               return (
                 <button

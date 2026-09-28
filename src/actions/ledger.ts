@@ -7,8 +7,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
-import { entryTotals, hasOneSidedLines, isBalanced, reverseLines } from "@/lib/ledger/posting";
-import { ensureChartOfAccounts, writeEntry } from "@/lib/ledger/journal";
+import { entryTotals, hasOneSidedLines, isBalanced } from "@/lib/ledger/posting";
+import { ensureChartOfAccounts, reversedLines, reversibleLineSelect, writeEntry } from "@/lib/ledger/journal";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -34,21 +34,14 @@ export async function reverseJournalEntry(input: {
         select: {
           id: true, entryNumber: true, date: true, narration: true, companyId: true,
           reversedBy: { select: { id: true, entryNumber: true } },
-          lines: { select: { accountId: true, debit: true, credit: true, companyId: true, narration: true }, orderBy: { sortOrder: "asc" } },
+          lines: { select: reversibleLineSelect, orderBy: { sortOrder: "asc" } },
         },
       });
       if (!original) throw new Error("That entry no longer exists.");
       if (original.reversedBy) throw new Error(`Already reversed by ${original.reversedBy.entryNumber}.`);
 
-      const flipped = reverseLines(
-        original.lines.map((l) => ({
-          accountId: l.accountId,
-          debit: Number(l.debit),
-          credit: Number(l.credit),
-          companyId: l.companyId,
-          narration: l.narration,
-        })),
-      );
+      // Branch, GSTIN and cost centre go with each line, so the reversal lands where the original did.
+      const flipped = reversedLines(original.lines);
 
       return writeEntry(tx, {
         // Reversing into a closed period would change a figure someone has already filed, so the
@@ -77,12 +70,37 @@ export async function reverseJournalEntry(input: {
   }
 }
 
-/** A hand-written entry — opening balances, depreciation, a correction the documents can't express. */
+/** The GST accounts, whose lines belong to one GSTIN's return (spec §8.3). */
+const GST_ACCOUNT_KEYS: string[] = [
+  SYSTEM_ACCOUNTS.INPUT_CGST,
+  SYSTEM_ACCOUNTS.INPUT_SGST,
+  SYSTEM_ACCOUNTS.INPUT_IGST,
+  SYSTEM_ACCOUNTS.OUTPUT_CGST,
+  SYSTEM_ACCOUNTS.OUTPUT_SGST,
+  SYSTEM_ACCOUNTS.OUTPUT_IGST,
+];
+
+/**
+ * A hand-written entry — opening balances, depreciation, a correction the documents can't express.
+ *
+ * Each line may name a branch and a GST registration. A branch is optional (none means the line is
+ * not attributed to one). A line on a GST account must say which GSTIN it belongs to once there is more
+ * than one — otherwise it would sit in no return, or in the wrong one; with exactly one it takes that
+ * one, and with none it stays blank, as every line did before registrations existed.
+ */
 export async function createManualJournal(input: {
   date: string;
   narration: string;
   source?: "MANUAL" | "OPENING";
-  lines: { accountId: string; debit: string; credit: string; companyId?: string; narration?: string }[];
+  lines: {
+    accountId: string;
+    debit: string;
+    credit: string;
+    companyId?: string;
+    narration?: string;
+    branchId?: string;
+    gstRegistrationId?: string;
+  }[];
 }): Promise<ActionResult<{ id: string; entryNumber: string }>> {
   const user = await requireModuleUser("accounting");
   if (!(await hasEffectivePermission(user.id, "ledger.post"))) {
@@ -100,6 +118,8 @@ export async function createManualJournal(input: {
       credit: Number(l.credit) || 0,
       companyId: l.companyId || null,
       narration: l.narration?.trim() || null,
+      branchId: l.branchId || null,
+      gstRegistrationId: l.gstRegistrationId || null,
     }))
     .filter((l) => l.accountId && (l.debit !== 0 || l.credit !== 0));
 
@@ -124,6 +144,32 @@ export async function createManualJournal(input: {
     };
   }
 
+  const branchIds = [...new Set(lines.flatMap((l) => (l.branchId ? [l.branchId] : [])))];
+  const registrationIds = [...new Set(lines.flatMap((l) => (l.gstRegistrationId ? [l.gstRegistrationId] : [])))];
+  const [knownBranches, knownRegistrations, gstAccounts, activeRegistrations] = await Promise.all([
+    branchIds.length ? db.branch.count({ where: { id: { in: branchIds }, active: true } }) : 0,
+    registrationIds.length ? db.gstRegistration.count({ where: { id: { in: registrationIds }, active: true } }) : 0,
+    db.ledgerAccount.findMany({
+      where: { id: { in: lines.map((l) => l.accountId) }, systemKey: { in: GST_ACCOUNT_KEYS } },
+      select: { id: true },
+    }),
+    // Two are enough to know "more than one".
+    db.gstRegistration.findMany({ where: { active: true }, select: { id: true }, orderBy: { id: "asc" }, take: 2 }),
+  ]);
+  if (knownBranches !== branchIds.length) return { ok: false, error: "That branch doesn't exist or is inactive." };
+  if (knownRegistrations !== registrationIds.length) {
+    return { ok: false, error: "That registration doesn't exist or is inactive." };
+  }
+
+  const gstAccountIds = new Set(gstAccounts.map((a) => a.id));
+  const onlyRegistration = activeRegistrations.length === 1 ? activeRegistrations[0].id : null;
+  if (activeRegistrations.length > 1 && lines.some((l) => gstAccountIds.has(l.accountId) && !l.gstRegistrationId)) {
+    return { ok: false, error: "Say which GSTIN this GST line belongs to." };
+  }
+  const tagged = lines.map((l) =>
+    gstAccountIds.has(l.accountId) && !l.gstRegistrationId ? { ...l, gstRegistrationId: onlyRegistration } : l,
+  );
+
   try {
     const entry = await db.$transaction((tx) =>
       writeEntry(tx, {
@@ -131,7 +177,7 @@ export async function createManualJournal(input: {
         narration,
         source: input.source ?? "MANUAL",
         userId: user.id,
-        lines,
+        lines: tagged,
       }),
     );
     await recordAudit({

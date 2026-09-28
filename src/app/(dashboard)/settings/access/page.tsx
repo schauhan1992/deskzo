@@ -22,6 +22,8 @@ import { ExceptionsTable } from "@/components/settings/exceptions-table";
 import { WhoCan } from "@/components/settings/who-can";
 import { ChangeHistory } from "@/components/settings/change-history";
 import { can } from "@/lib/authz/resolve";
+import { listUserBranchAssignments } from "@/actions/branch";
+import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
 
 /**
  * Users & access, as four questions rather than one long page.
@@ -89,7 +91,7 @@ export default async function UsersAccessPage({
       </div>
 
       <div className="mt-5">
-        {tab === "people" && <PeopleTab mayManage={mayManage} />}
+        {tab === "people" && <PeopleTab mayManage={mayManage} viewerId={sessionUser.id} />}
         {tab === "exceptions" && <ExceptionsTab mayManage={mayManage} />}
         {tab === "who" && <WhoCanTab />}
         {tab === "roles" && <RolesTab mayManage={mayManage} viewerIsSuperAdmin={viewerIsSuperAdmin} />}
@@ -98,12 +100,13 @@ export default async function UsersAccessPage({
   );
 }
 
-async function PeopleTab({ mayManage }: { mayManage: boolean }) {
-  const [roster, users, departments, history] = await Promise.all([
+async function PeopleTab({ mayManage, viewerId }: { mayManage: boolean; viewerId: string }) {
+  const [roster, users, departments, history, worksAt] = await Promise.all([
     accessRoster(),
     listUsers(),
     listDepartments(),
     permissionChangeHistory({ limit: 8 }),
+    worksAtColumn(mayManage, viewerId),
   ]);
   const allRoles = await roleKeys();
   const nonAdminRoles = allRoles.filter((r: Role) => r !== ADMIN_ROLE);
@@ -128,7 +131,13 @@ async function PeopleTab({ mayManage }: { mayManage: boolean }) {
             role — so the reporting line is an access decision, not just an org chart. Changing one needs permission
             to manage access.
           </p>
-          <TeamManager users={users} departments={departments} roles={allRoles} />
+          <TeamManager
+            users={users}
+            departments={departments}
+            roles={allRoles}
+            branches={worksAt?.branches}
+            branchByUser={worksAt?.branchByUser}
+          />
         </CardContent>
       </Card>
 
@@ -161,6 +170,27 @@ async function PeopleTab({ mayManage }: { mayManage: boolean }) {
       <ChangeHistory rows={history} title="Recent access changes" />
     </div>
   );
+}
+
+/**
+ * The team table's "Works at" column (spec §10.1), or null when it has no place here.
+ *
+ * Only with more than one active branch — a single-branch company has one answer for everybody — and
+ * only for somebody who may change it. That takes `users.manage` as well as this screen's
+ * `permissions.manage`: `setUserBranch` checks the first, and without it the assignments come back
+ * empty, which would show every person as working nowhere.
+ */
+async function worksAtColumn(mayManage: boolean, viewerId: string) {
+  if (!mayManage || !(await can(viewerId, "users.manage")) || !(await isMultiBranch())) return null;
+  const assignments = await listUserBranchAssignments();
+  const assigned = [...new Set(assignments.flatMap((a) => (a.branchId ? [a.branchId] : [])))];
+  // The active branches, plus any somebody still works at after it closed, so their row shows it
+  // rather than falling back to "none".
+  const branches = await listBranchChoices({ include: assigned });
+  return {
+    branches: branches.map((b) => ({ id: b.id, name: b.name, code: b.code, isHeadOffice: b.isHeadOffice, active: b.active })),
+    branchByUser: Object.fromEntries(assignments.map((a) => [a.userId, a.branchId] as const)),
+  };
 }
 
 async function ExceptionsTab({ mayManage }: { mayManage: boolean }) {

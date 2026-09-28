@@ -531,6 +531,13 @@ model User {
   managerId     String?
   manager       User?       @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
   directReports User[]      @relation("UserManager")
+  /**
+   * "Works at": the branch a new document of theirs defaults to, and — only when set — the state their
+   * professional tax is computed for. Null means not set: documents default to the head office and
+   * professional tax keeps following their home address. Nullable so a data reset can let go of it.
+   */
+  branchId      String?
+  branch        Branch?     @relation("UserBranch", fields: [branchId], references: [id], onDelete: SetNull)
 
   companiesCreated           Company[]                @relation("CompanyCreatedBy")
   companiesOwned             Company[]                @relation("CompanyOwner")
@@ -739,6 +746,9 @@ model User {
   photo                  UserPhoto?               @relation("UserPhoto")
   creditDecisions        CreditDecision[]         @relation("CreditDecidedBy")
   messagesSent           MarketingMessage[]       @relation("MarketingMessageSentBy")
+
+  branchesCreated         Branch[]          @relation("BranchCreatedBy")
+  gstRegistrationsCreated GstRegistration[] @relation("GstRegistrationCreatedBy")
 
   @@index([departmentId])
   @@index([managerId])
@@ -1350,11 +1360,16 @@ model BrandingSettings {
  * Singleton ("global") holding who *we* are on a tax document: legal name, GSTIN, registered
  * address and bank details. Without this an invoice can't be raised — the seller's GSTIN and state
  * decide whether a supply is CGST+SGST or IGST — so it's the first thing the invoice flow checks.
+ * Since branches, this row holds the entity-wide facts (one PAN, one registered office, the defaults
+ * every branch inherits). What is per GSTIN lives on GstRegistration, and what a branch prints comes
+ * from Branch where it overrides this row.
  */
 model OrganisationSettings {
   id        String  @id @default("global")
   legalName String  @default("")
   tradeName String?
+  /// Rollback mirror of the head office registration's GSTIN since 20260928090000_branches_gst_registrations:
+  /// written so an older build still finds it, read by nothing new. Read `getOrganisation().gstin` instead.
   gstin     String?
   pan       String?
   cin       String?
@@ -1364,7 +1379,8 @@ model OrganisationSettings {
   city         String?
   state        String?
   /**
-   * Two-digit GST state code — the seller half of the place-of-supply comparison.
+   * The registered office's two-digit GST state code. No longer the seller half of the place-of-supply
+   * comparison — that is the document's branch's registration.
    */
   stateCode    String?
   pincode      String?
@@ -1392,8 +1408,14 @@ model OrganisationSettings {
 
   /**
    * e-invoicing (IRP). Credentials are encrypted at rest — see src/lib/crypto.ts.
+   * The switch is entity-wide: the e-invoice mandate follows the PAN's aggregate turnover.
    */
   einvoiceEnabled            Boolean  @default(false)
+  /**
+   * Provider and credentials: moved to GstRegistration (the NIC issues API users per GSTIN) — the
+   * head office registration took a copy in 20260928090000_branches_gst_registrations. Kept here as the
+   * rollback build's copy (owner decision: not dropped), read by nothing new.
+   */
   einvoiceProvider           String   @default("mock")
   einvoiceUsername           String?
   einvoicePasswordCipher     String?
@@ -1401,6 +1423,7 @@ model OrganisationSettings {
   einvoiceClientSecretCipher String?
   /**
    * Invoices below this value skip IRN generation, mirroring the turnover-based exemption rules.
+   * Entity-wide, like the switch.
    */
   einvoiceMinValue           Decimal? @db.Decimal(12, 2)
 
@@ -1408,12 +1431,13 @@ model OrganisationSettings {
    * e-way bills. Same portal operator and the same credentials as e-invoicing, so there is nothing
    * more to enter — but its own switch, because plenty of businesses register for one and not the
    * other, and a single flag would make turning off IRN generation silently stop bills as well.
+   * Entity-wide; the credentials it uses are the document's registration's.
    */
   ewayEnabled Boolean @default(false)
 
   /**
-   * The floor for movement that stays inside our own state. Null means the central ₹50,000, which
-   * is what most states use. Inter-state is never affected — that threshold is not ours to set.
+   * Moved to GstRegistration.ewayIntraStateThreshold — each state sets its own floor, so it belongs to
+   * the registration in that state. Kept here as the rollback build's copy, read by nothing new.
    */
   ewayIntraStateThreshold Decimal? @db.Decimal(12, 2)
 
@@ -1485,6 +1509,118 @@ model OrganisationSettings {
   updatedAt DateTime @updatedAt
 
   @@map("organisation_settings")
+}
+
+/// One GST registration of this company: one GSTIN, one state.
+///
+/// A company has one PAN and one set of books but a registration in every state it supplies from
+/// (occasionally two in a state, for separate business verticals). Several branches in one state share
+/// a registration — GST calls them additional places of business on the same GSTIN. The IRP and e-way
+/// portals issue credentials per GSTIN, invoice series must be unique per GSTIN, and the intra-state
+/// e-way threshold is set by each state: all of that lives here, not on a branch.
+model GstRegistration {
+  id        String  @id @default(cuid())
+  /// 15 characters, upper case. Characters 3–12 are the organisation's PAN and the last is a checksum;
+  /// both are verified on save. Immutable once an issued document names this registration — a new GSTIN
+  /// is a new registration, and the old one is deactivated.
+  gstin     String  @unique
+  /// The GSTIN's first two digits. Stored so every place-of-supply comparison and report filter reads it
+  /// rather than re-deriving it. A CHECK (gst_registrations_state_is_gstin_prefix) keeps the two equal.
+  stateCode String
+  /// Short code for number prefixes ({GST}), e.g. "MH". Upper-case letters and digits, 1–4, unique.
+  code      String  @unique
+  active    Boolean @default(true)
+
+  /// The portal connection for this GSTIN — e-invoice and e-way share it, as they share an operator.
+  /// Null provider = not set up: nothing is sent, and generation says so by GSTIN.
+  einvoiceProvider           String?
+  einvoiceUsername           String?
+  einvoicePasswordCipher     String?
+  einvoiceClientId           String?
+  einvoiceClientSecretCipher String?
+  /// The e-way floor for movement that stays inside this registration's state. Null = the central ₹50,000.
+  ewayIntraStateThreshold    Decimal? @db.Decimal(12, 2)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  createdBy   User?    @relation("GstRegistrationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  branches       Branch[]
+  documents      TradeDocument[]
+  journalLines   JournalLine[]
+  documentSeries DocumentSeries[]
+
+  @@index([active])
+  @@map("gst_registrations")
+}
+
+/// A place of business — an office, shop, factory or warehouse — of this one company.
+///
+/// Called a branch because that is what the people using it call it; "location" already means the
+/// customer's address in this schema (CompanyLocation, TradeDocument.locationId). In GST terms it is a
+/// place of business on `gstRegistration`'s GSTIN. Every document is raised from (or, for a purchase,
+/// bought by) one branch, which decides the GSTIN, address, bank and series that document prints.
+/// Anything left blank is the organisation's — which is how a single-branch company sees no change.
+///
+/// No stateCode column: a branch's GST state is its registration's; without one it is derived from its
+/// own (or, for an inheriting head office, the organisation's) address — derived, so it cannot drift.
+model Branch {
+  id   String @id @default(cuid())
+  name String
+  /// Short, unique: {BR} in number prefixes, and the column value in lists. Upper-case letters and digits, 1–6.
+  code String @unique
+
+  /// Null only while the organisation holds no GST registration at all, or for a branch that does not
+  /// supply (a liaison office): such a branch cannot issue a tax invoice, credit note or challan.
+  gstRegistrationId String?
+  gstRegistration   GstRegistration? @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+
+  /// Its own address. All blank on the head office means "the registered office" on OrganisationSettings;
+  /// required on every other branch, and in the registration's state.
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  pincode      String?
+  /// Blank means India, as everywhere.
+  country      String?
+  email        String?
+  phone        String?
+
+  /// Overrides — null prints the organisation's. The bank block is taken whole: the branch's when it has
+  /// an account number or a UPI id, else the organisation's, never a mixture of the two.
+  bankName          String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankBranch        String?
+  upiId             String?
+  logoDataUrl       String?
+  signatureDataUrl  String?
+  invoiceTerms      String?
+  invoiceNotes      String?
+
+  /// Exactly one: at most one by a partial unique index (branches_one_head_office), at least one because
+  /// the flag can only be moved.
+  isHeadOffice Boolean @default(false)
+  /// Retired rather than deleted once anything names it.
+  active       Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  createdBy   User?    @relation("BranchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members        User[]           @relation("UserBranch")
+  documents      TradeDocument[]
+  payments       Payment[]
+  consignments   Consignment[]
+  journalLines   JournalLine[]
+  documentSeries DocumentSeries[]
+
+  @@index([active])
+  @@index([gstRegistrationId])
+  @@map("branches")
 }
 
 /**
@@ -1631,6 +1767,20 @@ model TradeDocument {
   location   CompanyLocation? @relation(fields: [locationId], references: [id])
 
   /**
+   * Our side of the document: the branch it is raised from (for a purchase, the branch buying) and the
+   * GST registration it goes out under. The branch decides the address, bank and series it prints; the
+   * registration is the branch's as it stood when the document was last saved as a draft, and never
+   * changes after issue. Editable while DRAFT, like every other field.
+   * Nullable in this release only (expand, then contract): rows an older build writes during the rollout
+   * are adopted by the head office (`adoptUnassigned`), and readers treat null as the head office until
+   * the next release makes `branchId` NOT NULL with the head office as its database default.
+   */
+  branchId          String?
+  branch            Branch?          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  gstRegistrationId String?
+  gstRegistration   GstRegistration? @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+
+  /**
    * Two-digit state code the supply is taxed in — drives CGST+SGST vs IGST.
    */
   placeOfSupplyCode String?
@@ -1643,7 +1793,10 @@ model TradeDocument {
   currency      String       @default("INR")
   exchangeRate  Decimal      @default(1) @db.Decimal(14, 6)
   /**
-   * Snapshot of both GSTINs, so a later edit to either company can't rewrite history on an issued document.
+   * Snapshot of both GSTINs, so a later edit to either side can't rewrite history on an issued document.
+   * Ours is `sellerGstin` on a sales document and `buyerGstin` on a purchase; the other is the party's.
+   * (Purchases saved before branches held the vendor's in `buyerGstin`; the branches migration moved it
+   * to `sellerGstin` and put ours in its place.)
    */
   sellerGstin   String?
   buyerGstin    String?
@@ -1827,6 +1980,9 @@ model TradeDocument {
   /// Both Dated-on options. `(direction, issueDate)` above cannot serve a window on issueDate alone.
   @@index([issueDate])
   @@index([dueDate])
+  @@index([branchId, docType])
+  /// A GST return is one registration's documents in one month.
+  @@index([gstRegistrationId, issueDate])
   @@map("trade_documents")
 }
 
@@ -1939,20 +2095,62 @@ model DocumentApprovalPolicy {
  * this is the *format*, that is the *sequence*.
  */
 model DocumentNumberSetting {
-  docType    TradeDocumentType  @id
-  mode       DocumentNumberMode @default(AUTO)
+  docType    TradeDocumentType   @id
+  mode       DocumentNumberMode  @default(AUTO)
+  /**
+   * Whose series a number of this type comes from. COMPANY (the default, and the only behaviour before
+   * branches): this row is the series. REGISTRATION or BRANCH: each owner's DocumentSeries is, and this
+   * row keeps the mode and the template prefix/padding every series of the type starts from. Switching
+   * away from COMPANY copies this row's counter into the head office's series, so its numbering
+   * continues; switching back takes the higher of the two.
+   */
+  scope      DocumentSeriesScope @default(COMPANY)
   /**
    * Free text, e.g. "WT/26-27/QT/". Supports {FY} for the financial year.
    */
-  prefix     String             @default("")
-  nextNumber Int                @default(1)
+  prefix     String              @default("")
+  nextNumber Int                 @default(1)
   /**
    * Zero-padding width for the serial, so 12 renders as 0012.
    */
-  padding    Int                @default(4)
-  updatedAt  DateTime           @updatedAt
+  padding    Int                 @default(4)
+  updatedAt  DateTime            @updatedAt
 
   @@map("document_number_settings")
+}
+
+/// Who a document type's numbers are counted for. GST wants a consecutive series per GSTIN; the company
+/// series is today's behaviour and the default.
+enum DocumentSeriesScope {
+  /// One series for the whole company — the DocumentNumberSetting row itself.
+  COMPANY
+  /// One series per GST registration (a branch without a registration counts in its own branch series).
+  REGISTRATION
+  /// One series per branch.
+  BRANCH
+}
+
+/// A numbering series of one document type for one GST registration or one branch — used only when that
+/// type's DocumentNumberSetting.scope is not COMPANY. The company series is the DocumentNumberSetting row
+/// itself; switching scope copies it into the head office's series here, so its numbering continues.
+model DocumentSeries {
+  id                String            @id @default(cuid())
+  docType           TradeDocumentType
+  gstRegistrationId String?
+  gstRegistration   GstRegistration?  @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+  branchId          String?
+  branch            Branch?           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  /// gstRegistrationId ?? branchId. One non-null column for the unique index, because Postgres treats
+  /// NULLs as distinct; a CHECK (document_series_one_owner) keeps it equal to whichever owner is set.
+  ownerKey          String
+  /// Same tokens as DocumentNumberSetting.prefix, plus {GST}, {BR} and {FY2}.
+  prefix            String
+  nextNumber        Int               @default(1)
+  padding           Int               @default(4)
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([docType, ownerKey])
+  @@map("document_series")
 }
 
 /**
@@ -2370,6 +2568,13 @@ model Payment {
   recordedBy       User     @relation("PaymentRecordedBy", fields: [recordedByUserId], references: [id])
   createdAt        DateTime @default(now())
 
+  /**
+   * The branch that received or made it; tags its postings. Nullable in this release only, like
+   * TradeDocument.branchId — null reads as the head office.
+   */
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
   allocations PaymentAllocation[]
 
   journalEntries JournalEntry[] @relation("PaymentJournal")
@@ -2378,6 +2583,7 @@ model Payment {
   @@index([bankAccountId])
   /// Every Payments report windows on this. See the note on Ticket.
   @@index([paidOn])
+  @@index([branchId])
   @@map("payments")
 }
 
@@ -3044,6 +3250,16 @@ model JournalLine {
   sortOrder    Int           @default(0)
 
   /**
+   * Dimensions, like `departmentId`: the branch the line happened at, and the GST registration whose
+   * return it belongs to — so one set of books answers output tax and ITC per GSTIN and a P&L per branch
+   * without duplicate ledgers. Null = not attributed (payroll, depreciation, manual lines without one).
+   */
+  branchId          String?
+  branch            Branch?          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  gstRegistrationId String?
+  gstRegistration   GstRegistration? @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+
+  /**
    * Set when this line has been agreed against the bank statement. Only bank lines ever carry it.
    */
   reconciledAt  DateTime?
@@ -3054,6 +3270,8 @@ model JournalLine {
   @@index([companyId])
   @@index([departmentId])
   @@index([accountId, reconciledAt])
+  @@index([branchId])
+  @@index([gstRegistrationId])
   @@map("journal_lines")
 }
 
@@ -5217,6 +5435,16 @@ model Consignment {
   reason            ConsignmentReason @default(SALE_DELIVERY)
   status            ConsignmentStatus @default(DRAFT)
 
+  /**
+   * "Dispatched from": the branch the goods leave. Nullable in this release only, like
+   * TradeDocument.branchId — null reads as the head office.
+   */
+  branchId  String?
+  branch    Branch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  /**
+   * Free-text origin from before branches. Kept so rows recorded then still show where they left from;
+   * nothing new writes it in place of `branchId`.
+   */
   fromLabel String?
 
   toCompanyId  String?
@@ -5286,6 +5514,7 @@ model Consignment {
 
   @@index([status, dispatchedOn])
   @@index([toCompanyId])
+  @@index([branchId])
   @@map("consignments")
 }
 

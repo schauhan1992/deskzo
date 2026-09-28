@@ -14,6 +14,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
 import { annualCtcOf, computePayslip, suggestStructure } from "@/lib/hr/payroll";
+import { GST_STATE_CODES } from "@/lib/gst-engine";
+import { branchIdentity } from "@/lib/branches/identity";
 import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema } from "@/lib/validation/hr";
 import type { ActionResult } from "@/actions/company";
 
@@ -184,9 +186,22 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
         { employeeProfile: { exitedOn: { gte: monthRange(year, month).from } } },
       ],
     },
-    select: { id: true, name: true, employeeProfile: { select: { state: true, exitedOn: true } } },
+    select: { id: true, name: true, branchId: true, employeeProfile: { select: { state: true, exitedOn: true } } },
     orderBy: { name: "asc" },
   });
+
+  // Professional tax follows the place of work (src/lib/hr/payroll.ts:101-103): the state of the branch
+  // someone works at, for people whose branch is set. Nobody else changes — owner decision Q5, pending
+  // the CA's C9. Each branch is resolved once, and never inside a transaction.
+  const branchIds = [...new Set(people.map((p) => p.branchId).filter((id): id is string => Boolean(id)))];
+  const workStates = new Map(
+    await Promise.all(
+      branchIds.map(async (id) => {
+        const identity = await branchIdentity(id);
+        return [id, identity.stateCode ? (GST_STATE_CODES[identity.stateCode] ?? null) : identity.state] as const;
+      }),
+    ),
+  );
 
   const run =
     existing ??
@@ -244,7 +259,7 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       },
       monthDays,
       lopDays: lop,
-      state: person.employeeProfile?.state ?? null,
+      state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.employeeProfile?.state ?? null,
       month,
       incentive: incentiveByUser.get(person.id)?.total ?? 0,
     });

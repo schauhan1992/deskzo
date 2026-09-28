@@ -12,6 +12,10 @@
  * read back as HTML. Rendering it is also the only way to find out that it renders at all for a
  * draft; a type check cannot tell you that.
  *
+ * It also reads whose paper it is: the document is raised from a branch, its letterhead prints the
+ * GSTIN the document recorded rather than today's, and a "Branch:" line appears only where the
+ * workspace has several branches and this is not the head office's document.
+ *
  *   npm run check:document-print
  */
 import "dotenv/config";
@@ -19,6 +23,7 @@ import Module from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { db } from "../src/lib/db";
+import { gstinCheckCharacter } from "../src/lib/gst-engine";
 
 const TAG = "ZZPROBE_PRINT";
 
@@ -117,6 +122,40 @@ async function main() {
     if (!made.ok) return;
     created.documents.push(made.data.id);
 
+    /**
+     * ── Whose paper it is ───────────────────────────────────────────────────────────────────────
+     *
+     * Every document is raised from a branch now, and one written without choosing is raised from
+     * the writer's: their own branch while it is active, else the head office. Worked out here from
+     * the rows rather than by asking the helper that decides it, so a document that silently landed
+     * nowhere — or on somebody else's branch — fails.
+     */
+    const stored = await db.tradeDocument.findUniqueOrThrow({
+      where: { id: made.data.id },
+      select: { branchId: true, branch: { select: { name: true, isHeadOffice: true } } },
+    });
+    const [writer, headOffice] = await Promise.all([
+      db.user.findUnique({ where: { id: actorId }, select: { branch: { select: { id: true, active: true } } } }),
+      db.branch.findFirst({ where: { isHeadOffice: true }, select: { id: true } }),
+    ]);
+    const expectedBranch = writer?.branch?.active ? writer.branch.id : (headOffice?.id ?? null);
+    ok(
+      "the proposal was raised from a branch — the writer's default",
+      stored.branchId !== null && stored.branchId === expectedBranch,
+      stored.branch ? stored.branch.name : "no branch at all",
+    );
+
+    /**
+     * The GSTIN printed is the one the document recorded, not the one the company has today (X2).
+     *
+     * A GSTIN is replaced, or a branch moves to another registration, and an invoice reprinted
+     * afterwards must still carry the number it was issued under. So the fixture is given a snapshot
+     * no registration holds — a made-up PAN with a real check character — and the page must print
+     * exactly that. Nothing is restored: the document is deleted in the `finally`.
+     */
+    const snapshot = `27ZZPRT0000Z1Z${gstinCheckCharacter("27ZZPRT0000Z1Z")}`;
+    await db.tradeDocument.update({ where: { id: made.data.id }, data: { sellerGstin: snapshot } });
+
     // ── It renders at all, as a draft ────────────────────────────────────────────────────────────
     let html = "";
     try {
@@ -140,6 +179,42 @@ async function main() {
     );
     ok("  and the customer's name", html.includes("Juniper Pharma"));
     ok("  and the line it is quoting for", html.includes("997331"), "the HSN off the catalogue item");
+
+    {
+      // In the letterhead — ahead of the customer's block, which carries the customer's own GSTIN.
+      const printed = new RegExp(`GSTIN:\\s*(?:<!-- -->)?\\s*${snapshot}`).exec(html);
+      const customerAt = html.indexOf("Juniper Pharma");
+      ok(
+        "the letterhead prints the document's own GSTIN snapshot",
+        printed !== null && customerAt >= 0 && printed.index < customerAt,
+        printed ? snapshot : "the snapshot is not in the header",
+      );
+      // And not today's: the organisation's live GSTIN (its head office registration's), where it has one.
+      const { getOrganisation } = await import("../src/lib/organisation");
+      const live = (await getOrganisation()).gstin;
+      ok(
+        "  not the organisation's live GSTIN",
+        !live || live === snapshot || !html.includes(live),
+        live ? `${live} is ${html.includes(live) ? "on the page" : "not on the page"}` : "the organisation has no GSTIN today",
+      );
+    }
+
+    {
+      /**
+       * A "Branch:" line only where there is more than one branch to tell apart, and only for a
+       * branch other than the head office — a single-branch company's paper reads as it always has.
+       * Asserted for whichever of the two this workspace is; the suite doesn't change it to find out.
+       */
+      const { isMultiBranch } = await import("../src/lib/branches/identity");
+      const multi = await isMultiBranch();
+      const named = multi && stored.branch !== null && !stored.branch.isHeadOffice;
+      const line = /Branch:\s*(?:<!-- -->)?\s*([^<]+)</.exec(html);
+      ok(
+        named ? "the branch it was raised from is named on the paper" : "no branch line — one branch, or the head office's paper",
+        named ? line !== null && line[1]!.trim() === stored.branch!.name : line === null,
+        `${multi ? "several branches" : "one branch"}; raised from ${stored.branch?.isHeadOffice ? "the head office" : (stored.branch?.name ?? "nowhere")}${line ? `; printed "${line[0].slice(0, -1).trim()}"` : ""}`,
+      );
+    }
 
     // ── The draft says so, on the paper ──────────────────────────────────────────────────────────
     const marked = /Draft\s*(?:—|&#x2014;|&mdash;)\s*not issued/i.test(html);

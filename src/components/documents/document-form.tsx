@@ -12,6 +12,7 @@ import {
   listDocumentItems,
   listCreditableInvoices,
 } from "@/actions/trade-document";
+import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -28,6 +29,9 @@ import { lookupExchangeRate } from "@/actions/exchange-rate";
 import { documentDirection, documentListPath, tradeDocumentLabels } from "@/lib/trade-documents";
 import { registeredTreatments } from "@/lib/validation/trade-document";
 import { blankLine, type AddressDraft, type DocumentFormDefaults, type LineDraft } from "@/lib/document-draft";
+import { branchLabel, type BranchChoice } from "@/lib/branches/format";
+import { GST_NUMBERED_TYPES, expandPrefix } from "@/lib/document-numbering";
+import { startOfIndianDay } from "@/lib/india-time";
 
 type Party = { id: string; name: string; relationshipType: CompanyRelationshipType; customerCategory?: CategoryWithParent | null };
 type PartyLocation = Awaited<ReturnType<typeof listPartyLocations>>[number];
@@ -37,11 +41,20 @@ type CreditableInvoice = Awaited<ReturnType<typeof listCreditableInvoices>>[numb
 const EMPTY_LOCATIONS: PartyLocation[] = [];
 const GST_RATES = ["0", "0.25", "3", "5", "12", "18", "28"];
 
+/**
+ * Whether a stored number is one this series generated: its prefix, expanded for the document's date,
+ * then digits only. The server's own test (`isAutoNumberOf`) for renumbering a moved draft — a number
+ * somebody typed is never renumbered.
+ */
+function generatedBy(setting: NumberSetting, docNumber: string, issueDate: string) {
+  const prefix = expandPrefix(setting.prefix, startOfIndianDay(issueDate) ?? new Date(), setting.ctx ?? {});
+  return docNumber.startsWith(prefix) && /^\d+$/.test(docNumber.slice(prefix.length));
+}
+
 export function DocumentForm({
   docType,
   parties,
-  orgStateCode,
-  orgAddress,
+  branches,
   defaultTerms,
   roundOffTotals,
   numberSetting,
@@ -51,11 +64,16 @@ export function DocumentForm({
   docType: TradeDocumentType;
   parties: Party[];
   salespeople: { id: string; name: string; email?: string | null; phone?: string | null }[];
-  orgStateCode: string | null;
-  /** Our own registered address, offered as the despatch-from default. */
-  orgAddress: string;
+  /**
+   * Where the document can be raised from (on a purchase, who is buying): the active branches, head
+   * office first, plus an edited draft's own if it has since been deactivated. The picker shows only
+   * when there is a choice, so a single-branch company sees the form it always had.
+   */
+  branches: BranchChoice[];
+  /** The organisation's terms — the fallback for a branch without its own. */
   defaultTerms: string | null;
   roundOffTotals: boolean;
+  /** The series the starting branch numbers from: `getNumberSetting(docType, defaults.branchId)`. */
   numberSetting: NumberSetting;
   defaults: DocumentFormDefaults;
 }) {
@@ -65,8 +83,33 @@ export function DocumentForm({
   /** Prefix for ids that tie captions to their controls, unique per mount of this form. */
   const fieldId = useId();
 
+  const headOfficeId = branches.find((b) => b.isHeadOffice)?.id ?? "";
+  /** Where this form started: the draft's branch, or the writer's own, else the head office. */
+  const startBranchId = defaults.branchId || headOfficeId || branches[0]?.id || "";
+  const [branchId, setBranchId] = useState(startBranchId);
+  /** Declared after the state it reads, like `chosenSalesperson` below. Unset only for a credit note
+   *  whose invoice came from a branch since deactivated, which the picker names without its details. */
+  const selectedBranch = branches.find((b) => b.id === branchId);
+  /** Our side's GST state: the branch's registration, else its address — what decides CGST+SGST or IGST. */
+  const sellerStateCode = selectedBranch?.stateCode ?? null;
+  const gstNumbered = GST_NUMBERED_TYPES.includes(docType);
+
   const [docNumber, setDocNumber] = useState(defaults.docNumber);
   const [numberMode, setNumberMode] = useState(numberSetting.mode);
+  /**
+   * The series the chosen branch numbers from (what the gear edits) and its next number. Swapped when
+   * the branch changes, since per-GSTIN or per-branch numbering gives each branch its own.
+   */
+  const [series, setSeries] = useState({ branchId: startBranchId, setting: numberSetting, preview: defaults.docNumber });
+  /**
+   * The number this form generated and put in the field, while it is still there — a new document's
+   * preview, or one the gear produced. A number that no longer matches was typed, and is left alone
+   * when the branch changes. Null on an edit: the stored number is the server's to renumber.
+   */
+  const [generatedNumber, setGeneratedNumber] = useState<string | null>(defaults.id ? null : defaults.docNumber);
+  const [numberLoading, startNumberLookup] = useTransition();
+  /** Which branch change is the latest, so a slower answer for an earlier one is dropped. */
+  const numberRequest = useRef(0);
   const [companyId, setCompanyId] = useState(defaults.companyId);
   const [fetchedLocations, setFetchedLocations] = useState<{ companyId: string; rows: PartyLocation[] }>({
     companyId: "",
@@ -134,9 +177,9 @@ export function DocumentForm({
    *  `useState` throws on the dead zone rather than reading an undefined. */
   const chosenSalesperson = salespeople.find((p) => p.id === salespersonId);
   const [notes, setNotes] = useState(defaults.notes);
-  const [terms, setTerms] = useState(defaults.terms || defaultTerms || "");
+  const [terms, setTerms] = useState(defaults.terms || selectedBranch?.invoiceTerms || defaultTerms || "");
 
-  const [dispatchFrom, setDispatchFrom] = useState(defaults.dispatchFromAddress || orgAddress);
+  const [dispatchFrom, setDispatchFrom] = useState(defaults.dispatchFromAddress || selectedBranch?.dispatchAddress || "");
   const [billing, setBilling] = useState<AddressDraft>(defaults.billing);
   /**
    * Once someone edits the address by hand, an arriving location must not overwrite it. Held in a
@@ -211,9 +254,70 @@ export function DocumentForm({
     null;
 
   // The place of supply follows the billing state until someone overrides it — a bill-to/ship-to
-  // split is real but uncommon, and defaulting it wrong taxes the whole document incorrectly.
-  const placeOfSupplyCode = placeTouched ? placeOverride : ((isSales ? partyStateCode : orgStateCode) ?? "");
-  const supplyType = resolveSupplyType(isSales ? orgStateCode : partyStateCode, placeOfSupplyCode || null);
+  // split is real but uncommon, and defaulting it wrong taxes the whole document incorrectly. On a
+  // purchase it is the buying branch's own state, as the server defaults it.
+  const placeOfSupplyCode = placeTouched ? placeOverride : ((isSales ? partyStateCode : sellerStateCode) ?? "");
+  const supplyType = resolveSupplyType(isSales ? sellerStateCode : partyStateCode, placeOfSupplyCode || null);
+
+  // A credit note is raised by the branch that issued its invoice; once one is chosen, the picker
+  // shows that branch and can't be changed (the server refuses any other).
+  const followsInvoice = isCreditNote && Boolean(againstDocumentId);
+
+  /**
+   * Editing a draft: moving it to a branch that numbers in another series renumbers it when saved,
+   * and the old number is left as a gap (owner decision Q9, CA question C2). The server's rule,
+   * shown in advance — only for a number its old series generated, and only while it is left as stored.
+   */
+  const renumbering =
+    defaults.id !== undefined &&
+    series.branchId !== startBranchId &&
+    series.setting.ownerKey !== numberSetting.ownerKey &&
+    docNumber.trim() === defaults.docNumber &&
+    generatedBy(numberSetting, defaults.docNumber, defaults.issueDate);
+
+  /**
+   * Moves the document to another branch. An event, so everything that follows the branch is set here
+   * rather than mirrored in an effect. The dispatch-from address and the terms follow it unless
+   * somebody wrote their own — text that still reads as the old branch filled it in, or is blank,
+   * counts as untouched (on an edited draft too, where a flag set at load could only guess).
+   */
+  function chooseBranch(nextId: string) {
+    if (!nextId || nextId === branchId) return;
+    const from = selectedBranch;
+    const to = branches.find((b) => b.id === nextId);
+    setBranchId(nextId);
+    if (to) {
+      if (!dispatchFrom.trim() || dispatchFrom === (from?.dispatchAddress ?? "")) setDispatchFrom(to.dispatchAddress);
+      const termsOf = (b: BranchChoice | undefined) => b?.invoiceTerms ?? defaultTerms ?? "";
+      if (!terms.trim() || terms === termsOf(from)) setTerms(termsOf(to));
+    }
+    followSeries(nextId);
+  }
+
+  /**
+   * The chosen branch's numbering: the series the gear edits and, when the field still holds the
+   * number this form generated, that series' next number in its place (`adopt`). An answer that
+   * arrives after a later change is dropped, as the locations effect drops a superseded party's.
+   */
+  function followSeries(forBranchId: string, adopt = true) {
+    const ticket = ++numberRequest.current;
+    const shown = docNumber;
+    const replace = adopt && numberMode === "AUTO" && generatedNumber !== null && docNumber === generatedNumber;
+    startNumberLookup(async () => {
+      const [setting, preview] = await Promise.all([
+        getNumberSetting(docType, forBranchId || null),
+        previewNextNumber(docType, forBranchId || null),
+      ]);
+      if (ticket !== numberRequest.current) return;
+      setSeries({ branchId: forBranchId, setting, preview });
+      setNumberMode(setting.mode);
+      if (replace && setting.mode === "AUTO" && preview) {
+        // Only over the generated number: one typed while this was on its way is theirs.
+        setDocNumber((current) => (current === shown ? preview : current));
+        setGeneratedNumber(preview);
+      }
+    });
+  }
 
   /** Pulls the billing address and GST details from a location the user just chose. */
   function adoptLocation(location: PartyLocation | null) {
@@ -304,8 +408,12 @@ export function DocumentForm({
       locationId,
       placeOfSupplyCode,
       gstTreatment,
+      // The party's GSTIN, whichever side they are on — the payload keeps its historical name.
       buyerGstin,
       reverseCharge,
+      // Blank where there was no choice to make: with one branch, or a credit note following its
+      // invoice, the server applies the same answer itself.
+      branchId: branches.length > 1 && !followsInvoice ? branchId : "",
       currency,
       // Forced back to 1 on a rupee document rather than left at whatever was typed before
       // somebody switched back — the schema refuses the mismatch, and failing validation on a
@@ -362,6 +470,16 @@ export function DocumentForm({
 
   return (
     <form onSubmit={onSubmit} className="animate-fade-rise space-y-5">
+      {/* Here rather than on the page, so it follows the branch chosen below. */}
+      {selectedBranch && !sellerStateCode && (
+        <Card className="border-warning/40 bg-warning-bg px-4 py-3 text-sm text-warning">
+          {branches.length > 1
+            ? `${branchLabel(selectedBranch)} has no GSTIN or state set, so its documents will be taxed as inter-state (IGST).`
+            : "Your organisation's GSTIN and state aren't set, so every document will be taxed as inter-state (IGST)."}{" "}
+          Set your GSTIN under Settings → Organisation (head office) or Settings → Branches &amp; GST registrations.
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="text-sm font-medium text-text">
           {isSales ? "Customer" : "Vendor"} &amp; addresses
@@ -616,6 +734,34 @@ export function DocumentForm({
       <Card>
         <CardHeader className="text-sm font-medium text-text">Document details</CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Only when there is a choice: a single-branch company sees the form it always had. */}
+          {branches.length > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="branchId">{isSales ? "Branch" : "Buying branch"}</Label>
+              <Select id="branchId" value={branchId} onChange={(e) => chooseBranch(e.target.value)} disabled={followsInvoice}>
+                {/* The invoice's branch, since deactivated, is not among the choices — but it is the answer. */}
+                {!selectedBranch && <option value={branchId}>The invoice&apos;s branch (inactive)</option>}
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {branchLabel(b)}
+                    {b.active ? "" : " (inactive)"}
+                    {gstNumbered && !b.canIssueTaxDocuments ? " — can't issue tax invoices" : ""}
+                  </option>
+                ))}
+              </Select>
+              {followsInvoice ? (
+                <p className="text-xs text-subtle">Follows the invoice.</p>
+              ) : selectedBranch && !selectedBranch.active ? (
+                <p className="text-xs text-warning">This branch is inactive: the draft can be saved, but move it to an active branch to issue it.</p>
+              ) : gstNumbered && selectedBranch && !selectedBranch.canIssueTaxDocuments ? (
+                <p className="text-xs text-subtle">
+                  No GST registration here, so it can&apos;t issue a {tradeDocumentLabels[docType].toLowerCase()}. Save the draft, or
+                  choose a branch with a GSTIN.
+                </p>
+              ) : null}
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="docNumber">
               {tradeDocumentLabels[docType]} # <span className="text-danger">*</span>
@@ -631,14 +777,31 @@ export function DocumentForm({
               />
               <NumberSettingsDialog
                 docType={docType}
-                setting={numberSetting}
+                setting={series.setting}
+                branchId={branchId || null}
                 onApplied={(generated, mode) => {
                   setNumberMode(mode);
-                  if (mode === "AUTO" && generated) setDocNumber(generated);
-                  if (mode === "MANUAL") setDocNumber("");
+                  if (mode === "AUTO" && generated) {
+                    setDocNumber(generated);
+                    setGeneratedNumber(generated);
+                  }
+                  if (mode === "MANUAL") {
+                    setDocNumber("");
+                    setGeneratedNumber(null);
+                  }
+                  // The gear saved this branch's series: read it back, so the next visit starts from it.
+                  followSeries(branchId, false);
                 }}
               />
             </div>
+            {numberLoading ? (
+              <p className="text-xs text-subtle">Checking this branch&apos;s numbering…</p>
+            ) : renumbering ? (
+              <p className="text-xs text-subtle">
+                Saving renumbers this draft from the series for {series.setting.ownerLabel ?? (selectedBranch ? branchLabel(selectedBranch) : "this branch")}
+                {series.preview ? ` (next: ${series.preview})` : ""}; {defaults.docNumber} is left as a gap.
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1.5">
@@ -697,7 +860,12 @@ export function DocumentForm({
               <Select
                 id="againstDocumentId"
                 value={againstDocumentId}
-                onChange={(e) => setAgainstDocumentId(e.target.value)}
+                onChange={(e) => {
+                  setAgainstDocumentId(e.target.value);
+                  // The credit note moves to the invoice's branch — its GSTIN, its series, its address.
+                  const invoice = creditable.find((inv) => inv.id === e.target.value);
+                  if (invoice) chooseBranch(invoice.branchId ?? headOfficeId);
+                }}
                 required
               >
                 <option value="">Select the invoice this reduces…</option>
@@ -990,7 +1158,8 @@ export function DocumentForm({
       )}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending || !companyId}>
+        {/* Held while a branch change is fetching its number, so the old branch's number isn't saved under the new one. */}
+        <Button type="submit" disabled={pending || !companyId || numberLoading}>
           {pending ? "Saving…" : defaults.id ? "Save changes" : `Save ${tradeDocumentLabels[docType].toLowerCase()}`}
         </Button>
         <Button

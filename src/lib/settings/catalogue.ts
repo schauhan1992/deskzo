@@ -116,9 +116,17 @@ export const SETTINGS: SettingsSection[] = [
           {
             key: "organisation",
             label: "Profile",
-            description: "Legal name, GSTIN, registered address and bank details — what prints on every document.",
+            description: "Legal name, PAN, registered office, head-office GSTIN and default bank details — what prints unless a branch says otherwise.",
             href: "/settings/organisation",
             icon: Building2,
+            permission: "settings.manage",
+          },
+          {
+            key: "branches",
+            label: "Branches & GST registrations",
+            description: "Your offices, shops and warehouses, the GSTIN each one bills under, and which is the head office.",
+            href: "/settings/branches",
+            icon: MapPin,
             permission: "settings.manage",
           },
           {

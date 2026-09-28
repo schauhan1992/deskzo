@@ -3,16 +3,21 @@ import { notFound } from "next/navigation";
 import { getTradeDocument, listDocumentParties } from "@/actions/trade-document";
 import { listAssignableUsers } from "@/actions/company";
 import { getNumberSetting } from "@/actions/document-number";
-import { getOrganisation, foreignCountry } from "@/lib/organisation";
-import { stateCodeFromGstin } from "@/lib/gst-engine";
+import { getOrganisation } from "@/lib/organisation";
+import { listBranchChoices } from "@/lib/branches/identity";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { DocumentForm } from "@/components/documents/document-form";
 import { isEditable, tradeDocumentLabels } from "@/lib/trade-documents";
+import { istDateTimeInput } from "@/lib/india-time";
 
-const asDateInput = (value: Date | string | null | undefined) =>
-  value ? new Date(value).toISOString().slice(0, 10) : "";
+/**
+ * A stored date as the Indian calendar day, for a date input. Right whether the date was saved at UTC
+ * midnight (05:30 IST, the same day) or at India midnight (18:30 UTC the day before) — slicing the UTC
+ * ISO string gave the previous day for the second.
+ */
+const asDateInput = (value: Date | string | null | undefined) => (value ? istDateTimeInput(value).slice(0, 10) : "");
 
 export default async function EditDocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -47,15 +52,18 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     );
   }
 
-  const [parties, salespeople, org, numberSetting] = await Promise.all([
+  const [parties, salespeople, org, branches, numberSetting] = await Promise.all([
     listDocumentParties(document.docType),
     listAssignableUsers(),
     getOrganisation(),
-    getNumberSetting(document.docType),
+    // The draft's own branch stays selectable even once deactivated: the picker must show what the
+    // draft says, and a draft on an inactive branch can still be saved (just not issued).
+    listBranchChoices({ include: document.branchId ? [document.branchId] : [] }),
+    getNumberSetting(document.docType, document.branchId),
   ]);
-  const orgAddress = [org.legalName, org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" "), org.state, foreignCountry(org)]
-    .filter(Boolean)
-    .join("\n");
+  // Written before branches (null): the head office's.
+  const branch = branches.find((b) => b.id === document.branchId) ?? branches.find((b) => b.isHeadOffice);
+  const isSales = document.direction === "SALES";
 
   return (
     <div>
@@ -71,8 +79,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
       <DocumentForm
         docType={document.docType}
         parties={parties}
-        orgStateCode={org.stateCode ?? stateCodeFromGstin(org.gstin)}
-        orgAddress={orgAddress}
+        branches={branches}
         defaultTerms={org.invoiceTerms}
         roundOffTotals={org.roundOffTotals}
         numberSetting={numberSetting}
@@ -84,8 +91,10 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           locationId: document.locationId ?? "",
           placeOfSupplyCode: document.placeOfSupplyCode ?? "",
           gstTreatment: document.gstTreatment,
-          buyerGstin: document.buyerGstin ?? "",
+          // The party's GSTIN: on a purchase that is the vendor's, stored as the seller's (spec §5.2).
+          buyerGstin: (isSales ? document.buyerGstin : document.sellerGstin) ?? "",
           reverseCharge: document.reverseCharge,
+          branchId: branch?.id ?? "",
           currency: document.currency,
           exchangeRate: Number(document.exchangeRate),
           issueDate: asDateInput(document.issueDate),
@@ -95,7 +104,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           salespersonId: document.salespersonId ?? "",
           notes: document.notes ?? "",
           terms: document.terms ?? "",
-          dispatchFromAddress: document.dispatchFromAddress ?? orgAddress,
+          dispatchFromAddress: document.dispatchFromAddress ?? branch?.dispatchAddress ?? "",
           billing: {
             attention: document.billingAttention ?? "",
             line1: document.billingLine1 ?? "",

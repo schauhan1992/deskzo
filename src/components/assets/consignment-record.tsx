@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/bulk-select";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { consignmentReasonLabels, consignmentStatusLabels, consignmentStatusTone } from "@/lib/assets/lifecycle";
+import { branchLabel } from "@/lib/branches/format";
 
 type Consignment = NonNullable<Awaited<ReturnType<typeof getConsignment>>>;
 
@@ -144,7 +145,8 @@ export function ConsignmentRecord({ consignment }: { consignment: Consignment })
           <Card>
             <CardHeader className="text-sm font-medium text-text">Movement</CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <Fact label="From" value={consignment.fromLabel ?? "Our office"} />
+              {/* The branch it was dispatched from. The fallbacks are for a row read before the head office adopted it. */}
+              <Fact label="From" value={consignment.branch ? branchLabel(consignment.branch) : (consignment.fromLabel ?? "Our office")} />
               <Fact
                 label="To"
                 value={consignment.toCompany?.name ?? consignment.toAddress ?? "—"}

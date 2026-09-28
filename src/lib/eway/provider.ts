@@ -1,4 +1,5 @@
 import { buildEwayPayload, type EwayDocument } from "@/lib/eway/payload";
+import { IST_OFFSET_MS } from "@/lib/india-time";
 import { validityFor } from "@/lib/eway/rules";
 
 /**
@@ -332,6 +333,10 @@ class NicEwayProvider implements EwayProvider {
  *
  * Returns null rather than an Invalid Date, so a caller falls back to the computed validity instead
  * of storing `NaN` as an expiry and showing every bill as expired.
+ *
+ * The portal's times are India's. Built as a UTC instant less 05:30 rather than with `new Date(y, m, …)`,
+ * which reads them in the server's zone: on a UTC server a bill valid until 23:59 IST was stored as
+ * valid until 05:29 the next morning.
  */
 export function parsePortalDate(value: unknown): Date | null {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -343,7 +348,7 @@ export function parsePortalDate(value: unknown): Date | null {
   if (meridiem?.toUpperCase() === "PM" && hours < 12) hours += 12;
   if (meridiem?.toUpperCase() === "AM" && hours === 12) hours = 0;
 
-  const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), hours, Number(mi ?? 0), Number(ss ?? 0));
+  const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), hours, Number(mi ?? 0), Number(ss ?? 0)) - IST_OFFSET_MS);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 

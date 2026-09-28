@@ -50,6 +50,8 @@ type DocumentRow = {
   origin?: DocumentOrigin | null;
   /** Where a conversion came from, so the Source cell can link to it rather than only name it. */
   sourceDocument?: { id: string; docNumber: string; docType: TradeDocumentType } | null;
+  /** The branch it was raised from (on a purchase, the one buying); null on a row written before branches. */
+  branch?: { id: string; name: string; code: string } | null;
 };
 
 /**
@@ -62,6 +64,7 @@ export function DocumentRows({
   eInvoiced,
   approvalEnabled = false,
   approvalRequiredIds,
+  branchColumn = false,
 }: {
   docType: TradeDocumentType;
   documents: DocumentRow[];
@@ -75,6 +78,11 @@ export function DocumentRows({
   approvalEnabled?: boolean;
   /** Which documents need sign-off, when the type needs it only above a limit. Left out: all of them. */
   approvalRequiredIds?: string[];
+  /**
+   * More than one branch. Off, the Branch column is not drawn even where a stored preference from a
+   * multi-branch past asks for it — the picker stops offering it too (`ColumnPicker`'s `omit`).
+   */
+  branchColumn?: boolean;
 }) {
   const router = useRouter();
   const selection = useRowSelection(documents);
@@ -165,6 +173,7 @@ export function DocumentRows({
               {cols.show("number") && <th className="px-4 py-2.5">Number</th>}
               {cols.show("reference") && <th className="px-4 py-2.5">Reference #</th>}
               {cols.show("party") && <th className="px-4 py-2.5">Party</th>}
+              {branchColumn && cols.show("branch") && <th className="px-4 py-2.5">{isSales ? "Branch" : "Buying branch"}</th>}
               {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
               {cols.show("origin") && <th className="px-4 py-2.5">Source</th>}
               {cols.show("amount") && <th className="px-4 py-2.5 text-right">Amount</th>}
@@ -212,6 +221,11 @@ export function DocumentRows({
                         Reseller
                       </Badge>
                     )}
+                  </td>
+                )}
+                {branchColumn && cols.show("branch") && (
+                  <td className="px-4 py-2.5 font-mono text-xs text-muted" title={doc.branch?.name}>
+                    {doc.branch?.code ?? "—"}
                   </td>
                 )}
                 {cols.show("status") && (

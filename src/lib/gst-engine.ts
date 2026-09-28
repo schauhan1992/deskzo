@@ -11,6 +11,7 @@
  */
 
 import { BASE_CURRENCY, getCurrency } from "@/lib/currency";
+import { istDateParts } from "@/lib/india-time";
 
 export type SupplyType = "INTRA_STATE" | "INTER_STATE";
 
@@ -103,6 +104,57 @@ export const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z][Z][0-9A-Z]$
 export function isValidGstin(gstin: string) {
   return GSTIN_PATTERN.test(gstin.trim().toUpperCase());
 }
+
+const GSTIN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/**
+ * The fifteenth character of a GSTIN, from its first fourteen: Luhn mod 36 over 0-9A-Z.
+ *
+ * Null when the input is not fourteen characters of that alphabet, so a caller can't mistake "could
+ * not compute" for a check character.
+ */
+export function gstinCheckCharacter(first14: string): string | null {
+  if (first14.length !== 14) return null;
+  let sum = 0;
+  for (let i = 0; i < 14; i++) {
+    const value = GSTIN_ALPHABET.indexOf(first14[i]);
+    if (value < 0) return null;
+    const product = value * (i % 2 === 0 ? 1 : 2);
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+  return GSTIN_ALPHABET[(36 - (sum % 36)) % 36];
+}
+
+/**
+ * The pattern and the checksum — for **our own** registrations only.
+ *
+ * `isValidGstin` stays pattern-only on purpose: customer GSTINs typed years ago, and several suite
+ * fixtures, would fail the checksum, and refusing a customer's address over it helps nobody. Our own
+ * GSTIN is different — a mistyped one goes on every invoice and every return.
+ */
+export function hasValidGstinChecksum(gstin: string): boolean {
+  const value = gstin.trim().toUpperCase();
+  return GSTIN_PATTERN.test(value) && gstinCheckCharacter(value.slice(0, 14)) === value[14];
+}
+
+/** Characters 3–12 of a GSTIN are its holder's PAN — what makes two GSTINs one company. */
+export function panOfGstin(gstin: string | null | undefined): string | null {
+  const value = gstin?.trim().toUpperCase();
+  return value && GSTIN_PATTERN.test(value) ? value.slice(2, 12) : null;
+}
+
+/**
+ * Default short codes for a registration, vehicle-registration style (owner decision Q7) — what `{GST}`
+ * prints in a number prefix until somebody edits it. Every GST state except 96, "Other Country", which
+ * no Indian registration can be in. The migration's CASE has the same table.
+ */
+export const GST_STATE_ABBREVIATIONS: Record<string, string> = {
+  "01": "JK", "02": "HP", "03": "PB", "04": "CH", "05": "UK", "06": "HR", "07": "DL", "08": "RJ", "09": "UP",
+  "10": "BR", "11": "SK", "12": "AR", "13": "NL", "14": "MN", "15": "MZ", "16": "TR", "17": "ML", "18": "AS",
+  "19": "WB", "20": "JH", "21": "OD", "22": "CG", "23": "MP", "24": "GJ", "26": "DD", "27": "MH", "29": "KA",
+  "30": "GA", "31": "LD", "32": "KL", "33": "TN", "34": "PY", "35": "AN", "36": "TG", "37": "AP", "38": "LA",
+  "97": "OT",
+};
 
 /**
  * Intra-state when the seller and the place of supply share a state code. Anything else — including
@@ -259,11 +311,27 @@ export function computeDocument(
   };
 }
 
-/** Indian financial year (April–March) a date falls in, e.g. "2026-27" — the unit invoice series reset on. */
+/** The calendar year an Indian financial year starts in — read on India's calendar, not the host's. */
+function financialYearStart(date: Date) {
+  const { year, month } = istDateParts(date);
+  return month >= 3 ? year : year - 1;
+}
+
+/**
+ * Indian financial year (April–March) a date falls in, e.g. "2026-27" — the unit invoice series reset on.
+ *
+ * On India's calendar (X5): read from the host's, an invoice issued between midnight and 05:30 IST on
+ * 1 April took the previous year's prefix and journal series on a server running in UTC.
+ */
 export function financialYearOf(date: Date) {
-  const year = date.getFullYear();
-  const startYear = date.getMonth() >= 3 ? year : year - 1;
+  const startYear = financialYearStart(date);
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+/** The same year in four digits, "2627" — `{FY2}`, for prefixes that must fit GST's 16 characters. */
+export function shortFinancialYear(date: Date) {
+  const startYear = financialYearStart(date);
+  return `${String(startYear % 100).padStart(2, "0")}${String((startYear + 1) % 100).padStart(2, "0")}`;
 }
 
 const UNITS = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",

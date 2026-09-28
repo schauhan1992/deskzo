@@ -36,7 +36,6 @@ import {
   reverseLines,
   type PayrollTotals,
   type DocumentFinancials,
-  type DraftEntry,
   type DraftLine,
 } from "@/lib/ledger/posting";
 import { financialYearOf } from "@/lib/gst-engine";
@@ -49,9 +48,11 @@ type Tx = Prisma.TransactionClient;
  * Idempotent, and safe to call on every read: a business that has already edited its chart keeps
  * what it has, and only genuinely missing system accounts are added back — which is what happens
  * when a later release introduces one, as TDS Payable did.
+ *
+ * `client` is the global client, or a posting's own transaction (see `resolveAccounts`).
  */
-export async function ensureChartOfAccounts(): Promise<void> {
-  const existing = await db.ledgerAccount.findMany({ select: { id: true, code: true, systemKey: true } });
+export async function ensureChartOfAccounts(client: Pick<Tx, "ledgerAccount"> = db): Promise<void> {
+  const existing = await client.ledgerAccount.findMany({ select: { id: true, code: true, systemKey: true } });
   const haveCodes = new Set(existing.map((a) => a.code));
   const haveKeys = new Set(existing.filter((a) => a.systemKey).map((a) => a.systemKey));
 
@@ -63,7 +64,7 @@ export async function ensureChartOfAccounts(): Promise<void> {
     if (!seed.systemKey || haveKeys.has(seed.systemKey)) continue;
     const match = existing.find((a) => a.code === seed.code && !a.systemKey);
     if (!match) continue;
-    await db.ledgerAccount.update({ where: { id: match.id }, data: { systemKey: seed.systemKey } });
+    await client.ledgerAccount.update({ where: { id: match.id }, data: { systemKey: seed.systemKey } });
     haveKeys.add(seed.systemKey);
   }
 
@@ -74,7 +75,7 @@ export async function ensureChartOfAccounts(): Promise<void> {
 
   // Parents first, so a child always finds its parent's id.
   const byCode = new Map<string, string>(
-    (await db.ledgerAccount.findMany({ select: { id: true, code: true } })).map((a) => [a.code, a.id]),
+    (await client.ledgerAccount.findMany({ select: { id: true, code: true } })).map((a) => [a.code, a.id]),
   );
   // Upsert rather than create, because `missing` was worked out before any of these ran and this
   // function is called by several report queries that a single page fires in parallel. They all
@@ -82,7 +83,7 @@ export async function ensureChartOfAccounts(): Promise<void> {
   // it — a P2002 that took the whole Accounting page down rather than settling for the row that
   // was already there. Whoever arrives second now simply reads it.
   for (const seed of missing.sort((a, b) => a.code.localeCompare(b.code))) {
-    const created = await db.ledgerAccount.upsert({
+    const created = await client.ledgerAccount.upsert({
       where: { code: seed.code },
       update: {},
       create: {
@@ -119,13 +120,27 @@ export async function assertPeriodOpen(tx: Tx, date: Date) {
   }
 }
 
-/** Resolves system keys to account ids in one query, failing loudly if the chart is incomplete. */
+/**
+ * Resolves system keys to account ids, failing loudly if the chart is incomplete.
+ *
+ * A workspace whose ledger nobody has opened yet has no chart at all, and only the accounting
+ * screens used to create it — so a new workspace's first invoice (or payment) failed with "Chart of
+ * accounts is missing". Now the first posting that finds accounts missing creates the default chart in
+ * its own transaction and looks again; only a chart somebody has since broken still fails.
+ */
 export async function resolveAccounts(tx: Tx, keys: SystemAccountKey[]) {
-  const rows = await tx.ledgerAccount.findMany({
-    where: { systemKey: { in: keys } },
-    select: { id: true, systemKey: true },
-  });
-  const map = new Map(rows.map((r) => [r.systemKey as SystemAccountKey, r.id]));
+  const lookup = async () => {
+    const rows = await tx.ledgerAccount.findMany({
+      where: { systemKey: { in: keys } },
+      select: { id: true, systemKey: true },
+    });
+    return new Map(rows.map((r) => [r.systemKey as SystemAccountKey, r.id]));
+  };
+  let map = await lookup();
+  if (keys.some((k) => !map.has(k))) {
+    await ensureChartOfAccounts(tx);
+    map = await lookup();
+  }
   const missing = keys.filter((k) => !map.has(k));
   if (missing.length > 0) {
     throw new Error(`Chart of accounts is missing: ${missing.join(", ")}. Open Accounting → Chart of accounts to restore it.`);
@@ -182,6 +197,13 @@ async function nextEntryNumber(tx: Tx, date: Date) {
  * Writes one balanced entry. The balance check lives here rather than in a database constraint
  * because Postgres can't express "these rows must sum to each other" — so every path that creates an
  * entry goes through this one function.
+ *
+ * Branch and GST registration are tags on the lines, not separate books (spec §8): `branchId` and
+ * `gstRegistrationId` given here apply to every line that has no value of its own. Documents, payments
+ * and expense claims are tagged, and so is a reversal, which copies its original's lines. Payroll,
+ * payroll payments, depreciation, disposals, cheque clearings, exchange differences and the year-end
+ * close are deliberately left untagged — null means "not attributed to a branch", which the P&L shows
+ * as its own column rather than guessing one.
  */
 export async function writeEntry(
   tx: Tx,
@@ -197,6 +219,8 @@ export async function writeEntry(
       companyId?: string | null;
       departmentId?: string | null;
       narration?: string | null;
+      branchId?: string | null;
+      gstRegistrationId?: string | null;
     }[];
     documentId?: string | null;
     payrollRunId?: string | null;
@@ -204,6 +228,8 @@ export async function writeEntry(
     expenseId?: string | null;
     companyId?: string | null;
     reversesId?: string | null;
+    branchId?: string | null;
+    gstRegistrationId?: string | null;
   },
 ) {
   await assertPeriodOpen(tx, params.date);
@@ -235,6 +261,8 @@ export async function writeEntry(
           companyId: l.companyId ?? null,
           departmentId: l.departmentId ?? null,
           narration: l.narration ?? null,
+          branchId: l.branchId ?? params.branchId ?? null,
+          gstRegistrationId: l.gstRegistrationId ?? params.gstRegistrationId ?? null,
           sortOrder: i,
         })),
       },
@@ -243,11 +271,17 @@ export async function writeEntry(
   });
 }
 
+/**
+ * A posting-engine line, plus the two tags. The engine (`posting.ts`) doesn't set them today — the
+ * entry-level defaults in `writeEntry` do — but a line that carries its own is passed straight through.
+ */
+type TaggedDraftLine = DraftLine & { branchId?: string | null; gstRegistrationId?: string | null };
+
 /** Turns the posting engine's keyed lines into rows with real account ids. */
-async function materialise(tx: Tx, draft: DraftEntry) {
+async function materialise(tx: Tx, draft: { narration: string; lines: TaggedDraftLine[] }) {
   const keys = [...new Set(draft.lines.filter((l) => !l.accountIdOverride).map((l) => l.account))];
   const accounts = await resolveAccounts(tx, keys);
-  return draft.lines.map((l: DraftLine) => ({
+  return draft.lines.map((l: TaggedDraftLine) => ({
     // A line that named a real account wins: an asset's own account, or one P&L account being
     // closed, is chosen from data and has no system key to look up.
     accountId: l.accountIdOverride ?? accounts.get(l.account)!,
@@ -256,7 +290,20 @@ async function materialise(tx: Tx, draft: DraftEntry) {
     companyId: l.companyId ?? null,
     departmentId: l.departmentId ?? null,
     narration: l.narration ?? null,
+    branchId: l.branchId ?? null,
+    gstRegistrationId: l.gstRegistrationId ?? null,
   }));
+}
+
+/**
+ * The head office, read through the caller's transaction.
+ *
+ * Not `ensureHeadOffice()` or `branchIdentity()`: those go through `db` — another connection — and may
+ * write (`adoptUnassigned` updates `trade_documents`), so inside a posting they could wait on the very
+ * row this transaction holds, while it waits on them. With no head office the tag stays null.
+ */
+async function headOfficeOf(tx: Tx): Promise<{ id: string; gstRegistrationId: string | null } | null> {
+  return tx.branch.findFirst({ where: { isHeadOffice: true }, select: { id: true, gstRegistrationId: true } });
 }
 
 function financialsOf(doc: {
@@ -313,7 +360,7 @@ export async function postDocumentToLedger(
       id: true, docType: true, docNumber: true, companyId: true, issueDate: true,
       taxableValue: true, cgstAmount: true, sgstAmount: true, igstAmount: true,
       shippingCharge: true, withholdingAmount: true, adjustment: true, adjustmentLabel: true,
-      roundOff: true, total: true,
+      roundOff: true, total: true, branchId: true, gstRegistrationId: true,
     },
   });
   if (!doc) return null;
@@ -343,6 +390,11 @@ export async function postDocumentToLedger(
     lines: await materialise(tx, draft),
     documentId: doc.id,
     companyId: doc.companyId,
+    // Every line, receivable and revenue included, carries the document's branch and GSTIN: the tax
+    // lines are what a return per registration sums, the rest are what a P&L per branch sums. A document
+    // an older build wrote without a branch is the head office's, as readers take it (spec §13.2).
+    branchId: doc.branchId ?? (await headOfficeOf(tx))?.id ?? null,
+    gstRegistrationId: doc.gstRegistrationId,
   });
 }
 
@@ -356,7 +408,7 @@ export async function postPaymentToLedger(
     where: { id: paymentId },
     select: {
       id: true, companyId: true, amount: true, paidOn: true, method: true, reference: true, direction: true,
-      bankAccountId: true, clearedOn: true, currency: true, exchangeRate: true,
+      bankAccountId: true, clearedOn: true, currency: true, exchangeRate: true, branchId: true,
       company: { select: { name: true } },
     },
   });
@@ -405,7 +457,26 @@ export async function postPaymentToLedger(
     lines,
     paymentId: payment.id,
     companyId: payment.companyId,
+    // The branch that took or made the payment. No GSTIN: money moving carries no tax.
+    branchId: payment.branchId ?? (await headOfficeOf(tx))?.id ?? null,
   });
+}
+
+/**
+ * What a reversal reads from each original line: everything but the direction, which it swaps.
+ *
+ * The cost centre and the branch and GSTIN tags go with the amount — a reversal that dropped them
+ * would leave the original's branch, GSTIN or team carrying a figure the company as a whole had
+ * cancelled. The cost centre was dropped until the branch tags were added (X8).
+ */
+export const reversibleLineSelect = {
+  accountId: true, debit: true, credit: true, companyId: true, departmentId: true, narration: true,
+  branchId: true, gstRegistrationId: true,
+} satisfies Prisma.JournalLineSelect;
+
+/** The original's lines, debit and credit swapped, every tag kept — ready for `writeEntry`. */
+export function reversedLines(lines: Prisma.JournalLineGetPayload<{ select: typeof reversibleLineSelect }>[]) {
+  return reverseLines(lines.map((l) => ({ ...l, debit: Number(l.debit), credit: Number(l.credit) })));
 }
 
 /**
@@ -420,10 +491,7 @@ export async function reverseDocumentPosting(tx: Tx, documentId: string, userId:
     select: {
       id: true, entryNumber: true, companyId: true,
       reversedBy: { select: { id: true } },
-      lines: {
-        orderBy: { sortOrder: "asc" },
-        select: { accountId: true, debit: true, credit: true, companyId: true, narration: true },
-      },
+      lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect },
     },
   });
   if (!original || original.reversedBy) return null;
@@ -433,15 +501,7 @@ export async function reverseDocumentPosting(tx: Tx, documentId: string, userId:
     narration: `Reversal of ${original.entryNumber} — document cancelled`,
     source: "MANUAL",
     userId,
-    lines: reverseLines(
-      original.lines.map((l) => ({
-        accountId: l.accountId,
-        debit: Number(l.debit),
-        credit: Number(l.credit),
-        companyId: l.companyId,
-        narration: l.narration,
-      })),
-    ),
+    lines: reversedLines(original.lines),
     companyId: original.companyId,
     reversesId: original.id,
   });
@@ -462,10 +522,7 @@ export async function reversePaymentPosting(tx: Tx, paymentId: string, userId: s
     select: {
       id: true, entryNumber: true, companyId: true,
       reversedBy: { select: { id: true } },
-      lines: {
-        orderBy: { sortOrder: "asc" },
-        select: { accountId: true, debit: true, credit: true, companyId: true, narration: true },
-      },
+      lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect },
     },
   });
   if (!original || original.reversedBy) return null;
@@ -475,15 +532,7 @@ export async function reversePaymentPosting(tx: Tx, paymentId: string, userId: s
     narration: `Reversal of ${original.entryNumber} — payment deleted`,
     source: "MANUAL",
     userId,
-    lines: reverseLines(
-      original.lines.map((l) => ({
-        accountId: l.accountId,
-        debit: Number(l.debit),
-        credit: Number(l.credit),
-        companyId: l.companyId,
-        narration: l.narration,
-      })),
-    ),
+    lines: reversedLines(original.lines),
     companyId: original.companyId,
     reversesId: original.id,
   });
@@ -552,6 +601,25 @@ export async function bankLedgerAccountId(bankAccountId: string): Promise<string
 // ─── Expenses ─────────────────────────────────────────────────────────────────
 
 /**
+ * Where a claim books: the claimant's branch while it is active, else the head office; and that
+ * branch's GSTIN, else the head office's, else none — on every line (spec §8.2).
+ *
+ * Taking the input tax under the claimant's GSTIN is a default, not the law: ITC belongs to the GSTIN
+ * named on the supplier's invoice, which a claim does not record (CA question C7).
+ */
+async function expenseTags(
+  tx: Tx,
+  branch: { id: string; active: boolean; gstRegistrationId: string | null } | null,
+): Promise<{ branchId: string | null; gstRegistrationId: string | null }> {
+  const own = branch?.active ? branch : null;
+  const headOffice = own?.gstRegistrationId ? null : await headOfficeOf(tx);
+  return {
+    branchId: own?.id ?? headOffice?.id ?? null,
+    gstRegistrationId: own?.gstRegistrationId ?? headOffice?.gstRegistrationId ?? null,
+  };
+}
+
+/**
  * Posts an approved claim.
  *
  * Idempotent on the expense, like every other posting here: approving twice, or an approval that
@@ -576,7 +644,7 @@ export async function postExpenseToLedger(
       paymentMode: true,
       reimbursable: true,
       companyId: true,
-      user: { select: { name: true, departmentId: true } },
+      user: { select: { name: true, departmentId: true, branch: { select: { id: true, active: true, gstRegistrationId: true } } } },
     },
   });
   if (!expense) return null;
@@ -608,6 +676,7 @@ export async function postExpenseToLedger(
     lines: await materialise(tx, draft),
     expenseId: expense.id,
     companyId: expense.companyId,
+    ...(await expenseTags(tx, expense.user.branch)),
   });
 }
 
@@ -626,7 +695,7 @@ export async function postExpenseReimbursementToLedger(
       amount: true,
       reimbursable: true,
       paymentMode: true,
-      user: { select: { name: true } },
+      user: { select: { name: true, branch: { select: { id: true, active: true, gstRegistrationId: true } } } },
     },
   });
   // Nothing to settle on spend the company already paid for directly.
@@ -652,6 +721,8 @@ export async function postExpenseReimbursementToLedger(
     userId,
     lines: await materialise(tx, draft),
     expenseId: expense.id,
+    // Tagged as the claim was, so the branch that owed the money is the branch that paid it.
+    ...(await expenseTags(tx, expense.user.branch)),
   });
 }
 

@@ -7,6 +7,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
+import { ensureHeadOffice } from "@/lib/branches/identity";
 import {
   agingBucket,
   daysOverdue,
@@ -58,7 +59,7 @@ export async function recordBillPayment(input: {
 
   const bill = await db.tradeDocument.findUnique({
     where: { id: input.billId },
-    select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, ...billSettlementInclude },
+    select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true, ...billSettlementInclude },
   });
   if (!bill) return { ok: false, error: "That bill no longer exists." };
   if (bill.docType !== "BILL") return { ok: false, error: "Payments out are recorded against a vendor bill." };
@@ -78,10 +79,15 @@ export async function recordBillPayment(input: {
     };
   }
 
+  // Paid by the branch the bill was raised on (a bill from before branches: the head office). Resolved
+  // before the transaction — the head office lookup uses its own connection.
+  const branchId = bill.branchId ?? (await ensureHeadOffice()).id;
+
   const payment = await db.$transaction(async (tx) => {
     const created = await tx.payment.create({
       data: {
         companyId: bill.companyId,
+        branchId,
         direction: "PAID",
         amount: new Prisma.Decimal(amount),
         paidOn: new Date(input.paidOn),

@@ -37,6 +37,13 @@ export default async function EwaySettingsPage() {
     return <Card className="px-6 py-10 text-center text-sm text-muted">{result.error}</Card>;
   }
   const settings = result.data;
+  const registrations = settings.registrations;
+
+  // The login is the e-invoice one, so a GSTIN is connected only while e-invoicing is on and its provider is set.
+  const live = registrations.filter((r) => r.active);
+  const connected = live.filter((r) => r.configured && settings.einvoiceEnabled).length;
+  const allConnected = live.length > 0 && connected === live.length;
+  const onMock = registrations.filter((r) => r.provider === "mock");
 
   const withoutGstin = transporters.ok ? transporters.data.filter((t) => !t.gstin).length : 0;
 
@@ -65,66 +72,64 @@ export default async function EwaySettingsPage() {
 
       <Card className="mt-6">
         <CardHeader className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-text">Connection details</span>
-          <Badge tone={settings.configured ? "green" : "amber"}>
-            {settings.configured ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-            {settings.configured ? "Connected" : "Not set up"}
+          <span className="text-sm font-medium text-text">Connection and thresholds</span>
+          <Badge tone={allConnected ? "green" : "amber"}>
+            {allConnected ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+            {allConnected ? "Connected" : connected > 0 ? "Partly set up" : "Not set up"}
           </Badge>
         </CardHeader>
         <CardContent className="space-y-3">
           {/*
             No separate credentials here on purpose. Two sets of details for the same NIC login is
             how one of them goes stale unnoticed, and the one that goes stale is always the one you
-            need at four o'clock on a Friday.
+            need at four o'clock on a Friday. The portal issues one login per GSTIN, so each
+            registration below uses its own e-invoice login.
           */}
           <p className="text-sm text-muted">
-            E-way bills go through the same NIC portal as e-invoicing, on the same credentials. They are entered once,
+            E-way bills go through the same NIC portal as e-invoicing, on the same login — one per GSTIN. It is entered once,
             under{" "}
-            <Link href="/settings/organisation" className="text-brand hover:underline">
-              Organisation &amp; e-invoicing
+            <Link href="/settings/einvoicing" className="text-brand hover:underline">
+              e-Invoicing
             </Link>
             .
           </p>
 
-          <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-            <div className="flex gap-2">
-              <dt className="text-muted">Provider</dt>
-              <dd className="text-text">{settings.provider ?? "—"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted">Username</dt>
-              <dd className="font-mono text-text">{settings.username ?? "—"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted">GSTIN</dt>
-              <dd className="font-mono text-text">{settings.gstin ?? "Not set"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted">State code</dt>
-              <dd className="font-mono text-text">{settings.stateCode ?? "Not set"}</dd>
-            </div>
-          </dl>
-
-          {!settings.gstin && (
+          {registrations.length === 0 ? (
             <p className="flex items-start gap-2 rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              Without your own GSTIN, every movement is read as crossing a state line and no bill can be raised at all.
+              <span>
+                No GST registration yet — add one under{" "}
+                <Link href="/settings/branches" className="font-medium underline underline-offset-2">
+                  Branches &amp; GST registrations
+                </Link>
+                . Without your own GSTIN, every movement is read as crossing a state line and no bill can be raised at all.
+              </span>
+            </p>
+          ) : (
+            <EwaySettingsForm registrations={registrations} einvoiceEnabled={settings.einvoiceEnabled} />
+          )}
+
+          {registrations.length > 0 && !settings.einvoiceEnabled && (
+            <p className="flex items-start gap-2 rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                E-invoicing is switched off, and e-way bills sign in with its logins — nothing can be filed until it is on,
+                under{" "}
+                <Link href="/settings/einvoicing" className="font-medium underline underline-offset-2">
+                  e-Invoicing
+                </Link>
+                .
+              </span>
             </p>
           )}
 
-          {settings.provider === "mock" && (
+          {onMock.length > 0 && (
             <p className="rounded-base bg-surface-sunken px-3 py-2 text-sm text-muted">
               {/* Said out loud, because a mock bill looks exactly like a real one on screen. */}
-              Running against the mock portal. Numbers it returns are made up — nothing has been filed with NIC.
+              {registrations.length === 1 ? "Running" : `GSTIN ${onMock.map((r) => r.gstin).join(", ")} ${onMock.length === 1 ? "runs" : "run"}`}{" "}
+              against the mock portal. Numbers it returns are made up — nothing has been filed with NIC.
             </p>
           )}
-        </CardContent>
-      </Card>
-
-      <Card className="mt-6">
-        <CardHeader className="text-sm font-medium text-text">Threshold</CardHeader>
-        <CardContent>
-          <EwaySettingsForm settings={settings} />
         </CardContent>
       </Card>
 

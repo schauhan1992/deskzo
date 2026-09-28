@@ -6,14 +6,21 @@ import { profitAndLoss } from "@/actions/ledger-reports";
 import { getOrganisation } from "@/lib/organisation";
 import { Card } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Amount, ReportHeader, StatementRow, TotalRow, asTree, withMovement } from "@/components/accounting/report-chrome";
+import { ReportHeader, StatementRow, TotalRow, asTree, withMovement } from "@/components/accounting/report-chrome";
 import { DateParamInput } from "@/components/accounting/date-param-input";
+import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { financialYearBounds } from "@/lib/ledger/period";
+import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
+import { branchLabel, type BranchChoice } from "@/lib/branches/format";
+
+/** The `branch` value for the lines no branch owns — payroll, depreciation, the year-end close (spec §8.2). */
+const UNASSIGNED = "unassigned";
 
 export default async function ProfitLossPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  /** `branch` is a branch id, or `unassigned`. */
+  searchParams: Promise<{ from?: string; to?: string; branch?: string }>;
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
@@ -39,20 +46,54 @@ export default async function ProfitLossPage({
   const fy = financialYearBounds(new Date());
   const from = params.from ?? fy.from;
   const to = params.to ?? fy.to;
+  const branchId = params.branch || undefined;
 
-  const [report, org] = await Promise.all([profitAndLoss({ from, to }), getOrganisation()]);
+  const [report, org, multiBranch] = await Promise.all([
+    profitAndLoss({ from, to, branchId }),
+    getOrganisation(),
+    isMultiBranch(),
+  ]);
+  // The active branches, plus the one a link names even if it has since closed — its history is still
+  // worth reading, and the select should show what the figures are for.
+  const branches: BranchChoice[] = multiBranch
+    ? await listBranchChoices({ include: branchId && branchId !== UNASSIGNED ? [branchId] : [] })
+    : [];
   const income = asTree(withMovement(report.income));
   const expense = asTree(withMovement(report.expense));
   const profitable = report.netProfit >= 0;
+
+  // The result says which branch the figures are for; an id that names none comes back company-wide.
+  const filtered = report.branch;
+  const filteredChoice = filtered && filtered !== UNASSIGNED ? branches.find((b) => b.id === filtered.id) : undefined;
+  const shownBranch =
+    filtered === UNASSIGNED
+      ? "not attributed to a branch"
+      : filtered
+        ? filteredChoice
+          ? branchLabel(filteredChoice)
+          : filtered.name
+        : null;
 
   return (
     <div className="animate-fade-rise">
       <ReportHeader
         title="Profit &amp; loss"
-        subtitle={`${formatDate(report.from)} to ${formatDate(report.to)}`}
+        subtitle={`${formatDate(report.from)} to ${formatDate(report.to)}${shownBranch ? ` · ${shownBranch}` : ""}`}
         organisation={org.legalName}
       >
         <div className="flex flex-wrap items-center gap-3">
+          {/* One set of books, so only the P&L splits by branch; the balance sheet stays whole (spec §8.5). */}
+          {multiBranch && (
+            <SelectParamFilter
+              paramName="branch"
+              label="Branch"
+              allLabel="All branches"
+              options={[
+                ...branches.map((b) => ({ value: b.id, label: `${branchLabel(b)}${b.active ? "" : " (inactive)"}` })),
+                { value: UNASSIGNED, label: "Not attributed to a branch" },
+              ]}
+            />
+          )}
           <DateParamInput paramName="from" label="From" />
           <DateParamInput paramName="to" label="To" />
         </div>

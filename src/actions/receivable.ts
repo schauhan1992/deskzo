@@ -9,6 +9,7 @@ import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
+import { ensureHeadOffice } from "@/lib/branches/identity";
 import {
   settleInvoice,
   settledStatus,
@@ -76,7 +77,7 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
 
   const invoice = await db.tradeDocument.findUnique({
     where: { id: invoiceId },
-    select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, ...invoiceSettlementInclude },
+    select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true, ...invoiceSettlementInclude },
   });
   if (!invoice) return { ok: false, error: "That invoice no longer exists." };
   if (invoice.docType !== "INVOICE") return { ok: false, error: "Payments are recorded against a tax invoice." };
@@ -91,12 +92,17 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
     };
   }
 
+  // The money comes in to the branch that billed it (an invoice from before branches: the head office).
+  // Resolved before the transaction — the head office lookup uses its own connection.
+  const branchId = invoice.branchId ?? (await ensureHeadOffice()).id;
+
   // One payment, one application — written together so a payment can never exist without the
   // allocation that explains it.
   const payment = await db.$transaction(async (tx) => {
     const created = await tx.payment.create({
       data: {
         companyId: invoice.companyId,
+        branchId,
         amount: new Prisma.Decimal(amount),
         paidOn: new Date(paidOn),
         method,

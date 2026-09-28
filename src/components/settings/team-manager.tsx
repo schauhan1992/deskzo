@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Role } from "@/lib/roles";
 import { updateUserAssignment, setUserActive, resetUserTwoFactor } from "@/actions/user";
+import { setUserBranch } from "@/actions/branch";
+import { branchLabel } from "@/lib/branches/format";
 import { Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+
+/** A branch somebody can be said to work at. An inactive one appears only while somebody still does. */
+type WorkBranch = { id: string; name: string; code: string; isHeadOffice: boolean; active: boolean };
+
+/** Where somebody works (spec §10.1): the column, when there is one. */
+type WorksAt = { branches: WorkBranch[]; branchId: string | null; helpId: string };
 
 type TeamUser = {
   id: string;
@@ -26,11 +34,13 @@ function TeamRow({
   users,
   departments,
   roles,
+  worksAt,
 }: {
   user: TeamUser;
   users: TeamUser[];
   departments: { id: string; name: string }[];
   roles: readonly Role[];
+  worksAt: WorksAt | null;
 }) {
   const router = useRouter();
   const [role, setRole] = useState<Role>(user.role);
@@ -41,6 +51,9 @@ function TeamRow({
   const [isResetting2fa, startResetTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmReset2fa, setConfirmReset2fa] = useState(false);
+  const [branchId, setBranchId] = useState(worksAt?.branchId ?? "");
+  const [isSavingBranch, startBranchTransition] = useTransition();
+  const [branchError, setBranchError] = useState<string | null>(null);
 
   const dirty = role !== user.role || departmentId !== (user.departmentId ?? "") || managerId !== (user.managerId ?? "");
 
@@ -83,6 +96,26 @@ function TeamRow({
         return;
       }
       setConfirmReset2fa(false);
+      router.refresh();
+    });
+  }
+
+  /**
+   * Saved the moment it changes, apart from the role/department/manager save: it is a different
+   * permission's act (`setUserBranch`), and it grants nothing, so there is no reason to hold it back
+   * behind a button that also moves someone's access. A refusal puts the old value back.
+   */
+  function changeBranch(value: string) {
+    const previous = branchId;
+    setBranchId(value);
+    setBranchError(null);
+    startBranchTransition(async () => {
+      const result = await setUserBranch(user.id, value || null);
+      if (!result.ok) {
+        setBranchId(previous);
+        setBranchError(result.error);
+        return;
+      }
       router.refresh();
     });
   }
@@ -139,6 +172,26 @@ function TeamRow({
           ))}
         </Select>
       </td>
+      {worksAt && (
+        <td className="py-3 pr-3">
+          <Select
+            value={branchId}
+            onChange={(e) => changeBranch(e.target.value)}
+            disabled={isSavingBranch}
+            aria-label={`Works at, for ${user.name}`}
+            aria-describedby={worksAt.helpId}
+          >
+            <option value="">— none —</option>
+            {worksAt.branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {`${branchLabel(b)}${b.active ? "" : " (inactive)"}`}
+              </option>
+            ))}
+          </Select>
+          {isSavingBranch && <p className="mt-1 text-xs text-muted">Saving…</p>}
+          {branchError && <p className="mt-1 text-xs text-danger">{branchError}</p>}
+        </td>
+      )}
       <td className="py-3 pr-3">
         <div className="flex items-center gap-2">
           {user.twoFactorEnabledAt ? <Badge tone="green">2FA on</Badge> : <Badge tone="default">2FA off</Badge>}
@@ -193,20 +246,38 @@ export function TeamManager({
   users,
   departments,
   roles,
+  branches,
+  branchByUser = {},
 }: {
   users: TeamUser[];
   departments: { id: string; name: string }[];
   roles: readonly Role[];
+  /** Given only when the company has more than one branch and the viewer may set it — otherwise no column. */
+  branches?: WorkBranch[];
+  /** Each person's branch, by user id; missing or null is "none". */
+  branchByUser?: Record<string, string | null>;
 }) {
+  // One help text for the whole column, pointed at by every row's select.
+  const worksAtHelpId = useId();
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+          {/* Top-aligned when the Works at heading carries its help text beneath it. */}
+          <tr className={`border-b border-line text-left text-xs uppercase tracking-wide text-muted${branches ? " align-top" : ""}`}>
             <th className="py-2 pr-4">User</th>
             <th className="py-2 pr-3">Role</th>
             <th className="py-2 pr-3">Department</th>
             <th className="py-2 pr-3">Reporting manager</th>
+            {branches && (
+              <th className="py-2 pr-3">
+                Works at
+                <span id={worksAtHelpId} className="mt-0.5 block max-w-56 text-xs font-normal normal-case tracking-normal text-subtle">
+                  Sets their default branch on new documents, and the state professional tax is worked out for.
+                </span>
+              </th>
+            )}
             <th className="py-2 pr-3">Security</th>
             <th className="py-2 pr-3">Status</th>
             <th className="py-2" />
@@ -214,7 +285,14 @@ export function TeamManager({
         </thead>
         <tbody>
           {users.map((user) => (
-            <TeamRow key={user.id} user={user} users={users} departments={departments} roles={roles} />
+            <TeamRow
+              key={user.id}
+              user={user}
+              users={users}
+              departments={departments}
+              roles={roles}
+              worksAt={branches ? { branches, branchId: branchByUser[user.id] ?? null, helpId: worksAtHelpId } : null}
+            />
           ))}
         </tbody>
       </table>

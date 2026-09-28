@@ -92,7 +92,8 @@ export function EwayPanel({
     setNotice(null);
     setFetched(null);
     startTransition(async () => {
-      const result = await lookupEwayBill(associate.number);
+      // With the document, so the portal is asked under the GSTIN this document was issued from.
+      const result = await lookupEwayBill(associate.number, view.documentId);
       setBusy(false);
       if (!result.ok) {
         setNotice({ text: result.error, bad: true });
@@ -212,8 +213,13 @@ export function EwayPanel({
         {!view.configured && view.required && (
           <p className="flex items-start gap-2 rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
             <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            The portal isn&rsquo;t set up. It uses the same credentials as e-invoicing — Settings → Organisation. You
-            can still record a bill raised on the portal by hand.
+            {/* The reason names the GSTIN and the screen to fix it on: each registration signs in with its own
+                e-invoicing credentials, so "not set up" alone no longer says which ones are missing. */}
+            <span>
+              {view.configError ? `${view.configError.replace(/\.$/, "")}.` : "The portal isn’t set up — Settings → e-Invoicing."} The
+              e-way portal signs in with the same credentials as e-invoicing. You can still record a bill raised on the portal
+              by hand.
+            </span>
           </p>
         )}
 

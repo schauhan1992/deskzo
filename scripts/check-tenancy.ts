@@ -78,6 +78,7 @@ const PER_WORKSPACE: Allowed = { reason: "remembers something about one workspac
 const CALLER_KEYED = (why: string): Allowed => ({ reason: `per workspace — ${why}` });
 const STATE: Record<string, Allowed> = {
   "src/lib/access/gate.ts:verdicts": PER_WORKSPACE,
+  "src/lib/branches/identity.ts:adopted": PER_WORKSPACE,
   "src/lib/access/gate.ts:rulesCache": PER_WORKSPACE,
   "src/lib/access/gate.ts:policyCache": PER_WORKSPACE,
   "src/lib/access/gate.ts:seenRecently": PER_WORKSPACE,

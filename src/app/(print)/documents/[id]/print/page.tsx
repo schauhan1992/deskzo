@@ -4,7 +4,8 @@ import { getTradeDocument } from "@/actions/trade-document";
 import { findTradeDocumentFor } from "@/lib/documents/load";
 import { spendRenderGrant } from "@/lib/documents/render-grant";
 import { can } from "@/lib/authz/resolve";
-import { getOrganisation, foreignCountry } from "@/lib/organisation";
+import { foreignCountry } from "@/lib/organisation";
+import { branchIdentity, isMultiBranch } from "@/lib/branches/identity";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
 import { formatDate } from "@/lib/utils";
@@ -31,8 +32,19 @@ export default async function PrintDocumentPage({
   searchParams: Promise<{ embed?: string; render?: string }>;
 }) {
   const [{ id }, { embed, render }] = await Promise.all([params, searchParams]);
-  const [document, org, branding] = await Promise.all([loadForPrint(id, render), getOrganisation(), getBranding()]);
+  const [document, branding] = await Promise.all([loadForPrint(id, render), getBranding()]);
   if (!document) notFound();
+
+  /**
+   * Who "we" are on this paper: the branch it was raised from (or, on a purchase, bought by), with
+   * whatever the branch leaves blank taken from the organisation. A null branch — a document written
+   * before branches — is the head office, which with every override blank prints what the company
+   * always printed. Neither read throws: a page that cannot find its branch still prints the company.
+   */
+  const [identity, multiBranch] = await Promise.all([
+    branchIdentity(document.branchId),
+    isMultiBranch().catch(() => false),
+  ]);
 
   /**
    * Every figure on the page, in the currency the customer agreed to pay in.
@@ -82,7 +94,26 @@ export default async function PrintDocumentPage({
     ? `${GST_STATE_CODES[document.placeOfSupplyCode] ?? "Unknown"} (${document.placeOfSupplyCode})`
     : "Not set";
 
-  const orgLines = [org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" — "), org.state, foreignCountry(org)];
+  /**
+   * Our GSTIN as the document recorded it — `sellerGstin` on a sale, `buyerGstin` on a purchase — not
+   * the registration's value today. A GSTIN is replaced or a branch moves to another registration,
+   * and an invoice reprinted afterwards must still carry the number it was issued under. The live one
+   * only fills in for a document that recorded none.
+   */
+  const ourGstin = (isSales ? document.sellerGstin : document.buyerGstin) || identity.gstin;
+  // One quiet line saying which branch this is, where there is more than one to tell apart. The head
+  // office goes unnamed, so a single-branch company's paper reads exactly as it always has.
+  const branchLine = multiBranch && !identity.isHeadOffice ? `Branch: ${identity.name}` : null;
+  // The branch's own logo when it has one; otherwise the app's, as every document printed before.
+  const logoDataUrl = identity.logoDataUrl ?? branding.logoDataUrl;
+
+  const ourLines = [
+    identity.addressLine1,
+    identity.addressLine2,
+    [identity.city, identity.pincode].filter(Boolean).join(" — "),
+    identity.state,
+    foreignCountry(identity),
+  ];
   const billingLines = formatAddress({
     attention: document.billingAttention,
     line1: document.billingLine1,
@@ -106,7 +137,7 @@ export default async function PrintDocumentPage({
     // The name it was issued under, if the party has since been merged into another company.
     name: document.partyName ?? document.company.name,
     gstin: isSales ? document.buyerGstin : document.sellerGstin,
-    lines: billingLines.length > 0 ? billingLines : orgLines,
+    lines: billingLines.length > 0 ? billingLines : ourLines,
   };
 
   // A shipping address only earns its space when it actually differs from the billing one.
@@ -166,18 +197,21 @@ export default async function PrintDocumentPage({
       <div className="relative z-0 border border-neutral-300">
         <div className="flex items-start justify-between gap-6 border-b border-neutral-300 p-5">
           <div className="flex items-start gap-3">
-            {branding.logoDataUrl && (
+            {logoDataUrl && (
               /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={branding.logoDataUrl} alt="" className="h-12 w-auto object-contain" />
+              <img src={logoDataUrl} alt="" className="h-12 w-auto object-contain" />
             )}
             <div>
-              <div className="text-base font-semibold">{org.legalName || branding.appName}</div>
-              {org.tradeName && <div className="text-neutral-600">{org.tradeName}</div>}
+              <div className="text-base font-semibold">{identity.legalName || branding.appName}</div>
+              {identity.tradeName && <div className="text-neutral-600">{identity.tradeName}</div>}
               <div className="mt-1 leading-5 text-neutral-600">
-                {[org.addressLine1, org.addressLine2].filter(Boolean).join(", ")}
-                {org.city && <div>{[org.city, org.state, org.pincode, foreignCountry(org)].filter(Boolean).join(", ")}</div>}
-                {org.gstin && <div>GSTIN: {org.gstin}</div>}
-                {org.phone && <div>{org.phone}</div>}
+                {[identity.addressLine1, identity.addressLine2].filter(Boolean).join(", ")}
+                {identity.city && (
+                  <div>{[identity.city, identity.state, identity.pincode, foreignCountry(identity)].filter(Boolean).join(", ")}</div>
+                )}
+                {branchLine && <div className="text-[11px] text-neutral-500">{branchLine}</div>}
+                {ourGstin && <div>GSTIN: {ourGstin}</div>}
+                {identity.phone && <div>{identity.phone}</div>}
               </div>
             </div>
           </div>
@@ -335,13 +369,14 @@ export default async function PrintDocumentPage({
               </div>
             )}
 
-            {(org.bankName || org.upiId) && isSales && (
+            {/* The branch's account when it has its own, else the company's — whole, never half of each. */}
+            {(identity.bankName || identity.upiId) && isSales && (
               <div className="text-[11px] leading-5 text-neutral-600">
                 <div className="text-[11px] uppercase tracking-wide text-neutral-500">Bank details</div>
-                {org.bankName && <div>{org.bankName}{org.bankBranch ? ` — ${org.bankBranch}` : ""}</div>}
-                {org.bankAccountNumber && <div>A/c: {org.bankAccountNumber}</div>}
-                {org.bankIfsc && <div>IFSC: {org.bankIfsc}</div>}
-                {org.upiId && <div>UPI: {org.upiId}</div>}
+                {identity.bankName && <div>{identity.bankName}{identity.bankBranch ? ` — ${identity.bankBranch}` : ""}</div>}
+                {identity.bankAccountNumber && <div>A/c: {identity.bankAccountNumber}</div>}
+                {identity.bankIfsc && <div>IFSC: {identity.bankIfsc}</div>}
+                {identity.upiId && <div>UPI: {identity.upiId}</div>}
               </div>
             )}
 
@@ -399,20 +434,20 @@ export default async function PrintDocumentPage({
             )}
 
             <div className="mt-10 text-right text-[11px] text-neutral-600">
-              {org.signatureDataUrl && (
+              {identity.signatureDataUrl && (
                 /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={org.signatureDataUrl} alt="" className="ml-auto h-14 w-auto object-contain" />
+                <img src={identity.signatureDataUrl} alt="" className="ml-auto h-14 w-auto object-contain" />
               )}
-              <div className="mt-1">For {org.legalName || branding.appName}</div>
+              <div className="mt-1">For {identity.legalName || branding.appName}</div>
               <div className="mt-6 border-t border-neutral-300 pt-1">Authorised signatory</div>
             </div>
           </div>
         </div>
 
-        {(document.notes || org.invoiceNotes) && (
+        {(document.notes || identity.invoiceNotes) && (
           <div className="border-t border-neutral-300 px-5 py-3 text-[11px] leading-5 text-neutral-600">
             {document.notes && <div className="whitespace-pre-wrap">{document.notes}</div>}
-            {org.invoiceNotes && <div className="mt-1 whitespace-pre-wrap">{org.invoiceNotes}</div>}
+            {identity.invoiceNotes && <div className="mt-1 whitespace-pre-wrap">{identity.invoiceNotes}</div>}
           </div>
         )}
       </div>

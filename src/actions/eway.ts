@@ -8,7 +8,9 @@ import { EWAY_CLAIM_STALE_MS } from "@/lib/eway/rules";
 import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
-import { getOrganisation, getEInvoiceConfig } from "@/lib/organisation";
+import { eInvoiceConfigFor } from "@/lib/organisation";
+import { branchIdentity, listRegistrationChoices } from "@/lib/branches/identity";
+import type { BranchIdentity } from "@/lib/branches/format";
 import { validateEwayPayload, type EwayDocument } from "@/lib/eway/payload";
 import { createEwayProvider } from "@/lib/eway/provider";
 import {
@@ -40,8 +42,10 @@ import type { ActionResult } from "@/actions/company";
  *
  * ## The credentials are the e-invoice credentials
  *
- * Same portal operator, same GSTIN, same client id and secret, so this reads `getEInvoiceConfig`
- * rather than adding a second set for somebody to keep in step.
+ * Same portal operator, same GSTIN, same client id and secret, so this reads the e-invoice
+ * connection rather than adding a second set for somebody to keep in step. It is the connection of
+ * the document's own GST registration (`eInvoiceConfigFor`): a company with GSTINs in two states
+ * files each state's bills under that state's login, and the head office's would be refused.
  */
 
 async function gate() {
@@ -59,6 +63,34 @@ async function gate() {
 function stateCodeFromGstin(gstin: string | null | undefined): string | null {
   const match = /^(\d{2})/.exec((gstin ?? "").trim());
   return match ? match[1]! : null;
+}
+
+/**
+ * Our state on a document, for the inter-state decision: its GST registration's, else its own GSTIN
+ * snapshot's, else the head office's. Every e-way document is a sale (`EWAY_DOC_TYPES`), so ours is
+ * `sellerGstin`. The head office is asked only when both are missing, and at most once per call.
+ */
+async function sellerStateOf(
+  doc: { gstRegistration: { stateCode: string } | null; sellerGstin: string | null },
+  headOfficeState: () => Promise<string | null>,
+): Promise<string | null> {
+  return doc.gstRegistration?.stateCode ?? stateCodeFromGstin(doc.sellerGstin) ?? (await headOfficeState());
+}
+
+/** `branchIdentity(null)`'s state, read the first time somebody needs it and then remembered. */
+function headOfficeStateOnce(): () => Promise<string | null> {
+  let pending: Promise<string | null> | null = null;
+  return () => (pending ??= branchIdentity(null).then((identity) => identity.stateCode));
+}
+
+/** `intraStateThreshold` per registration, once each — a list holds many documents and few GSTINs. */
+function thresholdsOnce(): (gstRegistrationId: string | null) => Promise<number> {
+  const seen = new Map<string | null, Promise<number>>();
+  return (id) => {
+    let pending = seen.get(id);
+    if (!pending) seen.set(id, (pending = intraStateThreshold(id)));
+    return pending;
+  };
 }
 
 /**
@@ -135,19 +167,17 @@ export async function ewayDocuments(params: {
       ? [params.docType as TradeDocumentType]
       : EWAY_DOC_TYPES;
 
+  // Indian days, half-open. `new Date("yyyy-mm-dd")` is UTC midnight, which started the period at
+  // 05:30 IST and dropped everything after 05:30 on its last day.
+  const from = params.from ? startOfIndianDay(params.from) : null;
+  const to = params.to ? endOfIndianDay(params.to) : null;
+
   const where: Prisma.TradeDocumentWhereInput = {
     docType: { in: docType },
     direction: "SALES",
     // A draft is our workings; nothing has moved against it.
     status: { not: "DRAFT" },
-    ...(params.from || params.to
-      ? {
-          issueDate: {
-            ...(params.from ? { gte: new Date(params.from) } : {}),
-            ...(params.to ? { lte: new Date(params.to) } : {}),
-          },
-        }
-      : {}),
+    ...(from || to ? { issueDate: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
     ...(params.q
       ? {
           OR: [
@@ -185,6 +215,8 @@ export async function ewayDocuments(params: {
       shippingStateCode: true,
       billingStateCode: true,
       placeOfSupplyCode: true,
+      gstRegistrationId: true,
+      gstRegistration: { select: { id: true, stateCode: true } },
       company: { select: { name: true } },
       lines: { select: { quantity: true, unitPrice: true, taxableValue: true } },
       consignments: { select: { declaredValue: true, interstate: true, reason: true } },
@@ -192,14 +224,16 @@ export async function ewayDocuments(params: {
     },
   });
 
-  const threshold = await intraStateThreshold();
-  const org = await getOrganisation();
+  const thresholdFor = thresholdsOnce();
+  const headOfficeState = headOfficeStateOnce();
   const now = new Date();
 
-  const all: EwayListRow[] = documents.map((d) => {
+  const all: EwayListRow[] = await Promise.all(documents.map(async (d) => {
     const bill = d.ewayBills[0] ?? null;
-    // Ours, whether or not this particular document recorded it — older rows predate the field.
-    const sellerState = stateCodeFromGstin(d.sellerGstin) ?? stateCodeFromGstin(org.gstin);
+    // Ours, whether or not this particular document recorded it — older rows predate the fields.
+    const sellerState = await sellerStateOf(d, headOfficeState);
+    // Each state sets its own floor, so it is the floor of the registration the document was issued under.
+    const threshold = await thresholdFor(d.gstRegistrationId);
     const buyerState = deliveryStateCode(d);
     const interstate =
       sellerState && buyerState ? sellerState !== buyerState : d.consignments.some((c) => c.interstate);
@@ -246,7 +280,7 @@ export async function ewayDocuments(params: {
       required: requirement.required,
       because: requirement.because,
     };
-  });
+  }));
 
   /**
    * Counted before filtering, so each tab says how many are in that state rather than how many are
@@ -319,14 +353,19 @@ export type EwayDocumentView = {
   /** Fixed by editing the document, not by filling in the transport form. */
   missingOnDocument: string[];
   canCancel: boolean;
+  /** Whether the document's GST registration has a usable portal connection. */
   configured: boolean;
   provider: string | null;
+  /** Why not, naming the GSTIN — "E-invoicing isn't set up for GSTIN 29…". Null when configured. */
+  configError: string | null;
 };
 
 async function loadDocument(documentId: string) {
   return db.tradeDocument.findUnique({
     where: { id: documentId },
     include: {
+      // Whose bill it is: the registration it was issued under decides our state and the login.
+      gstRegistration: { select: { id: true, stateCode: true } },
       company: { select: { name: true } },
       lines: { select: { name: true, hsnCode: true, quantity: true, unitPrice: true, unit: true, taxableValue: true } },
       // A challan totals nil on purpose, so the value of what is moving has to come from the
@@ -350,8 +389,7 @@ export async function ewayForDocument(documentId: string): Promise<ActionResult<
   if (!doc) return { ok: false, error: "That document no longer exists." };
 
   const bill = doc.ewayBills[0] ?? null;
-  const org = await getOrganisation();
-  const sellerState = stateCodeFromGstin(doc.sellerGstin) ?? stateCodeFromGstin(org.gstin);
+  const sellerState = await sellerStateOf(doc, headOfficeStateOnce());
   const buyerState = deliveryStateCode(doc);
   /**
    * Whether it crosses a state line, from whoever actually knows.
@@ -382,9 +420,9 @@ export async function ewayForDocument(documentId: string): Promise<ActionResult<
     vehicleType: bill?.vehicleType ?? ("REGULAR" as const),
   };
 
-  const threshold = await intraStateThreshold();
+  const threshold = await intraStateThreshold(doc.gstRegistrationId);
   const requirement = ewayBillRequired(shape, { intraStateThreshold: threshold });
-  const config = await getEInvoiceConfig();
+  const connection = await eInvoiceConfigFor(doc.gstRegistrationId);
 
   return {
     ok: true,
@@ -450,8 +488,9 @@ export async function ewayForDocument(documentId: string): Promise<ActionResult<
         bill?.status === "GENERATED" &&
         !bill.associated &&
         withinCancellationWindow(bill?.ewayBillDate, new Date()),
-      configured: config !== null,
-      provider: config?.provider ?? null,
+      configured: "config" in connection,
+      provider: "config" in connection ? connection.config.provider : null,
+      configError: "error" in connection ? connection.error : null,
     },
   };
 }
@@ -516,10 +555,14 @@ export async function saveEwayDetails(input: {
 
 type LoadedDoc = NonNullable<Awaited<ReturnType<typeof loadDocument>>>;
 
+/**
+ * `identity` is the document's branch (`branchIdentity(doc.branchId)`): the goods leave from the
+ * branch that raised the document, under its GSTIN and from its address — not the registered office's.
+ */
 function toEwayPayload(
   doc: LoadedDoc,
   bill: LoadedDoc["ewayBills"][number],
-  org: Awaited<ReturnType<typeof getOrganisation>>,
+  identity: BranchIdentity,
 ): { doc: EwayDocument } | { problems: string[] } {
   const value = Number(bill.declaredValue);
 
@@ -541,14 +584,16 @@ function toEwayPayload(
     documentType: doc.docType === "INVOICE" ? "INVOICE" : doc.docType === "CREDIT_NOTE" ? "OTHERS" : "CHALLAN",
     documentNumber: doc.docNumber,
     documentDate: doc.issueDate,
+    // Dispatch-from is bill-from: `actFromStateCode` is sent as this same state — CA question C10.
     from: {
-      gstin: org.gstin ?? null,
-      tradeName: org.tradeName || org.legalName || "",
-      address1: org.addressLine1 ?? "",
-      address2: org.addressLine2 ?? null,
-      place: org.city ?? "",
-      pincode: org.pincode ?? "",
-      stateCode: stateCodeFromGstin(org.gstin) ?? "",
+      gstin: identity.gstin,
+      tradeName: identity.tradeName || identity.legalName,
+      address1: identity.addressLine1 ?? "",
+      address2: identity.addressLine2,
+      place: identity.city ?? "",
+      pincode: identity.pincode ?? "",
+      // The registration's state (X9: it was read off the GSTIN, ignoring the organisation's).
+      stateCode: identity.stateCode ?? "",
     },
     to: {
       gstin: doc.buyerGstin,
@@ -591,16 +636,13 @@ export async function generateEwayBill(
 
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
-  const config = await getEInvoiceConfig();
-  if (!config) {
-    return {
-      ok: false,
-      error: "The e-way bill portal isn't set up. It uses the same credentials as e-invoicing — Settings → Organisation.",
-    };
-  }
-
   const doc = await loadDocument(documentId);
   if (!doc) return { ok: false, error: "That document no longer exists." };
+
+  // The login of the GSTIN the document was issued under; the refusal names that GSTIN.
+  const connection = await eInvoiceConfigFor(doc.gstRegistrationId);
+  if ("error" in connection) return { ok: false, error: connection.error };
+  const { config } = connection;
 
   const bill = doc.ewayBills[0] ?? null;
   if (!bill) return { ok: false, error: "Fill in the transport details first." };
@@ -638,8 +680,19 @@ export async function generateEwayBill(
   });
   if (missing.length > 0) return { ok: false, error: `Fill in ${missing.join(", ")} first.` };
 
-  const org = await getOrganisation();
-  const built = toEwayPayload(doc, bill, org);
+  const identity = await branchIdentity(doc.branchId);
+  /**
+   * The portal files under the login's GSTIN and checks it against the consignor's. They part only
+   * when the branch has moved to another registration since the document was issued; the bill then
+   * belongs to the GSTIN on the document, which this branch no longer bills under.
+   */
+  if (identity.gstin !== config.gstin) {
+    return {
+      ok: false,
+      error: `${doc.docNumber} was issued under GSTIN ${config.gstin}, but its branch now bills under ${identity.gstin ?? "no GSTIN"}. Raise this bill on the portal under ${config.gstin} and record it here.`,
+    };
+  }
+  const built = toEwayPayload(doc, bill, identity);
   if ("problems" in built) return { ok: false, error: built.problems.join(" ") };
 
   /**
@@ -736,8 +789,11 @@ export async function generateEwayBill(
  * hands it to the screen for somebody to look at before they commit it — because the portal will
  * also happily return a bill raised against a different document, and that is worth seeing before
  * it is attached to this one.
+ *
+ * Asked with the login of the document it is for — a GSTIN sees only its own bills — and, with no
+ * document, the head office's.
  */
-export async function lookupEwayBill(ewayBillNumber: string): Promise<
+export async function lookupEwayBill(ewayBillNumber: string, documentId?: string): Promise<
   ActionResult<{
     ewayBillNumber: string;
     ewayBillDate: Date;
@@ -752,14 +808,32 @@ export async function lookupEwayBill(ewayBillNumber: string): Promise<
   if (error) return { ok: false, error };
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
-  const config = await getEInvoiceConfig();
-  if (!config) return { ok: false, error: "The portal isn't set up, so a bill can't be looked up. Enter the dates by hand." };
+  let gstRegistrationId: string | null;
+  if (typeof documentId === "string" && documentId) {
+    const doc = await db.tradeDocument.findUnique({ where: { id: documentId }, select: { gstRegistrationId: true } });
+    if (!doc) return { ok: false, error: "That document no longer exists." };
+    gstRegistrationId = doc.gstRegistrationId;
+  } else {
+    gstRegistrationId = (await branchIdentity(null)).gstRegistrationId;
+  }
+  const connection = await eInvoiceConfigFor(gstRegistrationId);
+  if ("error" in connection) return { ok: false, error: `${connection.error}. Enter the dates by hand.` };
 
-  const result = await createEwayProvider(config).fetch(ewayBillNumber.replace(/\s/g, ""));
+  const result = await createEwayProvider(connection.config).fetch(ewayBillNumber.replace(/\s/g, ""));
   if (!result.ok) return { ok: false, error: result.error };
 
-  const { ok: _ok, ...data } = result;
-  return { ok: true, data };
+  return {
+    ok: true,
+    data: {
+      ewayBillNumber: result.ewayBillNumber,
+      ewayBillDate: result.ewayBillDate,
+      validUntil: result.validUntil,
+      status: result.status,
+      documentNumber: result.documentNumber,
+      vehicleNumber: result.vehicleNumber,
+      transporterName: result.transporterName,
+    },
+  };
 }
 
 export async function associateEwayBill(input: {
@@ -861,14 +935,17 @@ export async function updateEwayVehicle(input: {
 
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
-  const config = await getEInvoiceConfig();
-  if (!config) return { ok: false, error: "The portal isn't set up in Settings." };
-
   const bill = await db.ewayBill.findFirst({
     where: { documentId: input.documentId, status: "GENERATED" },
     orderBy: { createdAt: "desc" },
+    include: { document: { select: { branchId: true, gstRegistrationId: true } } },
   });
   if (!bill?.ewayBillNumber) return { ok: false, error: "There is no live e-way bill on this document." };
+
+  // The bill was raised under its document's GSTIN, so only that GSTIN's login can change it.
+  const connection = await eInvoiceConfigFor(bill.document.gstRegistrationId);
+  if ("error" in connection) return { ok: false, error: connection.error };
+
   if (bill.associated) {
     return { ok: false, error: "This bill was raised on the portal, so its vehicle has to be changed there too." };
   }
@@ -876,14 +953,15 @@ export async function updateEwayVehicle(input: {
   const vehicleNumber = normaliseVehicleNumber(input.vehicleNumber);
   if (!vehicleNumber) return { ok: false, error: "That doesn't look like a vehicle number." };
 
-  const org = await getOrganisation();
-  const result = await createEwayProvider(config).updateVehicle({
+  // Where the goods set off from: the document's branch, as Part A said.
+  const identity = await branchIdentity(bill.document.branchId);
+  const result = await createEwayProvider(connection.config).updateVehicle({
     ewayBillNumber: bill.ewayBillNumber,
     vehicleNumber,
     reasonCode: input.reasonCode,
     reasonNote: input.reasonNote?.trim() || "Vehicle assigned",
-    fromPlace: org.city ?? "",
-    fromStateCode: stateCodeFromGstin(org.gstin) ?? "",
+    fromPlace: identity.city ?? "",
+    fromStateCode: identity.stateCode ?? "",
     transportMode: bill.transportMode,
   });
   if (!result.ok) return { ok: false, error: result.error };
@@ -913,14 +991,18 @@ export async function cancelEwayBill(input: {
   if (error) return { ok: false, error };
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
-  const config = await getEInvoiceConfig();
-  if (!config) return { ok: false, error: "The portal isn't set up in Settings." };
-
   const bill = await db.ewayBill.findFirst({
     where: { documentId: input.documentId, status: "GENERATED" },
     orderBy: { createdAt: "desc" },
+    include: { document: { select: { gstRegistrationId: true } } },
   });
   if (!bill?.ewayBillNumber) return { ok: false, error: "There is no e-way bill to cancel." };
+
+  // Under the GSTIN it was raised with — even one deactivated since: withdrawing a bill it already
+  // filed is the one thing an inactive registration's login is kept for.
+  const connection = await eInvoiceConfigFor(bill.document.gstRegistrationId, { allowInactive: true });
+  if ("error" in connection) return { ok: false, error: connection.error };
+
   if (bill.associated) {
     return { ok: false, error: "This bill was raised on the portal, so it has to be cancelled there." };
   }
@@ -936,7 +1018,7 @@ export async function cancelEwayBill(input: {
   }
   if (!input.remark.trim()) return { ok: false, error: "The portal wants a reason in words." };
 
-  const result = await createEwayProvider(config).cancel(bill.ewayBillNumber, input.reasonCode, input.remark.trim());
+  const result = await createEwayProvider(connection.config).cancel(bill.ewayBillNumber, input.reasonCode, input.remark.trim());
   if (!result.ok) return { ok: false, error: result.error };
 
   await db.ewayBill.update({
@@ -961,67 +1043,72 @@ export async function cancelEwayBill(input: {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────────────────────
 
-export type EwaySettings = {
-  /** The module's own switch, separate from e-invoicing even though they share a login. */
-  enabled: boolean;
+/** One GST registration as the e-way screen shows it — its own login and its own state's floor. */
+export type EwayRegistrationSettings = {
+  id: string;
+  gstin: string;
+  stateCode: string;
+  code: string;
+  active: boolean;
+  isHeadOffice: boolean;
   /** Null means the central ₹50,000 applies within the state too, which is the common case. */
-  intraStateThreshold: number | null;
+  threshold: number | null;
+  /** A portal provider is chosen for this GSTIN (Settings → e-Invoicing). */
   configured: boolean;
   provider: string | null;
   username: string | null;
-  gstin: string | null;
-  stateCode: string | null;
+};
+
+export type EwaySettings = {
+  /** The module's own switch, separate from e-invoicing even though they share a login. */
+  enabled: boolean;
+  /** The company's e-invoicing switch — the logins below are used only while it is on. */
+  einvoiceEnabled: boolean;
+  registrations: EwayRegistrationSettings[];
 };
 
 /**
- * What the module is running on, said plainly.
+ * What the module is running on, said plainly — per GSTIN, because each has its own login and each
+ * state its own floor.
  *
  * Deliberately shows the username and never the password: the credentials are the e-invoice
  * credentials, they are stored encrypted, and a settings screen that could print one back would
- * make the encryption decorative.
+ * make the encryption decorative. The cipher columns are never selected.
  */
 export async function ewaySettings(): Promise<ActionResult<EwaySettings>> {
   const user = await requireModuleUser("sales_documents");
   if (!(await countryFeatureAvailable("eway"))) return { ok: false, error: "E-way bills are India's, and this workspace is set up for another country." };
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "Only an admin can change this." };
 
-  const [row, org] = await Promise.all([
-    db.organisationSettings.findUnique({
-      where: { id: "global" },
-      select: {
-        ewayEnabled: true,
-        ewayIntraStateThreshold: true,
-        einvoiceEnabled: true,
-        einvoiceProvider: true,
-        einvoiceUsername: true,
-      },
-    }),
-    getOrganisation(),
+  const [row, choices] = await Promise.all([
+    db.organisationSettings.findUnique({ where: { id: "global" }, select: { ewayEnabled: true, einvoiceEnabled: true } }),
+    listRegistrationChoices(),
   ]);
+  const columns = await db.gstRegistration.findMany({
+    where: { id: { in: choices.map((c) => c.id) } },
+    select: { id: true, ewayIntraStateThreshold: true, einvoiceProvider: true, einvoiceUsername: true },
+  });
+  const byId = new Map(columns.map((c) => [c.id, c]));
 
   return {
     ok: true,
     data: {
       enabled: Boolean(row?.ewayEnabled),
-      intraStateThreshold: row?.ewayIntraStateThreshold ? Number(row.ewayIntraStateThreshold) : null,
-      configured: Boolean(row?.einvoiceEnabled),
-      provider: row?.einvoiceProvider ?? null,
-      username: row?.einvoiceUsername ?? null,
-      gstin: org.gstin,
-      stateCode: org.stateCode,
+      einvoiceEnabled: Boolean(row?.einvoiceEnabled),
+      registrations: choices.map((choice) => {
+        const own = byId.get(choice.id);
+        return {
+          ...choice,
+          threshold: own?.ewayIntraStateThreshold ? Number(own.ewayIntraStateThreshold) : null,
+          configured: Boolean(own?.einvoiceProvider),
+          provider: own?.einvoiceProvider ?? null,
+          username: own?.einvoiceUsername ?? null,
+        };
+      }),
     },
   };
 }
 
-/**
- * The threshold inside our own state.
- *
- * Every state sets its own floor for movement that does not cross a border — ₹1,00,000 in
- * Maharashtra, ₹2,00,000 in Bihar, ₹50,000 in most — and getting it wrong is expensive in both
- * directions: too low and every desk that moves between offices raises a bill nobody needed, too
- * high and a real movement goes out bare. Inter-state is never affected; that floor is central and
- * not ours to set.
- */
 /**
  * Turn e-way bills on or off.
  *
@@ -1053,39 +1140,58 @@ export async function setEwayEnabled(input: { enabled: boolean }): Promise<Actio
   return { ok: true, data: { enabled: input.enabled } };
 }
 
-export async function saveEwayThreshold(input: { intraStateThreshold: number | null }): Promise<
-  ActionResult<{ intraStateThreshold: number | null }>
+/** The column is `Decimal(12, 2)`; anything this size is a typo, not a state's rule. */
+const MAX_THRESHOLD = 1e10;
+
+/**
+ * The threshold inside one registration's state.
+ *
+ * Every state sets its own floor for movement that does not cross a border — ₹1,00,000 in
+ * Maharashtra, ₹2,00,000 in Bihar, ₹50,000 in most — and getting it wrong is expensive in both
+ * directions: too low and every desk that moves between offices raises a bill nobody needed, too
+ * high and a real movement goes out bare. Inter-state is never affected; that floor is central and
+ * not ours to set. Kept per GSTIN and typed in by the user, not looked up — CA question C6.
+ */
+export async function saveEwayThreshold(input: { gstRegistrationId: string; threshold: number | string | null }): Promise<
+  ActionResult<{ gstRegistrationId: string; threshold: number | null }>
 > {
   const user = await requireModuleUser("sales_documents");
   if (!(await countryFeatureAvailable("eway"))) return { ok: false, error: "E-way bills are India's, and this workspace is set up for another country." };
   if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "Only an admin can change this." };
 
-  const value = input.intraStateThreshold;
-  if (value !== null && (!Number.isFinite(value) || value < 0)) {
+  if (typeof input.gstRegistrationId !== "string" || !input.gstRegistrationId) {
+    return { ok: false, error: "Choose the GST registration this threshold is for." };
+  }
+  const registration = await db.gstRegistration.findUnique({
+    where: { id: input.gstRegistrationId },
+    select: { id: true, gstin: true },
+  });
+  if (!registration) return { ok: false, error: "That GST registration no longer exists." };
+
+  // Blank is the central floor. A typed "1,00,000" is how the amount is written here, so the commas go.
+  const raw = input.threshold;
+  const text = typeof raw === "string" ? raw.replace(/,/g, "").trim() : null;
+  const value = raw === null || raw === undefined || text === "" ? null : Number(text ?? raw);
+  if (value !== null && (!Number.isFinite(value) || value < 0 || value >= MAX_THRESHOLD)) {
     return { ok: false, error: "The threshold should be a positive amount, or blank for the central ₹50,000." };
   }
 
-  await db.organisationSettings.upsert({
-    where: { id: "global" },
-    create: {
-      id: "global",
-      ewayIntraStateThreshold: value === null ? null : new Prisma.Decimal(value.toFixed(2)),
-    },
-    update: { ewayIntraStateThreshold: value === null ? null : new Prisma.Decimal(value.toFixed(2)) },
+  await db.gstRegistration.update({
+    where: { id: registration.id },
+    data: { ewayIntraStateThreshold: value === null ? null : new Prisma.Decimal(value.toFixed(2)) },
   });
 
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
-    entityType: "OrganisationSettings",
-    entityId: "global",
-    entityLabel:
-      value === null
-        ? "Intra-state e-way bill threshold reset to the central ₹50,000"
-        : `Intra-state e-way bill threshold set to ₹${value.toLocaleString("en-IN")}`,
+    entityType: "GstRegistration",
+    entityId: registration.id,
+    entityLabel: `E-way intra-state threshold for GSTIN ${registration.gstin}: ${
+      value === null ? "the central ₹50,000" : `₹${value.toLocaleString("en-IN")}`
+    }`,
   });
 
   revalidatePath("/settings/eway");
   revalidatePath("/sales/eway-bills");
-  return { ok: true, data: { intraStateThreshold: value } };
+  return { ok: true, data: { gstRegistrationId: registration.id, threshold: value } };
 }

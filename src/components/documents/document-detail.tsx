@@ -12,6 +12,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { auth } from "@/lib/auth";
 import { getOrganisation } from "@/lib/organisation";
+import { isMultiBranch } from "@/lib/branches/identity";
+import { branchLabel } from "@/lib/branches/format";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { DocumentActions } from "@/components/documents/document-actions";
 import { DocumentEmailHistory } from "@/components/documents/document-email-history";
@@ -48,8 +50,20 @@ import {
  * already provides.
  */
 export async function DocumentDetail({ id, embedded = false }: { id: string; embedded?: boolean }) {
-  const [document, org, session] = await Promise.all([getTradeDocument(id), getOrganisation(), auth()]);
+  const [document, org, session, multiBranch] = await Promise.all([getTradeDocument(id), getOrganisation(), auth(), isMultiBranch()]);
   if (!document) notFound();
+
+  /**
+   * Which of the two GSTIN snapshots is ours. On a sale we are the seller; on a purchase we are the
+   * buyer and the vendor's GSTIN is the seller's (spec §5.2) — so "seller" and "buyer" would name
+   * the right numbers only half the time.
+   */
+  const isSales = document.direction === "SALES";
+  const ourGstin = isSales ? document.sellerGstin : document.buyerGstin;
+  const partyGstin = isSales ? document.buyerGstin : document.sellerGstin;
+  // Named only where it tells somebody something: a single-branch company raises everything from its
+  // head office. A null branch is a document written before branches — the head office's.
+  const showBranch = multiBranch || (document.branch !== null && !document.branch.isHeadOffice);
 
   // Settlement only exists for an issued invoice or credit note — a quote has nothing to settle.
   const isOpenInvoice = document.docType === "INVOICE" && document.status !== "DRAFT" && document.status !== "CANCELLED";
@@ -406,8 +420,23 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
           <Card>
             <CardHeader className="text-sm font-medium text-text">GST details</CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <Row label="Seller GSTIN" value={document.sellerGstin ?? "—"} />
-              <Row label="Buyer GSTIN" value={document.buyerGstin ?? "Unregistered"} />
+              {showBranch && (
+                <Row
+                  label={isSales ? "Branch" : "Buying branch"}
+                  value={
+                    <>
+                      {document.branch ? branchLabel(document.branch) : "Head office"}
+                      {document.branch && !document.branch.active && (
+                        <Badge tone="default" className="ml-2">
+                          Inactive
+                        </Badge>
+                      )}
+                    </>
+                  }
+                />
+              )}
+              <Row label="Our GSTIN" value={ourGstin ?? "—"} />
+              <Row label="Party GSTIN" value={partyGstin ?? "Unregistered"} />
               <Row
                 label="Place of supply"
                 value={
@@ -480,7 +509,7 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-muted">
       <span className="shrink-0">{label}</span>

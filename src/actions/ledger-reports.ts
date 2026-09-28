@@ -1,6 +1,7 @@
 "use server";
 
 import type { AccountType } from "@prisma/client";
+import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { requireModuleUser } from "@/lib/modules-access";
@@ -23,12 +24,18 @@ export type AccountBalance = {
 };
 
 /**
+ * Which lines a report sums: one branch's, the ones attributed to no branch (`"unassigned"` — payroll,
+ * depreciation, a manual line nobody tagged), or — when absent — every line, which is the company.
+ */
+type BranchScope = string | "unassigned";
+
+/**
  * Sums every posted line per account, optionally within a window.
  *
  * `from` is what separates the two kinds of report: a P&L asks "what happened between these dates",
  * a balance sheet asks "where do we stand as at this date" and so takes everything up to it.
  */
-async function balances(params: { from?: Date; to?: Date }) {
+async function balances(params: { from?: Date; to?: Date; branchId?: BranchScope }) {
   const grouped = await db.journalLine.groupBy({
     by: ["accountId"],
     where: {
@@ -38,6 +45,7 @@ async function balances(params: { from?: Date; to?: Date }) {
           ...(params.to ? { lte: params.to } : {}),
         },
       },
+      ...(params.branchId ? { branchId: params.branchId === "unassigned" ? null : params.branchId } : {}),
     },
     _sum: { debit: true, credit: true },
   });
@@ -49,7 +57,12 @@ async function balances(params: { from?: Date; to?: Date }) {
   );
 }
 
-async function accountsWithBalances(params: { from?: Date; to?: Date }): Promise<AccountBalance[]> {
+/**
+ * Every account with its sums. `branchId` narrows the lines to one branch; only the P&L passes it —
+ * the trial balance and balance sheet stay company-wide, because one company keeps one set of books
+ * and a branch's "balance sheet" would not balance (spec §8.5).
+ */
+async function accountsWithBalances(params: { from?: Date; to?: Date; branchId?: BranchScope }): Promise<AccountBalance[]> {
   await ensureChartOfAccounts();
   const [accounts, sums] = await Promise.all([
     db.ledgerAccount.findMany({
@@ -146,12 +159,28 @@ export async function trialBalance(params?: { to?: string }) {
 /**
  * Profit and loss for a period. Income less expenses, both shown positive on their natural side so
  * the statement reads the way it's spoken rather than as a column of signed numbers.
+ *
+ * `branchId` narrows it to one branch's lines, or to `"unassigned"` — the lines no branch owns, such as
+ * payroll and depreciation. An id that names no branch is ignored, and the statement is the company's;
+ * `branch` in the result says which one the figures are.
  */
-export async function profitAndLoss(params: { from: string; to: string }) {
+export async function profitAndLoss(params: { from: string; to: string; branchId?: string }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
   await requireModuleUser("accounting");
-  const rows = rollUp(await accountsWithBalances({ from: startOfDay(params.from), to: endOfDay(params.to) }));
+  const branch: { id: string; name: string } | "unassigned" | null =
+    params.branchId === "unassigned"
+      ? "unassigned"
+      : params.branchId
+        ? await db.branch.findUnique({ where: { id: params.branchId }, select: { id: true, name: true } })
+        : null;
+  const rows = rollUp(
+    await accountsWithBalances({
+      from: startOfDay(params.from),
+      to: endOfDay(params.to),
+      branchId: branch === "unassigned" ? "unassigned" : branch?.id,
+    }),
+  );
   const income = rows.filter((r) => r.type === "INCOME");
   const expense = rows.filter((r) => r.type === "EXPENSE");
   const totalIncome = sumTop(income);
@@ -159,6 +188,7 @@ export async function profitAndLoss(params: { from: string; to: string }) {
   return {
     from: startOfDay(params.from),
     to: endOfDay(params.to),
+    branch,
     income,
     expense,
     totalIncome,
@@ -360,14 +390,20 @@ function sumTop(rows: AccountBalance[]) {
   return rows.filter((r) => r.parentId === null || !rows.some((o) => o.id === r.parentId)).reduce((t, r) => round2(t + r.balance), 0);
 }
 
+/**
+ * Where a report's first day begins, in India — whatever the server's clock. `setHours` on the parsed
+ * date used the process's zone: right on a laptop in Pune, five and a half hours late on a server in
+ * UTC, and a day early in New York. An unreadable date stays unreadable (Invalid Date), as before.
+ */
 function startOfDay(value: string) {
-  const d = new Date(value);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return startOfIndianDay(value) ?? new Date(NaN);
 }
 
+/**
+ * The last millisecond of a report's last day, in India. Inclusive, because every caller here compares
+ * with `lte`: the instant before the next Indian midnight (src/lib/india-time.ts `endOfIndianDay`).
+ */
 function endOfDay(value: string) {
-  const d = new Date(value);
-  d.setHours(23, 59, 59, 999);
-  return d;
+  const next = endOfIndianDay(value);
+  return next ? new Date(next.getTime() - 1) : new Date(NaN);
 }

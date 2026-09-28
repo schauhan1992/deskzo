@@ -195,6 +195,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",
@@ -226,6 +227,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",
@@ -257,6 +259,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",
@@ -294,6 +297,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",
@@ -331,6 +335,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",
@@ -362,6 +367,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",
@@ -393,6 +399,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       },
       { key: "reference", label: "Reference #", default: true, hint: "Their PO or quote reference, where one was given." },
       { key: "party", label: "Party", default: true },
+      { key: "branch", label: "Branch", default: false, hint: "Which branch raised it — on a purchase, which one bought. Offered only when there is more than one." },
       {
         key: "status",
         label: "Status",

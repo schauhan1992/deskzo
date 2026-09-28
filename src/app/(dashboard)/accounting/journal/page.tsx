@@ -1,12 +1,10 @@
 import { Card } from "@/components/ui/card";
 import { currentUser } from "@/lib/session";
-import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { listJournalEntries } from "@/actions/ledger-reports";
 import { listAccounts } from "@/actions/ledger";
-import { Button } from "@/components/ui/button";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { Pagination } from "@/components/ui/pagination";
@@ -15,6 +13,8 @@ import { JournalEntries } from "@/components/accounting/journal-entries";
 import { NewJournalDialog } from "@/components/accounting/new-journal-dialog";
 import { DateParamInput } from "@/components/accounting/date-param-input";
 import { can } from "@/lib/authz/resolve";
+import { listBranchChoices, listRegistrationChoices } from "@/lib/branches/identity";
+import type { BranchChoice, RegistrationChoice } from "@/lib/branches/format";
 
 export default async function JournalPage({
   searchParams,
@@ -50,6 +50,11 @@ export default async function JournalPage({
     listAccounts({ postableOnly: true }),
   ]);
   const isAdmin = session ? await can(session.user.id, "ledger.post") : false;
+  // What a new entry's lines may be tagged with — only the dialog needs them, and only somebody who
+  // may post sees it. Active ones only: a closed branch or a surrendered GSTIN takes no new lines.
+  const [branches, registrations]: [BranchChoice[], RegistrationChoice[]] = isAdmin
+    ? await Promise.all([listBranchChoices(), listRegistrationChoices().then((all) => all.filter((r) => r.active))])
+    : [[], []];
 
   return (
     <div className="animate-fade-rise">
@@ -61,7 +66,7 @@ export default async function JournalPage({
             here is edited or deleted; a mistake is corrected by a reversal.
           </p>
         </div>
-        {isAdmin && <NewJournalDialog accounts={accounts} />}
+        {isAdmin && <NewJournalDialog accounts={accounts} branches={branches} registrations={registrations} />}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

@@ -274,6 +274,39 @@ async function main() {
     );
   }
 
+  // ── A branch filter narrows; it never widens ────────────────────────────────────────────────
+
+  /**
+   * The documents list takes a branch as well as a search, and the head office's branch filter is an
+   * `OR` (its own documents, and those written before branches) — exactly the shape that, spread next
+   * to the account scope, would replace it. It sits inside the same `AND` instead. So the executive's
+   * list is asked for again filtered to the head office, and every row must be one the unfiltered
+   * list already gave them, and on an account they manage.
+   */
+  section("Filtering documents by branch keeps the account scope");
+
+  const headOffice = await probe.branch.findFirst({ where: { isHeadOffice: true }, select: { id: true } });
+  if (!headOffice) {
+    console.log("  (no head office in this workspace yet, so there is no branch to filter by)");
+  } else {
+    const unfiltered = new Set(idsOf((await listTradeDocuments({ docType: "INVOICE", page: 1, pageSize: 5000 })).rows));
+    const byBranch = idsOf((await listTradeDocuments({ docType: "INVOICE", branchId: headOffice.id, page: 1, pageSize: 5000 })).rows);
+    const widened = byBranch.filter((id) => !unfiltered.has(id)).length;
+    ok(
+      "the head office's invoices, filtered, are among the executive's own",
+      widened === 0,
+      widened === 0 ? `${byBranch.length} of their ${unfiltered.size} row(s)` : `${widened} of ${byBranch.length} are not in their unfiltered list`,
+    );
+
+    const owners = byBranch.length > 0
+      ? (await probe.tradeDocument.findMany({ where: { id: { in: byBranch } }, select: { company: { select: { ownerUserId: true } } } })).map(
+          (d) => d.company?.ownerUserId ?? null,
+        )
+      : [];
+    const strangers = owners.filter((o) => o === null || !inScope.has(o)).length;
+    ok("  and every one is on an account they manage", strangers === 0, strangers === 0 ? "" : `${strangers} out of scope`);
+  }
+
   // ── And everybody else still sees everything ────────────────────────────────────────────────
   section("Somebody with companies.viewAll still sees the whole business");
 

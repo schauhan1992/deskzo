@@ -10,6 +10,9 @@ import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { buildCashFlow, type AccountMovement } from "@/lib/ledger/cashflow";
 import { buildGstr1, buildGstr3b, buildTdsSummary, type ReturnDocument } from "@/lib/ledger/gst-returns";
 import { profitAndLoss } from "@/actions/ledger-reports";
+import { endOfIndianDay, istMidnight, startOfIndianDay } from "@/lib/india-time";
+import { listRegistrationChoices } from "@/lib/branches/identity";
+import type { RegistrationChoice } from "@/lib/branches/format";
 
 /**
  * The statutory returns and the cash flow statement.
@@ -26,11 +29,44 @@ async function requireAccounts() {
   return { user, allowed };
 }
 
+/**
+ * A return month, in India: from midnight IST on the 1st up to — not including — midnight IST on the
+ * 1st of the next month. Queries use `gte: from, lt: before`.
+ *
+ * It used to be the UTC month, inclusive, so a document issued between 00:00 and 05:30 IST on the 1st
+ * landed in the previous month's return (X4). Past months' figures change with the fix, because those
+ * were the wrong ones. `to` — the month's last millisecond — is only for the pages' labels.
+ */
 function monthBounds(month: number, year: number) {
-  return {
-    from: new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)),
-    to: new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)),
-  };
+  const from = istMidnight(year, month - 1, 1);
+  // `month` is 1-based and istMidnight's is 0-based, so this is the next month; December carries into January.
+  const before = istMidnight(year, month, 1);
+  return { from, before, to: new Date(before.getTime() - 1) };
+}
+
+/** The GSTIN a return is filed for, as the pages show it. */
+type ReturnRegistration = { id: string; gstin: string; stateCode: string; code: string };
+
+/**
+ * Which registration's return to build: the one asked for, else the head office's, else the first
+ * there is. Null only when there is no registration to file for — then the return is unfiltered, as it
+ * was before registrations existed.
+ *
+ * Reads through `listRegistrationChoices`, so an inactive registration still has its returns while
+ * anything names it: a return for a GSTIN surrendered last month is still due.
+ */
+async function returnRegistration(requested: string | undefined): Promise<ReturnRegistration | null> {
+  const choices = await listRegistrationChoices();
+  const chosen =
+    (requested ? choices.find((c) => c.id === requested) : undefined) ?? choices.find((c) => c.isHeadOffice) ?? choices[0];
+  return chosen ? { id: chosen.id, gstin: chosen.gstin, stateCode: chosen.stateCode, code: chosen.code } : null;
+}
+
+/** The registrations there are returns for, for the page's picker: the active ones, and any still referenced. */
+export async function listReturnRegistrations(): Promise<RegistrationChoice[]> {
+  const { allowed } = await requireAccounts();
+  if (!allowed) return [];
+  return listRegistrationChoices();
 }
 
 const documentSelect = {
@@ -46,13 +82,16 @@ const documentSelect = {
   withholdingAmount: true,
   total: true,
   /**
-   * The buyer's GSTIN as it was on the document, not as the company record reads today.
+   * The party's GSTIN as it was on the document, not as the company record reads today.
    *
    * A return is a statement about what was supplied on a date, and the customer's registration can
    * change afterwards — filing this month's return with next year's GSTIN would break the match
-   * against the buyer's own credit.
+   * against the buyer's own credit. On a sale the party is the buyer; on a purchase it is the seller,
+   * and `buyerGstin` is ours (X1 — see `toReturnDocument`).
    */
+  direction: true,
   buyerGstin: true,
+  sellerGstin: true,
   company: { select: { name: true, panNumber: true } },
   lines: {
     select: {
@@ -75,7 +114,9 @@ type RawDoc = {
   issueDate: Date;
   status: string;
   placeOfSupplyCode: string | null;
+  direction: string;
   buyerGstin: string | null;
+  sellerGstin: string | null;
   taxableValue: unknown;
   cgstAmount: unknown;
   sgstAmount: unknown;
@@ -102,7 +143,9 @@ function toReturnDocument(d: RawDoc): ReturnDocument {
     issueDate: d.issueDate,
     status: d.status,
     partyName: d.company.name,
-    partyGstin: d.buyerGstin,
+    // A purchase records the vendor as the seller and us as the buyer; before branches it kept the
+    // vendor's GSTIN in `buyerGstin`, and the migration moved it (X1).
+    partyGstin: d.direction === "PURCHASE" ? d.sellerGstin : d.buyerGstin,
     placeOfSupplyCode: d.placeOfSupplyCode,
     taxableValue: Number(d.taxableValue),
     cgstAmount: Number(d.cgstAmount),
@@ -125,13 +168,22 @@ function toReturnDocument(d: RawDoc): ReturnDocument {
 
 // ─── GSTR-1 ───────────────────────────────────────────────────────────────────
 
-export async function gstr1(params: { month: number; year: number }) {
+/**
+ * GSTR-1 for one registration — a return is filed per GSTIN, never for the company (spec §8.4).
+ * `gstRegistrationId` defaults to the head office's; see `returnRegistration`.
+ */
+export async function gstr1(params: { month: number; year: number; gstRegistrationId?: string }) {
   const { allowed } = await requireAccounts();
   if (!allowed) return null;
 
-  const { from, to } = monthBounds(params.month, params.year);
+  const { from, before, to } = monthBounds(params.month, params.year);
+  const registration = await returnRegistration(params.gstRegistrationId);
   const docs = await db.tradeDocument.findMany({
-    where: { docType: { in: ["INVOICE", "CREDIT_NOTE"] }, issueDate: { gte: from, lte: to } },
+    where: {
+      docType: { in: ["INVOICE", "CREDIT_NOTE"] },
+      issueDate: { gte: from, lt: before },
+      ...(registration ? { gstRegistrationId: registration.id } : {}),
+    },
     orderBy: { issueDate: "asc" },
     select: documentSelect,
   });
@@ -141,27 +193,34 @@ export async function gstr1(params: { month: number; year: number }) {
     year: params.year,
     from,
     to,
+    registration,
     ...buildGstr1(docs.map((d) => toReturnDocument(d as unknown as RawDoc))),
   });
 }
 
 // ─── GSTR-3B ──────────────────────────────────────────────────────────────────
 
-export async function gstr3b(params: { month: number; year: number }) {
+/**
+ * GSTR-3B for one registration: its outward supplies, the credit on bills raised to it, and its own
+ * GST lines in the ledger to check both against. Defaults as `gstr1` does.
+ */
+export async function gstr3b(params: { month: number; year: number; gstRegistrationId?: string }) {
   const { allowed } = await requireAccounts();
   if (!allowed) return null;
 
-  const { from, to } = monthBounds(params.month, params.year);
+  const { from, before, to } = monthBounds(params.month, params.year);
+  const registration = await returnRegistration(params.gstRegistrationId);
+  const ofRegistration = registration ? { gstRegistrationId: registration.id } : {};
   const [outward, inward, ledger] = await Promise.all([
     db.tradeDocument.findMany({
-      where: { docType: { in: ["INVOICE", "CREDIT_NOTE"] }, issueDate: { gte: from, lte: to } },
+      where: { docType: { in: ["INVOICE", "CREDIT_NOTE"] }, issueDate: { gte: from, lt: before }, ...ofRegistration },
       select: documentSelect,
     }),
     db.tradeDocument.findMany({
-      where: { docType: "BILL", issueDate: { gte: from, lte: to } },
+      where: { docType: "BILL", issueDate: { gte: from, lt: before }, ...ofRegistration },
       select: documentSelect,
     }),
-    ledgerTaxTotals(from, to),
+    ledgerTaxTotals(from, before, registration?.id ?? null),
   ]);
 
   return toPlain({
@@ -169,6 +228,7 @@ export async function gstr3b(params: { month: number; year: number }) {
     year: params.year,
     from,
     to,
+    registration,
     ...buildGstr3b({
       outwardDocs: outward.map((d) => toReturnDocument(d as unknown as RawDoc)),
       inwardDocs: inward.map((d) => toReturnDocument(d as unknown as RawDoc)),
@@ -184,8 +244,12 @@ export async function gstr3b(params: { month: number; year: number }) {
  * and still disagree with the books — an expense claim carrying input tax, a manual journal on a GST
  * account, an invoice that never posted. Filing a figure the ledger cannot support is precisely what
  * an audit looks for.
+ *
+ * With a registration, only the lines tagged with it: the GST accounts are shared by every GSTIN of the
+ * company (one set of books), and the tag is what says whose return a line belongs to. `before` is
+ * exclusive, as in `monthBounds`.
  */
-async function ledgerTaxTotals(from: Date, to: Date) {
+async function ledgerTaxTotals(from: Date, before: Date, gstRegistrationId: string | null) {
   const accounts = await db.ledgerAccount.findMany({
     where: {
       systemKey: {
@@ -205,7 +269,11 @@ async function ledgerTaxTotals(from: Date, to: Date) {
 
   const sums = await db.journalLine.groupBy({
     by: ["accountId"],
-    where: { accountId: { in: accounts.map((a) => a.id) }, entry: { date: { gte: from, lte: to } } },
+    where: {
+      accountId: { in: accounts.map((a) => a.id) },
+      entry: { date: { gte: from, lt: before } },
+      ...(gstRegistrationId ? { gstRegistrationId } : {}),
+    },
     _sum: { debit: true, credit: true },
   });
 
@@ -235,11 +303,12 @@ export async function tdsSummary(params: { month: number; year: number }) {
   const { allowed } = await requireAccounts();
   if (!allowed) return null;
 
-  const { from, to } = monthBounds(params.month, params.year);
+  // Not a GST return: TDS is accounted for under a TAN, not per GSTIN, so this stays company-wide.
+  const { from, before, to } = monthBounds(params.month, params.year);
   const docs = await db.tradeDocument.findMany({
     where: {
       docType: { in: ["INVOICE", "BILL"] },
-      issueDate: { gte: from, lte: to },
+      issueDate: { gte: from, lt: before },
       withholdingAmount: { not: 0 },
     },
     select: { ...documentSelect, withholdingAmount: true },
@@ -284,8 +353,10 @@ export async function cashFlow(params: { from: string; to: string }) {
   // The page checks this too, but a server action can be called without its page: the books are
   // `ledger.viewReports`, as everywhere else in src/actions/ledger-reports.ts.
   if (!(await can(user.id, "ledger.viewReports"))) throw new Error("You don't have permission to see the books.");
-  const from = new Date(`${params.from}T00:00:00.000Z`);
-  const to = new Date(`${params.to}T23:59:59.999Z`);
+  // Indian days, as the returns' months are — not UTC days, which began and ended at 05:30 IST.
+  const from = startOfIndianDay(params.from) ?? new Date(NaN);
+  const toNext = endOfIndianDay(params.to);
+  const to = toNext ? new Date(toNext.getTime() - 1) : new Date(NaN);
 
   const accounts = await db.ledgerAccount.findMany({
     where: { isGroup: false },

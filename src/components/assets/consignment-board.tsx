@@ -7,7 +7,9 @@ import { Plus, Truck } from "lucide-react";
 import type { ConsignmentReason } from "@prisma/client";
 import type { dispatchableAssets, listConsignments } from "@/actions/consignment";
 import { createConsignment } from "@/actions/consignment";
+import { listBranchOptions } from "@/actions/branch";
 import { locationsFor } from "@/actions/it-asset";
+import { branchLabel, type BranchChoice } from "@/lib/branches/format";
 import { Badge, Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -183,8 +185,13 @@ function NewConsignmentDialog({
     companyId: string;
     rows: { id: string; label: string; city: string | null }[];
   } | null>(null);
+  // Every active branch, loaded once when the dialog opens. With only one there is nothing to choose.
+  const [branches, setBranches] = useState<BranchChoice[]>([]);
   const [form, setForm] = useState({
     reason: "SALE_DELIVERY" as ConsignmentReason,
+    // Blank: the branch the user works at, else the head office — `createConsignment` resolves it,
+    // so the default is decided in one place rather than guessed here.
+    branchId: "",
     toCompanyId: "",
     toLocationId: "",
     toAddress: "",
@@ -198,6 +205,19 @@ function NewConsignmentDialog({
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const locations = loadedSites?.companyId === form.toCompanyId ? loadedSites.rows : [];
+
+  useEffect(() => {
+    let cancelled = false;
+    listBranchOptions()
+      .then((rows) => {
+        if (!cancelled) setBranches(rows);
+      })
+      // No list, no picker: the consignment still goes out from the user's default branch.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!form.toCompanyId) return;
@@ -241,6 +261,24 @@ function NewConsignmentDialog({
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {branches.length > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cfrom">Dispatch from</Label>
+              <Select id="cfrom" value={form.branchId} onChange={set("branchId")}>
+                <option value="">Your own branch</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {branchLabel(b)}
+                    {b.gstin ? ` — ${b.gstin}` : ""}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-subtle">
+                Its GSTIN goes on the challan and the e-way bill. Left on your own branch, it goes from the branch you work
+                at, or the head office if you have none.
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="toc">To</Label>
             {/* A search box rather than a dropdown: the company list runs to hundreds, and scrolling
@@ -364,6 +402,7 @@ function NewConsignmentDialog({
                   assetIds: [...picked],
                   toCompanyId: form.toCompanyId || undefined,
                   toLocationId: form.toLocationId || undefined,
+                  branchId: form.branchId || undefined,
                 });
                 if (!result.ok) {
                   setError(result.error);

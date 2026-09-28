@@ -68,8 +68,18 @@ export const tradeDocumentSchema = z
     locationId: z.string().optional().or(z.literal("")),
     /** Blank asks the server to generate one from the type's numbering preference. */
     docNumber: z.string().trim().max(64).optional().or(z.literal("")),
+    /**
+     * The branch it is raised from (on a purchase, bought by). Blank = the user's home branch, else the
+     * head office; a credit note always takes its invoice's.
+     */
+    branchId: z.string().optional().or(z.literal("")),
     placeOfSupplyCode: stateCode,
     gstTreatment: z.enum(gstTreatmentValues).default("UNREGISTERED"),
+    /**
+     * The *party's* GSTIN, whichever side of the document they are on. The name is the payload's, kept
+     * for compatibility: on a sale it is stored as `buyerGstin`, on a purchase as `sellerGstin` — ours
+     * takes the other column.
+     */
     buyerGstin: gstin,
     reverseCharge: z.boolean().default(false),
     /** What the customer is quoted in. The books stay in rupees whatever this says. */
@@ -165,7 +175,9 @@ export const convertTradeDocumentSchema = z.object({
 });
 
 export const documentNumberSettingSchema = z.object({
-  docType: z.enum(tradeDocumentTypeValues),
+  // Delivery challans are numbered too, though they are not in the document form's list of types —
+  // leaving them out made every save of the challan row fail validation.
+  docType: z.enum([...tradeDocumentTypeValues, "DELIVERY_CHALLAN"]),
   mode: z.enum(["AUTO", "MANUAL"]).default("AUTO"),
   prefix: z.string().max(40).optional().or(z.literal("")),
   nextNumber: z.preprocess(
@@ -224,6 +236,12 @@ export const organisationSettingsSchema = z.object({
     }
   });
 
+/**
+ * The e-invoicing switch and minimum value — entity-wide. `updateEInvoiceSettings` now reads only
+ * `einvoiceEnabled` and `einvoiceMinValue`; the credential fields stay optional here so an older form
+ * still parses, but credentials are saved per GST registration (`registrationEInvoiceSchema` in
+ * src/lib/validation/branch.ts).
+ */
 export const einvoiceSettingsSchema = z.object({
   einvoiceEnabled: z.boolean().default(false),
   einvoiceProvider: z.enum(["mock", "nic_sandbox", "nic_production"]).default("mock"),

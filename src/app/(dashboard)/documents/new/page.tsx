@@ -6,11 +6,10 @@ import { listDocumentParties } from "@/actions/trade-document";
 import { listAssignableUsers } from "@/actions/company";
 import { leadDocumentDraft } from "@/actions/lead";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
-import { getOrganisation, foreignCountry } from "@/lib/organisation";
-import { stateCodeFromGstin } from "@/lib/gst-engine";
+import { getOrganisation } from "@/lib/organisation";
+import { defaultBranchIdFor, listBranchChoices } from "@/lib/branches/identity";
 import { DocumentForm } from "@/components/documents/document-form";
 import { blankLine, emptyDefaults } from "@/lib/document-draft";
-import { Card } from "@/components/ui/card";
 import { viewerHas } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import {
@@ -31,14 +30,20 @@ export default async function NewDocumentPage({
   if (!tradeDocumentTypeValues.includes(params.type as (typeof tradeDocumentTypeValues)[number])) notFound();
   const docType = params.type as TradeDocumentType;
 
-  const [parties, salespeople, org, numberSetting, nextNumber, lead, me] = await Promise.all([
+  // The branch decides which series the number comes from, so the two number reads wait for it —
+  // and only for it: everything else is fetched alongside.
+  const signedIn = currentUser();
+  const defaultBranch = signedIn.then((me) => (me ? defaultBranchIdFor(me.id) : null));
+  const [parties, salespeople, org, branches, defaultBranchId, numberSetting, nextNumber, lead, me] = await Promise.all([
     listDocumentParties(docType),
     listAssignableUsers(),
     getOrganisation(),
-    getNumberSetting(docType),
-    previewNextNumber(docType),
+    listBranchChoices(),
+    defaultBranch,
+    defaultBranch.then((branchId) => getNumberSetting(docType, branchId)),
+    defaultBranch.then((branchId) => previewNextNumber(docType, branchId)),
     params.leadId ? leadDocumentDraft(params.leadId) : Promise.resolve(null),
-    currentUser(),
+    signedIn,
   ]);
 
   /**
@@ -49,14 +54,13 @@ export default async function NewDocumentPage({
    * salesperson writing their own proposal and having to pick themselves from a list every time.
    */
   const defaultSalespersonId = me && salespeople.some((s) => s.id === me.id) ? me.id : "";
-  const orgStateCode = org.stateCode ?? stateCodeFromGstin(org.gstin);
-  const orgAddress = [org.legalName, org.addressLine1, org.addressLine2, [org.city, org.pincode].filter(Boolean).join(" "), org.state, foreignCountry(org)]
-    .filter(Boolean)
-    .join("\n");
+  // Raised from the writer's own branch (else the head office): its address is where goods leave from.
+  const startBranch = branches.find((b) => b.id === defaultBranchId) ?? branches.find((b) => b.isHeadOffice);
 
   const defaults = emptyDefaults();
   defaults.docNumber = nextNumber;
-  defaults.dispatchFromAddress = orgAddress;
+  defaults.branchId = startBranch?.id ?? "";
+  defaults.dispatchFromAddress = startBranch?.dispatchAddress ?? "";
   defaults.salespersonId = defaultSalespersonId;
   if (params.companyId && parties.some((p) => p.id === params.companyId)) {
     defaults.companyId = params.companyId;
@@ -107,18 +111,11 @@ export default async function NewDocumentPage({
         </p>
       </div>
 
-      {!orgStateCode && (
-        <Card className="mb-5 border-warning/40 bg-warning-bg px-4 py-3 text-sm text-warning">
-          Your organisation&apos;s GSTIN and state aren&apos;t set, so every document will be taxed as inter-state
-          (IGST). Set them under Settings → Organisation.
-        </Card>
-      )}
-
+      {/* The "taxed as inter-state" warning is the form's: it follows the branch chosen there. */}
       <DocumentForm
         docType={docType}
         parties={parties}
-        orgStateCode={orgStateCode}
-        orgAddress={orgAddress}
+        branches={branches}
         defaultTerms={org.invoiceTerms}
         roundOffTotals={org.roundOffTotals}
         numberSetting={numberSetting}

@@ -10,8 +10,9 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { canMove, consignmentReasonLabels, ewayBillRequired, isSupply, paperworkFor } from "@/lib/assets/lifecycle";
 import { intraStateThreshold } from "@/lib/eway/settings";
 import { nextDocumentNumber } from "@/lib/trade-number";
-import { financialYearOf, stateCodeFromGstin, stateCodeFromName } from "@/lib/gst-engine";
-import { getOrganisation } from "@/lib/organisation";
+import { financialYearOf, panOfGstin, stateCodeFromGstin, stateCodeFromName } from "@/lib/gst-engine";
+import { branchIdentity, defaultBranchIdFor } from "@/lib/branches/identity";
+import { formatDispatchAddress } from "@/lib/branches/format";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -58,6 +59,9 @@ const consignmentSelect = {
   toContact: { select: { id: true, name: true, phone: true } },
   document: { select: { id: true, docNumber: true, docType: true } },
   createdBy: { select: { name: true } },
+  // The branch it is dispatched from (null = raised before branches: the head office). Its
+  // registration decides the intra-state e-way threshold.
+  branch: { select: { id: true, name: true, code: true, isHeadOffice: true, gstRegistrationId: true } },
   _count: { select: { movements: true } },
 } satisfies Prisma.ConsignmentSelect;
 
@@ -108,8 +112,9 @@ export async function getConsignment(id: string) {
       interstate: row.interstate,
       reason: row.reason,
     },
-    // The state's own floor, if one is set. Without it this screen contradicted the e-way list.
-    { intraStateThreshold: await intraStateThreshold() },
+    // The state's own floor, if one is set — the dispatching branch's GSTIN's, as the e-way list reads
+    // its challan's. Without it this screen contradicted the e-way list.
+    { intraStateThreshold: await intraStateThreshold(row.branch?.gstRegistrationId ?? null) },
   );
 
   return toPlain({ ...row, eway, paperwork: paperworkFor(row.reason) });
@@ -147,10 +152,23 @@ export async function createConsignment(input: {
   declaredValue?: number;
   documentId?: string;
   notes?: string;
+  /** The branch it is dispatched from. Blank: the user's home branch, else the head office. */
+  branchId?: string;
 }): Promise<ActionResult<{ id: string; consignmentNumber: string }>> {
   const { user, manage } = await access();
   if (!manage) return { ok: false, error: "You can't dispatch assets." };
   if (input.assetIds.length === 0) return { ok: false, error: "Nothing to send — pick at least one asset." };
+
+  // Resolved before the transaction: the default may create the head office, on its own connection.
+  let branchId: string;
+  if (input.branchId?.trim()) {
+    const branch = await db.branch.findUnique({ where: { id: input.branchId.trim() }, select: { id: true, name: true, active: true } });
+    if (!branch) return { ok: false, error: "That branch no longer exists. Choose another one." };
+    if (!branch.active) return { ok: false, error: `Branch ${branch.name} is inactive. Choose another branch.` };
+    branchId = branch.id;
+  } else {
+    branchId = await defaultBranchIdFor(user.id);
+  }
 
   const assets = await db.asset.findMany({
     where: { id: { in: input.assetIds } },
@@ -205,6 +223,7 @@ export async function createConsignment(input: {
         declaredValue: declaredValue ? new Prisma.Decimal(declaredValue) : null,
         documentId: input.documentId || null,
         notes: input.notes?.trim() || null,
+        branchId,
         createdById: user.id,
       },
       select: { id: true, consignmentNumber: true },
@@ -275,6 +294,7 @@ export async function dispatchConsignment(input: {
     select: {
       id: true, consignmentNumber: true, status: true, reason: true, declaredValue: true,
       interstate: true, ewayBillNumber: true, toCompanyId: true, toLocationId: true,
+      branch: { select: { gstRegistrationId: true } },
       movements: { select: { assetId: true } },
     },
   });
@@ -287,7 +307,8 @@ export async function dispatchConsignment(input: {
       interstate: consignment.interstate,
       reason: consignment.reason,
     },
-    { intraStateThreshold: await intraStateThreshold() },
+    // The dispatching branch's GSTIN's floor, as on the consignment's own screen.
+    { intraStateThreshold: await intraStateThreshold(consignment.branch?.gstRegistrationId ?? null) },
   );
   const ewayNumber = input.ewayBillNumber?.trim() || consignment.ewayBillNumber;
   if (eway.required && !ewayNumber) {
@@ -469,7 +490,7 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
     where: { id: consignmentId },
     select: {
       id: true, consignmentNumber: true, reason: true, toCompanyId: true, toLocationId: true,
-      toAddress: true, declaredValue: true, documentId: true, notes: true,
+      toAddress: true, declaredValue: true, documentId: true, notes: true, branchId: true,
       toLocation: { select: { label: true, address: true, city: true, state: true, pincode: true, gstNumber: true } },
       toCompany: { select: { name: true } },
       toContact: { select: { name: true, phone: true } },
@@ -508,7 +529,43 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
   // is the whole point of one at a checkpoint or a goods-inwards desk.
   const assets = consignment.movements.map((m) => m.asset);
   const issueDate = new Date();
-  const org = await getOrganisation();
+
+  // Who is sending it: the consignment's branch (the head office for one raised before branches),
+  // resolved before the transaction — it reads on its own connection and may create the head office.
+  const identity = await branchIdentity(consignment.branchId);
+  const [registration, activeRegistrations] = await Promise.all([
+    identity.gstRegistrationId ? db.gstRegistration.findUnique({ where: { id: identity.gstRegistrationId }, select: { active: true } }) : null,
+    db.gstRegistration.count({ where: { active: true } }),
+  ]);
+  // The issue rule of any GST-numbered document (spec §5.5): a registered company raises a challan only
+  // from a branch with a live GSTIN. An unregistered one issues as it always has.
+  if (activeRegistrations > 0 && !registration?.active) {
+    return {
+      ok: false,
+      error: identity.gstin
+        ? `Branch ${identity.name}'s GSTIN ${identity.gstin} is inactive, so it can't issue a delivery challan. Reactivate it under Settings → Branches & GST registrations.`
+        : `Branch ${identity.name} has no GST registration, so it can't issue a delivery challan. Add its GSTIN under Settings → Branches & GST registrations.`,
+    };
+  }
+
+  /**
+   * Goods going to another of our own registrations (spec D16, owner decision Q8).
+   *
+   * Two GSTINs of one PAN are distinct persons under GST, so moving goods between them is a supply
+   * even with no consideration: it needs a tax invoice, valued under Rule 28, not a challan. Within one
+   * registration it is only a movement, and a challan is right. Refused until stock transfers are
+   * designed with the CA — CA question C3.
+   */
+  const consigneeGstin = consignment.toLocation?.gstNumber?.trim().toUpperCase() || null;
+  const ourPan = panOfGstin(identity.gstin) ?? identity.pan?.trim().toUpperCase() ?? null;
+  if (consigneeGstin && ourPan && panOfGstin(consigneeGstin) === ourPan && consigneeGstin !== identity.gstin) {
+    return {
+      ok: false,
+      error:
+        "This is going to your own registration in another state. GST treats that as a supply between distinct persons: it needs a tax invoice, not a delivery challan. Ask your CA how to value it.",
+    };
+  }
+
   /**
    * The consignee's own GSTIN first, then the state they are in by name.
    *
@@ -520,7 +577,8 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
 
   try {
     const created = await db.$transaction(async (tx) => {
-      const docNumber = await nextDocumentNumber(tx, "DELIVERY_CHALLAN", issueDate);
+      // From the dispatching branch's series — per GSTIN or per branch once numbering is scoped so.
+      const docNumber = await nextDocumentNumber(tx, "DELIVERY_CHALLAN", issueDate, identity.branchId);
       const doc = await tx.tradeDocument.create({
         data: {
           docNumber,
@@ -534,6 +592,10 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
           locationId: consignment.toLocationId,
           issueDate,
           createdById: user.id,
+          branchId: identity.branchId,
+          gstRegistrationId: identity.gstRegistrationId,
+          // Where the goods leave from, which a challan states and an e-way bill raised on it reads.
+          dispatchFromAddress: formatDispatchAddress(identity),
           /**
            * Where the goods are actually going, written onto the document.
            *
@@ -542,7 +604,7 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
            * location and then not writing it down made every challan this produced un-billable —
            * the portal said so in as many words the first time one was tried.
            */
-          sellerGstin: org.gstin,
+          sellerGstin: identity.gstin,
           buyerGstin: consignment.toLocation?.gstNumber ?? null,
           shippingSameAsBilling: true,
           shippingAttention: consignment.toContact?.name ?? consignment.toCompany?.name ?? null,

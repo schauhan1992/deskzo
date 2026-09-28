@@ -27,6 +27,11 @@
  * Everything is created under a reserved prefix and removed again, so it is safe to run against a
  * database with real data in it. Every count is asserted **relative to this suite's own fixture**,
  * never against the whole table.
+ *
+ * That includes who the goods leave from. The second half ships everything from a GST registration
+ * and a branch of its own (`ZZEway Mumbai`, on a made-up PAN), created for the run and removed after
+ * it — so it reads neither the workspace's head office nor its GSTIN, and a bill it raises is filed
+ * under that fixture's login, from that fixture's address.
  */
 import {
   CANCELLATION_WINDOW_HOURS,
@@ -49,10 +54,13 @@ import { buildEwayPayload, portalDate, validateEwayPayload, type EwayDocument } 
 import { apportionLineValues, documentGoodsValue } from "../src/lib/eway/value";
 import { deliveryStateCode } from "../src/lib/eway/documents";
 import { subSupplyFor } from "../src/lib/eway/sub-supply";
-import { createEwayProvider, parsePortalDate } from "../src/lib/eway/provider";
+import * as ewayProvider from "../src/lib/eway/provider";
+import { gstinCheckCharacter } from "../src/lib/gst-engine";
 import Module from "node:module";
 import { Prisma } from "@prisma/client";
 import { db } from "../src/lib/db";
+
+const { createEwayProvider, parsePortalDate } = ewayProvider;
 
 // ── Who the actions think is calling ──────────────────────────────────────────────────────────
 
@@ -76,7 +84,41 @@ const moduleInternals = Module as unknown as {
   _resolveFilename(request: string, parent: unknown, isMain: boolean): string;
 };
 
+/**
+ * What the actions hand the portal, recorded on the way through.
+ *
+ * The provider is still the real one — `createEwayProvider`, which for `mock` issues the bill
+ * locally with the real validity rule. It is only wrapped, so the database half can read the
+ * payload `generateEwayBill` built (whose GSTIN, from which address) and what Part B said, rather
+ * than trusting that the branch was read. And a connection naming any provider but `mock` throws
+ * before a request is made: nothing this suite runs may reach NIC.
+ */
+const sentToPortal: { login: string | null; doc: EwayDocument }[] = [];
+const partBSent: { login: string | null; input: Parameters<ewayProvider.EwayProvider["updateVehicle"]>[0] }[] = [];
+
+function recordingProvider(config: ewayProvider.EwayProviderConfig): ewayProvider.EwayProvider {
+  if (config.provider !== "mock") {
+    throw new Error(`check:eway only ever talks to the mock portal, and was handed "${config.provider}".`);
+  }
+  const real = createEwayProvider(config);
+  const login = config.gstin ?? null;
+  return {
+    name: real.name,
+    generate: async (doc) => {
+      sentToPortal.push({ login, doc });
+      return real.generate(doc);
+    },
+    updateVehicle: async (input) => {
+      partBSent.push({ login, input });
+      return real.updateVehicle(input);
+    },
+    cancel: (ewayBillNumber, reasonCode, remark) => real.cancel(ewayBillNumber, reasonCode, remark),
+    fetch: (ewayBillNumber) => real.fetch(ewayBillNumber),
+  };
+}
+
 const substitutes = new Map<string, unknown>([
+  [load.resolve("../src/lib/eway/provider"), { ...ewayProvider, createEwayProvider: recordingProvider }],
   [
     load.resolve("../src/lib/session"),
     {
@@ -401,7 +443,15 @@ async function main() {
   ok("rail is 2, air 3, ship 4", ["RAIL", "AIR", "SHIP"].map((m) => buildEwayPayload(document({ transportMode: m as EwayDocument["transportMode"] })).transMode).join(",") === "2,3,4");
 
   // dd/mm/yyyy — not the format anything else in this app uses, and not one Date produces.
-  ok("dates go as dd/mm/yyyy", portalDate(at("2026-09-07T00:00:00")) === "07/09/2026", portalDate(at("2026-09-07T00:00:00")));
+  ok("dates go as dd/mm/yyyy", portalDate(ist("2026-09-07T00:00")) === "07/09/2026", portalDate(ist("2026-09-07T00:00")));
+  /**
+   * And it is the Indian date, whatever the server's clock. Half past one in the morning of 1 Oct in
+   * India is still 30 Sep in UTC, and the old `getDate()` sent exactly that to the portal from a
+   * UTC server — a bill dated the day before the invoice it covers. Written with its offset, so
+   * `TZ=UTC npm run check:eway` is the run that proves it.
+   */
+  ok("  the day is India's, not the server's", portalDate(ist("2026-10-01T01:30")) === "01/10/2026", portalDate(ist("2026-10-01T01:30")));
+  ok("  and a minute to midnight is still that day", portalDate(ist("2026-09-30T23:59")) === "30/09/2026", portalDate(ist("2026-09-30T23:59")));
 
   {
     // "URP" — unregistered person — rather than a blank, which the portal rejects.
@@ -437,11 +487,15 @@ async function main() {
 
   section("The portal's own date format");
 
-  ok("dd/mm/yyyy hh:mm AM parses", parsePortalDate("22/09/2026 11:30:00 AM")?.getHours() === 11);
-  ok("  PM is afternoon", parsePortalDate("22/09/2026 04:15:00 PM")?.getHours() === 16);
-  ok("  midnight is 0, not 12", parsePortalDate("22/09/2026 12:05:00 AM")?.getHours() === 0);
-  ok("  noon is 12", parsePortalDate("22/09/2026 12:05:00 PM")?.getHours() === 12);
-  ok("  the date is read day-first", parsePortalDate("07/09/2026")?.getMonth() === 8);
+  // Explicit +05:30 instants: the portal's times are India's, whatever the server's clock. getHours() would
+  // agree with a parser that read them in the server's zone — the bug this pins.
+  const istAt = (iso: string) => new Date(iso).getTime();
+  ok("dd/mm/yyyy hh:mm AM parses, in India time", parsePortalDate("22/09/2026 11:30:00 AM")?.getTime() === istAt("2026-09-22T11:30:00+05:30"));
+  ok("  PM is afternoon", parsePortalDate("22/09/2026 04:15:00 PM")?.getTime() === istAt("2026-09-22T16:15:00+05:30"));
+  ok("  midnight is 0, not 12", parsePortalDate("22/09/2026 12:05:00 AM")?.getTime() === istAt("2026-09-22T00:05:00+05:30"));
+  ok("  noon is 12", parsePortalDate("22/09/2026 12:05:00 PM")?.getTime() === istAt("2026-09-22T12:05:00+05:30"));
+  ok("  the date is read day-first", parsePortalDate("07/09/2026")?.getTime() === istAt("2026-09-07T00:00:00+05:30"));
+  ok("  a bill valid until 23:59 IST is the same day, on any server", parsePortalDate("30/09/2026 11:59:00 PM")?.getTime() === istAt("2026-09-30T23:59:00+05:30"));
   /**
    * Null rather than an Invalid Date. Storing NaN as an expiry would show every bill as expired,
    * which on this screen is a false compliance alarm on every consignment.
@@ -646,36 +700,77 @@ async function main() {
 const PREFIX = "ZZEway";
 
 /**
+ * The seller every document here is issued by: a GST registration and a branch of the suite's own.
+ *
+ * On a made-up PAN, so the GSTIN is nobody's — but with a real check character, because a GSTIN
+ * that fails its own checksum is not one the product would ever have stored. Maharashtra (27), with
+ * the branch at a full Mumbai address, so the bill's "from" block has something definite to be
+ * compared against. Created directly with `db` — this is fixture setup, not a test of the settings
+ * screen, which `check:branches` covers — and removed again in the `finally`. The workspace's head
+ * office and its GSTIN are never read or touched.
+ */
+const FIXTURE_PAN = "ZZEWB1234E";
+const FIXTURE_GSTIN = withCheckCharacter(`27${FIXTURE_PAN}9Z`);
+const REGISTRATION_CODE = "ZZE";
+const BRANCH_CODE = "ZZEW";
+const BRANCH_NAME = `${PREFIX} Mumbai`;
+const BRANCH_PINCODE = "400001";
+/** Borrowed only by an organisation with no name at all, so the bill has a consignor to name. */
+const FIXTURE_LEGAL_NAME = `${PREFIX} Traders Pvt Ltd`;
+
+function withCheckCharacter(first14: string): string {
+  const check = gstinCheckCharacter(first14);
+  if (!check) throw new Error(`${first14} cannot take a GSTIN check character.`);
+  return `${first14}${check}`;
+}
+
+/** The fixture seller's ids, once setup has made them. */
+let seller: { registrationId: string; branchId: string } | null = null;
+
+/**
  * The portal settings this suite needs, put back exactly as they were.
  *
  * `generateEwayBill` refuses without a configured portal, so a run against an unconfigured database
- * would exercise nothing but the refusal. Flipping it to the mock provider for the duration is the
- * only way to reach the code that matters — and the restore is in a `finally`, because leaving
- * somebody's live NIC settings pointed at a mock would be a far worse bug than the one this suite
- * is looking for.
+ * would exercise nothing but the refusal. The connection is the document's registration's now
+ * (`eInvoiceConfigFor`), so the mock goes on the fixture registration — not on the head office's,
+ * and not on the organisation's old copy, which nothing reads any more. The two switches are still
+ * the company's. All of it is restored in a `finally`, because leaving somebody's settings pointed
+ * at a mock would be a far worse bug than the one this suite is looking for.
+ *
+ * The organisation's name is borrowed only when it has none: the bill names its consignor by it (a
+ * branch has no legal name of its own), and a nameless consignor is refused by the portal.
  */
-async function withMockPortal<T>(run: () => Promise<T>): Promise<T> {
-  const before = await db.organisationSettings.findUnique({
-    where: { id: "global" },
-    select: { einvoiceEnabled: true, einvoiceProvider: true, ewayEnabled: true },
-  });
+async function withMockPortal<T>(registrationId: string, run: () => Promise<T>): Promise<T> {
+  const [before, registrationBefore] = await Promise.all([
+    db.organisationSettings.findUnique({
+      where: { id: "global" },
+      select: { einvoiceEnabled: true, ewayEnabled: true, legalName: true, tradeName: true },
+    }),
+    db.gstRegistration.findUniqueOrThrow({ where: { id: registrationId }, select: { einvoiceProvider: true } }),
+  ]);
+  const nameless = !before?.legalName.trim() && !before?.tradeName?.trim();
 
   await db.organisationSettings.upsert({
     where: { id: "global" },
-    create: { id: "global", einvoiceEnabled: true, einvoiceProvider: "mock", ewayEnabled: true },
-    update: { einvoiceEnabled: true, einvoiceProvider: "mock", ewayEnabled: true },
+    create: { id: "global", einvoiceEnabled: true, ewayEnabled: true, legalName: FIXTURE_LEGAL_NAME },
+    update: { einvoiceEnabled: true, ewayEnabled: true, ...(nameless ? { legalName: FIXTURE_LEGAL_NAME } : {}) },
   });
+  await db.gstRegistration.update({ where: { id: registrationId }, data: { einvoiceProvider: "mock" } });
 
   try {
     return await run();
   } finally {
+    await db.gstRegistration.update({
+      where: { id: registrationId },
+      data: { einvoiceProvider: registrationBefore.einvoiceProvider },
+    });
     if (before) {
       await db.organisationSettings.update({
         where: { id: "global" },
         data: {
           einvoiceEnabled: before.einvoiceEnabled,
-          einvoiceProvider: before.einvoiceProvider,
           ewayEnabled: before.ewayEnabled,
+          ...(nameless ? { legalName: before.legalName } : {}),
         },
       });
     } else {
@@ -686,13 +781,53 @@ async function withMockPortal<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * The fixture seller and everything issued from it, found by the fixture's GSTIN and codes — never
+ * by a name alone, and never the head office.
+ *
+ * Documents and their bills go first, because a branch or registration a document names cannot be
+ * deleted; then consignments dispatched from the branch and any numbering series allocated for it;
+ * then the branch; then the registration.
+ */
+async function removeSeller() {
+  const registrationIds = (
+    await db.gstRegistration.findMany({ where: { gstin: FIXTURE_GSTIN }, select: { id: true } })
+  ).map((r) => r.id);
+  const branchIds = (
+    await db.branch.findMany({
+      where: {
+        isHeadOffice: false,
+        OR: [{ code: BRANCH_CODE, name: { startsWith: PREFIX } }, { gstRegistrationId: { in: registrationIds } }],
+      },
+      select: { id: true },
+    })
+  ).map((b) => b.id);
+  if (registrationIds.length === 0 && branchIds.length === 0) return;
+
+  const issued = { OR: [{ branchId: { in: branchIds } }, { gstRegistrationId: { in: registrationIds } }] };
+  await db.ewayBill.deleteMany({ where: { document: issued } });
+  await db.consignment.deleteMany({ where: { branchId: { in: branchIds } } });
+  await db.tradeDocument.deleteMany({ where: issued });
+  await db.documentSeries.deleteMany({ where: issued });
+  await db.branch.deleteMany({ where: { id: { in: branchIds } } });
+  await db.gstRegistration.deleteMany({ where: { id: { in: registrationIds } } });
+}
+
+/**
+ * A delivery challan from the fixture branch, under the fixture registration.
+ *
+ * `within` sends it to a customer inside Maharashtra instead of to Karnataka, so that the
+ * registration's own intra-state floor, rather than the central one, decides whether it needs a bill.
+ */
 async function makeDocument(
   companyId: string,
   userId: string,
   suffix: string,
   total = 615000,
   addressed = true,
+  within = false,
 ) {
+  if (!seller) throw new Error("The fixture seller is made before any document is.");
   // Split out because it is the number the lines carry, and the nil-total case needs them to keep
   // it while the document total goes to zero — which is exactly what a real challan looks like.
   const unitPrice = 205000;
@@ -704,14 +839,17 @@ async function makeDocument(
       status: "ISSUED",
       companyId,
       createdById: userId,
-      // 27 is Maharashtra, 29 is Karnataka — so this crosses a line and the central threshold bites
-      // whatever any state has set for movement inside its own borders.
-      sellerGstin: "27AABCW1234F1Z5",
-      buyerGstin: "29AAACX1234F1Z5",
-      shippingStateCode: addressed ? "29" : null,
-      shippingLine1: addressed ? "Plot 4, Whitefield" : null,
-      shippingCity: addressed ? "Bengaluru" : null,
-      shippingPincode: addressed ? "560066" : null,
+      // Who sent it, the three ways a real challan records that — and what every e-way action reads.
+      branchId: seller.branchId,
+      gstRegistrationId: seller.registrationId,
+      sellerGstin: FIXTURE_GSTIN,
+      // 27 is Maharashtra, 29 is Karnataka — so by default this crosses a line and the central
+      // threshold bites whatever any state has set for movement inside its own borders.
+      buyerGstin: within ? "27AAACX1234F1Z5" : "29AAACX1234F1Z5",
+      shippingStateCode: addressed ? (within ? "27" : "29") : null,
+      shippingLine1: addressed ? (within ? "Unit 9, Andheri East" : "Plot 4, Whitefield") : null,
+      shippingCity: addressed ? (within ? "Mumbai" : "Bengaluru") : null,
+      shippingPincode: addressed ? (within ? "400093" : "560066") : null,
       total: new Prisma.Decimal(total),
       lines: {
         create: [
@@ -756,6 +894,11 @@ async function documents() {
     await db.transporter.deleteMany({ where: { name: { startsWith: PREFIX } } });
     await db.company.delete({ where: { id: stale.id } });
   }
+  // …and its seller and catalogue item, whose GSTIN, codes and SKU are unique, so this run could
+  // not make them again; and the organisation name it borrowed, which is only ever this one.
+  await removeSeller();
+  await db.item.deleteMany({ where: { sku: { startsWith: PREFIX } } });
+  await db.organisationSettings.updateMany({ where: { id: "global", legalName: FIXTURE_LEGAL_NAME }, data: { legalName: "" } });
 
   const company = await db.company.create({
     data: {
@@ -773,7 +916,7 @@ async function documents() {
    * The challan `raiseDeliveryChallan` produces is numbered by the real sequence — DC/2026-27/0003,
    * not ZZEway/003 — so a prefix match misses it and leaves a foreign key pointing at a company
    * this is about to delete. Everything here belongs to one company; deleting by that is both
-   * complete and impossible to widen by accident.
+   * complete and impossible to widen by accident. The seller goes after it, by its own ids.
    */
   const cleanup = async () => {
     const docs = { where: { OR: [{ docNumber: { startsWith: PREFIX } }, { companyId: company.id }] } };
@@ -784,10 +927,32 @@ async function documents() {
     await db.tradeDocument.deleteMany(docs);
     await db.transporter.deleteMany({ where: { name: { startsWith: PREFIX } } });
     await db.company.deleteMany({ where: { name: { startsWith: PREFIX } } });
+    await removeSeller();
+    await db.item.deleteMany({ where: { sku: { startsWith: PREFIX } } });
   };
 
   try {
-    await withMockPortal(async () => {
+    const registration = await db.gstRegistration.create({
+      data: { gstin: FIXTURE_GSTIN, stateCode: "27", code: REGISTRATION_CODE, einvoiceProvider: null, createdById: user.id },
+      select: { id: true },
+    });
+    const branch = await db.branch.create({
+      data: {
+        name: BRANCH_NAME,
+        code: BRANCH_CODE,
+        gstRegistrationId: registration.id,
+        addressLine1: "4th Floor, Maker Chambers IV",
+        addressLine2: "Nariman Point",
+        city: "Mumbai",
+        state: "Maharashtra",
+        pincode: BRANCH_PINCODE,
+        createdById: user.id,
+      },
+      select: { id: true },
+    });
+    seller = { registrationId: registration.id, branchId: branch.id };
+
+    await withMockPortal(registration.id, async () => {
       section("Transporters are records, not typing");
 
       const first = await saveTransporter({
@@ -866,6 +1031,33 @@ async function documents() {
       const generated = await generateEwayBill(doc.id);
       ok("the bill is raised", generated.ok, generated.ok ? generated.data.ewayBillNumber : generated.error);
 
+      {
+        /**
+         * Who the portal was told the goods left from — read off the payload the action actually
+         * handed the provider, not worked out again here.
+         *
+         * The branch that issued the document, under its own registration: its GSTIN, its state, its
+         * address. Before branches this was the organisation's, and a company with a second GSTIN
+         * would have declared every Bengaluru despatch as leaving Mumbai.
+         */
+        const sent = sentToPortal.filter((s) => s.doc.documentNumber === doc.docNumber).at(-1);
+        const from = sent?.doc.from;
+        ok("  filed under the fixture registration's own login", sent?.login === FIXTURE_GSTIN, sent?.login ?? "nothing was sent");
+        ok("  declaring its GSTIN as the consignor's", from?.gstin === FIXTURE_GSTIN, from?.gstin ?? "none");
+        ok("  in its state, Maharashtra", from?.stateCode === "27", from?.stateCode ?? "none");
+        ok(
+          "  from the branch's own address",
+          from?.pincode === BRANCH_PINCODE && from.place === "Mumbai" && from.address1 === "4th Floor, Maker Chambers IV",
+          from ? `${from.address1}, ${from.place} ${from.pincode}` : "none",
+        );
+        const wire = sent ? buildEwayPayload(sent.doc) : null;
+        ok(
+          "  and that is what goes on the wire",
+          wire?.fromGstin === FIXTURE_GSTIN && wire.fromStateCode === 27 && wire.actFromStateCode === 27 && wire.fromPincode === 400001,
+          wire ? `${wire.fromGstin} · ${wire.fromStateCode} · ${wire.fromPincode}` : "none",
+        );
+      }
+
       view = await ewayForDocument(doc.id);
       const raised = view.ok ? view.data.bill : null;
       ok("  twelve digits, as the portal issues them", /^\d{12}$/.test(raised?.ewayBillNumber ?? ""));
@@ -898,6 +1090,15 @@ async function documents() {
       });
       ok("Part B takes the vehicle", partB.ok, partB.ok ? partB.data.vehicleNumber : partB.error);
       ok("  normalised the way the portal wants it", partB.ok && partB.data.vehicleNumber === "MH12AB1234");
+      {
+        // Part B says where the lorry is starting from, and that is the branch too.
+        const told = partBSent.at(-1);
+        ok(
+          "  telling the portal it starts from the branch's city and state",
+          told?.login === FIXTURE_GSTIN && told.input.fromPlace === "Mumbai" && told.input.fromStateCode === "27",
+          told ? `${told.input.fromPlace} (${told.input.fromStateCode}) under ${told.login}` : "nothing was sent",
+        );
+      }
 
       view = await ewayForDocument(doc.id);
       ok("  and it can still be cancelled inside the 24 hours", view.ok && view.data.canCancel);
@@ -1058,7 +1259,23 @@ async function documents() {
         select: { id: true },
       });
 
-      const item = await db.item.findFirst({ where: { hsnCode: { not: null } }, select: { id: true, hsnCode: true } });
+      /**
+       * What the laptops are, in the catalogue — the suite's own item, with the HSN a challan has to
+       * carry. It used to borrow whichever item the database held with an HSN, so on an empty
+       * catalogue every HSN assertion below failed for a reason that had nothing to do with challans.
+       */
+      const item = await db.item.create({
+        data: {
+          name: `${PREFIX} laptop`,
+          sku: `${PREFIX}-LAPTOP`,
+          type: "GOOD",
+          hsnCode: "84713010",
+          unit: "NOS",
+          sellingPrice: new Prisma.Decimal(205000),
+          createdById: user.id,
+        },
+        select: { id: true },
+      });
       const asset = await db.asset.create({
         data: {
           assetTag: `${PREFIX}-A1`,
@@ -1067,12 +1284,14 @@ async function documents() {
           kind: "LAPTOP",
           status: "IN_STOCK",
           purchaseCost: new Prisma.Decimal(205000),
-          itemId: item?.id ?? null,
+          itemId: item.id,
           createdById: user.id,
         },
         select: { id: true },
       });
 
+      // Dispatched from the fixture branch: once any GSTIN is registered, only a branch holding one
+      // may issue a challan, and the workspace's head office may hold none.
       const movement = await createConsignment({
         reason: "REPAIR_OUT",
         assetIds: [asset.id],
@@ -1080,6 +1299,7 @@ async function documents() {
         toLocationId: site.id,
         transporterId,
         interstate: true,
+        branchId: branch.id,
       });
       ok("a consignment is raised", movement.ok, movement.ok ? movement.data.consignmentNumber : movement.error);
       if (!movement.ok) return;
@@ -1096,10 +1316,17 @@ async function documents() {
           shippingStateCode: true,
           shippingCity: true,
           sellerGstin: true,
+          branchId: true,
+          gstRegistrationId: true,
           lines: { select: { hsnCode: true, unitPrice: true, taxableValue: true } },
         },
       });
 
+      ok(
+        "  from the branch that dispatched the goods, under its GSTIN",
+        built?.branchId === branch.id && built.gstRegistrationId === registration.id && built.sellerGstin === FIXTURE_GSTIN,
+        built?.sellerGstin ?? "no GSTIN",
+      );
       ok("  it charges nothing, which is what makes it a challan", Number(built?.total) === 0);
       ok("  but it states the delivery pincode", built?.shippingPincode === "560066", built?.shippingPincode ?? "blank");
       ok("  and the delivery state code", built?.shippingStateCode === "29", built?.shippingStateCode ?? "blank");
@@ -1159,7 +1386,7 @@ async function documents() {
             kind: "LAPTOP",
             status: "IN_STOCK",
             purchaseCost: new Prisma.Decimal(205000),
-            itemId: item?.id ?? null,
+            itemId: item.id,
             createdById: user.id,
           },
           select: { id: true },
@@ -1171,6 +1398,7 @@ async function documents() {
           toLocationId: site.id,
           transporterId,
           interstate: true,
+          branchId: branch.id,
         });
         if (!racerMovement.ok) throw new Error(racerMovement.error);
         const racerChallan = await raiseDeliveryChallan(racerMovement.data.id);
@@ -1208,13 +1436,19 @@ async function documents() {
 
       section("Reading a bill back, and the module switch");
 
-      const looked = await lookupEwayBill("381234567890");
+      // Asked with the document it is for, as the e-way panel asks: a GSTIN's login sees only its own
+      // bills, and without a document the lookup would use the head office's, which may have none.
+      const looked = await lookupEwayBill("381234567890", other.id);
       ok("the portal lookup answers", looked.ok, looked.ok ? looked.data.ewayBillNumber : looked.error);
       ok(
         "  it reads, it does not write",
         (await db.ewayBill.count({ where: { ewayBillNumber: "381234567890", associated: false } })) === 0,
       );
-      ok("  and a short number never reaches the portal", !(await lookupEwayBill("99")).ok);
+      {
+        // Refused by the provider's own length check, not by a missing login — the two look alike.
+        const short = await lookupEwayBill("99", other.id);
+        ok("  and a short number never reaches the portal", !short.ok && /12 digits/.test(short.error), short.ok ? "looked it up" : short.error);
+      }
 
       /**
        * The switch is enforced where the data is read, not only in the nav.
@@ -1241,9 +1475,83 @@ async function documents() {
       );
       ok("  and is not on the to-do list", (await mine("pending")).every((r) => !r.docNumber.endsWith("003")));
       ok("  but is still in the full list, so it can be looked up", (await mine("all")).some((r) => r.docNumber.endsWith("003")));
+
+      section("A state's own floor, from the registration in that state");
+
+      /**
+       * Movement inside a state is governed by that state's threshold, and each state sets its own —
+       * so it is kept on the GST registration in that state, not on the company. Set on the fixture
+       * registration to a figure nothing else uses, so the answer can only have come from there: both
+       * documents below are well over the central ₹50,000, and only the registration's ₹1,23,456
+       * can call the first one "not needed".
+       */
+      await db.gstRegistration.update({
+        where: { id: registration.id },
+        data: { ewayIntraStateThreshold: new Prisma.Decimal(123456) },
+      });
+      const under = await makeDocument(company.id, user.id, "006", 123455, true, true);
+      const over = await makeDocument(company.id, user.id, "007", 123457, true, true);
+      const underView = await ewayForDocument(under.id);
+      const overView = await ewayForDocument(over.id);
+      ok(
+        "inside Maharashtra, ₹1,23,455 is under the registration's ₹1,23,456",
+        underView.ok && !underView.data.interstate && !underView.data.required,
+        underView.ok ? underView.data.because : underView.error,
+      );
+      ok(
+        "  and ₹1,23,457 is over it",
+        overView.ok && !overView.data.interstate && overView.data.required,
+        overView.ok ? overView.data.because : overView.error,
+      );
+
+      await db.gstRegistration.update({ where: { id: registration.id }, data: { ewayIntraStateThreshold: null } });
+      const central = await ewayForDocument(under.id);
+      ok(
+        "  cleared, the central ₹50,000 governs the same document again",
+        central.ok && central.data.required,
+        central.ok ? central.data.because : central.error,
+      );
+
+      section("A GSTIN with no portal connection");
+
+      /**
+       * The refusal names the GSTIN whose login is missing.
+       *
+       * With several registrations "the portal isn't set up" no longer says what to fix — the head
+       * office may be connected while this branch's GSTIN is not. And nothing may fall back to
+       * another GSTIN's login, which would file the bill under the wrong taxpayer.
+       */
+      await db.gstRegistration.update({ where: { id: registration.id }, data: { einvoiceProvider: null } });
+      const callsBefore = sentToPortal.length;
+      const unset = await generateEwayBill(over.id);
+      ok(
+        "with the provider cleared, generation refuses, naming the fixture GSTIN",
+        !unset.ok && unset.error.includes(FIXTURE_GSTIN),
+        unset.ok ? "it generated one" : unset.error,
+      );
+      ok("  and nothing reached the portal", sentToPortal.length === callsBefore, `${sentToPortal.length - callsBefore} call(s)`);
+      const unsetView = await ewayForDocument(over.id);
+      ok(
+        "  the panel says the same, by GSTIN",
+        unsetView.ok && !unsetView.data.configured && (unsetView.data.configError ?? "").includes(FIXTURE_GSTIN),
+        unsetView.ok ? (unsetView.data.configError ?? "no reason given") : unsetView.error,
+      );
     });
   } finally {
     await cleanup();
+    // By the fixture's own keys — its GSTIN, codes, SKU and borrowed name — not by counting tables.
+    const left = await Promise.all([
+      db.gstRegistration.count({ where: { gstin: FIXTURE_GSTIN } }),
+      db.branch.count({ where: { code: BRANCH_CODE, name: { startsWith: PREFIX } } }),
+      db.tradeDocument.count({ where: { docNumber: { startsWith: PREFIX } } }),
+      db.item.count({ where: { sku: { startsWith: PREFIX } } }),
+      db.organisationSettings.count({ where: { legalName: FIXTURE_LEGAL_NAME } }),
+    ]);
+    ok(
+      "the fixture seller, its documents and its item are gone, and the organisation's name is its own again",
+      left.every((n) => n === 0),
+      left.join(" / "),
+    );
     await db.$disconnect();
   }
 }
