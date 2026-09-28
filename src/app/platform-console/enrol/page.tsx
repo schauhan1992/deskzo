@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
+import { AuthFrame } from "@/components/console/auth/auth-frame";
 import { ConsoleEnrolForm } from "@/components/console/console-auth-forms";
+import { platformEnv } from "@/lib/platform/console-page";
 import { currentStaffSession, enrolmentChallenge } from "@/lib/platform/staff-session";
+
+export const metadata: Metadata = { title: "Set up two-factor" };
 
 /**
  * Enrolling an authenticator — the first thing after a first sign-in, and nothing else in the console
@@ -14,25 +19,36 @@ export default async function ConsoleEnrolPage() {
   if (session.enrolled) redirect(session.mfaDone ? "/" : "/login");
   const challenge = await enrolmentChallenge();
   if (!challenge) redirect("/login");
+  const required = session.twoFactorRequired;
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4 py-10">
-      <Card className="w-full max-w-sm">
-        <CardContent className="space-y-5 pt-6">
-          <div>
-            <h1 className="text-lg font-semibold text-text">Turn on two-factor</h1>
-            <p className="mt-1 text-sm text-muted">The console needs it. Scan this with an authenticator app, then enter the code it shows.</p>
-          </div>
-          {/* A data: URL made on the server — nothing is fetched from anywhere else. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={challenge.qr} alt="QR code for your authenticator app" width={200} height={200} className="mx-auto rounded-base border border-line bg-white p-2" />
-          <details className="text-xs text-muted">
-            <summary className="cursor-pointer">Can&apos;t scan it?</summary>
-            <p className="mt-2">Enter this key in the app instead:</p>
-            <code className="mt-1 block break-all rounded-base bg-surface-sunken p-2 font-mono text-text">{challenge.secret}</code>
-          </details>
-          <ConsoleEnrolForm />
-        </CardContent>
-      </Card>
-    </div>
+    <AuthFrame
+      env={platformEnv()}
+      title="Turn on two-factor"
+      subtitle={required ? "The console needs it — nothing else opens until it's done." : "A code from your phone, asked for at every sign-in."}
+      footer={
+        <>
+          Signed in as <span className="font-medium break-all text-text">{session.staff.email}</span>
+          {/* Optional under the current policy, so it can be left for later. */}
+          {!required && (
+            <>
+              {" · "}
+              <Link href="/" className="font-medium text-brand hover:underline">
+                Not now
+              </Link>
+            </>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-5">
+        {/*
+          * A data: URL made on the server — nothing is fetched from anywhere else. The image carries its
+          * own white margin, which is what a scanner needs to find the code in a dark theme.
+          */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={challenge.qr} alt="QR code for your authenticator app" width={200} height={200} className="mx-auto rounded-lg border border-line" />
+        <ConsoleEnrolForm secret={challenge.secret} />
+      </div>
+    </AuthFrame>
   );
 }

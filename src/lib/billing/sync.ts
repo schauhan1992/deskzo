@@ -1,6 +1,6 @@
-import type { Prisma } from "@wroffy/control-client";
+import { Prisma, type BillingGateway } from "@wroffy/control-client";
 import { fromUnix } from "@/lib/billing/gateway";
-import { idOf, stripeInvoiceStatus, stripePeriodEnd, stripeStatus, type StripeInvoice, type StripeSubscription } from "@/lib/billing/stripe";
+import { idOf, stripeInvoiceStatus, stripePeriodEnd, stripeStatus, type StripeCharge, type StripeInvoice, type StripeSubscription } from "@/lib/billing/stripe";
 import { noteOf, razorpayStatus, type RazorpayPayment, type RazorpaySubscription } from "@/lib/billing/razorpay";
 import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
@@ -12,9 +12,16 @@ import { refreshEntitlements } from "@/lib/platform/entitlements";
  *
  * Each returns the workspace it concerned, or null for something that is not ours (another app on
  * the same gateway account, a subscription deleted here).
+ *
+ * An invoice also keeps what partner commission is worked out from: the subscription it bills, its
+ * lines by plan, and the money that went back to the customer — refunded, or credited after payment.
+ * What was refunded only ever goes up here; the commission engine reverses its share of it.
  */
 
 const LIVE = new Set(["TRIALING", "ACTIVE", "PAST_DUE"]);
+
+/** An invoice's amount by plan, as `invoices.planLines` holds it: `planKey` null for a price that is not ours. */
+export type PlanLine = { planKey: string | null; amount: number };
 
 /** A paid subscription going live ends the free trial it replaces; a staff-given one stays. */
 async function endTrialFor(tx: Prisma.TransactionClient, tenantId: string, now: Date) {
@@ -24,6 +31,23 @@ async function endTrialFor(tx: Prisma.TransactionClient, tenantId: string, now: 
 async function tenantExists(tenantId: string | null | undefined): Promise<string | null> {
   if (!tenantId) return null;
   return (await controlDb().tenant.findUnique({ where: { id: tenantId }, select: { id: true } }))?.id ?? null;
+}
+
+/**
+ * What was refunded on one of our invoices, raised to `refunded` — never lowered, since gateways send
+ * refunds more than once and out of order. `refundedAt` moves only when the amount grows. The workspace,
+ * or null for an invoice that is not here.
+ */
+async function raiseRefunded(gateway: BillingGateway, externalId: string | null, refunded: number | undefined, now: Date): Promise<string | null> {
+  if (!externalId) return null;
+  const control = controlDb();
+  const invoice = await control.invoice.findUnique({ where: { gateway_externalId: { gateway, externalId } }, select: { tenantId: true } });
+  if (!invoice) return null;
+  if (typeof refunded === "number" && Number.isInteger(refunded) && refunded > 0) {
+    // One conditional statement: a smaller figure arriving late matches no row, so it cannot lower it.
+    await control.invoice.updateMany({ where: { gateway, externalId, amountRefunded: { lt: refunded } }, data: { amountRefunded: refunded, refundedAt: now } });
+  }
+  return invoice.tenantId;
 }
 
 // ─── Stripe ────────────────────────────────────────────────────────────────────────────────────
@@ -80,15 +104,28 @@ export async function applyStripeSubscription(sub: StripeSubscription, now = new
   return tenantId;
 }
 
+/** Each line's price as our plan's key; null when it has no lines, or Stripe sent only some of them — the engine then falls back to the subscription's plan. */
+async function stripePlanLines(invoice: StripeInvoice): Promise<PlanLine[] | null> {
+  const lines = invoice.lines;
+  if (!lines?.data.length || lines.has_more) return null;
+  const priceIds = [...new Set(lines.data.flatMap((l) => (l.price?.id ? [l.price.id] : [])))];
+  const prices = priceIds.length
+    ? await controlDb().planPrice.findMany({ where: { gateway: "STRIPE", externalId: { in: priceIds } }, select: { externalId: true, plan: { select: { key: true } } } })
+    : [];
+  const keyOf = new Map(prices.map((p) => [p.externalId, p.plan.key]));
+  return lines.data.map((l) => ({ planKey: (l.price?.id ? keyOf.get(l.price.id) : undefined) ?? null, amount: l.amount }));
+}
+
 export async function applyStripeInvoice(invoice: StripeInvoice): Promise<string | null> {
   const control = controlDb();
   const subscriptionId = idOf(invoice.subscription);
   const customerId = idOf(invoice.customer);
-  const sub = subscriptionId ? await control.subscription.findUnique({ where: { externalId: subscriptionId }, select: { tenantId: true } }) : null;
+  const sub = subscriptionId ? await control.subscription.findUnique({ where: { externalId: subscriptionId }, select: { id: true, tenantId: true } }) : null;
   const byCustomer = !sub && customerId ? await control.tenant.findUnique({ where: { stripeCustomerId: customerId }, select: { id: true } }) : null;
   const tenantId = sub?.tenantId ?? byCustomer?.id ?? (await tenantExists(invoice.metadata?.tenantId));
   if (!tenantId) return null;
   const excludingTax = invoice.total_excluding_tax ?? invoice.subtotal;
+  const planLines = await stripePlanLines(invoice);
   const data = {
     number: invoice.number ?? null,
     status: stripeInvoiceStatus(invoice.status),
@@ -103,13 +140,22 @@ export async function applyStripeInvoice(invoice: StripeInvoice): Promise<string
     paidAt: fromUnix(invoice.status_transitions?.paid_at),
     hostedUrl: invoice.hosted_invoice_url ?? null,
     pdfUrl: invoice.invoice_pdf ?? null,
+    planLines: planLines ?? Prisma.DbNull,
+    // Stripe's running total, which falls again when a credit note is voided; a payload without it leaves ours alone.
+    ...(typeof invoice.post_payment_credit_notes_amount === "number" ? { amountCredited: Math.max(0, invoice.post_payment_credit_notes_amount) } : {}),
   };
   await control.invoice.upsert({
     where: { gateway_externalId: { gateway: "STRIPE", externalId: invoice.id } },
-    create: { tenantId, gateway: "STRIPE", externalId: invoice.id, ...data },
-    update: data,
+    create: { tenantId, gateway: "STRIPE", externalId: invoice.id, subscriptionId: sub?.id ?? null, ...data },
+    // An invoice's subscription never changes: one not (yet) here leaves the one already known.
+    update: { ...data, ...(sub ? { subscriptionId: sub.id } : {}) },
   });
   return tenantId;
+}
+
+/** A charge refunded, in whole or in part: its invoice keeps how much went back. */
+export async function applyStripeRefund(charge: StripeCharge, now = new Date()): Promise<string | null> {
+  return raiseRefunded("STRIPE", idOf(charge.invoice), charge.amount_refunded, now);
 }
 
 // ─── Razorpay ──────────────────────────────────────────────────────────────────────────────────
@@ -157,12 +203,18 @@ export async function applyRazorpaySubscription(sub: RazorpaySubscription, now =
 /** A charge on a subscription: its invoice, paid. */
 export async function applyRazorpayCharge(payment: RazorpayPayment, sub: RazorpaySubscription): Promise<string | null> {
   const control = controlDb();
-  const ours = await control.subscription.findUnique({ where: { externalId: sub.id }, select: { tenantId: true } });
+  const ours = await control.subscription.findUnique({
+    where: { externalId: sub.id },
+    select: { id: true, tenantId: true, items: { select: { plan: { select: { key: true } } }, orderBy: { createdAt: "asc" }, take: 1 } },
+  });
   const tenantId = ours?.tenantId ?? (await tenantExists(noteOf(sub.notes, "tenantId")));
   if (!tenantId) return null;
   const externalId = payment.invoice_id ?? payment.id;
   const paid = payment.status === "captured";
   const tax = payment.tax ?? 0;
+  // A Razorpay subscription carries a single plan, so the whole charge, less its tax, is that plan's.
+  const planKey = ours?.items[0]?.plan.key ?? null;
+  const planLines: PlanLine[] | null = planKey ? [{ planKey, amount: payment.amount - tax }] : null;
   const data = {
     status: paid ? ("PAID" as const) : ("OPEN" as const),
     currency: payment.currency.toUpperCase(),
@@ -174,11 +226,17 @@ export async function applyRazorpayCharge(payment: RazorpayPayment, sub: Razorpa
     periodEnd: fromUnix(sub.current_end),
     issuedAt: fromUnix(payment.created_at) ?? new Date(),
     paidAt: paid ? fromUnix(payment.created_at) : null,
+    planLines: planLines ?? Prisma.DbNull,
   };
   await control.invoice.upsert({
     where: { gateway_externalId: { gateway: "RAZORPAY", externalId } },
-    create: { tenantId, gateway: "RAZORPAY", externalId, ...data },
-    update: data,
+    create: { tenantId, gateway: "RAZORPAY", externalId, subscriptionId: ours?.id ?? null, ...data },
+    update: { ...data, ...(ours ? { subscriptionId: ours.id } : {}) },
   });
   return tenantId;
+}
+
+/** A payment refunded, in whole or in part: the invoice it paid keeps how much went back. */
+export async function applyRazorpayRefund(payment: RazorpayPayment, now = new Date()): Promise<string | null> {
+  return raiseRefunded("RAZORPAY", payment.invoice_id ?? payment.id, payment.amount_refunded, now);
 }

@@ -1,5 +1,11 @@
-import { Card, CardContent } from "@/components/ui/card";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { AuthFrame } from "@/components/console/auth/auth-frame";
+import { Banner } from "@/components/console/kit/banner";
 import { ConsoleSetPasswordForm } from "@/components/console/console-auth-forms";
+import { platformEnv } from "@/lib/platform/console-page";
+
+export const metadata: Metadata = { title: "Choose a password" };
 
 /**
  * Choosing a password from a one-time link — a new staff member's first, or a forgotten one's
@@ -10,16 +16,23 @@ export default async function ConsoleSetupPage({ searchParams }: PageProps<"/pla
   const { t } = await searchParams;
   const token = typeof t === "string" ? t : "";
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
-      <Card className="w-full max-w-sm">
-        <CardContent className="space-y-5 pt-6">
-          <div>
-            <h1 className="text-lg font-semibold text-text">Choose your console password</h1>
-            <p className="mt-1 text-sm text-muted">After this you sign in, and set up two-factor.</p>
-          </div>
-          {token ? <ConsoleSetPasswordForm token={token} /> : <p className="text-sm text-danger">This link is not complete. Ask a console owner for a new one.</p>}
-        </CardContent>
-      </Card>
-    </div>
+    <AuthFrame
+      env={platformEnv()}
+      title="Choose your console password"
+      subtitle="After this you sign in, and set up two-factor if you haven't yet."
+      footer={
+        <Link href="/login" className="font-medium text-brand hover:underline">
+          Back to sign in
+        </Link>
+      }
+    >
+      {token ? (
+        <ConsoleSetPasswordForm token={token} />
+      ) : (
+        <Banner tone="warning" title="This link isn't complete">
+          Open the link from your email again, or ask an owner for a new one.
+        </Banner>
+      )}
+    </AuthFrame>
   );
 }

@@ -44,7 +44,7 @@ export function labelForHost(rawHost: string | null | undefined): string | null 
   if (!host) return null;
   const kind = classifyHost(host);
   if (kind.kind === "tenant") return kind.slug;
-  if (kind.kind === "root" || kind.kind === "console") return "platform";
+  if (kind.kind === "root" || kind.kind === "console" || kind.kind === "cms" || kind.kind === "partners") return "platform";
   return host;
 }
 

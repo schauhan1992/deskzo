@@ -1,85 +1,86 @@
-import { consoleRemovePinKey, consoleStartSync } from "@/actions/platform/console";
-import { ConsoleAction } from "@/components/console/console-action";
-import { PinKeyForm } from "@/components/console/console-forms";
-import { Cell, DataTable, PageTitle, Section, StatusBadge, when } from "@/components/console/console-ui";
-import { consoleStaff, mayManage } from "@/lib/platform/console-page";
-import { readPinDirectory, readWorldPlaces, type SyncStatus } from "@/lib/platform/reference-sync";
+import type { Metadata } from "next";
+import { PageHeader } from "@/components/console/kit/page-header";
+import { Panel } from "@/components/console/kit/panel";
+import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
+import { PinDirectoryCard, WorldPlacesCard, isSyncing } from "@/components/console/reference/dataset-card";
+import { plural } from "@/lib/console-shared/format";
+import { PAGE_ROLES } from "@/lib/console-shared/nav";
+import { capsFor } from "@/lib/console-shared/roles";
+import { consoleStaff } from "@/lib/platform/console-page";
+import { readPinDirectory, readWorldPlaces } from "@/lib/platform/reference-sync";
 
-function SyncLine({ status, stale, startedAt, finishedAt, progress, message }: { status: SyncStatus; stale: boolean; startedAt: string | null; finishedAt: string | null; progress: string; message: string | null }) {
+export const metadata: Metadata = { title: "Reference data" };
+
+/** How often the page reads the sync rows again while a worker is writing its progress to them. */
+const REFRESH_SECONDS = 5;
+
+/**
+ * Reference data (spec §3.15): the shared reference database — one copy for every workspace — with
+ * India's PIN directory and the world's states, cities and postal codes. A sync changes every
+ * workspace's address lookups, which is why it is started from here (managers only) and never from a
+ * customer's workspace. Nothing on this page deletes reference data, and a workspace's reset never
+ * touches it.
+ *
+ * `?sync=pin|world` (the command palette's "Sync PIN directory") opens that dataset's confirmation;
+ * the button reads it itself, so the page takes no params.
+ */
+export default async function ConsoleReferencePage() {
+  const staff = await consoleStaff(PAGE_ROLES.reference);
+  const caps = capsFor(staff.role);
+  const [pin, world] = await Promise.all([readPinDirectory(), readWorldPlaces()]);
+
+  // One poll for the page, however many syncs run: each card would otherwise start its own.
+  const running = isSyncing(pin.sync) || isSyncing(world.sync);
+  const unresolved = Object.entries(pin.loaded?.unresolvedStates ?? {})
+    .filter(([, n]) => typeof n === "number" && n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
   return (
-    <p className="text-sm text-text">
-      <StatusBadge status={stale ? "FAILED" : status} /> {stale ? "It stopped answering — start it again." : status === "RUNNING" ? `Running since ${when(startedAt)} · ${progress}` : finishedAt ? `Last finished ${when(finishedAt)}` : "Never run."}
-      {message && <span className="block text-xs text-muted">{message}</span>}
-    </p>
+    <>
+      <PageHeader
+        title="Reference data"
+        subtitle="Shared by every workspace. A workspace's reset never removes it."
+        autoRefreshSeconds={running ? REFRESH_SECONDS : undefined}
+        live={running}
+      />
+
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        <div className="min-w-0 space-y-6">
+          <PinDirectoryCard pin={pin} caps={caps} />
+          {unresolved.length > 0 && <UnresolvedStates rows={unresolved} />}
+        </div>
+        <WorldPlacesCard world={world} caps={caps} />
+      </div>
+    </>
   );
 }
 
 /**
- * The shared reference database — one copy for every workspace: India's PIN directory and the world's
- * states, cities and postal codes. A sync changes every workspace's address lookups, which is why it is
- * started from here (or the installation's first workspace) and never from a customer's.
+ * State names in the PIN directory that resolved to no GST state code (India Post spells a few its
+ * own way). A PIN under one of them does not fill in a state.
  */
-export default async function ConsoleReferencePage() {
-  const staff = await consoleStaff();
-  const [pin, world] = await Promise.all([readPinDirectory(), readWorldPlaces()]);
-  const manager = mayManage(staff);
+function UnresolvedStates({ rows }: { rows: [string, number][] }) {
+  const offices = rows.reduce((sum, [, n]) => sum + n, 0);
   return (
-    <>
-      <PageTitle title="Reference data">Shared by every workspace. Never removed by a workspace&apos;s reset.</PageTitle>
-
-      <Section title="India PIN directory">
-        <p className="mb-3 text-sm text-text">
-          {pin.loaded ? `${pin.loaded.postOffices.toLocaleString("en-IN")} post offices, ${pin.loaded.pincodes.toLocaleString("en-IN")} PIN codes — from ${pin.loaded.source}, ${when(pin.loaded.loadedAt)}.` : "Empty. PIN codes are not filled in anywhere until it is loaded."}
-        </p>
-        <SyncLine
-          status={pin.sync.status}
-          stale={pin.sync.stale}
-          startedAt={pin.sync.startedAt}
-          finishedAt={pin.sync.finishedAt}
-          progress={`${pin.sync.fetched.toLocaleString("en-IN")}${pin.sync.total ? ` of ${pin.sync.total.toLocaleString("en-IN")}` : ""} records`}
-          message={pin.sync.message}
-        />
-        {manager && (
-          <div className="mt-4 space-y-3">
-            <p className="text-xs text-muted">
-              The sync reads the directory from data.gov.in, with an API key from there. {pin.sync.hasApiKey ? "A key is saved." : "No key is saved yet."}
-            </p>
-            <PinKeyForm hasKey={pin.sync.hasApiKey} />
-            <div className="flex flex-wrap gap-2">
-              {pin.sync.hasApiKey && (pin.sync.status !== "RUNNING" || pin.sync.stale) && <ConsoleAction action={consoleStartSync.bind(null, "pin")} label="Sync now" variant="primary" />}
-              {pin.sync.hasApiKey && <ConsoleAction action={consoleRemovePinKey} label="Remove the key" confirm="Remove the saved data.gov.in key? Syncing stops until one is saved again." />}
-            </div>
-          </div>
-        )}
-      </Section>
-
-      <Section title="World places (GeoNames)">
-        <DataTable head={["Dataset", "Rows", "Source", "Loaded"]} empty="Nothing loaded yet.">
-          {world.loaded.map((d) => (
-            <tr key={d.key}>
-              <Cell className="font-mono text-xs">{d.key}</Cell>
-              <Cell>{d.rows.toLocaleString("en-IN")}</Cell>
-              <Cell className="text-muted">{d.source}</Cell>
-              <Cell className="whitespace-nowrap text-muted">{when(d.loadedAt)}</Cell>
-            </tr>
+    <Panel
+      title="Unresolved state names"
+      description={`${plural(rows.length, "name")} in the PIN directory match no state — ${plural(offices, "post office")} under them don't fill in a state.`}
+      padded={false}
+    >
+      <DataTable caption="Unresolved state names" minWidth={320}>
+        <THead>
+          <Th>Name in the directory</Th>
+          <Th numeric>Post offices</Th>
+        </THead>
+        <TBody>
+          {rows.map(([name, n]) => (
+            <Tr key={name}>
+              <Td>{name}</Td>
+              <Td numeric>{n.toLocaleString("en-IN")}</Td>
+            </Tr>
           ))}
-        </DataTable>
-        <div className="mt-4">
-          <SyncLine
-            status={world.sync.status}
-            stale={world.sync.stale}
-            startedAt={world.sync.startedAt}
-            finishedAt={world.sync.finishedAt}
-            progress={`${world.sync.done}${world.sync.total ? ` of ${world.sync.total}` : ""} files`}
-            message={world.sync.message}
-          />
-        </div>
-        {manager && (world.sync.status !== "RUNNING" || world.sync.stale) && (
-          <div className="mt-3">
-            <ConsoleAction action={consoleStartSync.bind(null, "world")} label="Sync now" confirm="Download the GeoNames files again and reload them? It takes several minutes." />
-          </div>
-        )}
-      </Section>
-    </>
+        </TBody>
+      </DataTable>
+    </Panel>
   );
 }

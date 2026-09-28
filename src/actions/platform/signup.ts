@@ -7,6 +7,8 @@ import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 import { WORLD_COUNTRIES } from "@/lib/geo/world-countries";
 import { isDisposableDomain, parseEmailAddress } from "@/lib/email-verification";
+import { resolveSignupAttribution } from "@/lib/partners/attribution";
+import { findActiveReferral, partnerInviteProblem } from "@/lib/partners/referrals";
 import { controlDb } from "@/lib/platform/control-db";
 import { createHandoffTicket } from "@/lib/platform/handoff";
 import { sendPlatformMail } from "@/lib/platform/mailer";
@@ -28,6 +30,10 @@ import { subdomainHost } from "@/lib/tenancy/registry";
  *      the workspace on a free trial (src/lib/platform/provisioning.ts) and starts the worker.
  *   3. `signupProgress`: what the progress page polls. Once the workspace is up, it hands the owner
  *      a one-time pass to it — once, to this browser only — and the page follows it straight in.
+ *
+ * Partners (src/lib/partners): a partner's invitation code works only while its partner is ACTIVE,
+ * and a partner's referral code on the form must be live. Verifying works out which partner the
+ * workspace belongs to (attribution.ts) and provisioning records it with the workspace.
  *
  * None of this touches a workspace's database: there is none yet. Attempts are limited per address
  * (src/lib/security/lockout.ts, under "platform|"), codes per signup.
@@ -74,15 +80,25 @@ export type SignupForm = {
   password: string;
   country: string;
   invite: string;
+  /** A partner's referral code — from a /signup?ref= link, the referral cookie, or typed. Optional, so a form without it still works. */
+  referral?: string;
+  referralVia?: "link" | "cookie" | "typed" | "";
 };
+
+const inviteRefusal = (open: boolean) =>
+  open ? "That invitation code isn't valid — leave it empty to sign up without one." : "That invitation code isn't valid. Signing up is by invitation for now.";
 
 async function inviteProblem(code: string, open: boolean): Promise<string | null> {
   const invite = await controlDb().signupInvite.findUnique({ where: { codeHash: sha256(code.trim()) } });
   if (!invite || invite.uses >= invite.maxUses || (invite.expiresAt && invite.expiresAt < new Date())) {
-    return open ? "That invitation code isn't valid — leave it empty to sign up without one." : "That invitation code isn't valid. Signing up is by invitation for now.";
+    return inviteRefusal(open);
   }
+  // A partner's code works only while its partner is ACTIVE — refused in the same words.
+  if (await partnerInviteProblem(invite.codeHash, new Date())) return inviteRefusal(open);
   return null;
 }
+
+const REFERRAL_VIA = ["link", "cookie", "typed"] as const;
 
 export async function startSignup(form: SignupForm): Promise<SignupResult<{ email: string }>> {
   const slow = await limited(form.email);
@@ -111,6 +127,11 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
     const badInvite = await inviteProblem(inviteCode, open);
     if (badInvite) return { ok: false, error: badInvite };
   }
+  // A partner's code on the form must be live; an empty one is simply no partner code.
+  const referralInput = String(form.referral ?? "").trim();
+  const referral = referralInput ? await findActiveReferral(referralInput, new Date()) : null;
+  if (referralInput && !referral) return { ok: false, error: "That partner code isn't valid — clear it to sign up without one." };
+  const referralVia = referral ? ((REFERRAL_VIA as readonly string[]).includes(String(form.referralVia)) ? String(form.referralVia) : "typed") : null;
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const secret = randomBytes(24).toString("base64url");
@@ -128,6 +149,8 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
       codeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
       browserSecretHash: sha256(secret),
       ip: clientIpFrom(head),
+      referralCode: referral?.code ?? null,
+      referralVia,
     },
     select: { id: true },
   });
@@ -190,6 +213,12 @@ export async function verifySignup(input: string): Promise<SignupResult> {
   const invite = inviteCodeHash ? await controlDb().signupInvite.findUnique({ where: { codeHash: inviteCodeHash }, select: { planKey: true } }) : null;
   let tenantId: string;
   try {
+    // A partner's invitation whose partner is no longer ACTIVE is refused in the usual words — and goes back, below.
+    if (inviteCodeHash && (await partnerInviteProblem(inviteCodeHash, new Date()))) throw new ProvisioningRefused(inviteRefusal(await signupOpen()));
+    const now = new Date();
+    const attribution = await resolveSignupAttribution({ inviteCodeHash, referralCode: pending.referralCode, email: pending.email, country: pending.country }, now);
+    // The referral link is read again now: the plan it names applies when the invitation names none.
+    const referral = pending.referralCode ? await findActiveReferral(pending.referralCode, now, pending.country) : null;
     ({ tenantId } = await startProvisioning({
       slug: pending.slug,
       companyName: pending.companyName,
@@ -197,7 +226,8 @@ export async function verifySignup(input: string): Promise<SignupResult> {
       ownerEmail: pending.email,
       ownerPasswordHash: pending.passwordHash,
       country: pending.country,
-      planKey: invite?.planKey ?? null,
+      planKey: invite?.planKey ?? referral?.planKey ?? null,
+      attribution,
     }));
   } catch (err) {
     // The invitation goes back: nothing was made with it.

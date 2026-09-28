@@ -309,7 +309,13 @@ export function MergePartnerPicker({ keepRef, keepName, keepId }: { keepRef: str
           Which company is a duplicate of <span className="font-semibold">{keepName}</span>? It will be merged into {keepRef} and removed — you&apos;ll see
           everything that moves before anything does.
         </p>
-        <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type part of the duplicate's name…" autoFocus />
+        <Input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          aria-label="The duplicate company's name"
+          placeholder="Type part of the duplicate's name…"
+          autoFocus
+        />
         {list.length > 0 && (
           <ul className="divide-y divide-line overflow-hidden rounded-base border border-line">
             {list.map((m) => (

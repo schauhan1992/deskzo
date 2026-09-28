@@ -11,7 +11,7 @@
  *   · the new owner is handed straight in with a one-time pass, once;
  *   · "forgot password" says the same for any address, and its link works once;
  *   · the migration runner goes round the workspaces, holds one whose migration fails, and lets it
- *     through again once it can;
+ *     through again once it can; given a list, it migrates those workspaces and nothing else;
  *   · a workspace can be held, reopened, closed with a final backup, and purged.
  *
  * No mail leaves: the platform mailer is replaced. No worker process is started: the one the signup
@@ -260,6 +260,16 @@ async function main() {
     registry.forgetRegistry();
     const retried = await runner.migrateEverything({ only: "zzprov-b" });
     ok("the next run lets it through again", retried.workspaces.some((w) => w.slug === "zzprov-b" && w.ok === true) && (await control.tenant.findUniqueOrThrow({ where: { id: B.id } })).status === "ACTIVE");
+    const listed = await runner.migrateEverything({ only: ["zzprov-a", "zzprov-b"] });
+    const listedRuns = await control.tenantMigrationRun.findMany({ where: { runId: listed.runId }, select: { target: true, ok: true } });
+    const slugsOf = (list: { slug?: string; target?: string }[]) => list.map((w) => w.slug ?? w.target).sort().join();
+    ok(
+      "a list of workspaces: each of them migrated, and nothing else — no control plane, no warm database",
+      listed.platform.length === 0 && slugsOf(listed.workspaces) === "zzprov-a,zzprov-b" && listed.workspaces.every((w) => w.ok === true) && slugsOf(listedRuns) === "zzprov-a,zzprov-b",
+      `${JSON.stringify(listed.workspaces)} · recorded ${slugsOf(listedRuns)}`,
+    );
+    const named = await runner.migrateEverything({ only: ["zzprov-a", "zz-nobody"] });
+    ok("  a name that is no workspace is passed over, and one left off the list is not touched", named.platform.length === 0 && slugsOf(named.workspaces) === "zzprov-a", JSON.stringify(named.workspaces));
 
     section("Held, reopened, closed");
     await lifecycle.suspendTenant(B.id, "check:provisioning", "zz testing");

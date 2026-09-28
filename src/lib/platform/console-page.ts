@@ -1,5 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import type { StaffRole } from "@wroffy/control-client";
+import { ENV_LABEL } from "@/lib/console-shared/labels";
+import { ENTER, MANAGERS, OWNERS, SELLERS, capsFor, hasRole, type Caps } from "@/lib/console-shared/roles";
+import type { PlatformEnv } from "@/lib/console-shared/types";
 import { currentStaffSession, type Staff } from "@/lib/platform/staff-session";
 
 /**
@@ -18,8 +21,31 @@ export async function consoleStaff(roles?: readonly StaffRole[]): Promise<Staff>
   return session.staff;
 }
 
-/** Who may do what from the console, for pages deciding which buttons to show (the actions check again). */
-export const CONSOLE_MANAGERS: readonly StaffRole[] = ["OWNER", "ADMIN"];
-export const mayManage = (staff: Staff) => CONSOLE_MANAGERS.includes(staff.role);
-export const mayEnterWorkspaces = (staff: Staff) => (["OWNER", "ADMIN", "SUPPORT"] as StaffRole[]).includes(staff.role);
-export const isOwner = (staff: Staff) => staff.role === "OWNER";
+/**
+ * Who may do what from the console, for pages deciding which buttons to show (the actions check again).
+ * The sets themselves live in src/lib/console-shared/roles.ts; typing them as StaffRole here is what
+ * proves the console's role names and the control plane's are the same.
+ */
+export const CONSOLE_MANAGERS: readonly StaffRole[] = MANAGERS;
+export const mayManage = (staff: Staff) => hasRole(staff.role, MANAGERS);
+export const mayEnterWorkspaces = (staff: Staff) => hasRole(staff.role, ENTER);
+export const isOwner = (staff: Staff) => hasRole(staff.role, OWNERS);
+/** Plans, prices, trials and billing: OWNER, ADMIN, BILLING. */
+export const maySell = (staff: Staff) => hasRole(staff.role, SELLERS);
+
+/** Everything the staff member may do, as plain booleans a client component can take as a prop. */
+export function consoleCaps(staff: Staff): Caps {
+  return capsFor(staff.role);
+}
+
+/**
+ * Which installation this is — shown on every console page so nobody mistakes staging for the real
+ * thing. PLATFORM_ENV names it (production, staging or development); without it, a production build
+ * is production and anything else is development.
+ */
+export function platformEnv(): PlatformEnv {
+  const named = process.env.PLATFORM_ENV?.trim().toLowerCase();
+  const key: PlatformEnv["key"] =
+    named === "production" || named === "staging" || named === "development" ? named : process.env.NODE_ENV === "production" ? "production" : "development";
+  return { key, ...ENV_LABEL[key], titlePrefix: key === "production" ? "" : `[${key}] ` };
+}

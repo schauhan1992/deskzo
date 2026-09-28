@@ -57,6 +57,8 @@ The Customer authorises the sub-processors listed in docs/privacy/subprocessors.
 
 Services the **Customer** connects to its own workspace with its own credentials — its mail provider, its AI provider for the copilot, the government e-invoice and e-way bill portals, Microsoft for single sign-on — act for the Customer, not as the Processor's sub-processors.
 
+**Partners** — the resellers and distributors who sell or support the service under Wroffy's partner programme — are not sub-processors: they never access the Customer's workspace or the personal data in it, and receive none of it from the Processor. What a partner is shown about a Customer it sold to is limited to the Customer's account with Wroffy (its plan, status, what it pays and its renewal date), which Wroffy holds as controller, not under this agreement.
+
 ## 7. Data subjects' rights
 
 The software lets the Customer answer requests itself: find everything held about a person, export it (Settings → Data export), correct it, and delete it. Marketing recipients can always see and change what they receive, and unsubscribe, whatever the Customer's plan. Where the Customer cannot answer a request with the software, the Processor helps within 10 working days of being asked.

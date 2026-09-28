@@ -35,6 +35,15 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@wroffy/control-client", "@wroffy/reference-client", "@prisma/adapter-pg"],
 
   /**
+   * Server actions accept bodies up to 6 MB: the website CMS uploads images of up to 5 MB through one
+   * (src/actions/cms/media.ts), and Next's default of 1 MB would refuse them before the action's own
+   * checks run. Every action still validates its own input.
+   */
+  experimental: {
+    serverActions: { bodySizeLimit: "6mb" },
+  },
+
+  /**
    * eSSL / ZKTeco terminals post to a fixed path.
    *
    * Their firmware lets you set the server address and port on the keypad, but the path is baked

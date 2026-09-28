@@ -43,6 +43,10 @@ import { searchScopesForMe } from "@/actions/search";
 import { unreadUpdateCount } from "@/actions/help";
 import { can } from "@/lib/authz/resolve";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { activeAnnouncementsFor } from "@/lib/platform/announcements";
+import { PlatformAnnouncements } from "@/components/platform/platform-announcements";
+import { supportLauncherState } from "@/actions/support";
+import { SupportLauncher } from "@/components/support/support-launcher";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
@@ -60,7 +64,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // point of the feature is to see their app, and a header still showing the admin's name and role
   // would make it impossible to tell whose permissions a page was rendered with.
   const shownUser = viewAs?.user ?? session?.user;
-  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp] = await Promise.all([
+  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp, supportLauncher] = await Promise.all([
     listViewAsTargets(),
     // Resolved for whoever the request is acting as, so an admin viewing as a salesperson sees
     // the salesperson's sidebar rather than their own.
@@ -82,6 +86,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     shownUser ? searchScopesForMe().catch(() => []) : Promise.resolve([]),
     shownUser ? unreadUpdateCount().catch(() => 0) : Promise.resolve(0),
     shownUser ? can(shownUser.id, "help.manage") : Promise.resolve(false),
+    // The platform's Contact Support button — null for a view-as, platform support staff, or support
+    // switched off. Never throws, and reads its settings from a minute-long copy with a 1.5 s limit,
+    // so a slow control plane costs a page nothing (src/actions/support.ts).
+    session?.user && !viewAs ? supportLauncherState() : Promise.resolve(null),
 ]);
 
   // Not while viewing as somebody else: an admin borrowing an account should not be wished a happy
@@ -89,6 +97,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const today = viewAs ? null : await todaysMoments();
   // The owner's reminder while a trial or a grace period runs — null for everybody else.
   const billing = session?.user && !viewAs ? await billingNotice().catch(() => null) : null;
+  // The platform's announcements for this workspace. Cached for a minute and never throws, so a
+  // control plane that is down or slow costs a page nothing (src/lib/platform/announcements.ts).
+  const announcements = session?.user ? await activeAnnouncementsFor(await currentTenant()) : [];
 
   const currentPath = requestHeaders.get("x-pathname") ?? "";
   // Skipped while viewing as someone else: "you must change your password" is about the person
@@ -236,17 +247,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
         <MaintenanceBanner />
-        <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">
+        {/*
+          The platform's banners sit above <main>, not inside it: a page may bleed its header into
+          main's top padding with negative margins (the dashboard's welcome header does), which would
+          pull it over anything placed first inside main. Their spacing is their own margins, so a
+          banner dismissed or absent leaves no gap.
+        */}
+        <div className="mx-auto w-full max-w-[1600px] px-4 md:px-6">
+          <PlatformAnnouncements items={announcements} />
           {billing && (
             <Link
               href="/settings/billing"
-              className={`mb-4 block rounded-base border px-3 py-2 text-sm ${billing.tone === "warning" ? "border-warning/40 bg-warning-bg text-warning" : "border-info/30 bg-info-bg text-info"}`}
+              className={`my-4 block rounded-base border px-3 py-2 text-sm md:my-6 ${billing.tone === "warning" ? "border-warning/40 bg-warning-bg text-warning" : "border-info/30 bg-info-bg text-info"}`}
             >
               {billing.text} <span className="font-medium underline">Plan &amp; billing</span>
             </Link>
           )}
-          {children}
-        </main>
+        </div>
+        <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">{children}</main>
         {today && <CelebrationSplash moments={today.moments} />}
       </div>
 
@@ -255,7 +273,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         another twenty rem out of it to hold a calculator would make every table worse in exchange
         for a convenience. The tools it offers all have pages of their own.
       */}
-      <div className="hidden xl:block">
+      <div className="hidden xl:block" data-side-rail>
         <SideRail
           copilot={!!copilot}
           unreadUpdates={unreadUpdates}
@@ -264,6 +282,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           country={(await currentTenant()).country}
         />
       </div>
+
+      {/* Fixed at the bottom right; it measures the rail above through `data-side-rail` to stay clear of it. */}
+      {supportLauncher && <SupportLauncher state={supportLauncher} />}
     </div>
     </TableColumnsProvider>
   );

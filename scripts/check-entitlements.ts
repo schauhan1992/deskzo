@@ -14,7 +14,8 @@
  *   · seats: every way an account becomes active is refused once they are taken, and support
  *     accounts take none;
  *   · the copilot's monthly allowance; e-way bills outside India;
- *   · the console: who may change plans, and its pages.
+ *   · the console: who may change plans, its previews agreeing with the changes they preview, and
+ *     its pages.
  *
  * No mail leaves, no worker process is started, no password is typed anywhere.
  */
@@ -23,6 +24,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
 import Module from "node:module";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import bcrypt from "bcryptjs";
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -179,6 +181,8 @@ async function main() {
     const copilot = require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings");
     const staffLib = require("../src/lib/platform/staff") as typeof import("../src/lib/platform/staff");
     const consoleActions = require("../src/actions/platform/console") as typeof import("../src/actions/platform/console");
+    const consoleWorkspace = require("../src/actions/platform/console-workspace") as typeof import("../src/actions/platform/console-workspace");
+    const consoleBilling = require("../src/actions/platform/console-billing") as typeof import("../src/actions/platform/console-billing");
     const { formatCompanyId } = require("../src/lib/order-id") as typeof import("../src/lib/order-id");
     const { db } = require("../src/lib/db") as typeof import("../src/lib/db");
     cleanup = async () => {
@@ -429,6 +433,44 @@ async function main() {
     const bySupport = await consoleActions.consoleSetWorkspacePlans(TID, [{ planKey: "zz-crm", quantity: 1 }]);
     ok("support staff change no plans", !bySupport.ok);
     await actAs(ownerStaff);
+
+    section("The console previews a change, and the change does what it said");
+    const entitledNow = async () => rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id: TID }, select: { entitlements: true } })).entitlements);
+    const items = [{ planKey: "zz-crm", quantity: 1 }, { planKey: "zz-seats", quantity: 2 }];
+    const planPreview = await consoleWorkspace.consolePreviewEntitlements(TID, { plans: items });
+    const planSaved = await consoleActions.consoleSetWorkspacePlans(TID, items);
+    const afterPlans = await entitledNow();
+    ok(
+      "a change of plans: the preview's answer is the one the workspace then has",
+      planPreview.ok && planSaved.ok && planPreview.data.refusal === null && isDeepStrictEqual(planPreview.data.next, afterPlans),
+      planPreview.ok ? `${JSON.stringify(planPreview.data.next)} vs ${JSON.stringify(afterPlans)}` : planPreview.error,
+    );
+    await consoleActions.consoleSetWorkspacePlans(TID, [{ planKey: "zz-sales-in", quantity: 1 }]);
+    const takePreview = await consoleWorkspace.consolePreviewEntitlements(TID, { override: { moduleKey: "items", granted: false } });
+    const taken = await consoleActions.consoleSetModuleOverride(TID, "items", false, "zz dispute over items");
+    const afterTaking = await entitledNow();
+    ok(
+      "  taking away a module others need: the preview's answer is the one it then has",
+      takePreview.ok && taken.ok && isDeepStrictEqual(takePreview.data.next, afterTaking),
+      takePreview.ok ? `${JSON.stringify(takePreview.data.next)} vs ${JSON.stringify(afterTaking)}` : takePreview.error,
+    );
+    ok(
+      "  and it says what goes with it",
+      takePreview.ok && ["items", "orders", "renewals"].every((m) => takePreview.data.diff.modulesRemoved.includes(m)) && !afterTaking.modules.includes("orders"),
+      takePreview.ok ? takePreview.data.diff.modulesRemoved.join(",") : "",
+    );
+    await plans.setModuleOverride(TID, "items", null, "", "zz-staff");
+    await consoleActions.consoleSetWorkspacePlans(TID, [{ planKey: "zz-crm", quantity: 1 }]);
+    const crmModules = async () => (await control.plan.findUniqueOrThrow({ where: { key: "zz-crm" }, select: { modules: { select: { moduleKey: true } } } })).modules.map((m) => m.moduleKey);
+    const impact = await consoleBilling.consolePreviewPlanSave({ ...base, key: "zz-crm", name: "CRM", modules: [], seats: 2, copilotTokens: 0, isDefault: true });
+    ok(
+      "saving a plan without its modules: the preview names the workspace that would lose them",
+      impact.ok && impact.data.workspaces >= 1 && impact.data.losingModules.some((l) => l.slug === SLUG && l.modules.includes("workspace")),
+      impact.ok ? JSON.stringify(impact.data.losingModules) : impact.error,
+    );
+    ok("  and saves nothing", (await crmModules()).includes("workspace") && (await entitledNow()).modules.includes("workspace"));
+
+    section("The console's pages");
     const PlansPage = (require("../src/app/platform-console/(console)/plans/page") as { default: Page }).default;
     const WorkspacePage = (require("../src/app/platform-console/(console)/workspaces/[slug]/page") as { default: Page }).default;
     const plansHtml = text(await attempt(PlansPage));

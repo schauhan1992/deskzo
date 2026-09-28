@@ -16,7 +16,14 @@
  *     billing; closing after ninety days only when turned on;
  *   · a held workspace answering only its sign-in and billing page;
  *   · the workspace's billing page and actions — its owner's alone; open signup starting a trial;
- *   · the platform tick and the webhook routes answering only on the platform's address.
+ *   · the platform tick and the webhook routes answering only on the platform's address, and what the
+ *     tick did kept for the console;
+ *   · the console: a workspace paying at a gateway given no plans or trial by hand; a webhook that
+ *     failed replayed once the gateway answers; a subscription read back; the billing lifecycle run
+ *     now doing exactly what its preview said; keys shown only as set or not;
+ *   · what the partner programme's commission reads from an invoice (check:partners has the rest):
+ *     its subscription and plan lines, what was refunded (raised, never lowered) and credited (a
+ *     credit note's invoice read back from Stripe), and the events the Billing page says to send.
  */
 import "dotenv/config";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
@@ -61,6 +68,10 @@ type Call = { method: string; url: URL; body: string; headers: Record<string, st
 const calls: Call[] = [];
 const stripeSubs = new Map<string, Record<string, unknown>>();
 const razorSubs = new Map<string, Record<string, unknown>>();
+/** Stripe subscriptions Stripe is failing to read back just now — a 500 — so a webhook needing one fails. */
+const stripeDown = new Set<string>();
+/** Invoices as Stripe would read them back — a credit note names only its invoice. */
+const stripeInvoices = new Map<string, Record<string, unknown>>();
 let seq = 0;
 const answer = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,8 +87,14 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (method === "POST" && p === "/v1/billing_portal/sessions") return answer(200, { url: "https://billing.stripe.test/portal" });
     const sub = p.match(/^\/v1\/subscriptions\/(.+)$/);
     if (method === "GET" && sub) {
+      if (stripeDown.has(decodeURIComponent(sub[1]!))) return answer(500, { error: { message: "zz Stripe is having a bad day" } });
       const found = stripeSubs.get(decodeURIComponent(sub[1]!));
       return found ? answer(200, found) : answer(404, { error: { message: "No such subscription" } });
+    }
+    const invoiceRead = p.match(/^\/v1\/invoices\/([^/]+)$/);
+    if (method === "GET" && invoiceRead) {
+      const found = stripeInvoices.get(decodeURIComponent(invoiceRead[1]!));
+      return found ? answer(200, found) : answer(404, { error: { message: "No such invoice" } });
     }
   }
   if (url.host === "api.razorpay.com") {
@@ -227,7 +244,9 @@ async function main() {
     const signup = require("../src/actions/platform/signup") as typeof import("../src/actions/platform/signup");
     const staffLib = require("../src/lib/platform/staff") as typeof import("../src/lib/platform/staff");
     const consoleActions = require("../src/actions/platform/console") as typeof import("../src/actions/platform/console");
+    const consoleBilling = require("../src/actions/platform/console-billing") as typeof import("../src/actions/platform/console-billing");
     const consoleData = require("../src/lib/platform/console-data") as typeof import("../src/lib/platform/console-data");
+    const tickSummary = require("../src/lib/platform/tick-summary") as typeof import("../src/lib/platform/tick-summary");
     const { db } = require("../src/lib/db") as typeof import("../src/lib/db");
     cleanup = async () => {
       await db.$disconnect();
@@ -357,6 +376,47 @@ async function main() {
     await webhooks.receiveStripeWebhook(inv.raw, inv.signature);
     const usInvoice = await control.invoice.findFirst({ where: { tenantId: US } });
     ok("an invoice paid is recorded: its number, its tax, where to see it", usInvoice?.status === "PAID" && usInvoice.number === "ZZ-0001" && usInvoice.tax === 384 && usInvoice.total === 5184 && usInvoice.pdfUrl?.endsWith(".pdf") === true);
+    ok(
+      "  with its subscription; no lines were sent, so no plan lines (the commission engine falls back to the subscription's plan)",
+      usInvoice?.subscriptionId === usSub.id && usInvoice.planLines === null,
+      JSON.stringify({ subscriptionId: usInvoice?.subscriptionId, planLines: usInvoice?.planLines }),
+    );
+
+    section("Stripe: what the partner programme's commission reads from an invoice");
+    let feed = 0;
+    const stripeEvent = async (type: string, object: Record<string, unknown>) => {
+      const e = stripeSigned({ id: `evt_zz_feed_${++feed}`, type, created: 0, data: { object } });
+      return webhooks.receiveStripeWebhook(e.raw, e.signature);
+    };
+    const in1 = () => control.invoice.findUniqueOrThrow({ where: { gateway_externalId: { gateway: "STRIPE", externalId: "in_zz1" } } });
+    const linesOf = (value: unknown) => (Array.isArray(value) ? (value as { planKey: string | null; amount: number }[]).map((l) => `${l.planKey}:${l.amount}`).join() : String(value));
+    const paidInvoice = invoice.data.object;
+    const lines = { data: [{ amount: 2900, price: { id: priceIds["zz-pro"]! } }, { amount: 1800, price: { id: priceIds["zz-seats"]! } }, { amount: 100, price: { id: "price_zz_not_ours" } }] };
+    const withLines = await stripeEvent("invoice.updated", { ...paidInvoice, lines });
+    const planLines = linesOf((await in1()).planLines);
+    ok("an invoice's lines become its plan lines: each price as our plan's key, a price not ours as none", withLines.status === 200 && planLines === "zz-pro:2900,zz-seats:1800,null:100", planLines);
+    await stripeEvent("invoice.updated", { ...paidInvoice, lines: { ...lines, has_more: true } });
+    ok("  only some of them sent (has_more): none at all, rather than a guess", (await in1()).planLines === null, linesOf((await in1()).planLines));
+    const charge = (refunded: number) => ({ id: "ch_zz1", object: "charge", invoice: "in_zz1", amount: 5184, amount_refunded: refunded, created: Math.floor(Date.now() / 1000) });
+    const refundedOnce = await stripeEvent("charge.refunded", charge(1000));
+    const afterRefund = await in1();
+    ok("a charge refunded, delivered signed: its invoice keeps how much went back, and when", refundedOnce.status === 200 && afterRefund.amountRefunded === 1000 && !!afterRefund.refundedAt, `${refundedOnce.status} ${afterRefund.amountRefunded}`);
+    await stripeEvent("charge.refunded", charge(400));
+    const afterLate = await in1();
+    ok("  a smaller figure arriving late never lowers it, nor moves when", afterLate.amountRefunded === 1000 && afterLate.refundedAt?.getTime() === afterRefund.refundedAt?.getTime(), afterLate.amountRefunded);
+    await stripeEvent("charge.refunded", charge(1500));
+    ok("  a larger one raises it", (await in1()).amountRefunded === 1500, (await in1()).amountRefunded);
+    stripeInvoices.set("in_zz1", { ...paidInvoice, lines, post_payment_credit_notes_amount: 2000 });
+    const readsBefore = callsTo("GET", "/v1/invoices/").length;
+    const credited = await stripeEvent("credit_note.created", { id: "cn_zz1", object: "credit_note", invoice: "in_zz1" });
+    const afterCredit = await in1();
+    ok(
+      "a credit note: its invoice read back from Stripe, and what was credited on it kept — the refund untouched",
+      credited.status === 200 && callsTo("GET", "/v1/invoices/in_zz1").length === 1 && callsTo("GET", "/v1/invoices/").length === readsBefore + 1 && afterCredit.amountCredited === 2000 && afterCredit.amountRefunded === 1500,
+      `${credited.status} credited ${afterCredit.amountCredited} refunded ${afterCredit.amountRefunded}`,
+    );
+    const noInvoice = await stripeEvent("credit_note.created", { id: "cn_zz2", object: "credit_note", invoice: null });
+    ok("  one naming no invoice reads nothing, and is answered", noInvoice.status === 200 && callsTo("GET", "/v1/invoices/").length === readsBefore + 1);
 
     section("A failed payment, its grace, the hold — and paying again");
     let n = 3;
@@ -415,6 +475,22 @@ async function main() {
     await webhooks.receiveRazorpayWebhook(charged.raw, charged.signature, "evt_rzp_2");
     const inInvoice = await control.invoice.findFirst({ where: { tenantId: IN } });
     ok("charged: its invoice, paid, in rupees", inInvoice?.status === "PAID" && inInvoice.total === 149900 && inInvoice.currency === "INR" && inInvoice.externalId === "inv_zz1");
+    ok("  with its subscription, and the plan it is for as its one plan line, less tax", inInvoice?.subscriptionId === inSub.id && linesOf(inInvoice.planLines) === "zz-pro:149900", linesOf(inInvoice?.planLines));
+    const rzpInvoice = () => control.invoice.findUniqueOrThrow({ where: { gateway_externalId: { gateway: "RAZORPAY", externalId: "inv_zz1" } } });
+    const rzpRefund = (event: string, payment: Record<string, unknown>, refund?: Record<string, unknown>) =>
+      razorSigned({
+        entity: "event",
+        event,
+        payload: { payment: { entity: { id: "pay_zz1", entity: "payment", amount: 149900, currency: "INR", status: "refunded", invoice_id: "inv_zz1", created_at: Math.floor(Date.now() / 1000), ...payment } }, ...(refund ? { refund: { entity: refund } } : {}) },
+        created_at: 0,
+      });
+    const rzpRefunded = rzpRefund("payment.refunded", { amount_refunded: 50000 });
+    const rzpRefundAnswer = await webhooks.receiveRazorpayWebhook(rzpRefunded.raw, rzpRefunded.signature, "evt_rzp_refund_1");
+    const rzpAfterRefund = await rzpInvoice();
+    ok("a payment refunded, delivered signed: the invoice it paid keeps how much went back", rzpRefundAnswer.status === 200 && rzpAfterRefund.amountRefunded === 50000 && !!rzpAfterRefund.refundedAt, `${rzpRefundAnswer.status} ${rzpAfterRefund.amountRefunded}`);
+    const rzpSmaller = rzpRefund("refund.processed", {}, { id: "rfnd_zz1", payment_id: "pay_zz1", amount: 20000 });
+    await webhooks.receiveRazorpayWebhook(rzpSmaller.raw, rzpSmaller.signature, "evt_rzp_refund_2");
+    ok("  a refund processed for less, arriving later, never lowers it", (await rzpInvoice()).amountRefunded === 50000, (await rzpInvoice()).amountRefunded);
     razorSubs.get(firstRzp!)!.status = "pending";
     const pending = razorSigned(rzpEvent("subscription.pending", firstRzp!));
     await webhooks.receiveRazorpayWebhook(pending.raw, pending.signature, "evt_rzp_3");
@@ -458,6 +534,9 @@ async function main() {
     const ticked = await tick(tickReq("admin.localhost:3000"));
     const tickBody = (await ticked.json()) as { daily?: { usage: number } | null };
     ok("  on the platform's: the lifecycle, and the day's reconcile and usage", ticked.status === 200 && !!tickBody.daily, JSON.stringify(tickBody).slice(0, 160));
+    const lastRun = await tickSummary.lastTick();
+    ok("  what it did is kept for the console: by the tick, with the day's block", lastRun?.by === "tick" && !!lastRun.daily && lastRun.daily.usage === tickBody.daily?.usage, JSON.stringify(lastRun));
+    ok("  and the day's revenue is recorded", (await control.platformRevenueSnapshot.count()) >= 1 && (lastRun?.daily?.revenue ?? 0) >= 1, lastRun?.daily?.revenue);
     const hook = (host: string) => new Request(`http://${host}/api/platform/billing/stripe`, { method: "POST", headers: { host, "stripe-signature": "t=1,v1=0" }, body: "{}" });
     ok("the webhook on a workspace's address: not here", (await stripeRoute(hook("zzbill-in.localhost:3000"))).status === 404);
     ok("  on the platform's, a bad signature: refused", (await stripeRoute(hook("admin.localhost:3000"))).status === 400);
@@ -536,9 +615,124 @@ async function main() {
     const BillingConsole = (require("../src/app/platform-console/(console)/billing/page") as { default: Page }).default;
     const consolePage = await render(BillingConsole);
     ok("the Billing page: keys only as set or not, the webhook addresses, what the gateways said", !consolePage.includes("sk_test_replaced") && consolePage.includes("/api/platform/billing/stripe") && /checkout.session.completed/.test(consolePage), consolePage.slice(0, 160));
+    const gatewayEvents = ["charge.refunded", "credit_note.*", "payment.refunded", "refund.processed"];
+    ok("  and the events to send: refunds and credit notes at Stripe, refunds at Razorpay", gatewayEvents.every((e) => consolePage.includes(e)), gatewayEvents.filter((e) => !consolePage.includes(e)).join(", "));
     const WorkspacePage = (require("../src/app/platform-console/(console)/workspaces/[slug]/page") as { default: Page }).default;
     const wsPage = await render(WorkspacePage, { slug: "zzbill-in" });
     ok("a workspace's page: its standing, subscriptions and invoices", /Billing/.test(wsPage) && wsPage.includes(firstRzp!) && /1,499/.test(wsPage), wsPage.slice(0, 200));
+    const billingStaff = (await staffLib.createStaff({ email: "billing@zzbill.example", name: "Zz Billing", role: "BILLING" }, "script:check")).id;
+    const supportStaff = (await staffLib.createStaff({ email: "support@zzbill.example", name: "Zz Support", role: "SUPPORT" }, "script:check")).id;
+    const audits = (action: string, tenantId?: string) => control.platformAuditLog.count({ where: { action, ...(tenantId ? { tenantId } : {}) } });
+
+    section("The console: a workspace paying at a gateway changes its plans there");
+    const standingBefore = await lifecycle.billingStanding(IN);
+    const manualBefore = await control.subscription.count({ where: { tenantId: IN, gateway: "MANUAL" } });
+    const guarded = await consoleActions.consoleSetWorkspacePlans(IN, [{ planKey: "zz-lite", quantity: 1 }]);
+    ok("its plans are not given here: it pays through Razorpay", !guarded.ok && /pays through Razorpay/.test(guarded.error), guarded.ok ? "given" : guarded.error);
+    ok(
+      "  no plan given by hand, and its standing as it was",
+      (await control.subscription.count({ where: { tenantId: IN, gateway: "MANUAL" } })) === manualBefore && (await lifecycle.billingStanding(IN)).kind === standingBefore.kind,
+      standingBefore.kind,
+    );
+    const trialRefused = await plans.setTrialEnd(IN, new Date(Date.now() + 10 * DAY), "script:check").then(
+      () => null,
+      (err: unknown) => err,
+    );
+    ok("  nor a trial on top of what it pays for", trialRefused instanceof plans.PlanRefused && /pays through Razorpay/.test(trialRefused.message), String(trialRefused));
+
+    section("The console: a webhook that failed, replayed");
+    const RE = await makeTenant("zzbill-replay", "US", "USD", 14);
+    const replaySubId = "sub_stripe_zz_replay";
+    stripeSubs.set(replaySubId, { ...stripeSub("active"), id: replaySubId, customer: "cus_zz_replay", metadata: { tenantId: RE }, items: { data: [{ id: "si_zz_replay_pro", quantity: 1, price: { id: priceIds["zz-pro"]! } }] } });
+    stripeDown.add(replaySubId);
+    const replayEvent = stripeSigned({
+      id: "evt_zz_replay",
+      type: "checkout.session.completed",
+      created: Math.floor(Date.now() / 1000),
+      data: { object: { id: "cs_zz_replay", object: "checkout.session", mode: "subscription", client_reference_id: RE, customer: "cus_zz_replay", subscription: replaySubId } },
+    });
+    const failedDelivery = await webhooks.receiveStripeWebhook(replayEvent.raw, replayEvent.signature);
+    const eventRow = () => control.billingEvent.findUniqueOrThrow({ where: { gateway_eventId: { gateway: "STRIPE", eventId: "evt_zz_replay" } }, select: { id: true, processedAt: true, error: true, tenantId: true } });
+    const failedRow = await eventRow();
+    ok(
+      "while Stripe cannot say what was bought, the webhook fails: kept with its error, not processed",
+      failedDelivery.status === 500 && !failedRow.processedAt && /bad day/.test(failedRow.error ?? "") && (await control.subscription.count({ where: { externalId: replaySubId } })) === 0,
+      `${failedDelivery.status} ${failedRow.error}`,
+    );
+    await actAs(supportStaff);
+    const bySupport = await consoleBilling.consoleReplayBillingEvent(failedRow.id);
+    ok("support staff cannot replay it", !bySupport.ok && !(await eventRow()).processedAt, bySupport.ok ? "replayed" : bySupport.error);
+    await actAs(ownerStaff);
+    const stillDown = await consoleBilling.consoleReplayBillingEvent(failedRow.id);
+    ok(
+      "replayed while Stripe still fails: refused in Stripe's words, still waiting, and the attempt audited",
+      !stillDown.ok && /bad day/.test(stillDown.error) && !(await eventRow()).processedAt && (await audits("billing.event.replay")) === 1,
+      stillDown.ok ? "processed" : stillDown.error,
+    );
+    stripeDown.delete(replaySubId);
+    const replayed = await consoleBilling.consoleReplayBillingEvent(failedRow.id);
+    const replayedRow = await eventRow();
+    const replaySub = await control.subscription.findUnique({ where: { externalId: replaySubId }, select: { tenantId: true, status: true } });
+    ok("once Stripe answers, the replay goes through: processed, for its workspace", replayed.ok && replayed.data.ok && !!replayedRow.processedAt && replayedRow.error === null && replayedRow.tenantId === RE, replayed.ok ? JSON.stringify(replayed.data) : replayed.error);
+    ok("  the subscription written from it", replaySub?.tenantId === RE && replaySub.status === "ACTIVE" && (await lifecycle.billingStanding(RE)).kind === "paid", JSON.stringify(replaySub));
+    ok("  and recorded against it", (await audits("billing.event.replay", RE)) === 1);
+    const twice = await consoleBilling.consoleReplayBillingEvent(failedRow.id);
+    ok("a processed event is not replayed again", !twice.ok && /Already processed/.test(twice.error), twice.ok ? "replayed" : twice.error);
+
+    section("The console: a subscription read back from its gateway");
+    const inGatewaySub = await control.subscription.findUniqueOrThrow({ where: { externalId: firstRzp! }, select: { id: true, syncedAt: true } });
+    const resynced = await consoleBilling.consoleResyncSubscription(inGatewaySub.id);
+    const syncedAfter = (await control.subscription.findUniqueOrThrow({ where: { id: inGatewaySub.id }, select: { syncedAt: true } })).syncedAt;
+    ok(
+      "a Razorpay subscription is read back now, and that is recorded",
+      resynced.ok && !!syncedAfter && syncedAfter.getTime() > (inGatewaySub.syncedAt?.getTime() ?? 0) && (await audits("billing.resync", IN)) === 1,
+      resynced.ok ? JSON.stringify(resynced.data) : resynced.error,
+    );
+    const handGiven = await control.subscription.findFirstOrThrow({ where: { gateway: "MANUAL" }, select: { id: true } });
+    const manualResync = await consoleBilling.consoleResyncSubscription(handGiven.id);
+    ok("  a plan given by hand has nothing to read back", !manualResync.ok && /given by hand/.test(manualResync.error) && (await audits("billing.resync")) === 1, manualResync.ok ? "resynced" : manualResync.error);
+
+    section("The console: the billing lifecycle, now");
+    // A trial that ended eight days ago: past its seven days' grace, so the run holds it.
+    const DUE = await makeTenant("zzbill-due", "IN", "INR", -8);
+    const preview = await consoleBilling.consolePreviewLifecycle();
+    ok("the preview says who a run would hold — the trial past its grace among them", preview.ok && preview.data.held.includes("zzbill-due"), preview.ok ? JSON.stringify(preview.data) : preview.error);
+    const planned = preview.ok ? preview.data : { held: [], lifted: [], closed: [], remind: [] };
+    const understated = await consoleBilling.consoleRunBillingLifecycle({ held: planned.held.length - 1, closed: planned.closed.length });
+    ok("a run confirming fewer holds than it would make is refused, and holds nobody", !understated.ok && /more than you confirmed/.test(understated.error) && (await control.tenant.findUniqueOrThrow({ where: { id: DUE } })).status === "ACTIVE", understated.ok ? "ran" : understated.error);
+    // The platform tick holding its lease — started elsewhere, not finished.
+    const leaseKey = { tenantId_job: { tenantId: "platform", job: "platform-tick" } };
+    await control.tenantJobLease.upsert({
+      where: leaseKey,
+      create: { tenantId: "platform", job: "platform-tick", leasedUntil: new Date(Date.now() + 10 * 60_000), holder: "zz-another-scheduler" },
+      update: { leasedUntil: new Date(Date.now() + 10 * 60_000), holder: "zz-another-scheduler" },
+    });
+    const whileTicking = await consoleBilling.consoleRunBillingLifecycle({ held: planned.held.length, closed: planned.closed.length });
+    ok("while the tick is running, a run is refused — it does the same", !whileTicking.ok && /running right now/.test(whileTicking.error) && (await control.tenant.findUniqueOrThrow({ where: { id: DUE } })).status === "ACTIVE", whileTicking.ok ? "ran" : whileTicking.error);
+    await control.tenantJobLease.update({ where: leaseKey, data: { leasedUntil: new Date(Date.now() - 1000) } });
+    const run = await consoleBilling.consoleRunBillingLifecycle({ held: planned.held.length, closed: planned.closed.length });
+    const sameList = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
+    ok(
+      "run now, it does exactly what the preview said",
+      run.ok && sameList(run.data.held, planned.held) && sameList(run.data.lifted, planned.lifted) && sameList(run.data.closed, planned.closed) && run.data.reminded === planned.remind.length,
+      run.ok ? `${JSON.stringify(run.data)} vs ${JSON.stringify(planned)}` : run.error,
+    );
+    const dueRow = await control.tenant.findUniqueOrThrow({ where: { id: DUE }, select: { status: true, suspendedFor: true } });
+    ok("  the trial past its grace is held for billing", dueRow.status === "SUSPENDED" && dueRow.suspendedFor === "BILLING", JSON.stringify(dueRow));
+    const byStaff = await tickSummary.lastTick();
+    ok("  recorded: in the audit log, and as the last tick — by the staff member, no daily chores", (await audits("billing.lifecycle.run")) === 1 && byStaff?.by === ownerStaff && byStaff.daily === null, JSON.stringify(byStaff));
+    await actAs(billingStaff);
+    ok("billing staff do not run it", !(await consoleBilling.consolePreviewLifecycle()).ok && !(await consoleBilling.consoleRunBillingLifecycle({ held: 0, closed: 0 })).ok);
+    await actAs(ownerStaff);
+
+    section("The console: settings show keys only as set or not");
+    const keyValues = ["sk_test_replaced", STRIPE_WHSEC, "rzp_test_zz", "rzp_secret_zz", RAZOR_WHSEC];
+    const overview = JSON.stringify(await settings.settingsOverview());
+    const modes = await settings.gatewayModes();
+    ok("the settings list has no key's value in it", !keyValues.some((v) => overview.includes(v)), keyValues.filter((v) => overview.includes(v)).join(", "));
+    ok("  the gateways' modes neither — test, from the keys' prefixes", !keyValues.some((v) => JSON.stringify(modes).includes(v)) && modes.stripe === "test" && modes.razorpay === "test", JSON.stringify(modes));
+    const billingAfter = await render(BillingConsole);
+    ok("  and the Billing page, after all that, still no key — its webhook address and what the gateways said", !keyValues.some((v) => billingAfter.includes(v)) && billingAfter.includes("/api/platform/billing/stripe") && billingAfter.includes("checkout.session.completed"));
   } finally {
     try {
       (require("../src/lib/platform/mailer") as typeof import("../src/lib/platform/mailer")).setTestPlatformMailer(null);

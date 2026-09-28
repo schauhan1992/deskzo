@@ -1,4 +1,4 @@
-import type { PlanKind } from "@wroffy/control-client";
+import type { PlanKind, Prisma } from "@wroffy/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { dependentsOf, soldIn, withDependencies, type Entitlements } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
@@ -15,11 +15,29 @@ import { forgetRegistry } from "@/lib/tenancy/registry";
  *   · Seats and copilot tokens: an edition or internal plan without a limit means no limit;
  *     otherwise each plan's allowance times its quantity, added up. A staff override replaces the
  *     sum.
+ *
+ * The working out itself is `entitlementsFrom`, which reads nothing: the console's previews
+ * (entitlement-preview.ts) run it on a change that has not been made, so what they show is what the
+ * save will write.
  */
 
-const LIVE = ["TRIALING", "ACTIVE", "PAST_DUE"] as const;
+/** The subscriptions whose plans count. */
+export const LIVE_STATUSES = ["TRIALING", "ACTIVE", "PAST_DUE"] as const;
 /** Plans whose missing limit means "none"; an add-on without one adds nothing. */
 const BASE_KINDS: readonly PlanKind[] = ["EDITION", "INTERNAL"];
+
+/** A plan as entitlements are worked out from it — whoever loads plans for `entitlementsFrom` selects this. */
+export const ENTITLEMENT_PLAN_SELECT = {
+  key: true,
+  kind: true,
+  allModules: true,
+  seats: true,
+  copilotTokens: true,
+  modules: { select: { moduleKey: true } },
+} as const satisfies Prisma.PlanSelect;
+
+/** One plan on a live subscription, with its quantity. */
+export type EntItem = { quantity: number; plan: { key: string; kind: PlanKind; allModules: boolean; seats: number | null; copilotTokens: number | null; modules: { moduleKey: string }[] } };
 
 type PlanForSum = { kind: PlanKind; seats: number | null; copilotTokens: number | null };
 
@@ -28,17 +46,15 @@ function sumLimit(items: { quantity: number; plan: PlanForSum }[], field: "seats
   return items.reduce((total, i) => total + (i.plan[field] ?? 0) * i.quantity, 0);
 }
 
-export async function computeEntitlements(tenantId: string): Promise<Entitlements> {
-  const control = controlDb();
-  const [tenant, items, overrides] = await Promise.all([
-    control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, seatOverride: true, copilotTokenOverride: true } }),
-    control.subscriptionItem.findMany({
-      where: { subscription: { tenantId, status: { in: [...LIVE] } } },
-      select: { quantity: true, plan: { select: { key: true, kind: true, allModules: true, seats: true, copilotTokens: true, modules: { select: { moduleKey: true } } } } },
-    }),
-    control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
-  ]);
-
+/**
+ * What a workspace may use, from its country and limit overrides, the plans on its live
+ * subscriptions, and its module overrides — the rules above, and nothing read.
+ */
+export function entitlementsFrom(
+  tenant: { country: string; seatOverride: number | null; copilotTokenOverride: number | null },
+  items: EntItem[],
+  overrides: { moduleKey: string; granted: boolean }[],
+): Entitlements {
   const everything = items.some((i) => i.plan.allModules);
   const fromPlans = everything ? MODULE_REGISTRY.map((m) => m.key) : items.flatMap((i) => i.plan.modules.map((m) => m.moduleKey));
   const modules = withDependencies(fromPlans.filter((key) => getModuleDefinition(key)));
@@ -59,6 +75,19 @@ export async function computeEntitlements(tenantId: string): Promise<Entitlement
     copilotTokens: tenant.copilotTokenOverride ?? sumLimit(items, "copilotTokens"),
     plans: [...new Set(items.map((i) => i.plan.key))].sort(),
   };
+}
+
+export async function computeEntitlements(tenantId: string): Promise<Entitlements> {
+  const control = controlDb();
+  const [tenant, items, overrides] = await Promise.all([
+    control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, seatOverride: true, copilotTokenOverride: true } }),
+    control.subscriptionItem.findMany({
+      where: { subscription: { tenantId, status: { in: [...LIVE_STATUSES] } } },
+      select: { quantity: true, plan: { select: ENTITLEMENT_PLAN_SELECT } },
+    }),
+    control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
+  ]);
+  return entitlementsFrom(tenant, items, overrides);
 }
 
 /** Works it out and writes it, where every request for the workspace reads it within the minute. */

@@ -298,6 +298,7 @@ function CopilotPanel({ availability, onClose }: { availability: CopilotAvailabi
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              aria-label="Message the copilot"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

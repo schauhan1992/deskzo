@@ -11,7 +11,9 @@ import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, ty
  *
  * Each seal is bound to its workspace and its purpose as AES-GCM associated data: a sealed key
  * bundle copied onto another workspace's row, or a database address pasted into the key bundle's
- * column, fails to open rather than opening as something else.
+ * column, fails to open rather than opening as something else. What belongs to no workspace is
+ * bound the same way to "platform" (the platform's own secrets) or to "partner:<id>" (a partner's
+ * bank details).
  */
 
 const FORMAT = "k1";
@@ -60,7 +62,7 @@ export function openForTenant(tenantId: string, purpose: SealPurpose, sealed: st
   return open(tenantId, purpose, sealed);
 }
 
-export type SignPurpose = "backup-archive";
+export type SignPurpose = "backup-archive" | "cms-preview";
 
 /**
  * A signature only the platform can make, for one workspace and one purpose — derived from the
@@ -78,7 +80,8 @@ export function platformKeyConfigured(): boolean {
   return !!process.env.PLATFORM_MASTER_KEY?.trim();
 }
 
-export type PlatformSealPurpose = "reference-sync-key" | "warm-db-url" | "staff-totp" | "platform-setting";
+/** "partner-totp": a partner portal user's authenticator secret (src/lib/partners/session.ts). */
+export type PlatformSealPurpose = "reference-sync-key" | "warm-db-url" | "staff-totp" | "platform-setting" | "cms-totp" | "partner-totp";
 
 /**
  * Sealing for something that belongs to no workspace — the data.gov.in key that refreshes the shared
@@ -92,4 +95,27 @@ export function sealForPlatform(purpose: PlatformSealPurpose, plainText: string)
 
 export function openForPlatform(purpose: PlatformSealPurpose, sealed: string): string {
   return open("platform", purpose, sealed);
+}
+
+/** A partner's bank details on its row, and new ones waiting in a payout request. */
+export type PartnerSealPurpose = "partner-payout" | "partner-payout-request";
+
+/**
+ * Sealing for one partner of the partner programme — its bank details. Same key and format again,
+ * bound to "partner:<its id>" and the purpose: never a workspace's id (no id has a colon) nor
+ * "platform", so one partner's details copied onto another partner's row, into a request of the
+ * wrong kind, or onto a workspace fail to open rather than opening as theirs.
+ */
+export function sealForPartner(partnerId: string, purpose: PartnerSealPurpose, plainText: string): string {
+  return seal(partnerOwner(partnerId), purpose, plainText);
+}
+
+export function openForPartner(partnerId: string, purpose: PartnerSealPurpose, sealed: string): string {
+  return open(partnerOwner(partnerId), purpose, sealed);
+}
+
+function partnerOwner(partnerId: string): string {
+  const id = String(partnerId ?? "").trim();
+  if (!id) throw new Error("A partner's seal needs the partner's id.");
+  return `partner:${id}`;
 }

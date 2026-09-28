@@ -1,100 +1,109 @@
 "use client";
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Theme = "light" | "dark" | "system";
+/**
+ * Light or dark — the two choices a person makes. Until they make one, the page follows the
+ * organisation's default, and where that default is "system", the computer's own setting (the root
+ * layout's before-paint script applies it; the effect below keeps following it). Whichever of the two
+ * is showing is the button that looks pressed. A stored "system" from before there was no such button
+ * counts as no choice.
+ */
+export type ThemeChoice = "light" | "dark";
 
-const OPTIONS: { value: Theme; label: string; Icon: typeof Sun }[] = [
+export const THEME_CHOICES: { value: ThemeChoice; label: string; Icon: typeof Sun }[] = [
   { value: "light", label: "Light", Icon: Sun },
   { value: "dark", label: "Dark", Icon: Moon },
-  { value: "system", label: "System", Icon: Monitor },
 ];
 
 const STORAGE_KEY = "theme";
 /** `storage` only fires in *other* tabs, so this tab tells itself. */
 const CHANGED = "wroffy:theme-changed";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-function apply(theme: Theme) {
-  const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", dark);
+const isChoice = (value: unknown): value is ThemeChoice => value === "light" || value === "dark";
+
+function stored(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    // Private mode, or site data blocked: nothing was remembered.
+    return null;
+  }
 }
 
 function subscribe(onChange: () => void) {
+  const media = window.matchMedia(DARK_QUERY);
   window.addEventListener(CHANGED, onChange);
   window.addEventListener("storage", onChange);
+  media.addEventListener("change", onChange);
   return () => {
     window.removeEventListener(CHANGED, onChange);
     window.removeEventListener("storage", onChange);
+    media.removeEventListener("change", onChange);
   };
 }
 
+/** Choose light or dark: remembered, applied at once, and told to every toggle and menu on the page. */
+export function chooseTheme(next: ThemeChoice) {
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    // ignore — the choice holds for this page and is simply not remembered
+  }
+  document.documentElement.classList.toggle("dark", next === "dark");
+  window.dispatchEvent(new Event(CHANGED));
+}
+
 /**
- * Which button looks pressed.
+ * Which theme is showing: the person's choice, else the default, else the computer's setting. Null
+ * only on the server and while hydrating when the default is "system", because only the browser
+ * knows the computer's setting.
  *
  * ## Why this is a store rather than `useState`
  *
- * The chosen theme lives in `localStorage`, which exists only in the browser. Seeding `useState`
- * from it means the first client render disagrees with the server's — the server has no way to know
- * somebody picked Dark — and React reports that as a hydration mismatch. It was doing exactly that:
- * `aria-pressed={true}` against `aria-pressed="false"` on two of these buttons, with an error
- * overlay on every dashboard load in development.
- *
- * `suppressHydrationWarning` was on the wrapping element and did nothing for it, because that flag
- * covers the element's own attributes and text, never its descendants'. The buttons are the
- * descendants.
- *
- * `useSyncExternalStore` is built for precisely this: `getServerSnapshot` is used on the server and
- * for the hydrating render, so the two agree by construction, and React then re-renders from the
- * real value. The same approach the sidebar uses for its collapsed state, for the same reason.
- *
- * The theme itself is applied before paint by the inline script in the root layout, so none of this
- * affects what the page looks like — only which of the three buttons is highlighted.
+ * The choice lives in `localStorage`, which exists only in the browser. Seeding `useState` from it
+ * makes the first client render disagree with the server's, which React reports as a hydration
+ * mismatch (`aria-pressed` differing on the buttons). `useSyncExternalStore` uses the server
+ * snapshot for the server and the hydrating render, so the two agree by construction, then
+ * re-renders from the real value.
  */
-export function ThemeToggle({ defaultTheme }: { defaultTheme: string }) {
-  const fallback = ((defaultTheme as Theme) || "system") satisfies Theme;
+export function useThemeChoice(defaultTheme: string): ThemeChoice | null {
+  const fallback = isChoice(defaultTheme) ? defaultTheme : null;
 
-  const getSnapshot = useCallback((): Theme => {
-    try {
-      return (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? fallback;
-    } catch {
-      // Private mode, or site data blocked. The organisation's default is the honest answer.
-      return fallback;
-    }
+  const getSnapshot = useCallback((): ThemeChoice | null => {
+    const chosen = stored();
+    if (isChoice(chosen)) return chosen;
+    return fallback ?? (window.matchMedia(DARK_QUERY).matches ? "dark" : "light");
   }, [fallback]);
-
-  const getServerSnapshot = useCallback((): Theme => fallback, [fallback]);
-
+  const getServerSnapshot = useCallback((): ThemeChoice | null => fallback, [fallback]);
   const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  // Following the OS only means anything if we react when the OS changes.
+  // Until somebody chooses, a "system" default follows the computer when it switches.
   useEffect(() => {
-    if (theme !== "system") return;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => apply("system");
+    if (fallback) return;
+    const media = window.matchMedia(DARK_QUERY);
+    const onChange = () => {
+      if (!isChoice(stored())) document.documentElement.classList.toggle("dark", media.matches);
+    };
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
-  }, [theme]);
+  }, [fallback]);
 
-  function choose(next: Theme) {
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // ignore — the choice just won't persist
-    }
-    apply(next);
-    // The store is the source of truth now, so telling it is what re-renders the buttons.
-    window.dispatchEvent(new Event(CHANGED));
-  }
+  return theme;
+}
 
+export function ThemeToggle({ defaultTheme }: { defaultTheme: string }) {
+  const theme = useThemeChoice(defaultTheme);
   return (
     <div className="flex items-center gap-0.5 rounded-base border border-line bg-surface-sunken p-0.5">
-      {OPTIONS.map(({ value, label, Icon }) => (
+      {THEME_CHOICES.map(({ value, label, Icon }) => (
         <button
           key={value}
           type="button"
-          onClick={() => choose(value)}
+          onClick={() => chooseTheme(value)}
           title={label}
           aria-label={`${label} theme`}
           aria-pressed={theme === value}

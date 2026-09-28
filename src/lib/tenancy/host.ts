@@ -1,11 +1,13 @@
 /**
  * Which workspace a request is for, from the host it arrived on — and only from that.
  *
- *   acme.<PLATFORM_DOMAIN>    the workspace "acme"
- *   admin.<PLATFORM_DOMAIN>   the platform console
- *   <PLATFORM_DOMAIN>         the public site and signup
- *   anything else             a workspace's custom domain, or an address kept alive from before
- *                             (TENANCY_LEGACY_HOSTS) — looked up in the registry
+ *   acme.<PLATFORM_DOMAIN>      the workspace "acme"
+ *   admin.<PLATFORM_DOMAIN>     the platform console
+ *   cms.<PLATFORM_DOMAIN>       the public website's CMS (its own accounts — src/lib/cms)
+ *   partners.<PLATFORM_DOMAIN>  the partner portal (its own accounts — src/lib/partners)
+ *   <PLATFORM_DOMAIN>           the public site and signup
+ *   anything else               a workspace's custom domain, or an address kept alive from before
+ *                               (TENANCY_LEGACY_HOSTS) — looked up in the registry
  *
  * ## The forwarded host is a claim
  *
@@ -26,6 +28,7 @@ export const RESERVED_SLUGS = new Set([
   "www", "admin", "api", "app", "apps", "auth", "billing", "console", "dashboard", "devices", "docs", "help",
   "mail", "smtp", "imap", "status", "support", "static", "cdn", "assets", "files", "login", "signup", "account",
   "accounts", "platform", "system", "root", "test", "dev", "staging", "demo", "blog", "news", "shop", "store",
+  "cms", "partners", "partner",
 ]);
 
 /** A workspace name: lower-case letters, digits and hyphens, 3–40, not starting or ending with a hyphen. */
@@ -34,6 +37,10 @@ export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 export type HostKind =
   | { kind: "tenant"; slug: string; host: string }
   | { kind: "console"; host: string }
+  /** The website CMS: its own sign-in, no workspace, no /api. */
+  | { kind: "cms"; host: string }
+  /** The partner portal: its own sign-in, no workspace, no /api. */
+  | { kind: "partners"; host: string }
   | { kind: "root"; host: string }
   /** Not under the platform domain: a custom domain or a kept-alive address, for the registry. */
   | { kind: "other"; host: string }
@@ -63,8 +70,10 @@ export function classifyHost(host: string): HostKind {
   if (!name.endsWith(suffix)) return { kind: "other", host };
   const sub = name.slice(0, -suffix.length);
   if (sub === "admin") return { kind: "console", host };
-  // The public site answers on www. as well as the bare domain — and in development only there, the
-  // bare localhost:3000 being the first workspace's old address.
+  if (sub === "cms") return { kind: "cms", host };
+  if (sub === "partners") return { kind: "partners", host };
+  // The public site answers on www. as well as the bare domain (unless TENANCY_LEGACY_HOSTS gives the
+  // bare address to a workspace from before).
   if (sub === "www") return { kind: "root", host };
   if (sub.includes(".") || RESERVED_SLUGS.has(sub) || !SLUG_PATTERN.test(sub)) return { kind: "invalid", host };
   return { kind: "tenant", slug: sub, host };
@@ -97,7 +106,7 @@ export function requestHost(headers: Headers): string | null | typeof HOST_MISMA
   return host;
 }
 
-const onPlatform = (h: HostKind) => h.kind === "tenant" || h.kind === "console" || h.kind === "root";
+const onPlatform = (h: HostKind) => h.kind === "tenant" || h.kind === "console" || h.kind === "cms" || h.kind === "partners" || h.kind === "root";
 const sameSite = (a: HostKind, b: HostKind) => a.kind === b.kind && (a.kind !== "tenant" || (b.kind === "tenant" && a.slug === b.slug));
 
 /** http for local development hosts, https everywhere else. */

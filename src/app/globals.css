@@ -42,6 +42,18 @@
   --info: #2563a8;
   --info-bg: #e8f1fb;
 
+  /*
+   * Chart series, for identity rather than state — a series is "Stripe" or "trialing", never
+   * "good" or "bad"; that is what the status colours above are for. Used by position in fixed
+   * order (src/components/console/charts), so a filtered-out series never repaints the others.
+   */
+  --chart-1: #6366f1;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #8b5cf6;
+  --chart-6: #06b6d4;
+
   --shadow-sm: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.06);
   --shadow-md: 0 2px 4px -1px rgb(16 24 40 / 0.06), 0 4px 12px -2px rgb(16 24 40 / 0.08);
   --shadow-lg: 0 8px 24px -4px rgb(16 24 40 / 0.12), 0 16px 40px -8px rgb(16 24 40 / 0.10);
@@ -71,6 +83,13 @@
   --danger-bg: #2d1618;
   --info: #6aa5e8;
   --info-bg: #14212f;
+
+  --chart-1: #818cf8;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a78bfa;
+  --chart-6: #22d3ee;
 
   /* Indigo-300: 8.2:1 against the dark surface, where the brand indigo manages 2.92:1. */
   --focus: #a5b4fc;
@@ -104,6 +123,13 @@
   --color-danger-bg: var(--danger-bg);
   --color-info: var(--info);
   --color-info-bg: var(--info-bg);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
 
   --radius-base: var(--radius);
   --font-sans: var(--font-geist-sans);

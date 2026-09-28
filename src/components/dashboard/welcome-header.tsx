@@ -46,7 +46,7 @@ export function WelcomeHeader({
   return (
     <section className="relative -mx-4 -mt-6 mb-6 overflow-hidden border-b border-line bg-surface md:-mx-6 md:-mt-8">
       {/* The pattern fades out towards the tabs, so they sit on a clean strip and read clearly. */}
-      <IconPattern className="pointer-events-none absolute inset-0 h-full w-full text-brand opacity-[0.09] [mask-image:linear-gradient(to_bottom,black_40%,transparent)] dark:opacity-[0.14]" />
+      <IconPattern className="pointer-events-none absolute inset-0 h-full w-full text-brand opacity-[0.1] [mask-image:linear-gradient(to_bottom,black_55%,transparent)] dark:opacity-[0.14]" />
 
       <div className="relative flex flex-wrap items-start justify-between gap-x-6 gap-y-4 px-4 pt-5 md:px-6 md:pt-6">
         <div className="flex min-w-0 items-center gap-4">

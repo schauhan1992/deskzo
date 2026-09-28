@@ -1,110 +1,156 @@
-import { Cell, DataTable, PageTitle, Section } from "@/components/console/console-ui";
-import { PlanForm } from "@/components/console/plan-forms";
-import { AddPriceForm } from "@/components/console/billing-forms";
-import { ConsoleAction } from "@/components/console/console-action";
-import { consoleRetirePrice } from "@/actions/platform/console";
-import { formatMoney } from "@/lib/billing/money";
-import { consoleStaff, isOwner } from "@/lib/platform/console-page";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Layers, Plus } from "lucide-react";
+import { ChartFrame, ChartTable } from "@/components/console/charts/chart-frame";
+import { HBarChart } from "@/components/console/charts/hbar-chart";
+import { Banner } from "@/components/console/kit/banner";
+import { EmptyState } from "@/components/console/kit/empty-state";
+import { SelectFilter, ToggleFilter } from "@/components/console/kit/filter-controls";
+import { FilterBar, FilterChips, ViewTabs } from "@/components/console/kit/filters";
+import { PageHeader } from "@/components/console/kit/page-header";
+import { Panel } from "@/components/console/kit/panel";
+import { CompareMatrix } from "@/components/console/plans/compare-matrix";
+import { KIND_ORDER, PlanCards } from "@/components/console/plans/plan-cards";
+import { plural } from "@/lib/console-shared/format";
+import { planKindLabel } from "@/lib/console-shared/labels";
+import { PAGE_ROLES } from "@/lib/console-shared/nav";
+import { parsePlanCatalogueFilters, withParams } from "@/lib/console-shared/params";
+import { capsFor } from "@/lib/console-shared/roles";
 import { plansList } from "@/lib/platform/console-data";
+import { consoleStaff } from "@/lib/platform/console-page";
 import { moduleCatalogue } from "@/lib/platform/plans";
 
+export const metadata: Metadata = { title: "Plans" };
+
+const PRIMARY_LINK =
+  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-base bg-brand px-3 text-[13px] font-medium whitespace-nowrap text-brand-contrast shadow-sm hover:brightness-110";
+
 /**
- * What a workspace can be on. A change to a plan reaches every workspace on it at once — their
- * entitlements are worked out again as it is saved (src/lib/platform/plans.ts). Its prices are made
- * at their gateway as they are added (src/lib/billing/prices.ts).
+ * What a workspace can be on (spec §3.10): the catalogue as cards grouped by kind, or every plan side
+ * by side. A change to a plan reaches every workspace on it as it is saved — entitlements are worked
+ * out again (src/lib/platform/plans.ts) — so the editor is its own page, and this one is for reading
+ * and finding. Sellers get New plan, Edit, Duplicate and Retire; an internal plan only the owner.
  */
-export default async function ConsolePlansPage() {
-  const staff = await consoleStaff();
+export default async function ConsolePlansPage({ searchParams }: PageProps<"/platform-console/plans">) {
+  const staff = await consoleStaff(PAGE_ROLES.plans);
+  const caps = capsFor(staff.role);
+  const sp = await searchParams;
+  const f = parsePlanCatalogueFilters(sp);
   const plans = await plansList();
   const catalogue = moduleCatalogue();
-  const seller = ["OWNER", "ADMIN", "BILLING"].includes(staff.role);
-  const owner = isOwner(staff);
+
+  const onSale = plans.filter((p) => p.active).length;
+  const retired = plans.length - onSale;
   const hasDefault = plans.some((p) => p.isDefault && p.active);
+  const countries = [...new Set(plans.flatMap((p) => p.countries))].sort();
+  // Sold in a country: limited to it, or sold everywhere.
+  const visible = plans.filter(
+    (p) => (f.retired || p.active) && (!f.kind || p.kind === f.kind) && (!f.country || p.countries.length === 0 || p.countries.includes(f.country)),
+  );
+
+  const view = f.view === "compare" ? "compare" : null;
+  const chips = [
+    ...(f.kind ? [{ key: "kind", label: `Kind: ${planKindLabel(f.kind)}`, removeHref: withParams("/plans", sp, { kind: null }) }] : []),
+    ...(f.country ? [{ key: "country", label: `Sold in ${f.country}`, removeHref: withParams("/plans", sp, { country: null }) }] : []),
+    ...(f.retired ? [{ key: "retired", label: "Retired shown", removeHref: withParams("/plans", sp, { retired: null }) }] : []),
+  ];
+  const clearHref = view ? "/plans?view=compare" : "/plans";
+
+  const bars = [...visible]
+    .sort((a, b) => b.workspaces - a.workspaces || a.name.localeCompare(b.name))
+    .map((p) => ({
+      key: p.key,
+      label: p.name,
+      value: p.workspaces,
+      href: `/workspaces?plan=${encodeURIComponent(p.key)}`,
+      tone: p.active ? ("chart-1" as const) : ("muted" as const),
+      note: p.active ? undefined : "retired",
+    }));
+  const onAnyPlan = bars.some((b) => b.value > 0);
+
   return (
     <>
-      <PageTitle title="Plans">
-        What each plan includes. Modules sold only in India go only into plans sold only there.
-        {!hasDefault && " No plan is marked for new workspaces yet, so a new workspace starts with only the core."}
-      </PageTitle>
-      <Section title={`${plans.length} plan(s)`}>
-        <DataTable head={["Plan", "Kind", "Modules", "Users", "Copilot / month", "Sold in", "Prices", "Workspaces"]} empty="None yet.">
-          {plans.map((p) => (
-            <tr key={p.id} className={p.active ? undefined : "opacity-60"}>
-              <Cell>
-                <span className="font-medium">{p.name}</span>
-                {p.isDefault && <span className="ml-1 text-xs text-brand">new workspaces</span>}
-                {!p.active && <span className="ml-1 text-xs text-muted">retired</span>}
-                <span className="block font-mono text-xs text-muted">{p.key}</span>
-              </Cell>
-              <Cell>{p.kind.toLowerCase()}</Cell>
-              <Cell className="max-w-[280px] text-xs text-muted">{p.allModules ? "every module" : p.modules.join(", ") || "the basics only"}</Cell>
-              <Cell>{p.seats ?? "no limit"}</Cell>
-              <Cell>{p.copilotTokens === null ? "no limit" : p.copilotTokens === 0 ? "none" : p.copilotTokens.toLocaleString("en-IN")}</Cell>
-              <Cell>{p.countries.join(", ") || "everywhere"}</Cell>
-              <Cell className="text-xs">
-                {p.prices.filter((x) => x.active).map((x) => (
-                  <span key={x.id} className="block whitespace-nowrap">
-                    {formatMoney(x.amount, x.currency)}/{x.interval === "YEAR" ? "yr" : "mo"}
-                    {x.perSeat ? " per person" : ""} <span className="text-muted">{x.gateway.toLowerCase()}</span>
-                  </span>
-                ))}
-                {p.kind !== "INTERNAL" && !p.prices.some((x) => x.active) && <span className="text-muted">not for sale yet</span>}
-              </Cell>
-              <Cell>{p.workspaces}</Cell>
-            </tr>
-          ))}
-        </DataTable>
-      </Section>
-      {seller && (
-        <>
-          <Section title="New plan">
-            <PlanForm catalogue={catalogue} owner={owner} />
-          </Section>
-          {plans.map((p) => (
-            <details key={p.id} className="mb-3 rounded-xl border border-line bg-surface px-5 py-3">
-              <summary className="cursor-pointer text-sm font-medium text-text">Change {p.name}</summary>
-              {p.kind !== "INTERNAL" && (
-                <div className="mt-4 space-y-2 border-b border-line pb-4">
-                  <p className="text-xs text-muted">
-                    Prices — made at the gateway as they are added, never changed there: a new price replaces the one on sale, and workspaces already paying the old one keep it.
-                  </p>
-                  {p.prices.map((x) => (
-                    <div key={x.id} className={x.active ? "flex flex-wrap items-center gap-2 text-sm" : "flex flex-wrap items-center gap-2 text-sm opacity-60"}>
-                      <span>
-                        {formatMoney(x.amount, x.currency)} {x.interval === "YEAR" ? "a year" : "a month"}
-                        {x.perSeat ? ", per person" : ""} — {x.gateway.toLowerCase()} <span className="font-mono text-xs text-muted">{x.externalId}</span>
-                        {!x.active && " (retired)"}
-                      </span>
-                      {x.active && <ConsoleAction action={consoleRetirePrice.bind(null, x.id)} label="Take off sale" variant="ghost" confirm="Take this price off sale? Workspaces already paying it keep it." />}
-                    </div>
-                  ))}
-                  <AddPriceForm planKey={p.key} />
-                </div>
-              )}
-              <div className="mt-4">
-                <PlanForm
-                  owner={owner}
-                  catalogue={catalogue}
-                  plan={{
-                    key: p.key,
-                    name: p.name,
-                    kind: p.kind,
-                    description: p.description,
-                    allModules: p.allModules,
-                    modules: p.modules,
-                    countries: p.countries,
-                    seats: p.seats,
-                    copilotTokens: p.copilotTokens,
-                    isDefault: p.isDefault,
-                    active: p.active,
-                    sortOrder: p.sortOrder,
-                  }}
+      <PageHeader
+        title="Plans"
+        subtitle={
+          plans.length === 0
+            ? "What a workspace can be on — nothing yet."
+            : `${plural(onSale, "plan")} on sale · ${retired} retired. A change to a plan reaches every workspace on it as it is saved.`
+        }
+        actions={
+          caps.sell ? (
+            <Link href="/plans/new" className={PRIMARY_LINK}>
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              New plan
+            </Link>
+          ) : undefined
+        }
+      />
+
+      <div className="space-y-6">
+        {plans.length > 0 && !hasDefault && (
+          <Banner tone="warning" title="No plan is the default for new workspaces — signups without an invitation plan have nothing to start on.">
+            {caps.sell ? "Open the edition new workspaces should start on and tick “Default for new workspaces”." : undefined}
+          </Banner>
+        )}
+
+        {plans.length === 0 ? (
+          <Panel>
+            <EmptyState
+              icon={<Layers className="h-5 w-5" />}
+              title="No plans yet"
+              body="Create the first edition — the plan new workspaces start on, with the modules they run on and the people included."
+              action={
+                caps.sell ? (
+                  <Link href="/plans/new" className={PRIMARY_LINK}>
+                    <Plus aria-hidden="true" className="h-4 w-4" />
+                    New plan
+                  </Link>
+                ) : undefined
+              }
+            />
+          </Panel>
+        ) : (
+          <div>
+            <FilterBar
+              trailing={
+                <ViewTabs
+                  label="View"
+                  items={[
+                    { key: "cards", label: "Cards", href: withParams("/plans", sp, { view: null }), active: view === null },
+                    { key: "compare", label: "Compare", href: withParams("/plans", sp, { view: "compare" }), active: view === "compare" },
+                  ]}
                 />
-              </div>
-            </details>
-          ))}
-        </>
-      )}
+              }
+            >
+              <SelectFilter param="kind" label="Kind" allLabel="All kinds" options={KIND_ORDER.map((k) => ({ value: k, label: planKindLabel(k) }))} />
+              {countries.length > 0 && <SelectFilter param="country" label="Sold in" allLabel="Any country" options={countries.map((c) => ({ value: c, label: c }))} />}
+              {(retired > 0 || f.retired) && <ToggleFilter param="retired" label={`Show retired (${retired})`} />}
+            </FilterBar>
+            <FilterChips chips={chips} clearHref={chips.length ? clearHref : undefined} />
+
+            {visible.length === 0 ? (
+              <Panel>
+                <EmptyState variant="filtered" title="No plan matches these filters" body="Plans sold everywhere count as sold in every country." clearHref={clearHref} />
+              </Panel>
+            ) : view === "compare" ? (
+              <CompareMatrix plans={visible} catalogue={catalogue} />
+            ) : (
+              <PlanCards plans={visible} catalogue={catalogue} caps={caps} />
+            )}
+          </div>
+        )}
+
+        {onAnyPlan && (
+          <ChartFrame
+            title="Workspaces per plan"
+            description="Workspaces on each plan through a live subscription. One workspace can be on several plans — an edition and its add-ons."
+            table={<ChartTable columns={["Plan", "Key", "Workspaces"]} rows={bars.map((b) => [b.label, b.key, b.value])} numericFrom={2} />}
+          >
+            <HBarChart bars={bars} label="Workspaces per plan" />
+          </ChartFrame>
+        )}
+      </div>
     </>
   );
 }

@@ -21,6 +21,10 @@ import type { Tenant } from "@/lib/tenancy/state";
  * Each database's run is recorded (TenantMigrationRun). A workspace whose migration fails is held
  * (MIGRATING — the proxy shows a maintenance page) until a later run brings it through; one already
  * held is retried by every run. A workspace that succeeds is marked current.
+ *
+ * `only` names workspaces by slug — one, or a list — and a run then covers just those of them it
+ * would have covered anyway, skipping steps 1–2. Given but naming none (an empty list or string), it
+ * migrates nothing — it is never read as "everything".
  */
 
 export type MigrationSummary = {
@@ -67,21 +71,32 @@ async function migrateWorkspace(runId: string, tenant: Tenant): Promise<void> {
   }
 }
 
-/** The workspaces a run covers: every active one, and every one a failed run left held. */
-async function runnable(only: string | null): Promise<Tenant[]> {
+/** The workspaces a run covers: every active one, and every one a failed run left held — of those named, when some are. */
+async function runnable(only: ReadonlySet<string> | null): Promise<Tenant[]> {
   const held = await controlDb().tenant.findMany({ where: { status: "MIGRATING" }, select: { id: true } });
   const heldTenants = (await Promise.all(held.map((h) => tenantById(h.id)))).filter((t): t is Tenant => !!t);
   const all = [...(await activeTenants()), ...heldTenants.filter((t) => t.dbUrl)];
-  return only ? all.filter((t) => t.slug === only) : all;
+  return only ? all.filter((t) => only.has(t.slug)) : all;
 }
 
-export async function migrateEverything(options: { only?: string | null; concurrency?: number; log?: (line: string) => void } = {}): Promise<MigrationSummary> {
+/** The slugs `only` names — null when it is not given, which is every database. */
+function namedSlugs(only: string | string[] | null | undefined): ReadonlySet<string> | null {
+  if (only === null || only === undefined) return null;
+  return new Set((Array.isArray(only) ? only : [only]).map((s) => String(s).trim()).filter(Boolean));
+}
+
+export async function migrateEverything(options: { only?: string | string[] | null; concurrency?: number; log?: (line: string) => void } = {}): Promise<MigrationSummary> {
   const log = options.log ?? (() => {});
+  const only = namedSlugs(options.only);
   const runId = randomUUID();
   const summary: MigrationSummary = { runId, version: latestMigrationName(), platform: [], workspaces: [], stoppedAt: null };
+  if (only?.size === 0) {
+    log("  no workspace named: nothing to migrate");
+    return summary;
+  }
   const outcome = await withPlatformLease("migrate", 2 * 60 * 60_000, async () => {
-    // 1–2. The platform's own databases and the warm pool — unless one workspace was named.
-    if (!options.only) {
+    // 1–2. The platform's own databases and the warm pool — unless workspaces were named.
+    if (!only) {
       const platform: { target: string; run: () => Promise<string> }[] = [
         { target: "control", run: () => migrateDeploy(process.env.CONTROL_DATABASE_URL!, "control") },
         ...(process.env.REFERENCE_DATABASE_URL ? [{ target: "reference", run: () => migrateDeploy(process.env.REFERENCE_DATABASE_URL!, "reference") }] : []),
@@ -110,7 +125,12 @@ export async function migrateEverything(options: { only?: string | null; concurr
     }
 
     // 3–4. The canary, then everyone else.
-    const tenants = await runnable(options.only ?? null);
+    const tenants = await runnable(only);
+    if (only) {
+      const found = new Set(tenants.map((t) => t.slug));
+      const absent = [...only].filter((slug) => !found.has(slug));
+      if (absent.length) log(`  not open or held, so not migrated: ${absent.join(", ")}`);
+    }
     const canaries = tenants.filter((t) => t.isDefault);
     const rest = tenants.filter((t) => !t.isDefault);
     for (const [group, list, concurrency] of [["canary", canaries, 1], ["workspaces", rest, options.concurrency ?? 8]] as const) {

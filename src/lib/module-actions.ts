@@ -10,7 +10,8 @@
  *                   search, the dashboard. In every plan, so nothing to check.
  *   · "public"    — served to somebody with no account here (a form, the portal, the visitor
  *                   tablet). There is no user to require; each checks `moduleAvailableForTenant`.
- *   · "platform"  — the platform's own (signup, the staff console). No workspace plan applies.
+ *   · "platform"  — the platform's own (signup, the staff console, the public website and its CMS,
+ *                   the partner portal). No workspace plan applies.
  *
  * A file listing several modules serves each of them (a trade document is a sales or a purchase
  * one): its actions are open while any of them is in the plan.
@@ -131,6 +132,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "security.ts": "core",
   "settlement.ts": ["payroll"],
   "support-access.ts": "core",
+  // Contact Support: asking the platform for help is part of every plan.
+  "support.ts": "core",
   "support-load.ts": ["helpdesk"],
   "survey.ts": ["engagement"],
   "table-preference.ts": "core",
@@ -150,9 +153,38 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "visitor.ts": ["visitors"],
   "wins.ts": ["wins"],
   "workspace.ts": ["workspace"],
+  "platform/console-admin.ts": "platform",
+  "platform/console-alerts.ts": "platform",
+  "platform/console-announcements.ts": "platform",
+  "platform/console-billing.ts": "platform",
+  "platform/console-commissions.ts": "platform",
+  "platform/console-directory.ts": "platform",
+  "platform/console-partners.ts": "platform",
+  "platform/console-shell.ts": "platform",
+  "platform/console-support.ts": "platform",
+  "platform/console-website.ts": "platform",
+  "platform/console-workspace.ts": "platform",
   "platform/console.ts": "platform",
+  "platform/partner-site.ts": "platform",
   "platform/signup.ts": "platform",
+  "platform/site.ts": "platform",
   "platform/staff-auth.ts": "platform",
+  // The website CMS (cms.<domain>): its own accounts, and only the control plane's site tables.
+  "cms/auth.ts": "platform",
+  "cms/leads.ts": "platform",
+  "cms/media.ts": "platform",
+  "cms/pages.ts": "platform",
+  "cms/posts.ts": "platform",
+  "cms/settings.ts": "platform",
+  "cms/users.ts": "platform",
+  // The partner portal (partners.<domain>): its own accounts, and only the control plane's partner tables.
+  "partners/auth.ts": "platform",
+  "partners/commissions.ts": "platform",
+  "partners/deals.ts": "platform",
+  "partners/invitations.ts": "platform",
+  "partners/profile.ts": "platform",
+  "partners/resellers.ts": "platform",
+  "partners/team.ts": "platform",
 };
 
 /**

@@ -83,3 +83,8 @@ public/sample-vendor-statement.csv
 
 # Platform mail written instead of sent, in development (src/lib/platform/mailer.ts)
 /platform-outbox/
+
+# Contact Support's attachments and recordings when SUPPORT_DIR is unset (src/lib/support/storage.ts):
+# what customers sent — screenshots, documents, recordings of their screens. Anchored for the reason
+# /backups/ is.
+/storage/

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { checkWorkspaceName, signupProgress, startSignup, verifySignup, type SignupForm } from "@/actions/platform/signup";
@@ -8,13 +9,22 @@ import type { Country } from "@/lib/geo/countries";
 
 type Stage = { at: "form" } | { at: "code"; email: string } | { at: "progress"; step: string } | { at: "failed"; message: string };
 
+/** A partner's live referral code, checked by the signup page (src/app/platform-site/signup/page.tsx) — from its link or the referral cookie. */
+export type SignupReferral = { code: string; partnerName: string; via: "link" | "cookie" };
+
 /**
  * The signup, in three screens: the form, the emailed code, and the workspace being set up — which
  * ends by going straight into it, signed in (src/actions/platform/signup.ts).
+ *
+ * A partner's code (spec §4.2): prefilled from a referral — "Referred by …", which the visitor may
+ * remove — or typed into the "Have a partner code?" disclosure. It goes with the form, saying where it
+ * came from; `startSignup` checks it again.
  */
-export function SignupFlow({ suffix, countries, inviteRequired = true }: { suffix: string; countries: Country[]; inviteRequired?: boolean }) {
+export function SignupFlow({ suffix, countries, inviteRequired = true, referral = null }: { suffix: string; countries: Country[]; inviteRequired?: boolean; referral?: SignupReferral | null }) {
   const [stage, setStage] = useState<Stage>({ at: "form" });
-  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite: "" });
+  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite: "", referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
+  // The partner's name is shown until the visitor removes it; after that, the code is theirs to type or not.
+  const [referredBy, setReferredBy] = useState(referral?.partnerName ?? null);
   // Remembered with the name it was for, so an answer about an earlier name is never shown.
   const [nameCheck, setNameCheck] = useState<{ slug: string; ok: boolean; text: string } | null>(null);
   const [code, setCode] = useState("");
@@ -146,6 +156,44 @@ export function SignupFlow({ suffix, countries, inviteRequired = true }: { suffi
         <Label htmlFor="invite">{inviteRequired ? "Invitation code" : "Invitation code (if you have one)"}</Label>
         <Input id="invite" value={form.invite} onChange={set("invite")} autoComplete="off" required={inviteRequired} />
       </div>
+      {referredBy ? (
+        <div className="flex items-center justify-between gap-3 rounded-base border border-line bg-surface-sunken px-3 py-2">
+          <p className="min-w-0 text-sm text-text">{`Referred by ${referredBy}`}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setReferredBy(null);
+              setForm((f) => ({ ...f, referral: "", referralVia: "" }));
+            }}
+          >
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <details className="group">
+          <summary className="cursor-pointer list-none rounded-md text-sm font-medium text-muted hover:text-text [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex items-center gap-1">
+              Have a partner code?
+              <ChevronDown aria-hidden="true" className="h-4 w-4 transition-transform duration-200 group-open:rotate-180" />
+            </span>
+          </summary>
+          <div className="mt-3">
+            <Label htmlFor="referral">Partner code</Label>
+            <Input
+              id="referral"
+              value={form.referral ?? ""}
+              onChange={(e) => {
+                const value = e.target.value;
+                setForm((f) => ({ ...f, referral: value, referralVia: value.trim() ? "typed" : "" }));
+              }}
+              autoComplete="off"
+              maxLength={40}
+            />
+          </div>
+        </details>
+      )}
       {error && <p className="text-sm text-danger">{error}</p>}
       <Button type="submit" disabled={pending}>
         {pending ? "Sending your code…" : "Continue"}

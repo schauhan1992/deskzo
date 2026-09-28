@@ -10,7 +10,8 @@ import { currentMaintenance, maintenanceAppName, maintenancePage, maintenanceVer
 import { evaluateAccess } from "@/lib/access/gate";
 import { clientIpFrom } from "@/lib/client-ip";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, newDeviceToken, validDeviceToken } from "@/lib/access/device-token";
-import { HOST_MISMATCH, classifyHost, requestHost } from "@/lib/tenancy/host";
+import { HOST_MISMATCH, classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
+import { referralCookieDays } from "@/lib/partners/settings";
 import { tenantForKind } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
@@ -88,6 +89,10 @@ const MAINTENANCE_PAGE = `<!doctype html>
  */
 const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay))\/?$/;
 
+/** The partner programme's first-touch referral cookie on the public site, and a referral code's shape (6–40 characters). */
+const REFERRAL_COOKIE = "wroffy_ref";
+const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 const PUBLIC_PREFIXES = ["/login", "/handoff", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
 
 function isPublicPath(pathname: string): boolean {
@@ -148,18 +153,69 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
    *
    *   · the public site — signing up — on the bare domain and www., from src/app/platform-site;
    *   · the staff console on admin., from src/app/platform-console (its own sign-in —
-   *     src/lib/platform/staff-session.ts; no workspace's session means anything there).
+   *     src/lib/platform/staff-session.ts; no workspace's session means anything there);
+   *   · the website's CMS on cms., from src/app/platform-cms (its own accounts and sign-in —
+   *     src/lib/cms/session.ts; neither a staff nor a workspace session means anything there). Server
+   *     actions only: no /api path answers on it (the `!tenant && api` refusal above);
+   *   · the partner portal on partners., from src/app/platform-partners (its own accounts and sign-in —
+   *     src/lib/partners/session.ts; no staff, CMS or workspace session means anything there). Server
+   *     actions only, like the CMS: no /api path answers on it either.
    *
-   * Neither reads a workspace's data. Their folders answer on no other address, so a workspace's host
-   * can never serve the console, nor the console's host a workspace.
+   * None reads a workspace's data. Their folders answer on no other address, so a workspace's host
+   * can never serve the console, the CMS or the portal, nor their hosts a workspace.
    */
-  const inPlatformFolder = /^\/platform-(site|console)(\/|$)/.test(pathname);
-  const platformFolder = kind?.kind === "root" ? "/platform-site" : kind?.kind === "console" ? "/platform-console" : null;
+  const inPlatformFolder = /^\/platform-(site|console|cms|partners)(\/|$)/.test(pathname);
+  const platformFolder =
+    kind?.kind === "root"
+      ? "/platform-site"
+      : kind?.kind === "console"
+        ? "/platform-console"
+        : kind?.kind === "cms"
+          ? "/platform-cms"
+          : kind?.kind === "partners"
+            ? "/platform-partners"
+            : null;
   if (!tenant && platformFolder && !inPlatformFolder) {
+    // The public site's sitemap is src/app/sitemap.ts, at the root like robots.txt — not in the folder.
+    if (platformFolder === "/platform-site" && pathname === "/sitemap.xml") return harden(NextResponse.next() as NextResponse, pathname);
     const url = req.nextUrl.clone();
     url.pathname = `${platformFolder}${pathname === "/" ? "" : pathname}`;
+    /**
+     * The media library's images, on the CMS host too: the CMS's editor previews blocks with the
+     * site's own components, whose images are "/media/<id>". Served by the public site's image route
+     * (src/app/platform-site/media/[id]/route.ts) — the same public bytes, nothing of the CMS's.
+     */
+    if (platformFolder === "/platform-cms" && /^\/media\/[a-z0-9]{20,40}$/.test(pathname)) url.pathname = `/platform-site${pathname}`;
     const response = harden(NextResponse.rewrite(url) as NextResponse, pathname);
-    if (platformFolder === "/platform-console") response.headers.set("cache-control", "no-store");
+    if (platformFolder === "/platform-console" || platformFolder === "/platform-cms" || platformFolder === "/platform-partners") response.headers.set("cache-control", "no-store");
+    /**
+     * The public website exists to be found, so its pages may be indexed — except signing up, a
+     * draft's preview (its address carries a token, and it is not published), and any address with a
+     * query, which may carry a code or a token (and is otherwise a variant of a page that has its own
+     * canonical address). Every other host keeps harden()'s noindex.
+     */
+    const preview = /^\/preview(\/|$)/.test(pathname);
+    if (platformFolder === "/platform-site" && preview) response.headers.set("cache-control", "no-store");
+    if (platformFolder === "/platform-site" && !preview && !/^\/signup(\/|$)/.test(pathname) && !req.nextUrl.search) {
+      response.headers.set("X-Robots-Tag", "index, follow");
+    }
+    /**
+     * The partner programme's referral cookie — off unless an owner sets partners.refCookieDays
+     * (spec D8: the site promises no tracking cookies by default). A public-site GET with a
+     * well-formed `?ref=` and no `wroffy_ref` yet gets one; the first touch wins and is never
+     * overwritten while present. Without a `ref` nothing is read, so every other request costs
+     * nothing; the setting is cached for a minute. Only the code's shape is checked here — the signup
+     * page validates it, and prefers the address's own `ref` over the cookie.
+     */
+    if (platformFolder === "/platform-site" && req.method === "GET" && kind) {
+      const ref = req.nextUrl.searchParams.get("ref");
+      if (ref && ref.length >= 6 && ref.length <= 40 && REFERRAL_CODE.test(ref) && !req.cookies.has(REFERRAL_COOKIE)) {
+        const days = await referralCookieDays();
+        if (days > 0) {
+          response.cookies.set(REFERRAL_COOKIE, ref, { httpOnly: true, sameSite: "lax", secure: protocolFor(kind.host) === "https", path: "/", maxAge: days * 86_400 });
+        }
+      }
+    }
     return response;
   }
   if (inPlatformFolder) {

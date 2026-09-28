@@ -13,6 +13,7 @@ import { forgetRegistry, subdomainHost } from "@/lib/tenancy/registry";
 import { PlanRefused, planForNewWorkspace, startOnPlan } from "@/lib/platform/plans";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { trialDays } from "@/lib/platform/settings";
+import { mailNewCustomer, recordSignupAttribution, type AttributionDecision } from "@/lib/partners/attribution";
 
 /**
  * Setting a workspace up, from a name to a working address.
@@ -47,6 +48,8 @@ export type ProvisioningInput = {
   country: string;
   /** The plan it starts on — an invitation's; the default plan when absent. */
   planKey?: string | null;
+  /** The partner signup credited it to (src/lib/partners/attribution.ts); none: a direct customer. */
+  attribution?: AttributionDecision | null;
 };
 
 /** Why a workspace name cannot be had, or null when it can — the signup form asks this live. */
@@ -105,9 +108,13 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
     // On a free trial of it; an internal plan is never a trial.
     if (plan) await startOnPlan(tx, tenantId, plan.id, plan.kind === "INTERNAL" ? null : trialEnds);
     await tx.platformAuditLog.create({ data: { actorKind: "SYSTEM", actor: "signup", action: "tenant.provision.requested", tenantId, detail: { slug } } });
+    // Its partner, with the workspace: both are made, or neither.
+    if (input.attribution) await recordSignupAttribution(tx, tenantId, input.attribution, new Date());
     return created;
   });
   await refreshEntitlements(tenantId);
+  // Its partner hears of it once it exists; mailNewCustomer logs a failure and never throws.
+  if (input.attribution) await mailNewCustomer(input.attribution, input.companyName.trim());
   return { tenantId, jobId: job.id };
 }
 

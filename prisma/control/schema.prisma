@@ -95,6 +95,13 @@ model Tenant {
   stripeCustomerId   String?       @unique
   razorpayCustomerId String?       @unique
 
+  /// Staff labels: lower-case, 1–24 chars, at most ten (a CHECK in the migration). Never read by the workspace.
+  tags String[] @default([])
+
+  /// The partner it belongs to now — kept in step with tenant_attributions in the same transaction.
+  partnerId String?
+  partner   Partner? @relation("TenantPartner", fields: [partnerId], references: [id], onDelete: Restrict)
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   suspendedAt     DateTime?
@@ -111,7 +118,16 @@ model Tenant {
   invoices         Invoice[]
   usage            TenantUsage[]
   billingNotices   BillingNotice[]
+  notes            TenantNote[]
+  supportRequests  SupportRequest[]
 
+  /// The partner programme: who it belonged to, what was earned on it, deals naming it.
+  attributions      TenantAttribution[]
+  commissionEntries CommissionEntry[]
+  deals             DealRegistration[]
+
+  @@index([tags], type: Gin)
+  @@index([partnerId])
   @@map("tenants")
 }
 
@@ -166,6 +182,10 @@ model PlatformAuditLog {
   detail    Json?
 
   @@index([tenantId, at])
+  // The console's audit explorer: everything newest first, one action's, one actor's.
+  @@index([at])
+  @@index([action, at])
+  @@index([actor, at])
   @@map("platform_audit_log")
 }
 
@@ -258,7 +278,13 @@ model SignupInvite {
   /// The plan a workspace set up with it starts on; null: the default plan.
   planKey   String?
   createdAt DateTime  @default(now())
+  /// A partner's invitation code: the workspace it sets up is attributed to that partner.
+  partnerId String?
+  partner   Partner?  @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  /// The code's last four characters, so a partner can tell its codes apart.
+  codeHint  String?
 
+  @@index([partnerId, createdAt])
   @@map("signup_invites")
 }
 
@@ -287,9 +313,13 @@ model PendingSignup {
   handedOffAt DateTime?
   ip         String?
   createdAt  DateTime  @default(now())
+  /// A partner's referral code on the form, and how it got there: "link" | "cookie" | "typed" (informational).
+  referralCode String?
+  referralVia  String?
 
   @@index([email])
   @@index([slug])
+  @@index([createdAt])
   @@map("pending_signups")
 }
 
@@ -368,6 +398,9 @@ model PlatformUser {
   updatedAt        DateTime  @updatedAt
 
   sessions PlatformSession[]
+  /// Support requests assigned to them, and what they wrote on requests (src/lib/support).
+  assignedSupportRequests SupportRequest[] @relation("SupportAssignee")
+  supportEntries          SupportEntry[]   @relation("SupportEntryAuthor")
 
   @@map("platform_users")
 }
@@ -516,7 +549,8 @@ model Subscription {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  items SubscriptionItem[]
+  items    SubscriptionItem[]
+  invoices Invoice[]
 
   @@index([tenantId, status])
   @@map("subscriptions")
@@ -608,6 +642,7 @@ model BillingEvent {
 
   @@unique([gateway, eventId])
   @@index([receivedAt])
+  @@index([tenantId, receivedAt])
   @@map("billing_events")
 }
 
@@ -643,8 +678,23 @@ model Invoice {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  /// The subscription it bills, when the gateway said.
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  /// [{ planKey | null, amount }]. Null: not known — written before the partner programme, or lines that did not fit.
+  planLines      Json?
+  /// Smallest units, refunded and credited back so far.
+  amountRefunded Int           @default(0)
+  amountCredited Int           @default(0)
+  refundedAt     DateTime?
+
+  commissionEntries CommissionEntry[]
+  commissionState   CommissionInvoiceState?
+
   @@unique([gateway, externalId])
   @@index([tenantId, issuedAt])
+  // The commission engine's scan: invoices changed since it last looked.
+  @@index([updatedAt])
   @@map("invoices")
 }
 
@@ -683,4 +733,1000 @@ model BillingNotice {
 
   @@id([tenantId, key])
   @@map("billing_notices")
+}
+
+// ─── Console (the redesign) ──────────────────────────────────────────────────────────────────────
+
+enum AnnouncementTone {
+  INFO
+  WARNING
+  /// Not dismissible; audience ALL or CRITICAL needs an owner's "publish".
+  CRITICAL
+}
+
+enum AnnouncementAudience {
+  ALL
+  /// targets: tenant ids
+  TENANTS
+  /// targets: ISO 3166-1 alpha-2 codes
+  COUNTRIES
+  /// targets: plan keys (matched against Tenant.entitlements.plans)
+  PLANS
+}
+
+/// Staff's own notes on a workspace: context the audit log is not for. Plain text; never in audit detail.
+model TenantNote {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// PlatformUser.id (a soft reference, like the audit actor).
+  authorId  String
+  /// 1–4000 characters (a CHECK in the migration).
+  body      String
+  pinned    Boolean   @default(false)
+  editedBy  String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /// Deleted notes are kept, hidden, for the record.
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([tenantId, createdAt])
+  @@map("tenant_notes")
+}
+
+/// An alert a staff member has dealt with, or put off — keyed by the alert's stable key.
+model PlatformAlertAck {
+  key         String    @id
+  ackedBy     String
+  ackedAt     DateTime  @default(now())
+  /// Null: acknowledged for good (instance alerts only). Set: hidden until then.
+  snoozeUntil DateTime?
+  note        String?
+
+  @@map("platform_alert_acks")
+}
+
+/// A notice shown at the top of workspaces' pages. Plain text only.
+model PlatformAnnouncement {
+  id          String               @id @default(cuid())
+  /// 3–120 characters, and the body 1–1000 (a CHECK in the migration).
+  title       String
+  body        String
+  tone        AnnouncementTone     @default(INFO)
+  audience    AnnouncementAudience @default(ALL)
+  /// What the audience is matched against; empty for ALL.
+  targets     String[]             @default([])
+  startsAt    DateTime             @default(now())
+  /// Null: until archived. Otherwise after startsAt (a CHECK in the migration).
+  endsAt      DateTime?
+  dismissible Boolean              @default(true)
+  createdBy   String
+  updatedBy   String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  archivedAt  DateTime?
+
+  @@index([archivedAt, startsAt])
+  @@map("platform_announcements")
+}
+
+/// Monthly recurring revenue at the gateways, one row per currency per day — written by the tick's daily chores.
+model PlatformRevenueSnapshot {
+  day           DateTime @db.Date
+  /// ISO 4217, upper case.
+  currency      String
+  /// Minor units a month, before tax. BigInt: an INR sum passes 2^31 paise at Rs 2.1 crore.
+  mrr           BigInt
+  subscriptions Int
+  workspaces    Int
+  recordedAt    DateTime @default(now())
+
+  @@id([day, currency])
+  @@map("platform_revenue_snapshots")
+}
+
+// ─── The website CMS (cms.<PLATFORM_DOMAIN>) ─────────────────────────────────────────────────────
+//
+// The public website's content and the small app that edits it. Its accounts are its own — never a
+// staff member's, never a workspace member's — and nothing here is about a workspace.
+
+enum CmsRole {
+  /// Everything, including CMS accounts and the CMS's security settings.
+  ADMIN
+  /// Edits and publishes pages, posts, media, navigation and settings; works the leads.
+  EDITOR
+  /// Drafts pages and posts and uploads media; publishes nothing, deletes nobody else's work.
+  AUTHOR
+  /// Looking only, leads included.
+  VIEWER
+}
+
+/// Somebody who edits the public website, at cms.<domain>. The password is only ever chosen by the
+/// person, through an emailed one-time link.
+model CmsUser {
+  id             String    @id @default(cuid())
+  /// Lower-case (a CHECK in the migration).
+  email          String    @unique
+  name           String
+  role           CmsRole
+  /// bcrypt. Null until they choose one through their setup link.
+  passwordHash   String?
+  /// SHA-256 of a one-time link to choose a password — the first, or a reset. Works until
+  /// setupExpiresAt, once.
+  setupTokenHash String?   @unique
+  setupExpiresAt DateTime?
+  /// The authenticator secret, sealed under the platform key ("cms-totp"). Null until enrolment starts.
+  totpSecretCipher String?
+  /// When enrolment finished.
+  totpEnabledAt  DateTime?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  /// Who made it: "staff:<id>", "cms:<id>" or "script".
+  createdBy      String
+  lastSignInAt   DateTime?
+
+  sessions CmsSession[]
+  posts    SitePost[]
+
+  @@map("cms_users")
+}
+
+/// One CMS sign-in: sixty minutes idle, twelve hours at most, revocable.
+model CmsSession {
+  /// SHA-256 of the cookie's token; the token itself is only ever in the cookie.
+  id         String    @id
+  userId     String
+  user       CmsUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  /// When the second factor was passed in this session, when one was asked for.
+  mfaAt      DateTime?
+  revokedAt  DateTime?
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+  @@map("cms_sessions")
+}
+
+/// The CMS's own settings ("two-factor": "optional" | "required"). Not the website's content.
+model CmsSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedBy String
+
+  @@map("cms_settings")
+}
+
+enum SitePageStatus {
+  DRAFT
+  PUBLISHED
+}
+
+/// A page of the public website, built from typed blocks (src/components/site/blocks/types.ts). The
+/// home page's slug is "home". The draft is what editors change; the site shows only `published`.
+model SitePage {
+  id          String         @id @default(cuid())
+  /// Lower-case words and hyphens, "/" between levels (a CHECK in the migration).
+  slug        String         @unique
+  title       String
+  status      SitePageStatus @default(DRAFT)
+  /// The page document: { title, seo, blocks }.
+  draft       Json
+  published   Json?
+  publishedAt DateTime?
+  publishedBy String?
+  createdAt   DateTime       @default(now())
+  createdBy   String
+  updatedAt   DateTime       @updatedAt
+  updatedBy   String
+  archivedAt  DateTime?
+
+  versions SitePageVersion[]
+
+  @@map("site_pages")
+}
+
+/// A page as it was published (or saved as a version) — for history and restore.
+model SitePageVersion {
+  id        String   @id @default(cuid())
+  pageId    String
+  page      SitePage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  document  Json
+  note      String?
+  createdAt DateTime @default(now())
+  createdBy String
+
+  @@index([pageId, createdAt])
+  @@map("site_page_versions")
+}
+
+enum SitePostStatus {
+  DRAFT
+  /// Published, from publishAt on — the public site shows it once that has passed; no job runs.
+  SCHEDULED
+  PUBLISHED
+}
+
+/// A blog or news post. The body is blocks, like a page's.
+model SitePost {
+  id           String         @id @default(cuid())
+  slug         String         @unique
+  title        String
+  excerpt      String?
+  /// A SiteMedia id (a soft reference: deleting media in use is refused by the app).
+  coverMediaId String?
+  body         Json
+  tags         String[]       @default([])
+  status       SitePostStatus @default(DRAFT)
+  publishAt    DateTime?
+  publishedAt  DateTime?
+  seo          Json?
+  authorId     String
+  author       CmsUser        @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  updatedBy    String
+  archivedAt   DateTime?
+
+  @@index([status, publishAt])
+  @@map("site_posts")
+}
+
+/// An image in the website's media library, served publicly at /media/<id>. List queries never
+/// select `data`.
+model SiteMedia {
+  id        String   @id @default(cuid())
+  filename  String
+  /// image/png, image/jpeg, image/webp or image/gif (a CHECK in the migration).
+  mime      String
+  size      Int
+  width     Int?
+  height    Int?
+  alt       String   @default("")
+  data      Bytes
+  /// Of the bytes: the same image uploaded twice is one row.
+  sha256    String   @unique
+  createdAt DateTime @default(now())
+  createdBy String
+
+  @@index([createdAt])
+  @@map("site_media")
+}
+
+/// The website's settings — site name, tagline, emails, social links, default SEO, header and footer
+/// navigation — in the site's SiteSettings shape. One row, key "site".
+model SiteSettings {
+  key         String    @id
+  draft       Json
+  published   Json?
+  publishedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+  updatedBy   String
+
+  @@map("site_settings")
+}
+
+enum SiteLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CLOSED
+  SPAM
+}
+
+/// A request from the website's contact form.
+model SiteLead {
+  id        String         @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  phone     String?
+  topic     String
+  message   String
+  status    SiteLeadStatus @default(NEW)
+  notes     String?
+  /// Only when the caller's address is known.
+  ip        String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  /// Who last changed its status or notes: "cms:<id>".
+  handledBy String?
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("site_leads")
+}
+
+/// What was done in the CMS, by whom. Ids, slugs, titles and counts — never a document's body.
+model CmsAuditLog {
+  id         String   @id @default(cuid())
+  at         DateTime @default(now())
+  /// The CMS user's id; null for a script or the public site.
+  actorId    String?
+  actorLabel String
+  action     String
+  entity     String
+  entityId   String?
+  detail     Json?
+
+  @@index([at])
+  @@index([actorId, at])
+  @@index([entity, entityId])
+  @@map("cms_audit_log")
+}
+
+// ─── Contact Support (the platform's own support desk) ──────────────────────────────────────────
+//
+// A workspace user asking the platform for help, from inside their workspace, and staff answering
+// from the console's Support page. Not a workspace's own helpline (HelpDesk, in the workspace's
+// database). Files live on disk under SUPPORT_DIR, never in a row (src/lib/support/storage.ts).
+
+enum SupportStatus {
+  OPEN
+  /// Staff are on it: set by the first reply, or by hand.
+  IN_PROGRESS
+  /// Waiting on the customer.
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+enum SupportPriority {
+  /// "Just a question"
+  LOW
+  /// "Something isn't working"
+  NORMAL
+  /// "It's blocking my work"
+  HIGH
+  /// "Critical — our business is stopped"
+  URGENT
+}
+
+enum SupportAttachmentKind {
+  FILE
+  /// A screen recording, made with the requester's consent.
+  RECORDING
+}
+
+enum SupportEntryKind {
+  /// Emailed to the requester.
+  REPLY
+  /// Staff only; never leaves the console.
+  NOTE
+  STATUS
+  PRIORITY
+  ASSIGN
+}
+
+/// A request for help from somebody signed in to a workspace. Shown as SR-<number>.
+model SupportRequest {
+  id              String          @id @default(cuid())
+  /// SR-1001 onwards: the sequence restarts at 1001 in the migration.
+  number          Int             @unique @default(autoincrement())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// The workspace's User.id — opaque here, never joined. Name, email and role as they were when sent.
+  requesterUserId String
+  requesterName   String
+  requesterEmail  String
+  requesterRole   String?
+  mobile          String?
+  /// 1–150 characters, one line (a CHECK in the migration).
+  subject         String
+  /// 1–5000 characters of plain text (a CHECK in the migration). Never rendered as HTML.
+  body            String
+  priority        SupportPriority @default(NORMAL)
+  status          SupportStatus   @default(OPEN)
+  assigneeId      String?
+  assignee        PlatformUser?   @relation("SupportAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// What was collected with every request, as the dialog says: the workspace and the person (from the
+  /// server), the page, browser, screen, time zone and language (from the browser, capped), and the
+  /// page-load timings when a recording was consented to.
+  context         Json
+  /// Browser console errors and warnings during a recording — only with the recording's consent.
+  consoleLog      Json?
+  recordingConsentAt DateTime?
+  /// Only when the caller's address is known (src/lib/client-ip.ts).
+  ip              String?
+  createdAt       DateTime        @default(now())
+  /// Every change and every entry touches it: the inbox's "last activity".
+  updatedAt       DateTime        @updatedAt
+  /// The first reply that reached the requester by email.
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  /// Retention counts from here: files of requests closed longer ago than support.retentionDays go.
+  closedAt        DateTime?
+
+  attachments SupportAttachment[]
+  entries     SupportEntry[]
+
+  @@index([status, priority, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([assigneeId, status])
+  @@map("support_requests")
+}
+
+/// A file or recording sent with a request. The bytes are on disk at SUPPORT_DIR/<storageKey>.
+model SupportAttachment {
+  id         String                @id @default(cuid())
+  requestId  String
+  request    SupportRequest        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  kind       SupportAttachmentKind
+  /// Sanitised display name.
+  filename   String
+  /// The type its bytes were sniffed as on upload — never the browser's claim.
+  mime       String
+  /// Bytes, never negative (a CHECK in the migration).
+  size       Int
+  sha256     String
+  /// <tenantId>/<requestId>/<attachmentId>, relative to SUPPORT_DIR.
+  storageKey String
+  /// Recordings only.
+  durationMs Int?
+  /// The file was removed by retention; the row stays, for the record.
+  purgedAt   DateTime?
+  createdAt  DateTime              @default(now())
+
+  @@index([requestId])
+  @@map("support_attachments")
+}
+
+/// One thing on a request's timeline: a reply, an internal note, or a change of status, priority or
+/// assignee. `meta`: STATUS / PRIORITY / ASSIGN {from, to}; REPLY {emailed, to, error?}.
+model SupportEntry {
+  id        String           @id @default(cuid())
+  requestId String
+  request   SupportRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  kind      SupportEntryKind
+  /// REPLY and NOTE text, 1–5000 characters (a CHECK in the migration).
+  body      String?
+  authorId  String?
+  author    PlatformUser?    @relation("SupportEntryAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  meta      Json?
+  createdAt DateTime         @default(now())
+
+  @@index([requestId, createdAt])
+  @@map("support_entries")
+}
+
+// ─── The partner programme (partners.<PLATFORM_DOMAIN>) ──────────────────────────────────────────
+//
+// Companies that sell the platform — distributors and resellers — and the commission they earn. The
+// platform bills every customer; partners only earn, and are paid by hand against monthly statements.
+// The portal's accounts are its own — never a staff member's, never a workspace member's.
+
+enum PartnerKind {
+  /// Holds a territory; may have resellers under it.
+  DISTRIBUTOR
+  /// Sells on its own, or under one distributor.
+  RESELLER
+}
+
+enum PartnerStatus {
+  /// Signs in, cannot sell yet; keeps earning on customers it has.
+  ONBOARDING
+  ACTIVE
+  /// Signs in, cannot sell; keeps earning.
+  SUSPENDED
+  /// Cannot sign in; earns nothing on invoices paid from terminatedAt on.
+  TERMINATED
+}
+
+enum PartnerRole {
+  /// Everything, including the team, the profile and requests.
+  ADMIN
+  /// Commissions, statements, the payout mask and payout requests.
+  FINANCE
+  /// Customers, invitations, links and deals.
+  SALES
+  /// Reads customers, invitations and deals.
+  VIEWER
+}
+
+enum AttributionSource {
+  /// The partner's invitation code.
+  SIGNUP_INVITE
+  /// A referral code on the signup form.
+  REFERRAL_LINK
+  /// An approved deal registration for the signup email's domain.
+  DEAL_REGISTRATION
+  /// A distributor's default for direct signups from its territories.
+  TERRITORY
+  /// Assigned by staff, with a reason.
+  STAFF
+}
+
+enum DealStatus {
+  /// Waiting for staff.
+  PENDING
+  /// Protected until expiresAt.
+  APPROVED
+  DECLINED
+  /// The company signed up, and the workspace is on the deal.
+  WON
+  EXPIRED
+  /// Taken back by the partner.
+  WITHDRAWN
+}
+
+enum CommissionKind {
+  /// On the partner's own customer's invoice.
+  DIRECT
+  /// A distributor's cut of its resellers' customers' invoices.
+  OVERRIDE
+  /// Entered by staff, with a reason.
+  ADJUSTMENT
+}
+
+enum CommissionStatus {
+  /// Owed; on no approved statement yet.
+  PENDING
+  /// On an approved statement.
+  APPROVED
+  /// Its statement was paid.
+  PAID
+  /// Voided by staff while pending.
+  VOID
+}
+
+enum StatementStatus {
+  DRAFT
+  APPROVED
+  /// Marked paid by staff, with the transfer's reference.
+  PAID
+  /// Its entries went back to pending, unattached.
+  VOID
+}
+
+enum PartnerRequestKind {
+  /// A change to the partner's own details.
+  PROFILE
+  /// New bank details.
+  PAYOUT
+  /// A reseller proposed by a distributor.
+  NEW_RESELLER
+}
+
+enum PartnerRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  /// Taken back by the partner, or ended by its termination.
+  WITHDRAWN
+}
+
+enum PartnerApplicationStatus {
+  NEW
+  REVIEWING
+  /// Made into a partner.
+  ACCEPTED
+  DECLINED
+  SPAM
+}
+
+enum PartnerActorKind {
+  /// A partner user, in the portal.
+  PARTNER
+  /// A member of staff, in the console.
+  STAFF
+  /// The platform itself: signup, the tick.
+  SYSTEM
+  /// A script run by the operator on the server.
+  SCRIPT
+  /// Somebody on the public site: an application.
+  PUBLIC
+}
+
+/// A company in the programme: a distributor or a reseller.
+model Partner {
+  id              String        @id @default(cuid())
+  /// Lower-case, 3–40, like a workspace name; never "new" or "requests" (the console's own routes).
+  slug            String        @unique
+  kind            PartnerKind
+  status          PartnerStatus @default(ONBOARDING)
+  /// A reseller's distributor. Only a reseller has one, and it is always a distributor (checked in the app).
+  parentId        String?
+  parent          Partner?      @relation("PartnerResellers", fields: [parentId], references: [id], onDelete: Restrict)
+  resellers       Partner[]     @relation("PartnerResellers")
+  legalName       String
+  displayName     String
+  /// Where it is established — its tax home (ISO 3166-1 alpha-2).
+  country         String
+  /// The countries it may sell in (ISO 3166-1 alpha-2), at least one.
+  territories     String[]
+  contactName     String
+  contactEmail    String
+  contactPhone    String?
+  website         String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  region          String?
+  postalCode      String?
+  /// [{ kind: "GSTIN" | "PAN" | "VAT" | "GST" | "ABN" | "EIN" | "TIN" | "OTHER", value }] — at most four.
+  taxIds          Json          @default("[]")
+  /// Bank details, sealed under the platform key bound to this partner ("partner-payout"). Never selected by a loader.
+  payoutCipher    String?
+  /// What may be shown of them: { method, accountHolder, bankName, country, currency, last4, ifsc?, swift? }.
+  payoutMask      Json?
+  payoutUpdatedAt DateTime?
+  /// Staff's own notes. Never shown in the portal.
+  notes           String?
+  /// Listed on the public "Find a partner" page (only while ACTIVE).
+  publicListing   Boolean       @default(false)
+  publicBlurb     String?
+  statusReason    String?
+  /// "staff:<id>" or "script".
+  createdBy       String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  activatedAt     DateTime?
+  suspendedAt     DateTime?
+  terminatedAt    DateTime?
+
+  terms        PartnerTerms[]
+  users        PartnerUser[]
+  tenants      Tenant[]              @relation("TenantPartner")
+  attributions TenantAttribution[]
+  invites      SignupInvite[]
+  links        PartnerReferralLink[]
+  deals        DealRegistration[]
+  entries      CommissionEntry[]
+  statements   PartnerStatement[]
+  requests     PartnerRequest[]
+  applications PartnerApplication[]
+  auditLog     PartnerAuditLog[]
+
+  @@index([parentId])
+  @@index([status, kind])
+  @@map("partners")
+}
+
+/// A partner's commission rates from `effectiveFrom` on — a new row replaces the old from its date; rows are never edited.
+model PartnerTerms {
+  id              String   @id @default(cuid())
+  partnerId       String
+  partner         Partner  @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  effectiveFrom   DateTime
+  /// Basis points: 1500 is 15 %.
+  defaultRateBp   Int
+  /// While the customer is new (its first `newMonths` months from its first paid invoice), and after.
+  newRateBp       Int?
+  renewalRateBp   Int?
+  newMonths       Int      @default(12)
+  /// Commission stops this many months after it started for this partner and customer; null: the customer's lifetime.
+  durationMonths  Int?
+  /// A distributor's cut of its resellers' customers' invoices, on top of the reseller's own.
+  overrideRateBp  Int?
+  /// A distributor's rate on direct signups from its territories attributed to it by default; null: no territory default.
+  territoryRateBp Int?
+  /// [{ planKey, rateBp }] — replaces the rate for that plan's share of an invoice.
+  planRates       Json     @default("[]")
+  /// [{ country, rateBp }] — replaces the rate for customers in that country.
+  countryRates    Json     @default("[]")
+  note            String?
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  @@unique([partnerId, effectiveFrom])
+  @@map("partner_terms")
+}
+
+/// Somebody who signs in to the partner portal for one partner.
+model PartnerUser {
+  id               String      @id @default(cuid())
+  partnerId        String
+  partner          Partner     @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  /// Lower-case, unique across the portal.
+  email            String      @unique
+  name             String
+  role             PartnerRole
+  passwordHash     String?
+  setupTokenHash   String?     @unique
+  setupExpiresAt   DateTime?
+  /// Sealed under the platform key ("partner-totp").
+  totpSecretCipher String?
+  totpEnabledAt    DateTime?
+  active           Boolean     @default(true)
+  /// "staff:<id>", "partner:<userId>" or "script".
+  createdBy        String
+  lastSignInAt     DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  sessions PartnerSession[]
+
+  @@index([partnerId])
+  @@map("partner_users")
+}
+
+/// One portal sign-in: sixty minutes idle, twelve hours at most, revocable.
+model PartnerSession {
+  /// SHA-256 of the cookie's token.
+  id         String      @id
+  userId     String
+  user       PartnerUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime    @default(now())
+  lastSeenAt DateTime    @default(now())
+  expiresAt  DateTime
+  mfaAt      DateTime?
+  revokedAt  DateTime?
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+  @@map("partner_sessions")
+}
+
+/// Which partner a workspace belonged to, from when to when, and how; one current row each (a partial unique index).
+model TenantAttribution {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Null: staff made it direct.
+  partnerId      String?
+  partner        Partner?          @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  source         AttributionSource
+  /// What led to it: "invite:<first 8 of the hash>", "link:<code>", "deal:<id>", "territory:<country>"; null for staff.
+  reference      String?
+  /// Staff's reason (required for STAFF). Never shown in the portal.
+  reason         String?
+  commissionable Boolean           @default(true)
+  /// { outsideTerritory?: true, conflicts?: [{ partnerId, source }] } — what staff should look at.
+  flags          Json?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  validFrom      DateTime          @default(now())
+  validTo        DateTime?
+  /// "signup", "staff:<id>", "script".
+  createdBy      String
+  createdAt      DateTime          @default(now())
+
+  @@index([tenantId, validFrom])
+  @@index([partnerId, validTo])
+  @@map("tenant_attributions")
+}
+
+/// A partner's public referral code: /signup?ref=<code>.
+model PartnerReferralLink {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  partnerId String
+  partner   Partner   @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  label     String?
+  /// The plan a workspace signing up with it starts its trial on; null: the default plan.
+  planKey   String?
+  expiresAt DateTime?
+  endedAt   DateTime?
+  /// Signups verified with this code on the form, whoever they were finally attributed to.
+  signups   Int       @default(0)
+  createdBy String
+  createdAt DateTime  @default(now())
+
+  @@index([partnerId, createdAt])
+  @@map("partner_referral_links")
+}
+
+/// A partner's claim on a prospect company, by its email domain.
+model DealRegistration {
+  id              String     @id @default(cuid())
+  partnerId       String
+  partner         Partner    @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  companyName     String
+  /// Lower-case, never a free-mail domain.
+  domain          String
+  country         String
+  contactName     String?
+  contactEmail    String?
+  expectedPlanKey String?
+  note            String?
+  status          DealStatus @default(PENDING)
+  /// The partner user's id.
+  submittedBy     String
+  decidedBy       String?
+  decidedAt       DateTime?
+  decisionNote    String?
+  expiresAt       DateTime?
+  tenantId        String?
+  tenant          Tenant?    @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([partnerId, status])
+  @@index([domain])
+  @@map("partner_deals")
+}
+
+/// One line of money owed to a partner, or clawed back from it.
+model CommissionEntry {
+  id          String            @id @default(cuid())
+  partnerId   String
+  partner     Partner           @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  /// Null only for an adjustment not about one customer.
+  tenantId    String?
+  tenant      Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  /// Null only for an adjustment.
+  invoiceId   String?
+  invoice     Invoice?          @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  kind        CommissionKind
+  status      CommissionStatus  @default(PENDING)
+  currency    String
+  /// The invoice's net amount this entry is on (a reversal: the part reversed), minor units, never negative.
+  base        Int
+  /// The rate applied (effective, over the whole base); 0 for an adjustment.
+  rateBp      Int
+  /// Minor units: positive owed, negative clawed back. Never 0.
+  amount      Int
+  /// How it was worked out (spec §5.8). No secrets, no personal data.
+  basis       Json
+  /// The idempotency key (spec §5.7).
+  sourceKey   String            @unique
+  reversesId  String?
+  reverses    CommissionEntry?  @relation("CommissionReversals", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversals   CommissionEntry[] @relation("CommissionReversals")
+  /// Accrual: the invoice's paidAt. Reversal: when the refund was seen. Adjustment: staff's date.
+  earnedAt    DateTime
+  statementId String?
+  statement   PartnerStatement? @relation(fields: [statementId], references: [id], onDelete: SetNull)
+  /// An adjustment's reason. Shown to the partner.
+  note        String?
+  /// "engine" or "staff:<id>".
+  createdBy   String
+  createdAt   DateTime          @default(now())
+  voidedAt    DateTime?
+  voidedBy    String?
+  /// Staff only.
+  voidReason  String?
+
+  @@index([partnerId, status, earnedAt])
+  @@index([statementId])
+  @@index([tenantId, earnedAt])
+  @@index([invoiceId])
+  @@map("commission_entries")
+}
+
+/// What the commission engine last made of one invoice — so each is looked at again only when it changes.
+model CommissionInvoiceState {
+  invoiceId         String        @id
+  invoice           Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  status            InvoiceStatus
+  /// total − tax when it was paid, minor units.
+  base              Int
+  /// How much of `base` has been reversed so far.
+  reversedBase      Int           @default(0)
+  /// The DIRECT outcome: "accrued" | "no-partner" | "not-commissionable" | "no-terms" | "outside-duration" | "terminated" | "exempt" | "zero".
+  outcome           String
+  /// The invoice's updatedAt when it was processed: a later one means look again.
+  seenUpdatedAt     DateTime
+  processedAt       DateTime      @default(now())
+  /// A refund came after the clawback window (partners.clawbackMonths): its PAID entries were not reversed.
+  clawbackExpiredAt DateTime?
+
+  @@map("commission_invoice_states")
+}
+
+/// One month's entries for one partner in one currency — what a payout is made against.
+model PartnerStatement {
+  id                   String          @id @default(cuid())
+  /// "<SLUG>-<YYYY-MM>-<CUR>", upper case; a regenerated one after a void gets "-2", "-3".
+  number               String          @unique
+  partnerId            String
+  partner              Partner         @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  currency             String
+  /// The IST month, "2026-09".
+  period               String
+  periodStart          DateTime
+  periodEnd            DateTime
+  status               StatementStatus @default(DRAFT)
+  entryCount           Int
+  /// Minor units: accruals, reversals (≤ 0), adjustments, and their sum.
+  earned               BigInt
+  reversed             BigInt
+  adjustments          BigInt
+  total                BigInt
+  /// [{ label, kind: "ADD" | "WITHHOLD", rateBp?, amount }] — entered by staff for the accountant; no tax is worked out here.
+  taxLines             Json            @default("[]")
+  netPayable           BigInt
+  /// The partner as it was: { legalName, displayName, country, address, taxIds, payout: mask | null }.
+  partnerSnapshot      Json
+  /// The partner's own invoice number for this statement, entered in the portal.
+  partnerInvoiceNumber String?
+  generatedAt          DateTime        @default(now())
+  /// "tick" or "staff:<id>".
+  generatedBy          String
+  approvedAt           DateTime?
+  approvedBy           String?
+  paidAt               DateTime?
+  paidBy               String?
+  paymentReference     String?
+  paymentNote          String?
+  voidedAt             DateTime?
+  voidedBy             String?
+  voidReason           String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  entries CommissionEntry[]
+
+  @@index([partnerId, period])
+  @@index([status, generatedAt])
+  @@map("partner_statements")
+}
+
+/// Something a partner asked staff to decide: a profile change, new payout details, a new reseller.
+model PartnerRequest {
+  id              String               @id @default(cuid())
+  partnerId       String
+  partner         Partner              @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  kind            PartnerRequestKind
+  status          PartnerRequestStatus @default(PENDING)
+  /// PROFILE: the fields asked for; NEW_RESELLER: the proposed reseller; PAYOUT: the new mask only.
+  payload         Json
+  /// PAYOUT only, while PENDING: the new details, sealed ("partner-payout-request", bound to the partner); cleared on decision.
+  payloadCipher   String?
+  requestedBy     String
+  decidedBy       String?
+  decidedAt       DateTime?
+  decisionNote    String?
+  /// NEW_RESELLER approved: the partner made.
+  resultPartnerId String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([status, createdAt])
+  @@index([partnerId, createdAt])
+  @@map("partner_requests")
+}
+
+/// "Become a partner", from the public site.
+model PartnerApplication {
+  id           String                   @id @default(cuid())
+  companyName  String
+  website      String?
+  country      String
+  kindWanted   PartnerKind
+  contactName  String
+  contactEmail String
+  contactPhone String?
+  message      String
+  status       PartnerApplicationStatus @default(NEW)
+  notes        String?
+  /// Only when the caller's address is known (src/lib/client-ip.ts).
+  ip           String?
+  partnerId    String?
+  partner      Partner?                 @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  handledBy    String?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  @@index([status, createdAt])
+  @@map("partner_applications")
+}
+
+/// What was done in or to the partner programme. Ids, names, counts — never a secret, code, token or bank detail.
+model PartnerAuditLog {
+  id               String           @id @default(cuid())
+  at               DateTime         @default(now())
+  /// Null: a public application.
+  partnerId        String?
+  partner          Partner?         @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  actorKind        PartnerActorKind
+  actorId          String?
+  actorLabel       String
+  action           String
+  entity           String
+  entityId         String?
+  detail           Json?
+  /// Shown on the partner's own Activity page.
+  visibleToPartner Boolean          @default(true)
+
+  @@index([partnerId, at])
+  @@index([at])
+  @@index([action, at])
+  @@map("partner_audit_log")
 }

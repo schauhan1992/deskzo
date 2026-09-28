@@ -205,7 +205,9 @@ console.log("\n— No ungated endpoint —\n");
  */
 // requireStaff: the platform console's actions are gated by a staff session, not a workspace's.
 // requireModuleUser: requireUser, plus the workspace's plan (src/lib/modules-access.ts).
-const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext(", "currentUser(", "auth()", "requireStaff(", "requireModuleUser("];
+// requireCms / cmsAction: the website CMS's actions are gated by a CMS session and its roles (src/lib/cms/guard.ts).
+// requirePartner: the partner portal's, by a partner session and its roles (src/lib/partners/guard.ts).
+const BASE_MARKERS = ["requireUser(", "hasEffectivePermission(", "actorContext(", "currentUser(", "auth()", "requireStaff(", "requireModuleUser(", "requireCms(", "cmsAction(", "requirePartner("];
 
 /**
  * Local helpers in the same file that themselves reach a base marker.
@@ -257,6 +259,22 @@ const PUBLIC_ACTIONS = new Set([
   // Signing in to the platform console: its own sign-in, enrolling two-factor, choosing a password from
   // a one-time link, signing out — each touching only the caller's own console session.
   "src/actions/platform/staff-auth.ts",
+  // Signing in to the website CMS, the same four (cmsSignIn, cmsFinishEnrolment, cmsSetPassword,
+  // cmsSignOut) — each touching only the caller's own CMS session or one-time link. The file's other
+  // exports go through `cmsAction` like every CMS action; check:cms holds the lockouts and the links.
+  "src/actions/cms/auth.ts",
+  // Signing in to the partner portal, the same four (partnerSignIn, partnerFinishEnrolment,
+  // partnerSetPassword, partnerSignOut): each touches only the caller's own partner session or one-time
+  // link. The file's other exports go through its local asPartner → requirePartner.
+  "src/actions/partners/auth.ts",
+  // The public website's two forms, "find my workspaces" and "contact us", for people with no account
+  // anywhere: a honeypot, limits per address and per caller, the same answer whatever was found, and
+  // nothing of a workspace's returned. check:site and check:cms hold them.
+  "src/actions/platform/site.ts",
+  // The public website's "become a partner" form (applyToPartnerProgramme), the same kind: a honeypot,
+  // limits per address, per caller and in all, the control plane only, nothing returned but a field
+  // error. check:partners holds it.
+  "src/actions/platform/partner-site.ts",
   // The access page: a person held at the door shares their location or signs out. `requireUser`
   // refuses exactly these people by design, so the session is read directly — and each action does
   // one narrow thing to the caller's own session. See src/actions/access-gate.ts.

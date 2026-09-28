@@ -12,7 +12,9 @@
  *   · each role reaches only its own actions and pages, and the last owner cannot be removed;
  *   · support gets into a workspace only on its super admin's grant — as a hidden account, never a
  *     super admin, read-only unless granted more — and is out again when the grant ends or expires;
- *   · the console's pages render for the roles that may see them.
+ *     no console action can grant it;
+ *   · a refused action says why and changes nothing;
+ *   · every console page renders for an owner, and support is never offered a hold or a close.
  *
  * No mail leaves: the platform mailer is replaced. No worker process is started: the setup job is run
  * here. No password is typed anywhere — the check makes its own staff and generates their passwords.
@@ -20,7 +22,7 @@
 import "dotenv/config";
 import { createHash, randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import Module from "node:module";
 import path from "node:path";
 import bcrypt from "bcryptjs";
@@ -124,8 +126,8 @@ async function resolveAsync(node: unknown): Promise<unknown> {
   }
   return el;
 }
-async function renderPage(page: Page, props: Record<string, unknown> = {}): Promise<string> {
-  const el = await page({ params: Promise.resolve(props), searchParams: Promise.resolve({}) } as never);
+async function renderPage(page: Page, props: Record<string, unknown> = {}, searchParams: Record<string, string> = {}): Promise<string> {
+  const el = await page({ params: Promise.resolve(props), searchParams: Promise.resolve(searchParams) } as never);
   return renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
 }
 
@@ -380,7 +382,11 @@ async function main() {
     const state = await inWorkspace(() => supportActions.getSupportAccess());
     ok("the super admin grants read-only access for four hours", granted.ok && state?.grant?.level === "READONLY" && Math.abs(new Date(state.grant.expiresAt).getTime() - Date.now() - 4 * 3_600_000) < 60_000);
     ok("  recorded in the workspace and on the platform", (await inWorkspace(() => db.auditLog.count({ where: { entityType: "SupportAccess" } }))) === 1 && (await control.platformAuditLog.count({ where: { tenantId: tenant.id, action: "support.grant" } })) === 1);
-    ok("staff have no way to grant it themselves", !/grantSupportAccess/.test(readFileSync(path.join(process.cwd(), "src", "actions", "platform", "console.ts"), "utf8")));
+    // Every console action file, the ones added since too: none grants access, writes a grant row, or purges a workspace.
+    const actionDir = path.join(process.cwd(), "src", "actions", "platform");
+    const actionFiles = readdirSync(actionDir).filter((f) => f.endsWith(".ts"));
+    const granting = actionFiles.filter((f) => /grantSupportAccess|supportAccessGrant\.(create|update|upsert|delete)|purgeTenant/.test(readFileSync(path.join(actionDir, f), "utf8")));
+    ok("staff have no way to grant it themselves — no console action grants it, writes a grant or purges a workspace", actionFiles.includes("console.ts") && granting.length === 0, granting.join(", ") || `${actionFiles.length} files`);
 
     section("Entering as support");
     await actAs(readonlyId);
@@ -456,22 +462,68 @@ async function main() {
     const trail = await control.platformAuditLog.findMany({ where: { tenantId: tenant.id }, select: { action: true } });
     ok("every step is in the platform's audit log", ["support.grant", "support.enter", "support.end"].every((a) => trail.some((t) => t.action === a)));
 
+    section("A refusal is an answer in words, and changes nothing");
+    const setupJob = await control.provisioningJob.findFirstOrThrow({ where: { tenantId: tenant.id }, select: { id: true, status: true } });
+    await actAs(adminId);
+    const retryDone = await consoleActions.consoleRetryJob(setupJob.id);
+    const jobAfter = await control.provisioningJob.findUniqueOrThrow({ where: { id: setupJob.id }, select: { status: true } });
+    ok(
+      "a finished setup is not tried again",
+      setupJob.status === "SUCCEEDED" && !retryDone.ok && /Only a failed setup/.test(retryDone.error) && jobAfter.status === "SUCCEEDED",
+      retryDone.ok ? `retried a ${setupJob.status} job` : retryDone.error,
+    );
+    const endNothing = await consoleActions.consoleEndInvite("nope");
+    ok("an invitation that is not there is not ended", !endNothing.ok && /no longer exists/.test(endNothing.error), endNothing.ok ? "ended" : endNothing.error);
+    const releaseNothing = await consoleActions.consoleReleaseDevice("zz-no-such-terminal");
+    ok("  nor a terminal that is not there released", !releaseNothing.ok && /no longer exists/.test(releaseNothing.error), releaseNothing.ok ? "released" : releaseNothing.error);
+    const shortReason = await consoleActions.consoleSuspend(tenant.id, "zz");
+    ok(
+      "a hold needs a reason of at least three characters",
+      !shortReason.ok && /at least 3/.test(shortReason.error) && (await control.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).status === "ACTIVE",
+      shortReason.ok ? "held" : shortReason.error,
+    );
+    await actAs(ownerRow.id);
+    const madeUpRole = await consoleActions.consoleSetStaffRole(supportId, "SUPERUSER" as never);
+    const madeUpNew = await consoleActions.consoleAddStaff({ email: "superuser@zzconsole.example", name: "Zz Superuser", role: "SUPERUSER" as never });
+    ok(
+      "a role that does not exist is neither given nor made",
+      !madeUpRole.ok && /Choose a role/.test(madeUpRole.error) && !madeUpNew.ok && /Choose a role/.test(madeUpNew.error),
+      [madeUpRole, madeUpNew].map((r) => (r.ok ? "accepted" : r.error)).join(" | "),
+    );
+    ok(
+      "  the role stays as it was, and nobody is added",
+      (await control.platformUser.findUniqueOrThrow({ where: { id: supportId } })).role === "SUPPORT" && (await control.platformUser.count({ where: { email: "superuser@zzconsole.example" } })) === 0,
+    );
+
     section("The console's pages");
     jar.delete(COOKIE);
     const OverviewPage = (require("../src/app/platform-console/(console)/page") as { default: Page }).default;
     ok("signed out, a page sends you to sign in", (await thrown(() => OverviewPage({} as never))) === "redirect /login");
     const WorkspacePage = (require("../src/app/platform-console/(console)/workspaces/[slug]/page") as { default: Page }).default;
     const StaffPage = (require("../src/app/platform-console/(console)/staff/page") as { default: Page }).default;
+    const { WORKSPACE_TABS } = require("../src/lib/console-shared/params") as typeof import("../src/lib/console-shared/params");
     const pages: [string, Page][] = [
       ["overview", OverviewPage],
+      ["alerts", (require("../src/app/platform-console/(console)/alerts/page") as { default: Page }).default],
       ["workspaces", (require("../src/app/platform-console/(console)/workspaces/page") as { default: Page }).default],
+      ["trials", (require("../src/app/platform-console/(console)/trials/page") as { default: Page }).default],
+      ["signups", (require("../src/app/platform-console/(console)/signups/page") as { default: Page }).default],
       ["provisioning", (require("../src/app/platform-console/(console)/provisioning/page") as { default: Page }).default],
       ["migrations", (require("../src/app/platform-console/(console)/migrations/page") as { default: Page }).default],
       ["invitations", (require("../src/app/platform-console/(console)/invites/page") as { default: Page }).default],
+      ["announcements", (require("../src/app/platform-console/(console)/announcements/page") as { default: Page }).default],
+      ["a new announcement", (require("../src/app/platform-console/(console)/announcements/new/page") as { default: Page }).default],
+      ["billing", (require("../src/app/platform-console/(console)/billing/page") as { default: Page }).default],
+      ["plans", (require("../src/app/platform-console/(console)/plans/page") as { default: Page }).default],
+      ["a new plan", (require("../src/app/platform-console/(console)/plans/new/page") as { default: Page }).default],
+      ["system health", (require("../src/app/platform-console/(console)/health/page") as { default: Page }).default],
       ["terminals", (require("../src/app/platform-console/(console)/devices/page") as { default: Page }).default],
       ["reference data", (require("../src/app/platform-console/(console)/reference/page") as { default: Page }).default],
       ["staff", StaffPage],
       ["audit log", (require("../src/app/platform-console/(console)/audit/page") as { default: Page }).default],
+      ["settings", (require("../src/app/platform-console/(console)/settings/page") as { default: Page }).default],
+      ["my account", (require("../src/app/platform-console/(console)/account/page") as { default: Page }).default],
+      ["the website's CMS", (require("../src/app/platform-console/(console)/website/page") as { default: Page }).default],
     ];
     await staffLib.setStaffRole(adminId, "OWNER", "script:check:console");
     await actAs(adminId);
@@ -488,6 +540,15 @@ async function main() {
     await actAs(supportId);
     const asSupport = await renderPage(WorkspacePage, { slug: "zzcons-a" });
     ok("support sees the way in, but no hold or close", asSupport.includes("Enter as support") && !asSupport.includes("Hold workspace") && !asSupport.includes("Close workspace"));
+    // Every tab is in the markup whichever is open, but the one open decides what is drawn first — and
+    // `?do=hold` is how a link asks for the hold dialog: none of them offers support a hold or a close.
+    const supportViews: Record<string, string>[] = [...WORKSPACE_TABS.map((tab) => ({ tab })), { do: "hold" }];
+    const offered: string[] = [];
+    for (const view of supportViews) {
+      const html = await renderPage(WorkspacePage, { slug: "zzcons-a" }, view).catch((err: Error) => `FAILED ${err.message}`);
+      if (html.startsWith("FAILED") || html.includes("Hold workspace") || html.includes("Close workspace")) offered.push(`${new URLSearchParams(view)}: ${html.startsWith("FAILED") ? html : "hold or close"}`);
+    }
+    ok(`  on each of its ${WORKSPACE_TABS.length} tabs, and when a link asks for the hold`, WORKSPACE_TABS.length === 8 && offered.length === 0, offered.join(" | "));
     ok("  and no way to add staff", !(await renderPage(StaffPage)).includes("Add someone"));
     ok("an unknown workspace is not found", (await thrown(() => renderPage(WorkspacePage, { slug: "zz-nothing" }))) === "notFound");
   } finally {

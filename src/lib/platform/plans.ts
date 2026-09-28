@@ -1,16 +1,23 @@
-import type { PlanKind, Prisma } from "@wroffy/control-client";
+import type { PlanKind, Prisma, SubscriptionStatus } from "@wroffy/control-client";
+import { applyStanding } from "@/lib/billing/lifecycle";
 import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements, refreshEntitlementsForPlan } from "@/lib/platform/entitlements";
 import { soldIn } from "@/lib/entitlements";
-import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
+import { MODULE_REGISTRY, getModuleDefinition, type ModuleDefinition } from "@/lib/modules";
 
 /**
  * Plans, and which workspace is on which — from the console, the scripts and signup. Every change is
  * followed by working the affected workspaces' entitlements out again (src/lib/platform/
  * entitlements.ts), and recorded in the platform's audit log.
  *
- * Until billing arrives every subscription is a manual one, given by staff: one per workspace,
- * holding its plans.
+ * Staff put a workspace on plans through its manual subscription — one per workspace, holding the
+ * plans given by hand. A workspace that pays at Stripe or Razorpay is not given plans that way: a
+ * live manual subscription makes it exempt from billing (src/lib/billing/lifecycle.ts), so it would
+ * quietly stop being charged for what it uses. Its plans change at the gateway, from its own billing
+ * page; staff add a module or raise a limit instead.
+ *
+ * The console previews a change before it is made (entitlement-preview.ts), with the same rules and
+ * the same words as the save — `PLAN_REFUSALS` and the helpers below.
  */
 
 /** The plan the installation's own workspace is on: every module, no limits, never sold. */
@@ -21,6 +28,29 @@ export class PlanRefused extends Error {}
 
 const KEY_PATTERN = /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/;
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
+const DAY = 86_400_000;
+/** A checkout started at a gateway counts as paying there for this long — the customer may be paying right now. */
+const CHECKOUT_WINDOW_MS = 2 * DAY;
+
+/** A subscription at a gateway that the workspace pays through (`liveGatewaySubscription`). */
+export type LiveGateway = { gateway: "STRIPE" | "RAZORPAY"; status: SubscriptionStatus };
+
+const gatewayName = (g: LiveGateway["gateway"]) => (g === "STRIPE" ? "Stripe" : "Razorpay");
+
+/** What a save refuses with, word for word — its preview gives the same. */
+export const PLAN_REFUSALS = {
+  closed: "This workspace is closed.",
+  quantity: "A quantity is a whole number from 1.",
+  noSuchPlan: (keys: string[]) => `No such plan: ${keys.join(", ")}.`,
+  retired: (name: string) => `${name} is retired, and is not given to any more workspaces.`,
+  notOffered: (name: string, country: string) => `${name} is not offered in ${country}.`,
+  paysAtGateway: (g: LiveGateway) =>
+    `This workspace pays through ${gatewayName(g.gateway)}. Its plans change there — from its own billing page. To give it something extra, add a module or raise a limit instead.`,
+  trialWhilePaying: (g: LiveGateway) => `It pays through ${gatewayName(g.gateway)} — a trial would add to what it pays for.`,
+  notPlanModule: "That module is not one a plan decides.",
+  moduleSoldOnlyIn: (def: Pick<ModuleDefinition, "label" | "countries">) => `${def.label} is sold only in ${(def.countries ?? []).join(", ")}.`,
+  internalStaysInternal: "An internal plan stays internal.",
+} as const;
 
 export type PlanInput = {
   key: string;
@@ -43,15 +73,23 @@ async function audit(actor: string, action: string, detail: Record<string, unkno
   await tx.platformAuditLog.create({ data: { actorKind: kind, actor: actor.replace(/^(staff|script):/, ""), action, tenantId: tenantId ?? null, detail: detail as never } });
 }
 
-const limitOf = (value: unknown, what: string): number | null => {
+/** A seat or copilot-token limit as typed: a whole number, or empty for none. Refused otherwise. */
+export const limitOf = (value: unknown, what: string): number | null => {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 0 || n > 1_000_000_000) throw new PlanRefused(`${what} is a whole number, 0 or more — or empty for no limit.`);
   return n;
 };
 
-/** Creates a plan, or changes the one with this key; then every workspace on it. */
-export async function savePlan(input: PlanInput, actor: string): Promise<{ id: string; workspaces: number }> {
+/** A plan's definition as it is saved, checked — `savePlan` stores exactly this, and `previewPlanSave` shows it. */
+export type CheckedPlan = {
+  key: string;
+  modules: string[];
+  data: { name: string; kind: PlanKind; description: string | null; allModules: boolean; countries: string[]; seats: number | null; copilotTokens: number | null; isDefault: boolean; active: boolean; sortOrder: number };
+};
+
+/** Checks a plan's definition, refusing what `savePlan` refuses, in the same order and words. */
+export function checkPlanInput(input: PlanInput): CheckedPlan {
   const key = String(input.key ?? "").trim().toLowerCase();
   if (!KEY_PATTERN.test(key)) throw new PlanRefused("A plan's key is 3–50 lower-case letters, digits and dashes, e.g. crm-starter.");
   const name = String(input.name ?? "").trim();
@@ -91,10 +129,17 @@ export async function savePlan(input: PlanInput, actor: string): Promise<{ id: s
     active: input.active !== false,
     sortOrder: Number.isInteger(input.sortOrder) ? input.sortOrder! : 0,
   };
+  return { key, modules, data };
+}
+
+/** Creates a plan, or changes the one with this key; then every workspace on it. */
+export async function savePlan(input: PlanInput, actor: string): Promise<{ id: string; workspaces: number }> {
+  const { key, modules, data } = checkPlanInput(input);
+  const { allModules, countries, seats, copilotTokens, isDefault, name } = data;
 
   const plan = await controlDb().$transaction(async (tx) => {
     const existing = await tx.plan.findUnique({ where: { key }, select: { id: true, kind: true } });
-    if (existing?.kind === "INTERNAL" && input.kind !== "INTERNAL") throw new PlanRefused("An internal plan stays internal.");
+    if (existing?.kind === "INTERNAL" && input.kind !== "INTERNAL") throw new PlanRefused(PLAN_REFUSALS.internalStaysInternal);
     if (isDefault) await tx.plan.updateMany({ where: { isDefault: true, NOT: { key } }, data: { isDefault: false } });
     const saved = await tx.plan.upsert({ where: { key }, create: { key, ...data }, update: data, select: { id: true } });
     await tx.planModule.deleteMany({ where: { planId: saved.id } });
@@ -144,53 +189,93 @@ export async function startOnPlan(tx: Prisma.TransactionClient, tenantId: string
   await tx.subscriptionItem.upsert({ where: { subscriptionId_planId: { subscriptionId, planId } }, create: { subscriptionId, planId }, update: {} });
 }
 
-/** A trial made longer (or shorter), from the console. */
-export async function setTrialEnd(tenantId: string, trialEndsAt: Date, actor: string): Promise<void> {
+/**
+ * The subscription a workspace pays through at Stripe or Razorpay, if it has one that counts: live
+ * (trialing, active, past due), or a checkout started there in the last two days. While it has one,
+ * staff do not give it plans or trials by hand — see the top of this file.
+ */
+export async function liveGatewaySubscription(tenantId: string, now = new Date()): Promise<LiveGateway | null> {
+  const sub = await controlDb().subscription.findFirst({
+    where: {
+      tenantId,
+      gateway: { in: ["STRIPE", "RAZORPAY"] },
+      OR: [{ status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } }, { status: "INCOMPLETE", createdAt: { gt: new Date(now.getTime() - CHECKOUT_WINDOW_MS) } }],
+    },
+    orderBy: { createdAt: "desc" },
+    select: { gateway: true, status: true },
+  });
+  return sub ? { gateway: sub.gateway === "STRIPE" ? "STRIPE" : "RAZORPAY", status: sub.status } : null;
+}
+
+/** A trial made longer (or shorter), from the console. `extra` (the days added, a batch) goes into the audit entry with it. */
+export async function setTrialEnd(tenantId: string, trialEndsAt: Date, actor: string, extra?: Record<string, unknown>): Promise<void> {
   if (!(trialEndsAt.getTime() > Date.now())) throw new PlanRefused("A trial ends in the future.");
+  const gateway = await liveGatewaySubscription(tenantId);
+  if (gateway) throw new PlanRefused(PLAN_REFUSALS.trialWhilePaying(gateway));
   const control = controlDb();
   const trial = await control.subscription.findFirst({ where: { tenantId, gateway: "MANUAL", status: { in: ["TRIALING", "CANCELLED"] }, trialEndsAt: { not: null } }, orderBy: { createdAt: "desc" }, select: { id: true } });
   if (!trial) throw new PlanRefused("This workspace has no trial.");
   await control.subscription.update({ where: { id: trial.id }, data: { status: "TRIALING", trialEndsAt, cancelledAt: null } });
-  await audit(actor, "tenant.trial", { endsAt: trialEndsAt.toISOString() }, tenantId);
+  await audit(actor, "tenant.trial", { ...extra, endsAt: trialEndsAt.toISOString() }, tenantId);
   await refreshEntitlements(tenantId);
 }
 
-/** Its trial's plans kept, as a plan given by hand: billing leaves it alone from now on. */
+/**
+ * Its trial's plans kept, as a plan given by hand: billing leaves it alone from now on. Not while a
+ * checkout at a gateway is going through — the plan given by hand would exempt what it pays for.
+ */
 export async function giveTrialPlans(tenantId: string, actor: string): Promise<void> {
   const control = controlDb();
   const trial = await control.subscription.findFirst({ where: { tenantId, gateway: "MANUAL", status: "TRIALING" }, select: { id: true } });
   if (!trial) throw new PlanRefused("This workspace has no trial running.");
+  const gateway = await liveGatewaySubscription(tenantId);
+  if (gateway) throw new PlanRefused(PLAN_REFUSALS.paysAtGateway(gateway));
   await control.subscription.update({ where: { id: trial.id }, data: { status: "ACTIVE", trialEndsAt: null } });
   await audit(actor, "tenant.trial.given", {}, tenantId);
   await refreshEntitlements(tenantId);
 }
 
+/** The plans asked for, by key, with their quantities — a key listed twice adds up. Refused when a quantity is not 1 to 10,000. */
+export function wantedPlans(items: { planKey: string; quantity: number }[]): Map<string, number> {
+  const wanted = new Map<string, number>();
+  for (const item of items) {
+    const quantity = Number(item.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) throw new PlanRefused(PLAN_REFUSALS.quantity);
+    wanted.set(String(item.planKey), (wanted.get(String(item.planKey)) ?? 0) + quantity);
+  }
+  return wanted;
+}
+
+/** Why a plan may not be put on a workspace, or null: retired, or not offered in its country — unless it is on it already. */
+export function planChoiceRefusal(plan: { name: string; active: boolean; countries: string[] }, already: boolean, country: string): string | null {
+  if (already) return null;
+  if (!plan.active) return PLAN_REFUSALS.retired(plan.name);
+  if (plan.countries.length && !plan.countries.includes(country)) return PLAN_REFUSALS.notOffered(plan.name, country);
+  return null;
+}
+
 /**
  * The plans a workspace is on, as a whole: what is listed stays or is added, with its quantity;
  * what is not is taken off. Each must be offered and sold in the workspace's country — a retired
- * plan already on it may stay.
+ * plan already on it may stay. Never for a workspace that pays at a gateway (see the top of this file).
  */
 export async function setWorkspacePlans(tenantId: string, items: { planKey: string; quantity: number }[], actor: string): Promise<void> {
   const control = controlDb();
   const tenant = await control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, status: true } });
-  if (tenant.status === "DEPROVISIONED") throw new PlanRefused("This workspace is closed.");
-  const wanted = new Map<string, number>();
-  for (const item of items) {
-    const quantity = Number(item.quantity);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) throw new PlanRefused("A quantity is a whole number from 1.");
-    wanted.set(String(item.planKey), (wanted.get(String(item.planKey)) ?? 0) + quantity);
-  }
-  const plans = await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } } });
+  if (tenant.status === "DEPROVISIONED") throw new PlanRefused(PLAN_REFUSALS.closed);
+  const gateway = await liveGatewaySubscription(tenantId);
+  if (gateway) throw new PlanRefused(PLAN_REFUSALS.paysAtGateway(gateway));
+  const wanted = wantedPlans(items);
+  const plans = await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: { id: true, key: true, name: true, active: true, countries: true } });
   const missing = [...wanted.keys()].filter((k) => !plans.some((p) => p.key === k));
-  if (missing.length) throw new PlanRefused(`No such plan: ${missing.join(", ")}.`);
+  if (missing.length) throw new PlanRefused(PLAN_REFUSALS.noSuchPlan(missing));
 
   await control.$transaction(async (tx) => {
     const subscriptionId = await manualSubscription(tx, tenantId);
     const current = await tx.subscriptionItem.findMany({ where: { subscriptionId }, select: { planId: true } });
     for (const plan of plans) {
-      const already = current.some((c) => c.planId === plan.id);
-      if (!already && !plan.active) throw new PlanRefused(`${plan.name} is retired, and is not given to any more workspaces.`);
-      if (!already && plan.countries.length && !plan.countries.includes(tenant.country)) throw new PlanRefused(`${plan.name} is not offered in ${tenant.country}.`);
+      const refusal = planChoiceRefusal(plan, current.some((c) => c.planId === plan.id), tenant.country);
+      if (refusal) throw new PlanRefused(refusal);
     }
     await tx.subscriptionItem.deleteMany({ where: { subscriptionId, planId: { notIn: plans.map((p) => p.id) } } });
     for (const plan of plans) {
@@ -202,14 +287,42 @@ export async function setWorkspacePlans(tenantId: string, items: { planKey: stri
   await refreshEntitlements(tenantId);
 }
 
+/**
+ * The remedy for a workspace that pays at a gateway and also has a plan given by hand — the plan by
+ * hand made it exempt, so billing stopped holding it to what it pays for. That plan ends; the
+ * gateway's subscription decides from here. Only then: for any other workspace, ending its plan by
+ * hand would leave it with nothing, and changing its plans is the way.
+ */
+export async function endManualPlan(tenantId: string, subscriptionId: string, actor: string): Promise<void> {
+  const control = controlDb();
+  const sub = await control.subscription.findUnique({
+    where: { id: String(subscriptionId) },
+    select: { id: true, tenantId: true, gateway: true, status: true, items: { select: { plan: { select: { key: true } } } } },
+  });
+  if (!sub || sub.tenantId !== tenantId || sub.gateway !== "MANUAL" || sub.status !== "ACTIVE") throw new PlanRefused("That is not a plan this workspace was given by hand, or it has ended already.");
+  if (!(await liveGatewaySubscription(tenantId))) {
+    throw new PlanRefused("This workspace does not pay through Stripe or Razorpay, so its plan given by hand is all it has — change its plans instead.");
+  }
+  const now = new Date();
+  const plans = sub.items.map((i) => i.plan.key).sort();
+  await control.$transaction(async (tx) => {
+    // Only while it is still active: two staff ending it at once end it once.
+    const ended = await tx.subscription.updateMany({ where: { id: sub.id, gateway: "MANUAL", status: "ACTIVE" }, data: { status: "CANCELLED", cancelledAt: now } });
+    if (ended.count === 0) throw new PlanRefused("That plan has ended already.");
+    await audit(actor, "tenant.plans.manual-ended", { subscriptionId: sub.id, plans }, tenantId, tx);
+  });
+  await refreshEntitlements(tenantId);
+  await applyStanding(tenantId, now);
+}
+
 /** A module added to one workspace, or taken away from it, whatever its plans say — or back to them (null). */
 export async function setModuleOverride(tenantId: string, moduleKey: string, granted: boolean | null, reason: string, staffId: string): Promise<void> {
   const def = getModuleDefinition(moduleKey);
-  if (!def || def.core) throw new PlanRefused("That module is not one a plan decides.");
+  if (!def || def.core) throw new PlanRefused(PLAN_REFUSALS.notPlanModule);
   const why = String(reason ?? "").trim();
   if (granted !== null && why.length < 5) throw new PlanRefused("Say why — it is kept with the change.");
   const tenant = await controlDb().tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true } });
-  if (granted && !soldIn(def, tenant.country)) throw new PlanRefused(`${def.label} is sold only in ${def.countries!.join(", ")}.`);
+  if (granted && !soldIn(def, tenant.country)) throw new PlanRefused(PLAN_REFUSALS.moduleSoldOnlyIn(def));
   const control = controlDb();
   if (granted === null) await control.tenantModuleOverride.deleteMany({ where: { tenantId, moduleKey } });
   else {

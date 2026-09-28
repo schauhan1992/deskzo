@@ -102,7 +102,24 @@ export type StripeInvoice = {
   hosted_invoice_url?: string | null;
   invoice_pdf?: string | null;
   metadata?: Record<string, string>;
+  /** What it charges for, a line each at its price; `has_more` when Stripe sent only the first page of them. */
+  lines?: { data: { amount: number; price?: { id: string } | null }[]; has_more?: boolean };
+  /** Credited back by credit notes issued after it was paid — what the partner programme reverses. */
+  post_payment_credit_notes_amount?: number;
 };
+
+/** A payment. Only its refunds are read: `amount_refunded` is everything refunded on it so far. */
+export type StripeCharge = {
+  id: string;
+  object: "charge";
+  invoice?: string | { id: string } | null;
+  amount: number;
+  amount_refunded: number;
+  created: number;
+};
+
+/** Only to find its invoice, which is read back whole: the invoice carries what was credited. */
+export type StripeCreditNote = { id: string; object: "credit_note"; invoice: string | { id: string } };
 
 export type StripeCheckoutSession = {
   id: string;
@@ -217,6 +234,10 @@ export function createStripePortal(input: { customerId: string; returnUrl: strin
 
 export function getStripeSubscription(id: string) {
   return call<StripeSubscription>("GET", `/subscriptions/${encodeURIComponent(id)}`);
+}
+
+export function getStripeInvoice(id: string) {
+  return call<StripeInvoice>("GET", `/invoices/${encodeURIComponent(id)}`);
 }
 
 // ─── Webhooks ──────────────────────────────────────────────────────────────────────────────────

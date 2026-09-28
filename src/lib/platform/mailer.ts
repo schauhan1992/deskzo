@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import nodemailer from "nodemailer";
@@ -14,7 +15,8 @@ import nodemailer from "nodemailer";
  * Check suites replace the sender (`setTestPlatformMailer`), so no check ever sends or writes mail.
  */
 
-export type PlatformMail = { to: string; subject: string; text: string };
+/** `replyTo`: where an answer goes instead of the From address — support mail sends it to the support mailbox. */
+export type PlatformMail = { to: string; subject: string; text: string; replyTo?: string };
 type Sender = (mail: PlatformMail) => Promise<void>;
 
 let testSender: Sender | null = null;
@@ -32,12 +34,14 @@ export async function sendPlatformMail(mail: PlatformMail): Promise<void> {
   if (testSender) return testSender(mail);
   const smtp = process.env.PLATFORM_SMTP_URL?.trim();
   if (smtp) {
-    await nodemailer.createTransport(smtp).sendMail({ from: platformMailFrom(), to: mail.to, subject: mail.subject, text: mail.text });
+    await nodemailer.createTransport(smtp).sendMail({ from: platformMailFrom(), to: mail.to, subject: mail.subject, text: mail.text, ...(mail.replyTo ? { replyTo: mail.replyTo } : {}) });
     return;
   }
   const dir = path.join(process.cwd(), "platform-outbox");
   await mkdir(dir, { recursive: true });
-  const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${mail.to.replace(/[^a-z0-9@.-]/gi, "_")}.eml`);
-  await writeFile(file, `From: ${platformMailFrom()}\nTo: ${mail.to}\nSubject: ${mail.subject}\n\n${mail.text}\n`, "utf8");
+  // Named by time, not by recipient: the name is logged, and a visitor's address must not be.
+  const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}.eml`);
+  const replyTo = mail.replyTo ? `Reply-To: ${mail.replyTo}\n` : "";
+  await writeFile(file, `From: ${platformMailFrom()}\nTo: ${mail.to}\n${replyTo}Subject: ${mail.subject}\n\n${mail.text}\n`, "utf8");
   console.log(`[platform mail] no PLATFORM_SMTP_URL — written to ${path.relative(process.cwd(), file)}`);
 }

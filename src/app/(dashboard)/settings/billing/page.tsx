@@ -5,6 +5,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatMoney } from "@/lib/billing/money";
 import { formatIstDate } from "@/lib/india-time";
+import { partnerShownToCustomer } from "@/lib/partners/customer-facing";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
 /** Where this workspace stands, in a sentence. */
@@ -45,7 +46,11 @@ export default async function BillingPage() {
       </div>
     );
   }
-  const { country } = await currentTenant();
+  const { id: tenantId, country } = await currentTenant();
+  // The partner that sold this workspace, named but read-only: moving a workspace to another partner
+  // is a staff act with a reason (spec §4.4), so there is nothing here to change it. It never throws
+  // and waits 1.5 s at most; without an answer the line is simply left out.
+  const partner = await partnerShownToCustomer(tenantId).catch(() => null);
   const standing = standingText(view);
   const paying = view.subscriptions.some((s) => s.gateway !== "MANUAL");
   const mayBuy = !paying && view.standing.kind !== "exempt";
@@ -89,6 +94,7 @@ export default async function BillingPage() {
               )}
             </div>
           )}
+          {partner && <p className="text-muted">Sold and supported by {partner.displayName}.</p>}
           <p className="text-xs text-muted">
             People with an account: {view.usage.seatsUsed}
             {view.usage.seatsLimit !== null ? ` of ${view.usage.seatsLimit}` : ""} · AI copilot this month: {view.usage.copilotUsed.toLocaleString("en-IN")} tokens

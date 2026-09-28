@@ -1,35 +1,31 @@
-import { consoleSignOut } from "@/actions/platform/staff-auth";
-import { ConsoleNav } from "@/components/console/console-nav";
-import { Button } from "@/components/ui/button";
-import { consoleStaff } from "@/lib/platform/console-page";
+import { ConsoleShell } from "@/components/console/shell/console-shell";
+import { schemaLabel } from "@/lib/console-shared/labels";
+import { pagesFor } from "@/lib/console-shared/nav";
+import { consoleStaff, platformEnv } from "@/lib/platform/console-page";
+import { navCounts } from "@/lib/platform/nav-counts";
+import { workspaceMigrationNames } from "@/lib/platform/schema-info";
 
 /**
  * The staff console's frame, on admin. only (src/proxy.ts rewrites there into this folder and refuses
- * the folder anywhere else). Each page below checks the session itself too — see consoleStaff.
+ * the folder anywhere else). Each page below checks the session itself too — see consoleStaff: the App
+ * Router keeps this layout across navigations without running it again.
+ *
+ * Everything the shell shows is worked out here, on the server, as plain props: the pages this role may
+ * open (the same registry the page gates read), the sidebar's badge counts (`navCounts` never throws — a
+ * badge it cannot count is left off), which installation this is, and the newest workspace schema this
+ * code carries, in words ("billing · 28 Sep").
  */
 export default async function ConsoleLayout({ children }: LayoutProps<"/platform-console">) {
   const staff = await consoleStaff();
+  const env = platformEnv();
+  const visibleKeys = pagesFor(staff.role).map((page) => page.key);
+  const counts = await navCounts(staff.role);
+  // The folder read that never throws (an unreadable folder is "none", not a broken console).
+  const schema = schemaLabel(workspaceMigrationNames().at(-1) ?? null);
+
   return (
-    <div className="min-h-screen bg-surface-sunken">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div>
-            <p className="text-sm font-semibold text-text">Wroffy platform console</p>
-            <p className="text-xs text-muted">
-              {staff.name} · {staff.role.toLowerCase()}
-            </p>
-          </div>
-          <form action={consoleSignOut}>
-            <Button type="submit" size="sm" variant="ghost">
-              Sign out
-            </Button>
-          </form>
-        </div>
-        <div className="mx-auto max-w-6xl px-4 pb-2">
-          <ConsoleNav />
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
-    </div>
+    <ConsoleShell staff={{ name: staff.name, email: staff.email, role: staff.role }} env={env} visibleKeys={visibleKeys} counts={counts} schema={schema}>
+      {children}
+    </ConsoleShell>
   );
 }

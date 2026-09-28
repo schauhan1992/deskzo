@@ -65,13 +65,21 @@ export type RazorpayPayment = {
   invoice_id?: string | null;
   tax?: number | null;
   created_at: number;
+  /** Everything refunded on it so far; `refund_status` null, "partial" or "full". */
+  amount_refunded?: number;
+  refund_status?: string | null;
 };
 
 export type RazorpayEvent = {
   entity: "event";
   event: string;
   created_at?: number;
-  payload: { subscription?: { entity: RazorpaySubscription }; payment?: { entity: RazorpayPayment } };
+  payload: {
+    subscription?: { entity: RazorpaySubscription };
+    payment?: { entity: RazorpayPayment };
+    /** One refund (`refund.processed`): its own amount, not the payment's total refunded. */
+    refund?: { entity: { id: string; payment_id: string; amount: number } };
+  };
 };
 
 /** Razorpay sends `notes` as an object, or as an empty array when there are none. */
