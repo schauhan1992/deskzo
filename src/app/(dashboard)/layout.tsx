@@ -185,6 +185,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         permissions={permissions}
         branding={branding}
         country={(await currentTenant()).country}
+        support={!!supportLauncher}
       />
 
       <div className={`flex min-w-0 flex-1 flex-col${viewAs ? " ring-2 ring-inset ring-warning/50" : ""}`}>
@@ -273,7 +274,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         another twenty rem out of it to hold a calculator would make every table worse in exchange
         for a convenience. The tools it offers all have pages of their own.
       */}
-      <div className="hidden xl:block" data-side-rail>
+      <div className="hidden xl:block">
         <SideRail
           copilot={!!copilot}
           unreadUpdates={unreadUpdates}
@@ -283,7 +284,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         />
       </div>
 
-      {/* Fixed at the bottom right; it measures the rail above through `data-side-rail` to stay clear of it. */}
+      {/* The Contact Support dialog; its button is at the foot of the sidebar (the `support` prop above). */}
       {supportLauncher && <SupportLauncher state={supportLauncher} />}
     </div>
     </TableColumnsProvider>

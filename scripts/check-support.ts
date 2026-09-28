@@ -952,7 +952,7 @@ async function main() {
       ok("the workspace's support components import with no window or document", typeof (globalThis as { window?: unknown }).window === "undefined" && typeof (globalThis as { document?: unknown }).document === "undefined");
       const state: LauncherState = { email: "asha@zzsup.example", phone: "+91 98765 43210", helpline: "+91 80 4000 1234", hours: "Mon-Fri", recordingAllowed: true, recordingBlockedReason: null, brandName: "Wroffy ERP" };
       const launcher = renderToStaticMarkup(createElement(SupportLauncher, { state }));
-      ok("the launcher: the Contact Support button, the dialog closed", launcher.includes('aria-label="Contact support"') && launcher.includes("Contact Support") && !launcher.includes('role="dialog"'), launcher.slice(0, 300));
+      ok("the launcher: nothing on the page until the sidebar asks — the dialog closed", !launcher.includes('role="dialog"'), launcher.slice(0, 300));
       const dialog = renderToStaticMarkup(createElement(SupportDialog, { state, open: true, onClose: () => {} }));
       ok("the dialog: its title, the fields, the priorities, the footer and the disclosure", ["How can we help you today?", "Subject", "Tell us in detail", "Mobile number", "How critical is your request?", "Just a question", "Critical — our business is stopped", "asha@zzsup.example", "We&#x27;ll include the page you were on"].every((t) => dialog.includes(t)), ["How can we help you today?", "Subject", "Tell us in detail", "Mobile number", "How critical is your request?", "Just a question", "asha@zzsup.example"].filter((t) => !dialog.includes(t)).join(", "));
       ok("  the phone prefilled, and NORMAL chosen", dialog.includes('value="+91 98765 43210"') && /<option value="NORMAL" selected="">/.test(dialog));

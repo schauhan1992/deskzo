@@ -4,10 +4,11 @@ import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Menu, X, ChevronRight, LayoutDashboard, BarChart3, Search, Settings as SettingsIcon, UserCog, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck, FileSpreadsheet } from "lucide-react";
+import { Menu, X, ChevronRight, LayoutDashboard, BarChart3, Search, Settings as SettingsIcon, UserCog, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck, FileSpreadsheet, Headset } from "lucide-react";
 import { MODULE_REGISTRY, navGroupRank , navPermissionKeys } from "@/lib/modules";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
+import { openSupport } from "@/components/support/open-support";
 
 /** Every module link, for working out which one is the most specific match for the current page. */
 const NAV_HREFS = MODULE_REGISTRY.flatMap((m) => m.navItems.map((i) => i.href));
@@ -121,6 +122,7 @@ export function Sidebar({
   permissions = [],
   branding,
   country = "IN",
+  support = false,
 }: {
   enabledKeys: string[];
   canViewPerformance: boolean;
@@ -128,6 +130,11 @@ export function Sidebar({
   branding: Branding;
   /** The workspace's, for links that only exist in some countries (the e-way bill register). */
   country?: string;
+  /**
+   * Whether to offer "Contact Support" at the foot of the menu — the layout's answer from
+   * `supportLauncherState()`. The dialog itself is the layout's (src/components/support/support-launcher.tsx).
+   */
+  support?: boolean;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -286,6 +293,30 @@ export function Sidebar({
    */
   const isGroupOpen = (group: string) =>
     group === activeGroup || (openGroups === null ? false : openGroups.includes(group));
+
+  /** "Contact Support", at the foot of the menu: the platform's help desk, not a page of this workspace. */
+  function supportButton(isCollapsed: boolean, beforeOpen?: () => void) {
+    return (
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-label={isCollapsed ? "Contact support" : undefined}
+        title={isCollapsed ? "Contact support" : undefined}
+        onClick={() => {
+          beforeOpen?.();
+          openSupport();
+        }}
+        className={cn(
+          "flex w-full items-center gap-2.5 rounded-base px-2.5 py-2 text-[13px] font-medium text-brand",
+          "transition-colors hover:bg-brand/10",
+          isCollapsed && "justify-center",
+        )}
+      >
+        <Headset aria-hidden="true" className="h-4 w-4 shrink-0" />
+        {!isCollapsed && "Contact Support"}
+      </button>
+    );
+  }
 
   function renderNav(isCollapsed: boolean, onNavigate?: () => void) {
     /**
@@ -464,7 +495,8 @@ export function Sidebar({
           )}
         </div>
         {renderNav(collapsed)}
-        <div className="border-t border-line p-2">
+        <div className="space-y-0.5 border-t border-line p-2">
+          {support && supportButton(collapsed)}
           <button
             type="button"
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -502,6 +534,8 @@ export function Sidebar({
               </button>
             </div>
             {renderNav(false, () => setMobileOpen(false))}
+            {/* The drawer closes first, so the dialog opens over the page rather than over the menu. */}
+            {support && <div className="border-t border-line p-2">{supportButton(false, () => setMobileOpen(false))}</div>}
           </aside>
         </div>
       )}

@@ -11,6 +11,7 @@ export function Dialog({
   title,
   children,
   wide = false,
+  large = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -18,6 +19,8 @@ export function Dialog({
   children: React.ReactNode;
   /** Room for two panes side by side — an editor and its preview. */
   wide?: boolean;
+  /** Room for a two-column form, so a long one fits a laptop screen without scrolling. */
+  large?: boolean;
 }) {
   // Escape, the scroll lock, the focus trap and the accessible name — see use-modal-a11y.ts.
   const { titleId, containerRef } = useModalA11y(open, onClose);
@@ -70,7 +73,7 @@ export function Dialog({
          * Reset here rather than at each call site, because every future caller would have to
          * remember, and the one that forgets looks broken in a way that points at its own contents.
          */
-        className={`relative w-full ${wide ? "max-w-6xl" : "max-w-lg"} animate-scale-in whitespace-normal rounded-t-2xl border border-line bg-surface p-5 text-left shadow-lg sm:rounded-xl`}
+        className={`relative w-full ${wide ? "max-w-6xl" : large ? "max-w-3xl" : "max-w-lg"} animate-scale-in whitespace-normal rounded-t-2xl border border-line bg-surface p-5 text-left shadow-lg sm:rounded-xl`}
       >
         <div className="flex items-center justify-between gap-4">
           <h2 id={titleId} className="text-sm font-semibold text-text">
@@ -85,7 +88,7 @@ export function Dialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className={`mt-4 ${wide ? "max-h-[85vh]" : "max-h-[75vh]"} overflow-y-auto`}>{children}</div>
+        <div className={`mt-4 ${wide || large ? "max-h-[85vh]" : "max-h-[75vh]"} overflow-y-auto`}>{children}</div>
       </div>
     </div>,
     document.body,

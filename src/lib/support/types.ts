@@ -71,9 +71,6 @@ export const UPLOAD_HEADERS = {
   marker: "x-support-upload",
 } as const;
 
-/** Where the launcher remembers being collapsed to its icon. */
-export const COLLAPSED_STORAGE_KEY = "wroffy:support-collapsed";
-
 /** SR-1042. */
 export function supportRef(number: number): string {
   return `SR-${number}`;

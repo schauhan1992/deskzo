@@ -401,7 +401,7 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
 
   return (
     <>
-      <Dialog open={open && phase === "idle"} onClose={requestClose} title="How can we help you today?">
+      <Dialog open={open && phase === "idle"} onClose={requestClose} title="How can we help you today?" large>
         {sent ? (
           <div className="flex flex-col items-center gap-3 px-2 py-6 text-center">
             <CircleCheck aria-hidden="true" className="h-10 w-10 text-success" />
@@ -415,145 +415,154 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
           </div>
         ) : (
           <form onSubmit={send} noValidate className="space-y-4">
-            <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between gap-3">
-                <Label htmlFor={ids.subject}>
-                  Subject <span aria-hidden="true" className="text-danger">*</span>
-                </Label>
-                {showSubjectCount && <Counter id={ids.subjectCount} length={subjectLength} max={LIMITS.subject} />}
+            {/*
+              Two columns from `sm`, so the whole form fits a laptop screen without the dialog
+              scrolling: what happened on the left, its text box taking the column's height, and the
+              smaller fields on the right. On a phone they stack, and the sheet scrolls as a long form must.
+            */}
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <Label htmlFor={ids.subject}>
+                      Subject <span aria-hidden="true" className="text-danger">*</span>
+                    </Label>
+                    {showSubjectCount && <Counter id={ids.subjectCount} length={subjectLength} max={LIMITS.subject} />}
+                  </div>
+                  <Input
+                    ref={subjectRef}
+                    id={ids.subject}
+                    value={subject}
+                    autoComplete="off"
+                    aria-required="true"
+                    aria-invalid={errors.subject ? true : undefined}
+                    aria-describedby={describedBy(errors.subject && ids.subjectError, showSubjectCount && ids.subjectCount)}
+                    onChange={(event) => {
+                      setSubject(event.target.value);
+                      if (errors.subject) setErrors((e) => ({ ...e, subject: undefined }));
+                    }}
+                  />
+                  {errors.subject && <FieldError id={ids.subjectError} message={errors.subject} />}
+                </div>
+
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <Label htmlFor={ids.body}>
+                      Tell us in detail <span aria-hidden="true" className="text-danger">*</span>
+                    </Label>
+                    {showBodyCount && <Counter id={ids.bodyCount} length={bodyLength} max={LIMITS.body} />}
+                  </div>
+                  <Textarea
+                    ref={bodyRef}
+                    id={ids.body}
+                    rows={6}
+                    value={body}
+                    placeholder="What were you trying to do, and what happened instead?"
+                    aria-required="true"
+                    aria-invalid={errors.body ? true : undefined}
+                    aria-describedby={describedBy(errors.body && ids.bodyError, showBodyCount && ids.bodyCount)}
+                    className="min-h-40 flex-1 resize-none"
+                    onChange={(event) => {
+                      setBody(event.target.value);
+                      if (errors.body) setErrors((e) => ({ ...e, body: undefined }));
+                    }}
+                  />
+                  {errors.body && <FieldError id={ids.bodyError} message={errors.body} />}
+                </div>
               </div>
-              <Input
-                ref={subjectRef}
-                id={ids.subject}
-                value={subject}
-                autoComplete="off"
-                aria-required="true"
-                aria-invalid={errors.subject ? true : undefined}
-                aria-describedby={describedBy(errors.subject && ids.subjectError, showSubjectCount && ids.subjectCount)}
-                onChange={(event) => {
-                  setSubject(event.target.value);
-                  if (errors.subject) setErrors((e) => ({ ...e, subject: undefined }));
-                }}
-              />
-              {errors.subject && <FieldError id={ids.subjectError} message={errors.subject} />}
-            </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between gap-3">
-                <Label htmlFor={ids.body}>
-                  Tell us in detail <span aria-hidden="true" className="text-danger">*</span>
-                </Label>
-                {showBodyCount && <Counter id={ids.bodyCount} length={bodyLength} max={LIMITS.body} />}
-              </div>
-              <Textarea
-                ref={bodyRef}
-                id={ids.body}
-                rows={6}
-                value={body}
-                placeholder="What were you trying to do, and what happened instead?"
-                aria-required="true"
-                aria-invalid={errors.body ? true : undefined}
-                aria-describedby={describedBy(errors.body && ids.bodyError, showBodyCount && ids.bodyCount)}
-                className="min-h-32 resize-y"
-                onChange={(event) => {
-                  setBody(event.target.value);
-                  if (errors.body) setErrors((e) => ({ ...e, body: undefined }));
-                }}
-              />
-              {errors.body && <FieldError id={ids.bodyError} message={errors.body} />}
-            </div>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor={ids.mobile}>Mobile number</Label>
+                  <Input
+                    ref={mobileRef}
+                    id={ids.mobile}
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    maxLength={24}
+                    value={mobile}
+                    aria-invalid={errors.mobile ? true : undefined}
+                    aria-describedby={describedBy(errors.mobile ? ids.mobileError : ids.mobileHint)}
+                    onChange={(event) => {
+                      setMobile(event.target.value);
+                      if (errors.mobile) setErrors((e) => ({ ...e, mobile: undefined }));
+                    }}
+                  />
+                  {errors.mobile ? (
+                    <FieldError id={ids.mobileError} message={errors.mobile} />
+                  ) : (
+                    <p id={ids.mobileHint} className="text-xs text-subtle">
+                      Optional — in case a call is quicker.
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={ids.priority}>How critical is your request?</Label>
+                  <Select id={ids.priority} value={priority} onChange={(event) => setPriority(event.target.value as SupportPriorityKey)}>
+                    {PRIORITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
 
-            <div className="space-y-1.5">
-              <p id={ids.attachments} className="text-[13px] font-medium text-muted">
-                Attachments
-              </p>
-              <AttachmentPicker items={files.items} refused={files.refused} onAdd={files.add} onRemove={files.remove} labelId={ids.attachments} />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor={ids.mobile}>Mobile number</Label>
-                <Input
-                  ref={mobileRef}
-                  id={ids.mobile}
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  maxLength={24}
-                  value={mobile}
-                  aria-invalid={errors.mobile ? true : undefined}
-                  aria-describedby={describedBy(errors.mobile ? ids.mobileError : ids.mobileHint)}
-                  onChange={(event) => {
-                    setMobile(event.target.value);
-                    if (errors.mobile) setErrors((e) => ({ ...e, mobile: undefined }));
-                  }}
-                />
-                {errors.mobile ? (
-                  <FieldError id={ids.mobileError} message={errors.mobile} />
-                ) : (
-                  <p id={ids.mobileHint} className="text-xs text-subtle">
-                    Optional — in case a call is quicker.
+                <div className="space-y-1.5">
+                  <p id={ids.attachments} className="text-[13px] font-medium text-muted">
+                    Attachments
                   </p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={ids.priority}>How critical is your request?</Label>
-                <Select id={ids.priority} value={priority} onChange={(event) => setPriority(event.target.value as SupportPriorityKey)}>
-                  {PRIORITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
+                  <AttachmentPicker items={files.items} refused={files.refused} onAdd={files.add} onRemove={files.remove} labelId={ids.attachments} />
+                </div>
 
-            <div role="group" aria-labelledby={ids.record} className="space-y-1.5">
-              <p id={ids.record} className="text-[13px] font-medium text-muted">
-                Screen recording
-              </p>
-              {take ? (
-                take.upload.state === "done" ? (
-                  <RecordingChip url={take.url} durationMs={take.durationMs} size={take.blob.size} focusPlay={focusChip} onRemove={removeTake} />
-                ) : (
-                  <div ref={previewRef}>
-                    <RecordingPreview
-                      url={take.url}
-                      durationMs={take.durationMs}
-                      size={take.blob.size}
-                      note={take.note}
-                      upload={take.upload}
-                      onAttach={attachTake}
-                      onRedo={recordAgain}
-                      onDiscard={removeTake}
-                    />
-                  </div>
-                )
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    {/* The tooltip sits on a wrapper: a disabled button gets no hover, so its own title never shows. */}
-                    <span title={recordBlocked ?? undefined} className="inline-flex">
-                      <Button
-                        ref={recordButtonRef}
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={!!recordBlocked}
-                        aria-describedby={ids.recordHint}
-                        onClick={openConsent}
-                      >
-                        <Video aria-hidden="true" className="h-3.5 w-3.5" />
-                        Record screen
-                      </Button>
-                    </span>
-                    <span id={ids.recordHint} className="text-xs text-subtle">
-                      {recordBlocked ?? "Show us what's happening — up to 5 minutes, with your consent."}
-                    </span>
-                  </div>
-                  {recordNotice && <p className="text-xs text-muted">{recordNotice}</p>}
-                </>
-              )}
+                <div role="group" aria-labelledby={ids.record} className="space-y-1.5">
+                  <p id={ids.record} className="text-[13px] font-medium text-muted">
+                    Screen recording
+                  </p>
+                  {take ? (
+                    take.upload.state === "done" ? (
+                      <RecordingChip url={take.url} durationMs={take.durationMs} size={take.blob.size} focusPlay={focusChip} onRemove={removeTake} />
+                    ) : (
+                      <div ref={previewRef}>
+                        <RecordingPreview
+                          url={take.url}
+                          durationMs={take.durationMs}
+                          size={take.blob.size}
+                          note={take.note}
+                          upload={take.upload}
+                          onAttach={attachTake}
+                          onRedo={recordAgain}
+                          onDiscard={removeTake}
+                        />
+                      </div>
+                    )
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                        {/* The tooltip sits on a wrapper: a disabled button gets no hover, so its own title never shows. */}
+                        <span title={recordBlocked ?? undefined} className="inline-flex">
+                          <Button
+                            ref={recordButtonRef}
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={!!recordBlocked}
+                            aria-describedby={ids.recordHint}
+                            onClick={openConsent}
+                          >
+                            <Video aria-hidden="true" className="h-3.5 w-3.5" />
+                            Record screen
+                          </Button>
+                        </span>
+                        <span id={ids.recordHint} className="text-xs text-subtle">
+                          {recordBlocked ?? "Show us what's happening — up to 5 minutes, with your consent."}
+                        </span>
+                      </div>
+                      {recordNotice && <p className="text-xs text-muted">{recordNotice}</p>}
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-1.5 rounded-lg bg-surface-sunken/60 px-3 py-2.5 text-xs text-muted">
@@ -578,10 +587,10 @@ export function SupportDialog({ state, open, onClose }: { state: LauncherState; 
                   Our response will be sent to your email address <strong className="font-medium text-text">{state.email}</strong>.
                 </span>
               </p>
+              <p className="text-[11px] leading-relaxed text-subtle">
+                We&apos;ll include the page you were on and your browser and device details, to help us reproduce the problem.
+              </p>
             </div>
-            <p className="text-[11px] leading-relaxed text-subtle">
-              We&apos;ll include the page you were on and your browser and device details, to help us reproduce the problem.
-            </p>
 
             {formError && <ActionNotice tone="error">{formError}</ActionNotice>}
 
