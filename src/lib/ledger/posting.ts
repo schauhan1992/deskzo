@@ -1,4 +1,5 @@
 import { SYSTEM_ACCOUNTS, type SystemAccountKey } from "@/lib/ledger/chart";
+import { isBaseCurrency } from "@/lib/currency";
 
 /**
  * A line the posting engine wants written, before account ids are resolved.
@@ -78,6 +79,53 @@ export type DocumentFinancials = {
   roundOff: number;
   total: number;
 };
+
+/**
+ * The rate a document is booked at: its own — except that a rupee document is booked as written. The
+ * form refuses a rupee document with a rate other than 1 (check:currency), but a row from before
+ * that rule can still carry one, and booking it would multiply a rupee invoice by a stale rate.
+ */
+export function bookingRate(doc: { currency: string; exchangeRate: unknown }): number {
+  if (isBaseCurrency(doc.currency)) return 1;
+  return Number(doc.exchangeRate) || 1;
+}
+
+/**
+ * A document's figures in rupees, at the rate it was raised at. The books are kept in rupees; the
+ * difference when a foreign document settles at another rate is booked separately, on the payment.
+ *
+ * The total is converted as one figure, so the receivable or payable is exactly `total × rate` —
+ * the amount the payment and the exchange-difference postings later clear it by. Every other figure
+ * is converted on its own and rounds on its own, so together they can miss that total by a paisa
+ * or two, which would leave the entry out of balance. That remainder is conversion rounding and is
+ * taken to round off, the one line that exists to absorb it.
+ *
+ * At rate 1 nothing is converted and nothing is absorbed: a rupee document posts exactly as written.
+ */
+export function inRupees(doc: DocumentFinancials, rate: number): DocumentFinancials {
+  if (!(rate > 0) || rate === 1) return doc;
+  const inr = (v: number) => round2(v * rate);
+  const taxableValue = inr(doc.taxableValue);
+  const cgstAmount = inr(doc.cgstAmount);
+  const sgstAmount = inr(doc.sgstAmount);
+  const igstAmount = inr(doc.igstAmount);
+  const withholdingAmount = inr(doc.withholdingAmount);
+  const adjustment = inr(doc.adjustment);
+  const total = inr(doc.total);
+  return {
+    ...doc,
+    taxableValue,
+    cgstAmount,
+    sgstAmount,
+    igstAmount,
+    shippingCharge: inr(doc.shippingCharge),
+    withholdingAmount,
+    adjustment,
+    // total = taxable + taxes + withholding + adjustment + round off, as the GST engine builds it.
+    roundOff: round2(total - (taxableValue + cgstAmount + sgstAmount + igstAmount + withholdingAmount + adjustment)),
+    total,
+  };
+}
 
 /**
  * A sales invoice.
@@ -492,6 +540,19 @@ export function postChequeClearing(params: {
 }
 
 // ─── Foreign currency ─────────────────────────────────────────────────────────
+
+/**
+ * How many more rupees an allocation moved than the document booked for it: the amount at the
+ * payment's rate less the amount at the document's, each rounded as the two postings round it.
+ *
+ * Taken as a difference of the two rounded figures rather than `amount × (paymentRate − docRate)`
+ * rounded once. That product is not always the difference of the rounded postings — $1 booked at
+ * ₹82.915 (₹82.92) and received at ₹84.4444 (₹84.44) is ₹1.53 by the product and ₹1.52 by the
+ * postings — so a document settled in full kept a paisa on the receivable, in about one case in four.
+ */
+export function exchangeDifference(allocated: number, paymentRate: number, docRate: number): number {
+  return round2(round2(allocated * paymentRate) - round2(allocated * docRate));
+}
 
 /**
  * The difference between the rate a document was raised at and the rate it settled at.

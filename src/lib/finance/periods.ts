@@ -1,4 +1,11 @@
-import { financialYearBounds } from "@/lib/ledger/period";
+import {
+  financialYearBounds,
+  financialYearStartOf,
+  financialYearWindow,
+  istDateParts,
+  istMidnight,
+  istMonthWindow,
+} from "@/lib/india-time";
 
 /**
  * The windows a finance card can be looked at through.
@@ -32,71 +39,73 @@ export const PERIODS: { key: PeriodKey; label: string }[] = [
 
 export type ResolvedPeriod = { key: PeriodKey; from: Date; to: Date; label: string };
 
-const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
-const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+/**
+ * Every bound here is on India's calendar (src/lib/india-time.ts). They were built with
+ * `new Date(y, m, d)` and `getMonth()`, which read the host's clock: on a server in UTC "this month"
+ * began at 05:30 IST on the 1st and ran into the morning of the next month's 1st.
+ *
+ * `to` stays inclusive, as its callers compare with `lte` and the cards print it as the last day:
+ * the millisecond before the next Indian midnight. Timestamps are stored to the millisecond, so that
+ * is the same set of instants as `lt` the next midnight, with no gap for one to fall through.
+ */
+const inclusive = (exclusiveEnd: Date) => new Date(exclusiveEnd.getTime() - 1);
 
-/** Which fiscal quarter a month sits in: April is the start of Q1. */
-function fiscalQuarterStart(date: Date): Date {
-  const shifted = (date.getMonth() - 3 + 12) % 12;
-  const quarterIndex = Math.floor(shifted / 3);
-  const month = (quarterIndex * 3 + 3) % 12;
-  // A quarter beginning in January, February or March belongs to the fiscal year that started the
-  // previous April, so its calendar year is the later one.
-  const year = month >= 3 ? (date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1) : date.getFullYear();
-  return new Date(year, month, 1);
+/** The first month (0-based) of the fiscal quarter a date sits in, in the date's calendar year. */
+function fiscalQuarterStart(date: Date): { year: number; month: number } {
+  const { year, month } = istDateParts(date);
+  // April, July, October and January each open a quarter. A quarter never straddles a calendar
+  // year, so its start is in the same calendar year as the date.
+  const shifted = (month - 3 + 12) % 12;
+  return { year, month: (Math.floor(shifted / 3) * 3 + 3) % 12 };
 }
 
 function fiscalYear(date: Date): { from: Date; to: Date; label: string } {
-  const bounds = financialYearBounds(date);
-  return {
-    from: new Date(`${bounds.from}T00:00:00`),
-    to: new Date(`${bounds.to}T23:59:59.999`),
-    label: `FY ${bounds.label}`,
-  };
+  const window = financialYearWindow(financialYearStartOf(date));
+  return { from: window.from, to: inclusive(window.to), label: `FY ${window.label}` };
 }
 
 const QUARTER_LABEL = ["Q1", "Q2", "Q3", "Q4"];
 
 export function resolvePeriod(key: PeriodKey, now: Date): ResolvedPeriod {
+  const today = istDateParts(now);
   switch (key) {
     case "thisFiscalYear": {
       const fy = fiscalYear(now);
       return { key, ...fy };
     }
     case "lastFiscalYear": {
-      const fy = fiscalYear(new Date(now.getFullYear() - 1, now.getMonth(), 1));
+      const fy = fiscalYear(istMidnight(today.year - 1, today.month, 1));
       return { key, ...fy };
     }
     case "thisQuarter":
     case "lastQuarter": {
-      const start = fiscalQuarterStart(now);
-      if (key === "lastQuarter") start.setMonth(start.getMonth() - 3);
-      const end = new Date(start.getFullYear(), start.getMonth() + 3, 0, 23, 59, 59, 999);
-      const index = ((start.getMonth() - 3 + 12) % 12) / 3;
+      const q = fiscalQuarterStart(now);
+      const shift = key === "lastQuarter" ? -3 : 0;
+      const start = istMidnight(q.year, q.month + shift, 1);
+      const index = ((istDateParts(start).month - 3 + 12) % 12) / 3;
       return {
         key,
         from: start,
-        to: end,
+        to: inclusive(istMidnight(q.year, q.month + shift + 3, 1)),
         label: `${QUARTER_LABEL[index] ?? "Q"} ${financialYearBounds(start).label}`,
       };
     }
     case "thisMonth":
-      return { key, from: startOfMonth(now), to: endOfMonth(now), label: monthLabel(now) };
     case "lastMonth": {
-      const m = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      return { key, from: startOfMonth(m), to: endOfMonth(m), label: monthLabel(m) };
+      const month = istMonthWindow(now, key === "lastMonth" ? -1 : 0);
+      return { key, from: month.from, to: inclusive(month.to), label: monthLabel(month.from) };
     }
     case "last6Months":
     case "last12Months": {
       const back = key === "last6Months" ? 5 : 11;
       // From the *start* of the month that many back, so the window is whole months and the last
       // bar is the month in progress rather than a fortnight of an extra one.
-      const from = new Date(now.getFullYear(), now.getMonth() - back, 1);
+      const from = istMonthWindow(now, -back).from;
       return { key, from, to: now, label: key === "last6Months" ? "Last 6 months" : "Last 12 months" };
     }
   }
 }
 
 function monthLabel(d: Date) {
-  return d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  return d.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
 }

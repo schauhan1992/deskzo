@@ -9,7 +9,10 @@
  *   npm run check:accounting
  */
 import {
+  bookingRate,
   entryTotals,
+  exchangeDifference,
+  inRupees,
   isBalanced,
   hasOneSidedLines,
   postAssetDisposal,
@@ -18,12 +21,29 @@ import {
   postExchangeDifference,
   postExpenseClaim,
   postExpenseReimbursement,
+  postCreditNote,
   postPayrollPayment,
   postPayrollRun,
+  postSalesInvoice,
+  postVendorBill,
   postYearEndClose,
+  type DocumentFinancials,
   type DraftLine,
   type PayrollTotals,
 } from "../src/lib/ledger/posting";
+import { computeDocument, type SupplyType } from "../src/lib/gst-engine";
+import { toBase } from "../src/lib/currency";
+import { firstOpenDate, isLockedDate, startYearOf, yearEndDates } from "../src/lib/ledger/period";
+import { resolvePeriod } from "../src/lib/finance/periods";
+import {
+  calendarDateOf,
+  endOfIndianDay,
+  financialYearBounds,
+  financialYearWindow,
+  istCalendarDate,
+  istDateKey,
+  istMonthWindow,
+} from "../src/lib/india-time";
 import { EXPENSE_CATEGORY_ACCOUNT, SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { bookValue, depreciableAmount, monthlyCharge, schedule } from "../src/lib/ledger/depreciation";
 import { buildGstr1, buildGstr3b, buildTdsSummary, countsForReturn, type ReturnDocument } from "../src/lib/ledger/gst-returns";
@@ -705,6 +725,202 @@ const fp2 = statementFingerprint({ date: "2026-09-10", amount: 50000, reference:
 ok("Re-importing the same row is recognised", fp1 === fp2, "so an overlapping statement is a no-op");
 const fp3 = statementFingerprint({ date: "2026-09-10", amount: 50001, reference: "UTR112233", narration: "NEFT ACME" });
 ok("  but a different amount is a different row", fp1 !== fp3);
+
+// ─── Phase 0: the ledger's dates and rates (F1–F5) ─────────────────────────────────────────────
+//
+// Every instant here is written with India's offset spelled out and compared with getTime(), so the
+// cases mean the same thing under any host clock. Run them under two:
+//
+//   TZ=UTC npm run check:accounting
+//   TZ=Asia/Kolkata npm run check:accounting
+
+console.log("\n— Foreign-currency documents post at their rate (F1) —\n");
+
+const ist = (s: string) => new Date(`${s}+05:30`);
+const same = (a: Date, b: Date) => a.getTime() === b.getTime();
+
+{
+  // $118.44 at ₹83.47. Converted a figure at a time the parts come to ₹9,886.18 and the total to
+  // ₹9,886.19: posting them as they stand is an entry a paisa out, which writeEntry refuses — the
+  // invoice could not be issued at all.
+  const usd: DocumentFinancials = {
+    companyId: "c", docNumber: "USD-1", taxableValue: 100.38, cgstAmount: 9.03, sgstAmount: 9.03, igstAmount: 0,
+    shippingCharge: 0, withholdingAmount: 0, adjustment: 0, adjustmentLabel: null, roundOff: 0, total: 118.44,
+  };
+  const naive = round2(round2(100.38 * 83.47) + round2(9.03 * 83.47) * 2);
+  ok("A figure-at-a-time conversion misses the converted total", naive !== toBase(118.44, 83.47), `${naive} against ${toBase(118.44, 83.47)}`);
+  const inr = inRupees(usd, 83.47);
+  eq("  in rupees the total is total × rate", inr.total, 9886.19, "the receivable the payment will clear");
+  eq("  and the paisa goes to round off", inr.roundOff, 0.01);
+  for (const [kind, post, key, side] of [
+    ["invoice", postSalesInvoice, SYSTEM_ACCOUNTS.AR, "debit"],
+    ["credit note", postCreditNote, SYSTEM_ACCOUNTS.AR, "credit"],
+    ["bill", postVendorBill, SYSTEM_ACCOUNTS.AP, "credit"],
+  ] as const) {
+    const draft = post(inr);
+    balanced(`  the ${kind} at ₹83.47`, draft.lines);
+    eq(`  its ${key} line`, sumOn(draft.lines, key, side), 9886.19);
+  }
+  ok("A rupee document is left exactly as written", inRupees(usd, 1) === usd);
+  ok(
+    "  and booked at 1 even with a leftover rate on it",
+    bookingRate({ currency: "INR", exchangeRate: 83.25 }) === 1 && bookingRate({ currency: "USD", exchangeRate: "83.25" }) === 83.25,
+  );
+
+  // The GST engine's own awkward cases — TDS, TCS, freight, adjustments — at three rates.
+  const cases: [Parameters<typeof computeDocument>[0], SupplyType, NonNullable<Parameters<typeof computeDocument>[2]>][] = [
+    [[{ quantity: 4, unitPrice: 685.17, discountMode: "PERCENT", discountValue: 5, taxRatePercent: 18 }], "INTER_STATE", { shippingCharge: 22.35, shippingTaxRatePercent: 18, withholdingMode: "TDS", withholdingRatePercent: 10, adjustment: -0.99 }],
+    [[{ quantity: 3, unitPrice: 333.33, taxRatePercent: 18 }], "INTRA_STATE", { withholdingMode: "TCS", withholdingRatePercent: 1, roundOff: false }],
+    [[{ quantity: 7, unitPrice: 12.34, taxRatePercent: 0 }], "INTRA_STATE", { shippingCharge: 3.33, shippingTaxRatePercent: 5, roundOff: false }],
+  ];
+  let fine = 0;
+  let tried = 0;
+  for (const [lines, supply, extras] of cases) {
+    const c = computeDocument(lines, supply, extras);
+    const f: DocumentFinancials = {
+      companyId: "c", docNumber: "x", taxableValue: c.taxableValue, cgstAmount: c.cgstAmount, sgstAmount: c.sgstAmount,
+      igstAmount: c.igstAmount, shippingCharge: extras.shippingCharge ?? 0, withholdingAmount: c.withholdingAmount,
+      adjustment: c.adjustment, adjustmentLabel: null, roundOff: c.roundOff, total: c.total,
+    };
+    for (const rate of [83.47, 91.123456, 0.2231]) {
+      const converted = inRupees(f, rate);
+      for (const post of [postSalesInvoice, postCreditNote, postVendorBill]) {
+        tried += 1;
+        const draft = post(converted);
+        const party =
+          sumOn(draft.lines, SYSTEM_ACCOUNTS.AR, "debit") + sumOn(draft.lines, SYSTEM_ACCOUNTS.AR, "credit") + sumOn(draft.lines, SYSTEM_ACCOUNTS.AP, "credit");
+        if (isBalanced(draft.lines) && hasOneSidedLines(draft.lines) && Math.abs(party - toBase(c.total, rate)) < 0.005) fine += 1;
+      }
+    }
+  }
+  eq("Every engine case balances at every rate, the party line at total × rate", fine, tried, `${tried} postings`);
+
+  // Settled at another rate, the receivable clears to the paisa: the document booked total × its
+  // rate, the payment clears total × its own, and the difference is the difference of those two.
+  const booked = toBase(1, 82.915);
+  const received = toBase(1, 84.4444);
+  const fx = exchangeDifference(1, 84.4444, 82.915);
+  eq("$1 booked at ₹82.915 and received at ₹84.4444: exchange difference", fx, 1.52, "₹84.44 − ₹82.92");
+  eq("  the receivable nets to nil", round2(booked - received + fx), 0, "the old amount × (rate − rate) was ₹1.53 and left a paisa");
+  let residuals = 0;
+  let settled = 0;
+  for (let t = 1; t < 400; t += 0.37) {
+    for (const docRate of [83.47, 82.915, 83.3333, 91.1234]) {
+      for (const payRate of [85.01, 81.777, 84.4444]) {
+        settled += 1;
+        const total = round2(t);
+        if (round2(toBase(total, docRate) - toBase(total, payRate) + exchangeDifference(total, payRate, docRate)) !== 0) residuals += 1;
+      }
+    }
+  }
+  eq("A document settled in full at another rate never leaves a paisa", residuals, 0, `${settled} settlements`);
+}
+
+console.log("\n— The lock compares calendar days in India (F2) —\n");
+
+{
+  const lock = d("2026-03-31"); // a @db.Date reads back as midnight UTC
+  ok("12:00 UTC on the lock day is closed", isLockedDate(new Date("2026-03-31T12:00:00.000Z"), lock), "payroll and depreciation are dated so; comparing instants let them through");
+  ok("  as is the first minute of that day in India", isLockedDate(ist("2026-03-31T00:00:00"), lock));
+  ok("  and its last", isLockedDate(ist("2026-03-31T23:59:59"), lock));
+  ok("  but India's midnight starting the next day is open", !isLockedDate(ist("2026-04-01T00:00:00"), lock), "31 March 18:30 UTC — the UTC date is still the 31st");
+  ok("  and a day before the lock is closed too", isLockedDate(ist("2026-03-15T10:00:00"), lock));
+  ok("  no lock, nothing closed", !isLockedDate(ist("2026-03-15T10:00:00"), null));
+  ok("A lock that arrives with a time on it is still read as its day", isLockedDate(ist("2026-03-31T20:00:00"), new Date("2026-03-31T06:00:00.000Z")));
+  ok("The first open day after the lock is the next Indian day, at 12:00 UTC", same(firstOpenDate(new Date("2026-03-31T12:00:00.000Z"), lock), new Date("2026-04-01T12:00:00.000Z")));
+  ok("  and an open date is kept as it is", same(firstOpenDate(ist("2026-04-02T09:00:00"), lock), ist("2026-04-02T09:00:00")));
+}
+
+console.log("\n— The year-end close sums the whole Indian year (F3) —\n");
+
+{
+  const y = yearEndDates(2025);
+  ok("The year is 2025-26", y.label === "2025-26" && startYearOf("2025-26") === 2025 && startYearOf("25-26") === null, y.label);
+  ok("  from 1 April 00:00 IST", same(y.from, ist("2025-04-01T00:00:00")), y.from.toISOString());
+  ok("  up to, not including, the next 1 April 00:00 IST", same(y.to, ist("2026-04-01T00:00:00")), y.to.toISOString());
+  const inYear = (at: Date) => at >= y.from && at < y.to;
+  ok("March's payroll (31 March, 12:00 UTC) is in the year", inYear(new Date("2026-03-31T12:00:00.000Z")), "the old bound, lte 31 March 00:00 UTC, left it out");
+  ok("  and so is 23:59 IST on 31 March", inYear(ist("2026-03-31T23:59:59")));
+  ok("  and 00:00 IST on 1 April 2025", inYear(ist("2025-04-01T00:00:00")));
+  ok("  but not 1 April 2026 in India", !inYear(ist("2026-04-01T00:00:00")));
+  ok("  nor 31 March 2025 in India", !inYear(ist("2025-03-31T23:59:59")));
+  ok(
+    "The closing entry is dated 31 March, inside the year",
+    inYear(y.closingDate) && same(istCalendarDate(y.closingDate), d("2026-03-31")),
+    y.closingDate.toISOString(),
+  );
+  ok("  and the lock and the close record hold 31 March and 1 April as days", same(y.toDate, d("2026-03-31")) && same(y.fromDate, d("2025-04-01")));
+  ok("  so the lock set by the close refuses March's payroll", isLockedDate(new Date("2026-03-31T12:00:00.000Z"), y.toDate));
+}
+
+console.log("\n— Months and years on India's calendar, whatever the host's (F5) —\n");
+
+{
+  const at = ist("2026-04-01T01:30:00"); // 31 March, 20:00 UTC
+  ok(
+    "01:30 IST on 1 April is in the new financial year",
+    financialYearBounds(at).label === "2026-27" && financialYearBounds(at).from === "2026-04-01",
+    financialYearBounds(at).label,
+  );
+  ok("  and 23:30 IST on 31 March in the old one", financialYearBounds(ist("2026-03-31T23:30:00")).label === "2025-26");
+  const fyWindow = financialYearWindow(2026);
+  ok("The financial year window is half-open in India", same(fyWindow.from, ist("2026-04-01T00:00:00")) && same(fyWindow.to, ist("2027-04-01T00:00:00")));
+
+  const oct = ist("2026-10-01T01:30:00"); // 30 September, 20:00 UTC
+  ok("The month of 01:30 IST on 1 October is October", same(istMonthWindow(oct).from, ist("2026-10-01T00:00:00")) && same(istMonthWindow(oct).to, ist("2026-11-01T00:00:00")));
+  ok("  and the month before it September", same(istMonthWindow(oct, -1).from, ist("2026-09-01T00:00:00")) && same(istMonthWindow(oct, -1).to, ist("2026-10-01T00:00:00")));
+  ok("  its date is the 1st, not the UTC 30th", istDateKey(oct) === "2026-10-01", istDateKey(oct));
+  ok("A @db.Date comparison day for it is 1 October", same(istCalendarDate(oct), d("2026-10-01")) && same(calendarDateOf(new Date("2026-10-01T18:00:00.000Z")), d("2026-10-01")));
+
+  const lastMs = (s: string) => new Date(ist(s).getTime() - 1);
+  const month = resolvePeriod("thisMonth", oct);
+  ok(
+    "This month, asked at 01:30 IST on 1 October, is October",
+    same(month.from, ist("2026-10-01T00:00:00")) && same(month.to, lastMs("2026-11-01T00:00:00")) && month.label === "October 2026",
+    `${month.label}: ${month.from.toISOString()} – ${month.to.toISOString()}`,
+  );
+  const last = resolvePeriod("lastMonth", oct);
+  ok(
+    "  last month is September, to its last millisecond in India",
+    same(last.from, ist("2026-09-01T00:00:00")) && same(last.to, lastMs("2026-10-01T00:00:00")) && last.label === "September 2026",
+    last.label,
+  );
+  const feb = resolvePeriod("thisMonth", ist("2026-02-14T12:00:00"));
+  ok("  a short February ends on the 28th", same(feb.to, lastMs("2026-03-01T00:00:00")));
+  const q3 = resolvePeriod("thisQuarter", oct);
+  ok(
+    "This quarter on 1 October is Q3, October to December",
+    same(q3.from, ist("2026-10-01T00:00:00")) && same(q3.to, lastMs("2027-01-01T00:00:00")) && q3.label === "Q3 2026-27",
+    q3.label,
+  );
+  const q2 = resolvePeriod("lastQuarter", oct);
+  ok(
+    "  and last quarter Q2, July to September",
+    same(q2.from, ist("2026-07-01T00:00:00")) && same(q2.to, lastMs("2026-10-01T00:00:00")) && q2.label === "Q2 2026-27",
+    q2.label,
+  );
+  const q4 = resolvePeriod("thisQuarter", ist("2027-01-01T00:10:00"));
+  ok("  00:10 IST on 1 January is Q4 of 2026-27", same(q4.from, ist("2027-01-01T00:00:00")) && q4.label === "Q4 2026-27", q4.label);
+  const q1last = resolvePeriod("lastQuarter", ist("2026-04-01T00:10:00"));
+  ok("  and last quarter from 1 April is Q4 of the year before", same(q1last.from, ist("2026-01-01T00:00:00")) && q1last.label === "Q4 2025-26", q1last.label);
+  const fy = resolvePeriod("thisFiscalYear", at);
+  ok(
+    "This fiscal year at 01:30 IST on 1 April is the new one",
+    same(fy.from, ist("2026-04-01T00:00:00")) && same(fy.to, lastMs("2027-04-01T00:00:00")) && fy.label === "FY 2026-27",
+    fy.label,
+  );
+  const lastFy = resolvePeriod("lastFiscalYear", at);
+  ok(
+    "  and last fiscal year ends the millisecond before it begins",
+    same(lastFy.from, ist("2025-04-01T00:00:00")) && lastFy.to.getTime() === fy.from.getTime() - 1,
+    lastFy.label,
+  );
+  const twelve = resolvePeriod("last12Months", ist("2026-09-19T12:00:00"));
+  ok("The last twelve months start on 1 October a year back, in India", same(twelve.from, ist("2025-10-01T00:00:00")), twelve.from.toISOString());
+
+  // The reconciliation screen's "as at" day (src/actions/bank.ts): up to India's midnight after it.
+  ok("As at 30 September runs to 1 October 00:00 IST", same(endOfIndianDay("2026-09-30")!, ist("2026-10-01T00:00:00")), "not 23:59:59.999 UTC, which is 05:29 IST the next morning");
+}
 
 console.log(failures === 0 ? "\nAll accounting checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
 process.exit(failures === 0 ? 0 : 1);

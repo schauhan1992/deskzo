@@ -59,7 +59,10 @@ export async function recordBillPayment(input: {
 
   const bill = await db.tradeDocument.findUnique({
     where: { id: input.billId },
-    select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true, ...billSettlementInclude },
+    select: {
+      id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true,
+      currency: true, exchangeRate: true, ...billSettlementInclude,
+    },
   });
   if (!bill) return { ok: false, error: "That bill no longer exists." };
   if (bill.docType !== "BILL") return { ok: false, error: "Payments out are recorded against a vendor bill." };
@@ -90,6 +93,10 @@ export async function recordBillPayment(input: {
         branchId,
         direction: "PAID",
         amount: new Prisma.Decimal(amount),
+        // In the bill's currency and at its rate, as a receipt against an invoice is (receivable.ts):
+        // the payable is cleared by exactly the rupees the bill booked.
+        currency: bill.currency,
+        exchangeRate: bill.exchangeRate,
         paidOn: new Date(input.paidOn),
         method: input.method,
         reference: input.reference || null,

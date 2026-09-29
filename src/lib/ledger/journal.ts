@@ -33,12 +33,16 @@ import {
   postSalesInvoice,
   postVendorBill,
   postYearEndClose,
+  bookingRate,
+  exchangeDifference,
+  inRupees,
   reverseLines,
   type PayrollTotals,
   type DocumentFinancials,
   type DraftLine,
 } from "@/lib/ledger/posting";
 import { financialYearOf } from "@/lib/gst-engine";
+import { isLockedDate } from "@/lib/ledger/period";
 
 type Tx = Prisma.TransactionClient;
 
@@ -112,7 +116,9 @@ export async function ensureChartOfAccounts(client: Pick<Tx, "ledgerAccount"> = 
 export async function assertPeriodOpen(tx: Tx, date: Date) {
   const lock = await tx.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
   if (!lock?.lockedUntil) return;
-  if (date <= lock.lockedUntil) {
+  // By calendar day in India (period.ts): the lock is a date, and an entry at 12:00 UTC on the
+  // locked day — every payroll and depreciation entry — is on that day, not after it.
+  if (isLockedDate(date, lock.lockedUntil)) {
     const until = lock.lockedUntil.toISOString().slice(0, 10);
     throw new Error(
       `The books are closed to ${until}. Post this in an open period instead — reopening a closed one changes a trial balance somebody has already been given.`,
@@ -306,39 +312,112 @@ async function headOfficeOf(tx: Tx): Promise<{ id: string; gstRegistrationId: st
   return tx.branch.findFirst({ where: { isHeadOffice: true }, select: { id: true, gstRegistrationId: true } });
 }
 
-function financialsOf(doc: {
-  companyId: string;
-  docNumber: string;
-  taxableValue: Prisma.Decimal | number;
-  cgstAmount: Prisma.Decimal | number;
-  sgstAmount: Prisma.Decimal | number;
-  igstAmount: Prisma.Decimal | number;
-  shippingCharge: Prisma.Decimal | number;
-  withholdingAmount: Prisma.Decimal | number;
-  adjustment: Prisma.Decimal | number;
-  adjustmentLabel: string | null;
-  roundOff: Prisma.Decimal | number;
-  total: Prisma.Decimal | number;
-  exchangeRate?: Prisma.Decimal | number | null;
-}): DocumentFinancials {
-  // The books are kept in rupees. A document written in another currency posts converted at the
-  // rate agreed on the day it was raised; the difference when it settles is booked separately.
-  const rate = Number(doc.exchangeRate ?? 1) || 1;
-  const inr = (v: Prisma.Decimal | number) => Math.round(Number(v) * rate * 100) / 100;
+/** What a document's posting reads from it: the figures, and the rate that brings them into rupees. */
+export const documentPostingSelect = {
+  id: true, docType: true, docNumber: true, companyId: true, issueDate: true,
+  taxableValue: true, cgstAmount: true, sgstAmount: true, igstAmount: true,
+  shippingCharge: true, withholdingAmount: true, adjustment: true, adjustmentLabel: true,
+  roundOff: true, total: true, currency: true, exchangeRate: true, branchId: true, gstRegistrationId: true,
+} satisfies Prisma.TradeDocumentSelect;
+
+export type PostableDocument = Prisma.TradeDocumentGetPayload<{ select: typeof documentPostingSelect }>;
+
+/**
+ * The books are kept in rupees. A document written in another currency posts converted at the rate
+ * agreed on the day it was raised (`inRupees`); the difference when it settles is booked separately,
+ * on the payment. Until the rate was added to `documentPostingSelect` it never reached here, so every
+ * foreign document posted at 1 — a $1,000 invoice booked ₹1,000 (`npm run ledger:repost-fx`).
+ */
+function financialsOf(doc: PostableDocument): DocumentFinancials {
+  const n = (v: Prisma.Decimal | number) => Number(v);
+  return inRupees(
+    {
+      companyId: doc.companyId,
+      docNumber: doc.docNumber,
+      taxableValue: n(doc.taxableValue),
+      cgstAmount: n(doc.cgstAmount),
+      sgstAmount: n(doc.sgstAmount),
+      igstAmount: n(doc.igstAmount),
+      shippingCharge: n(doc.shippingCharge),
+      withholdingAmount: n(doc.withholdingAmount),
+      adjustment: n(doc.adjustment),
+      adjustmentLabel: doc.adjustmentLabel,
+      roundOff: n(doc.roundOff),
+      total: n(doc.total),
+    },
+    bookingRate(doc),
+  );
+}
+
+/** The sources a document's own posting is written under — not a reversal's, not an exchange difference's. */
+export const DOCUMENT_SOURCES = ["INVOICE", "CREDIT_NOTE", "BILL"] as const satisfies readonly JournalSource[];
+
+/**
+ * The entry that books a document now: its own posting, not a reversal, and not reversed since.
+ *
+ * A document normally has one posting. After `ledger:repost-fx` has repaired it, it has two — the
+ * original, reversed, and the re-post — and only the re-post is live, so that is the one a
+ * cancellation must reverse. An `FX` entry carries the document too, which is why the source is
+ * part of the question.
+ */
+function currentDocumentEntryWhere(documentId: string) {
   return {
-    companyId: doc.companyId,
-    docNumber: doc.docNumber,
-    taxableValue: inr(doc.taxableValue),
-    cgstAmount: inr(doc.cgstAmount),
-    sgstAmount: inr(doc.sgstAmount),
-    igstAmount: inr(doc.igstAmount),
-    shippingCharge: inr(doc.shippingCharge),
-    withholdingAmount: inr(doc.withholdingAmount),
-    adjustment: inr(doc.adjustment),
-    adjustmentLabel: doc.adjustmentLabel,
-    roundOff: inr(doc.roundOff),
-    total: inr(doc.total),
+    documentId,
+    source: { in: [...DOCUMENT_SOURCES] },
+    reversesId: null,
+    reversedBy: { is: null },
+  } satisfies Prisma.JournalEntryWhereInput;
+}
+
+export async function currentDocumentEntry(tx: Tx, documentId: string) {
+  return tx.journalEntry.findFirst({
+    where: currentDocumentEntryWhere(documentId),
+    orderBy: { createdAt: "desc" },
+    select: { id: true, entryNumber: true },
+  });
+}
+
+/**
+ * Writes a document's entry: at its issue date when it is first posted, or on the day the repair
+ * chooses when `ledger:repost-fx` posts it again. The repair passes the original's branch and GSTIN
+ * so the re-post lands where the original did.
+ */
+export async function writeDocumentEntry(
+  tx: Tx,
+  doc: PostableDocument,
+  userId: string,
+  at: { date: Date; note?: string; tags?: { branchId: string | null; gstRegistrationId: string | null } },
+): Promise<{ id: string; entryNumber: string }> {
+  if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "BILL") {
+    throw new Error(`A ${doc.docType} does not post to the ledger.`);
+  }
+  const financials = financialsOf(doc);
+  const draft =
+    doc.docType === "INVOICE"
+      ? postSalesInvoice(financials)
+      : doc.docType === "CREDIT_NOTE"
+        ? postCreditNote(financials)
+        : postVendorBill(financials);
+
+  // Every line, receivable and revenue included, carries the document's branch and GSTIN: the tax
+  // lines are what a return per registration sums, the rest are what a P&L per branch sums. A document
+  // an older build wrote without a branch is the head office's, as readers take it (spec §13.2).
+  const tags = at.tags ?? {
+    branchId: doc.branchId ?? (await headOfficeOf(tx))?.id ?? null,
+    gstRegistrationId: doc.gstRegistrationId,
   };
+
+  return writeEntry(tx, {
+    date: at.date,
+    narration: at.note ? `${draft.narration} — ${at.note}` : draft.narration,
+    source: doc.docType,
+    userId,
+    lines: await materialise(tx, draft),
+    documentId: doc.id,
+    companyId: doc.companyId,
+    branchId: tags.branchId,
+    gstRegistrationId: tags.gstRegistrationId,
+  });
 }
 
 /**
@@ -354,48 +433,26 @@ export async function postDocumentToLedger(
   documentId: string,
   userId: string,
 ): Promise<{ id: string; entryNumber: string } | null> {
-  const doc = await tx.tradeDocument.findUnique({
-    where: { id: documentId },
-    select: {
-      id: true, docType: true, docNumber: true, companyId: true, issueDate: true,
-      taxableValue: true, cgstAmount: true, sgstAmount: true, igstAmount: true,
-      shippingCharge: true, withholdingAmount: true, adjustment: true, adjustmentLabel: true,
-      roundOff: true, total: true, branchId: true, gstRegistrationId: true,
-    },
-  });
+  const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: documentPostingSelect });
   if (!doc) return null;
   // Quotes, proformas and purchase orders are commitments, not transactions — nothing has happened
   // in accounting terms until an invoice or a bill exists.
   if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "BILL") return null;
 
-  const already = await tx.journalEntry.findFirst({
-    where: { documentId, reversesId: null },
-    select: { id: true, entryNumber: true },
+  // Posted already if it has any posting of its own, reversed or not: the live one is returned when
+  // there is one (a repaired document's re-post), and a cancelled document's reversed original
+  // otherwise — cancelling is final, and posting again would put its revenue back.
+  const posted = await tx.journalEntry.findMany({
+    where: { documentId, source: { in: [...DOCUMENT_SOURCES] }, reversesId: null },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, entryNumber: true, reversedBy: { select: { id: true } } },
   });
-  if (already) return already;
+  if (posted.length > 0) {
+    const entry = posted.find((e) => !e.reversedBy) ?? posted[0];
+    return { id: entry.id, entryNumber: entry.entryNumber };
+  }
 
-  const financials = financialsOf(doc);
-  const draft =
-    doc.docType === "INVOICE"
-      ? postSalesInvoice(financials)
-      : doc.docType === "CREDIT_NOTE"
-        ? postCreditNote(financials)
-        : postVendorBill(financials);
-
-  return writeEntry(tx, {
-    date: doc.issueDate,
-    narration: draft.narration,
-    source: doc.docType === "INVOICE" ? "INVOICE" : doc.docType === "CREDIT_NOTE" ? "CREDIT_NOTE" : "BILL",
-    userId,
-    lines: await materialise(tx, draft),
-    documentId: doc.id,
-    companyId: doc.companyId,
-    // Every line, receivable and revenue included, carries the document's branch and GSTIN: the tax
-    // lines are what a return per registration sums, the rest are what a P&L per branch sums. A document
-    // an older build wrote without a branch is the head office's, as readers take it (spec §13.2).
-    branchId: doc.branchId ?? (await headOfficeOf(tx))?.id ?? null,
-    gstRegistrationId: doc.gstRegistrationId,
-  });
+  return writeDocumentEntry(tx, doc, userId, { date: doc.issueDate });
 }
 
 /** Posts a payment. Direction decides whether it settles a receivable or a payable. */
@@ -484,17 +541,21 @@ export function reversedLines(lines: Prisma.JournalLineGetPayload<{ select: type
  *
  * Runs inside the caller's transaction and is quiet about a document that was never posted — a
  * cancelled draft has no entry to reverse, and that isn't an error.
+ *
+ * It reverses the document's *current* entry. It used to take the first entry carrying the document,
+ * which after a repair is the original the repair already reversed — so it found nothing to do and
+ * left the re-post standing — and could be an exchange difference, which is the payment's.
  */
 export async function reverseDocumentPosting(tx: Tx, documentId: string, userId: string) {
   const original = await tx.journalEntry.findFirst({
-    where: { documentId, reversesId: null },
+    where: currentDocumentEntryWhere(documentId),
+    orderBy: { createdAt: "desc" },
     select: {
       id: true, entryNumber: true, companyId: true,
-      reversedBy: { select: { id: true } },
       lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect },
     },
   });
-  if (!original || original.reversedBy) return null;
+  if (!original) return null;
 
   return writeEntry(tx, {
     date: new Date(),
@@ -1054,12 +1115,14 @@ export async function postExchangeDifferenceToLedger(
   if (!payment || !doc) return null;
 
   const paymentRate = Number(payment.exchangeRate) || 1;
-  const docRate = Number(doc.exchangeRate) || 1;
+  // The rate the document was booked at (posting.ts `bookingRate`), which is what the receivable or
+  // payable holds and so what this payment is measured against.
+  const docRate = bookingRate(doc);
   if (paymentRate === docRate) return null;
   // A rate difference between two different currencies is not an exchange gain, it is a mistake.
   if (payment.currency !== doc.currency) return null;
 
-  const difference = Math.round(params.allocatedAmount * (paymentRate - docRate) * 100) / 100;
+  const difference = exchangeDifference(params.allocatedAmount, paymentRate, docRate);
   const draft = postExchangeDifference({
     companyId: payment.companyId,
     difference,
@@ -1089,10 +1152,16 @@ export async function postExchangeDifferenceToLedger(
  * The balances are read from the journal rather than passed in, so what is closed is exactly what
  * the trial balance says — a closing entry built from a figure somebody typed is a closing entry
  * that leaves a remainder.
+ *
+ * `from` and `to` are a half-open window of instants — 1 April 00:00 IST up to the next 1 April
+ * (src/lib/india-time.ts `financialYearWindow`). The year end used to be midnight UTC on 31 March,
+ * compared with `lte`: that is 05:30 IST on the year's last day, so March's payroll and depreciation
+ * (12:00 UTC) and everything else posted later that day stayed out of the closing entry. `date` is
+ * the day the entry itself is dated, inside the year.
  */
 export async function postYearEndCloseToLedger(
   tx: Tx,
-  params: { fromDate: Date; toDate: Date; label: string; userId: string },
+  params: { from: Date; to: Date; date: Date; label: string; userId: string },
 ): Promise<{ entry: { id: string; entryNumber: string } | null; netProfit: number }> {
   const accounts = await tx.ledgerAccount.findMany({
     where: { isGroup: false, type: { in: ["INCOME", "EXPENSE"] } },
@@ -1104,7 +1173,7 @@ export async function postYearEndCloseToLedger(
     by: ["accountId"],
     where: {
       accountId: { in: accounts.map((a) => a.id) },
-      entry: { date: { gte: params.fromDate, lte: params.toDate } },
+      entry: { date: { gte: params.from, lt: params.to } },
     },
     _sum: { debit: true, credit: true },
   });
@@ -1125,7 +1194,7 @@ export async function postYearEndCloseToLedger(
   if (draft.lines.length === 0) return { entry: null, netProfit: 0 };
 
   const entry = await writeEntry(tx, {
-    date: params.toDate,
+    date: params.date,
     narration: draft.narration,
     source: "CLOSING",
     userId: params.userId,

@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { settleInvoice } from "@/lib/receivables";
 import { bucketOf } from "@/lib/analytics/types";
-import { financialYearBounds } from "@/lib/ledger/period";
+import { financialYearStartOf, financialYearWindow, istDateParts, istMidnight } from "@/lib/india-time";
 
 /**
  * The finance headline figures, read off the ledger rather than recomputed.
@@ -22,19 +22,33 @@ const money = (v: unknown) => Number(v ?? 0);
 /**
  * The financial year containing a date, as Dates.
  *
- * Wrapping `financialYearBounds` rather than working it out again: that function is what the
- * accounting screens, the invoice numbering series and the GST returns already run on, and a
- * second definition of when the year starts is a dashboard that disagrees with every filing the
- * business makes. It returns ISO strings because that is what those callers want; this returns
- * Dates because a journal query needs them.
+ * From src/lib/india-time.ts rather than worked out again: that is the year the accounting screens,
+ * the invoice numbering series and the GST returns already run on, and a second definition of when
+ * the year starts is a dashboard that disagrees with every filing the business makes.
+ *
+ * On India's calendar. It parsed `2026-04-01T00:00:00` in the host's zone, so on a server in UTC
+ * the year began at 05:30 IST on 1 April and ran on to 05:30 IST on the next one. `to` is inclusive
+ * — the millisecond before the next 1 April 00:00 IST — because the queries below compare with `lte`.
  */
 export function fiscalYearOf(date: Date): { from: Date; to: Date; label: string } {
-  const bounds = financialYearBounds(date);
-  return {
-    from: new Date(`${bounds.from}T00:00:00`),
-    to: new Date(`${bounds.to}T23:59:59.999`),
-    label: `FY ${bounds.label}`,
-  };
+  const year = financialYearWindow(financialYearStartOf(date));
+  return { from: year.from, to: new Date(year.to.getTime() - 1), label: `FY ${year.label}` };
+}
+
+/**
+ * The first instant of each Indian month the window touches, from the month `from` is in to the
+ * month `to` is in. The buckets are keyed by `bucketOf`, which reads India's calendar; walking them
+ * with `getMonth`/`setMonth` read the host's, so on a server in UTC a fiscal year starting at
+ * 1 April 00:00 IST (31 March, 18:30 UTC) drew an empty March bar in front of April.
+ */
+function monthsBetween(from: Date, to: Date): Date[] {
+  const start = istDateParts(from);
+  const out: Date[] = [];
+  for (let i = 0; ; i += 1) {
+    const at = istMidnight(start.year, start.month + i, 1);
+    if (at > to) return out;
+    out.push(at);
+  }
 }
 /**
  * Which entries count on each basis, and — the part that is easy to get wrong — which lines.
@@ -125,7 +139,7 @@ export async function incomeAndExpense(from: Date, to: Date, basis: Basis): Prom
   // Every month in the window, present or not. A fiscal year with a gap where March should be reads
   // as missing data; a March at zero reads as a quiet month, which is what it is.
   const months = new Map<string, { key: string; label: string; income: number; expense: number }>();
-  for (let d = new Date(from.getFullYear(), from.getMonth(), 1); d <= to; d.setMonth(d.getMonth() + 1)) {
+  for (const d of monthsBetween(from, to)) {
     const b = bucketOf(d, "month");
     months.set(b.key, { ...b, income: 0, expense: 0 });
   }
@@ -205,7 +219,7 @@ export async function cashFlow(from: Date, to: Date): Promise<CashFlow> {
   const opening = round(money(before._sum.debit) - money(before._sum.credit));
 
   const months = new Map<string, { key: string; label: string; delta: number }>();
-  for (let d = new Date(from.getFullYear(), from.getMonth(), 1); d <= to; d.setMonth(d.getMonth() + 1)) {
+  for (const d of monthsBetween(from, to)) {
     const b = bucketOf(d, "month");
     months.set(b.key, { ...b, delta: 0 });
   }

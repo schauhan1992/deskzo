@@ -375,8 +375,11 @@ export async function cashFlow(params: { from: string; to: string }) {
       _sum: { debit: true, credit: true },
     }),
     profitAndLoss({ from: params.from, to: params.to }),
+    // `toDate` is a `@db.Date`, which compares by the bound's UTC date — and India's midnight on the
+    // first day is the previous day in UTC, so the instants above pulled in the charge for the month
+    // before the window. Compared as the calendar days asked for instead.
     db.depreciationCharge.aggregate({
-      where: { toDate: { gte: from, lte: to } },
+      where: { toDate: { gte: new Date(`${params.from}T00:00:00.000Z`), lte: new Date(`${params.to}T00:00:00.000Z`) } },
       _sum: { amount: true },
     }),
   ]);

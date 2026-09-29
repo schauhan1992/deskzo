@@ -73,6 +73,74 @@ export function endOfIndianDay(date: string): Date | null {
   return Number.isNaN(at.getTime()) ? null : at;
 }
 
+/** `yyyy-mm-dd` for the Indian calendar date an instant falls on. */
+export function istDateKey(at: Date): string {
+  const { year, month, day } = istDateParts(at);
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * The Indian calendar date an instant falls on, held the way a `@db.Date` column holds a date:
+ * midnight UTC of that day.
+ *
+ * For comparing a timestamp with a date column by calendar day. The column is a day, not an
+ * instant — it reads back as midnight UTC, which is 05:30 IST — so comparing it with a timestamp
+ * directly lets anything after 05:30 on that day through as though it were the next one.
+ */
+export function istCalendarDate(at: Date): Date {
+  const { year, month, day } = istDateParts(at);
+  return new Date(Date.UTC(year, month, day));
+}
+
+/** The day a `@db.Date` value holds, as midnight UTC — normalised in case it arrives with a time on it. */
+export function calendarDateOf(value: Date): Date {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+/**
+ * The Indian month an instant falls in, half-open: `from` is the 1st's midnight IST and `to` the
+ * next month's. `offset` moves by whole months, so −1 is last month and 0 this one.
+ */
+export function istMonthWindow(at: Date, offset = 0): { from: Date; to: Date } {
+  const { year, month } = istDateParts(at);
+  return { from: istMidnight(year, month + offset, 1), to: istMidnight(year, month + offset + 1, 1) };
+}
+
+/** The calendar year the Indian financial year containing an instant starts in: April onwards is that year's. */
+export function financialYearStartOf(at: Date): number {
+  const { year, month } = istDateParts(at);
+  return month >= 3 ? year : year - 1;
+}
+
+/**
+ * The financial year that starts in April of `startYear`, half-open: 1 April 00:00 IST up to, not
+ * including, the next 1 April 00:00 IST. Every entry dated 31 March in India is inside it — payroll
+ * and depreciation at 12:00 UTC, an invoice at 23:30 IST — and nothing of April is.
+ */
+export function financialYearWindow(startYear: number): { from: Date; to: Date; label: string } {
+  return {
+    from: istMidnight(startYear, 3, 1),
+    to: istMidnight(startYear + 1, 3, 1),
+    label: `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`,
+  };
+}
+
+/**
+ * The Indian financial year runs April to March, so "this year" on a report is almost never the
+ * calendar year — defaulting to one would quietly give people the wrong period.
+ *
+ * Read on India's calendar. It used the host's (`getMonth`), so on a server in UTC anything between
+ * midnight and 05:30 IST on 1 April was still last year.
+ */
+export function financialYearBounds(date: Date) {
+  const year = financialYearStartOf(date);
+  return {
+    from: `${year}-04-01`,
+    to: `${year + 1}-03-31`,
+    label: `${year}-${String((year + 1) % 100).padStart(2, "0")}`,
+  };
+}
+
 /**
  * `yyyy-mm-ddThh:mm` — what a `datetime-local` input gives — read as a time in India.
  *

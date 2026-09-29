@@ -10,6 +10,8 @@
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { computeDocument, type SupplyType } from "../src/lib/gst-engine";
 import {
+  bookingRate,
+  inRupees,
   postSalesInvoice,
   postCreditNote,
   postVendorBill,
@@ -38,11 +40,18 @@ const SYNTHETIC: { name: string; supply: SupplyType; lines: Parameters<typeof co
   { name: "zero rated", supply: "INTRA_STATE", lines: [{ quantity: 2, unitPrice: 500, taxRatePercent: 0 }], extras: {} },
 ];
 
+/**
+ * The rates the synthetic cases are also posted at. A foreign document posts every figure converted
+ * at its rate (`inRupees`), and converted one at a time they need not add up to the converted total
+ * — the paisa that makes an entry unbalanced, and a document impossible to issue (F1).
+ */
+const RATES = [1, 83.47, 91.123456];
+
 function checkSynthetic() {
   let failures = 0;
-  for (const c of SYNTHETIC) {
+  for (const c of SYNTHETIC) for (const rate of RATES) {
     const computed = computeDocument(c.lines, c.supply, c.extras);
-    const f: DocumentFinancials = {
+    const f: DocumentFinancials = inRupees({
       companyId: "test-company",
       docNumber: c.name,
       taxableValue: computed.taxableValue,
@@ -55,7 +64,7 @@ function checkSynthetic() {
       adjustmentLabel: null,
       roundOff: computed.roundOff,
       total: computed.total,
-    };
+    }, rate);
     for (const [kind, post] of [
       ["invoice", postSalesInvoice],
       ["credit note", postCreditNote],
@@ -66,7 +75,7 @@ function checkSynthetic() {
       if (!isBalanced(draft.lines) || !hasOneSidedLines(draft.lines)) {
         failures++;
         console.log(`
-✗ ${kind}: ${c.name}`);
+✗ ${kind}: ${c.name} at ${rate}`);
         console.log(`  debits ${totals.debit.toFixed(2)}  credits ${totals.credit.toFixed(2)}  diff ${(totals.debit - totals.credit).toFixed(2)}`);
         console.log(`  taxable ${f.taxableValue}  gst ${(f.cgstAmount + f.sgstAmount + f.igstAmount).toFixed(2)}  withholding ${f.withholdingAmount}  adj ${f.adjustment}  round ${f.roundOff}  total ${f.total}`);
         for (const l of draft.lines) {
@@ -75,7 +84,7 @@ function checkSynthetic() {
       }
     }
   }
-  console.log(`${SYNTHETIC.length * 3} synthetic posting(s) checked, ${failures} unbalanced.`);
+  console.log(`${SYNTHETIC.length * RATES.length * 3} synthetic posting(s) checked, at rates ${RATES.join(", ")}; ${failures} unbalanced.`);
   return failures;
 }
 
@@ -140,14 +149,15 @@ async function main() {
       docType: true, docNumber: true, companyId: true,
       taxableValue: true, cgstAmount: true, sgstAmount: true, igstAmount: true,
       shippingCharge: true, withholdingAmount: true, adjustment: true, adjustmentLabel: true,
-      roundOff: true, total: true,
+      roundOff: true, total: true, currency: true, exchangeRate: true,
     },
   });
 
   let failures = checkSynthetic();
   failures += await checkDrift();
   for (const doc of docs) {
-    const f: DocumentFinancials = {
+    // In rupees at the document's rate, as journal.ts posts it.
+    const f: DocumentFinancials = inRupees({
       companyId: doc.companyId,
       docNumber: doc.docNumber,
       taxableValue: Number(doc.taxableValue),
@@ -160,7 +170,7 @@ async function main() {
       adjustmentLabel: doc.adjustmentLabel,
       roundOff: Number(doc.roundOff),
       total: Number(doc.total),
-    };
+    }, bookingRate(doc));
     const draft =
       doc.docType === "INVOICE" ? postSalesInvoice(f) : doc.docType === "CREDIT_NOTE" ? postCreditNote(f) : postVendorBill(f);
 

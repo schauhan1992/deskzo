@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { ensureChartOfAccounts, postAssetDisposalToLedger, postDepreciationToLedger } from "@/lib/ledger/journal";
 import { bookValue, endOfMonth, monthlyCharge, startOfMonth } from "@/lib/ledger/depreciation";
+import { calendarDateOf, istMidnight } from "@/lib/india-time";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -184,6 +185,16 @@ export async function saveAsset(input: {
 
 // ─── The depreciation run ─────────────────────────────────────────────────────
 
+/**
+ * Whether a charge is for the period ending on `periodEnd`. The charge's `toDate` is a `@db.Date` and
+ * reads back as midnight UTC, while `periodEnd` is 12:00 UTC on the same day, so comparing the two
+ * instants never matched: every month read as not yet charged, and a second run counted as charging
+ * again (the posting itself stayed single — its own lookup compares the date column by day).
+ */
+function sameDay(date: Date, periodEnd: Date) {
+  return calendarDateOf(date).getTime() === calendarDateOf(periodEnd).getTime();
+}
+
 /** What a month's run would charge, before anybody commits to it. */
 export async function previewDepreciation(params: { month: number; year: number }) {
   const { allowed } = await requireAssets();
@@ -199,7 +210,7 @@ export async function previewDepreciation(params: { month: number; year: number 
     assets
       .map((a) => {
         const accumulated = a.charges.reduce((t, c) => t + Number(c.amount), 0);
-        const already = a.charges.some((c) => c.toDate.getTime() === periodEnd.getTime());
+        const already = a.charges.some((c) => sameDay(c.toDate, periodEnd));
         const charge = already
           ? 0
           : monthlyCharge(
@@ -244,7 +255,9 @@ export async function runDepreciation(params: { month: number; year: number }): 
 
   const periodEnd = endOfMonth(params.year, params.month);
   const periodStart = startOfMonth(params.year, params.month);
-  if (periodEnd > new Date()) {
+  // Over at midnight IST starting the next month. The charge's own date (12:00 UTC on the last day) is
+  // 17:30 IST, and treating that as the end let a month be charged while its evening was still to come.
+  if (istMidnight(params.year, params.month, 1) > new Date()) {
     return { ok: false, error: "That month isn't over yet." };
   }
 
@@ -262,7 +275,7 @@ export async function runDepreciation(params: { month: number; year: number }): 
 
   for (const a of assets) {
     const accumulated = a.charges.reduce((t, c) => t + Number(c.amount), 0);
-    if (a.charges.some((c) => c.toDate.getTime() === periodEnd.getTime())) {
+    if (a.charges.some((c) => sameDay(c.toDate, periodEnd))) {
       skipped += 1;
       continue;
     }

@@ -6,8 +6,10 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
-import { ensureChartOfAccounts, postYearEndCloseToLedger } from "@/lib/ledger/journal";
-import { financialYearBounds } from "@/lib/ledger/period";
+import { ensureChartOfAccounts } from "@/lib/ledger/journal";
+import { financialYearBounds, startYearOf } from "@/lib/ledger/period";
+import { closeFinancialYearInBooks, reopenFinancialYearInBooks } from "@/lib/ledger/year-end";
+import { istCalendarDate } from "@/lib/india-time";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -67,8 +69,9 @@ export async function setBooksLock(input: { lockedUntil: string | null; note?: s
     return { ok: false, error: "That isn't a date." };
   }
   // A lock into the future would refuse entries for work that hasn't happened yet, which is not a
-  // lock — it is the books being shut.
-  if (lockedUntil && lockedUntil > new Date()) {
+  // lock — it is the books being shut. Today counts as India's today: the lock is a calendar day,
+  // and compared with the instant now it refused today's date until 05:30 IST.
+  if (lockedUntil && lockedUntil > istCalendarDate(new Date())) {
     return { ok: false, error: "You can't lock a period that hasn't finished." };
   }
 
@@ -108,62 +111,14 @@ export async function closeFinancialYear(label: string): Promise<ActionResult<{ 
   const { user, allowed } = await requireAdmin();
   if (!allowed) return { ok: false, error: "Only an admin can close a year." };
 
-  const match = /^(\d{4})-(\d{2})$/.exec(label.trim());
-  if (!match) return { ok: false, error: "A year reads like 2025-26." };
-  const startYear = Number(match[1]);
-  const fromDate = new Date(Date.UTC(startYear, 3, 1));
-  const toDate = new Date(Date.UTC(startYear + 1, 2, 31));
-
-  if (toDate > new Date()) {
-    return { ok: false, error: `${label} isn't over yet. Closing a year that is still running produces an entry that is wrong tomorrow.` };
-  }
-
-  const existing = await db.fiscalYearClose.findUnique({ where: { label }, select: { id: true } });
-  if (existing) return { ok: false, error: `${label} is already closed.` };
+  if (startYearOf(label) === null) return { ok: false, error: "A year reads like 2025-26." };
 
   await ensureChartOfAccounts();
 
   try {
-    const result = await db.$transaction(async (tx) => {
-      // The lock is lifted for the duration of this one transaction if it already covers the year
-      // end — otherwise the closing entry, which is dated to the year end, would be refused by the
-      // very rule it is about to tighten.
-      const lock = await tx.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
-      const previousLock = lock?.lockedUntil ?? null;
-      if (previousLock && previousLock >= fromDate) {
-        await tx.ledgerLock.update({ where: { id: "global" }, data: { lockedUntil: null } });
-      }
-
-      const { entry, netProfit } = await postYearEndCloseToLedger(tx, {
-        fromDate,
-        toDate,
-        label,
-        userId: user.id,
-      });
-
-      const close = await tx.fiscalYearClose.create({
-        data: {
-          label,
-          fromDate,
-          toDate,
-          netProfit,
-          closingEntryId: entry?.id ?? null,
-          closedById: user.id,
-        },
-        select: { id: true },
-      });
-
-      // And now the lock, at least to the year end — a closed year that can still be posted into is
-      // not closed.
-      const newLock = previousLock && previousLock > toDate ? previousLock : toDate;
-      await tx.ledgerLock.upsert({
-        where: { id: "global" },
-        create: { id: "global", lockedUntil: newLock, updatedById: user.id, note: `Year ${label} closed` },
-        update: { lockedUntil: newLock, updatedById: user.id, note: `Year ${label} closed` },
-      });
-
-      return { closeId: close.id, netProfit, entryNumber: entry?.entryNumber ?? null };
-    });
+    // The whole close — the refusals, the entry, the record and the lock — is src/lib/ledger/year-end.ts,
+    // in this one transaction.
+    const result = await db.$transaction((tx) => closeFinancialYearInBooks(tx, { label, userId: user.id }));
 
     await recordAudit({
       userId: user.id,
@@ -191,67 +146,16 @@ export async function reopenFinancialYear(label: string): Promise<ActionResult<n
   const { user, allowed } = await requireAdmin();
   if (!allowed) return { ok: false, error: "Only an admin can reopen a year." };
 
-  const close = await db.fiscalYearClose.findUnique({
-    where: { label },
-    include: { closingEntry: { select: { id: true, entryNumber: true, companyId: true, lines: true } } },
-  });
-  if (!close) return { ok: false, error: `${label} isn't closed.` };
-
-  const later = await db.fiscalYearClose.findFirst({
-    where: { fromDate: { gt: close.fromDate } },
-    select: { label: true },
-  });
-  // Reopening a year underneath a later closed one would leave that year's opening reserves wrong,
-  // and nothing would say so.
-  if (later) return { ok: false, error: `Reopen ${later.label} first — a later year is closed on top of this one.` };
-
   try {
-    await db.$transaction(async (tx) => {
-      await tx.ledgerLock.upsert({
-        where: { id: "global" },
-        create: { id: "global", lockedUntil: null, updatedById: user.id, note: `Year ${label} reopened` },
-        update: {
-          // Back to the day before the year started, so the whole year can be posted into again.
-          lockedUntil: new Date(close.fromDate.getTime() - 86400000),
-          updatedById: user.id,
-          note: `Year ${label} reopened`,
-        },
-      });
-
-      if (close.closingEntry) {
-        const original = close.closingEntry;
-        await tx.journalEntry.create({
-          data: {
-            entryNumber: `${original.entryNumber}-R`,
-            date: close.toDate,
-            narration: `Reversal of ${original.entryNumber} — ${label} reopened`,
-            source: "CLOSING",
-            reversesId: original.id,
-            companyId: original.companyId,
-            createdById: user.id,
-            lines: {
-              create: original.lines.map((l, i) => ({
-                accountId: l.accountId,
-                debit: l.credit,
-                credit: l.debit,
-                companyId: l.companyId,
-                departmentId: l.departmentId,
-                narration: l.narration,
-                sortOrder: i,
-              })),
-            },
-          },
-        });
-      }
-
-      await tx.fiscalYearClose.delete({ where: { label } });
-    });
+    // The lock rolled back, the closing entry reversed through the write door (numbered, tags kept),
+    // and the close record removed — src/lib/ledger/year-end.ts, in this one transaction.
+    const { closeId } = await db.$transaction((tx) => reopenFinancialYearInBooks(tx, { label, userId: user.id }));
 
     await recordAudit({
       userId: user.id,
       action: "DELETE",
       entityType: "FiscalYearClose",
-      entityId: close.id,
+      entityId: closeId,
       entityLabel: `Reopened ${label} — closing entry reversed`,
     });
     revalidatePath("/accounting/books");

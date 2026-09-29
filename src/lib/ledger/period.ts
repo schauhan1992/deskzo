@@ -1,14 +1,62 @@
+import { calendarDateOf, financialYearWindow, istCalendarDate } from "@/lib/india-time";
+
 /**
- * The Indian financial year runs April to March, so "this year" on a report is almost never the
- * calendar year — defaulting to one would quietly give people the wrong period.
+ * The Indian financial year a date falls in, as `yyyy-mm-dd` strings and a label. It lives in
+ * src/lib/india-time.ts with the rest of India's calendar; the ledger's callers keep importing it
+ * from here.
  */
-export function financialYearBounds(date: Date) {
-  const year = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+export { financialYearBounds } from "@/lib/india-time";
+
+/**
+ * Whether an entry dated `date` falls in books closed to `lockedUntil`.
+ *
+ * By calendar day in India, not by instant. `lockedUntil` is a `@db.Date`, which reads back as
+ * midnight UTC, and payroll and depreciation date their entries 12:00 UTC on the month's last day —
+ * so comparing the two instants let a September payroll through a lock set to 30 September. The
+ * entry's day is its Indian date (01:00 IST on 1 October is October's), the lock's is the date it
+ * holds, and a day on or before the lock is closed.
+ */
+export function isLockedDate(date: Date, lockedUntil: Date | null | undefined): boolean {
+  if (!lockedUntil) return false;
+  return istCalendarDate(date).getTime() <= calendarDateOf(lockedUntil).getTime();
+}
+
+/**
+ * Where an entry that belongs on `date` can go: `date` itself while it is open, otherwise the
+ * first open day after the lock — dated 12:00 UTC (17:30 IST), which is that day whichever clock
+ * reads it, as payroll and depreciation are.
+ */
+export function firstOpenDate(date: Date, lockedUntil: Date | null | undefined): Date {
+  if (!lockedUntil || !isLockedDate(date, lockedUntil)) return date;
+  const lock = calendarDateOf(lockedUntil);
+  return new Date(Date.UTC(lock.getUTCFullYear(), lock.getUTCMonth(), lock.getUTCDate() + 1, 12));
+}
+
+/**
+ * The dates a year is closed under, from the calendar year it starts in.
+ *
+ * Two kinds, deliberately. `fromDate` and `toDate` are calendar days — 1 April and 31 March — for the
+ * `@db.Date` columns: the close record and the lock set to the year end. `from` and `to` are the
+ * instants the closing entry sums between, half-open in India time, so everything dated 31 March in
+ * India is in and nothing of April is. `closingDate` is 31 March at 12:00 UTC (17:30 IST): inside the
+ * year, and the same calendar day whichever clock reads it.
+ */
+export function yearEndDates(startYear: number) {
+  const window = financialYearWindow(startYear);
   return {
-    from: `${year}-04-01`,
-    to: `${year + 1}-03-31`,
-    label: `${year}-${String((year + 1) % 100).padStart(2, "0")}`,
+    label: window.label,
+    fromDate: new Date(Date.UTC(startYear, 3, 1)),
+    toDate: new Date(Date.UTC(startYear + 1, 2, 31)),
+    from: window.from,
+    to: window.to,
+    closingDate: new Date(Date.UTC(startYear + 1, 2, 31, 12)),
   };
+}
+
+/** The calendar year a label like "2025-26" starts in, or null when it doesn't read like one. */
+export function startYearOf(label: string): number | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(label.trim());
+  return match ? Number(match[1]) : null;
 }
 
 /**

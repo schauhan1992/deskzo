@@ -38,6 +38,7 @@
     "build:check": "node scripts/build-check.mjs",
     "check:postings": "tsx scripts/check-postings.ts",
     "ledger:backfill": "tsx scripts/backfill-ledger.ts",
+    "ledger:repost-fx": "tsx scripts/ledger-repost-fx.ts",
     "check:links": "node scripts/check-outbound-links.mjs",
     "check:payroll": "tsx scripts/check-payroll.ts",
     "check:iclock": "tsx scripts/check-iclock.ts",
@@ -141,7 +142,8 @@
     "check:cms": "tsx scripts/check-cms.ts",
     "check:partners": "tsx scripts/check-partners.ts",
     "check:support": "tsx scripts/check-support.ts",
-    "check:access-lock": "tsx scripts/check-access-lock.ts"
+    "check:access-lock": "tsx scripts/check-access-lock.ts",
+    "check:ledger-close": "tsx scripts/check-ledger-close.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

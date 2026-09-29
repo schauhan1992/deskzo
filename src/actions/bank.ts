@@ -8,6 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { ensureChartOfAccounts, postChequeClearingToLedger } from "@/lib/ledger/journal";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
+import { endOfIndianDay, istDateKey, startOfIndianDay } from "@/lib/india-time";
 import {
   parseStatementCsv,
   reconcile,
@@ -222,8 +223,8 @@ export async function clearCheque(input: {
 
   const clearedOn = new Date(`${input.clearedOn}T00:00:00.000Z`);
   if (Number.isNaN(clearedOn.getTime())) return { ok: false, error: "That isn't a date." };
-  // A cheque cannot clear before it was written.
-  if (clearedOn < new Date(payment.paidOn.toISOString().slice(0, 10))) {
+  // A cheque cannot clear before it was written — the Indian day it was written, not the UTC one.
+  if (clearedOn < new Date(`${istDateKey(payment.paidOn)}T00:00:00.000Z`)) {
     return { ok: false, error: "A cheque can't clear before the day it was written." };
   }
 
@@ -326,11 +327,17 @@ export async function reconciliationView(params: { bankAccountId: string; to?: s
   });
   if (!account) return null;
 
-  const to = params.to ? new Date(`${params.to}T23:59:59.999Z`) : new Date();
+  // As at the end of an Indian day: the one asked for, or today in India. It was the end of the UTC
+  // day (`T23:59:59.999Z`), which is 05:29 IST the next morning — so a receipt posted at 01:00 IST on
+  // the 1st counted in a reconciliation to the 31st. Journal dates are instants, compared up to the
+  // next Indian midnight; statement dates are a `@db.Date`, compared as that calendar day itself.
+  const asAtDay = params.to && startOfIndianDay(params.to) ? params.to : istDateKey(new Date());
+  const before = endOfIndianDay(asAtDay)!;
+  const to = new Date(before.getTime() - 1);
 
   const [lines, statementLines] = await Promise.all([
     db.journalLine.findMany({
-      where: { accountId: account.ledgerAccountId, entry: { date: { lte: to } } },
+      where: { accountId: account.ledgerAccountId, entry: { date: { lt: before } } },
       orderBy: { entry: { date: "asc" } },
       select: {
         id: true,
@@ -342,7 +349,7 @@ export async function reconciliationView(params: { bankAccountId: string; to?: s
       },
     }),
     db.bankStatementLine.findMany({
-      where: { bankAccountId: account.id, date: { lte: to } },
+      where: { bankAccountId: account.id, date: { lte: new Date(`${asAtDay}T00:00:00.000Z`) } },
       orderBy: { date: "asc" },
     }),
   ]);

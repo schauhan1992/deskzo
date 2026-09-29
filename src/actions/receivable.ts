@@ -77,7 +77,10 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
 
   const invoice = await db.tradeDocument.findUnique({
     where: { id: invoiceId },
-    select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true, ...invoiceSettlementInclude },
+    select: {
+      id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true,
+      currency: true, exchangeRate: true, ...invoiceSettlementInclude,
+    },
   });
   if (!invoice) return { ok: false, error: "That invoice no longer exists." };
   if (invoice.docType !== "INVOICE") return { ok: false, error: "Payments are recorded against a tax invoice." };
@@ -104,6 +107,13 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
         companyId: invoice.companyId,
         branchId,
         amount: new Prisma.Decimal(amount),
+        // The amount is in the invoice's currency — it was checked against the invoice's balance — so
+        // the payment is too, at the invoice's rate: the ledger then clears exactly the rupees the
+        // invoice booked. Without them a $1,000 receipt posted as ₹1,000 against a receivable the
+        // invoice booked at ₹83,000. (No rate of its own is asked for yet, so no exchange difference
+        // is booked here; a payment that carries one gets it from postExchangeDifferenceToLedger.)
+        currency: invoice.currency,
+        exchangeRate: invoice.exchangeRate,
         paidOn: new Date(paidOn),
         method,
         reference: reference || null,

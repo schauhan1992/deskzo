@@ -25,6 +25,7 @@ import { financialYearBounds } from "../src/lib/ledger/period";
 import { settleInvoice } from "../src/lib/receivables";
 import { SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { PERIODS, resolvePeriod, type PeriodKey } from "../src/lib/finance/periods";
+import { istDateParts, istMidnight, istMonthWindow } from "../src/lib/india-time";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: unknown = "") {
@@ -40,6 +41,17 @@ const near = (a: number, b: number, tolerance = 0.05) => Math.abs(a - b) <= tole
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 const PREFIX = "ZZFinanceCheck";
+
+/**
+ * Dates are India's, whatever clock this runs under: instants are written with the offset spelled
+ * out and read back as Indian calendar parts. Written in host-local time (`new Date(2026, 3, 1)`,
+ * `getMonth()`) these checks agreed with the host-clock bug they were meant to catch.
+ *
+ *   TZ=UTC npm run check:finance
+ */
+const ist = (s: string) => new Date(`${s}+05:30`);
+const day = (d: Date) => istDateParts(d);
+const iso = (d: Date) => d.toISOString();
 
 async function cleanup() {
   const entries = await db.journalEntry.findMany({
@@ -77,8 +89,10 @@ async function seed(createdById: string) {
   const bank = await db.ledgerAccount.findFirst({ where: { systemKey: SYSTEM_ACCOUNTS.BANK } });
   if (!bank) throw new Error("No bank account in the chart — run the accounting module once first.");
 
-  const when = new Date();
-  when.setDate(15);
+  // The 15th of this Indian month at noon — or a minute ago, early in a month, so the fixture is
+  // never in the future of the cash-flow window that ends now.
+  const today = istDateParts(new Date());
+  const when = new Date(Math.min(istMidnight(today.year, today.month, 15).getTime() + 12 * 3600_000, Date.now() - 60_000));
 
   const entry = async (
     suffix: string,
@@ -145,7 +159,7 @@ async function main() {
 
 /** The twelve-month window the cash-flow card covers. One definition, used by both readings. */
 function cashWindowFrom(now: Date) {
-  return new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  return istMonthWindow(now, -11).from;
 }
 
 async function run(
@@ -159,19 +173,23 @@ async function run(
 
   const bounds = financialYearBounds(now);
   ok(
-    "It starts on 1 April",
-    fy.from.getMonth() === 3 && fy.from.getDate() === 1,
-    fy.from.toDateString(),
+    "It starts on 1 April, at midnight in India",
+    day(fy.from).month === 3 && day(fy.from).day === 1 && fy.from.getTime() === istMidnight(day(fy.from).year, 3, 1).getTime(),
+    iso(fy.from),
   );
-  ok("  and ends on 31 March", fy.to.getMonth() === 2 && fy.to.getDate() === 31, fy.to.toDateString());
+  ok(
+    "  and ends on 31 March, at its last millisecond in India",
+    day(fy.to).month === 2 && day(fy.to).day === 31 && fy.to.getTime() === istMidnight(day(fy.to).year, 3, 1).getTime() - 1,
+    iso(fy.to),
+  );
   ok(
     "  matching financialYearBounds exactly",
     fy.label.endsWith(bounds.label),
     `${fy.label} vs ${bounds.label} — a dashboard on a different year than the GST returns is worse than no dashboard`,
   );
   // 31 March and 1 April are the two dates this gets wrong if it is wrong at all.
-  const marchEnd = fiscalYearOf(new Date(now.getFullYear(), 2, 31));
-  const aprilStart = fiscalYearOf(new Date(now.getFullYear(), 3, 1));
+  const marchEnd = fiscalYearOf(ist(`${day(now).year}-03-31T23:30:00`));
+  const aprilStart = fiscalYearOf(ist(`${day(now).year}-04-01T00:30:00`));
   ok(
     "  31 March and 1 April fall in different years",
     marchEnd.label !== aprilStart.label,
@@ -312,10 +330,10 @@ async function run(
   // Four dates chosen because they are where a fiscal calendar goes wrong: mid-year, the first
   // day of the year, the last day of it, and a January that belongs to the *previous* April.
   const probes = [
-    ["mid-year", new Date(2026, 8, 19)],
-    ["1 April", new Date(2026, 3, 1)],
-    ["31 March", new Date(2026, 2, 31)],
-    ["mid-January", new Date(2026, 0, 15)],
+    ["mid-year", ist("2026-09-19T12:00:00")],
+    ["1 April", ist("2026-04-01T00:30:00")],
+    ["31 March", ist("2026-03-31T23:30:00")],
+    ["mid-January", ist("2026-01-15T12:00:00")],
   ] as const;
 
   for (const [what, at] of probes) {
@@ -332,19 +350,19 @@ async function run(
     );
   }
 
-  const midYear = new Date(2026, 8, 19);
+  const midYear = ist("2026-09-19T12:00:00");
   const q = resolvePeriod("thisQuarter", midYear);
   ok(
     "Quarters are fiscal, not calendar",
-    q.from.getMonth() === 6 && q.to.getMonth() === 8 && q.label.startsWith("Q2"),
-    `${q.label}: ${q.from.toDateString()} to ${q.to.toDateString()} — September is Q2 when the year starts in April`,
+    q.from.getTime() === ist("2026-07-01T00:00:00").getTime() && q.to.getTime() === ist("2026-10-01T00:00:00").getTime() - 1 && q.label.startsWith("Q2"),
+    `${q.label}: ${iso(q.from)} to ${iso(q.to)} — September is Q2 when the year starts in April`,
   );
-  const q1 = resolvePeriod("thisQuarter", new Date(2026, 3, 1));
-  ok("  April opens Q1", q1.label.startsWith("Q1") && q1.from.getMonth() === 3, q1.label);
-  const q4 = resolvePeriod("thisQuarter", new Date(2026, 0, 15));
+  const q1 = resolvePeriod("thisQuarter", ist("2026-04-01T00:30:00"));
+  ok("  April opens Q1, from its first minute in India", q1.label.startsWith("Q1") && q1.from.getTime() === ist("2026-04-01T00:00:00").getTime(), q1.label);
+  const q4 = resolvePeriod("thisQuarter", ist("2026-01-15T12:00:00"));
   ok(
     "  and January is Q4 of the year that began the previous April",
-    q4.label.startsWith("Q4") && q4.from.getMonth() === 0 && q4.label.includes("2025-26"),
+    q4.label.startsWith("Q4") && q4.from.getTime() === ist("2026-01-01T00:00:00").getTime() && q4.label.includes("2025-26"),
     q4.label,
   );
 
@@ -352,24 +370,24 @@ async function run(
   const lastFy = resolvePeriod("lastFiscalYear", midYear);
   ok(
     "Last fiscal year ends where this one begins",
-    lastFy.to < thisFy.from && lastFy.to.getMonth() === 2 && thisFy.from.getMonth() === 3,
+    lastFy.to.getTime() === thisFy.from.getTime() - 1 && day(lastFy.to).month === 2 && day(thisFy.from).month === 3,
     `${lastFy.label} then ${thisFy.label} — they must not overlap or a year of income is counted twice`,
   );
 
-  const month = resolvePeriod("thisMonth", new Date(2026, 1, 14));
+  const month = resolvePeriod("thisMonth", ist("2026-02-14T12:00:00"));
   ok(
     "A month runs 1st to last, including a short February",
-    month.from.getDate() === 1 && month.to.getDate() === 28 && month.to.getMonth() === 1,
-    `${month.from.toDateString()} to ${month.to.toDateString()}`,
+    month.from.getTime() === ist("2026-02-01T00:00:00").getTime() && month.to.getTime() === ist("2026-03-01T00:00:00").getTime() - 1,
+    `${iso(month.from)} to ${iso(month.to)}`,
   );
 
   const twelve = resolvePeriod("last12Months", midYear);
   const monthsApart =
-    (twelve.to.getFullYear() - twelve.from.getFullYear()) * 12 + (twelve.to.getMonth() - twelve.from.getMonth());
+    (day(twelve.to).year - day(twelve.from).year) * 12 + (day(twelve.to).month - day(twelve.from).month);
   ok(
     "Last 12 months spans twelve month-starts, not thirteen",
-    monthsApart === 11 && twelve.from.getDate() === 1,
-    `${twelve.from.toDateString()} to ${twelve.to.toDateString()} — the chart draws one bar per month`,
+    monthsApart === 11 && twelve.from.getTime() === ist("2025-10-01T00:00:00").getTime(),
+    `${iso(twelve.from)} to ${iso(twelve.to)} — the chart draws one bar per month`,
   );
 
   // The window a card asks for has to be the window it gets: the figures and the label the
