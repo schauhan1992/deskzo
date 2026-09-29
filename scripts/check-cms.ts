@@ -115,6 +115,10 @@ internals._load = function (this: unknown, request: string, parent: { filename?:
       useSearchParams: () => searchParamsNow,
     };
   }
+  // The category and tag dialog, drawn in place: a server render has no body to portal a dialog into.
+  if ((request === "@/components/ui/dialog" || /[\\/]components[\\/]ui[\\/]dialog(\.tsx)?$/.test(request)) && parent?.filename?.includes(`taxonomy${path.sep}term-dialog`)) {
+    return { Dialog: ({ open, title, children }: { open: boolean; title: string; children?: ReactNode }) => (open ? createElement("div", { role: "dialog", "aria-label": title, "data-check-dialog": "" }, children) : null) };
+  }
   // The preview page's connection() needs Next's request store, which a check has none of.
   if (request === "next/server" && parent?.filename?.includes(`${path.sep}preview${path.sep}`)) {
     return { ...(originalLoad.call(this, request, parent, isMain) as object), connection: async () => {} };
@@ -1463,6 +1467,648 @@ async function main() {
       const adminDashboardError = await thrown(() => renderPage(DashboardScreen));
       const adminActivityError = await thrown(() => renderPage(ActivityScreen));
       ok("  as the admin's, and the admin's activity page", adminDashboardError === "" && adminActivityError === "", `${adminDashboardError} ${adminActivityError}`);
+    }
+
+    // ─── SEO Intelligence: keywords and the score cache ───────────────────────────────────────
+    // This block's own fixtures are "Zz SEO" posts, a category and a page; site-wide figures are
+    // asserted as changes around them, never as totals.
+    {
+      const seoScores = require("../src/lib/cms/seo-scores") as typeof import("../src/lib/cms/seo-scores");
+      const seoActions = require("../src/actions/cms/seo") as typeof import("../src/actions/cms/seo");
+      const categoryActions = require("../src/actions/cms/categories") as typeof import("../src/actions/cms/categories");
+      const { keywordProblems } = require("../src/lib/seo/keywords") as typeof import("../src/lib/seo/keywords");
+      const { ENGINE_VERSION } = require("../src/lib/seo/engine") as typeof import("../src/lib/seo/engine");
+      const said = (r: { ok: boolean; error?: string }) => (r.ok ? "ok" : (r.error ?? ""));
+      const idOf = (r: { ok: boolean; data?: { id: string } }) => (r.ok && r.data ? r.data.id : "");
+      const seoDoc = (seo: object, blocks: object[] = []) => ({ title: "Zz", seo: { title: "Zz", description: "", ...seo }, blocks });
+      const drain = async (options: { size?: number; all?: boolean } = {}) => {
+        let cursor: string | null = null;
+        let batches = 0;
+        let processed = 0;
+        let failed = 0;
+        for (;;) {
+          const r = await seoScores.recalculateBatch({ ...options, cursor });
+          batches += 1;
+          processed += r.processed;
+          failed += r.failed;
+          cursor = r.cursor;
+          if (r.done || batches > 500) return { batches, processed, failed };
+        }
+      };
+      const rowOf = async (type: "POST" | "PAGE" | "CATEGORY" | "TAG", key: string) => (await seoScores.listScores({ type, pageSize: 100, q: "" })).rows.find((r) => r.key === key) ?? null;
+      const rowsLike = async (q: string, extra: object = {}) => (await seoScores.listScores({ q, pageSize: 100, ...extra })).rows;
+
+      section("SEO: primary keywords are checked and stored normalised");
+      const repeat = validate.checkPageDocument(seoDoc({ keywords: ["GST invoice", " gst   INVOICE ", ""] }), "draft");
+      ok(
+        "a repeat is refused on the later one, whatever its case and spacing",
+        !repeat.ok && repeat.issues.length === 1 && repeat.issues[0].path === "seo.keywords[1]" && /repeats keyword 1/.test(repeat.issues[0].message),
+        repeat.ok ? "accepted" : JSON.stringify(repeat.issues),
+      );
+      ok("  in the engine's own words (keywordProblems), so the editor and the server agree", !repeat.ok && repeat.issues[0].message === keywordProblems(["GST invoice", " gst   INVOICE ", ""])[0]?.message);
+      const four = validate.checkPageDocument(seoDoc({ keywords: ["Zz one", "Zz two", "", "Zz three", "Zz four"] }), "draft");
+      ok("at most three: the fourth is refused where it is", !four.ok && four.issues.length === 1 && four.issues[0].path === "seo.keywords[4]" && /At most 3/.test(four.issues[0].message), four.ok ? "accepted" : JSON.stringify(four.issues));
+      const long = validate.checkPageDocument(seoDoc({ keywords: ["x".repeat(81)] }), "draft");
+      const eighty = validate.checkPageDocument(seoDoc({ keywords: [`  ${"y".repeat(80)}  `] }), "draft");
+      ok("each at most 80 characters once trimmed", !long.ok && long.issues[0].path === "seo.keywords[0]" && eighty.ok);
+      const trimmed = validate.checkPageDocument(seoDoc({ keywords: ["  e-invoicing   software ", "", "GST Returns"] }), "draft");
+      ok("stored trimmed, its spaces collapsed, blanks dropped, its case kept", trimmed.ok && JSON.stringify(trimmed.value.seo.keywords) === '["e-invoicing software","GST Returns"]', trimmed.ok ? JSON.stringify(trimmed.value.seo.keywords) : "");
+      const blanks = validate.checkPageDocument(seoDoc({ keywords: ["", "  "] }), "draft");
+      ok("  and none at all is stored as no field", blanks.ok && !("keywords" in blanks.value.seo));
+      const notList = validate.checkPageDocument(seoDoc({ keywords: "a, b" }), "draft");
+      const notText = validate.checkPageDocument(seoDoc({ keywords: ["ok", 7] }), "draft");
+      ok("a list of text only", !notList.ok && notList.issues[0].path === "seo.keywords" && !notText.ok && notText.issues[0].path === "seo.keywords[1]");
+      const oldDoc = validate.checkPageDocument({ title: "Zz old", seo: { title: "Zz old", description: "Saved before keywords existed." }, blocks: [{ id: "h", type: "pageHeader", props: { heading: "Zz old" } }] }, "publish");
+      ok("a document from before keywords still passes, unchanged", oldDoc.ok && !("keywords" in oldDoc.value.seo));
+      ok(
+        "  and every default page still passes as it is",
+        DEFAULT_SITE_PAGES.every((p) => validate.checkPageDocument({ title: p.title, seo: p.seo, blocks: p.blocks }, "publish").ok),
+      );
+      const postRepeat = validate.checkPostSeo({ keywords: ["Zz Payroll", "zz  PAYROLL"] });
+      const postKept = validate.checkPostSeo({ title: "Zz", keywords: [" Zz Payroll  software "] });
+      const postNone = validate.checkPostSeo({ keywords: [] });
+      ok(
+        "a post's are checked the same way",
+        !postRepeat.ok && postRepeat.issues[0].path === "seo.keywords[1]" && postKept.ok && JSON.stringify(postKept.value) === '{"title":"Zz","keywords":["Zz Payroll software"]}' && postNone.ok && postNone.value === null,
+      );
+      const untouched = await control.sitePage.findMany({ select: { draft: true, published: true } });
+      ok("no stored page was rewritten to add the field", untouched.length > 0 && untouched.every((p) => !JSON.stringify(p.draft).includes('"keywords"') && !JSON.stringify(p.published ?? null).includes('"keywords"')));
+
+      await actAs(editorId);
+      const seoPage = await act(pageActions.cmsCreatePage({ slug: "zz-seo-page", title: "Zz SEO page" }));
+      const seoPageId = idOf(seoPage);
+      const pageRefused = seoPage.ok ? await act(pageActions.cmsSavePageDraft(seoPageId, { document: pageDoc("Zz SEO page") as never, version: seoPage.data.version })) : null;
+      const withKeywords = (keywords: unknown[]) => ({ ...pageDoc("Zz SEO page"), seo: { title: "Zz SEO page", description: "About us.", keywords } });
+      const pageBad = pageRefused?.ok ? await act(pageActions.cmsSavePageDraft(seoPageId, { document: withKeywords(["Zz Payroll", "zz payroll"]) as never, version: pageRefused.data.version })) : null;
+      ok("the page editor's save refuses a repeat, at its box", !!pageBad && !pageBad.ok && !!pageBad.issues?.some((i) => i.path === "seo.keywords[1]"), pageBad ? said(pageBad) : "");
+      const pageGood = pageRefused?.ok ? await act(pageActions.cmsSavePageDraft(seoPageId, { document: withKeywords([" Zz Payroll  India ", "", "Zz HR"]) as never, version: pageRefused.data.version })) : null;
+      const storedPage = seoPageId ? await control.sitePage.findUnique({ where: { id: seoPageId }, select: { draft: true } }) : null;
+      ok("  and stores good ones normalised", !!pageGood?.ok && JSON.stringify((storedPage?.draft as { seo?: { keywords?: unknown } })?.seo?.keywords) === '["Zz Payroll India","Zz HR"]');
+      const catBad = await act(categoryActions.cmsCreateCategory({ name: "Zz SEO Category", seo: { keywords: ["Zz Ledger", "ZZ LEDGER"] } }));
+      const catGood = await act(categoryActions.cmsCreateCategory({ name: "Zz SEO Category", description: "Everything about the ledger, from first entries to the year-end close and the reports it feeds.", seo: { keywords: ["  Zz Ledger  "] } }));
+      const seoCategoryId = idOf(catGood);
+      const storedCat = seoCategoryId ? await control.siteCategory.findUnique({ where: { id: seoCategoryId }, select: { seo: true } }) : null;
+      ok(
+        "a category's (and a tag's) are checked by the same rules, and stored normalised",
+        !catBad.ok && !!catBad.issues?.some((i) => i.path === "seo.keywords[1]") && catGood.ok && JSON.stringify(storedCat?.seo) === '{"keywords":["Zz Ledger"]}',
+        `${said(catBad)} | ${said(catGood)}`,
+      );
+
+      // ─── The cache ──────────────────────────────────────────────────────────────────────────
+      section("SEO: the score cache fills in batches");
+      /** About 250 words, the keyword said three times: enough to score well, never stuffed. */
+      const richPost = (title: string, keyword: string) => [
+        {
+          id: "intro",
+          type: "richText",
+          props: {
+            content: [
+              { type: "paragraph", text: `${title} explains how ${keyword} works for small finance teams in India, from the first run of the month to the reports that follow it.` },
+              { type: "paragraph", text: "Attendance, statutory deductions and payslips are handled in one place, and every step leaves a record that auditors can follow later without asking anybody. Salaries, reimbursements and advances are settled together, so the books close on time." },
+            ],
+          },
+        },
+        {
+          id: "how",
+          type: "richText",
+          props: {
+            heading: `How does ${keyword} work each month?`,
+            content: [
+              { type: "paragraph", text: "Each month the run gathers attendance, applies each salary structure, works out provident fund, insurance and professional tax, and posts one journal entry to the ledger. Managers approve exceptions before anything is paid." },
+              { type: "list", items: ["Attendance is locked on the last working day", "Deductions follow the current statutory rates", "Payslips are emailed the same afternoon"] },
+            ],
+          },
+        },
+        {
+          id: "why",
+          type: "richText",
+          props: {
+            heading: "What do teams gain from it?",
+            content: [
+              { type: "paragraph", text: `Fewer spreadsheets, fewer late corrections and a clear trail from each payslip back to its source. Teams that moved their ${keyword} here report closing the month two days sooner, because reconciliation happens while the run is prepared rather than after it.` },
+              { type: "paragraph", text: "Questions from employees arrive less often, since every figure on a payslip links to the rule that produced it, and the finance team answers the rest from the same screen." },
+            ],
+          },
+        },
+      ];
+      const makePost = async (title: string, seo: object | null, body: object[], categories: string[] = []) => {
+        const made = await act(postActions.cmsCreatePost({ title }));
+        if (!made.ok) return "";
+        const saved = await act(postActions.cmsSavePost(made.data.id, { post: { title, slug: made.data.slug, excerpt: `${title}: a short summary of what the post covers for finance teams.`, coverMediaId: mediaId, tags: ["zz-seo-tag"], categories, body, seo } as never, version: made.data.version }));
+        return saved.ok ? made.data.id : "";
+      };
+      const alphaId = await makePost("Zz SEO Alpha payroll guide", { title: "Zz SEO Alpha: the payroll guide for Indian finance teams", description: "How payroll runs, statutory deductions and payslips work in one place, step by step, for small finance teams in India.", keywords: ["payroll"] }, richPost("Zz SEO Alpha", "payroll"), seoCategoryId ? [seoCategoryId] : []);
+      const betaId = await makePost("Zz SEO Beta", null, [{ id: "b", type: "richText", props: { content: [{ type: "paragraph", text: "Short." }] } }]);
+      ok("its fixtures are made (two draft posts in a category and a tag)", !!alphaId && !!betaId);
+      const before = await seoScores.markStale();
+      ok("a new post is uncalculated: no row, counted as missing", before.missing.some((r) => r.key === alphaId) && !(await rowOf("POST", alphaId)));
+      const filled = await drain({ size: 5 });
+      const after = await seoScores.markStale();
+      ok("recalculateBatch fills the cache five at a time, over several calls", filled.batches >= 2 && filled.failed === 0 && after.stale.length === 0 && after.missing.length === 0, `${filled.processed} scored in ${filled.batches} batches, ${filled.failed} failed`);
+      const cachedRows = await control.seoScore.count();
+      ok("  one row per entity on the site", cachedRows === after.entities, `${cachedRows} rows, ${after.entities} entities`);
+      const again = await seoScores.recalculateBatch({ size: 5 });
+      ok("  and a second run has nothing to do", again.processed === 0 && again.done && again.remaining === 0, JSON.stringify(again));
+      const alphaDraft = await rowOf("POST", alphaId);
+      ok(
+        "a draft post is scored as a draft: not live, not indexable, with its keywords and the engine's version",
+        !!alphaDraft && alphaDraft.status === "draft" && !alphaDraft.live && !alphaDraft.indexable && JSON.stringify(alphaDraft.keywords) === '["payroll"]' && alphaDraft.engineVersion === ENGINE_VERSION && !alphaDraft.stale,
+        JSON.stringify(alphaDraft),
+      );
+      const builtins = (await seoScores.listScores({ type: "PAGE", pageSize: 100 })).rows.filter((r) => ["/", "/pricing", "/signup"].includes(r.path));
+      ok(
+        "the built-in pages are there as the site shows them; /signup is excluded (noindex), not penalised",
+        builtins.length === 3 && builtins.find((r) => r.path === "/signup")?.excluded === true && builtins.find((r) => r.path === "/signup")?.indexable === false,
+        JSON.stringify(builtins.map((r) => [r.path, r.status, r.overall, r.excluded])),
+      );
+      const blogRow = (await seoScores.listScores({ type: "BLOG_INDEX" })).rows[0];
+      ok("  and so is the blog index, as one entity", !!blogRow && blogRow.key === "blog" && blogRow.path === "/blog" && blogRow.editHref === null);
+
+      section("SEO: what makes a score stale");
+      const alphaDetail = await act(postActions.cmsGetPost(alphaId));
+      const alphaSave = alphaDetail.ok
+        ? await act(postActions.cmsSavePost(alphaId, { post: { title: "Zz SEO Alpha payroll guide, revised", slug: alphaDetail.data.slug, excerpt: alphaDetail.data.excerpt, coverMediaId: mediaId, tags: ["zz-seo-tag"], categories: [seoCategoryId], body: alphaDetail.data.body, seo: alphaDetail.data.seo } as never, version: alphaDetail.data.version }))
+        : null;
+      const editedRow = await rowOf("POST", alphaId);
+      ok("editing a draft post leaves its row as it was, flagged stale", !!alphaSave?.ok && !!editedRow?.stale && editedRow.title === "Zz SEO Alpha payroll guide", editedRow ? `${editedRow.title} stale=${editedRow.stale}` : "no row");
+      const hookStart = performance.now();
+      const alphaLive = await act(postActions.cmsPublishPost(alphaId, {}));
+      const publishMs = performance.now() - hookStart;
+      const publishedRow = await rowOf("POST", alphaId);
+      const alphaNow = await control.sitePost.findUniqueOrThrow({ where: { id: alphaId }, select: { updatedAt: true, publishAt: true } });
+      ok(
+        "publishing it recalculates it at once: current, published, indexable, the new title",
+        alphaLive.ok && !!publishedRow && !publishedRow.stale && publishedRow.status === "published" && publishedRow.live && publishedRow.indexable && publishedRow.title === "Zz SEO Alpha payroll guide, revised",
+        JSON.stringify(publishedRow && [publishedRow.status, publishedRow.stale, publishedRow.title]),
+      );
+      ok("  its content time is the post's own", publishedRow?.contentUpdatedAt?.getTime() === Math.max(alphaNow.updatedAt.getTime(), alphaNow.publishAt?.getTime() ?? 0));
+      const archiveRows = (await seoScores.markStale()).stale;
+      ok("  and the archives and the blog index it now appears in are stale", archiveRows.some((r) => r.type === "CATEGORY" && r.key === seoCategoryId) && archiveRows.some((r) => r.type === "BLOG_INDEX"), JSON.stringify(archiveRows.map((r) => r.type)));
+      await control.sitePost.update({ where: { id: alphaId }, data: { excerpt: "Zz edited outside the CMS's save." } });
+      ok("a change the save hook didn't see (straight to the database) is caught by its timestamp", !!(await rowOf("POST", alphaId))?.stale);
+      await drain();
+      const settingsPublished = await act(settingsActions.cmsPublishSettings({}));
+      const afterSettings = await seoScores.markStale();
+      ok("publishing the settings makes every row stale", settingsPublished.ok && afterSettings.stale.length === afterSettings.entities && afterSettings.missing.length === 0, `${afterSettings.stale.length} of ${afterSettings.entities}`);
+      await drain();
+      ok("  until it is recalculated", (await seoScores.markStale()).stale.length === 0);
+      const oldEngine = await control.seoScore.updateMany({ where: { entityType: "POST", entityKey: betaId }, data: { engineVersion: ENGINE_VERSION + 1 } });
+      ok("a row from another engine version is stale", oldEngine.count === 1 && !!(await rowOf("POST", betaId))?.stale);
+      await act(postActions.cmsArchivePost(betaId));
+      const archivedAway = await seoScores.markStale();
+      ok("an archived post's row is dropped", archivedAway.dropped >= 1 && !(await control.seoScore.findFirst({ where: { entityType: "POST", entityKey: betaId } })));
+      await act(postActions.cmsUnarchivePost(betaId));
+      await drain();
+
+      section("SEO: the table's filters and sorts, from the cache");
+      const gammaId = await makePost("Zz SEO Gamma", { noindex: true }, richPost("Zz SEO Gamma", "payslips"));
+      await act(postActions.cmsPublishPost(betaId, {}));
+      const summaryBefore = await seoScores.siteSummary();
+      await act(postActions.cmsPublishPost(gammaId, {}));
+      const summaryAfter = await seoScores.siteSummary();
+      const mine = await rowsLike("zz seo", { type: "POST" });
+      const byTitle = (t: string) => mine.find((r) => r.title.startsWith(t));
+      const [alpha, beta, gamma] = [byTitle("Zz SEO Alpha"), byTitle("Zz SEO Beta"), byTitle("Zz SEO Gamma")];
+      ok("the three posts are listed, scored", !!alpha && !!beta && !!gamma, JSON.stringify(mine.map((r) => [r.title, r.overall, r.status])));
+      ok("  the rich one scores above the thin one", !!alpha && !!beta && alpha.overall > beta.overall, `${alpha?.overall} vs ${beta?.overall}`);
+      const lowest = (await rowsLike("zz seo", { type: "POST", sort: "lowest" })).map((r) => r.overall);
+      const highest = (await rowsLike("zz seo", { type: "POST", sort: "highest" })).map((r) => r.overall);
+      ok("sorted lowest first, or highest first", lowest.every((v, i) => i === 0 || lowest[i - 1] <= v) && highest.every((v, i) => i === 0 || highest[i - 1] >= v) && lowest.length === 3, `${lowest} / ${highest}`);
+      const issues = await rowsLike("zz seo", { type: "POST", sort: "issues" });
+      ok("  or by issues, the most critical first", issues.every((r, i) => i === 0 || issues[i - 1].critical >= r.critical));
+      const noKeywords = await rowsLike("zz seo", { type: "POST", missingKeywords: true });
+      ok("filtered: no primary keywords (the noindex one isn't asked for any)", noKeywords.some((r) => r.key === betaId) && !noKeywords.some((r) => r.key === alphaId) && !noKeywords.some((r) => r.key === gammaId));
+      const notIndexable = await rowsLike("zz seo", { type: "POST", indexable: false });
+      ok("  not indexable: the noindex one, excluded", notIndexable.length === 1 && notIndexable[0].key === gammaId && notIndexable[0].excluded && notIndexable[0].live);
+      const band = alpha ? await rowsLike("zz seo", { type: "POST", scoreMin: alpha.overall, scoreMax: alpha.overall }) : [];
+      ok("  by score range", band.some((r) => r.key === alphaId) && (!beta || beta.overall === alpha?.overall || !band.some((r) => r.key === betaId)));
+      const pageOne = await seoScores.listScores({ q: "zz seo", type: "POST", sort: "lowest", pageSize: 2, page: 1 });
+      const pageTwo = await seoScores.listScores({ q: "zz seo", type: "POST", sort: "lowest", pageSize: 2, page: 2 });
+      ok("  a page at a time", pageOne.total === 3 && pageOne.rows.length === 2 && pageTwo.rows.length === 1 && pageTwo.rows[0].key !== pageOne.rows[0].key && pageTwo.rows[0].key !== pageOne.rows[1].key);
+      ok("  each row says where to edit it", alpha?.editHref === `/posts/${alphaId}`);
+
+      section("SEO: the site score leaves noindex out");
+      ok(
+        "a live noindex post counts as excluded — not in the score, not scored against it",
+        summaryAfter.counts.excluded === summaryBefore.counts.excluded + 1 && summaryAfter.scored === summaryBefore.scored && summaryAfter.overall === summaryBefore.overall && summaryAfter.seo === summaryBefore.seo,
+        `excluded ${summaryBefore.counts.excluded}→${summaryAfter.counts.excluded}, scored ${summaryBefore.scored}→${summaryAfter.scored}, overall ${summaryBefore.overall}→${summaryAfter.overall}`,
+      );
+      const gammaDetail = await act(postActions.cmsGetPost(gammaId));
+      if (gammaDetail.ok) await act(postActions.cmsSavePost(gammaId, { post: { title: "Zz SEO Gamma", slug: gammaDetail.data.slug, excerpt: gammaDetail.data.excerpt, coverMediaId: mediaId, tags: ["zz-seo-tag"], body: gammaDetail.data.body, seo: null } as never, version: gammaDetail.data.version }));
+      const summaryIndexed = await seoScores.siteSummary();
+      ok("  and once it may be indexed, it is in the score (its live save recalculated it)", summaryIndexed.scored === summaryAfter.scored + 1 && summaryIndexed.counts.excluded === summaryAfter.counts.excluded - 1);
+      ok(
+        "the summary's own arithmetic holds: distribution = scored; stale, uncalculated and cached rows add up",
+        Object.values(summaryIndexed.distribution).reduce((n, v) => n + v, 0) === summaryIndexed.scored && summaryIndexed.calculated + summaryIndexed.uncalculated === summaryIndexed.entities && summaryIndexed.engineVersion === ENGINE_VERSION,
+      );
+      ok("  with the site-wide checks beside it", summaryIndexed.siteChecks.some((c) => c.id === "site.ai-crawlers") && summaryIndexed.siteChecks.some((c) => c.id === "site.title-template"));
+
+      section("SEO: one entity's detail, and an editor's context");
+      const detail = await seoScores.scoreDetail("POST", alphaId, { store: true });
+      ok("the detail is the cached calculation: every check, with what to do", !detail.fresh && detail.score.seo.checks.length > 20 && detail.score.overall === detail.row.overall && !("facts" in detail.score));
+      await control.sitePost.update({ where: { id: alphaId }, data: { excerpt: "Zz stale again." } });
+      const staleBefore = await control.seoScore.findFirstOrThrow({ where: { entityType: "POST", entityKey: alphaId }, select: { calculatedAt: true } });
+      await actAs(viewer.id);
+      const viewerDetail = await act(seoActions.cmsSeoDetail("POST", alphaId));
+      const staleAfter = await control.seoScore.findFirstOrThrow({ where: { entityType: "POST", entityKey: alphaId }, select: { calculatedAt: true } });
+      ok("  stale, it is calculated afresh — for a viewer without storing anything", viewerDetail.ok && viewerDetail.data.fresh && staleAfter.calculatedAt.getTime() === staleBefore.calculatedAt.getTime());
+      await actAs(editorId);
+      const editorDetail = await act(seoActions.cmsSeoDetail("POST", alphaId));
+      const storedAfter = await control.seoScore.findFirstOrThrow({ where: { entityType: "POST", entityKey: alphaId }, select: { calculatedAt: true } });
+      ok("  and for a writer, stored", editorDetail.ok && editorDetail.data.fresh && storedAfter.calculatedAt.getTime() > staleBefore.calculatedAt.getTime());
+      const context = await act(seoActions.cmsSeoEditorContext("post", alphaId));
+      const alphaPath = publishedRow?.path ?? "";
+      ok(
+        "an editor's context: the site, every other live entity (not itself), its images' alt text",
+        context.ok && context.data.site.others.length > 3 && !context.data.site.others.some((o) => o.path === alphaPath) && context.data.site.others.some((o) => o.path === beta?.path) && context.data.media[mediaId]?.alt === "The hero image" && context.data.archive === null,
+        context.ok ? `${context.data.site.others.length} others` : said(context),
+      );
+      const catContext = await act(seoActions.cmsSeoEditorContext("category", seoCategoryId));
+      ok("  a category's carries its archive's first page", catContext.ok && !!catContext.data.archive && catContext.data.archive.total === 1 && catContext.data.archive.posts[0]?.path === alphaPath);
+      const builtinContext = await act(seoActions.cmsSeoEditorContext("page", "builtin-home"));
+      ok("  a built-in page's works by its builtin- id", builtinContext.ok && !builtinContext.data.site.others.some((o) => o.path === "/"));
+
+      section("SEO: who may do what");
+      await actAs(viewer.id);
+      const viewerReads = [await act(seoActions.cmsSeoSummary()), await act(seoActions.cmsSeoList({ sort: "lowest" })), await act(seoActions.cmsSeoEditorContext("post", alphaId))];
+      ok("a viewer reads the summary, the table and an editor's context", viewerReads.every((r) => r.ok), viewerReads.map(said).join(" | "));
+      const viewerWrites = [await act(seoActions.cmsSeoRecalculate("POST", alphaId)), await act(seoActions.cmsSeoRecalculateBatch(null))];
+      ok("  but recalculates nothing", viewerWrites.every((r) => !r.ok && /role/i.test(said(r))), viewerWrites.map(said).join(" | "));
+      await actAs(author.id);
+      const authorRecalc = await act(seoActions.cmsSeoRecalculate("POST", alphaId));
+      const authorBatch = await act(seoActions.cmsSeoRecalculateBatch(null));
+      ok("an author (a writer) recalculates — the cache only", authorRecalc.ok && !authorRecalc.data.stale && authorBatch.ok, `${said(authorRecalc)} | ${said(authorBatch)}`);
+      const badInputs = [
+        await act(seoActions.cmsSeoDetail("SPAM" as never, alphaId)),
+        await act(seoActions.cmsSeoDetail("POST", "../../etc")),
+        await act(seoActions.cmsSeoDetail("PAGE", "Not A Slug")),
+        await act(seoActions.cmsSeoList({ page: 0 })),
+        await act(seoActions.cmsSeoList({ scoreMin: 101 })),
+        await act(seoActions.cmsSeoList({ scoreMin: 60, scoreMax: 40 })),
+        await act(seoActions.cmsSeoList({ sort: "random" as never })),
+        await act(seoActions.cmsSeoList({ indexable: "yes" as never })),
+        await act(seoActions.cmsSeoList({ pageSize: 1000 })),
+        await act(seoActions.cmsSeoRecalculateBatch("POST:../../etc")),
+        await act(seoActions.cmsSeoRecalculateBatch("NOPE")),
+        await act(seoActions.cmsSeoEditorContext("widget" as never, alphaId)),
+        await act(seoActions.cmsSeoRecalculate("POST", "zzzzzzzzzzzzzzzzzzzzzzzzz")),
+      ];
+      ok("every input is checked: type, key, cursor, filters, page bounds", badInputs.every((r) => !r.ok), badInputs.map(said).join(" | "));
+      await actAs(editorId);
+
+      section("SEO: no N+1 — a batch's queries don't grow with the site");
+      const { PrismaClient: CountingClient } = require("@wroffy/control-client") as typeof import("@wroffy/control-client");
+      const counting = new CountingClient({ datasourceUrl: controlUrl, log: [{ emit: "event", level: "query" }] });
+      let queries = 0;
+      counting.$on("query", () => {
+        queries += 1;
+      });
+      const slot = Symbol.for("wroffy.control-db");
+      const g = globalThis as { [key: symbol]: unknown };
+      const original = g[slot];
+      const measure = async () => {
+        const perBatch: number[] = [];
+        const times: number[] = [];
+        let cursor: string | null = null;
+        for (let n = 0; n < 200; n++) {
+          queries = 0;
+          const t0 = performance.now();
+          const r = await seoScores.recalculateBatch({ all: true, size: 25, cursor });
+          times.push(performance.now() - t0);
+          perBatch.push(queries);
+          cursor = r.cursor;
+          if (r.done) break;
+        }
+        return { perBatch, times };
+      };
+      let small = { perBatch: [] as number[], times: [] as number[] };
+      let large = { perBatch: [] as number[], times: [] as number[] };
+      const oneEntity: number[] = [];
+      let oneEntityQueries = 0;
+      const entitiesBefore = (await seoScores.markStale()).entities;
+      try {
+        g[slot] = counting;
+        small = await measure();
+        // Forty more live posts, each in the category and the tag, each with a cover: the site grows, the batches mustn't.
+        const zzTag = await control.siteTag.findUniqueOrThrow({ where: { slug: "zz-seo-tag" }, select: { id: true } });
+        const at0 = Date.now() - 60_000;
+        for (let i = 0; i < 40; i++) {
+          await control.sitePost.create({
+            data: {
+              slug: `zz-seo-bulk-${i}`,
+              title: `Zz SEO bulk ${i}`,
+              excerpt: `Bulk post ${i}.`,
+              coverMediaId: mediaId,
+              body: richPost(`Zz SEO bulk ${i}`, "payroll") as never,
+              status: "PUBLISHED",
+              publishAt: new Date(at0 + i),
+              publishedAt: new Date(at0 + i),
+              authorId: editorId,
+              updatedBy: `cms:${editorId}`,
+              categories: { create: [{ categoryId: seoCategoryId, position: 0 }] },
+              tagLinks: { create: [{ tagId: zzTag.id }] },
+            },
+          });
+        }
+        large = await measure();
+        for (let i = 0; i < 5; i++) {
+          queries = 0;
+          const t0 = performance.now();
+          await seoScores.recalculateEntity("POST", alphaId);
+          oneEntity.push(performance.now() - t0);
+          oneEntityQueries = queries;
+        }
+      } finally {
+        g[slot] = original;
+        await counting.$disconnect();
+      }
+      const entitiesAfter = (await seoScores.markStale()).entities;
+      const maxSmall = Math.max(...small.perBatch);
+      const maxLarge = Math.max(...large.perBatch);
+      const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
+      const fullBatches = large.times.slice(0, -1);
+      console.log(
+        `        entities ${entitiesBefore} → ${entitiesAfter}; batches of 25: ${small.perBatch.length} → ${large.perBatch.length}; queries per batch ${small.perBatch.join(",")} → ${large.perBatch.join(",")};` +
+          ` a full batch of 25 ≈ ${Math.round(median(fullBatches.length ? fullBatches : large.times))} ms; one entity ≈ ${Math.round(median(oneEntity))} ms in ${oneEntityQueries} queries; a publish with its recalculation ${Math.round(publishMs)} ms`,
+      );
+      ok("the site grew by forty entities and more batches ran", entitiesAfter >= entitiesBefore + 40 && large.perBatch.length > small.perBatch.length);
+      ok("  but no batch ran more queries than before, and none more than 30", maxLarge <= maxSmall && maxLarge <= 30, `${maxSmall} → ${maxLarge}`);
+      ok("one entity is recalculated in a fixed handful of queries", oneEntityQueries > 0 && oneEntityQueries <= maxSmall, oneEntityQueries);
+      const bulk = await rowsLike("zz seo bulk", { type: "POST" });
+      ok("  and every bulk post was scored", bulk.length === 40 && bulk.every((r) => r.live && !r.stale));
+      await control.sitePost.update({ where: { slug: "zz-seo-bulk-1" }, data: { status: "DRAFT", publishAt: null, publishedAt: null } });
+      const leaving = (await seoScores.markStale()).stale;
+      ok(
+        "a post leaving an archive makes it stale though nothing newer changed in it (its count moved)",
+        leaving.some((r) => r.type === "CATEGORY" && r.key === seoCategoryId) && leaving.some((r) => r.type === "BLOG_INDEX"),
+        JSON.stringify(leaving.map((r) => r.type)),
+      );
+
+      section("SEO: an image's alt text reaches the site at once");
+      const bulkPost = await site.getPublishedPost("zz-seo-bulk-0");
+      await act(mediaActions.cmsUpdateMediaAlt(mediaId, "The hero image, described anew"));
+      const afterAlt = await site.getPublishedPost("zz-seo-bulk-0");
+      ok("editing it in the library clears the site's cache", bulkPost?.cover?.alt === "The hero image" && afterAlt?.cover?.alt === "The hero image, described anew", `${bulkPost?.cover?.alt} → ${afterAlt?.cover?.alt}`);
+      await act(mediaActions.cmsUpdateMediaAlt(mediaId, "The hero image"));
+
+      // ─── S4: what the editors score live is what the dashboard scores ───────────────────────
+      const editorInput = require("../src/components/cms/seo/editor-input") as typeof import("../src/components/cms/seo/editor-input");
+      const { scoreEntity } = require("../src/lib/seo/engine") as typeof import("../src/lib/seo/engine");
+      const taxonomy = require("../src/lib/cms/taxonomy") as typeof import("../src/lib/cms/taxonomy");
+      const editorData = require("../src/components/cms/editor/editor-data") as typeof import("../src/components/cms/editor/editor-data");
+      const postEditor = require("../src/components/cms/editor/post-editor") as typeof import("../src/components/cms/editor/post-editor");
+      const termDialog = require("../src/components/cms/taxonomy/term-dialog") as typeof import("../src/components/cms/taxonomy/term-dialog");
+      type SeoInputT = import("../src/lib/seo/types").SeoInput;
+      /** Canonical text: Dates as ISO strings, undefined left out, keys sorted. */
+      const canon = (v: unknown) => validate.stableJson(JSON.parse(JSON.stringify(v)));
+      /** The store scores with every live entity as `others` (itself skipped by id); an editor's context leaves itself out. */
+      const withoutSelf = (input: SeoInputT): SeoInputT => ({ ...input, site: { ...input.site, others: input.site.others.filter((o) => o.id !== input.id && o.path !== input.path) } });
+      /** The first place two values differ, for the failure message. */
+      const firstDiff = (a: unknown, b: unknown, at = ""): string => {
+        if (canon(a) === canon(b)) return "";
+        if (a && b && typeof a === "object" && typeof b === "object") {
+          for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])]) {
+            const d = firstDiff((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`);
+            if (d) return d;
+          }
+        }
+        return `${at || "(root)"}: ${canon(a).slice(0, 120)} ≠ ${canon(b).slice(0, 120)}`;
+      };
+      const contextOf = async (kind: "page" | "post" | "category" | "tag", id: string) => {
+        const r = await act(seoActions.cmsSeoEditorContext(kind, id));
+        if (!r.ok) throw new Error(`editor context for ${kind} ${id}: ${r.error}`);
+        return r.data;
+      };
+      const parity = (what: string, store: SeoInputT | null, editor: SeoInputT | null) => {
+        const same = !!store && !!editor && canon(withoutSelf(store)) === canon(withoutSelf(editor));
+        ok(`${what}: the editor's input is the store's`, same, store && editor ? firstDiff(withoutSelf(store), withoutSelf(editor)) : `store ${!!store}, editor ${!!editor}`);
+        ok(`  and so is its score`, !!store && !!editor && canon(scoreEntity(store)) === canon(scoreEntity(editor)), store && editor ? `${scoreEntity(store).overall} vs ${scoreEntity(editor).overall}` : "");
+      };
+
+      section("SEO: the editors' live score is the dashboard's, for the same saved content");
+      await actAs(editorId);
+      // Its cached row current, so the panel below has nothing to report about the site's version.
+      await seoScores.recalculateEntity("POST", alphaId);
+      // A page never published (scored as its draft).
+      const seoPageDetail = await content.getPage(seoPageId);
+      const seoPageStore = await seoScores.storeInputFor("PAGE", seoPageDetail.slug);
+      const seoPageCtx = await contextOf("page", seoPageId);
+      const seoPageSource = { id: seoPageDetail.id, slug: seoPageDetail.slug, status: seoPageDetail.status, builtin: seoPageDetail.builtin, doc: seoPageDetail.draft };
+      const seoPageEditor = seoPageStore ? editorInput.pageDraftInput(seoPageSource, seoPageCtx, seoPageStore.now) : null;
+      parity("an added page's draft", seoPageStore, seoPageEditor);
+      ok("  (its keywords are the ones typed, blanks dropped)", JSON.stringify(seoPageEditor?.keywords) === '["Zz Payroll India","Zz HR"]', JSON.stringify(seoPageEditor?.keywords));
+      // A built-in page nobody has saved (its default content).
+      const homeDetail = await content.getPage("builtin-home");
+      const homeStore = await seoScores.storeInputFor("PAGE", "home");
+      ok("  (the home page is still its default content here)", homeDetail.status === "DEFAULT", homeDetail.status);
+      parity("the built-in home page", homeStore, homeStore ? editorInput.pageDraftInput({ id: homeDetail.id, slug: homeDetail.slug, status: homeDetail.status, builtin: homeDetail.builtin, doc: homeDetail.draft }, await contextOf("page", "builtin-home"), homeStore.now) : null);
+      // A live post: its cover, categories, tags, keywords, author and dates.
+      const alphaPost = await content.getPost(alphaId);
+      const catTree = await taxonomy.listCategories();
+      const categoryIndex = Object.fromEntries(catTree.flatMap((c) => [c, ...c.children]).map((c) => [c.id, { slug: c.slug, name: c.name }]));
+      const alphaMedia = Object.fromEntries((await editorData.mediaRowsFor({ body: alphaPost.body, seo: alphaPost.seo }, [alphaPost.coverMediaId])).map((m) => [m.id, m]));
+      const alphaCtx = await contextOf("post", alphaId);
+      const alphaSource = {
+        id: alphaPost.id,
+        doc: postEditor.inputOf(alphaPost),
+        status: alphaPost.status,
+        publishAt: alphaPost.publishAt,
+        updatedAt: alphaPost.updatedAt,
+        author: alphaPost.author.name,
+        savedCategories: alphaPost.categories,
+        categories: categoryIndex,
+        tagNames: Object.fromEntries(alphaPost.tagRefs.map((t) => [t.slug, t.name])),
+        media: alphaMedia,
+      };
+      const alphaStore = await seoScores.storeInputFor("POST", alphaId);
+      const alphaEditor = alphaStore ? editorInput.postDraftInput(alphaSource, alphaCtx, alphaStore.now) : null;
+      parity("a live post", alphaStore, alphaEditor);
+      ok("  (with its cover, category, tag and keyword in it)", !!alphaEditor?.editorial.cover && alphaEditor.editorial.categories.length === 1 && alphaEditor.editorial.tags.length === 1 && alphaEditor.keywords[0] === "payroll");
+      // A category and a tag, from the dialog's own draft of them.
+      const seoCatRow = catTree.find((c) => c.id === seoCategoryId)!;
+      const catStore = await seoScores.storeInputFor("CATEGORY", seoCategoryId);
+      const catCtx = await contextOf("category", seoCategoryId);
+      const catSource = termDialog.termSourceOf("category", seoCatRow, termDialog.draftOf(seoCatRow, null), { parents: catTree.map((t) => ({ id: t.id, name: t.name, slug: t.slug })), media: {} });
+      const catEditor = catStore ? editorInput.termDraftInput(catSource, catCtx, catStore.now) : null;
+      parity("a category's archive, from its dialog", catStore, catEditor);
+      const seoTagRow = (await taxonomy.listTags({ q: "zz-seo-tag" })).rows.find((t) => t.slug === "zz-seo-tag")!;
+      const tagStore = await seoScores.storeInputFor("TAG", seoTagRow.id);
+      const tagEditor = tagStore ? editorInput.termDraftInput(termDialog.termSourceOf("tag", seoTagRow, termDialog.draftOf(seoTagRow, null), { parents: [], media: {} }), await contextOf("tag", seoTagRow.id), tagStore.now) : null;
+      parity("a tag's archive, from its dialog", tagStore, tagEditor);
+      const dashboardRow = await seoScores.recalculateEntity("POST", alphaId);
+      ok("the dashboard's number for it, recalculated, is the editor's", !!alphaEditor && dashboardRow?.overall === scoreEntity(alphaEditor).overall, `${dashboardRow?.overall} vs ${alphaEditor ? scoreEntity(alphaEditor).overall : "—"}`);
+      const edited = alphaStore ? editorInput.postDraftInput({ ...alphaSource, doc: { ...alphaSource.doc, title: "Zz a different title" } }, alphaCtx, alphaStore.now) : null;
+      ok("  and the comparison notices a change: an edited title is another input", !!edited && !!alphaStore && canon(withoutSelf(edited)) !== canon(withoutSelf(alphaStore)) && edited.content.h1s[0] === "Zz a different title");
+
+      // ─── S4: the screens ─────────────────────────────────────────────────────────────────────
+      const SeoScreen = cmsScreen("(cms)/seo/page");
+      const PageEditorScreen = cmsScreen("(cms)/pages/[id]/page");
+      const PostEditorScreen = cmsScreen("(cms)/posts/[id]/page");
+      const dashboardParams = require("../src/components/cms/seo/dashboard-params") as typeof import("../src/components/cms/seo/dashboard-params");
+      const dashboardData = require("../src/components/cms/seo/dashboard-data") as typeof import("../src/components/cms/seo/dashboard-data");
+      const { SeoDetailView } = require("../src/components/cms/seo/detail-view") as typeof import("../src/components/cms/seo/detail-view");
+      const { SeoScorePanel } = require("../src/components/cms/seo/score-panel") as typeof import("../src/components/cms/seo/score-panel");
+      const { KeywordFields, KEYWORD_HINT } = require("../src/components/cms/seo/keyword-fields") as typeof import("../src/components/cms/seo/keyword-fields");
+      const { PageSeoFields } = require("../src/components/cms/editor/seo-fields") as typeof import("../src/components/cms/editor/seo-fields");
+      const { SEO_DISCLAIMER } = require("../src/components/cms/seo/score-view") as typeof import("../src/components/cms/seo/score-view");
+      const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+      const DISCLAIMER_HTML = esc(SEO_DISCLAIMER);
+      const HINT_HTML = esc(KEYWORD_HINT);
+
+      section("SEO: the SEO Intelligence dashboard, as each role sees it");
+      await actAs(screenViewer.id);
+      const viewerSidebar = await framed(Frame);
+      ok("every role has SEO Intelligence in the sidebar", viewerSidebar.includes(">SEO Intelligence<") && viewerSidebar.includes('href="/seo"'));
+      const dashboardFor: Record<string, string> = {};
+      for (const [role, id] of [["ADMIN", adminRow.id], ["EDITOR", editorId], ["AUTHOR", author.id], ["VIEWER", viewer.id]] as const) {
+        await actAs(id);
+        let html = "";
+        const error = await thrown(async () => {
+          html = await renderPage(SeoScreen);
+        });
+        dashboardFor[role] = html;
+        const writer = role !== "VIEWER";
+        ok(
+          `${role}: the dashboard, its disclaimer word for word, the cards, what needs attention, site checks, the distribution, the table`,
+          error === "" && html.includes(">SEO Intelligence<") && html.includes(DISCLAIMER_HTML) && ["Site optimization score", "Total indexable URLs", "Critical issues", "Warnings", "Needs attention", "Site checks", "Score distribution", "Pages, posts and archives"].every((w) => html.includes(w)),
+          error || ["Site optimization score", "Needs attention", "Site checks", "Score distribution"].filter((w) => !html.includes(w)).join(", "),
+        );
+        ok(`  ${writer ? "with" : "without"} the recalculate buttons`, writer ? html.includes("Recalculate everything") : !html.includes("Recalculate everything") && !html.includes("Recalculate all") && html.includes("An author, editor or admin can recalculate them."));
+      }
+      const adminDash = dashboardFor.ADMIN;
+      ok("the cards show the site's score as a number and its label, for a screen reader too", /Site optimization score \d+ out of 100, (Excellent|Good|Needs improvement|Poor)/.test(adminDash));
+      ok("  no country filter or column anywhere", !/country/i.test(adminDash));
+      ok(
+        "what needs attention links to the table filtered to it",
+        ['href="/seo?critical=1&amp;index=indexable"', 'href="/seo?type=page&amp;band=attention&amp;index=indexable"', 'href="/seo?type=post&amp;band=attention&amp;index=indexable"', 'href="/seo?meta=1&amp;index=indexable"', 'href="/seo?schema=1&amp;index=indexable"', 'href="/seo?keywords=1&amp;index=indexable"', 'href="/seo?conflict=1&amp;index=indexable"', 'href="/seo?index=noindex"'].every((h) => adminDash.includes(h)),
+      );
+      ok("the site checks are there with their status in words", ["AI search crawlers allowed", "Organization on the home page", "Default sharing image", "Title template"].every((w) => adminDash.includes(w)) && /(Passed|Warning|Failed)/.test(adminDash));
+
+      section("SEO: the table's filters, order and pages come from the address");
+      await actAs(editorId);
+      const rowTitle = (t: string) => `>${esc(t)}<span class="sr-only">`;
+      const byAddress = await renderPage(SeoScreen, {}, { type: "post", q: "zz seo alpha" });
+      ok("type and search: only the post searched for, with its chip and the Posts tab current", byAddress.includes(rowTitle("Zz SEO Alpha payroll guide, revised")) && !byAddress.includes(rowTitle("Zz SEO Beta")) && byAddress.includes("Search: zz seo alpha") && /aria-current="page"[^>]*>Posts</.test(byAddress));
+      const noKeywordsHtml = await renderPage(SeoScreen, {}, { type: "post", q: "zz seo", keywords: "1" });
+      ok("  no primary keywords: the post without any, not the one with", noKeywordsHtml.includes(rowTitle("Zz SEO Beta")) && !noKeywordsHtml.includes(rowTitle("Zz SEO Alpha payroll guide, revised")) && noKeywordsHtml.includes(">No primary keywords<"));
+      const noindexHtml = await renderPage(SeoScreen, {}, { index: "noindex" });
+      ok("  excluded (noindex): /signup, not /pricing", noindexHtml.includes(">/signup<") && !noindexHtml.includes(">/pricing<") && noindexHtml.includes("Excluded (noindex) only"));
+      const highestFilters = dashboardParams.parseSeoParams({ type: "post", q: "zz seo", sort: "highest" }).filters;
+      const highestRows = (await seoScores.listScores(highestFilters)).rows;
+      const highestHtml = await renderPage(SeoScreen, {}, { type: "post", q: "zz seo", sort: "highest" });
+      const positions = highestRows.map((r) => highestHtml.indexOf(rowTitle(r.title)));
+      ok("  the order is the store's (highest first), 25 a page", highestRows.length === 25 && positions.every((p, i) => p > 0 && (i === 0 || p > positions[i - 1])) && highestHtml.includes("Page 1 of 2"), `${highestRows.length} rows`);
+      ok("  page two has the rest", (await renderPage(SeoScreen, {}, { type: "post", q: "zz seo", page: "2" })).includes("Page 2 of 2"));
+      const junk = await thrown(() => renderPage(SeoScreen, {}, { type: "spam", sort: "random", band: "zzz", index: "maybe", page: "-4", open: "nope" }));
+      ok("  nonsense in the address is ignored, not an error", junk === "", junk);
+      const parsed = dashboardParams.parseSeoParams({ type: "Category", status: "draft", band: "attention", index: "indexable", meta: "1", schema: "true", critical: "1", conflict: "0" });
+      ok(
+        "  and each filter reaches the store as it should",
+        parsed.filters.type === "CATEGORY" && parsed.filters.status === "draft" && parsed.filters.scoreMin === 0 && parsed.filters.scoreMax === 59 && parsed.filters.indexable === true && parsed.filters.missingMetadata === true && parsed.filters.missingSchema === true && parsed.filters.critical === true && parsed.filters.conflict === undefined && parsed.filters.pageSize === 25,
+        JSON.stringify(parsed.filters),
+      );
+
+      section("SEO: one entity's analysis, opened from the address");
+      const openAlpha = `post:${alphaId}`;
+      const openHtml = await renderPage(SeoScreen, {}, { type: "post", q: "zz seo alpha", open: openAlpha });
+      ok("?open= marks its row as the one open", /aria-current="true"[^>]*>Zz SEO Alpha payroll guide, revised</.test(openHtml));
+      const opened = await dashboardData.loadOpenDetail(dashboardParams.parseOpen(openAlpha), { store: true });
+      const detailHtml = opened?.detail ? renderToStaticMarkup(createElement(SeoDetailView, { detail: opened.detail, canWrite: true, siteOrigin: "https://example.com" })) : "";
+      const detailSections = ["Primary keywords", "Metadata", "Content", "Technical SEO", "Structured data", "AEO — answers", "GEO — generative search", "Social metadata", "Images", "Links", "Indexability"];
+      ok(
+        "the drawer's analysis: its address, type, scores, keyword table and every section",
+        !!opened?.detail && detailSections.every((s) => detailHtml.includes(`>${esc(s)}</h3>`)) && detailHtml.includes(`/blog/`) && detailHtml.includes(">Post<") && detailHtml.includes("Times used") && /Overall score \d+ out of 100/.test(detailHtml),
+        opened?.error ?? detailSections.filter((s) => !detailHtml.includes(`>${esc(s)}</h3>`)).join(", "),
+      );
+      ok("  what the site emits as structured data", detailHtml.includes("BlogPosting") && detailHtml.includes("BreadcrumbList"));
+      ok("  each check with its status in words, the engine's explanation and recommendation", detailHtml.includes(">Passed<") && opened!.detail!.score.seo.checks.filter((c) => c.status === "FAIL" || c.status === "WARNING").every((c) => detailHtml.includes(esc(c.message))));
+      ok("  open in editor, and recalculate for a writer", detailHtml.includes(`href="/posts/${alphaId}"`) && detailHtml.includes("Open in editor") && detailHtml.includes(">Recalculate<"));
+      const viewerDetailHtml = opened?.detail ? renderToStaticMarkup(createElement(SeoDetailView, { detail: opened.detail, canWrite: false, siteOrigin: "https://example.com" })) : "";
+      ok("  but not for a viewer", viewerDetailHtml.includes("Open in editor") && !viewerDetailHtml.includes(">Recalculate<"));
+      const badOpen = await dashboardData.loadOpenDetail(dashboardParams.parseOpen("post:../../etc"), { store: false });
+      const badOpenPage = await thrown(() => renderPage(SeoScreen, {}, { open: "post:../../etc" }));
+      ok("a key that names nothing is a message in the drawer, not an error page", !!badOpen && !badOpen.detail && !!badOpen.error && badOpenPage === "", `${badOpen?.error} ${badOpenPage}`);
+      await actAs(editorId);
+      const homeWithSeo = await renderPage(DashboardScreen);
+      ok("the CMS dashboard has a small SEO card: the score and its label, critical issues, a link", homeWithSeo.includes("Open SEO Intelligence") && /Site optimization score \d+ out of 100/.test(homeWithSeo) && homeWithSeo.includes("critical issue") && homeWithSeo.includes('href="/seo"'));
+
+      section("SEO: the editors — the keyword fields and the score panel");
+      const pageEditorHtml = await renderPage(PageEditorScreen, { id: seoPageId });
+      const keywordBoxes = ["Primary keyword 1", "Primary keyword 2", "Primary keyword 3"];
+      ok(
+        "the page editor: three labelled keyword boxes with the hint, bound to seo.keywords[0..2], holding the saved ones",
+        keywordBoxes.every((l) => pageEditorHtml.includes(l)) && pageEditorHtml.includes(HINT_HTML) && [0, 1, 2].every((i) => pageEditorHtml.includes(`data-field-path="seo.keywords[${i}]"`)) && pageEditorHtml.includes('value="Zz Payroll India"') && pageEditorHtml.includes('value="Zz HR"'),
+      );
+      ok("  and the score panel in Page settings & SEO (it scores once the context arrives in the browser)", pageEditorHtml.includes(">Optimization score<") && pageEditorHtml.includes("Scores update as you edit.") && pageEditorHtml.includes("Loading the scores"));
+      const postEditorHtml = await renderPage(PostEditorScreen, { id: alphaId });
+      ok("the post editor: the keyword boxes and the panel", keywordBoxes.every((l) => postEditorHtml.includes(l)) && postEditorHtml.includes('value="payroll"') && postEditorHtml.includes(">Optimization score<"));
+      /** Every field a finding can name is marked in the editor, so the jump lands somewhere. */
+      const unmarked = (html: string, input: SeoInputT) =>
+        [
+          ...new Set(
+            [scoreEntity(input).seo, scoreEntity(input).aeo, scoreEntity(input).geo]
+              .flatMap((b) => b.checks)
+              .map((c) => c.field)
+              .filter((f): f is string => !!f),
+          ),
+        ].filter((field) => {
+          const block = /^(blocks|body)\[([^\]]+)\]$/.exec(field);
+          if (block) return !html.includes(`data-block-card="${block[2]}"`);
+          const tries: string[] = [];
+          for (let p = field; p; ) {
+            tries.push(p);
+            const stripped = p.replace(/\[[^\]]*\]$/, "");
+            p = stripped !== p ? stripped : p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
+          }
+          return !tries.some((p) => html.includes(`data-field-path="${p}"`));
+        });
+      const pageUnmarked = seoPageEditor ? unmarked(pageEditorHtml, seoPageEditor) : ["no input"];
+      const postUnmarked = alphaEditor ? unmarked(postEditorHtml, alphaEditor) : ["no input"];
+      ok("  every field a finding names is marked in its editor (the page's and the post's)", pageUnmarked.length === 0 && postUnmarked.length === 0, [...pageUnmarked, ...postUnmarked].join(", "));
+
+      const catDialogHtml = renderToStaticMarkup(createElement(termDialog.TermDialog, { kind: "category", row: seoCatRow, parents: catTree.map((t) => ({ id: t.id, name: t.name, slug: t.slug })), image: null, onClose: () => {} }));
+      ok("  (set-up: the dialog is drawn in place for this check)", catDialogHtml.includes("data-check-dialog"));
+      ok(
+        "the category dialog: the keyword boxes with the saved one, and a compact score panel",
+        keywordBoxes.every((l) => catDialogHtml.includes(l)) && catDialogHtml.includes('value="Zz Ledger"') && catDialogHtml.includes(HINT_HTML) && catDialogHtml.includes(">Optimization score<") && catDialogHtml.includes("Loading the scores"),
+      );
+      const catUnmarked = catEditor ? unmarked(catDialogHtml, catEditor) : ["no input"];
+      ok("  every field its findings name is marked in the dialog", catUnmarked.length === 0, catUnmarked.join(", "));
+      const newTagHtml = renderToStaticMarkup(createElement(termDialog.TermDialog, { kind: "tag", row: null, image: null, onClose: () => {} }));
+      ok("  a new tag's dialog has the boxes, and says the score comes once it is saved", keywordBoxes.every((l) => newTagHtml.includes(l)) && newTagHtml.includes("Scores appear once it is saved."));
+
+      const repeatDoc = validate.checkPageDocument(seoDoc({ keywords: ["GST invoice", " gst   INVOICE ", "gst, invoices"] }), "draft");
+      const expected = keywordProblems(["GST invoice", " gst   INVOICE ", "gst, invoices"]);
+      const typedHtml = renderToStaticMarkup(
+        createElement(Issues, { issues: repeatDoc.ok ? [] : repeatDoc.issues.map((i) => ({ path: i.path, message: i.message })) }, createElement(PageSeoFields, { seo: { title: "Zz", description: "", keywords: ["GST invoice", " gst   INVOICE ", "gst, invoices"] }, onChange: () => {}, titleTemplate: "%s · Zz", url: "https://example.com/zz", fill: (t: string) => t })),
+      );
+      ok(
+        "a repeat and a comma are marked at their boxes as you type, in keywordProblems' words (the server's)",
+        expected.length === 2 && expected.every((p) => typedHtml.includes(esc(p.message))) && (typedHtml.match(/aria-invalid="true"/g) ?? []).length === 2 && !repeatDoc.ok && repeatDoc.issues.map((i) => i.path).join() === "seo.keywords[1],seo.keywords[2]",
+        JSON.stringify(expected),
+      );
+      const dialogBoxes = renderToStaticMarkup(createElement(KeywordFields, { value: ["Payroll", "", "payroll"], onChange: () => {}, problems: (i: number) => keywordProblems(["Payroll", "", "payroll"]).filter((p) => p.index === i).map((p) => p.message), columns: 3 as const }));
+      ok("  the dialog's boxes too: a blank box between is fine, the repeat is named", dialogBoxes.includes(esc("“payroll” repeats keyword 1.")) && (dialogBoxes.match(/aria-invalid="true"/g) ?? []).length === 1 && dialogBoxes.includes('value=""'));
+
+      const liveOf = (input: SeoInputT, context: typeof alphaCtx) => ({ context, score: scoreEntity(input), input, loading: false, error: null, pending: false });
+      const alphaScore = alphaEditor ? scoreEntity(alphaEditor) : null;
+      const panelHtml = alphaEditor ? renderToStaticMarkup(createElement(SeoScorePanel, { live: liveOf(alphaEditor, alphaCtx), entity: { type: "POST" as const, key: alphaId }, canRecalculate: true, onJump: () => {}, fullAnalysisHref: `/seo?open=post%3A${alphaId}` })) : "";
+      ok(
+        "the panel with a live score: the overall as number and label, SEO, AEO and GEO, for a screen reader too",
+        !!alphaScore && panelHtml.includes(`Overall score ${alphaScore.overall} out of 100, ${alphaScore.label}`) && panelHtml.includes(`SEO score ${alphaScore.seo.score} out of 100`) && panelHtml.includes(`AEO score ${alphaScore.aeo.score} out of 100`) && panelHtml.includes(`GEO score ${alphaScore.geo.score} out of 100`),
+      );
+      ok("  the keyword placement grid, and the findings as a tablist: Issues, Warnings, Passed, Suggestions", panelHtml.includes(">payroll<") && panelHtml.includes('role="tablist"') && (panelHtml.match(/role="tab"/g) ?? []).length === 4 && ["Issues", "Warnings", "Passed", "Suggestions"].every((t) => panelHtml.includes(`>${t}<`)) && (panelHtml.match(/role="tabpanel"/g) ?? []).length === 4);
+      ok("  a finding about a field is a button to it; Recalculate score for a writer", panelHtml.includes("Go to the field") && panelHtml.includes("Recalculate score"));
+      const quietPanel = alphaEditor ? renderToStaticMarkup(createElement(SeoScorePanel, { live: liveOf(alphaEditor, alphaCtx), entity: { type: "POST" as const, key: alphaId }, canRecalculate: false })) : "";
+      ok("  and none for a viewer", !quietPanel.includes("Recalculate score"));
+      const drifted = alphaEditor && alphaScore ? { ...alphaCtx, cached: alphaCtx.cached ? { ...alphaCtx.cached, overall: alphaScore.overall === 50 ? 51 : 50, label: "Needs improvement" as const } : null } : alphaCtx;
+      const driftHtml = alphaEditor ? renderToStaticMarkup(createElement(SeoScorePanel, { live: liveOf(alphaEditor, drifted), entity: { type: "POST" as const, key: alphaId } })) : "";
+      ok("  when the site's version scores differently, it says what that is", !!alphaCtx.cached && driftHtml.includes("Live version on the site") && !panelHtml.includes("Live version on the site"));
+      const noindexInput = seoPageStore ? editorInput.pageDraftInput({ ...seoPageSource, doc: { ...seoPageSource.doc, seo: { ...seoPageSource.doc.seo, noindex: true } } }, seoPageCtx, seoPageStore.now) : null;
+      const noindexHtml2 = noindexInput ? renderToStaticMarkup(createElement(SeoScorePanel, { live: liveOf(noindexInput, seoPageCtx), entity: null })) : "";
+      ok("  noindex: \"Intentionally excluded from search engines (noindex)\", never a failure", noindexHtml2.includes("Intentionally excluded from search engines (noindex).") && !!noindexInput && !scoreEntity(noindexInput).seo.checks.some((c) => c.id === "seo.indexable" && c.status === "FAIL"));
+      const compactHtml = catEditor ? renderToStaticMarkup(createElement(SeoScorePanel, { live: liveOf(catEditor, catCtx), entity: { type: "CATEGORY" as const, key: seoCategoryId }, compact: true, fullAnalysisHref: `/seo?open=category%3A${seoCategoryId}`, fullAnalysisNewTab: true })) : "";
+      ok("  compact (the dialog's): the scores, at most three findings, and the full analysis", /Overall score \d+ out of 100/.test(compactHtml) && compactHtml.includes(">Full analysis") && compactHtml.includes(`href="/seo?open=category%3A${seoCategoryId}"`) && !compactHtml.includes('role="tablist"') && (compactHtml.match(/<li>/g) ?? []).length <= 3);
     }
 
     // ─── What was kept ────────────────────────────────────────────────────────────────────────

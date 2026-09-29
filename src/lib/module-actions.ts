@@ -183,6 +183,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "cms/pages.ts": "platform",
   "cms/posts.ts": "platform",
   "cms/redirects.ts": "platform",
+  "cms/seo.ts": "platform",
   "cms/settings.ts": "platform",
   "cms/tags.ts": "platform",
   "cms/users.ts": "platform",

@@ -8,6 +8,7 @@ import {
   Clock,
   FilePen,
   FileText,
+  Gauge,
   ImageOff,
   ImagePlus,
   Inbox,
@@ -29,12 +30,14 @@ import { RelativeTime } from "@/components/console/kit/relative-time";
 import { TONE_PILL } from "@/components/console/kit/status";
 import { activityFeedItems } from "@/components/cms/common/activity";
 import { CmsRolePill } from "@/components/cms/common/status";
+import { ScoreFigure } from "@/components/cms/seo/score-ui";
 import { NewItemButton } from "@/components/cms/shell/new-menu";
 import { istDayKey, plural } from "@/lib/console-shared/format";
 import { cmsDashboard } from "@/lib/cms/content";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
-import { CMS_ROLE_DESCRIPTIONS, cmsCapsFor, type CmsCaps, type CmsMe } from "@/lib/cms/types";
+import { siteSummary } from "@/lib/cms/seo-scores";
+import { CMS_ROLE_DESCRIPTIONS, cmsCapsFor, type CmsCaps, type CmsMe, type SeoSiteSummary } from "@/lib/cms/types";
 import { cn } from "@/lib/utils";
 import { getSiteSettings, siteOrigin } from "@/lib/platform/site-content";
 
@@ -45,14 +48,16 @@ const num = (n: number) => n.toLocaleString("en-IN");
 /** The dashboard's figures and the clock it was read by — India's day and hour, from the server. */
 async function loadDashboard(me: CmsMe) {
   const now = new Date();
-  const [data, settings] = await Promise.all([cmsDashboard(me, now), getSiteSettings()]);
+  // The SEO card is a courtesy: if the score cache can't be read, the dashboard still renders without it.
+  const [data, settings, seo] = await Promise.all([cmsDashboard(me, now), getSiteSettings(), siteSummary().catch(() => null)]);
   const hour = Number(new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", hourCycle: "h23" }).format(now));
-  return { data, settings, todayKey: istDayKey(now), greeting: hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening" };
+  return { data, settings, seo, todayKey: istDayKey(now), greeting: hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening" };
 }
 
 /**
  * The CMS's front page: a welcome, the site's content in four figures (each a link to the list behind
- * it), what the viewer was working on, what the team did last, and — for a new team — the few things
+ * it), what the viewer was working on, what the team did last, the site's SEO score in brief (SEO
+ * Intelligence has the rest), and — for a new team — the few things
  * that turn the placeholder site into theirs. It changes nothing itself; every fix is one click away on
  * the page that owns it, and only the roles that may make that fix are pointed at it.
  */
@@ -60,7 +65,7 @@ export default async function CmsDashboardPage() {
   const session = await cmsPage(CMS_PAGE_ROLES.dashboard);
   const me = session.user;
   const caps = cmsCapsFor(me.role);
-  const { data, settings, todayKey, greeting } = await loadDashboard(me);
+  const { data, settings, seo, todayKey, greeting } = await loadDashboard(me);
   const siteHost = new URL(siteOrigin()).host;
   const firstName = me.name.trim().split(/\s+/)[0] || me.name;
   const drafts = data.pages.drafts + data.posts.drafts;
@@ -171,6 +176,7 @@ export default async function CmsDashboardPage() {
           <div className="min-w-0 space-y-6">
             <QuickActions caps={caps} />
             <ContentHealth data={data} caps={caps} />
+            <SeoCard seo={seo} />
           </div>
         </div>
       </div>
@@ -382,6 +388,41 @@ function ContentHealth({ data, caps }: { data: Dashboard; caps: CmsCaps }) {
             </li>
           ))}
         </ul>
+      )}
+    </Panel>
+  );
+}
+
+/** The site's SEO score in brief — its number and label, the critical issues — and the way to SEO Intelligence. */
+function SeoCard({ seo }: { seo: SeoSiteSummary | null }) {
+  const behind = seo ? seo.stale + seo.uncalculated : 0;
+  return (
+    <Panel
+      title={
+        <span className="inline-flex items-center gap-2">
+          <Gauge aria-hidden="true" className="h-4 w-4 text-muted" />
+          SEO
+        </span>
+      }
+      description="Internal indicators, not Google's."
+      footer={
+        <Link href={CMS_ROUTES.seo} className="font-medium text-brand hover:underline">
+          Open SEO Intelligence<span aria-hidden="true"> →</span>
+        </Link>
+      }
+    >
+      {!seo || seo.scored === 0 ? (
+        <p className="text-sm text-muted">{seo ? "Not calculated yet." : "The scores couldn't be read just now."}</p>
+      ) : (
+        <div className="space-y-2">
+          <ScoreFigure score={seo.overall} label={seo.label} what="Site optimization score" size="md" />
+          <p className="text-xs text-muted">
+            <Link href={`${CMS_ROUTES.seo}?critical=1&index=indexable`} className={cn("font-medium hover:underline", seo.counts.critical > 0 ? "text-danger" : "text-text")}>
+              {plural(seo.counts.critical, "critical issue")}
+            </Link>
+            {behind > 0 ? ` · ${plural(behind, "score")} to recalculate` : ""}
+          </p>
+        </div>
       )}
     </Panel>
   );

@@ -6,16 +6,25 @@ import type { SiteRenderContext } from "@/components/site/blocks/types";
 import { SiteBlocks } from "@/components/site/blocks/render";
 import { SiteFooter } from "@/components/site/footer";
 import { SiteHeader } from "@/components/site/header";
-import { fill, resolveAction, safeSrc } from "@/components/site/links";
+import { fill, resolveAction } from "@/components/site/links";
 import { ButtonLink, Container } from "@/components/site/ui";
 import { istDateParts } from "@/lib/india-time";
-import { getSitePage, getSiteSettings, sitePath, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
+import { getSitePage, getSiteSettings, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
+import { aiSearchCrawlersAllowed } from "@/lib/seo/crawlers";
+import { inputFromPage, siteContextFrom } from "@/lib/seo/extract";
+import { buildLayoutMetadata, buildPageMetadata } from "@/lib/seo/metadata";
+import { serialiseLd } from "@/lib/seo/schema";
+import type { JsonLd, SeoInput, SeoSiteContext } from "@/lib/seo/types";
 import { HOST_MISMATCH, protocolFor, requestHost } from "@/lib/tenancy/host";
 
 /**
  * How a page of the public site is put together: its content from the one loader
  * (src/lib/platform/site-content.ts), rendered as blocks (./blocks) inside the site's header and
  * footer. The routes in src/app/platform-site are one line each on top of this.
+ *
+ * Metadata and structured data come from the SEO engine's pure builders (src/lib/seo): the same
+ * code the CMS's score panels read, so what they score is what the site emits. Only the builders run
+ * here — never a score.
  */
 
 type Query = Record<string, string | string[] | undefined>;
@@ -62,7 +71,8 @@ export async function SiteShell({ children }: { children: ReactNode }) {
 const REFERRAL_KEYS = ["ref", "refVia", "refName"] as const;
 
 /**
- * A page's blocks; an address the site has no page for is the site's not-found page.
+ * A page's blocks, and its structured data; an address the site has no page for is the site's
+ * not-found page.
  *
  * The referral keys are dropped from every query unless the caller says it checked them: a signup form
  * block on any page shows `refName` as "Referred by …", and a hand-made link must not put words of
@@ -71,9 +81,14 @@ const REFERRAL_KEYS = ["ref", "refVia", "refName"] as const;
  */
 export async function SitePageView({ slug, searchParams, trustedReferral = false }: { slug: string; searchParams?: Query; trustedReferral?: boolean }) {
   const query = trustedReferral || !searchParams ? searchParams : Object.fromEntries(Object.entries(searchParams).filter(([key]) => !(REFERRAL_KEYS as readonly string[]).includes(key)));
-  const [page, ctx] = await Promise.all([getSitePage(slug), renderContext(query)]);
+  const [page, ctx, origin] = await Promise.all([getSitePage(slug), renderContext(query), requestOrigin()]);
   if (!page) notFound();
-  return <SiteBlocks blocks={page.blocks} ctx={ctx} />;
+  return (
+    <>
+      <JsonLdScript data={jsonLdOf(() => inputFromPage(page, seoSiteContext(ctx, origin), new Date()))} />
+      <SiteBlocks blocks={page.blocks} ctx={ctx} />
+    </>
+  );
 }
 
 /** The not-found page's words, from the site's settings. */
@@ -98,8 +113,8 @@ export async function SiteNotFoundView() {
   );
 }
 
-/** The origin this request came in on (the bare domain or www.), for absolute URLs in metadata. */
-async function requestOrigin(): Promise<URL | undefined> {
+/** The origin this request came in on (the bare domain or www.), for absolute URLs in metadata and structured data. */
+export async function requestOrigin(): Promise<URL | undefined> {
   try {
     const host = requestHost(await headers());
     return host && host !== HOST_MISMATCH ? new URL(`${protocolFor(host)}://${host}`) : undefined;
@@ -108,41 +123,59 @@ async function requestOrigin(): Promise<URL | undefined> {
   }
 }
 
+// ─── Metadata ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The builders' metadata as the site sends it. Next writes an array of keywords joined by bare
+ * commas ("a,b,c"); one string keeps the owner's "a, b, c". An entity without keywords has no
+ * `keywords` at all, so no tag — and its object is exactly the builder's.
+ */
+export function joinKeywords(metadata: Metadata): Metadata {
+  return Array.isArray(metadata.keywords) && metadata.keywords.length ? { ...metadata, keywords: metadata.keywords.join(", ") } : metadata;
+}
+
 /** The site's title template, description and Open Graph defaults — the layout's metadata. */
 export async function siteLayoutMetadata(): Promise<Metadata> {
   const [ctx, origin] = await Promise.all([renderContext(), requestOrigin()]);
-  const { settings } = ctx;
-  const image = safeSrc(settings.seo.ogImage);
-  return {
-    metadataBase: origin,
-    title: { template: fill(settings.seo.titleTemplate, ctx), default: fill(settings.seo.defaultTitle, ctx) },
-    description: fill(settings.seo.description, ctx),
-    applicationName: settings.siteName,
-    openGraph: { type: "website", siteName: settings.siteName, images: image ? [image] : undefined },
-  };
+  return buildLayoutMetadata(ctx, origin);
 }
 
-/** A page's title, description, Open Graph and canonical address; kept out of search engines when its content says so. */
+/** A page's title, description, keywords, Open Graph and canonical address; kept out of search engines when its content says so. */
 export async function sitePageMetadata(slug: string): Promise<Metadata> {
   const [page, ctx] = await Promise.all([getSitePage(slug), renderContext()]);
-  if (!page) return { title: fill(ctx.settings.notFound.heading, ctx), robots: { index: false, follow: false } };
-  const title = fill(page.seo.title, ctx);
-  const description = fill(page.seo.description, ctx);
-  const image = safeSrc(page.seo.ogImage ?? ctx.settings.seo.ogImage);
-  const path = sitePath(page.slug);
-  return {
-    title: page.seo.absoluteTitle ? { absolute: title } : title,
-    description,
-    alternates: { canonical: path },
-    openGraph: {
-      type: "website",
-      siteName: ctx.settings.siteName,
-      title: fill(page.seo.ogTitle, ctx) || title,
-      description: fill(page.seo.ogDescription, ctx) || description,
-      url: path,
-      images: image ? [image] : undefined,
-    },
-    twitter: { card: image ? "summary_large_image" : "summary", title, description },
-    robots: page.seo.noindex ? { index: false, follow: false } : undefined,
-  };
+  return joinKeywords(buildPageMetadata(page, ctx));
+}
+
+// ─── Structured data (owner decision S-D1) ───────────────────────────────────────────────────────
+
+/**
+ * The site around a page, post or archive, for its structured data: the settings and platform status
+ * the page has already read, and the address this request came in on (JSON-LD's URLs are absolute).
+ */
+export function seoSiteContext(ctx: Pick<SiteRenderContext, "settings" | "signupOpen" | "trialDays">, origin: URL | undefined): SeoSiteContext {
+  return siteContextFrom(ctx.settings, { trialDays: ctx.trialDays, signupOpen: ctx.signupOpen, origin: origin?.origin ?? "", aiSearchCrawlersAllowed: aiSearchCrawlersAllowed() });
+}
+
+/**
+ * An entity's JSON-LD, from the same `SeoInput` the SEO engine scores (src/lib/seo/extract.ts and
+ * schema.ts). Structured data is an extra: should building it ever fail, the page goes out without it
+ * rather than not at all.
+ */
+export function jsonLdOf(build: () => SeoInput): JsonLd[] {
+  try {
+    return build().jsonLd;
+  } catch (err) {
+    console.warn(`[site] structured data left out of a page: ${err instanceof Error ? err.name : "error"}`);
+    return [];
+  }
+}
+
+/**
+ * A page's structured data as one `<script type="application/ld+json">` in the body: every object
+ * in one array. `serialiseLd` escapes `<`, `>` and `&`, so no text in it — a title with
+ * "</script>" in it — can close the element. Nothing at all when there is none (the blog index).
+ */
+export function JsonLdScript({ data }: { data: readonly JsonLd[] }) {
+  if (!data.length) return null;
+  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serialiseLd(data) }} />;
 }

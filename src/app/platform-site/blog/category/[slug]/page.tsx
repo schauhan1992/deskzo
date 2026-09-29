@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ArchiveView, archiveMetadata, loadArchive } from "../../archive-view";
+import { ArchiveView, archiveJsonLd, archiveMetadata, loadArchive } from "../../archive-view";
 
 /**
  * A category's archive: its live posts and its children's, 12 a page (`?page=`), newest first, with
@@ -14,5 +14,5 @@ export async function generateMetadata({ params, searchParams }: PageProps<"/pla
 export default async function CategoryArchivePage({ params, searchParams }: PageProps<"/platform-site/blog/category/[slug]">) {
   const archive = await loadArchive("category", (await params).slug, await searchParams);
   if (!archive) notFound();
-  return <ArchiveView archive={archive} />;
+  return <ArchiveView archive={archive} jsonLd={await archiveJsonLd(archive)} />;
 }

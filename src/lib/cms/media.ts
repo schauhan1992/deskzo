@@ -3,6 +3,7 @@ import type { Prisma } from "@wroffy/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CmsRefused, MEDIA_MAX_BYTES, type MediaRow, type MediaType, type MediaUsage, type Paged } from "@/lib/cms/types";
 import { controlDb } from "@/lib/platform/control-db";
+import { invalidateSiteContent } from "@/lib/platform/site-content";
 
 /**
  * The website's media library: images kept in the control plane (site_media) and served publicly at
@@ -173,6 +174,8 @@ export async function updateMediaAlt(id: string, altInput: unknown, actor: CmsAc
   if (!MEDIA_ID.test(String(id))) throw new CmsRefused("That image no longer exists.");
   const alt = cleanAlt(altInput);
   const row = await controlDb().siteMedia.update({ where: { id }, data: { alt }, select: ROW_SELECT });
+  // The site shows library alt text (a post's cover, an archive's sharing image) from its content cache.
+  invalidateSiteContent();
   await cmsAudit(actor, "media.alt", "media", id, { filename: row.filename, empty: !alt });
   return (await toRows([row]))[0];
 }

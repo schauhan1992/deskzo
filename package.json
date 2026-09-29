@@ -140,6 +140,7 @@
     "check:hardening": "tsx scripts/check-hardening.ts",
     "check:site": "tsx scripts/check-site.ts",
     "check:cms": "tsx scripts/check-cms.ts",
+    "check:seo-core": "tsx scripts/check-seo-core.ts",
     "check:partners": "tsx scripts/check-partners.ts",
     "check:support": "tsx scripts/check-support.ts",
     "check:access-lock": "tsx scripts/check-access-lock.ts",

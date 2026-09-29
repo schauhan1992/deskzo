@@ -9,6 +9,7 @@ import {
   type SiteSettings,
 } from "@/components/site/blocks/types";
 import type { CmsIssue, PageDocument, PostSeo } from "@/lib/cms/types";
+import { keywordProblems, MAX_KEYWORDS, normaliseKeywords } from "@/lib/seo/keywords";
 
 /**
  * Checking what an editor sends before it is stored — against the site's own content model
@@ -44,7 +45,9 @@ type Field =
   | { k: "media"; req?: boolean }
   | { k: "rich"; maxItems: number; req?: boolean }
   | { k: "list"; of: Fields; maxItems: number; req?: boolean; min?: number }
-  | { k: "object"; of: Fields; req?: boolean };
+  | { k: "object"; of: Fields; req?: boolean }
+  /** The primary keywords (`checkKeywords`): stored normalised, left out when there are none. */
+  | { k: "keywords" };
 type Fields = Record<string, Field>;
 
 const text = (max: number, req = false): Field => ({ k: "text", max, req });
@@ -160,9 +163,10 @@ const SEO_SPEC: Fields = {
   ogDescription: text(300),
   ogImage: { k: "image" },
   noindex: { k: "bool" },
+  keywords: { k: "keywords" },
 } satisfies Record<keyof SiteSeo, Field>;
 
-const POST_SEO_SPEC: Fields = { title: text(SHORT), description: text(300), ogImage: { k: "image" }, noindex: { k: "bool" } } satisfies Record<keyof PostSeo, Field>;
+const POST_SEO_SPEC: Fields = { title: text(SHORT), description: text(300), ogImage: { k: "image" }, noindex: { k: "bool" }, keywords: { k: "keywords" } } satisfies Record<keyof PostSeo, Field>;
 
 const SOCIAL_NETWORKS = ["linkedin", "x", "youtube", "facebook", "instagram", "github", "other"] as const;
 
@@ -250,6 +254,37 @@ export function slugify(value: string, max = 80): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, max)
     .replace(/-+$/g, "");
+}
+
+/** More slots than this is not an editor's three boxes. */
+const KEYWORD_SLOTS_MAX = 10;
+
+/**
+ * An entity's primary keywords (a page's, a post's, a category's or tag's `seo.keywords`), as its
+ * editor holds them: up to three filled boxes, blanks allowed. The rules are the SEO engine's own
+ * (src/lib/seo/keywords.ts `keywordProblems`), so the editor and the server refuse the same things:
+ * a repeat of an earlier keyword (compared case-insensitively, on its words — the issue is on the
+ * later one), a fourth, one over 80 characters, one with no letter or digit. `index` is the box
+ * (from 0), null for the list as a whole.
+ *
+ * `keywords` is what is stored: trimmed, inner whitespace collapsed, blanks dropped (`normaliseKeywords`)
+ * — an empty list is stored as no field at all.
+ */
+export function checkKeywords(value: unknown): { keywords: string[]; issues: { index: number | null; message: string }[] } {
+  if (value === undefined || value === null) return { keywords: [], issues: [] };
+  if (!Array.isArray(value)) return { keywords: [], issues: [{ index: null, message: `Keywords are a list of up to ${MAX_KEYWORDS}.` }] };
+  if (value.length > KEYWORD_SLOTS_MAX) return { keywords: [], issues: [{ index: null, message: `At most ${MAX_KEYWORDS} primary keywords.` }] };
+  const issues: { index: number | null; message: string }[] = [];
+  const cleaned = value.map((entry, index) => {
+    if (entry === undefined || entry === null) return "";
+    if (typeof entry !== "string") {
+      issues.push({ index, message: "A keyword is text." });
+      return "";
+    }
+    return entry.replace(CONTROL, " ");
+  });
+  issues.push(...keywordProblems(cleaned));
+  return { keywords: issues.length ? [] : normaliseKeywords(cleaned), issues };
 }
 
 // ─── The walker ──────────────────────────────────────────────────────────────────────────────────
@@ -461,6 +496,11 @@ function checkField(field: Field, value: unknown, path: string, ctx: Ctx): unkno
         return checkObject(field.of, {}, path, ctx);
       }
       return checkObject(field.of, value, path, ctx);
+    }
+    case "keywords": {
+      const checked = checkKeywords(value);
+      for (const p of checked.issues) issue(ctx, p.index === null ? path : `${path}[${p.index}]`, p.message);
+      return checked.keywords.length ? checked.keywords : undefined;
     }
   }
 }

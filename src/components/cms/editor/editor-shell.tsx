@@ -44,10 +44,13 @@ export function EditorShell({ header, banners, edit, preview }: { header: ReactN
   );
 }
 
-/** Tabs inside the edit pane ("Blocks", "Page settings"), all rendered, the others hidden. */
-export function PaneTabs<K extends string>({ tabs, active, onChange, label }: { tabs: { key: K; label: string; badge?: number }[]; active: K; onChange: (key: K) => void; label: string }) {
+/**
+ * Tabs inside the edit pane ("Blocks", "Page settings"), all rendered, the others hidden. `badge` is a
+ * count of issues; `extra` anything else the tab should carry (the SEO score on the settings tab).
+ */
+export function PaneTabs<K extends string>({ tabs, active, onChange, label }: { tabs: { key: K; label: string; badge?: number; extra?: ReactNode }[]; active: K; onChange: (key: K) => void; label: string }) {
   return (
-    <div role="tablist" aria-label={label} className="mb-4 flex gap-1 shadow-[inset_0_-1px_0_var(--line)]">
+    <div role="tablist" aria-label={label} className="mb-4 flex max-w-full gap-1 overflow-x-auto shadow-[inset_0_-1px_0_var(--line)]">
       {tabs.map((tab) => {
         const on = tab.key === active;
         return (
@@ -69,10 +72,11 @@ export function PaneTabs<K extends string>({ tabs, active, onChange, label }: { 
             }}
             data-tab={tab.key}
             tabIndex={on ? 0 : -1}
-            className={cn("inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap", on ? "border-brand text-text" : "border-transparent text-muted hover:border-line-strong hover:text-text")}
+            className={cn("inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap", on ? "border-brand text-text" : "border-transparent text-muted hover:border-line-strong hover:text-text")}
           >
             {tab.label}
             {!!tab.badge && <span className="rounded-full bg-danger-bg px-1.5 text-[11px] text-danger tabular-nums">{tab.badge}</span>}
+            {tab.extra}
           </button>
         );
       })}

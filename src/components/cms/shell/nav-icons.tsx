@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, FileText, FolderTree, Images, Inbox, LayoutDashboard, Newspaper, PanelsTopLeft, Settings, Signpost, Tags, UserRound, Users, type LucideIcon } from "lucide-react";
+import { Activity, FileText, FolderTree, Gauge, Images, Inbox, LayoutDashboard, Newspaper, PanelsTopLeft, Settings, Signpost, Tags, UserRound, Users, type LucideIcon } from "lucide-react";
 import type { CmsNavIconName } from "@/lib/cms/nav";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ const ICONS: Record<CmsNavIconName, LucideIcon> = {
   Tags,
   Images,
   Inbox,
+  Gauge,
   PanelsTopLeft,
   Signpost,
   Settings,

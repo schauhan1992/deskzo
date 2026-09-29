@@ -2,6 +2,7 @@ import { Prisma, type CmsRole, type SiteCategory, type SiteTag } from "@wroffy/c
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { missingMediaIds } from "@/lib/cms/media";
 import { autoRedirect } from "@/lib/cms/redirects";
+import { refreshSeoScores } from "@/lib/cms/seo-scores";
 import {
   CATEGORY_NAME_MAX,
   CMS_PUBLISHERS,
@@ -22,9 +23,10 @@ import {
   type TagRow,
   type TermSeo,
 } from "@/lib/cms/types";
-import { slugify, TERM_SLUG } from "@/lib/cms/validate";
+import { checkKeywords, slugify, TERM_SLUG } from "@/lib/cms/validate";
 import { controlDb } from "@/lib/platform/control-db";
 import { cachedSiteRead, invalidateSiteContent, livePostWhere, livePostsPage, siteImages, type SitePostCover, type SitePostSummary, type SiteTermLink } from "@/lib/platform/site-content";
+import { archiveSeoView } from "@/lib/seo/metadata";
 
 /**
  * The blog's categories and tags (spec §1.1–§1.4, §1.11): managed records, not free text.
@@ -48,6 +50,12 @@ import { cachedSiteRead, invalidateSiteContent, livePostWhere, livePostsPage, si
 
 const actorOf = (me: CmsMe): CmsActor => ({ kind: "cms", id: me.id, name: me.name, email: me.email });
 const MEDIA_ID = /^[a-z0-9]{20,40}$/;
+/**
+ * A category's or tag's id: a cuid when the CMS made it, or a UUID when the taxonomy migration
+ * backfilled it from a post's old free-text tags (gen_random_uuid()). Refusing the UUIDs made every
+ * backfilled tag impossible to rename, merge or delete ("That tag no longer exists").
+ */
+const TERM_ID = /^(?:[a-z0-9]{20,40}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const TAGS_PAGE_SIZE = 50;
 export const MAX_POST_TAGS = 10;
 export const MAX_POST_CATEGORIES = 10;
@@ -104,11 +112,14 @@ function checkDescription(raw: unknown, issues: CmsIssue[]): string | null {
   return text || null;
 }
 
-/** A category's or tag's { title, description, imageMediaId } — the image from the media library. */
+/**
+ * A category's or tag's { title, description, imageMediaId, keywords } — the image from the media
+ * library, the keywords checked as a page's are (validate.ts `checkKeywords`) and stored normalised.
+ */
 async function checkSeo(raw: unknown, issues: CmsIssue[]): Promise<TermSeo | null> {
   if (raw === undefined || raw === null) return null;
   if (typeof raw !== "object" || Array.isArray(raw)) {
-    issues.push({ path: "seo", message: "Search and sharing details are a title, a description and an image." });
+    issues.push({ path: "seo", message: "Search and sharing details are a title, a description, an image and keywords." });
     return null;
   }
   const r = raw as Record<string, unknown>;
@@ -124,6 +135,9 @@ async function checkSeo(raw: unknown, issues: CmsIssue[]): Promise<TermSeo | nul
     if (!MEDIA_ID.test(image) || (await missingMediaIds([image])).length) issues.push({ path: "seo.imageMediaId", message: "Choose an image from the media library." });
     else out.imageMediaId = image;
   }
+  const keywords = checkKeywords(r.keywords);
+  for (const p of keywords.issues) issues.push({ path: p.index === null ? "seo.keywords" : `seo.keywords[${p.index}]`, message: p.message });
+  if (keywords.keywords.length) out.keywords = keywords.keywords;
   return Object.keys(out).length ? out : null;
 }
 
@@ -178,7 +192,7 @@ function categoryRow(c: SiteCategory, counts: { all: Map<string, number>; live: 
 }
 
 async function categoryOrRefuse(id: string): Promise<SiteCategory> {
-  const row = /^[a-z0-9]{20,40}$/.test(String(id ?? "")) ? await controlDb().siteCategory.findUnique({ where: { id } }) : null;
+  const row = TERM_ID.test(String(id ?? "")) ? await controlDb().siteCategory.findUnique({ where: { id } }) : null;
   if (!row) throw new CmsRefused("That category no longer exists.");
   return row;
 }
@@ -205,7 +219,7 @@ async function checkParent(parentId: string | null, self: SiteCategory | null, i
     issues.push({ path: "parentId", message: "A category can't be inside itself." });
     return null;
   }
-  const parent = /^[a-z0-9]{20,40}$/.test(parentId) ? await controlDb().siteCategory.findUnique({ where: { id: parentId } }) : null;
+  const parent = TERM_ID.test(parentId) ? await controlDb().siteCategory.findUnique({ where: { id: parentId } }) : null;
   if (!parent) issues.push({ path: "parentId", message: "That category no longer exists." });
   else if (parent.parentId) issues.push({ path: "parentId", message: "Categories nest one level: choose a top-level category." });
   else if (self && (await controlDb().siteCategory.count({ where: { parentId: self.id } }))) issues.push({ path: "parentId", message: "It has subcategories of its own, and categories nest one level only." });
@@ -274,6 +288,7 @@ export async function updateCategory(id: string, input: Partial<CategoryInput>, 
   const redirect = wasLive ? await autoRedirect(categoryPath(current.slug), categoryPath(slug), actorOf(me)) : null;
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "category.update", "category", current.id, { slug, name, changed, ...(slug !== current.slug ? { from: current.slug } : {}), ...(redirect ? { redirectId: redirect.id } : {}) });
+  await refreshSeoScores({ type: "CATEGORY", key: current.id });
   return { ...(await getCategory(current.id)), redirect };
 }
 
@@ -290,6 +305,7 @@ export async function deleteCategory(id: string, me: CmsMe): Promise<void> {
   });
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "category.delete", "category", current.id, { slug: current.slug, name: current.name, posts });
+  await refreshSeoScores({ type: "CATEGORY", key: current.id });
 }
 
 /** Puts one parent's children (null: the top level) in this order — every one of them, each once. */
@@ -326,7 +342,7 @@ function tagRow(t: SiteTag, counts: { all: Map<string, number>; live: Map<string
 }
 
 async function tagOrRefuse(id: string): Promise<SiteTag> {
-  const row = /^[a-z0-9]{20,40}$/.test(String(id ?? "")) ? await controlDb().siteTag.findUnique({ where: { id } }) : null;
+  const row = TERM_ID.test(String(id ?? "")) ? await controlDb().siteTag.findUnique({ where: { id } }) : null;
   if (!row) throw new CmsRefused("That tag no longer exists.");
   return row;
 }
@@ -405,6 +421,7 @@ export async function updateTag(id: string, input: Partial<TagInput>, me: CmsMe)
   const redirect = wasLive ? await autoRedirect(tagPath(current.slug), tagPath(slug), actorOf(me)) : null;
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "tag.update", "tag", current.id, { slug, name, changed, ...(slug !== current.slug ? { from: current.slug } : {}), ...(redirect ? { redirectId: redirect.id } : {}) });
+  await refreshSeoScores({ type: "TAG", key: current.id });
   return { ...(await getTag(current.id)), redirect };
 }
 
@@ -426,6 +443,7 @@ export async function mergeTags(sourceId: string, targetId: string, me: CmsMe): 
   const redirect = await autoRedirect(tagPath(source.slug), tagPath(target.slug), actorOf(me));
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "tag.merge", "tag", target.id, { from: source.slug, fromName: source.name, into: target.slug, posts: moved, ...(redirect ? { redirectId: redirect.id } : {}) });
+  await refreshSeoScores({ type: "TAG", key: source.id }, { type: "TAG", key: target.id });
   return { tag: await getTag(target.id), moved, redirect };
 }
 
@@ -437,6 +455,7 @@ export async function deleteTag(id: string, me: CmsMe): Promise<void> {
   await controlDb().siteTag.delete({ where: { id: current.id } });
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "tag.delete", "tag", current.id, { slug: current.slug, name: current.name, posts });
+  await refreshSeoScores({ type: "TAG", key: current.id });
 }
 
 // ─── A post's categories and tags (src/lib/cms/content.ts) ───────────────────────────────────────
@@ -480,7 +499,7 @@ export async function planPostTerms(input: { tags: string[]; categories: string[
   if (input.categories) {
     categoryIds = [...new Set(input.categories)];
     if (categoryIds.length > MAX_POST_CATEGORIES) issues.push({ path: "categories", message: `At most ${MAX_POST_CATEGORIES} categories.` });
-    const valid = categoryIds.filter((id) => /^[a-z0-9]{20,40}$/.test(id));
+    const valid = categoryIds.filter((id) => TERM_ID.test(id));
     const found = valid.length ? await controlDb().siteCategory.findMany({ where: { id: { in: valid } }, select: { id: true } }) : [];
     input.categories.forEach((id, i) => {
       if (!found.some((f) => f.id === id)) issues.push({ path: `categories[${i}]`, message: "That category no longer exists." });
@@ -519,8 +538,8 @@ export async function auditNewTags(created: CmsTermRef[], me: CmsMe, postId: str
 
 // ─── The public site ─────────────────────────────────────────────────────────────────────────────
 
-/** An archive's search and sharing details: its own, else its name and description; the image from the library. */
-export type ArchiveSeo = { title: string; description: string | null; image: SitePostCover | null };
+/** An archive's search and sharing details: its own, else its name and description; the image from the library; its primary keywords, when it has some. */
+export type ArchiveSeo = { title: string; description: string | null; image: SitePostCover | null; keywords?: string[] };
 
 type ArchiveBase = {
   slug: string;
@@ -564,7 +583,8 @@ const pageUrl = (path: string, page: number) => (page <= 1 ? path : `${path}?pag
 async function archiveSeo(stored: unknown, name: string, description: string | null): Promise<ArchiveSeo> {
   const seo = seoOf(stored) ?? {};
   const image = seo.imageMediaId ? ((await siteImages([seo.imageMediaId])).get(seo.imageMediaId) ?? null) : null;
-  return { title: seo.title?.trim() || name, description: seo.description?.trim() || description || null, image };
+  // The SEO engine's own reading (src/lib/seo/metadata.ts), so the site and the score panels agree; it carries the keywords through.
+  return archiveSeoView(stored, name, description, image);
 }
 
 /**

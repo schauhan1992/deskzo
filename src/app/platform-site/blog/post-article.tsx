@@ -6,6 +6,7 @@ import { safeSrc } from "@/components/site/links";
 import { Container, buttonClasses } from "@/components/site/ui";
 import { formatIstDate } from "@/lib/india-time";
 import { getSiteSettings, siteStatus, workspaceSuffix, type SitePost, type SitePostSummary, type SiteTermLink } from "@/lib/platform/site-content";
+import { shownUpdatedAt } from "@/lib/seo/schema";
 import { cn } from "@/lib/utils";
 
 /**
@@ -245,6 +246,8 @@ export async function PostArticle({ post, ctx }: { post: SitePost; ctx: SiteRend
   const cover = post.cover ? safeSrc(post.cover.src) : null;
   const main = post.categories[0];
   const trail: Crumb[] = [{ name: "Blog", href: "/blog" }, ...(main ? [{ name: main.name, href: main.path }] : [])];
+  // Shown only when it falls on a later day than the post went live; the BlogPosting's dateModified is this same date.
+  const updated = shownUpdatedAt(post.publishedAt, post.updatedAt);
   return (
     <article>
       <header className="border-b border-line">
@@ -255,6 +258,12 @@ export async function PostArticle({ post, ctx }: { post: SitePost; ctx: SiteRend
             {post.excerpt && <p className="mt-5 text-lg leading-8 text-muted text-pretty">{post.excerpt}</p>}
             <p className="mt-6 text-sm text-subtle">
               <time dateTime={post.publishedAt.toISOString()}>{formatIstDate(post.publishedAt)}</time>
+              {updated && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  Updated <time dateTime={updated.toISOString()}>{formatIstDate(updated)}</time>
+                </>
+              )}
               <span aria-hidden="true"> · </span>
               {post.author}
             </p>

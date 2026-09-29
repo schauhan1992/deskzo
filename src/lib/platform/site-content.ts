@@ -187,7 +187,8 @@ export async function listSitePages(): Promise<SitePageSummary[]> {
 
 // ─── Posts ───────────────────────────────────────────────────────────────────────────────────────
 
-export type SitePostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean };
+/** `keywords`: the post's primary keywords (0–3), absent when none — read tolerantly (`normaliseKeywords`), as older posts have none. */
+export type SitePostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; keywords?: string[] };
 export type SitePostCover = { src: string; alt: string; width: number | null; height: number | null };
 /** A category or tag as the site links to it: its name and its archive's address. */
 export type SiteTermLink = { slug: string; name: string; path: string };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState, useTransition } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Eye, History, LoaderCircle, Redo2, Send, Undo2 } from "lucide-react";
@@ -36,6 +36,10 @@ import { PreviewFrame } from "@/components/cms/editor/preview-frame";
 import { PageSeoFields } from "@/components/cms/editor/seo-fields";
 import { useAutosave, useBeforeUnload, useDraftEditor, useEditorKeys, useLinkGuard } from "@/components/cms/editor/use-draft-editor";
 import { MediaPicker } from "@/components/cms/media/media-picker";
+import { pageDraftInput, type PageDraftSource } from "@/components/cms/seo/editor-input";
+import { focusBlockCard, focusFieldPath } from "@/components/cms/seo/focus-field";
+import { SeoScorePanel, SeoTabBadge } from "@/components/cms/seo/score-panel";
+import { useLiveSeo } from "@/components/cms/seo/use-live-score";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -44,11 +48,14 @@ import { CMS_ROUTES } from "@/lib/cms/nav";
 import type { AutoRedirect, CmsCaps, CmsIssue, MediaRow, PageDetail, PageDocument, PageSaved, PageVersionRow } from "@/lib/cms/types";
 import { checkPageDocument, PAGE_SLUG, stableJson } from "@/lib/cms/validate";
 import { formatIstDateTime } from "@/lib/india-time";
+import { parseSeoField } from "@/lib/seo/extract";
 
 /**
  * The page editor: the blocks on the left, the live preview on the right, and around them saving
  * (autosave every 30 seconds, Ctrl/⌘+S), publishing with a note, the signed preview link, history,
- * the page's settings and SEO, and what only publishers may do (unpublish, archive, delete, move).
+ * the page's settings and SEO — with its SEO, AEO and GEO scores worked out live from the draft
+ * (src/components/cms/seo), each finding a jump to its field or block — and what only publishers may
+ * do (unpublish, archive, delete, move).
  *
  * `pageRef` is the address's segment — a page id, or "builtin-<slug>" for one of the site's own
  * pages — and every action is called with it, before and after the first save alike, so the editor
@@ -195,6 +202,36 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
       setActiveId(first.id);
       setReveal({ id: first.id });
     } else if (withBlock.document.some((i) => i.path === "title" || i.path.startsWith("seo"))) setTab("settings");
+  };
+
+  // ─── The SEO score, live, and going to what a finding is about ─────────────────────────────────
+  const seoSource = useMemo<PageDraftSource>(() => ({ id: page.id, slug: meta.slug, status: meta.status, builtin: page.builtin, doc: deferred }), [page.id, page.builtin, meta.slug, meta.status, deferred]);
+  // A publish or an unpublish recalculates the dashboard's number: fetch the context again for it.
+  const liveSeo = useLiveSeo("page", pageRef, seoSource, pageDraftInput, { refresh: meta.publishedAt?.getTime() ?? 0 });
+  const [jump, setJump] = useState<{ path: string } | { blockId: string } | null>(null);
+  useEffect(() => {
+    if (!jump) return;
+    // After the tab that holds it has rendered.
+    const frame = window.requestAnimationFrame(() => void ("blockId" in jump ? focusBlockCard(jump.blockId) : focusFieldPath(jump.path)));
+    return () => window.cancelAnimationFrame(frame);
+  }, [jump]);
+  /** A finding's field: a block opens in the Blocks tab; anything else is in Page settings (or is the block list itself). */
+  const jumpTo = (field: string) => {
+    const target = parseSeoField(field);
+    if (!target) return;
+    if (target.kind === "block") {
+      const block = doc.blocks.find((b) => b.id === target.blockId) ?? (/^\d+$/.test(target.blockId) ? doc.blocks[Number(target.blockId)] : undefined);
+      setTab("blocks");
+      if (!block) return;
+      setOpen(block.id, true);
+      setActiveId(block.id);
+      setReveal({ id: block.id });
+      setScrollTo({ id: block.id });
+      setJump({ blockId: block.id });
+      return;
+    }
+    setTab(target.path === "blocks" ? "blocks" : "settings");
+    setJump({ path: target.path });
   };
 
   // ─── Saving, publishing and the rest ───────────────────────────────────────────────────────────
@@ -611,10 +648,10 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
         onChange={setTab}
         tabs={[
           { key: "blocks", label: "Blocks", badge: issues.length - settingsIssues.length || undefined },
-          { key: "settings", label: "Page settings & SEO", badge: settingsIssues.length || undefined },
+          { key: "settings", label: "Page settings & SEO", badge: settingsIssues.length || undefined, extra: <SeoTabBadge live={liveSeo} /> },
         ]}
       />
-      <div hidden={tab !== "blocks"}>
+      <div hidden={tab !== "blocks"} data-field-path="blocks">
         {listIssues.length > 0 && (
           <div className="mb-3 space-y-1">
             {listIssues.map((i, n) => (
@@ -643,35 +680,49 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
           onRemove={removeBlock}
         />
       </div>
-      <fieldset hidden={tab !== "settings"} disabled={readOnly} className="min-w-0 space-y-6">
-        <legend className="sr-only">Page settings and SEO</legend>
-        <IssueRoot issues={toFieldIssues(settingsIssues)}>
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-text">The page</h2>
-            <TextField label="Page name" name="title" value={doc.title} onChange={(value) => editor.update((d) => ({ ...d, title: value }), "title")} max={120} required hint="What the CMS calls it, in lists. Visitors see the SEO title below." />
-            <SlugSection
-              builtin={page.builtin}
-              path={meta.path}
-              canMove={caps.publish && !page.builtin && !meta.archived}
-              value={slugInput}
-              onChange={setSlugInput}
-              onMove={changeSlug}
-              busy={busy}
-              current={meta.slug}
-              published={meta.status === "PUBLISHED"}
-              siteOrigin={siteOrigin}
-            />
-          </section>
-          <section className="space-y-4 border-t border-line pt-6">
-            <h2 className="text-sm font-semibold text-text">Search and sharing</h2>
-            <PageSeoFields seo={doc.seo} onChange={(seo) => editor.update((d) => ({ ...d, seo }), "seo")} titleTemplate={ctx.settings.seo.titleTemplate} url={liveUrl} fill={fill} />
-          </section>
-          <section className="space-y-1 border-t border-line pt-6 text-xs text-muted">
-            <p>{page.createdAt ? `Created ${formatIstDateTime(page.createdAt)}${page.createdBy ? ` by ${page.createdBy}` : ""}.` : "Built into the site."}</p>
-            {meta.publishedAt && <p>{`Last published ${formatIstDateTime(meta.publishedAt)}${meta.publishedBy ? ` by ${meta.publishedBy}` : ""}.`}</p>}
-          </section>
-        </IssueRoot>
-      </fieldset>
+      <div hidden={tab !== "settings"} className="min-w-0 space-y-6">
+        {/* Outside the fieldset: a viewer switches its tabs and follows its findings too. */}
+        <SeoScorePanel
+          live={liveSeo}
+          entity={meta.archived ? null : { type: "PAGE", key: meta.slug }}
+          canRecalculate={caps.write}
+          onJump={jumpTo}
+          fullAnalysisHref={meta.archived ? undefined : CMS_ROUTES.seoDetail("page", meta.slug)}
+        />
+        <fieldset disabled={readOnly} className="min-w-0 space-y-6">
+          <legend className="sr-only">Page settings and SEO</legend>
+          <IssueRoot issues={toFieldIssues(settingsIssues)}>
+            <section className="space-y-4">
+              <h2 className="text-sm font-semibold text-text">The page</h2>
+              <div data-field-path="title">
+                <TextField label="Page name" name="title" value={doc.title} onChange={(value) => editor.update((d) => ({ ...d, title: value }), "title")} max={120} required hint="What the CMS calls it, in lists. Visitors see the SEO title below." />
+              </div>
+              <div data-field-path="slug">
+                <SlugSection
+                  builtin={page.builtin}
+                  path={meta.path}
+                  canMove={caps.publish && !page.builtin && !meta.archived}
+                  value={slugInput}
+                  onChange={setSlugInput}
+                  onMove={changeSlug}
+                  busy={busy}
+                  current={meta.slug}
+                  published={meta.status === "PUBLISHED"}
+                  siteOrigin={siteOrigin}
+                />
+              </div>
+            </section>
+            <section className="space-y-4 border-t border-line pt-6">
+              <h2 className="text-sm font-semibold text-text">Search and sharing</h2>
+              <PageSeoFields seo={doc.seo} onChange={(seo) => editor.update((d) => ({ ...d, seo }), "seo")} titleTemplate={ctx.settings.seo.titleTemplate} url={liveUrl} fill={fill} />
+            </section>
+            <section className="space-y-1 border-t border-line pt-6 text-xs text-muted">
+              <p>{page.createdAt ? `Created ${formatIstDateTime(page.createdAt)}${page.createdBy ? ` by ${page.createdBy}` : ""}.` : "Built into the site."}</p>
+              {meta.publishedAt && <p>{`Last published ${formatIstDateTime(meta.publishedAt)}${meta.publishedBy ? ` by ${meta.publishedBy}` : ""}.`}</p>}
+            </section>
+          </IssueRoot>
+        </fieldset>
+      </div>
     </div>
   );
 

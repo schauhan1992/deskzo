@@ -34,7 +34,7 @@ const postsHref = (slug: string) => `${CMS_ROUTES.posts}?category=${encodeURICom
 export function CategoriesTable({ tree, caps, media, siteOrigin }: { tree: CategoryNode[]; caps: CmsCaps; media: Record<string, MediaRow>; siteOrigin: string }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const reorder = useCmsAction<CategoryNode[]>();
-  const parents = tree.map((t) => ({ id: t.id, name: t.name }));
+  const parents = tree.map((t) => ({ id: t.id, name: t.name, slug: t.slug }));
   const manage = caps.publish;
 
   /** Moves one category up or down among its siblings — the whole sibling list is sent, in its new order. */

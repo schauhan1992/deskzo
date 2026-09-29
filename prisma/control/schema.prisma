@@ -1144,6 +1144,55 @@ enum SiteLeadStatus {
   SPAM
 }
 
+/// What the SEO Intelligence dashboard scores: a page (by slug), a post, a category, a tag, or the
+/// blog's index.
+enum SeoEntityType {
+  PAGE
+  POST
+  CATEGORY
+  TAG
+  BLOG_INDEX
+}
+
+/// The latest SEO / AEO / GEO scores of one piece of the website, for the SEO Intelligence
+/// dashboard (src/lib/seo, the CMS's scoring engine).
+///
+/// A cache, never the source of truth: the page, post or archive is. A row is stale when its
+/// content changed after `contentUpdatedAt`, when the site settings were published after
+/// `calculatedAt`, or when `engineVersion` is older than the engine's; the dashboard recalculates
+/// stale rows in batches. Nothing on the public site reads this table.
+model SeoScore {
+  id               String        @id @default(cuid())
+  entityType       SeoEntityType
+  /// A page's slug, a post's, category's or tag's id, or "blog" for the blog's index.
+  entityKey        String
+  path             String
+  title            String
+  /// published | draft | default (a built-in page on its default content) | scheduled
+  status           String
+  /// False for a page, post or archive deliberately kept out of search (noindex) — or not live.
+  indexable        Boolean
+  seoScore         Int
+  aeoScore         Int
+  geoScore         Int
+  overallScore     Int
+  critical         Int
+  warnings         Int
+  missingMetadata  Boolean
+  missingSchema    Boolean
+  missingKeywords  Boolean
+  /// The whole calculation: every check with its status, points, message and recommendation.
+  breakdown        Json
+  engineVersion    Int
+  contentUpdatedAt DateTime?
+  calculatedAt     DateTime      @default(now())
+
+  @@unique([entityType, entityKey])
+  @@index([overallScore])
+  @@index([calculatedAt])
+  @@map("seo_scores")
+}
+
 /// A request from the website's contact form.
 model SiteLead {
   id        String         @id @default(cuid())

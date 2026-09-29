@@ -5,6 +5,7 @@ import { actorRef, cmsAudit, listCmsAudit, refLabels, type CmsActor } from "@/li
 import { missingMediaIds, mediaWithoutAlt } from "@/lib/cms/media";
 import { mintPreviewToken, previewUrl, PREVIEW_TTL_MS } from "@/lib/cms/preview";
 import { autoRedirect, checkRedirect, releasePath, saveRedirectFrom } from "@/lib/cms/redirects";
+import { refreshSeoScores } from "@/lib/cms/seo-scores";
 import { auditNewTags, MAX_POST_CATEGORIES, MAX_POST_TAGS, planPostTerms, writePostTerms } from "@/lib/cms/taxonomy";
 import {
   BUILTIN_PAGE_SLUGS,
@@ -59,7 +60,9 @@ import { invalidateSiteContent, mergeSiteSettings, sitePath } from "@/lib/platfo
  *   · Saves are optimistic: the editor sends back the `version` it loaded, and a save over somebody
  *     else's newer one is refused with a `conflict` (unless it says `force`).
  *   · Whatever changes what the site shows clears the site's content cache in this process
- *     (src/lib/platform/site-content.ts invalidateSiteContent).
+ *     (src/lib/platform/site-content.ts invalidateSiteContent), and a publish or a live save
+ *     recalculates that page's or post's SEO score (src/lib/cms/seo-scores.ts refreshSeoScores —
+ *     it never fails the save).
  *   · Every change writes the CMS's activity log — ids, slugs, titles and counts, never a body.
  *     Repeated saves of one thing by one person within ten minutes (autosave) are one entry.
  *
@@ -340,6 +343,7 @@ export async function publishPage(ref: string, input: { document?: unknown; vers
   await releasePath(sitePath(target.slug), actorOf(me));
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "page.publish", "page", published.id, { slug: target.slug, title, blocks: doc.blocks.length, versionId: published.versionId });
+  await refreshSeoScores({ type: "PAGE", key: target.slug });
   return savedOf(await controlDb().sitePage.findUniqueOrThrow({ where: { id: published.id } }));
 }
 
@@ -352,6 +356,7 @@ export async function unpublishPage(ref: string, me: CmsMe): Promise<PageSaved> 
   const updated = await controlDb().sitePage.update({ where: { id: row.id }, data: { status: "DRAFT", published: Prisma.DbNull, publishedAt: null, publishedBy: null, updatedBy: actorRef(actorOf(me)) } });
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "page.unpublish", "page", row.id, { slug: row.slug, title: row.title });
+  await refreshSeoScores({ type: "PAGE", key: row.slug });
   return savedOf(updated);
 }
 
@@ -411,6 +416,8 @@ export async function changePageSlug(ref: string, slugInput: string, me: CmsMe):
   const redirect = row.status === "PUBLISHED" && !row.archivedAt ? await autoRedirect(sitePath(target.row.slug), sitePath(slug), actorOf(me)) : null;
   if (row.status === "PUBLISHED") invalidateSiteContent();
   await cmsAudit(actorOf(me), "page.slug", "page", row.id, { from: target.row.slug, to: slug, ...(redirect ? { redirectId: redirect.id } : {}) });
+  // Its score moves with it: the old address's row is dropped, the new one calculated.
+  await refreshSeoScores({ type: "PAGE", key: target.row.slug }, { type: "PAGE", key: slug });
   return { ...savedOf(row), redirect };
 }
 
@@ -693,6 +700,8 @@ export async function savePost(id: string, input: { post: PostInput; version: st
   if (live) invalidateSiteContent();
   await auditNewTags(newTags, me, row.id);
   await auditSave(me, "post.save", "post", row.id, { slug: post.slug, blocks: post.body.length, live, ...(post.slug !== row.slug ? { from: row.slug } : {}), ...(redirect ? { redirectId: redirect.id } : {}) });
+  // A live post's save changes the site at once: its score follows. A draft's waits for the dashboard.
+  if (live) await refreshSeoScores({ type: "POST", key: row.id });
   return { ...postSaved(after, now), redirect };
 }
 
@@ -746,6 +755,7 @@ export async function publishPost(id: string, input: { publishAt?: string | null
   await releasePath(`/blog/${row.slug}`, actorOf(me));
   invalidateSiteContent();
   await cmsAudit(actorOf(me), scheduled ? "post.schedule" : "post.publish", "post", row.id, { slug: row.slug, title: row.title, publishAt: publishAt.toISOString() });
+  await refreshSeoScores({ type: "POST", key: row.id });
   return postSaved(after, now);
 }
 
@@ -755,6 +765,7 @@ export async function unpublishPost(id: string, me: CmsMe): Promise<PostSaved> {
   const after = await controlDb().sitePost.update({ where: { id: row.id }, data: { status: "DRAFT", publishAt: null, publishedAt: null, updatedBy: actorRef(actorOf(me)) } });
   invalidateSiteContent();
   await cmsAudit(actorOf(me), "post.unpublish", "post", row.id, { slug: row.slug, title: row.title });
+  await refreshSeoScores({ type: "POST", key: row.id });
   return postSaved(after);
 }
 

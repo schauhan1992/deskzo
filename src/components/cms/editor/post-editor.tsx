@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useDeferredValue, useId, useMemo, useState, useTransition } from "react";
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarClock, ChevronRight, Eye, LoaderCircle, Redo2, Send, Undo2 } from "lucide-react";
@@ -24,6 +24,10 @@ import { CategoriesField, TagsTokenField, type TagNames } from "@/components/cms
 import { PostSeoFields } from "@/components/cms/editor/seo-fields";
 import { useAutosave, useBeforeUnload, useDraftEditor, useEditorKeys, useLinkGuard } from "@/components/cms/editor/use-draft-editor";
 import { MediaPicker } from "@/components/cms/media/media-picker";
+import { postDraftInput, type PostDraftSource } from "@/components/cms/seo/editor-input";
+import { focusBlockCard, focusFieldPath } from "@/components/cms/seo/focus-field";
+import { SeoScorePanel, SeoTabBadge } from "@/components/cms/seo/score-panel";
+import { useLiveSeo } from "@/components/cms/seo/use-live-score";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -47,12 +51,14 @@ import {
 } from "@/lib/cms/types";
 import { mediaIdOf, slugify, stableJson } from "@/lib/cms/validate";
 import { formatIstDate, formatIstDateTime, istDateTimeInput } from "@/lib/india-time";
+import { parseSeoField } from "@/lib/seo/extract";
 import { cn } from "@/lib/utils";
 
 /**
  * The post editor: the same block editor and live preview as pages, for a post's body, with what a
  * post has besides — title, excerpt, cover image, categories and tags (./post-terms.tsx), its
- * address under /blog, the author, and publishing now or at a set time (India time). A live post's
+ * address under /blog, the author, and publishing now or at a set time (India time) — with its SEO,
+ * AEO and GEO scores worked out live from the draft (src/components/cms/seo). A live post's
  * new address leaves a 301 from the old one, and the editor says so; deleting a post that was ever
  * on the site offers editors and admins a redirect for its old address.
  *
@@ -78,7 +84,8 @@ type Meta = { status: SitePostStatus; live: boolean; archived: boolean; publishA
 type Confirm = "unpublish" | "archive" | "delete" | null;
 
 const postFingerprint = (doc: PostInput) => stableJson(doc);
-const inputOf = (post: PostDetail): PostInput => ({
+/** The editor's copy of a saved post (exported for check:cms, which holds its live SEO score to the dashboard's). */
+export const inputOf = (post: PostDetail): PostInput => ({
   title: post.title,
   slug: post.slug,
   excerpt: post.excerpt,
@@ -104,6 +111,8 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
   }, []);
   /** The 301 the last save of a live post left behind when its address changed. */
   const [autoRedirect, setAutoRedirect] = useState<AutoRedirect | null>(null);
+  /** When it was last saved — the "Updated" date the site may show, which the SEO score reads. */
+  const [savedAt, setSavedAt] = useState<Date>(post.updatedAt);
   const onSite = meta.status !== "DRAFT";
   const mayChange = caps.write && !meta.archived && (me.role !== "AUTHOR" || (post.author.id === me.id && meta.status === "DRAFT"));
   const readOnly = !mayChange;
@@ -119,6 +128,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
     send: (doc, version, force) => cmsSavePost(post.id, { post: doc, version, force }),
     onSaved: (data, saved) => {
       setMeta((m) => ({ ...m, status: data.status, live: data.live, publishAt: data.publishAt, slug: data.slug }));
+      setSavedAt(data.updatedAt);
       if (data.redirect) setAutoRedirect(data.redirect);
       // Tags named for the first time exist now, so their chips stop saying "new".
       setTagNames((known) => {
@@ -192,6 +202,40 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
     else setTab("content");
   };
 
+  // ─── The SEO score, live, and going to what a finding is about ─────────────────────────────────
+  const categoryIndex = useMemo(() => Object.fromEntries(categories.flatMap((c) => [c, ...c.children]).map((c) => [c.id, { slug: c.slug, name: c.name }])), [categories]);
+  const seoSource = useMemo<PostDraftSource>(
+    () => ({ id: post.id, doc: deferred, status: meta.status, publishAt: meta.publishAt, updatedAt: savedAt, author: post.author.name, savedCategories: post.categories, categories: categoryIndex, tagNames, media }),
+    [post.id, post.author.name, post.categories, deferred, meta.status, meta.publishAt, savedAt, categoryIndex, tagNames, media],
+  );
+  // Publishing, unpublishing and saving a post on the site recalculate the dashboard's number: fetch the context again for it.
+  const liveSeo = useLiveSeo("post", post.id, seoSource, postDraftInput, { refresh: `${meta.status}:${meta.publishAt?.getTime() ?? 0}:${onSite ? savedAt.getTime() : 0}` });
+  const [jump, setJump] = useState<{ path: string } | { blockId: string } | null>(null);
+  useEffect(() => {
+    if (!jump) return;
+    // After the tab that holds it has rendered.
+    const frame = window.requestAnimationFrame(() => void ("blockId" in jump ? focusBlockCard(jump.blockId) : focusFieldPath(jump.path)));
+    return () => window.cancelAnimationFrame(frame);
+  }, [jump]);
+  /** A finding's field: a body block opens in Content; the header fields are in Content, the address, SEO and author in their own tab. */
+  const jumpTo = (field: string) => {
+    const target = parseSeoField(field);
+    if (!target) return;
+    if (target.kind === "block") {
+      const block = doc.body.find((b) => b.id === target.blockId) ?? (/^\d+$/.test(target.blockId) ? doc.body[Number(target.blockId)] : undefined);
+      setTab("content");
+      if (!block) return;
+      setOpen(block.id, true);
+      setActiveId(block.id);
+      setReveal({ id: block.id });
+      setScrollTo({ id: block.id });
+      setJump({ blockId: block.id });
+      return;
+    }
+    setTab(/^(slug|seo|author|publishAt)/.test(target.path) ? "settings" : "content");
+    setJump({ path: target.path });
+  };
+
   async function saveNow(): Promise<boolean> {
     if (readOnly) return false;
     if (saveCheck.length) {
@@ -246,6 +290,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         }
         editor.markSaved(doc, result.data.version);
         setMeta((m) => ({ ...m, status: result.data.status, live: result.data.live, publishAt: result.data.publishAt, wasPublished: true }));
+        setSavedAt(result.data.updatedAt);
         setPublishCheck(false);
         notice.show(
           "success",
@@ -306,6 +351,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         }
         learnTags(fresh.data.tagRefs);
         editor.load(inputOf(fresh.data), fresh.data.version);
+        setSavedAt(fresh.data.updatedAt);
         setMeta({ status: fresh.data.status, live: fresh.data.live, archived: fresh.data.archived, publishAt: fresh.data.publishAt, slug: fresh.data.slug, wasPublished: fresh.data.wasPublished });
         notice.show("info", "Their version is loaded. Yours is one Undo away (Ctrl/⌘+Z) if you need anything from it.");
       } catch {
@@ -498,27 +544,37 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         onChange={setTab}
         tabs={[
           { key: "content", label: "Content", badge: issues.length - settingsIssues.length || undefined },
-          { key: "settings", label: "Address, SEO & author", badge: settingsIssues.length || undefined },
+          { key: "settings", label: "Address, SEO & author", badge: settingsIssues.length || undefined, extra: <SeoTabBadge live={liveSeo} /> },
         ]}
       />
       <div hidden={tab !== "content"} className="space-y-6">
         <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <legend className="sr-only">The post</legend>
           <IssueRoot issues={toFieldIssues(contentIssues)}>
-            <TextField label="Title" name="title" value={doc.title} onChange={(v) => set("title", v)} max={200} required />
-            <TextField label="Excerpt" name="excerpt" value={doc.excerpt ?? ""} onChange={(v) => set("excerpt", v || null)} max={500} multiline rows={3} hint="Under the title, in the blog list and when shared." />
-            <ImageField
-              label="Cover image"
-              name="coverMediaId"
-              value={doc.coverMediaId ? `/media/${doc.coverMediaId}` : undefined}
-              onChange={(src) => set("coverMediaId", mediaIdOf(src))}
-              hint={coverRow?.needsAlt ? undefined : "Across the top of the post and on its card in the blog."}
-            />
-            <CategoriesField value={doc.categories ?? []} onChange={(v) => set("categories", v)} categories={categories} canManage={caps.publish} />
-            <TagsTokenField value={doc.tags} onChange={(v) => set("tags", v)} names={tagNames} onLearn={learnTags} />
+            <div data-field-path="title">
+              <TextField label="Title" name="title" value={doc.title} onChange={(v) => set("title", v)} max={200} required />
+            </div>
+            <div data-field-path="excerpt">
+              <TextField label="Excerpt" name="excerpt" value={doc.excerpt ?? ""} onChange={(v) => set("excerpt", v || null)} max={500} multiline rows={3} hint="Under the title, in the blog list and when shared." />
+            </div>
+            <div data-field-path="coverMediaId">
+              <ImageField
+                label="Cover image"
+                name="coverMediaId"
+                value={doc.coverMediaId ? `/media/${doc.coverMediaId}` : undefined}
+                onChange={(src) => set("coverMediaId", mediaIdOf(src))}
+                hint={coverRow?.needsAlt ? undefined : "Across the top of the post and on its card in the blog."}
+              />
+            </div>
+            <div data-field-path="categories">
+              <CategoriesField value={doc.categories ?? []} onChange={(v) => set("categories", v)} categories={categories} canManage={caps.publish} />
+            </div>
+            <div data-field-path="tags">
+              <TagsTokenField value={doc.tags} onChange={(v) => set("tags", v)} names={tagNames} onLearn={learnTags} />
+            </div>
           </IssueRoot>
         </fieldset>
-        <section aria-labelledby="post-body-heading" className="space-y-2 border-t border-line pt-5">
+        <section aria-labelledby="post-body-heading" data-field-path="body" className="space-y-2 border-t border-line pt-5">
           <h2 id="post-body-heading" className="text-sm font-semibold text-text">
             Body
           </h2>
@@ -547,28 +603,38 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
           />
         </section>
       </div>
-      <fieldset hidden={tab !== "settings"} disabled={readOnly} className="min-w-0 space-y-6">
-        <legend className="sr-only">Address, SEO and author</legend>
-        <IssueRoot issues={toFieldIssues(settingsIssues)}>
-          <section className="space-y-2">
-            <SlugField value={doc.slug} onChange={(v) => set("slug", v)} onSuggest={() => set("slug", slugify(doc.title) || doc.slug)} onSite={onSite} live={meta.live} siteOrigin={siteOrigin} />
-          </section>
-          <section className="space-y-3 border-t border-line pt-5">
-            <h2 className="text-sm font-semibold text-text">Search and sharing</h2>
-            <PostSeoFields seo={doc.seo} onChange={(seo) => set("seo", seo)} fallbackTitle={doc.title} fallbackDescription={doc.excerpt ?? ""} url={liveUrl} />
-          </section>
-          <section className="space-y-1 border-t border-line pt-5 text-sm">
-            <h2 className="text-sm font-semibold text-text">Author and dates</h2>
-            <p className="text-muted">
-              Written by <span className="font-medium text-text">{post.author.name}</span>
-              {post.author.id === me.id ? " (you)" : ""}.
-            </p>
-            <p className="text-xs text-subtle">
-              Created {formatIstDateTime(post.createdAt)}.{meta.publishAt ? ` ${meta.live ? "Live since" : "Goes live"} ${formatIstDateTime(meta.publishAt)}.` : ""}
-            </p>
-          </section>
-        </IssueRoot>
-      </fieldset>
+      <div hidden={tab !== "settings"} className="min-w-0 space-y-6">
+        {/* Outside the fieldset: a viewer switches its tabs and follows its findings too. */}
+        <SeoScorePanel
+          live={liveSeo}
+          entity={meta.archived ? null : { type: "POST", key: post.id }}
+          canRecalculate={caps.write}
+          onJump={jumpTo}
+          fullAnalysisHref={meta.archived ? undefined : CMS_ROUTES.seoDetail("post", post.id)}
+        />
+        <fieldset disabled={readOnly} className="min-w-0 space-y-6">
+          <legend className="sr-only">Address, SEO and author</legend>
+          <IssueRoot issues={toFieldIssues(settingsIssues)}>
+            <section data-field-path="slug" className="space-y-2">
+              <SlugField value={doc.slug} onChange={(v) => set("slug", v)} onSuggest={() => set("slug", slugify(doc.title) || doc.slug)} onSite={onSite} live={meta.live} siteOrigin={siteOrigin} />
+            </section>
+            <section className="space-y-3 border-t border-line pt-5">
+              <h2 className="text-sm font-semibold text-text">Search and sharing</h2>
+              <PostSeoFields seo={doc.seo} onChange={(seo) => set("seo", seo)} fallbackTitle={doc.title} fallbackDescription={doc.excerpt ?? ""} url={liveUrl} />
+            </section>
+            <section data-field-path="author" className="space-y-1 border-t border-line pt-5 text-sm">
+              <h2 className="text-sm font-semibold text-text">Author and dates</h2>
+              <p className="text-muted">
+                Written by <span className="font-medium text-text">{post.author.name}</span>
+                {post.author.id === me.id ? " (you)" : ""}.
+              </p>
+              <p data-field-path="publishAt" className="text-xs text-subtle">
+                Created {formatIstDateTime(post.createdAt)}.{meta.publishAt ? ` ${meta.live ? "Live since" : "Goes live"} ${formatIstDateTime(meta.publishAt)}.` : ""}
+              </p>
+            </section>
+          </IssueRoot>
+        </fieldset>
+      </div>
     </div>
   );
 

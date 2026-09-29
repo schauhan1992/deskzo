@@ -17,13 +17,20 @@
  *     in an hour; no email address reaches the logs;
  *   · the contact form checks, limits and mails — and without PLATFORM_SALES_EMAIL mails nobody;
  *   · robots.txt and the sitemap open the public host and nothing else; the proxy marks the public
- *     site's pages indexable while signup, a query, a workspace and the console stay noindex.
+ *     site's pages indexable while signup, a query, a workspace and the console stay noindex;
+ *   · AI search crawlers may read the public site (robots.txt and the proxy), AI training and SEO
+ *     crawlers may not (owner decision S-D2);
+ *   · metadata from the SEO engine's builders is what the site sent before, key for key, for every
+ *     entity without keywords; keywords become one "a, b, c" meta line; each page type carries its
+ *     JSON-LD (owner decision S-D1) in one script that no text can break out of; no public-site file
+ *     imports the scoring engine.
  *
  * No mail leaves: the platform mailer is replaced.
  */
 import "dotenv/config";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import Module from "node:module";
 import net from "node:net";
 import path from "node:path";
@@ -496,9 +503,18 @@ async function main() {
     const consoleRobots = resolveRobots(await robots());
     const group = (txt: string, agent: string) => txt.split(/\n\n/).find((g) => g.split("\n").some((l) => l.toLowerCase() === `user-agent: ${agent.toLowerCase()}`)) ?? "";
     ok("the public host: everyone may crawl, except signup", /Allow: \/\n/.test(group(rootRobots, "*")) && group(rootRobots, "*").includes("Disallow: /signup"), JSON.stringify(group(rootRobots, "*")));
-    ok("  the AI and SEO crawlers stay shut out there too", /Disallow: \/(\n|$)/.test(group(rootRobots, "GPTBot")) && /Disallow: \/(\n|$)/.test(group(rootRobots, "AhrefsBot")));
+    // Owner decision S-D2, written out here rather than read from src/lib/seo/crawlers.ts, so a change to the lists shows.
+    const AI_SEARCH = ["OAI-SearchBot", "ChatGPT-User", "Claude-SearchBot", "Claude-User", "PerplexityBot", "Perplexity-User"];
+    const AI_TRAINING = ["GPTBot", "ClaudeBot", "Claude-Web", "anthropic-ai", "CCBot", "Google-Extended", "Applebot-Extended", "Bytespider", "Amazonbot", "cohere-ai", "Meta-ExternalAgent"];
+    const shut = (txt: string, agent: string) => /Disallow: \/(\n|$)/.test(group(txt, agent)) && !/Allow:/.test(group(txt, agent));
+    const searchOpen = AI_SEARCH.filter((a) => /Allow: \/\n/.test(group(rootRobots, a)) && group(rootRobots, a).includes("Disallow: /signup") && !/Disallow: \/(\n|$)/.test(group(rootRobots, a)));
+    ok("  the AI search crawlers, each named, may read it as search engines do — not signup", searchOpen.length === AI_SEARCH.length, AI_SEARCH.filter((a) => !searchOpen.includes(a)).join(", ") || JSON.stringify(group(rootRobots, "OAI-SearchBot")));
+    ok("  the AI training crawlers (GPTBot, ClaudeBot, CCBot…) and the SEO crawlers stay shut out", [...AI_TRAINING, "AhrefsBot", "SemrushBot"].every((a) => shut(rootRobots, a)), [...AI_TRAINING, "AhrefsBot", "SemrushBot"].filter((a) => !shut(rootRobots, a)).join(", "));
+    const crawlers = require("../src/lib/seo/crawlers") as typeof import("../src/lib/seo/crawlers");
+    ok("  the SEO engine reads the same policy: AI search allowed there, and on no other host", crawlers.aiSearchCrawlersAllowed() && !crawlers.aiSearchCrawlersAllowed(crawlers.closedRobotsRules()));
     ok("  and the sitemap is named", rootRobots.includes(`Sitemap: http://${ROOT}/sitemap.xml`));
     ok("a workspace's host and the console's: everything disallowed, as before", [wsRobots, consoleRobots].every((r) => /Disallow: \/(\n|$)/.test(group(r, "*")) && !/Allow:/.test(r) && !r.includes("Sitemap")));
+    ok("  the AI search crawlers too, by name", [wsRobots, consoleRobots].every((r) => [...AI_SEARCH, ...AI_TRAINING].every((a) => shut(r, a))));
     at(ROOT);
     const rootMap = await sitemap();
     at(`zzsite-a.${ROOT}`);
@@ -557,6 +573,23 @@ async function main() {
         [pageAndMore, pricingPage2, badPage, zeroPage].every((r) => /noindex/.test(r.robots)),
         `${pageAndMore.robots} | ${pricingPage2.robots} | ${badPage.robots} | ${zeroPage.robots}`,
       );
+      // The proxy's user-agent block is a workspace's (it runs after the public site's branch has answered): an AI search
+      // crawler robots.txt lets in must get the page, not "Not available to automated clients".
+      const asAgent = async (agent: string) => {
+        const res = await proxy(new NextRequest(`http://${ROOT}/pricing`, { headers: { host: ROOT, "user-agent": agent } }), {});
+        return `${res.status} ${res.headers.get("x-robots-tag") ?? ""} ${res.headers.get("x-middleware-rewrite")?.includes("/platform-site/pricing") ? "rewritten" : "not rewritten"}`;
+      };
+      const searchAgents = [
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot",
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot",
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-SearchBot/1.0)",
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0)",
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)",
+      ];
+      const agentAnswers = [];
+      for (const agent of searchAgents) agentAnswers.push(await asAgent(agent));
+      ok("the proxy lets each AI search crawler read the public site: the page itself, marked indexable", agentAnswers.every((a) => a === "200 index, follow rewritten"), agentAnswers.join(" | "));
 
       // The CMS's redirects, as the proxy applies them (src/lib/cms/redirects.ts).
       const redirects = require("../src/lib/cms/redirects") as typeof import("../src/lib/cms/redirects");
@@ -629,6 +662,253 @@ async function main() {
     } catch (err) {
       ok("the proxy can be called", false, err instanceof Error ? err.stack?.split("\n").slice(0, 4).join(" | ") : String(err));
     }
+
+    // ─── Metadata and structured data ───────────────────────────────────────────────────────────
+    section("Metadata and structured data: the SEO engine's builders on the public site");
+    at(ROOT);
+    type SiteSettings = typeof DEFAULT_SITE_SETTINGS;
+    type SitePage = (typeof DEFAULT_SITE_PAGES)[number];
+    type SitePost = import("../src/lib/platform/site-content").SitePost;
+    type Archive = import("../src/app/platform-site/blog/archive-view").Archive;
+    type Meta = Record<string, unknown>;
+    type Route = { default: (props: never) => Promise<ReactNode>; generateMetadata: (props: never) => Promise<Meta> };
+    /** URLs as their address, undefined kept apart from missing: two Metadata objects compared field for field, in order. */
+    const canon = (v: unknown): unknown =>
+      v instanceof URL ? { URL: v.href } : Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.entries(v).map(([k, x]) => [k, x === undefined ? "<undefined>" : canon(x)]) : v;
+    const sameMeta = (a: unknown, b: unknown) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+    const notIndexed = { index: false, follow: false };
+    // Today's metadata, frozen: the bodies of page-view.tsx `sitePageMetadata`, blog/page.tsx, blog/[slug]/page.tsx and
+    // archive-view.tsx `archiveMetadata` as they were written before the site moved onto src/lib/seo's builders. Every
+    // entity without keywords must still get exactly this, key for key.
+    const before = {
+      page(page: SitePage | null, ctx: { settings: SiteSettings; trialDays: number }): Meta {
+        if (!page) return { title: links.fill(ctx.settings.notFound.heading, ctx), robots: { index: false, follow: false } };
+        const title = links.fill(page.seo.title, ctx);
+        const description = links.fill(page.seo.description, ctx);
+        const image = links.safeSrc(page.seo.ogImage ?? ctx.settings.seo.ogImage);
+        const pagePath = siteContent.sitePath(page.slug);
+        return {
+          title: page.seo.absoluteTitle ? { absolute: title } : title,
+          description,
+          alternates: { canonical: pagePath },
+          openGraph: {
+            type: "website",
+            siteName: ctx.settings.siteName,
+            title: links.fill(page.seo.ogTitle, ctx) || title,
+            description: links.fill(page.seo.ogDescription, ctx) || description,
+            url: pagePath,
+            images: image ? [image] : undefined,
+          },
+          twitter: { card: image ? "summary_large_image" : "summary", title, description },
+          robots: page.seo.noindex ? { index: false, follow: false } : undefined,
+        };
+      },
+      blogIndex(settings: SiteSettings): Meta {
+        return { title: "Blog", description: `News, product updates and notes from ${settings.siteName}.`, alternates: { canonical: "/blog" }, openGraph: { type: "website", title: "Blog", url: "/blog" } };
+      },
+      post(post: SitePost | null): Meta {
+        if (!post) return { title: "Not found", robots: notIndexed };
+        const title = post.seo?.title || post.title;
+        const description = post.seo?.description || post.excerpt || undefined;
+        const image = links.safeSrc(post.seo?.ogImage ?? post.cover?.src);
+        return {
+          title,
+          description,
+          alternates: { canonical: post.path },
+          openGraph: {
+            type: "article",
+            title,
+            description,
+            url: post.path,
+            publishedTime: post.publishedAt.toISOString(),
+            section: post.categories[0]?.name,
+            tags: post.tagLinks.map((t) => t.name),
+            images: image ? [image] : undefined,
+          },
+          twitter: { card: image ? "summary_large_image" : "summary", title, description },
+          robots: post.seo?.noindex ? { index: false, follow: false } : undefined,
+        };
+      },
+      archive(archive: Archive | null, settings: SiteSettings): Meta {
+        if (!archive) return { title: "Not found", robots: notIndexed };
+        const title = archive.page > 1 ? `${archive.seo.title} (page ${archive.page})` : archive.seo.title;
+        const description = archive.seo.description ?? `${archive.kind === "category" ? "Posts in" : "Posts tagged"} ${archive.name}, from ${settings.siteName}.`;
+        const own = archive.seo.image;
+        const ownSrc = own ? links.safeSrc(own.src) : null;
+        const siteImage = links.safeSrc(settings.seo.ogImage);
+        const images = own && ownSrc ? [{ url: ownSrc, alt: own.alt || undefined, width: own.width ?? undefined, height: own.height ?? undefined }] : siteImage ? [siteImage] : undefined;
+        return {
+          title,
+          description,
+          alternates: { canonical: archive.canonical },
+          openGraph: { type: "website", siteName: settings.siteName, title, description, url: archive.canonical, images },
+          twitter: { card: images ? "summary_large_image" : "summary", title, description },
+        };
+      },
+    };
+
+    // Written straight to the database: a CMS page with keywords (one a repeat), an FAQ block and a heading that tries to
+    // end the structured data's script; one whose FAQ has no complete question and whose keywords are blank; a post with
+    // its own search title for the parity, a post with keywords, and keywords on the parent category.
+    const HOSTILE = `Zz </script><script>alert("zz")</script> & <!-- the rest`;
+    const cmsPage = (slug: string, title: string, seo: Record<string, unknown>, blocks: unknown[]) => {
+      const doc = { title, seo, blocks };
+      return control.sitePage.create({ data: { slug, title, status: "PUBLISHED", draft: doc as never, published: doc as never, publishedAt: new Date(), createdBy: "script", updatedBy: "script" } });
+    };
+    await cmsPage("zz-seo-page", "Zz SEO page", { title: "Zz SEO page", description: "A page with primary keywords and its questions answered, for check:site.", keywords: ["GST software", "  gst   SOFTWARE ", "Payroll India"] }, [
+      { id: "zz-head", type: "pageHeader", props: { heading: HOSTILE, intro: "Zz: what the page is about." } },
+      { id: "zz-faq", type: "faq", props: { heading: "Zz questions", items: [{ question: "Zz, is this a question?", answer: ["Yes, and this is its answer."] }, { question: "Zz, one more?", answer: ["Another answer."] }] } },
+    ]);
+    await cmsPage("zz-half-faq", "Zz half FAQ", { title: "Zz half FAQ", description: "A page whose questions have no answers yet, for check:site.", keywords: ["  ", ""] }, [
+      { id: "zz-head", type: "pageHeader", props: { heading: "Zz questions without answers" } },
+      { id: "zz-faq", type: "faq", props: { heading: "Zz questions", items: [{ question: "Zz, unanswered?", answer: [] }, { question: "", answer: ["An answer to no question."] }] } },
+    ]);
+    const livePost = (data: { slug: string; title: string; excerpt?: string; seo: { title?: string; description?: string; keywords?: string[] }; categoryId: string; tagId?: string }) =>
+      control.sitePost.create({
+        data: {
+          slug: data.slug,
+          title: data.title,
+          excerpt: data.excerpt ?? null,
+          body: [],
+          seo: data.seo,
+          status: "PUBLISHED",
+          publishAt: liveAt,
+          publishedAt: liveAt,
+          authorId: archiveAuthor.id,
+          updatedBy: "script",
+          categories: { create: [{ categoryId: data.categoryId }] },
+          ...(data.tagId ? { tagLinks: { create: [{ tagId: data.tagId }] } } : {}),
+        },
+      });
+    await livePost({ slug: "zz-seo-post", title: "Zz SEO post", excerpt: "What the post is about, in a line.", seo: { title: "Zz SEO post, its search title", description: "Zz SEO post, its search description, for check:site." }, categoryId: howTo.id, tagId: newsTag.id });
+    await livePost({ slug: "zz-keyword-post", title: "Zz keyword post", seo: { keywords: ["GST invoice numbering", "e-invoice"] }, categoryId: guides.id });
+    await control.siteCategory.update({ where: { id: guides.id }, data: { seo: { keywords: ["Zz guides", "how-to"] } } });
+    siteContent.invalidateSiteContent();
+
+    const ctxNow = { settings: await siteContent.getSiteSettings(), trialDays: (await siteContent.siteStatus()).trialDays };
+    const drift: string[] = [];
+    for (const route of Object.keys(routes)) {
+      const theirs = await (await routes[route]!()).generateMetadata({} as never);
+      const expected = before.page(await siteContent.getSitePage(route === "/" ? "home" : route.slice(1)), ctxNow);
+      if (!sameMeta(theirs, expected) || "keywords" in theirs) drift.push(`${route}: ${JSON.stringify(canon(theirs))} vs ${JSON.stringify(canon(expected))}`);
+    }
+    ok("parity: the eight built-in pages' metadata is exactly what it was, key for key, with no keywords", drift.length === 0, drift.join(" /// "));
+    const blogRoute = require("../src/app/platform-site/blog/page") as Route;
+    const postRoute = require("../src/app/platform-site/blog/[slug]/page") as Route;
+    const categoryRoute = require("../src/app/platform-site/blog/category/[slug]/page") as Route;
+    const tagRoute = require("../src/app/platform-site/blog/tag/[slug]/page") as Route;
+    const archiveView = require("../src/app/platform-site/blog/archive-view") as typeof import("../src/app/platform-site/blog/archive-view");
+    const blogMeta = await blogRoute.generateMetadata({} as never);
+    ok("  the blog index's", sameMeta(blogMeta, before.blogIndex(ctxNow.settings)), JSON.stringify(canon(blogMeta)));
+    const postMetaFor = (slug: string) => postRoute.generateMetadata({ params: Promise.resolve({ slug }) } as never);
+    const seoPostMeta = await postMetaFor("zz-seo-post");
+    ok("  a post's (its own search title and description)", sameMeta(seoPostMeta, before.post(await siteContent.getPublishedPost("zz-seo-post"))) && seoPostMeta.title === "Zz SEO post, its search title", JSON.stringify(canon(seoPostMeta)));
+    ok("  a missing post's", sameMeta(await postMetaFor("zz-no-such-post"), before.post(null)));
+    const archiveMetaFor = (route: Route, slug: string) => route.generateMetadata({ params: Promise.resolve({ slug }), searchParams: Promise.resolve({}) } as never);
+    const howToArchive = await archiveView.loadArchive("category", "zz-how-to", {});
+    const howToMeta = await archiveMetaFor(categoryRoute, "zz-how-to");
+    ok(
+      "  an archive's (a subcategory with no search details of its own)",
+      !!howToArchive && JSON.stringify(howToArchive.seo) === JSON.stringify({ title: "Zz How-to", description: null, image: null }) && sameMeta(howToMeta, before.archive(howToArchive, ctxNow.settings)),
+      JSON.stringify(canon(howToMeta)),
+    );
+
+    const seoPageMeta = (await catchAll.generateMetadata({ params: Promise.resolve({ slug: ["zz-seo-page"] }) } as never)) as Meta;
+    ok("keywords: a page's are one meta line, comma and space between, a repeat dropped whatever its case and spacing", seoPageMeta.keywords === "GST software, Payroll India", String(seoPageMeta.keywords));
+    // Next resolves `keywords` to an array and writes the tag's content joined by "," (next/dist/lib/metadata/resolve-metadata.js, metadata.js).
+    const { resolveAsArrayOrUndefined } = require("next/dist/lib/metadata/generate/utils") as { resolveAsArrayOrUndefined: (v: unknown) => string[] | undefined };
+    ok('  which Next writes as <meta name="keywords" content="GST software, Payroll India">', resolveAsArrayOrUndefined(seoPageMeta.keywords)?.join(",") === "GST software, Payroll India");
+    ok("  the rest of that page's metadata as it would be without them", sameMeta(Object.fromEntries(Object.entries(seoPageMeta).filter(([k]) => k !== "keywords")), before.page(await siteContent.getSitePage("zz-seo-page"), ctxNow)));
+    const [kwPostMeta, guidesMeta, newsMeta] = [await postMetaFor("zz-keyword-post"), await archiveMetaFor(categoryRoute, "zz-guides"), await archiveMetaFor(tagRoute, "zz-news")];
+    ok("  a post's and a category's too", kwPostMeta.keywords === "GST invoice numbering, e-invoice" && guidesMeta.keywords === "Zz guides, how-to", `${String(kwPostMeta.keywords)} | ${String(guidesMeta.keywords)}`);
+    const halfMeta = (await catchAll.generateMetadata({ params: Promise.resolve({ slug: ["zz-half-faq"] }) } as never)) as Meta;
+    ok("  and no keywords where there are none, nor where the only ones are blank", [halfMeta, seoPostMeta, newsMeta, howToMeta, blogMeta].every((m) => !("keywords" in m)));
+
+    const ldScripts = (markup: string) => [...markup.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    type Ld = { "@type": string; [key: string]: unknown };
+    const ldOf = (markup: string): Ld[] | null => {
+      const scripts = ldScripts(markup);
+      if (scripts.length !== 1) return null;
+      try {
+        const parsed = JSON.parse(scripts[0]) as unknown;
+        return Array.isArray(parsed) ? (parsed as Ld[]) : null;
+      } catch {
+        return null;
+      }
+    };
+    const typesOf = (markup: string) => ldOf(markup)?.map((o) => o["@type"]).join("+") ?? `${ldScripts(markup).length} script(s), not one JSON array`;
+    const crumbsOf = (markup: string) => ((ldOf(markup)?.find((o) => o["@type"] === "BreadcrumbList")?.itemListElement ?? []) as { name: string }[]).map((i) => i.name).join(" › ");
+    const expectedTypes: Record<string, string> = { "/": "Organization+WebSite", "/pricing": "WebPage+BreadcrumbList+FAQPage" };
+    const builtinTypes = Object.entries(pages).map(([route, markup]) => ({ route, got: typesOf(markup), want: expectedTypes[route] ?? "WebPage+BreadcrumbList" }));
+    ok(
+      "JSON-LD: one script on each built-in page, parsed back as JSON — home: Organization, WebSite; pricing: WebPage, BreadcrumbList and its FAQ's FAQPage; the rest (no FAQ block): WebPage, BreadcrumbList",
+      builtinTypes.every((t) => t.got === t.want),
+      builtinTypes.map((t) => `${t.route}:${t.got}`).join(" "),
+    );
+    const pricingLd = ldOf(pages["/pricing"] ?? "") ?? [];
+    const pricingFaqBlock = DEFAULT_SITE_PAGES.find((p) => p.slug === "pricing")?.blocks.find((b) => b.type === "faq");
+    const pricingFaq = pricingLd.find((o) => o["@type"] === "FAQPage")?.mainEntity as { name: string; acceptedAnswer: { text: string } }[] | undefined;
+    ok(
+      "  addresses absolute, on the host asked; the FAQPage the page's own questions and answers, tokens filled",
+      pricingLd[0]?.url === `http://${ROOT}/pricing` && pricingFaqBlock?.type === "faq" && pricingFaq?.length === pricingFaqBlock.props.items.length && pricingFaq[0]?.name === pricingFaqBlock.props.items[0]?.question && !JSON.stringify(pricingLd).includes("{trialDays}"),
+      `${String(pricingLd[0]?.url)} ${pricingFaq?.length ?? 0} questions`,
+    );
+    const homeLd = ldOf(pages["/"] ?? "") ?? [];
+    ok("  home: the organisation and the site, by the site's name, at the site's address", homeLd.length === 2 && homeLd.every((o) => o.name === DEFAULT_SITE_SETTINGS.siteName && o.url === `http://${ROOT}/`));
+
+    const renderRoute = async (mod: { default: (props: never) => Promise<ReactNode> }, params: Record<string, unknown>) =>
+      html(Layout({ children: await mod.default({ params: Promise.resolve(params), searchParams: Promise.resolve({}) } as never) }));
+    const seoPageHtml = await renderRoute(catchAll as unknown as Route, { slug: ["zz-seo-page"] });
+    const seoPageLd = ldOf(seoPageHtml) ?? [];
+    ok(
+      "a CMS page with an FAQ block: WebPage, BreadcrumbList (Home › the page) and FAQPage with its two questions",
+      typesOf(seoPageHtml) === "WebPage+BreadcrumbList+FAQPage" && crumbsOf(seoPageHtml) === `Home › ${HOSTILE}` && (seoPageLd[2]?.mainEntity as unknown[] | undefined)?.length === 2,
+      `${typesOf(seoPageHtml)} ${crumbsOf(seoPageHtml)}`,
+    );
+    const [rawLd] = ldScripts(seoPageHtml);
+    ok(
+      "  a heading with “</script>” in it cannot end the script: one script on the page, no “<”, “>” or “&” inside it, the heading back whole from the JSON",
+      (seoPageHtml.match(/<script/gi) ?? []).length === 1 && !/[<>&]/.test(rawLd ?? "<") && seoPageLd[0]?.name === HOSTILE,
+      (rawLd ?? "").slice(0, 160),
+    );
+    const halfHtml = await renderRoute(catchAll as unknown as Route, { slug: ["zz-half-faq"] });
+    ok("  an FAQ block with no complete question and answer: no FAQPage", typesOf(halfHtml) === "WebPage+BreadcrumbList", typesOf(halfHtml));
+    const postHtml = await renderRoute(postRoute, { slug: "zz-seo-post" });
+    const posting = ldOf(postHtml)?.[0] as { headline?: string; author?: { name?: string }; datePublished?: string; articleSection?: string; keywords?: string[]; image?: string; url?: string } | undefined;
+    ok(
+      "a post: BlogPosting and BreadcrumbList (Blog › its main category › it); headline, author, date, section and tags as it shows them, and no image it hasn't got",
+      typesOf(postHtml) === "BlogPosting+BreadcrumbList" &&
+        crumbsOf(postHtml) === "Blog › Zz How-to › Zz SEO post" &&
+        posting?.headline === "Zz SEO post" &&
+        posting.author?.name === "Zz Archive Author" &&
+        posting.datePublished === liveAt.toISOString() &&
+        posting.articleSection === "Zz How-to" &&
+        JSON.stringify(posting.keywords) === JSON.stringify(["Zz News"]) &&
+        posting.image === undefined &&
+        posting.url === `http://${ROOT}/blog/zz-seo-post`,
+      `${typesOf(postHtml)} ${crumbsOf(postHtml)} ${JSON.stringify(posting)}`,
+    );
+    const howToHtml = await renderRoute(categoryRoute, { slug: "zz-how-to" });
+    const newsHtml = await renderRoute(tagRoute, { slug: "zz-news" });
+    ok("a category's archive: CollectionPage and BreadcrumbList (Blog › its parent › it)", typesOf(howToHtml) === "CollectionPage+BreadcrumbList" && crumbsOf(howToHtml) === "Blog › Zz Guides › Zz How-to", `${typesOf(howToHtml)} ${crumbsOf(howToHtml)}`);
+    ok("  a tag's: CollectionPage and BreadcrumbList (Blog › it)", typesOf(newsHtml) === "CollectionPage+BreadcrumbList" && crumbsOf(newsHtml) === "Blog › Zz News", `${typesOf(newsHtml)} ${crumbsOf(newsHtml)}`);
+    const blogHtml = await renderRoute(blogRoute, {});
+    const notFoundHtml = await html(Layout({ children: await notFoundPage() }));
+    ok("the blog index and the not-found page: no structured data", ldScripts(blogHtml).length === 0 && !blogHtml.includes("application/ld+json") && ldScripts(notFoundHtml).length === 0);
+    ok("  and every one of these pages still has exactly one h1", [seoPageHtml, halfHtml, postHtml, howToHtml, newsHtml, blogHtml].every((h) => (h.match(/<h1[\s>]/g) ?? []).length === 1));
+
+    // The scoring engine never runs on a public request: nothing the public site is built from imports it — only the
+    // builders (extract, schema, metadata), the crawler policy and the types.
+    const REPO = path.join(__dirname, "..");
+    const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(path.join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [path.join(dir, e.name)] : []));
+    const builtFrom = [
+      ...sources(path.join(REPO, "src", "app", "platform-site")),
+      ...sources(path.join(REPO, "src", "components", "site")),
+      ...["robots.ts", "sitemap.ts"].map((f) => path.join(REPO, "src", "app", f)),
+      ...["extract.ts", "schema.ts", "metadata.ts", "crawlers.ts", "keywords.ts", "text.ts", "types.ts"].map((f) => path.join(REPO, "src", "lib", "seo", f)),
+    ];
+    const engineImports = builtFrom.filter((f) => /from\s+["'](@\/lib\/seo|\.\.?\/(engine|site|index)|@\/lib\/seo\/(engine|site|index|checks\/[\w-]+)|\.\/checks\/[\w-]+)["']/.test(readFileSync(f, "utf8")));
+    ok("no public-site file, nor a builder it uses, imports the scoring engine (the barrel, engine, site score or checks)", builtFrom.length > 30 && engineImports.length === 0, engineImports.map((f) => path.relative(REPO, f)).join(", "));
 
     // ─── The logs ───────────────────────────────────────────────────────────────────────────────
     section("What was logged");

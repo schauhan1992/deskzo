@@ -4,22 +4,20 @@ import { fill } from "@/components/site/links";
 import { Container, Eyebrow } from "@/components/site/ui";
 import { blogCategories } from "@/lib/cms/taxonomy";
 import { getPublishedPosts, getSiteSettings } from "@/lib/platform/site-content";
+import { buildBlogIndexMetadata } from "@/lib/seo/metadata";
 import { ChipNav, Pagination, PostGrid, blogContext, postCount, type Chip } from "./post-article";
 
 /**
  * The blog: published posts, newest first, twelve a page — optionally one tag's (?tag=, ?page=; a
  * tag's own archive is /blog/tag/<slug>). Above the posts, the categories with posts on the site as
  * chips: links to their archives, not a filter held in the page. No categories, no chips.
+ *
+ * Its title and description are fixed in code (src/lib/seo/metadata.ts), and it carries no structured
+ * data: owner decision S-D1 names none for the blog's index.
  */
 
 export async function generateMetadata(): Promise<Metadata> {
-  const settings = await getSiteSettings();
-  return {
-    title: "Blog",
-    description: `News, product updates and notes from ${settings.siteName}.`,
-    alternates: { canonical: "/blog" },
-    openGraph: { type: "website", title: "Blog", url: "/blog" },
-  };
+  return buildBlogIndexMetadata(await getSiteSettings());
 }
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);

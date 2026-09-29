@@ -1,5 +1,6 @@
-import type { CmsRole, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch } from "@wroffy/control-client";
+import type { CmsRole, SeoEntityType, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch } from "@wroffy/control-client";
 import type { BlockType, SiteBlock, SiteSeo, SiteSettings } from "@/components/site/blocks/types";
+import type { CheckResult, EntityScore, SeoImage, SeoLabel, SeoSiteContext } from "@/lib/seo/types";
 
 /**
  * The website CMS's shared vocabulary — roles and what each may do, the shapes its loaders and
@@ -9,7 +10,7 @@ import type { BlockType, SiteBlock, SiteSeo, SiteSettings } from "@/components/s
  * the CMS's client components import from here freely. The server side is src/lib/cms/*.ts.
  */
 
-export type { CmsRole, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch };
+export type { CmsRole, SeoEntityType, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch };
 
 // ─── Roles ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -226,8 +227,11 @@ export type CmsDashboard = {
 
 // ─── Posts ───────────────────────────────────────────────────────────────────────────────────────
 
-/** A post's search and sharing details. Each falls back: title → the post's title, description → the excerpt, image → the cover. */
-export type PostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean };
+/**
+ * A post's search and sharing details. Each falls back: title → the post's title, description → the excerpt, image → the cover.
+ * `keywords`: its primary keywords, keyword 1 first (at most three, no repeats); absent when none.
+ */
+export type PostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; keywords?: string[] };
 
 /** The blocks a post's body may use: no second h1 (hero, pageHeader) and no forms or live pricing. */
 export const POST_BLOCK_TYPES = [
@@ -302,8 +306,11 @@ export type PostInput = {
 /** A category or tag as a post and a list refer to it. */
 export type CmsTermRef = { id: string; slug: string; name: string };
 
-/** A category's or tag's own search and sharing details. Each falls back: title → the name, description → the description. */
-export type TermSeo = { title?: string; description?: string; imageMediaId?: string };
+/**
+ * A category's or tag's own search and sharing details. Each falls back: title → the name, description → the description.
+ * `keywords`: its archive's primary keywords, keyword 1 first (at most three, no repeats); absent when none.
+ */
+export type TermSeo = { title?: string; description?: string; imageMediaId?: string; keywords?: string[] };
 
 /** Category and tag slugs: lower-case words and hyphens, at most 60 (the database's CHECKs). */
 export const TERM_SLUG_MAX = 60;
@@ -572,3 +579,158 @@ export type CmsAuditFilters = { actorId?: string; action?: string; entity?: stri
 
 /** One page of a list: `total` across every page. */
 export type Paged<T> = { rows: T[]; total: number; page: number; pageSize: number };
+
+// ─── SEO Intelligence ────────────────────────────────────────────────────────────────────────────
+// The score cache the dashboard reads (src/lib/cms/seo-scores.ts; control `seo_scores`). The scores
+// are internal indicators, not Google's or any AI platform's.
+
+/** What is scored (SeoEntityType): a page (keyed by its slug), a post, a category, a tag (by id), the blog's index (key "blog"). */
+export const SEO_ENTITY_TYPES = ["PAGE", "POST", "CATEGORY", "TAG", "BLOG_INDEX"] as const satisfies readonly SeoEntityType[];
+/** The blog index's key. */
+export const SEO_BLOG_INDEX_KEY = "blog";
+
+/** Which version was scored: the published one, a draft (an added page never published, a post not yet live), a built-in page's default content, a scheduled post. */
+export type SeoScoreStatus = "published" | "draft" | "default" | "scheduled";
+export const SEO_SCORE_STATUSES = ["published", "draft", "default", "scheduled"] as const satisfies readonly SeoScoreStatus[];
+
+export const SEO_SORTS = ["lowest", "highest", "issues", "recent"] as const;
+export type SeoSort = (typeof SEO_SORTS)[number];
+export const SEO_PAGE_SIZE = 25;
+export const SEO_PAGE_SIZE_MAX = 100;
+/** A "Recalculate all" batch: 25 by default, at most 50. */
+export const SEO_BATCH_SIZE = 25;
+export const SEO_BATCH_SIZE_MAX = 50;
+
+/** One entity's cached score, as the dashboard's table lists it. */
+export type SeoScoreRow = {
+  type: SeoEntityType;
+  key: string;
+  /** Its address on the site. */
+  path: string;
+  /** Its name in the CMS: a page's or post's title, a term's name, "Blog". */
+  title: string;
+  status: SeoScoreStatus;
+  /** On the site now. */
+  live: boolean;
+  /** Deliberately kept out of search (noindex): shown as excluded, never penalised. */
+  excluded: boolean;
+  /** Live and not excluded: in the site's score. */
+  indexable: boolean;
+  seo: number;
+  aeo: number;
+  geo: number;
+  overall: number;
+  /** `overall`'s band: always shown with the number. */
+  label: SeoLabel;
+  critical: number;
+  warnings: number;
+  missingMetadata: boolean;
+  missingSchema: boolean;
+  missingKeywords: boolean;
+  /** Its robots settings disagree with robots.txt, the canonical or a redirect (seo.robots-conflict warned or failed). */
+  indexingConflict: boolean;
+  /** Its primary keywords when it was scored. */
+  keywords: string[];
+  /** The content changed, the settings were published, or the engine changed since: the numbers may be out of date. */
+  stale: boolean;
+  calculatedAt: Date;
+  contentUpdatedAt: Date | null;
+  engineVersion: number;
+  /** Where the CMS edits it (CMS_ROUTES); null for the blog index, which has no editor. */
+  editHref: string | null;
+};
+
+export type SeoListFilters = {
+  type?: SeoEntityType;
+  status?: SeoScoreStatus;
+  indexable?: boolean;
+  /** 0–100, inclusive, on the overall score. */
+  scoreMin?: number;
+  scoreMax?: number;
+  missingMetadata?: boolean;
+  missingSchema?: boolean;
+  missingKeywords?: boolean;
+  /** true: only those with a critical issue; false: only those without. */
+  critical?: boolean;
+  /** true: only those deliberately kept out of search (noindex); false: only the others. */
+  excluded?: boolean;
+  /** true: only those with an indexing conflict; false: only those without. */
+  conflict?: boolean;
+  /** In the title or the address. */
+  q?: string;
+  sort?: SeoSort;
+  page?: number;
+  pageSize?: number;
+};
+
+/** The dashboard's cards: the weighted site score (noindex and not-live entities left out) and the counts, from the cache. */
+export type SeoSiteSummary = {
+  overall: number;
+  seo: number;
+  aeo: number;
+  geo: number;
+  label: SeoLabel;
+  /** Live, indexable entities in the score. */
+  scored: number;
+  counts: {
+    /** Critical issues across the scored entities. */
+    critical: number;
+    /** Warnings across the scored entities. */
+    warnings: number;
+    /** Scored pages (the home page included) under 60. */
+    pagesNeedingAttention: number;
+    /** Scored posts under 60. */
+    postsNeedingAttention: number;
+    /** Scored category and tag archives, and the blog index, under 60. */
+    archivesNeedingAttention: number;
+    missingMetadata: number;
+    missingStructuredData: number;
+    /** Scored entities without primary keywords (the blog index, which can't have any, left out). */
+    noPrimaryKeywords: number;
+    indexingConflicts: number;
+    /** Live, deliberately kept out of search. */
+    excluded: number;
+    /** Drafts, posts scheduled for later, archives with nothing live. */
+    notLive: number;
+  };
+  /** Scored entities by band. */
+  distribution: Record<SeoLabel, number>;
+  /** Live, indexable addresses: what the site offers search engines. */
+  indexableUrls: number;
+  /** Everything on the site that can be scored, and of those: with a cached score, out of date, never calculated. */
+  entities: number;
+  calculated: number;
+  stale: number;
+  uncalculated: number;
+  lastCalculatedAt: Date | null;
+  /** Site-wide checks (AI crawlers, Organization, default sharing image, title template), reported beside the score. */
+  siteChecks: CheckResult[];
+  engineVersion: number;
+};
+
+/** One entity's whole calculation: every check, with what to do about it. */
+export type SeoScoreDetail = {
+  row: SeoScoreRow;
+  score: EntityScore;
+  /** Calculated just now (it was stale or missing) rather than read from the cache. */
+  fresh: boolean;
+  /** The JSON-LD @types the site emits for it, and those its kind should carry (src/lib/seo EXPECTED_LD). */
+  jsonLd: { emitted: string[]; expected: string[] };
+};
+
+/** What "Recalculate all" gets back from each batch. Loop, passing `cursor` back, until `done`. */
+export type SeoBatchResult = { done: boolean; cursor: string | null; processed: number; failed: number; remaining: number };
+
+/** What an editor scores with, live in the browser: the site around the entity, loaded once when the editor opens. */
+export type SeoEditorContext = {
+  /** The published settings and the rest (src/lib/seo `SeoSiteContext`); `others` holds every live entity but this one. */
+  site: SeoSiteContext;
+  aiSearchCrawlersAllowed: boolean;
+  /** Library images this entity refers to (its documents, a cover, a sharing image, its archive's cards), by id. */
+  media: Record<string, { alt: string; width: number | null; height: number | null }>;
+  /** For a category or tag: its archive's first page as the site shows it now; null otherwise. */
+  archive: { posts: { title: string; path: string; excerpt: string | null; cover: SeoImage | null }[]; total: number; pages: number; parent: { name: string; path: string } | null } | null;
+  engineVersion: number;
+  /** Its cached row (the dashboard's number for what the site shows now), flagged stale when out of date; null when never calculated. */
+  cached: SeoScoreRow | null;
+};

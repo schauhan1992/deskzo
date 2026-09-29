@@ -14,12 +14,12 @@ import { CMS_ADMINS, CMS_PUBLISHERS, type CmsRole } from "@/lib/cms/types";
  * Pure and client-safe: nothing here reaches the database.
  */
 
-export type CmsPageKey = "dashboard" | "pages" | "posts" | "categories" | "tags" | "media" | "leads" | "navigation" | "redirects" | "settings" | "users" | "activity" | "account";
+export type CmsPageKey = "dashboard" | "pages" | "posts" | "categories" | "tags" | "media" | "leads" | "seo" | "navigation" | "redirects" | "settings" | "users" | "activity" | "account";
 
 export type CmsNavGroup = "home" | "content" | "inbox" | "site" | "team";
 
 /** lucide-react names; the shell turns them into glyphs (src/components/cms/shell/nav-icons.tsx). */
-export type CmsNavIconName = "LayoutDashboard" | "FileText" | "Newspaper" | "FolderTree" | "Tags" | "Images" | "Inbox" | "PanelsTopLeft" | "Signpost" | "Settings" | "Users" | "Activity" | "UserRound";
+export type CmsNavIconName = "LayoutDashboard" | "FileText" | "Newspaper" | "FolderTree" | "Tags" | "Images" | "Inbox" | "Gauge" | "PanelsTopLeft" | "Signpost" | "Settings" | "Users" | "Activity" | "UserRound";
 
 /** A count the layout works out for the sidebar. */
 export type CmsNavBadgeKey = "leads";
@@ -55,6 +55,7 @@ export const CMS_PAGE_ROLES: Record<CmsPageKey, readonly CmsRole[] | undefined> 
   tags: undefined,
   media: undefined,
   leads: undefined,
+  seo: undefined,
   navigation: undefined,
   redirects: CMS_PUBLISHERS,
   settings: undefined,
@@ -81,6 +82,10 @@ export const CMS_ROUTES = {
   mediaUpload: "/media?upload=1",
   leads: "/leads",
   lead: (id: string) => `/leads/${encodeURIComponent(id)}`,
+  /** SEO Intelligence: the site's scores and every page's, post's and archive's. */
+  seo: "/seo",
+  /** The dashboard with one entity's detail open ("category", "<id>"; "page", "<slug>"). */
+  seoDetail: (type: "page" | "post" | "category" | "tag" | "blog", key: string) => `/seo?${new URLSearchParams({ open: `${type}:${key}` }).toString()}`,
   settings: "/settings",
   navigation: "/settings/navigation",
   redirects: "/redirects",
@@ -98,6 +103,7 @@ export const CMS_PAGES: readonly CmsNavPage[] = [
   { key: "tags", href: CMS_ROUTES.tags, label: "Tags", group: "content", icon: "Tags", description: "The blog's tags: rename, merge and tidy them", roles: CMS_PAGE_ROLES.tags, shortcut: "t", inNav: true },
   { key: "media", href: CMS_ROUTES.media, label: "Media", group: "content", icon: "Images", description: "Images for pages, posts and sharing", roles: CMS_PAGE_ROLES.media, shortcut: "m", inNav: true },
   { key: "leads", href: CMS_ROUTES.leads, label: "Leads", group: "inbox", icon: "Inbox", description: "Requests sent through the contact form", roles: CMS_PAGE_ROLES.leads, badge: "leads", shortcut: "l", inNav: true },
+  { key: "seo", href: CMS_ROUTES.seo, label: "SEO Intelligence", group: "site", icon: "Gauge", description: "SEO, AEO and GEO scores for every page, post and archive, and what to fix", roles: CMS_PAGE_ROLES.seo, shortcut: "i", inNav: true },
   { key: "navigation", href: CMS_ROUTES.navigation, label: "Navigation", group: "site", icon: "PanelsTopLeft", description: "The header menu, the footer's columns and the sign-up button", roles: CMS_PAGE_ROLES.navigation, shortcut: "n", inNav: true },
   { key: "redirects", href: CMS_ROUTES.redirects, label: "Redirects", group: "site", icon: "Signpost", description: "Old addresses on the site sent on to new ones", roles: CMS_PAGE_ROLES.redirects, shortcut: "r", inNav: true },
   { key: "settings", href: CMS_ROUTES.settings, label: "Settings", group: "site", icon: "Settings", description: "Site name, tagline, contact email, social links and search defaults", roles: CMS_PAGE_ROLES.settings, shortcut: "s", inNav: true },
