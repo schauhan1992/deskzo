@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, ExternalLink, TriangleAlert } from "lucide-react";
+import { ArrowRight, ExternalLink, EyeOff, TriangleAlert } from "lucide-react";
 import { cmsDeleteRedirect, cmsUpdateRedirect } from "@/actions/cms/redirects";
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { RelativeTime } from "@/components/console/kit/relative-time";
@@ -17,8 +17,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * The redirect list: each old address, where it goes, how, how often it has been used and when last,
- * whether it was made automatically, and — when a visitor would pass through two or three redirects
- * in a row — the flag to point it straight at the end. Editors and admins change, switch off and
+ * whether it was made automatically, whether it hides a page or post that is live, and — when a
+ * visitor would pass through two or three redirects in a row — the flag to point it straight at the end. Editors and admins change, switch off and
  * delete from each row's menu; another site's redirect is an admin's to change (an editor may switch
  * it off, and change its note).
  */
@@ -76,6 +76,11 @@ export function RedirectsTable({ rows, admin, siteOrigin, used }: { rows: Redire
                   {row.automatic && (
                     <StatusPill tone="info" title="Made when a page's, post's, category's or tag's address changed">
                       Created automatically
+                    </StatusPill>
+                  )}
+                  {!!row.hides && (
+                    <StatusPill tone="warning" icon={<EyeOff className="h-3 w-3" />} title="Pages or posts on the site at this address can't be reached while it is on, and are left out of the sitemap">
+                      {`Hides ${plural(row.hides, "live page")}`}
                     </StatusPill>
                   )}
                 </div>

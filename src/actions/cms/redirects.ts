@@ -1,6 +1,7 @@
 "use server";
 
 import { cmsAction, revalidateCms } from "@/lib/cms/guard";
+import { withCovers, withHides, withImportHides } from "@/lib/cms/redirect-covers";
 import { checkRedirect, createRedirect, deleteRedirect, exportRedirectsCsv, getRedirect, importRedirects, listRedirects, previewRedirectImport, updateRedirect } from "@/lib/cms/redirects";
 import { CMS_PUBLISHERS, type CmsResult, type Paged, type RedirectCheck, type RedirectFilters, type RedirectImportResult, type RedirectInput, type RedirectRow } from "@/lib/cms/types";
 
@@ -9,13 +10,13 @@ import { CMS_PUBLISHERS, type CmsResult, type Paged, type RedirectCheck, type Re
  * at another site. src/lib/cms/redirects.ts does the work — normalising, the loop and chain checks,
  * the 5,000 limit — and writes the activity log (redirect.create / update / delete / import).
  *
- *   cmsListRedirects          publishers   filters { q, match, enabled, automatic, external, chained, sort, page }, 50 a page; `used` of `max`
+ *   cmsListRedirects          publishers   filters { q, match, enabled, automatic, external, chained, sort, page }, 50 a page; `used` of `max`; each row's `hides`
  *   cmsGetRedirect            publishers
- *   cmsCheckRedirect          publishers   the dialog's live checks: the redirect as it would be saved, its issues and chain; nothing written
+ *   cmsCheckRedirect          publishers   the dialog's live checks: the redirect as it would be saved, its issues and chain, and the live pages it would hide (`covers`); nothing written
  *   cmsCreateRedirect         publishers   { from, to, status?, match?, enabled?, note? }
  *   cmsUpdateRedirect         publishers   only the fields given
  *   cmsDeleteRedirect         publishers
- *   cmsPreviewRedirectImport  publishers   CSV text (from, to, status, match, note; at most 1,000 rows): what each row would do
+ *   cmsPreviewRedirectImport  publishers   CSV text (from, to, status, match, note; at most 1,000 rows): what each row would do, and the live pages it would hide
  *   cmsImportRedirects        publishers   the same, applied (refused rows skipped)
  *   cmsExportRedirects        publishers   every redirect as CSV text, guarded against formulas
  */
@@ -24,7 +25,7 @@ const rid = (value: unknown) => String(value ?? "").slice(0, 40);
 const CSV_MAX = 1_000_000;
 
 export async function cmsListRedirects(filters: RedirectFilters = {}): Promise<CmsResult<Paged<RedirectRow> & { used: number; max: number }>> {
-  return cmsAction(CMS_PUBLISHERS, async () => listRedirects(filters ?? {}));
+  return cmsAction(CMS_PUBLISHERS, async () => withHides(await listRedirects(filters ?? {})));
 }
 
 export async function cmsGetRedirect(redirectId: string): Promise<CmsResult<RedirectRow>> {
@@ -32,7 +33,11 @@ export async function cmsGetRedirect(redirectId: string): Promise<CmsResult<Redi
 }
 
 export async function cmsCheckRedirect(input: RedirectInput, exceptId?: string | null): Promise<CmsResult<RedirectCheck>> {
-  return cmsAction(CMS_PUBLISHERS, async ({ user }) => checkRedirect(input ?? { from: "", to: "" }, user, exceptId ? rid(exceptId) : null));
+  return cmsAction(CMS_PUBLISHERS, async ({ user }) => {
+    const draft = input ?? { from: "", to: "" };
+    const id = exceptId ? rid(exceptId) : null;
+    return withCovers(await checkRedirect(draft, user, id), draft, id);
+  });
 }
 
 export async function cmsCreateRedirect(input: RedirectInput): Promise<CmsResult<RedirectRow>> {
@@ -60,7 +65,7 @@ export async function cmsDeleteRedirect(redirectId: string): Promise<CmsResult<n
 }
 
 export async function cmsPreviewRedirectImport(csv: string): Promise<CmsResult<RedirectImportResult>> {
-  return cmsAction(CMS_PUBLISHERS, async ({ user }) => previewRedirectImport(String(csv ?? "").slice(0, CSV_MAX + 1), user));
+  return cmsAction(CMS_PUBLISHERS, async ({ user }) => withImportHides(await previewRedirectImport(String(csv ?? "").slice(0, CSV_MAX + 1), user)));
 }
 
 export async function cmsImportRedirects(csv: string): Promise<CmsResult<RedirectImportResult>> {

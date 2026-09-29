@@ -13,6 +13,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { withParams } from "@/lib/console-shared/params";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
+import { withHides } from "@/lib/cms/redirect-covers";
 import { listRedirects } from "@/lib/cms/redirects";
 import { cmsCapsFor, type RedirectFilters } from "@/lib/cms/types";
 import { siteOrigin } from "@/lib/platform/site-content";
@@ -62,8 +63,8 @@ function parseFilters(sp: Record<string, string | string[] | undefined>) {
 
 /**
  * Redirects (editors and admins): old addresses on the public site sent on to new ones — each with
- * how often it is used and when last, whether a slug change made it, and a flag when a visitor would
- * pass through two or three in a row. Filtered, searched and sorted from the address, 50 at a time;
+ * how often it is used and when last, whether a slug change made it, a flag when a visitor would
+ * pass through two or three in a row, and one when it hides a page or post that is live. Filtered, searched and sorted from the address, 50 at a time;
  * "used N of 5,000" in the header. Add one, import a CSV (with a preview of every row) or export
  * them all. Another site's address is an admin's to choose.
  */
@@ -72,7 +73,7 @@ export default async function CmsRedirectsPage({ searchParams }: PageProps<"/pla
   const caps = cmsCapsFor(session.user.role);
   const sp = await searchParams;
   const f = parseFilters(sp);
-  const list = await listRedirects(f.filters);
+  const list = await withHides(await listRedirects(f.filters));
   const origin = siteOrigin();
   const siteHost = new URL(origin).host;
   const totalPages = Math.max(1, Math.ceil(list.total / list.pageSize));

@@ -381,6 +381,12 @@ export type RedirectInput = { from: string; to: string; status?: number; match?:
 /** Where a redirect leads a visitor, following the redirects after it. Only for 2 hops or more. */
 export type RedirectChain = { hops: number; final: string; loop: boolean; through: string[] };
 
+/** A page, post or archive on the site now, at an address a redirect takes over (src/lib/cms/redirect-covers.ts). */
+export type LiveAddress = { path: string; kind: "page" | "post" | "blog" | "category" | "tag"; title: string };
+
+/** The live addresses a redirect sends visitors away from: how many, and the first few. */
+export type RedirectCovers = { total: number; examples: LiveAddress[] };
+
 export type RedirectRow = {
   id: string;
   /** Normalised: lower-case, no query, no trailing slash; a PREFIX one ends in "/*". */
@@ -399,6 +405,8 @@ export type RedirectRow = {
   external: boolean;
   /** Set when a visitor goes through 2–3 redirects in a row from here: "Point it straight at `final`". */
   chain: RedirectChain | null;
+  /** How many live pages, posts and archives it hides now — on the list only (src/lib/cms/redirect-covers.ts). */
+  hides?: number;
   createdAt: Date;
   updatedAt: Date;
   updatedBy: string;
@@ -415,6 +423,8 @@ export type RedirectCheck = {
   /** Another redirect already from the same address (a save then updates nothing: it is refused). */
   existingId: string | null;
   chain: RedirectChain | null;
+  /** The live pages it would hide once saved and switched on; null when none (src/lib/cms/redirect-covers.ts). */
+  covers?: RedirectCovers | null;
 };
 
 /** One row of an import file, and what importing it would do. */
@@ -430,6 +440,8 @@ export type RedirectImportRow = {
   reason: string | null;
   /** The redirect it updates (or leaves unchanged). */
   id: string | null;
+  /** For a row to create or update: how many live pages it would hide (src/lib/cms/redirect-covers.ts). */
+  hides?: number;
 };
 
 export type RedirectImportResult = {

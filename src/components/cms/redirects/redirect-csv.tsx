@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, useTransition, type ChangeEvent } from "react";
-import { CircleCheck, Download, LoaderCircle, Upload } from "lucide-react";
+import { CircleCheck, Download, EyeOff, LoaderCircle, Upload } from "lucide-react";
 import { cmsExportRedirects, cmsImportRedirects, cmsPreviewRedirectImport } from "@/actions/cms/redirects";
 import { useConsoleNotice } from "@/components/console/kit/notice";
 import { StatusPill } from "@/components/console/kit/status";
@@ -11,6 +11,7 @@ import { ActionNotice, ActionNoticeRegion } from "@/components/ui/action-notice"
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
+import { plural } from "@/lib/console-shared/format";
 import type { Tone } from "@/lib/console-shared/types";
 import { REDIRECT_IMPORT_MAX_ROWS, type RedirectImportResult, type RedirectImportRow } from "@/lib/cms/types";
 
@@ -20,8 +21,9 @@ import { REDIRECT_IMPORT_MAX_ROWS, type RedirectImportResult, type RedirectImpor
  *   · Export: every redirect, built by the server (guarded against spreadsheet formulas) and handed to
  *     the browser as a file; there is no download address to share.
  *   · Import: choose a file (at most 1,000 rows), see what each row would do — create, update, leave
- *     unchanged, or refuse and why — then import. Refused rows are skipped; nothing is written until
- *     "Import". The server checks the whole file again then, loops and chains included.
+ *     unchanged, or refuse and why, and which rows would hide a page or post on the site now — then
+ *     import. Refused rows are skipped; nothing is written until "Import". The server checks the
+ *     whole file again then, loops and chains included.
  */
 
 /** A byte-order mark, built from its code: Excel then reads the file as UTF-8. */
@@ -158,6 +160,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
   const shownPlan = applied ?? plan;
   const toApply = plan ? plan.counts.create + plan.counts.update : 0;
   const rows = shownPlan ? shownPlan.rows.filter((r) => filter === "all" || r.outcome === filter) : [];
+  const hiding = plan && !applied ? plan.rows.filter((r) => !!r.hides).length : 0;
 
   return (
     <Dialog open onClose={close} title={applied ? "Redirects imported" : "Import redirects from CSV"} large>
@@ -214,6 +217,12 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
                 </li>
               ))}
             </ul>
+            {hiding > 0 && (
+              <p className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning">
+                <EyeOff aria-hidden="true" className="mt-px h-3.5 w-3.5 shrink-0" />
+                <span>{`${plural(hiding, "row takes", "rows take")} over pages or posts that are on the site now. Once imported, visitors can't reach them, and they leave the sitemap. To move a page or post, change its address in its editor instead.`}</span>
+              </p>
+            )}
             {shownPlan.rows.length > 0 && (
               <div className="flex items-center gap-2">
                 <Label htmlFor={filterId}>Show</Label>
@@ -254,6 +263,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
                         <Td className="align-top">
                           <StatusPill tone={OUTCOMES[r.outcome].tone}>{OUTCOMES[r.outcome].label}</StatusPill>
                           {r.reason && <p className="mt-1 max-w-xs text-xs text-danger">{r.reason}</p>}
+                          {!!r.hides && <p className="mt-1 max-w-xs text-xs text-warning">{`Hides ${plural(r.hides, "live page")}`}</p>}
                         </Td>
                       </Tr>
                     ))}

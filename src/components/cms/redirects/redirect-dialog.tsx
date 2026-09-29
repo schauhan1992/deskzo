@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } from "react";
-import { CircleCheck, Info, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
+import { CircleCheck, EyeOff, Info, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { cmsCheckRedirect, cmsCreateRedirect, cmsUpdateRedirect } from "@/actions/cms/redirects";
 import { TextAreaField, TextField } from "@/components/cms/common/fields";
 import { issuesByPath, useCmsAction } from "@/components/cms/common/use-cms-action";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
 import { checkRedirectShape, REDIRECT_NOTE_MAX, REDIRECT_PATH_MAX } from "@/lib/cms/redirect-rules";
-import { MAX_REDIRECTS, REDIRECT_STATUSES, type CmsIssue, type RedirectCheck, type RedirectInput, type RedirectRow, type RedirectStatus, type SiteRedirectMatch } from "@/lib/cms/types";
+import { MAX_REDIRECTS, REDIRECT_STATUSES, type CmsIssue, type LiveAddress, type RedirectCheck, type RedirectCovers, type RedirectInput, type RedirectRow, type RedirectStatus, type SiteRedirectMatch } from "@/lib/cms/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +22,11 @@ import { cn } from "@/lib/utils";
  * will be stored, the site's own pages refused, only https:// for another site. What needs the
  * database — another redirect from the same address, loops, chains, the 5,000 limit — is asked of
  * the server a moment after typing stops (cmsCheckRedirect), and nothing is saved until Save.
+ *
+ * The server also says which pages, posts and archives on the site now the redirect would take over
+ * (src/lib/cms/redirect-covers.ts). That is allowed, but they can no longer be reached and leave the
+ * sitemap, so the dialog warns — and points at moving a page or post from its editor instead, which
+ * leaves the redirect by itself.
  *
  * Another site's address is an admin's to choose (a redirect from our domain to an outside one is a
  * phishing risk): an editor adding one is told so at once, and an editor opening one can change only
@@ -50,6 +55,27 @@ const draftOf = (row: RedirectRow | null, preset?: Partial<Draft>): Draft => ({
 const inputOf = (d: Draft): RedirectInput => ({ from: d.from, to: d.to, match: d.match, status: d.status, note: d.note.trim() || null, enabled: d.enabled });
 const keyOf = (d: Draft) => JSON.stringify(inputOf(d));
 const ADMIN_ONLY = "Only an admin can send visitors to another site: a redirect from our address to an outside one is a phishing risk.";
+
+/** "the post “Pricing tips” (/blog/pricing-tips)" — one live address, as the warning names it. */
+function liveLabel(a: LiveAddress): string {
+  const what =
+    a.kind === "page"
+      ? `the page “${a.title}”`
+      : a.kind === "post"
+        ? `the post “${a.title}”`
+        : a.kind === "blog"
+          ? "the blog's front page"
+          : `the “${a.title}” ${a.kind} page`;
+  return `${what} (${a.path})`;
+}
+
+/** What the redirect would take over, in a sentence: the one live address, or how many and the first few. */
+function coversSentence(c: RedirectCovers, to: string): string {
+  if (c.total === 1) return `This takes over ${liveLabel(c.examples[0])}, which is on the site now. Once it's on, visitors go to ${to} instead and can't reach it, and it leaves the sitemap.`;
+  const more = c.total - c.examples.length;
+  const named = c.examples.map(liveLabel).join(", ") + (more > 0 ? ` and ${more.toLocaleString("en-IN")} more` : "");
+  return `This takes over ${c.total.toLocaleString("en-IN")} addresses that are on the site now: ${named}. Once it's on, visitors can't reach them, and they leave the sitemap.`;
+}
 
 export function RedirectDialog({
   row,
@@ -146,6 +172,7 @@ export function RedirectDialog({
   const shown = issuesByPath([...(tried || row ? local : local.filter((i) => (i.path === "from" ? draft.from.trim() : i.path === "to" ? draft.to.trim() : true))), ...(serverCheck?.issues ?? []), ...action.issues]);
   const general = serverCheck?.issues.find((i) => i.path === "")?.message ?? null;
   const chain = serverCheck?.chain ?? null;
+  const covers = serverCheck?.covers ?? null;
   const normal = shape.ok ? shape.value : null;
   const unchanged = !!row && keyOf(draft) === keyOf(draftOf(row));
   const blocked = local.length > 0 || (serverCheck ? !serverCheck.ok : false);
@@ -315,6 +342,17 @@ export function RedirectDialog({
                   Point it straight at {chain.final}
                 </Button>
               )}
+            </div>
+          )}
+          {covers && normal && !blocked && (
+            <div className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning">
+              <EyeOff aria-hidden="true" className="mt-px h-3.5 w-3.5 shrink-0" />
+              <div className="min-w-0 space-y-1 break-words">
+                <p>{coversSentence(covers, normal.toUrl)}</p>
+                {covers.examples.some((a) => a.kind === "post" || a.kind === "page") && (
+                  <p>To give a page or post a new address, change it in its editor instead — the redirect from the old one is made for you.</p>
+                )}
+              </div>
             </div>
           )}
           {general && (

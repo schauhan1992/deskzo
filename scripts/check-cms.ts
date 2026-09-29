@@ -1318,6 +1318,44 @@ async function main() {
       ok("  and once they load again, it redirects", recovered.status === 301 && recovered.location === `http://${ROOT}/blog`, `${recovered.status} ${recovered.location}`);
       await redirects.flushRedirectHits();
 
+      section("Redirects: the warning when one hides a live page");
+      // /blog/zz-arch-05 is live, and the editor's redirect from it (`byHand`, above) still stands.
+      site.invalidateSiteContent();
+      const coversOf = async (input: { from: string; to: string; enabled?: boolean }, exceptId?: string) => {
+        const r = await act(redirectActions.cmsCheckRedirect(input, exceptId ?? null));
+        return r.ok ? { ok: r.data.ok, covers: r.data.covers ?? null } : { ok: false, covers: null };
+      };
+      const overPost = await coversOf({ from: "/blog/zz-arch-06", to: "/blog" });
+      ok(
+        "the dialog's check names the live post a new redirect would take over",
+        overPost.ok && overPost.covers?.total === 1 && overPost.covers.examples[0]?.kind === "post" && overPost.covers.examples[0].path === "/blog/zz-arch-06" && overPost.covers.examples[0].title === "Zz zz-arch-06",
+        JSON.stringify(overPost.covers),
+      );
+      const overCategory = await coversOf({ from: "/blog/category/zz-guides", to: "/blog" });
+      ok("  and a category's archive, by its name", overCategory.covers?.total === 1 && overCategory.covers.examples[0]?.kind === "category" && overCategory.covers.examples[0].title === "Zz Guides", JSON.stringify(overCategory.covers));
+      const overAll = await coversOf({ from: "/blog/*", to: "/zz-elsewhere/*" });
+      ok(
+        "  everything under an address: how many, and the first three — the blog's front page first",
+        overAll.ok && (overAll.covers?.total ?? 0) >= 14 && overAll.covers?.examples.length === 3 && overAll.covers.examples[0].kind === "blog" && overAll.covers.examples[0].path === "/blog",
+        JSON.stringify(overAll.covers),
+      );
+      const quiet = [await coversOf({ from: "/blog/zz-arch-06", to: "/blog", enabled: false }), await coversOf({ from: "/zz-nothing-live-here", to: "/blog" }), await coversOf({ from: "/blog/zz-arch-draft", to: "/blog" }), await coversOf({ from: "/blog/zz-arch-05", to: "/pricing" })];
+      ok("  nothing for one switched off, an address with nothing live, a draft's address, or a redirect that can't be saved", quiet.every((q) => q.covers === null) && !quiet[3].ok, JSON.stringify(quiet));
+      const ownEdit = await coversOf({ from: "/blog/zz-arch-05", to: "/blog" }, idOf(byHand));
+      ok("  editing the redirect that already hides one still says so", ownEdit.ok && ownEdit.covers?.total === 1 && ownEdit.covers.examples[0]?.title === "Zz zz-arch-05", JSON.stringify(ownEdit.covers));
+      const hidingRows = await act(redirectActions.cmsListRedirects({ q: "/blog/zz-arch-05" }));
+      const plainRows = await act(redirectActions.cmsListRedirects({ q: "/zz-old" }));
+      ok(
+        "the list counts the live pages each redirect hides",
+        hidingRows.ok && hidingRows.data.rows.find((r) => r.fromPath === "/blog/zz-arch-05")?.hides === 1 && plainRows.ok && plainRows.data.rows.find((r) => r.fromPath === "/zz-old")?.hides === 0,
+        hidingRows.ok ? JSON.stringify(hidingRows.data.rows.map((r) => [r.fromPath, r.hides])) : said(hidingRows),
+      );
+      const hidesHtml = await renderPage(cmsScreen("(cms)/redirects/page"));
+      ok("  and the Redirects screen shows it", hidesHtml.includes("Hides 1 live page"));
+      const hidesPreview = await act(redirectActions.cmsPreviewRedirectImport(["from,to", "/blog/zz-arch-07,/blog", "/zz-csv-hides-nothing,/zz-x", "/signup,/zz-x"].join("\r\n")));
+      const hidesByLine = hidesPreview.ok ? hidesPreview.data.rows.map((r) => `${r.line}:${r.outcome}:${r.hides ?? "-"}`).join(" ") : said(hidesPreview);
+      ok("an import's preview marks each row that would hide a live page", hidesByLine === "2:create:1 3:create:0 4:refuse:-", hidesByLine);
+
       section("Redirects as CSV");
       await act(redirectActions.cmsUpdateRedirect(exactId, { note: '=HYPERLINK("http://evil.example")' }));
       await act(redirectActions.cmsUpdateRedirect(idOf(prefixApi), { note: "+SUM(1,2)" }));
