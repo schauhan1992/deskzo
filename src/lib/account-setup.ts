@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { assertGrantWithinOwnAuthority } from "@/lib/authz/guards";
 import { permissionsFor } from "@/lib/authz/resolve";
 import { AWAITING_SETUP } from "@/lib/no-password";
+import { isAutomationKind, isSystemAddress, PEOPLE_ONLY } from "@/lib/people";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 
@@ -50,7 +51,8 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest("hex
 
 /** Whether this account is still waiting for its person to choose a password — asked of the database, so no stored value is read. */
 export async function awaitingSetup(userId: string): Promise<boolean> {
-  return (await db.user.count({ where: { id: userId, ...AWAITING_SETUP } })) > 0;
+  // A person's account only: the Automation account's placeholder is permanent, not an invitation.
+  return (await db.user.count({ where: { id: userId, ...PEOPLE_ONLY, ...AWAITING_SETUP } })) > 0;
 }
 
 /**
@@ -110,6 +112,9 @@ export async function sendSetupInvitation(user: { id: string; name: string; emai
   let url: string;
   let workspace: string;
   try {
+    // Never for the Automation account (src/lib/automation-user.ts): nobody chooses its password.
+    const account = await db.user.findUnique({ where: { id: user.id }, select: { kind: true, email: true } });
+    if (!account || isAutomationKind(account.kind) || isSystemAddress(account.email)) return { emailed: false };
     const tenant = await currentTenant();
     const token = randomBytes(32).toString("base64url");
     await db.$transaction(async (tx) => {

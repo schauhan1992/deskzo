@@ -33,6 +33,8 @@ import { getPageLayout, setPageLayout } from "@/actions/page-layout";
 import { getPageLayoutDefinition } from "@/lib/page-layouts";
 import type { ReactNode } from "react";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { closeOverview } from "@/actions/close";
+import { CloseOverviewCard } from "@/components/close/close-overview-card";
 
 export default async function AccountingOverviewPage() {
   const enabled = await isModuleEnabled("accounting");
@@ -79,6 +81,10 @@ export default async function AccountingOverviewPage() {
     receivablesOutstanding(),
     payablesOutstanding(),
   ]);
+
+  // Last month's close (Revenue & Close): only where the add-on is available, and null for anybody
+  // who neither works nor manages the close.
+  const closeCard = (await isModuleEnabled("revenue_close")) ? await closeOverview() : null;
 
   const order = await getPageLayout("accounting");
 
@@ -224,6 +230,8 @@ export default async function AccountingOverviewPage() {
           </Link>
         </Card>
       )}
+
+      {closeCard && <CloseOverviewCard overview={closeCard} />}
 
       <WidgetGrid items={items} onReorder={saveOrder} />
     </div>

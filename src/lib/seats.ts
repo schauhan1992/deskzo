@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { currentTenant } from "@/lib/tenancy/resolve";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Seats: the people a workspace's plan lets hold an active account (src/lib/entitlements.ts).
@@ -15,7 +16,7 @@ import { currentTenant } from "@/lib/tenancy/resolve";
  */
 
 export async function seatsInUse(): Promise<number> {
-  return db.user.count({ where: { active: true, kind: "MEMBER" } });
+  return db.user.count({ where: { active: true, ...PEOPLE_ONLY } });
 }
 
 /** Null when there is room for `adding` more; otherwise what to tell whoever tried. */

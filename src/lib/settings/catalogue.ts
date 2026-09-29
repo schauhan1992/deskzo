@@ -37,6 +37,8 @@ import {
   Wrench,
   Sparkles,
   Lock,
+  CalendarCheck,
+  ListChecks,
 } from "lucide-react";
 
 /**
@@ -410,6 +412,24 @@ export const SETTINGS: SettingsSection[] = [
             permission: "books.close",
             module: "accounting",
             external: true,
+          },
+          {
+            key: "revenue-close",
+            label: "Revenue & Close",
+            description: "Whether revenue and prepaids post themselves each night, how revenue spreads, and how large a monthly change must be to need explaining.",
+            href: "/settings/revenue-close",
+            icon: CalendarCheck,
+            permission: "close.manage",
+            module: "revenue_close",
+          },
+          {
+            key: "close-checklist",
+            label: "Month-end checklist",
+            description: "The tasks every month's close is copied from: their order, owners, due days and automatic checks.",
+            href: "/settings/close-checklist",
+            icon: ListChecks,
+            permission: "close.manage",
+            module: "revenue_close",
           },
         ],
       },

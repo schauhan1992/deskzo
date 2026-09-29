@@ -280,7 +280,10 @@ export async function deleteAccount(id: string): Promise<ActionResult<null>> {
 
   const account = await db.ledgerAccount.findUnique({
     where: { id },
-    select: { name: true, code: true, systemKey: true, _count: { select: { lines: true, children: true } } },
+    select: {
+      name: true, code: true, systemKey: true,
+      _count: { select: { lines: true, children: true, schedulesExpensed: true, schedulesHeld: true } },
+    },
   });
   if (!account) return { ok: false, error: "That account no longer exists." };
   if (account.systemKey) return { ok: false, error: "This account is used by automatic postings and can't be deleted." };
@@ -288,6 +291,12 @@ export async function deleteAccount(id: string): Promise<ActionResult<null>> {
     return { ok: false, error: "This account has entries against it. Archive it instead — deleting would break the books." };
   }
   if (account._count.children > 0) return { ok: false, error: "Move or delete the accounts under it first." };
+  // A prepaid or accrual schedule posts to it every month (Revenue & Close) — even one with nothing
+  // posted yet holds it, and the database would refuse the delete with a foreign-key error.
+  const schedules = account._count.schedulesExpensed + account._count.schedulesHeld;
+  if (schedules > 0) {
+    return { ok: false, error: `${schedules} prepaid or accrual schedule${schedules === 1 ? " uses" : "s use"} this account. Archive it instead.` };
+  }
 
   await db.ledgerAccount.delete({ where: { id } });
   await recordAudit({

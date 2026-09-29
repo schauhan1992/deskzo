@@ -16,6 +16,13 @@ export function itemTypeRenews(type: (typeof itemTypeValues)[number]) {
 }
 
 export const billingCycleValues = ["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"] as const;
+
+/** How revenue from an item is recognised (Revenue & Close, Ind AS 115). Blank is "automatic". */
+export const revenuePatternValues = ["POINT_IN_TIME", "RATABLE"] as const;
+export const revenuePatternLabels: Record<(typeof revenuePatternValues)[number], string> = {
+  POINT_IN_TIME: "When invoiced",
+  RATABLE: "Over the service period",
+};
 export const stockMovementTypeValues = ["RECEIVED", "SOLD", "ADJUSTMENT", "RETURNED", "DAMAGED"] as const;
 
 const optionalNonNegativeNumber = (opts?: { max?: number }) =>
@@ -64,6 +71,11 @@ const itemDetailShape = {
   trackInventory: z.boolean().default(false),
   reorderLevel: optionalNonNegativeInt,
   active: z.boolean().default(true),
+  /**
+   * Blank is "automatic, from the item type" (null): a subscription over its service period, anything
+   * else when invoiced. Saved only where Revenue & Close is available; the actions ignore it otherwise.
+   */
+  revenuePattern: z.enum(revenuePatternValues).optional().or(z.literal("")),
 };
 
 export const createItemSchema = z.object({

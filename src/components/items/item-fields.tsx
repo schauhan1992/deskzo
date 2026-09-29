@@ -1,5 +1,5 @@
 import type { FieldErrors, FieldValues, UseFormRegister } from "react-hook-form";
-import { itemTypeValues, itemTypeLabels, billingCycleValues } from "@/lib/validation/item";
+import { itemTypeValues, itemTypeLabels, billingCycleValues, revenuePatternLabels, revenuePatternValues } from "@/lib/validation/item";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
@@ -16,6 +16,7 @@ export function ItemDetailFields({
   onBrandChange,
   trackInventory,
   showOpeningStock,
+  showRevenuePattern = false,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
@@ -26,6 +27,11 @@ export function ItemDetailFields({
   onBrandChange: (brandId: string) => void;
   trackInventory: boolean;
   showOpeningStock?: boolean;
+  /**
+   * Whether to ask how revenue is recognised: only where Revenue & Close is available, which the page
+   * decides (`isModuleEnabled("revenue_close")`). The actions ignore the field otherwise.
+   */
+  showRevenuePattern?: boolean;
 }) {
   const selectedBrand = brands.find((b) => b.id === brandId);
   return (
@@ -132,6 +138,25 @@ export function ItemDetailFields({
                   </option>
                 ))}
               </Select>
+            </div>
+          )}
+          {showRevenuePattern && (
+            <div className="space-y-1.5">
+              <Label htmlFor="revenuePattern">Revenue is recognised</Label>
+              <Select id="revenuePattern" {...register("revenuePattern")}>
+                <option value="">Automatic (from the item type)</option>
+                {revenuePatternValues.map((p) => (
+                  <option key={p} value={p}>
+                    {revenuePatternLabels[p]}
+                  </option>
+                ))}
+              </Select>
+              {/* What "automatic" means for this type, so the choice isn't made blind. */}
+              <p className="text-xs text-subtle">
+                {itemType === "SUBSCRIPTION"
+                  ? "Automatic: over the service period, as a subscription is earned."
+                  : "Automatic: when invoiced — or over the service period when an invoice line's period runs past the month it was issued in."}
+              </p>
             </div>
           )}
           <div className="space-y-1.5">

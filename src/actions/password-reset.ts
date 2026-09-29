@@ -10,6 +10,7 @@ import { logActivity } from "@/lib/activity";
 import { clientIpFrom } from "@/lib/client-ip";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { accountsChanged } from "@/lib/platform/account-hooks";
+import { isAutomationKind } from "@/lib/people";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
@@ -51,8 +52,9 @@ export async function requestPasswordReset(input: string): Promise<{ ok: true }>
   if (lockoutState(keys).lockedOut || !email.includes("@")) return { ok: true };
   recordFailure(keys);
 
-  const user = await db.user.findUnique({ where: { email }, select: { id: true, name: true, active: true } });
-  if (!user?.active) return { ok: true };
+  const user = await db.user.findUnique({ where: { email }, select: { id: true, name: true, active: true, kind: true } });
+  // No link for the Automation account (src/lib/automation-user.ts), and the same answer as for no account.
+  if (!user?.active || isAutomationKind(user.kind)) return { ok: true };
 
   const token = randomBytes(32).toString("base64url");
   await db.$transaction(async (tx) => {
@@ -74,8 +76,8 @@ async function setPasswordFromLink(input: { token: string; password: string }): 
   const password = String(input?.password ?? "");
   if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
 
-  const row = await db.passwordResetToken.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { select: { id: true, name: true, email: true, active: true } } } });
-  if (!row || row.usedAt || row.expiresAt < new Date() || !row.user.active) {
+  const row = await db.passwordResetToken.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { select: { id: true, name: true, email: true, active: true, kind: true } } } });
+  if (!row || row.usedAt || row.expiresAt < new Date() || !row.user.active || isAutomationKind(row.user.kind)) {
     return { ok: false, error: "This link has expired or been used. Ask for a new one from the sign-in page." };
   }
   const now = new Date();

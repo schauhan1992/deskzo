@@ -89,6 +89,8 @@ import { paymentTermsLabels } from "@/lib/gst";
 import { relationshipTypeLabels, vendorStatusLabels } from "@/lib/validation/company";
 import { headcountLabel } from "@/lib/company-size";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { customerRevenue } from "@/actions/revenue";
+import { CustomerRevenueCard } from "@/components/revenue/customer-revenue-card";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
 
@@ -265,6 +267,14 @@ export async function CompanyDetail({
     !isVendor && (await isModuleEntitled("forms")) ? companyFormResponses(company.id) : Promise.resolve(null),
   ]);
   const showFormsTab = Boolean(companyForms && (companyForms.responses.length > 0 || companyForms.waiting.length > 0));
+
+  // A customer's revenue (Revenue & Close): only where the add-on is available and the viewer may read
+  // revenue. The action also answers null for an account outside their scope.
+  const revenueVisible =
+    !isVendor &&
+    (await isModuleEnabled("revenue_close")) &&
+    ((await hasEffectivePermission(userId, "revenue.viewReports")) || (await hasEffectivePermission(userId, "revenue.manage")));
+  const revenueFigures = revenueVisible ? await customerRevenue(company.id) : null;
 
   // Commission is paid on a customer's business, so it's a customer-side view; a commission party
   // sees the mirror of it (what they earned) on their own Details tab instead.
@@ -622,6 +632,7 @@ export async function CompanyDetail({
                 />
               </CardContent>
             </Card>
+            {revenueFigures && <CustomerRevenueCard revenue={revenueFigures} />}
             {isReseller && resellerOnboarding && resellerCredit && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Reseller onboarding</CardHeader>

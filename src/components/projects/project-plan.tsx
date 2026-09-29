@@ -3,10 +3,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2 } from "lucide-react";
+import { FileText, Plus, Trash2 } from "lucide-react";
 import {
   deleteBillingMilestone,
   deleteMilestone,
+  raiseBillingMilestoneInvoice,
   saveBillingMilestone,
   saveMilestone,
   setMilestoneDone,
@@ -36,8 +37,13 @@ type Billing = {
   amount: string | number;
   dueOn: string | Date | null;
   status: keyof typeof billingStatusLabels;
+  /** "Earned when": the delivery milestone this stage is earned on. */
+  deliveryMilestoneId: string | null;
   document: { id: string; docNumber: string; docType: string; status: string; total: string | number } | null;
 };
+
+/** What a new stage can start as. Invoiced and paid come from its invoice, never from a picker. */
+const NEW_STAGE_STATUSES = ["PENDING", "DUE", "WAIVED"] as const;
 
 const asDate = (v: string | Date | null) => (v ? new Date(v) : null);
 
@@ -54,6 +60,7 @@ export function ProjectPlan({
   billing,
   hasType,
   canManage,
+  canRaiseInvoice = false,
   now,
 }: {
   projectId: string;
@@ -61,6 +68,11 @@ export function ProjectPlan({
   billing: Billing[];
   hasType: boolean;
   canManage: boolean;
+  /**
+   * Whether "Raise invoice" is offered: this person can edit the billing, Sales Documents is available
+   * and they may raise invoices. The page decides; the action checks again.
+   */
+  canRaiseInvoice?: boolean;
   /**
    * Passed in rather than read here. Reading the clock during render makes the component
    * non-idempotent — React may re-render it at any time, and "overdue" would then flip on a
@@ -135,7 +147,9 @@ export function ProjectPlan({
                         label="Remove"
                         tone="danger"
                         onClick={async () => {
-                          await deleteMilestone(m.id);
+                          const result = await deleteMilestone(m.id);
+                          // Refused while revenue on a billing stage waits for it.
+                          if (!result.ok) alert(result.error);
                           router.refresh();
                         }}
                       />
@@ -158,37 +172,14 @@ export function ProjectPlan({
             </p>
           ) : (
             billing.map((b) => (
-              <div key={b.id} className="flex items-start justify-between gap-2 border-b border-line pb-2.5 last:border-0 last:pb-0">
-                <div className="min-w-0">
-                  <div className="text-sm text-text">
-                    {b.label}
-                    {b.percent !== null && <span className="text-muted"> · {Number(b.percent)}%</span>}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-subtle">
-                    <Badge tone={billingStatusTone[b.status]}>{billingStatusLabels[b.status]}</Badge>
-                    {b.dueOn && <span>due {formatDate(asDate(b.dueOn)!)}</span>}
-                    {b.document && (
-                      <Link href={`/documents/${b.document.id}`} className="text-brand hover:underline">
-                        {b.document.docNumber}
-                      </Link>
-                    )}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <span className="text-sm font-medium text-text">{formatCurrency(Number(b.amount))}</span>
-                  {canManage && (
-                    <IconButton
-                      icon={Trash2}
-                      label="Remove"
-                      tone="danger"
-                      onClick={async () => {
-                        await deleteBillingMilestone(b.id);
-                        router.refresh();
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
+              <BillingStage
+                key={b.id}
+                projectId={projectId}
+                stage={b}
+                milestones={milestones}
+                canManage={canManage}
+                canRaiseInvoice={canRaiseInvoice}
+              />
             ))
           )}
           {billing.length > 0 && (
@@ -197,7 +188,7 @@ export function ProjectPlan({
               <span>{formatCurrency(billing.reduce((sum, b) => sum + Number(b.amount), 0))}</span>
             </div>
           )}
-          {canManage && <AddBilling projectId={projectId} nextOrder={billing.length} />}
+          {canManage && <AddBilling projectId={projectId} nextOrder={billing.length} milestones={milestones} />}
         </CardContent>
       </Card>
     </div>
@@ -242,53 +233,205 @@ function AddMilestone({ projectId, nextOrder }: { projectId: string; nextOrder: 
   );
 }
 
-function AddBilling({ projectId, nextOrder }: { projectId: string; nextOrder: number }) {
+/**
+ * One billing stage: what it bills, what it is earned on, and the invoice raised for it.
+ *
+ * "Earned when" links the stage to a delivery milestone on the left: Revenue & Close waits for that
+ * milestone before recognising what the stage invoiced. "Raise invoice" writes the draft and opens it.
+ */
+function BillingStage({
+  projectId,
+  stage,
+  milestones,
+  canManage,
+  canRaiseInvoice,
+}: {
+  projectId: string;
+  stage: Billing;
+  milestones: Milestone[];
+  canManage: boolean;
+  canRaiseInvoice: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const earnedOn = milestones.find((m) => m.id === stage.deliveryMilestoneId) ?? null;
+  const invoiceable = !stage.document && (stage.status === "PENDING" || stage.status === "DUE") && Number(stage.amount) > 0;
+
+  function linkDelivery(deliveryMilestoneId: string) {
+    setError(null);
+    startTransition(async () => {
+      // The stage as it stands, with only the link changed — the action keeps its status and invoice.
+      const result = await saveBillingMilestone({
+        id: stage.id,
+        projectId,
+        label: stage.label,
+        amount: String(stage.amount),
+        percent: stage.percent !== null ? String(stage.percent) : undefined,
+        dueOn: stage.dueOn ? new Date(stage.dueOn).toISOString().slice(0, 10) : undefined,
+        deliveryMilestoneId,
+      });
+      if (!result.ok) setError(result.error);
+      router.refresh();
+    });
+  }
+
+  function raiseInvoice() {
+    setError(null);
+    startTransition(async () => {
+      const result = await raiseBillingMilestoneInvoice(stage.id);
+      if (!result.ok) {
+        setError(result.error);
+        router.refresh();
+        return;
+      }
+      router.push(`/documents/${result.data.id}`);
+    });
+  }
+
+  return (
+    <div className="border-b border-line pb-2.5 last:border-0 last:pb-0">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm text-text">
+            {stage.label}
+            {stage.percent !== null && <span className="text-muted"> · {Number(stage.percent)}%</span>}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-subtle">
+            <Badge tone={billingStatusTone[stage.status]}>{billingStatusLabels[stage.status]}</Badge>
+            {stage.dueOn && <span>due {formatDate(asDate(stage.dueOn)!)}</span>}
+            {stage.document && (
+              <Link href={`/documents/${stage.document.id}`} className="text-brand hover:underline">
+                {stage.document.docNumber}
+              </Link>
+            )}
+            {!canManage && earnedOn && <span>earned when {earnedOn.name} is done</span>}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="text-sm font-medium text-text">{formatCurrency(Number(stage.amount))}</span>
+          {canManage && (
+            <IconButton
+              icon={Trash2}
+              label="Remove"
+              tone="danger"
+              onClick={async () => {
+                setError(null);
+                const result = await deleteBillingMilestone(stage.id);
+                if (!result.ok) setError(result.error);
+                router.refresh();
+              }}
+            />
+          )}
+        </div>
+      </div>
+      {canManage && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {milestones.length > 0 && (
+            <label className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-subtle">
+              <span className="shrink-0">Earned when</span>
+              <Select
+                value={stage.deliveryMilestoneId ?? ""}
+                onChange={(e) => linkDelivery(e.target.value)}
+                disabled={pending}
+                className="h-8 min-w-0 flex-1 text-xs"
+              >
+                <option value="">Not linked to a milestone</option>
+                {milestones.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} is done
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+          {canRaiseInvoice && invoiceable && (
+            <Button size="sm" variant="secondary" disabled={pending} onClick={raiseInvoice}>
+              <FileText className="h-3.5 w-3.5" />
+              {pending ? "Raising…" : "Raise invoice"}
+            </Button>
+          )}
+        </div>
+      )}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
+function AddBilling({ projectId, nextOrder, milestones }: { projectId: string; nextOrder: number; milestones: Milestone[] }) {
   const router = useRouter();
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState<keyof typeof billingStatusLabels>("PENDING");
+  const [status, setStatus] = useState<(typeof NEW_STAGE_STATUSES)[number]>("PENDING");
+  const [deliveryMilestoneId, setDeliveryMilestoneId] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   return (
-    <div className="flex flex-wrap items-end gap-2 border-t border-line pt-3">
-      <div className="min-w-32 flex-1 space-y-1.5">
-        <Label htmlFor="bill-label">Add a stage</Label>
-        <Input id="bill-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="On UAT sign-off" />
+    <div className="space-y-2 border-t border-line pt-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-32 flex-1 space-y-1.5">
+          <Label htmlFor="bill-label">Add a stage</Label>
+          <Input id="bill-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="On UAT sign-off" />
+        </div>
+        <Input
+          aria-label="Amount"
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Amount"
+          className="w-32"
+        />
+        <Select
+          aria-label="Billing status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as (typeof NEW_STAGE_STATUSES)[number])}
+        >
+          {NEW_STAGE_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {billingStatusLabels[s]}
+            </option>
+          ))}
+        </Select>
+        {milestones.length > 0 && (
+          <Select
+            aria-label="Earned when"
+            value={deliveryMilestoneId}
+            onChange={(e) => setDeliveryMilestoneId(e.target.value)}
+            className="min-w-0 max-w-full sm:w-56"
+          >
+            <option value="">Earned when… (optional)</option>
+            {milestones.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} is done
+              </option>
+            ))}
+          </Select>
+        )}
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label="Add the stage"
+          disabled={pending || !label.trim() || !amount}
+          onClick={() =>
+            startTransition(async () => {
+              setError(null);
+              const result = await saveBillingMilestone({ projectId, label, amount, status, deliveryMilestoneId, sortOrder: nextOrder });
+              if (!result.ok) {
+                setError(result.error);
+                return;
+              }
+              setLabel("");
+              setAmount("");
+              setDeliveryMilestoneId("");
+              router.refresh();
+            })
+          }
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <Input
-        aria-label="Amount"
-        type="number"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="Amount"
-        className="w-32"
-      />
-      <Select
-        aria-label="Billing status"
-        value={status}
-        onChange={(e) => setStatus(e.target.value as keyof typeof billingStatusLabels)}
-      >
-        {(Object.keys(billingStatusLabels) as (keyof typeof billingStatusLabels)[]).map((s) => (
-          <option key={s} value={s}>
-            {billingStatusLabels[s]}
-          </option>
-        ))}
-      </Select>
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={pending || !label.trim() || !amount}
-        onClick={() =>
-          startTransition(async () => {
-            await saveBillingMilestone({ projectId, label, amount, status, sortOrder: nextOrder });
-            setLabel("");
-            setAmount("");
-            router.refresh();
-          })
-        }
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </Button>
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }

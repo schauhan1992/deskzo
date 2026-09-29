@@ -5,6 +5,7 @@ import { platformHmac } from "@/lib/platform/kek";
 import { activeTenants, tenantById } from "@/lib/tenancy/registry";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * "Find my workspaces"' index (spec §7): which workspaces an address has an active member account in,
@@ -141,7 +142,7 @@ export async function reconcileEmailIndex(): Promise<EmailIndexRun> {
     tenants,
     async (tenant) => {
       try {
-        const users = await db.user.findMany({ where: { active: true, kind: "MEMBER" }, select: { id: true, email: true } });
+        const users = await db.user.findMany({ where: { active: true, ...PEOPLE_ONLY }, select: { id: true, email: true } });
         const desired = new Map(users.map((user) => [user.id, emailKey(user.email)]));
         const existing = await controlDb().workspaceEmail.findMany({ where: { tenantId: tenant.id }, select: { userId: true, emailHmac: true } });
         await apply(tenant.id, desired, existing);

@@ -14,6 +14,7 @@ import { reportOptions, runAnalyticsReport } from "@/actions/analytics";
 import { formatCompanyId, formatLeadId, formatOrderId, parseSeqQuery } from "@/lib/order-id";
 import { formatTicketId } from "@/lib/tickets";
 import { formatIstDateTime, istDateParts, parseIstDateTime } from "@/lib/india-time";
+import { PEOPLE_ONLY } from "@/lib/people";
 import type { DisplayBlock, ToolSpec } from "@/lib/copilot/types";
 
 /**
@@ -411,7 +412,8 @@ const TOOLS: CopilotTool[] = [
     async run(ctx, input) {
       const attached = await attachments(ctx.userId, input);
       if ("error" in attached) return { output: { error: attached.error }, activity: "Couldn't draft the task" };
-      const assignee = input.assigneeUserId ? await db.user.findFirst({ where: { id: input.assigneeUserId, active: true }, select: { id: true, name: true } }) : null;
+      // A person only, as find_colleague offers: never a support or Automation account (src/lib/people.ts).
+      const assignee = input.assigneeUserId ? await db.user.findFirst({ where: { id: input.assigneeUserId, active: true, ...PEOPLE_ONLY }, select: { id: true, name: true } }) : null;
       if (input.assigneeUserId && !assignee) return { output: { error: "That colleague isn't an active user — use find_colleague." }, activity: "Couldn't draft the task" };
       const payload = {
         title: input.title,

@@ -10,6 +10,7 @@ import { getOrganisation } from "@/lib/organisation";
 import { defaultBranchIdFor, listBranchChoices } from "@/lib/branches/identity";
 import { DocumentForm } from "@/components/documents/document-form";
 import { blankLine, emptyDefaults } from "@/lib/document-draft";
+import { defaultServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
 import { viewerHas } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import {
@@ -76,19 +77,28 @@ export default async function NewDocumentPage({
     defaults.reference = fromLead.title;
     defaults.salespersonId = fromLead.ownerUserId ?? "";
     if (fromLead.requirements.length > 0) {
-      defaults.lines = fromLead.requirements.map((r) => ({
-        ...blankLine(),
-        itemId: r.item.id,
-        name: r.item.name,
-        // The requirement's own note is what the customer actually asked for on the call, so it
-        // beats the catalogue blurb when there is one.
-        description: r.notes ?? r.item.description ?? "",
-        hsnCode: r.item.hsnCode ?? "",
-        unit: r.item.unit ?? "",
-        quantity: String(r.quantity),
-        unitPrice: String(r.item.sellingPrice ?? 0),
-        taxRatePercent: String(r.item.taxRatePercent ?? 18),
-      }));
+      defaults.lines = fromLead.requirements.map((r) => {
+        // A subscription starts with one billing cycle from the document's date, as a picked item does.
+        const period = showsServicePeriod(docType) ? defaultServicePeriod({ item: r.item, issueDate: defaults.issueDate }) : null;
+        return {
+          ...blankLine(),
+          itemType: r.item.type,
+          itemCycle: r.item.billingCycle ?? "",
+          servicePeriodFrom: period?.from ?? "",
+          servicePeriodTo: period?.to ?? "",
+          periodSource: period?.source ?? "",
+          itemId: r.item.id,
+          name: r.item.name,
+          // The requirement's own note is what the customer actually asked for on the call, so it
+          // beats the catalogue blurb when there is one.
+          description: r.notes ?? r.item.description ?? "",
+          hsnCode: r.item.hsnCode ?? "",
+          unit: r.item.unit ?? "",
+          quantity: String(r.quantity),
+          unitPrice: String(r.item.sellingPrice ?? 0),
+          taxRatePercent: String(r.item.taxRatePercent ?? 18),
+        };
+      });
     }
   }
 

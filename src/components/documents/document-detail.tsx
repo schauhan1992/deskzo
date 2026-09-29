@@ -35,6 +35,10 @@ import { carriesGoods } from "@/lib/eway/documents";
 import { transporterOptions } from "@/actions/transporter";
 import { EwayPanel } from "@/components/logistics/eway-panel";
 import { nextStepFor } from "@/lib/document-next-step";
+import { descriptionStatesPeriod, formatServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
+import { isModuleEnabled } from "@/actions/module";
+import { listSchedules } from "@/actions/revenue";
+import { ScheduleLineNote } from "@/components/revenue/schedule-line-note";
 import {
   documentDirection,
   documentListPath,
@@ -86,6 +90,16 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
 
   // Only asked for once the document is loaded, because it needs the type to find the policy.
   const approval = await approvalContext(document.id);
+
+  // Revenue & Close: an issued invoice's deferring lines each link to their revenue schedule — where
+  // the add-on is available, and for somebody who may read revenue (the link would refuse anyone else).
+  const lineSchedules =
+    document.docType === "INVOICE" &&
+    document.status !== "DRAFT" &&
+    (await isModuleEnabled("revenue_close")) &&
+    ((await viewerHas("revenue.viewReports")) || (await viewerHas("revenue.manage")))
+      ? new Map((await listSchedules({ documentId: document.id, take: 500 })).rows.map((s) => [s.lineId, s]))
+      : null;
 
   /** Every figure on screen, in the currency the document was written in — see the print page. */
   const money = (value: number | string | null | undefined) => formatMoney(value, document.currency);
@@ -289,6 +303,16 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
                       {line.description && (
                         <div className="mt-0.5 whitespace-pre-line text-xs text-muted">{line.description}</div>
                       )}
+                      {/* Unless the description already says it, as a renewal quote's does. */}
+                      {showsServicePeriod(document.docType) &&
+                        line.servicePeriodFrom &&
+                        line.servicePeriodTo &&
+                        !descriptionStatesPeriod(line.description, line.servicePeriodFrom, line.servicePeriodTo) && (
+                          <div className="mt-0.5 text-xs text-muted">
+                            Service period: {formatServicePeriod(line.servicePeriodFrom, line.servicePeriodTo)}
+                          </div>
+                        )}
+                      {lineSchedules?.get(line.id) && <ScheduleLineNote schedule={lineSchedules.get(line.id)!} />}
                       {line.hsnCode && (
                         <div className="font-mono text-xs text-subtle @2xl:hidden">HSN {line.hsnCode}</div>
                       )}

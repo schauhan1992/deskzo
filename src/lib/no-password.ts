@@ -28,7 +28,11 @@ export function noPasswordYet(): string {
   return `${NO_PASSWORD_PREFIX}${randomBytes(32).toString("base64url")}`;
 }
 
-/** Accounts waiting for their person to choose a password. */
+/**
+ * Accounts waiting for their person to choose a password. The workspace's Automation account holds a
+ * placeholder for good (src/lib/automation-user.ts) and is nobody's to invite: `db` never lists it, and
+ * a query naming an id adds `PEOPLE_ONLY` (src/lib/people.ts), as `awaitingSetup` does.
+ */
 export const AWAITING_SETUP = {
   OR: [{ passwordHash: { startsWith: NO_PASSWORD_PREFIX } }, { passwordHash: IMPORTED_PLACEHOLDER }],
 } satisfies Prisma.UserWhereInput;

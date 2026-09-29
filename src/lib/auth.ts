@@ -13,6 +13,7 @@ import { sessionOptions } from "@/lib/auth-session";
 import { currentTenantOrNull } from "@/lib/tenancy/resolve";
 import { handoffAccount } from "@/lib/platform/handoff-sign-in";
 import { linkedAccount } from "@/lib/platform/linked/switch";
+import { isAutomationKind } from "@/lib/people";
 import type { Provider } from "@auth/core/providers";
 
 declare module "next-auth" {
@@ -78,6 +79,9 @@ async function buildConfig(req?: Request) {
 
         const user = await db.user.findUnique({ where: { email } });
         if (!user) return refuse("no account with that address");
+        // Nobody signs in as the workspace's Automation account (src/lib/automation-user.ts). Its
+        // placeholder password can't match anything typed, and it is refused by kind as well.
+        if (isAutomationKind(user.kind)) return refuse("the Automation account never signs in", user);
         if (!user.active) return refuse("the account is deactivated", user);
 
         const validPassword = await bcrypt.compare(password, user.passwordHash);
@@ -184,7 +188,7 @@ async function buildConfig(req?: Request) {
           if (!user.email) return false;
           // SSO signs people into accounts an admin already provisioned — it's not a self-signup path.
           const existing = await db.user.findUnique({ where: { email: user.email } });
-          if (!existing || !existing.active) return false;
+          if (!existing || !existing.active || isAutomationKind(existing.kind)) return false;
           const held = await doorCheck(existing);
           if (held) {
             await logActivity({
@@ -204,7 +208,8 @@ async function buildConfig(req?: Request) {
         const t = token as AppJWT;
         if (user?.email) {
           const dbUser = await db.user.findUnique({ where: { email: user.email } });
-          if (dbUser) {
+          // Never a session for the Automation account, whichever provider named its address.
+          if (dbUser && !isAutomationKind(dbUser.kind)) {
             t.id = dbUser.id;
             t.role = dbUser.role;
             // Only here, where `user` is present: this is the sign-in itself, not a later read.

@@ -77,6 +77,11 @@ export async function findFxMisposts(client: Tx | PrismaClient): Promise<FxMispo
       // A rupee document is booked as written, whatever rate it carries (posting.ts `bookingRate`).
       currency: { not: BASE_CURRENCY },
       journalEntries: { some: LIVE },
+      // Re-posting writes the plain invoice entry, with no deferral. Every rate-1 posting predates
+      // Revenue & Close, so none should have a schedule — but one that does is left alone rather than
+      // re-posted without its deferred revenue.
+      revenueSchedules: { none: {} },
+      revenueAdjustments: { none: {} },
     },
     orderBy: [{ issueDate: "asc" }, { docNumber: "asc" }],
     select: {

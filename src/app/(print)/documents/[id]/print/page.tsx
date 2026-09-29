@@ -16,6 +16,7 @@ import { gstTreatmentLabels } from "@/lib/gst";
 import { formatAddress } from "@/lib/document-draft";
 import { approvalDocumentFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
 import { approvalRequirement } from "@/lib/documents/approval";
+import { descriptionStatesPeriod, formatServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
 
 /**
  * The page that becomes the PDF. It deliberately ignores the app's dark mode and semantic tokens —
@@ -304,6 +305,15 @@ export default async function PrintDocumentPage({
                   {line.description && (
                     <div className="mt-0.5 whitespace-pre-line text-[11px] text-neutral-600">{line.description}</div>
                   )}
+                  {/* The period the customer is paying for, unless the description already says it. */}
+                  {showsServicePeriod(document.docType) &&
+                    line.servicePeriodFrom &&
+                    line.servicePeriodTo &&
+                    !descriptionStatesPeriod(line.description, line.servicePeriodFrom, line.servicePeriodTo) && (
+                      <div className="mt-0.5 text-[11px] text-neutral-600">
+                        Service period: {formatServicePeriod(line.servicePeriodFrom, line.servicePeriodTo)}
+                      </div>
+                    )}
                 </td>
                 <td className="px-3 py-2 font-mono text-[11px]">{line.hsnCode ?? "—"}</td>
                 <td className="px-3 py-2 text-right">

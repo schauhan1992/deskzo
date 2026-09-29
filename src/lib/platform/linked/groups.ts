@@ -4,6 +4,7 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { MAX_LINKED_WORKSPACES, originOf } from "@/lib/platform/linked/keys";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { subdomainHost, tenantById } from "@/lib/tenancy/registry";
+import { isSystemAddress } from "@/lib/people";
 
 /**
  * Link groups: one person's accounts in several workspaces (spec §4.6, §4.7, §4.9).
@@ -234,7 +235,8 @@ export async function linkedWorkspacesFor(tenantId: string, userId: string): Pro
 export type JoinSide = { tenantId: string; userId: string; email: string; name: string; stamp: string; provenAt: Date };
 
 const STAMP = /^[0-9a-f]{64}$/;
-const isSupportAddress = (email: string) => email.trim().toLowerCase().endsWith("@platform.invalid");
+// Platform support's and the Automation account's addresses (src/lib/people.ts): nobody's, so never linked.
+const isSupportAddress = (email: string) => isSystemAddress(email);
 
 /**
  * Records a proven link between two accounts (spec §4.6), in one Serializable transaction:

@@ -33,6 +33,7 @@ import {
 } from "../src/lib/wins/prizes";
 import { topPerformerCopy } from "../src/lib/wins/copy";
 import { istMidnight } from "../src/lib/india-time";
+import { PEOPLE_ONLY } from "../src/lib/people";
 
 let actor = { id: "", name: "Zzprize" };
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -275,7 +276,8 @@ async function main() {
     const said = runs.flatMap((r) => r.announced).sort();
     ok("three at once announce each race once", said.join() === "MOST_ACTIVE:2099-04-A,TOP_SELLERS:2099-04" && (await tellings()) === 2, said.join());
     ok("  and later that morning, nothing again", (await announcer.announcePrizes(new Date(opening.getTime() + HOUR))).announced.length === 0 && (await tellings()) === 2);
-    const activeCount = await db.user.count({ where: { active: true } });
+    // People only: this is the raw client, which also sees the workspace's Automation account (never notified).
+    const activeCount = await db.user.count({ where: { active: true, ...PEOPLE_ONLY } });
     const notes = await db.notification.findMany({ where: probeNote, select: { userId: true, title: true, message: true, link: true } });
     const sellers = notes.filter((n) => n.title.startsWith("Up for grabs, April 2099"));
     const actives = notes.filter((n) => n.title.startsWith("Up for grabs, 1–15 April 2099"));

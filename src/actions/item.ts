@@ -63,6 +63,8 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
   if (familyError) {
     return { ok: false, error: familyError };
   }
+  // The revenue pattern is Revenue & Close's: without it the field isn't on the form, and is ignored.
+  const revenueCapture = await isModuleEnabled("revenue_close");
 
   try {
     const item = await db.$transaction(async (tx) => {
@@ -87,6 +89,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
           active: rest.active,
           createdById: user.id,
           stockQuantity: trackInventory && openingStock ? openingStock : 0,
+          revenuePattern: revenueCapture ? rest.revenuePattern || null : null,
         },
       });
 
@@ -130,6 +133,8 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
   if (familyError) {
     return { ok: false, error: familyError };
   }
+  // Written only where Revenue & Close is available; otherwise the stored pattern is left as it is.
+  const revenueCapture = await isModuleEnabled("revenue_close");
 
   try {
     await db.item.update({
@@ -152,6 +157,7 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
         trackInventory,
         reorderLevel: rest.reorderLevel ?? null,
         active: rest.active,
+        ...(revenueCapture ? { revenuePattern: rest.revenuePattern || null } : {}),
       },
     });
 

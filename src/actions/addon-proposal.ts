@@ -198,6 +198,9 @@ export async function createProposalFromAddonQuote(input: {
         companyProductId: "",
         name: parent.item.name,
         description: `Part term — ${quote.daysCharged} of ${quote.fullTermDays} ${unitWord}, ${input.startDate} to ${expiry}`,
+        /** The part term the seats are charged for, co-terminating with the parent — as the description says. */
+        servicePeriodFrom: input.startDate,
+        servicePeriodTo: expiry,
         hsnCode: parent.item.hsnCode ?? "",
         unit: parent.item.unit ?? "",
         quantity,

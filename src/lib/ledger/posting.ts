@@ -78,7 +78,29 @@ export type DocumentFinancials = {
   adjustmentLabel: string | null;
   roundOff: number;
   total: number;
+  /**
+   * Revenue & Close, on an invoice: the part of its revenue, already in rupees, that is not earned yet
+   * and goes to Deferred Revenue instead of Sales (src/lib/revenue). Nil or absent posts as always.
+   */
+  deferred?: number;
+  /**
+   * Revenue & Close, on a credit note: the part of it, in rupees, that comes off revenue its invoice
+   * deferred — debited to Deferred Revenue instead of Sales Returns. Nil or absent posts as always.
+   */
+  deferredReduction?: number;
 };
+
+/** A document's revenue — its taxable value less the freight shown separately — as the entries book it. */
+export function revenueOf(doc: Pick<DocumentFinancials, "taxableValue" | "shippingCharge">): number {
+  return round2(doc.taxableValue - doc.shippingCharge);
+}
+
+/** A revenue line that is normally on one side, but whose net can cross to the other. */
+function signedLine(account: SystemAccountKey, amount: number, positiveSide: "debit" | "credit"): DraftLine {
+  const onDebit = positiveSide === "debit" ? amount >= 0 : amount < 0;
+  const value = Math.abs(amount);
+  return onDebit ? { account, debit: value, credit: 0 } : { account, debit: 0, credit: value };
+}
 
 /**
  * The rate a document is booked at: its own — except that a rupee document is booked as written. The
@@ -141,17 +163,31 @@ export function inRupees(doc: DocumentFinancials, rate: number): DocumentFinanci
  * our behalf, so less cash arrives but the debt is settled in full. It becomes an asset we later
  * claim, and AR is debited only for what will actually turn up. TCS is the mirror — the customer
  * pays extra and we owe it onwards.
+ *
+ * Revenue not yet earned (`deferred`, Revenue & Close) is credited to Deferred Revenue rather than
+ * Sales, under the same branch and GSTIN, and moves to Sales month by month as it is earned. The tax,
+ * the receivable, TDS and round off are untouched: GST is due on the invoice, not on recognition.
  */
 export function postSalesInvoice(doc: DocumentFinancials): DraftEntry {
   // Freight is taxed with the goods but reported separately, so revenue isn't inflated by delivery.
-  const revenue = round2(doc.taxableValue - doc.shippingCharge);
+  const revenue = revenueOf(doc);
+  const deferred = round2(doc.deferred ?? 0);
   const tds = doc.withholdingAmount < 0 ? Math.abs(doc.withholdingAmount) : 0;
   const tcs = doc.withholdingAmount > 0 ? doc.withholdingAmount : 0;
 
   const lines: DraftLine[] = [
     { account: SYSTEM_ACCOUNTS.AR, debit: doc.total, credit: 0, companyId: doc.companyId },
     { account: SYSTEM_ACCOUNTS.TDS_RECEIVABLE, debit: tds, credit: 0, narration: "Tax deducted by customer" },
-    { account: SYSTEM_ACCOUNTS.SALES, debit: 0, credit: revenue },
+    deferred === 0
+      ? { account: SYSTEM_ACCOUNTS.SALES, debit: 0, credit: revenue }
+      : signedLine(SYSTEM_ACCOUNTS.SALES, round2(revenue - deferred), "credit"),
+    {
+      account: SYSTEM_ACCOUNTS.DEFERRED_REVENUE,
+      debit: 0,
+      credit: deferred,
+      companyId: doc.companyId,
+      narration: "Invoiced, not yet earned",
+    },
     { account: SYSTEM_ACCOUNTS.FREIGHT_RECOVERED, debit: 0, credit: doc.shippingCharge },
     { account: SYSTEM_ACCOUNTS.OUTPUT_CGST, debit: 0, credit: doc.cgstAmount },
     { account: SYSTEM_ACCOUNTS.OUTPUT_SGST, debit: 0, credit: doc.sgstAmount },
@@ -169,14 +205,28 @@ export function postSalesInvoice(doc: DocumentFinancials): DraftEntry {
 /**
  * A credit note — the invoice reversed, with the return booked to its own account rather than
  * netted off Sales, so gross sales and returns both stay visible on the P&L.
+ *
+ * The part that comes off revenue its invoice is still deferring (`deferredReduction`, Revenue &
+ * Close) is debited to Deferred Revenue instead: that revenue was never in Sales, so it can't be
+ * returned from there.
  */
 export function postCreditNote(doc: DocumentFinancials): DraftEntry {
-  const revenue = round2(doc.taxableValue - doc.shippingCharge);
+  const revenue = revenueOf(doc);
+  const reduction = round2(doc.deferredReduction ?? 0);
   const tds = doc.withholdingAmount < 0 ? Math.abs(doc.withholdingAmount) : 0;
   const tcs = doc.withholdingAmount > 0 ? doc.withholdingAmount : 0;
 
   const lines: DraftLine[] = [
-    { account: SYSTEM_ACCOUNTS.SALES_RETURNS, debit: revenue, credit: 0 },
+    reduction === 0
+      ? { account: SYSTEM_ACCOUNTS.SALES_RETURNS, debit: revenue, credit: 0 }
+      : signedLine(SYSTEM_ACCOUNTS.SALES_RETURNS, round2(revenue - reduction), "debit"),
+    {
+      account: SYSTEM_ACCOUNTS.DEFERRED_REVENUE,
+      debit: reduction,
+      credit: 0,
+      companyId: doc.companyId,
+      narration: "Credited before it was earned",
+    },
     { account: SYSTEM_ACCOUNTS.FREIGHT_RECOVERED, debit: doc.shippingCharge, credit: 0 },
     { account: SYSTEM_ACCOUNTS.OUTPUT_CGST, debit: doc.cgstAmount, credit: 0 },
     { account: SYSTEM_ACCOUNTS.OUTPUT_SGST, debit: doc.sgstAmount, credit: 0 },

@@ -656,6 +656,40 @@ export const PERMISSION_REGISTRY = [
     delegable: false,
     tier: "sensitive",
   },
+  // ─── Revenue & Close (the add-on; spec: revenue recognised as earned, and the month-end close) ──
+  {
+    key: "revenue.viewReports",
+    label: "See revenue schedules and deferred revenue",
+    description:
+      "Open the revenue schedules, the waterfall of revenue still to be recognised, the deferred revenue roll-forward and each customer's revenue. Read-only: nothing here moves money between months.",
+    defaultRoles: ["ACCOUNTS", "MANAGEMENT"],
+    delegable: false,
+  },
+  {
+    key: "revenue.manage",
+    label: "Manage revenue recognition",
+    description:
+      "Approve, edit and cancel revenue schedules, run recognition for a month and open deferred revenue for past invoices. Each of these decides which month's profit an invoice lands in, so a schedule someone made or changed by hand needs a second person to approve it.",
+    defaultRoles: [],
+    delegable: false,
+    tier: "sensitive",
+  },
+  {
+    key: "close.work",
+    label: "Work the month-end close",
+    description:
+      "Tick, annotate and mark not-applicable the month-end checklist's tasks, and explain the month's large movements. Working the checklist doesn't close the month — that also needs “Lock periods and close the year”.",
+    defaultRoles: ["ACCOUNTS"],
+  },
+  {
+    key: "close.manage",
+    label: "Run the month-end close",
+    description:
+      "Change the checklist's tasks, set the thresholds for explaining movements, manage prepaid and accrual schedules, and close or reopen a month (with “Lock periods and close the year”).",
+    defaultRoles: [],
+    delegable: false,
+    tier: "sensitive",
+  },
   {
     /**
      * Choosing who owns a lead when it is created — anybody, not only yourself.
@@ -1050,6 +1084,8 @@ const GROUP_BY_PREFIX: Record<string, string> = {
   catalog: "Orders & fulfilment",
   ledger: "Finance",
   books: "Finance",
+  revenue: "Finance",
+  close: "Finance",
   workspace: "Sales & customers",
 };
 

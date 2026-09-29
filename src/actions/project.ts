@@ -11,13 +11,15 @@ import type {
   ProjectStatus,
 } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireModuleUser } from "@/lib/modules-access";
+import { moduleAccessFor, requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { visibleProjectsWhere } from "@/lib/projects/visibility";
 import { milestonesFromTemplate, projectStatusLabels } from "@/lib/projects/status";
+import { partyDetails, todayInIndia } from "@/lib/proposals/party";
+import { createTradeDocument } from "@/actions/trade-document";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -422,8 +424,12 @@ export async function saveMilestone(input: {
     dueDate: input.dueDate ? new Date(`${input.dueDate}T00:00:00.000Z`) : null,
     sortOrder: input.sortOrder ?? 0,
   };
-  if (input.id) await db.projectMilestone.update({ where: { id: input.id }, data });
-  else await db.projectMilestone.create({ data: { ...data, projectId: input.projectId } });
+  if (input.id) {
+    // Access was checked against `input.projectId`, so the write is held to that project too: a
+    // milestone id from a project the caller can't edit updates nothing.
+    const { count } = await db.projectMilestone.updateMany({ where: { id: input.id, projectId: input.projectId }, data });
+    if (count === 0) return { ok: false, error: "That milestone isn't on this project." };
+  } else await db.projectMilestone.create({ data: { ...data, projectId: input.projectId } });
 
   revalidatePath(`/projects/${input.projectId}`);
   return { ok: true, data: null };
@@ -455,6 +461,13 @@ export async function deleteMilestone(id: string): Promise<ActionResult<null>> {
   if (!row) return { ok: false, error: "That milestone no longer exists." };
   if (!(await readable(row.projectId, user.id, viewAll))) {
     return { ok: false, error: "That project doesn't exist, or you're not on it." };
+  }
+  // Revenue invoiced on a stage "earned when" this is done waits for it; without it, it never would.
+  const waiting = await db.revenueSchedule.count({
+    where: { status: { in: ["PENDING_APPROVAL", "ACTIVE"] }, billingMilestone: { deliveryMilestoneId: id } },
+  });
+  if (waiting > 0) {
+    return { ok: false, error: "Revenue on a billing stage is waiting for this milestone, so it can't be removed." };
   }
   await db.projectMilestone.delete({ where: { id } });
   revalidatePath(`/projects/${row.projectId}`);
@@ -491,8 +504,11 @@ export async function saveRisk(input: {
     resolvedOn: closing ? new Date() : null,
   };
 
-  if (input.id) await db.projectRisk.update({ where: { id: input.id }, data });
-  else await db.projectRisk.create({ data: { ...data, projectId: input.projectId, raisedById: user.id } });
+  if (input.id) {
+    // Held to the project access was checked against, as a milestone's save is.
+    const { count } = await db.projectRisk.updateMany({ where: { id: input.id, projectId: input.projectId }, data });
+    if (count === 0) return { ok: false, error: "That risk isn't on this project." };
+  } else await db.projectRisk.create({ data: { ...data, projectId: input.projectId, raisedById: user.id } });
 
   revalidatePath(`/projects/${input.projectId}`);
   return { ok: true, data: null };
@@ -528,6 +544,19 @@ export async function postUpdate(input: {
   return { ok: true, data: null };
 }
 
+/**
+ * Adds or edits a billing stage.
+ *
+ * On an update, `status`, `documentId`, `deliveryMilestoneId` and `sortOrder` left out keep what the
+ * stage has: a form that doesn't show a field must not reset it — in particular it must not unlink
+ * the invoice "Raise invoice" linked. `documentId` is still accepted, for the callers that set it by
+ * hand, but only as one of this project's customer's documents; and INVOICED or PAID can no longer be
+ * set on a stage with no document behind it — a stage is invoiced by raising its invoice.
+ *
+ * `deliveryMilestoneId` is "Earned when": the delivery milestone the stage is earned on, which Revenue
+ * & Close waits for before recognising what it invoiced. It must be on the same project, and it can't
+ * move once revenue has been scheduled against it.
+ */
 export async function saveBillingMilestone(input: {
   id?: string;
   projectId: string;
@@ -537,6 +566,8 @@ export async function saveBillingMilestone(input: {
   dueOn?: string;
   status?: "PENDING" | "DUE" | "INVOICED" | "PAID" | "WAIVED";
   documentId?: string;
+  /** "Earned when": a delivery milestone on this project. Blank unlinks; left out keeps it. */
+  deliveryMilestoneId?: string;
   sortOrder?: number;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
@@ -546,14 +577,56 @@ export async function saveBillingMilestone(input: {
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.label.trim()) return { ok: false, error: "Name the stage — 'Advance', 'On UAT sign-off'." };
 
+  // An edit names the stage by id; it has to be a stage of the project the caller was checked against.
+  const existing = input.id
+    ? await db.projectBillingMilestone.findUnique({
+        where: { id: input.id },
+        select: { projectId: true, status: true, documentId: true, deliveryMilestoneId: true, sortOrder: true },
+      })
+    : null;
+  if (input.id && (!existing || existing.projectId !== input.projectId)) return { ok: false, error: "That stage no longer exists." };
+
+  const documentId = input.documentId === undefined ? (existing?.documentId ?? null) : input.documentId || null;
+  if (documentId && documentId !== existing?.documentId) {
+    const document = await db.tradeDocument.findUnique({ where: { id: documentId }, select: { companyId: true } });
+    if (!document || document.companyId !== project.companyId) {
+      return { ok: false, error: "That document isn't one of this project's customer's." };
+    }
+  }
+  const status = input.status ?? existing?.status ?? "PENDING";
+  const statusChanged = !existing || existing.status !== status;
+  if (statusChanged && (status === "INVOICED" || status === "PAID") && !documentId) {
+    return { ok: false, error: "A stage is marked invoiced by raising its invoice. Use \"Raise invoice\" on it, or mark it due." };
+  }
+
+  const deliveryMilestoneId =
+    input.deliveryMilestoneId === undefined ? (existing?.deliveryMilestoneId ?? null) : input.deliveryMilestoneId || null;
+  if (deliveryMilestoneId !== (existing?.deliveryMilestoneId ?? null)) {
+    if (deliveryMilestoneId) {
+      // The database doesn't hold the two to one project; this does.
+      const delivery = await db.projectMilestone.findUnique({ where: { id: deliveryMilestoneId }, select: { projectId: true } });
+      if (!delivery || delivery.projectId !== input.projectId) return { ok: false, error: "That milestone isn't on this project." };
+    }
+    if (input.id) {
+      const scheduled = await db.revenueSchedule.count({ where: { billingMilestoneId: input.id, status: { not: "CANCELLED" } } });
+      if (scheduled > 0) {
+        return {
+          ok: false,
+          error: "Revenue on this stage is already scheduled against the milestone it's earned on, so that can't change now.",
+        };
+      }
+    }
+  }
+
   const data = {
     label: input.label.trim(),
     percent: input.percent ? new Prisma.Decimal(input.percent) : null,
     amount: new Prisma.Decimal(input.amount || "0"),
     dueOn: input.dueOn ? new Date(`${input.dueOn}T00:00:00.000Z`) : null,
-    status: input.status ?? "PENDING",
-    documentId: input.documentId || null,
-    sortOrder: input.sortOrder ?? 0,
+    status,
+    documentId,
+    deliveryMilestoneId,
+    sortOrder: input.sortOrder ?? existing?.sortOrder ?? 0,
   };
 
   if (input.id) await db.projectBillingMilestone.update({ where: { id: input.id }, data });
@@ -562,6 +635,10 @@ export async function saveBillingMilestone(input: {
   revalidatePath(`/projects/${input.projectId}`);
   return { ok: true, data: null };
 }
+
+/** What a stage can't be removed over: revenue scheduled on it (Revenue & Close keeps the link). */
+const STAGE_HAS_REVENUE =
+  "Revenue has been scheduled on this stage, so it stays on the project. Mark it waived if it won't be billed.";
 
 export async function deleteBillingMilestone(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
@@ -572,9 +649,172 @@ export async function deleteBillingMilestone(id: string): Promise<ActionResult<n
   if (!(await readable(row.projectId, user.id, viewAll))) {
     return { ok: false, error: "That project doesn't exist, or you're not on it." };
   }
-  await db.projectBillingMilestone.delete({ where: { id } });
+  // A MILESTONE revenue schedule restricts the delete (it could never be recognised without its
+  // stage): say so, rather than letting the foreign key answer with P2003.
+  if ((await db.revenueSchedule.count({ where: { billingMilestoneId: id } })) > 0) return { ok: false, error: STAGE_HAS_REVENUE };
+  try {
+    await db.projectBillingMilestone.delete({ where: { id } });
+  } catch (err) {
+    // Scheduled in the moment between the count and the delete.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") return { ok: false, error: STAGE_HAS_REVENUE };
+    throw err;
+  }
   revalidatePath(`/projects/${row.projectId}`);
   return { ok: true, data: null };
+}
+
+/** GST on a stage whose project has no order to take the rate from: the rate most of what is sold carries (as `blankLine`). */
+const DEFAULT_TAX_RATE_PERCENT = 18;
+
+/**
+ * "Raise invoice" on a billing stage: a draft tax invoice for the project's customer, with one line —
+ * the stage's label and amount — linked back to the stage, which becomes INVOICED.
+ *
+ * The line carries `billingMilestoneId`, so Revenue & Close defers what it bills until the stage's
+ * delivery milestone is done. The tax rate and SAC are the project order's item's, where the project
+ * came from an order; otherwise the usual 18%. The address and place of supply come from the order's
+ * site, else the customer's primary location, by the same rules as the renewal and add-on proposals
+ * (`partyDetails`). It stops at a draft: issuing stays a separate, deliberate step.
+ *
+ * It needs what raising any invoice needs — Sales Documents in the plan, switched on and visible, and
+ * `documents.issue` — as well as the right to edit this project's billing. The stage is claimed after
+ * the draft is written (the link needs the draft's id), in one conditional update: of two clicks at
+ * once, one links its draft and the other deletes its own and says which invoice won.
+ */
+export async function raiseBillingMilestoneInvoice(id: string): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("projects");
+  const { viewAll, manage } = await access(user.id);
+  if (!manage) return { ok: false, error: "You can't edit this project's billing." };
+  if ((await moduleAccessFor(user.id, "sales_documents")) !== "available") {
+    return { ok: false, error: "Sales documents aren't available in this workspace, so there's nowhere to raise the invoice." };
+  }
+  if (!(await hasEffectivePermission(user.id, "documents.issue"))) {
+    return { ok: false, error: "You don't have permission to raise invoices." };
+  }
+
+  const stage = await db.projectBillingMilestone.findUnique({
+    where: { id },
+    select: { id: true, projectId: true, label: true, amount: true, status: true, documentId: true, document: { select: { docNumber: true } } },
+  });
+  if (!stage) return { ok: false, error: "That stage no longer exists." };
+  if (!(await readable(stage.projectId, user.id, viewAll))) {
+    return { ok: false, error: "That project doesn't exist, or you're not on it." };
+  }
+  if (stage.documentId) return { ok: false, error: `This stage is already invoiced on ${stage.document?.docNumber ?? "another document"}.` };
+  if (stage.status === "WAIVED") return { ok: false, error: "This stage was waived, so there's nothing to invoice." };
+  if (stage.status === "INVOICED" || stage.status === "PAID") {
+    return { ok: false, error: `This stage is already marked ${stage.status === "PAID" ? "paid" : "invoiced"}. Mark it due to raise its invoice here.` };
+  }
+  if (!(Number(stage.amount) > 0)) return { ok: false, error: "Give the stage an amount before invoicing it." };
+
+  const project = await db.project.findUnique({
+    where: { id: stage.projectId },
+    select: {
+      code: true,
+      name: true,
+      companyId: true,
+      company: { select: { name: true } },
+      companyProduct: { select: { locationId: true, item: { select: { hsnCode: true, taxRatePercent: true } } } },
+    },
+  });
+  if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
+
+  const siteSelect = { id: true, address: true, city: true, state: true, pincode: true, country: true, gstNumber: true, gstTreatment: true } as const;
+  const site = project.companyProduct
+    ? await db.companyLocation.findUnique({ where: { id: project.companyProduct.locationId }, select: siteSelect })
+    : await db.companyLocation.findFirst({
+        where: { companyId: project.companyId },
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+        select: siteSelect,
+      });
+  const party = partyDetails(site, project.company.name);
+  if (!party.ok) return party;
+
+  const orderItem = project.companyProduct?.item ?? null;
+  const created = await createTradeDocument({
+    docType: "INVOICE",
+    companyId: project.companyId,
+    locationId: party.data.locationId,
+    docNumber: "",
+    placeOfSupplyCode: party.data.placeOfSupplyCode,
+    gstTreatment: party.data.gstTreatment,
+    buyerGstin: party.data.gstin,
+    reverseCharge: false,
+    currency: "INR",
+    exchangeRate: 1,
+    issueDate: todayInIndia(),
+    dueDate: "",
+    validUntil: "",
+    // The project's reference, so the invoice can be found from the project and the other way round.
+    reference: project.code,
+    salespersonId: "",
+    notes: "",
+    terms: "",
+    dispatchFromAddress: "",
+    billing: party.data.address,
+    shippingSameAsBilling: true,
+    shipping: party.data.address,
+    shippingGstin: "",
+    shippingCharge: 0,
+    shippingTaxRatePercent: 0,
+    withholdingMode: "NONE",
+    withholdingSection: "",
+    withholdingRatePercent: 0,
+    adjustmentLabel: "",
+    adjustment: 0,
+    sourceDocumentId: "",
+    leadId: "",
+    againstDocumentId: "",
+    lines: [
+      {
+        itemId: "",
+        companyProductId: "",
+        name: stage.label,
+        description: `${project.code} · ${project.name}`,
+        hsnCode: orderItem?.hsnCode ?? "",
+        unit: "",
+        quantity: 1,
+        unitPrice: Number(stage.amount),
+        discountMode: "PERCENT",
+        discountValue: 0,
+        taxRatePercent: orderItem?.taxRatePercent != null ? Number(orderItem.taxRatePercent) : DEFAULT_TAX_RATE_PERCENT,
+      },
+    ],
+  });
+  if (!created.ok) return created;
+  const invoiceId = created.data.id;
+
+  const linked = await db.$transaction(async (tx) => {
+    const claimed = await tx.projectBillingMilestone.updateMany({
+      where: { id, documentId: null, status: { in: ["PENDING", "DUE"] } },
+      data: { documentId: invoiceId, status: "INVOICED" },
+    });
+    if (claimed.count !== 1) return false;
+    await tx.tradeDocumentLine.updateMany({ where: { documentId: invoiceId }, data: { billingMilestoneId: id } });
+    return true;
+  });
+  if (!linked) {
+    // Somebody raised it a moment earlier, or the stage changed: this draft is surplus.
+    await db.tradeDocument.delete({ where: { id: invoiceId } }).catch(() => {});
+    const winner = await db.projectBillingMilestone.findUnique({ where: { id }, select: { document: { select: { docNumber: true } } } });
+    return {
+      ok: false,
+      error: winner?.document
+        ? `This stage was invoiced a moment ago, on ${winner.document.docNumber}.`
+        : "This stage changed while its invoice was being raised. Refresh and try again.",
+    };
+  }
+
+  const invoice = await db.tradeDocument.findUnique({ where: { id: invoiceId }, select: { docNumber: true } });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "ProjectBillingMilestone",
+    entityId: id,
+    entityLabel: `${project.code} · ${stage.label} invoiced on draft ${invoice?.docNumber ?? invoiceId}`,
+  });
+  revalidatePath(`/projects/${stage.projectId}`);
+  return { ok: true, data: { id: invoiceId } };
 }
 
 // ─── Options ────────────────────────────────────────────────────────────────────────────────────

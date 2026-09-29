@@ -86,12 +86,17 @@ export function isViewPermission(key: string): boolean {
 export const resolveUserPermissions = cache(async (userId: string): Promise<ResolvedPermissions> => {
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, active: true, isSuperAdmin: true },
+    select: { id: true, role: true, active: true, isSuperAdmin: true, kind: true },
   });
 
   const sources = new Map<string, PermissionSource>();
 
-  if (!user) {
+  /**
+   * The workspace's Automation account (src/lib/automation-user.ts) holds nothing, whatever its role
+   * and whatever is granted to it. Nobody signs in as it, and the postings it makes never ask the
+   * permission system. It can't be a super admin (the database refuses that), so rule 1 is not skipped.
+   */
+  if (!user || user.kind === "AUTOMATION") {
     for (const def of PERMISSIONS) sources.set(def.key, { via: "none" });
     return { userId, role: null, isSuperAdmin: false, active: false, sources };
   }

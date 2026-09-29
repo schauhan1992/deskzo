@@ -353,7 +353,8 @@ export async function listJournalEntries(params: {
         reversesId: true,
         reversedBy: { select: { id: true, entryNumber: true } },
         company: { select: { id: true, name: true } },
-        createdBy: { select: { name: true } },
+        // `kind`, so an entry by the Automation account reads "Posted automatically" (src/lib/people.ts).
+        createdBy: { select: { name: true, kind: true } },
         lines: {
           orderBy: { sortOrder: "asc" },
           select: {

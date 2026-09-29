@@ -27,6 +27,7 @@ import {
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
 import { noPasswordYet } from "@/lib/no-password";
+import { isSystemAddress, PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * User accounts, their roles, and the reporting line everything else is scoped against.
@@ -141,6 +142,7 @@ async function loadUser(where: { userSeq: number } | { email: string }) {
       role: true,
       isSuperAdmin: true,
       active: true,
+      kind: true,
       department: { select: { name: true } },
       manager: { select: { name: true } },
     },
@@ -202,7 +204,13 @@ async function resolve(row: Record<string, string>, ctx: ImportContext): Promise
   // Not `findUser` from lookups: that excludes deactivated accounts, which is right for naming
   // somebody else but wrong for the subject of the row — a leaver's row would silently become a
   // second account on the same address.
-  const existing = seq !== null ? await loadUser({ userSeq: seq }) : await loadUser({ email });
+  // Platform support's and the Automation account's addresses are nobody's (src/lib/people.ts): no row
+  // makes an account with one, and no row edits one of those accounts.
+  if (email && isSystemAddress(email)) {
+    return { error: `${email} is a reserved address, not a person's. Use the person's own email.` };
+  }
+  const found = seq !== null ? await loadUser({ userSeq: seq }) : await loadUser({ email });
+  const existing = found && found.kind === PEOPLE_ONLY.kind ? found : null;
   if (seq !== null && !existing) {
     return { error: `No user with key ${keyOf("USR", seq)}. Remove the Key cell to create a new account.` };
   }

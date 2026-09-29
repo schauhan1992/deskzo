@@ -78,6 +78,10 @@
     "check:eway": "tsx scripts/check-eway.ts",
     "check:handover": "tsx scripts/check-handover.ts",
     "check:projects": "tsx scripts/check-projects.ts",
+    "check:revenue-capture": "tsx scripts/check-revenue-capture.ts",
+    "check:revenue-core": "tsx scripts/check-revenue-core.ts",
+    "check:revenue": "tsx scripts/check-revenue.ts",
+    "check:revenue-ui": "tsx scripts/check-revenue-ui.ts",
     "check:vault": "tsx scripts/check-vault.ts",
     "check:engagement": "tsx scripts/check-engagement.ts",
     "check:visitors": "tsx scripts/check-visitors.ts",
@@ -144,7 +148,11 @@
     "check:partners": "tsx scripts/check-partners.ts",
     "check:support": "tsx scripts/check-support.ts",
     "check:access-lock": "tsx scripts/check-access-lock.ts",
-    "check:ledger-close": "tsx scripts/check-ledger-close.ts"
+    "check:automation-user": "tsx scripts/check-automation-user.ts",
+    "check:ledger-close": "tsx scripts/check-ledger-close.ts",
+    "check:close": "tsx scripts/check-close.ts",
+    "check:close-core": "tsx scripts/check-close-core.ts",
+    "check:close-ui": "tsx scripts/check-close-ui.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

@@ -3,6 +3,7 @@ import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { isAutomationKind } from "@/lib/people";
 
 /**
  * "View as" — an admin working inside another user's account.
@@ -101,12 +102,13 @@ export async function resolveViewAs(sessionUserId: string): Promise<ViewAsContex
     }),
     db.user.findUnique({
       where: { id: ticket.targetId },
-      select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true },
+      select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true, kind: true },
     }),
   ]);
 
   if (!actor?.active || actor.role !== "ADMIN") return null;
-  if (!target?.active) return null;
+  // Never the Automation account (src/lib/automation-user.ts): nobody is ever it, not even by borrowing it.
+  if (!target?.active || isAutomationKind(target.kind)) return null;
 
   /**
    * Re-checked here, not only where the ticket was issued.

@@ -18,6 +18,7 @@ import { UnauthorizedError, currentUser, requireUser, viewAsContext } from "@/li
 import { HOST_MISMATCH, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { currentTenant, currentTenantOrNull, tenantOrigin } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
+import { isSystemAddress } from "@/lib/people";
 
 /**
  * Linked sign-in, for the person (spec §8.4): linking their own accounts in other workspaces, switching
@@ -151,7 +152,8 @@ async function clearCookie(cookie: LinkCookie, secure: boolean): Promise<void> {
   (await cookies()).delete({ name: linkCookieName(cookie, secure), ...cookieAttributes(secure) });
 }
 
-const isSupportAddress = (email: string) => email.trim().toLowerCase().endsWith("@platform.invalid");
+// Platform support's and the Automation account's addresses (src/lib/people.ts): nobody's, so never linked.
+const isSupportAddress = (email: string) => isSystemAddress(email);
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
 // ─── The list ────────────────────────────────────────────────────────────────────────────────────

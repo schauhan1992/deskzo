@@ -11,6 +11,7 @@ import { hashDeviceToken, validDeviceToken } from "@/lib/access/device-token";
 import { lookupIp, placeText } from "@/lib/access/geo";
 import { isPrivateIp, normaliseIp, parseIp } from "@/lib/access/ip";
 import { companyLock, companyLockActive, forgetCompanyLock, personalLockActive } from "@/lib/access/lock";
+import { isAutomationKind } from "@/lib/people";
 
 /**
  * The access gate: may this signed-in request go on?
@@ -168,7 +169,9 @@ export async function evaluateAccess(input: GateInput): Promise<GateVerdict> {
     where: { id: input.userId },
     select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true, lockedAt: true, lockedUntil: true, kind: true },
   });
-  if (!user) {
+  // The Automation account (src/lib/automation-user.ts) never has a session: whatever claims to be it
+  // is ended here, before a device or a network is recorded for it.
+  if (!user || isAutomationKind(user.kind)) {
     const verdict: GateVerdict = { ok: false, reason: "SESSION_ENDED", deviceId: null, deviceStatus: null, kind };
     verdicts.set(cacheKey, { verdict, expiresAt: now.getTime() + VERDICT_TTL_MS });
     return verdict;

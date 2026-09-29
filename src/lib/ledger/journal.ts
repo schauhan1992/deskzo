@@ -37,12 +37,22 @@ import {
   exchangeDifference,
   inRupees,
   reverseLines,
+  revenueOf,
   type PayrollTotals,
   type DocumentFinancials,
   type DraftLine,
 } from "@/lib/ledger/posting";
 import { financialYearOf } from "@/lib/gst-engine";
 import { isLockedDate } from "@/lib/ledger/period";
+import {
+  applyCreditReduction,
+  createInvoiceSchedules,
+  onCreditNoteCancelled,
+  onInvoiceCancelled,
+  planCreditReduction,
+  planInvoiceDeferral,
+  type RevenueEntryDraft,
+} from "@/lib/revenue/deferral";
 
 type Tx = Prisma.TransactionClient;
 
@@ -318,6 +328,8 @@ export const documentPostingSelect = {
   taxableValue: true, cgstAmount: true, sgstAmount: true, igstAmount: true,
   shippingCharge: true, withholdingAmount: true, adjustment: true, adjustmentLabel: true,
   roundOff: true, total: true, currency: true, exchangeRate: true, branchId: true, gstRegistrationId: true,
+  // A credit note's invoice, whose revenue schedules it may reduce (src/lib/revenue/deferral.ts).
+  againstDocumentId: true,
 } satisfies Prisma.TradeDocumentSelect;
 
 export type PostableDocument = Prisma.TradeDocumentGetPayload<{ select: typeof documentPostingSelect }>;
@@ -347,6 +359,14 @@ function financialsOf(doc: PostableDocument): DocumentFinancials {
     },
     bookingRate(doc),
   );
+}
+
+/**
+ * A document's revenue in rupees exactly as its entry books it: taxable value less freight, each
+ * converted at the document's rate. What Revenue & Close shares across the lines (src/lib/revenue).
+ */
+export function revenueInRupees(doc: PostableDocument): number {
+  return revenueOf(financialsOf(doc));
 }
 
 /** The sources a document's own posting is written under — not a reversal's, not an exchange difference's. */
@@ -381,17 +401,30 @@ export async function currentDocumentEntry(tx: Tx, documentId: string) {
  * Writes a document's entry: at its issue date when it is first posted, or on the day the repair
  * chooses when `ledger:repost-fx` posts it again. The repair passes the original's branch and GSTIN
  * so the re-post lands where the original did.
+ *
+ * `deferred` (an invoice) and `deferredReduction` (a credit note) are Revenue & Close's, in rupees:
+ * what goes to Deferred Revenue instead of Sales or Sales Returns. Left out, the entry is as it always was.
  */
 export async function writeDocumentEntry(
   tx: Tx,
   doc: PostableDocument,
   userId: string,
-  at: { date: Date; note?: string; tags?: { branchId: string | null; gstRegistrationId: string | null } },
+  at: {
+    date: Date;
+    note?: string;
+    tags?: { branchId: string | null; gstRegistrationId: string | null };
+    deferred?: number;
+    deferredReduction?: number;
+  },
 ): Promise<{ id: string; entryNumber: string }> {
   if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "BILL") {
     throw new Error(`A ${doc.docType} does not post to the ledger.`);
   }
-  const financials = financialsOf(doc);
+  const financials: DocumentFinancials = {
+    ...financialsOf(doc),
+    ...(at.deferred ? { deferred: at.deferred } : {}),
+    ...(at.deferredReduction ? { deferredReduction: at.deferredReduction } : {}),
+  };
   const draft =
     doc.docType === "INVOICE"
       ? postSalesInvoice(financials)
@@ -427,6 +460,17 @@ export async function writeDocumentEntry(
  * entry written for a document that then failed to issue. Posting the same document twice is a
  * no-op rather than an error — issuing is idempotent in places and double-posting would silently
  * double the revenue.
+ *
+ * Revenue & Close (src/lib/revenue/deferral.ts), in the same transaction:
+ *
+ *   · **An invoice** with lines earned over time — a service period past the issue month, a
+ *     subscription, a project stage not yet delivered — credits their share of its revenue to
+ *     Deferred Revenue instead of Sales, and gets a schedule per such line. Only while the add-on is
+ *     on; otherwise, and for every other invoice, the entry is exactly what it always was.
+ *   · **A credit note** against an invoice with schedules takes what it can off their unrecognised
+ *     balance first (Dr Deferred Revenue), the rest being a sales return as before.
+ *
+ * Both happen only when the entry is first written, so issuing again never touches a schedule.
  */
 export async function postDocumentToLedger(
   tx: Tx,
@@ -452,7 +496,38 @@ export async function postDocumentToLedger(
     return { id: entry.id, entryNumber: entry.entryNumber };
   }
 
+  if (doc.docType === "INVOICE") {
+    const plan = await planInvoiceDeferral(tx, doc, revenueInRupees(doc));
+    if (plan) {
+      // The schedules go under the branch and GSTIN the entry does, so recognition lands where the
+      // invoice did.
+      const tags = { branchId: doc.branchId ?? (await headOfficeOf(tx))?.id ?? null, gstRegistrationId: doc.gstRegistrationId };
+      const entry = await writeDocumentEntry(tx, doc, userId, { date: doc.issueDate, tags, deferred: plan.deferred });
+      await createInvoiceSchedules(tx, doc, plan, { userId, ...tags });
+      return entry;
+    }
+  } else if (doc.docType === "CREDIT_NOTE") {
+    const plan = await planCreditReduction(tx, doc, revenueInRupees(doc));
+    if (plan) {
+      const entry = await writeDocumentEntry(tx, doc, userId, { date: doc.issueDate, deferredReduction: plan.total });
+      await applyCreditReduction(tx, doc.id, plan);
+      return entry;
+    }
+  }
+
   return writeDocumentEntry(tx, doc, userId, { date: doc.issueDate });
+}
+
+/** Writes one of Revenue & Close's own entries (src/lib/revenue/deferral.ts) through the write door. */
+async function writeRevenueEntry(tx: Tx, draft: RevenueEntryDraft, userId: string) {
+  return writeEntry(tx, {
+    date: draft.date,
+    narration: draft.narration,
+    source: "REVENUE",
+    userId,
+    lines: await materialise(tx, draft),
+    companyId: draft.companyId,
+  });
 }
 
 /** Posts a payment. Direction decides whether it settles a receivable or a payable. */
@@ -545,19 +620,26 @@ export function reversedLines(lines: Prisma.JournalLineGetPayload<{ select: type
  * It reverses the document's *current* entry. It used to take the first entry carrying the document,
  * which after a repair is the original the repair already reversed — so it found nothing to do and
  * left the re-post standing — and could be an exchange difference, which is the payment's.
+ *
+ * Revenue & Close follows in the same transaction (src/lib/revenue/deferral.ts). An invoice's
+ * schedules are cancelled, and one more entry takes back out of Sales what they had recognised since,
+ * so Sales and Deferred Revenue net to nil over the invoice's life. A credit note's reductions go back
+ * onto its invoice's schedules. Both run only when there was an entry to reverse, so cancelling twice
+ * does nothing more.
  */
 export async function reverseDocumentPosting(tx: Tx, documentId: string, userId: string) {
   const original = await tx.journalEntry.findFirst({
     where: currentDocumentEntryWhere(documentId),
     orderBy: { createdAt: "desc" },
     select: {
-      id: true, entryNumber: true, companyId: true,
+      id: true, entryNumber: true, companyId: true, source: true,
+      document: { select: { docNumber: true } },
       lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect },
     },
   });
   if (!original) return null;
 
-  return writeEntry(tx, {
+  const reversal = await writeEntry(tx, {
     date: new Date(),
     narration: `Reversal of ${original.entryNumber} — document cancelled`,
     source: "MANUAL",
@@ -566,6 +648,21 @@ export async function reverseDocumentPosting(tx: Tx, documentId: string, userId:
     companyId: original.companyId,
     reversesId: original.id,
   });
+
+  const docNumber = original.document?.docNumber ?? original.entryNumber;
+  const revenue =
+    original.source === "INVOICE"
+      ? await onInvoiceCancelled(
+          tx,
+          { id: documentId, docNumber, companyId: original.companyId },
+          original.lines.map((l) => ({ ...l, debit: Number(l.debit), credit: Number(l.credit) })),
+        )
+      : original.source === "CREDIT_NOTE"
+        ? await onCreditNoteCancelled(tx, { id: documentId, docNumber })
+        : null;
+  if (revenue) await writeRevenueEntry(tx, revenue, userId);
+
+  return reversal;
 }
 
 /**

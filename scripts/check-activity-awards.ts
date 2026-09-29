@@ -37,6 +37,7 @@ import {
 } from "../src/lib/performance/awards";
 import { momentsFor } from "../src/lib/hr/celebrations";
 import { istMidnight } from "../src/lib/india-time";
+import { PEOPLE_ONLY } from "../src/lib/people";
 
 let actor = { id: "", name: "Zzprobe" };
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -370,7 +371,8 @@ async function main() {
     const runs = await Promise.all([1, 2, 3].map(() => announce.announceActivityAwards(morning)));
     ok("three at once announce it once", runs.filter((r) => r.announced === "2099-03-A").length === 1, runs.map((r) => r.announced).join());
     ok("  and a fourth later says nothing new", (await announce.announceActivityAwards(new Date(morning.getTime() + HOUR))).announced === null);
-    const activeCount = await db.user.count({ where: { active: true } });
+    // People only: this is the raw client, which also sees the workspace's Automation account (never notified).
+    const activeCount = await db.user.count({ where: { active: true, ...PEOPLE_ONLY } });
     const all = await everyNote();
     const perPerson = new Map<string, number>();
     for (const n of all) perPerson.set(n.userId, (perPerson.get(n.userId) ?? 0) + 1);

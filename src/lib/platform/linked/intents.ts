@@ -26,6 +26,7 @@ import { sendPlatformMail } from "@/lib/platform/mailer";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { tenantKey } from "@/lib/tenancy/cache";
+import { isSystemAddress } from "@/lib/people";
 import { SLUG_PATTERN, normaliseHost, protocolFor } from "@/lib/tenancy/host";
 import { tenantById, tenantBySlug, tenantForHost } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
@@ -89,7 +90,8 @@ async function signInOf(tenant: Tenant, sid: string | undefined) {
   return runAsTenant(tenant, async () => await db.signIn.findUnique({ where: { sid }, select: { userId: true, provider: true, at: true } }));
 }
 
-const isSupportAddress = (email: string) => email.trim().toLowerCase().endsWith("@platform.invalid");
+// Platform support's and the Automation account's addresses (src/lib/people.ts): nobody's, so never linked.
+const isSupportAddress = (email: string) => isSystemAddress(email);
 
 /** Only a person's own, active, ordinary account links — never platform support's. */
 function mustBeMember(user: Account | null): asserts user is Account {

@@ -12,7 +12,7 @@ import { ItemDetailFields, type BrandOption } from "@/components/items/item-fiel
 
 type FormValues = z.input<typeof createItemSchema>;
 
-export function NewItemForm({ brands }: { brands: BrandOption[] }) {
+export function NewItemForm({ brands, showRevenuePattern = false }: { brands: BrandOption[]; showRevenuePattern?: boolean }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const {
@@ -62,6 +62,7 @@ export function NewItemForm({ brands }: { brands: BrandOption[] }) {
         onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
         trackInventory={!!trackInventory}
         showOpeningStock
+        showRevenuePattern={showRevenuePattern}
       />
 
       <div className="flex justify-end gap-3">

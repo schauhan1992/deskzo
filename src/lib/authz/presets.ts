@@ -199,6 +199,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "ledger.viewReports",
       "expenses.reimburse",
       "expenses.viewAll",
+      "revenue.viewReports",
+      "close.work",
     ],
   },
   {
@@ -231,6 +233,10 @@ export const ROLE_PRESETS: RolePreset[] = [
       "data.exportFinance",
       "data.importFinance",
       "purchase.reconcile",
+      "revenue.viewReports",
+      "revenue.manage",
+      "close.work",
+      "close.manage",
     ],
   },
   // ─── Purchase ───────────────────────────────────────────────────────────────────────────────

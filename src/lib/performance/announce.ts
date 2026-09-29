@@ -5,6 +5,7 @@ import { notifyUser } from "@/lib/notify";
 import { SLA_HOURS } from "@/lib/tickets";
 import { addDays, dateOnly } from "@/lib/hr/calendar";
 import { istDateParts } from "@/lib/india-time";
+import { PEOPLE_ONLY } from "@/lib/people";
 import { awardSettings } from "@/lib/performance/award-settings";
 import { prizeNames, prizesForPeriod, recordWinners, winsModuleOn } from "@/lib/wins/prize-store";
 import type { Slot } from "@/lib/wins/prizes";
@@ -116,7 +117,9 @@ export async function activityCounts(f: Pick<Fortnight, "from" | "to" | "firstDa
 export async function standingsFor(f: Pick<Fortnight, "from" | "to" | "firstDay" | "lastDay">): Promise<Standing[]> {
   const counts = await activityCounts(f);
   if (counts.size === 0) return [];
-  const people = await db.user.findMany({ where: { id: { in: [...counts.keys()] }, active: true }, select: { id: true, name: true } });
+  // People only: the Automation account's postings, or a support account's work, are nobody's to rank
+  // (src/lib/people.ts). Naming `id` takes this past db's own filter.
+  const people = await db.user.findMany({ where: { id: { in: [...counts.keys()] }, active: true, ...PEOPLE_ONLY }, select: { id: true, name: true } });
   return rank(people.map((p) => ({ userId: p.id, name: p.name, counts: counts.get(p.id)! })));
 }
 

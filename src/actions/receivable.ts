@@ -10,6 +10,7 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
 import { ensureHeadOffice } from "@/lib/branches/identity";
+import { syncBillingMilestones } from "@/lib/projects/billing-sync";
 import {
   settleInvoice,
   settledStatus,
@@ -57,6 +58,8 @@ async function syncInvoiceStatus(invoiceId: string) {
   if (next !== invoice.status) {
     await db.tradeDocument.update({ where: { id: invoiceId }, data: { status: next } });
   }
+  // The project billing stage raised on this invoice, if any — see src/lib/projects/billing-sync.ts.
+  await syncBillingMilestones(invoiceId);
 }
 
 /**

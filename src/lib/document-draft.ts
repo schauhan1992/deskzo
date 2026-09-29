@@ -19,6 +19,25 @@ export type LineDraft = {
   discountMode: string;
   discountValue: string;
   taxRatePercent: string;
+  /** The order this line bills, when it was taken from one ("Bills order"). */
+  companyProductId: string;
+  /** The catalogue item's type, when the line came from one — decides whether the period is offered. */
+  itemType: string;
+  /** Its billing cycle: a subscription's default period is one cycle from the document's date. */
+  itemCycle: string;
+  /** The period the line pays for, `yyyy-mm-dd` at both ends, or both blank. */
+  servicePeriodFrom: string;
+  servicePeriodTo: string;
+  /**
+   * Where the period came from, so a default can follow the order or item and never overwrite what
+   * somebody typed: "order" or "item" while it is a default, "typed" once edited (and for a period the
+   * document was saved with), blank for none.
+   */
+  periodSource: LinePeriodSource;
+  /** Set once somebody asks for a period on a line whose item doesn't suggest one. */
+  periodOpen: boolean;
+  /** The project billing stage this line bills — set by "Raise invoice", carried through an edit. */
+  billingMilestoneId: string;
 };
 
 export type AddressDraft = {
@@ -107,6 +126,14 @@ export function blankLine(): LineDraft {
     discountValue: "0",
     // 18% covers most of what Wroffy sells; the catalogue overrides it as soon as an item is picked.
     taxRatePercent: "18",
+    companyProductId: "",
+    itemType: "",
+    itemCycle: "",
+    servicePeriodFrom: "",
+    servicePeriodTo: "",
+    periodSource: "",
+    periodOpen: false,
+    billingMilestoneId: "",
   };
 }
 
@@ -172,3 +199,4 @@ export function formatAddress(parts: {
 }
 import { BASE_CURRENCY } from "@/lib/currency";
 import { istDateTimeInput } from "@/lib/india-time";
+import type { LinePeriodSource } from "@/lib/documents/service-period";

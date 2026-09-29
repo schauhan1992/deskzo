@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { logActivity } from "@/lib/activity";
 import { clearViewAsCookie, resolveViewAs, setViewAsCookie } from "@/lib/impersonation";
+import { isAutomationKind, PEOPLE_ONLY } from "@/lib/people";
 import { UnauthorizedError } from "@/lib/session";
 import type { ActionResult } from "@/actions/company";
 
@@ -51,9 +52,10 @@ export async function startViewingAs(targetUserId: string): Promise<ActionResult
 
   const target = await db.user.findUnique({
     where: { id: targetUserId },
-    select: { id: true, name: true, active: true, isSuperAdmin: true },
+    select: { id: true, name: true, active: true, isSuperAdmin: true, kind: true },
   });
-  if (!target) return { ok: false, error: "That user no longer exists." };
+  // The Automation account (src/lib/automation-user.ts) is nobody's, so there is nobody to view as.
+  if (!target || isAutomationKind(target.kind)) return { ok: false, error: "That user no longer exists." };
   if (!target.active) return { ok: false, error: `${target.name}'s account is deactivated.` };
 
   /**
@@ -141,6 +143,8 @@ export async function listViewAsTargets() {
     where: {
       active: true,
       id: { not: actor.id },
+      // Naming `id` takes this past db's own filter (src/lib/db.ts), so people only is said here.
+      ...PEOPLE_ONLY,
       ...(actor.isSuperAdmin ? {} : { isSuperAdmin: false }),
     },
     orderBy: [{ role: "asc" }, { name: "asc" }],

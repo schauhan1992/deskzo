@@ -9,7 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { ensureChartOfAccounts } from "@/lib/ledger/journal";
 import { financialYearBounds, startYearOf } from "@/lib/ledger/period";
 import { closeFinancialYearInBooks, reopenFinancialYearInBooks } from "@/lib/ledger/year-end";
-import { istCalendarDate } from "@/lib/india-time";
+import { auditBooksLock, auditReopenedCloseMonths, closedCloseMonths, moveBooksLock } from "@/lib/ledger/books-lock";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -38,7 +38,7 @@ async function requireAdmin() {
 
 export async function getBooksStatus() {
   await requireModuleUser("accounting");
-  const [lock, closes] = await Promise.all([
+  const [lock, closes, closedMonths] = await Promise.all([
     db.ledgerLock.findUnique({ where: { id: "global" }, include: { updatedBy: { select: { name: true } } } }),
     db.fiscalYearClose.findMany({
       orderBy: { toDate: "desc" },
@@ -47,6 +47,9 @@ export async function getBooksStatus() {
         closingEntry: { select: { id: true, entryNumber: true } },
       },
     }),
+    // The months the month-end close shows as closed (none without Revenue & Close), so the form can
+    // say which of them moving the lock back would reopen.
+    closedCloseMonths(db),
   ]);
 
   const fy = financialYearBounds(new Date());
@@ -57,6 +60,7 @@ export async function getBooksStatus() {
     lockUpdatedAt: lock?.updatedAt ?? null,
     closes,
     currentYear: fy,
+    closedMonths,
   });
 }
 
@@ -64,37 +68,13 @@ export async function setBooksLock(input: { lockedUntil: string | null; note?: s
   const { user, allowed } = await requireAdmin();
   if (!allowed) return { ok: false, error: "Only an admin can close the books." };
 
-  const lockedUntil = input.lockedUntil ? new Date(`${input.lockedUntil}T00:00:00.000Z`) : null;
-  if (input.lockedUntil && Number.isNaN(lockedUntil!.getTime())) {
-    return { ok: false, error: "That isn't a date." };
-  }
-  // A lock into the future would refuse entries for work that hasn't happened yet, which is not a
-  // lock — it is the books being shut. Today counts as India's today: the lock is a calendar day,
-  // and compared with the instant now it refused today's date until 05:30 IST.
-  if (lockedUntil && lockedUntil > istCalendarDate(new Date())) {
-    return { ok: false, error: "You can't lock a period that hasn't finished." };
-  }
-
-  const existing = await db.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
-  const loosening = existing?.lockedUntil && (!lockedUntil || lockedUntil < existing.lockedUntil);
-
-  await db.ledgerLock.upsert({
-    where: { id: "global" },
-    create: { id: "global", lockedUntil, note: input.note?.trim() || null, updatedById: user.id },
-    update: { lockedUntil, note: input.note?.trim() || null, updatedById: user.id },
-  });
-
-  await recordAudit({
-    userId: user.id,
-    action: "UPDATE",
-    entityType: "LedgerLock",
-    entityId: "global",
-    // Loosening a lock is the interesting event, so it is what the log says rather than just the
-    // new value — "reopened to 2025-04-01" reads differently from "locked to 2025-04-01".
-    entityLabel: lockedUntil
-      ? `${loosening ? "Reopened" : "Locked"} the books to ${input.lockedUntil}`
-      : "Removed the period lock entirely",
-  });
+  // The rules (no lock into a period that hasn't finished, by India's today) and the audit wording
+  // (a loosening reads "Reopened") live in src/lib/ledger/books-lock.ts, which the month-end close
+  // moves the lock through too. In a transaction, because a lock moved back under a closed month
+  // reopens that month with it.
+  const moved = await db.$transaction((tx) => moveBooksLock(tx, { lockedUntil: input.lockedUntil, note: input.note, userId: user.id }));
+  if (!moved.ok) return moved;
+  await auditBooksLock(user.id, moved.change);
   revalidatePath("/accounting/books");
   return { ok: true, data: null };
 }
@@ -149,7 +129,7 @@ export async function reopenFinancialYear(label: string): Promise<ActionResult<n
   try {
     // The lock rolled back, the closing entry reversed through the write door (numbered, tags kept),
     // and the close record removed — src/lib/ledger/year-end.ts, in this one transaction.
-    const { closeId } = await db.$transaction((tx) => reopenFinancialYearInBooks(tx, { label, userId: user.id }));
+    const { closeId, reopenedMonths } = await db.$transaction((tx) => reopenFinancialYearInBooks(tx, { label, userId: user.id }));
 
     await recordAudit({
       userId: user.id,
@@ -158,6 +138,8 @@ export async function reopenFinancialYear(label: string): Promise<ActionResult<n
       entityId: closeId,
       entityLabel: `Reopened ${label} — closing entry reversed`,
     });
+    // Months the month-end close showed as closed in (or after) the year reopen with it.
+    await auditReopenedCloseMonths(user.id, reopenedMonths, `${label} was reopened on Close the Books`);
     revalidatePath("/accounting/books");
     return { ok: true, data: null };
   } catch (error) {

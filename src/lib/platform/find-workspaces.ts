@@ -7,6 +7,7 @@ import { withClient } from "@/lib/tenancy/clients";
 import { activeTenants, tenantById } from "@/lib/tenancy/registry";
 import { runAsTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * "Find my workspaces" — the public site's sign-in page emails somebody a link to every workspace
@@ -136,7 +137,7 @@ export async function findWorkspacesFor(email: string, options: { timeoutMs?: nu
       const member = await within(
         withClient(tenant, async (c) =>
           await c.user.findFirst({
-            where: { ...(userIds ? { id: { in: userIds } } : {}), email: { equals: address, mode: "insensitive" }, active: true, kind: "MEMBER" },
+            where: { ...(userIds ? { id: { in: userIds } } : {}), email: { equals: address, mode: "insensitive" }, active: true, ...PEOPLE_ONLY },
             select: { id: true },
           }),
         ),

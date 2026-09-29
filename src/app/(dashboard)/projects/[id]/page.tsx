@@ -47,10 +47,14 @@ export default async function ProjectPage({
   const project = await getProject(id);
   if (!project) notFound();
 
-  const [canManage, canUseCredentials, options] = await Promise.all([
+  const [canManage, canUseCredentials, options, salesDocuments, canIssue] = await Promise.all([
     hasEffectivePermission(user.id, "projects.manage"),
     hasEffectivePermission(user.id, "projects.credentials"),
     projectFormOptions(project.companyId),
+    // "Raise invoice" writes a Sales Documents invoice: offered only where that module is available
+    // to this person, and they may raise invoices.
+    isModuleEnabled("sales_documents"),
+    hasEffectivePermission(user.id, "documents.issue"),
   ]);
 
   // Fetched only when they hold the key, and only for the tab that shows them.
@@ -148,6 +152,7 @@ export default async function ProjectPage({
             billing={project.billingMilestones}
             hasType={!!project.typeId}
             canManage={canManage}
+            canRaiseInvoice={canManage && salesDocuments && canIssue}
             now={now.getTime()}
           />
         )}

@@ -193,6 +193,13 @@ export async function createProposalFromRenewal(input: {
         companyProductId: product.id,
         name: product.item.name,
         description: `Renewal — ${draft.term.startDate} to ${draft.term.endDate}${seats}`,
+        /**
+         * The new term, as the line's service period — the same dates the description states. Set
+         * here rather than left to the order default: `companyProductId` points at the subscription
+         * being renewed, whose own term is the one ending.
+         */
+        servicePeriodFrom: draft.term.startDate,
+        servicePeriodTo: draft.term.endDate,
         hsnCode: product.item.hsnCode ?? "",
         unit: product.item.unit ?? "",
         quantity: draft.quantity,

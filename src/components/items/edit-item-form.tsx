@@ -20,7 +20,16 @@ type ItemWithPlainPrices = Omit<Item, "costPrice" | "sellingPrice" | "taxRatePer
   taxRatePercent: number | null;
 };
 
-export function EditItemForm({ item, brands }: { item: ItemWithPlainPrices; brands: BrandOption[] }) {
+export function EditItemForm({
+  item,
+  brands,
+  showRevenuePattern = false,
+}: {
+  item: ItemWithPlainPrices;
+  brands: BrandOption[];
+  /** Revenue & Close is available, so the form asks how this item's revenue is recognised. */
+  showRevenuePattern?: boolean;
+}) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const {
@@ -50,6 +59,7 @@ export function EditItemForm({ item, brands }: { item: ItemWithPlainPrices; bran
       trackInventory: item.trackInventory,
       reorderLevel: item.reorderLevel ?? undefined,
       active: item.active,
+      revenuePattern: item.revenuePattern ?? "",
     },
   });
 
@@ -92,6 +102,7 @@ export function EditItemForm({ item, brands }: { item: ItemWithPlainPrices; bran
         brandId={brandId}
         onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
         trackInventory={!!trackInventory}
+        showRevenuePattern={showRevenuePattern}
       />
 
       <div className="flex justify-end gap-3">

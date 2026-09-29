@@ -11,6 +11,7 @@ import { throttle } from "@/lib/security/throttle";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { logActivity } from "@/lib/activity";
 import { clientIpFrom } from "@/lib/client-ip";
+import { isAutomationKind } from "@/lib/people";
 
 /**
  * Who is asking, as well as it can be known behind a proxy.
@@ -70,7 +71,9 @@ export async function checkCredentials(email: string, password: string): Promise
   }
 
   const user = await db.user.findUnique({ where: { email } });
-  if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) {
+  // The Automation account (src/lib/automation-user.ts) is refused by kind, and answered exactly as a
+  // wrong password is.
+  if (!user || !user.active || isAutomationKind(user.kind) || !(await bcrypt.compare(password, user.passwordHash))) {
     const after = recordFailure(keys);
 
     /**

@@ -9,6 +9,7 @@ import { clearAccessCache } from "@/lib/access/gate";
 import { COMPANY_LOCK_PHRASE, companyLockActive, LOCK_MESSAGE_MAX, personalLockActive } from "@/lib/access/lock";
 import { formatIstDateTime, parseIstDateTime } from "@/lib/india-time";
 import { toPlain } from "@/lib/serialize";
+import { PEOPLE_ONLY } from "@/lib/people";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -56,7 +57,8 @@ export async function getAccessLocks() {
       select: { id: true, name: true, email: true, role: true, lockedAt: true, lockedUntil: true, lockMessage: true, lockedBy: { select: { name: true } } },
     }),
     db.user.findMany({
-      where: { active: true, isSuperAdmin: false, id: { not: a.me.id }, lockedAt: null },
+      // People only: naming `id` takes this past db's own filter (src/lib/db.ts).
+      where: { active: true, isSuperAdmin: false, id: { not: a.me.id }, lockedAt: null, ...PEOPLE_ONLY },
       orderBy: { name: "asc" },
       select: { id: true, name: true, email: true, role: true },
     }),

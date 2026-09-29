@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { settleInvoice, settledStatus } from "@/lib/receivables";
+import { syncBillingMilestones } from "@/lib/projects/billing-sync";
 
 /**
  * Brings an invoice's stored status back in line with what has actually been settled against it.
@@ -46,4 +47,6 @@ export async function syncInvoiceStatus(invoiceId: string) {
   if (next !== invoice.status) {
     await db.tradeDocument.update({ where: { id: invoiceId }, data: { status: next } });
   }
+  // A project billing stage raised on this invoice follows it: paid, or back to invoiced.
+  await syncBillingMilestones(invoiceId);
 }

@@ -4,6 +4,7 @@ import { refreshStaleCreditRatings } from "@/lib/credit/load";
 import { detectSalesWins } from "@/lib/wins/detect";
 import { announceActivityAwards } from "@/lib/performance/announce";
 import { announcePrizes } from "@/lib/wins/prize-announce";
+import { runRevenueAndClose } from "@/lib/close/nightly";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -59,6 +60,15 @@ export async function runHeartbeat() {
     console.error("prize announcements failed", err);
     return { announced: [] as string[] };
   });
+  /**
+   * Revenue & Close, once a day: the month-end checklist generated and checked, revenue recognised and
+   * prepaids and accruals posted as the Automation account. Its own claim row decides who runs it; it
+   * asks after its own module (and runs the postings without it while schedules are still running).
+   */
+  const revenueAndClose = await runRevenueAndClose().catch((err) => {
+    console.error("revenue & close nightly failed", err);
+    return { ran: false };
+  });
   return {
     ...result,
     leadScoresRefreshed,
@@ -66,5 +76,6 @@ export async function runHeartbeat() {
     salesWinsCelebrated: salesWins.created,
     activityAwardAnnounced: activityAward.announced,
     prizesAnnounced: prizes.announced,
+    revenueAndCloseRan: revenueAndClose.ran,
   };
 }

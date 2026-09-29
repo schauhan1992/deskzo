@@ -11,6 +11,7 @@ import {
   listPartyLocations,
   listDocumentItems,
   listCreditableInvoices,
+  listPartyOrders,
 } from "@/actions/trade-document";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
 import { Button } from "@/components/ui/button";
@@ -32,13 +33,36 @@ import { blankLine, type AddressDraft, type DocumentFormDefaults, type LineDraft
 import { branchLabel, type BranchChoice } from "@/lib/branches/format";
 import { GST_NUMBERED_TYPES, expandPrefix } from "@/lib/document-numbering";
 import { startOfIndianDay } from "@/lib/india-time";
+import { formatOrderId } from "@/lib/order-id";
+import {
+  defaultServicePeriod,
+  formatServicePeriod,
+  nextLinePeriod,
+  orderServicePeriod,
+  servicePeriodProblem,
+  showsServicePeriod,
+  suggestsServicePeriod,
+} from "@/lib/documents/service-period";
 
 type Party = { id: string; name: string; relationshipType: CompanyRelationshipType; customerCategory?: CategoryWithParent | null };
 type PartyLocation = Awaited<ReturnType<typeof listPartyLocations>>[number];
 type CatalogItem = Awaited<ReturnType<typeof listDocumentItems>>[number];
 type CreditableInvoice = Awaited<ReturnType<typeof listCreditableInvoices>>[number];
+type PartyOrder = Awaited<ReturnType<typeof listPartyOrders>>[number];
 
 const EMPTY_LOCATIONS: PartyLocation[] = [];
+const EMPTY_ORDERS: PartyOrder[] = [];
+
+/** A line's period after its item, order or date moved; never over one somebody typed (`nextLinePeriod`). */
+const periodDefault = nextLinePeriod;
+
+/** "ORD-000123 · Microsoft 365 × 10 · 1 Oct 2026 – 30 Sep 2027", for the order picker. */
+function orderLabel(order: PartyOrder): string {
+  // The order's dates are instants; `orderServicePeriod` reads them as the Indian days they fall on.
+  const term = orderServicePeriod(order);
+  return `${formatOrderId(order.orderSeq)} · ${order.item.name} × ${order.quantity}${term ? ` · ${formatServicePeriod(term.from, term.to)}` : ""}`;
+}
+
 const GST_RATES = ["0", "0.25", "3", "5", "12", "18", "28"];
 
 /**
@@ -207,6 +231,10 @@ export function DocumentForm({
     companyId: "",
     rows: [],
   });
+  const [fetchedOrders, setFetchedOrders] = useState<{ companyId: string; rows: PartyOrder[] }>({
+    companyId: "",
+    rows: EMPTY_ORDERS,
+  });
   const [lines, setLines] = useState<LineDraft[]>(defaults.lines.length > 0 ? defaults.lines : [blankLine()]);
 
   const isSales = documentDirection[docType] === "SALES";
@@ -243,10 +271,26 @@ export function DocumentForm({
     };
   }, [companyId, isCreditNote]);
 
+  // The customer's orders, for each line's "Bills order" picker. Sales only: a purchase is the
+  // vendor's bill, not a charge against our customer's order.
+  useEffect(() => {
+    if (!isSales || !companyId) return;
+    let cancelled = false;
+    listPartyOrders(companyId).then((rows) => {
+      if (!cancelled) setFetchedOrders({ companyId, rows });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, isSales]);
+
   locationIdRef.current = locationId;
 
   const locations = fetchedLocations.companyId === companyId ? fetchedLocations.rows : EMPTY_LOCATIONS;
   const creditable = fetchedCreditable.companyId === companyId ? fetchedCreditable.rows : [];
+  const orders = fetchedOrders.companyId === companyId ? fetchedOrders.rows : EMPTY_ORDERS;
+  /** A quote, proforma, invoice or credit note carries a service period per line; a purchase doesn't, for now. */
+  const periodShown = showsServicePeriod(docType);
 
   const partyStateCode =
     billing.stateCode ||
@@ -380,7 +424,15 @@ export function DocumentForm({
   }
 
   function applyCatalogItem(key: string, item: CatalogItem) {
+    const line = lines.find((l) => l.key === key);
     updateLine(key, {
+      // A different item is no longer the order it was taken from.
+      companyProductId: "",
+      itemType: item.type,
+      itemCycle: item.billingCycle ?? "",
+      // A subscription starts with one billing cycle from the document's date — unless a period was
+      // typed, or this type of document doesn't carry one (a purchase, for now).
+      ...(line && periodShown ? periodDefault(line, defaultServicePeriod({ item, issueDate })) : {}),
       itemId: item.id,
       name: item.name,
       // The catalogue's own description seeds the line, and stays editable — a quote often needs
@@ -394,6 +446,51 @@ export function DocumentForm({
       unitPrice: String(catalogPriceInDocumentCurrency(item.sellingPrice ?? 0)),
       taxRatePercent: String(item.taxRatePercent ?? 0),
     });
+  }
+
+  /**
+   * Bills one of the customer's orders on this line: fills it from the order, links it
+   * (`companyProductId`), and takes the order's term as the service period unless one was typed.
+   * Unlinking leaves the line as it reads, and drops a period that only came from the order.
+   */
+  function applyOrder(key: string, orderId: string) {
+    const line = lines.find((l) => l.key === key);
+    if (!line) return;
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) {
+      const fromItem = defaultServicePeriod({ item: { type: line.itemType, billingCycle: line.itemCycle }, issueDate });
+      updateLine(key, { companyProductId: "", ...(line.periodSource === "order" ? periodDefault(line, fromItem) : {}) });
+      return;
+    }
+    const item = order.item;
+    updateLine(key, {
+      companyProductId: order.id,
+      itemId: item.id,
+      itemType: item.type,
+      itemCycle: item.billingCycle ?? "",
+      name: item.name,
+      description: line.description || item.description || "",
+      hsnCode: item.hsnCode ?? "",
+      unit: item.unit ?? "",
+      quantity: String(order.quantity),
+      // What was agreed on the order, else the catalogue's price — in this document's currency either way.
+      unitPrice: String(catalogPriceInDocumentCurrency(order.unitPrice ?? item.sellingPrice ?? 0)),
+      taxRatePercent: String(item.taxRatePercent ?? 0),
+      ...periodDefault(line, defaultServicePeriod({ order, item, issueDate })),
+    });
+  }
+
+  /** The document's date moved: a period that is one billing cycle from it moves with it. */
+  function changeIssueDate(next: string) {
+    setIssueDate(next);
+    if (!periodShown || !startOfIndianDay(next)) return;
+    setLines((prev) =>
+      prev.map((l) =>
+        l.periodSource === "item"
+          ? { ...l, ...periodDefault(l, defaultServicePeriod({ item: { type: l.itemType, billingCycle: l.itemCycle }, issueDate: next })) }
+          : l,
+      ),
+    );
   }
 
   function onSubmit(event: React.FormEvent) {
@@ -445,6 +542,12 @@ export function DocumentForm({
       againstDocumentId,
       lines: lines.map((l) => ({
         itemId: l.itemId,
+        // Carried through every save: the form replaces the lines wholesale, so a link it doesn't
+        // send back is a link the edit deletes.
+        companyProductId: l.companyProductId,
+        servicePeriodFrom: l.servicePeriodFrom,
+        servicePeriodTo: l.servicePeriodTo,
+        billingMilestoneId: l.billingMilestoneId,
         name: l.name,
         description: l.description,
         hsnCode: l.hsnCode,
@@ -808,7 +911,7 @@ export function DocumentForm({
             <Label htmlFor="issueDate">
               Date <span className="text-danger">*</span>
             </Label>
-            <Input id="issueDate" type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required />
+            <Input id="issueDate" type="date" value={issueDate} onChange={(e) => changeIssueDate(e.target.value)} required />
           </div>
 
           {docType === "PROPOSAL" ? (
@@ -918,6 +1021,16 @@ export function DocumentForm({
                         converted={(rupees) =>
                           isBaseCurrency(currency) ? null : money(catalogPriceInDocumentCurrency(rupees))
                         }
+                      />
+                      <LineLinks
+                        line={line}
+                        lineNumber={index + 1}
+                        orders={isSales ? orders : EMPTY_ORDERS}
+                        periodShown={periodShown}
+                        onOrder={(orderId) => applyOrder(line.key, orderId)}
+                        // Anything typed here is theirs: no later default replaces it, blank included.
+                        onPeriod={(patch) => updateLine(line.key, { ...patch, periodSource: "typed" })}
+                        onOpenPeriod={() => updateLine(line.key, { periodOpen: true })}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -1179,6 +1292,100 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between text-muted">
       <span>{label}</span>
       <span className="text-text">{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Under a line: the order it bills, and the period it pays for.
+ *
+ * The order picker appears once the customer has orders to offer (or the line already bills one).
+ * The period shows on a line whose item is a service or a subscription, or that already has one;
+ * any other line gets a quiet "Add service period" link. The problem the server would refuse is
+ * shown as it is typed, in the same words.
+ */
+function LineLinks({
+  line,
+  lineNumber,
+  orders,
+  periodShown,
+  onOrder,
+  onPeriod,
+  onOpenPeriod,
+}: {
+  line: LineDraft;
+  lineNumber: number;
+  orders: PartyOrder[];
+  /** Whether this type of document carries a period at all (`showsServicePeriod`). */
+  periodShown: boolean;
+  onOrder: (orderId: string) => void;
+  onPeriod: (patch: Pick<Partial<LineDraft>, "servicePeriodFrom" | "servicePeriodTo">) => void;
+  onOpenPeriod: () => void;
+}) {
+  const showOrders = orders.length > 0 || !!line.companyProductId;
+  const showPeriod =
+    periodShown && (suggestsServicePeriod(line.itemType) || !!line.servicePeriodFrom || !!line.servicePeriodTo || line.periodOpen);
+  const problem = showPeriod ? servicePeriodProblem(line.servicePeriodFrom, line.servicePeriodTo) : null;
+  // Linked to an order the picker can't offer — cancelled since, outside what this person may see, or
+  // not loaded yet.
+  const linkedElsewhere = !!line.companyProductId && !orders.some((o) => o.id === line.companyProductId);
+  if (!showOrders && !periodShown && !line.billingMilestoneId) return null;
+
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {showOrders && (
+        <Select
+          aria-label={`Order billed, line ${lineNumber}`}
+          value={line.companyProductId}
+          onChange={(e) => onOrder(e.target.value)}
+          className="h-8 text-xs"
+        >
+          <option value="">Not billing an order</option>
+          {linkedElsewhere && <option value={line.companyProductId}>The order this line bills</option>}
+          {orders.map((o) => (
+            <option key={o.id} value={o.id}>
+              {orderLabel(o)}
+            </option>
+          ))}
+        </Select>
+      )}
+      {periodShown &&
+        (showPeriod ? (
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-subtle">Service period</span>
+              <Input
+                type="date"
+                aria-label={`Service period from, line ${lineNumber}`}
+                value={line.servicePeriodFrom}
+                onChange={(e) => onPeriod({ servicePeriodFrom: e.target.value })}
+                className="h-8 w-36 text-xs"
+              />
+              <span className="text-xs text-subtle" aria-hidden="true">
+                –
+              </span>
+              <Input
+                type="date"
+                aria-label={`Service period to, line ${lineNumber}`}
+                value={line.servicePeriodTo}
+                onChange={(e) => onPeriod({ servicePeriodTo: e.target.value })}
+                className="h-8 w-36 text-xs"
+              />
+            </div>
+            {problem ? (
+              <p className="text-xs text-danger">{problem}</p>
+            ) : line.periodSource === "order" ? (
+              <p className="text-xs text-subtle">The order&apos;s term.</p>
+            ) : line.periodSource === "item" ? (
+              <p className="text-xs text-subtle">One billing cycle from the document&apos;s date.</p>
+            ) : null}
+          </div>
+        ) : (
+          <button type="button" onClick={onOpenPeriod} className="text-xs text-brand hover:underline">
+            Add service period
+          </button>
+        ))}
+      {line.billingMilestoneId && <p className="text-xs text-subtle">Bills a project billing stage.</p>}
     </div>
   );
 }

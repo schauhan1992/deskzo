@@ -9,7 +9,8 @@ export default async function NewItemPage() {
     return <ModuleDisabledNotice moduleKey="items" />;
   }
 
-  const brands = await listBrands();
+  // How revenue is recognised is asked only where Revenue & Close is available.
+  const [brands, revenueCapture] = await Promise.all([listBrands(), isModuleEnabled("revenue_close")]);
 
   return (
     <div>
@@ -18,7 +19,7 @@ export default async function NewItemPage() {
         SKU must be unique. Goods, services, subscriptions, and perpetual licences share this catalog — only goods
         track stock, and only subscriptions ever come up for renewal.
       </p>
-      <NewItemForm brands={brands} />
+      <NewItemForm brands={brands} showRevenuePattern={revenueCapture} />
     </div>
   );
 }

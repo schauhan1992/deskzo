@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { controlDb } from "@/lib/platform/control-db";
+import { AUTOMATION_EMAIL } from "@/lib/people";
 
 /**
  * A one-time pass that signs somebody into a workspace without their password — the owner straight
@@ -19,6 +20,8 @@ const TTL_MS = 60_000;
 const hash = (token: string) => createHash("sha256").update(token).digest("hex");
 
 export async function createHandoffTicket(tenantId: string, email: string, purpose: HandoffPurpose): Promise<string> {
+  // Nobody is ever handed in as a workspace's Automation account (src/lib/automation-user.ts).
+  if (email.trim().toLowerCase() === AUTOMATION_EMAIL) throw new Error("There is no pass for the Automation account.");
   const token = randomBytes(32).toString("base64url");
   await controlDb().platformHandoffTicket.create({
     data: { tokenHash: hash(token), tenantId, email: email.trim().toLowerCase(), purpose, expiresAt: new Date(Date.now() + TTL_MS) },

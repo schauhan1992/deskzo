@@ -49,6 +49,9 @@ import { findTradeDocumentFor } from "@/lib/documents/load";
 import { OTHER_COUNTRY_CODE } from "@/lib/gst-engine";
 import { isIndia } from "@/lib/geo/countries";
 import { viewerHas } from "@/actions/permission";
+import { periodDay } from "@/lib/documents/service-period";
+import { releaseBillingMilestones, syncBillingMilestones } from "@/lib/projects/billing-sync";
+import { moduleAccessFor } from "@/lib/modules-access";
 
 function parseDate(value: string | undefined | null, fallback?: Date): Date | null {
   if (!value) return fallback ?? null;
@@ -172,10 +175,58 @@ async function resolveDocumentBranch(input: {
   return { branch };
 }
 
+/**
+ * The links a save may write on its lines, checked rather than trusted — the form is not the only
+ * thing that can post here.
+ *
+ *   · `companyProductId` must be one of this party's own orders (or, on a purchase, one it supplies):
+ *     a line pointing at another customer's order would bill their subscription on this invoice.
+ *   · `billingMilestoneId` is "Raise invoice"'s to set (src/actions/project.ts). A new document never
+ *     carries one; an edited draft keeps a line's only while the stage still points at this document,
+ *     so the form can round-trip it and nothing else can attach a stage to a document.
+ */
+async function checkLineLinks(
+  lines: TradeDocumentInput["lines"],
+  companyId: string,
+  documentId: string | null,
+): Promise<{ error: string } | { lines: TradeDocumentInput["lines"] }> {
+  const orderIds = [...new Set(lines.map((l) => l.companyProductId).filter((v): v is string => !!v))];
+  const orders = orderIds.length
+    ? await db.companyProduct.findMany({ where: { id: { in: orderIds } }, select: { id: true, companyId: true, vendorId: true } })
+    : [];
+  for (const [index, line] of lines.entries()) {
+    if (!line.companyProductId) continue;
+    const order = orders.find((o) => o.id === line.companyProductId);
+    if (!order) return { error: `Line ${index + 1} bills an order that no longer exists.` };
+    if (order.companyId !== companyId && order.vendorId !== companyId) {
+      return { error: `Line ${index + 1} bills an order that belongs to another party.` };
+    }
+  }
+
+  const stageIds = documentId ? [...new Set(lines.map((l) => l.billingMilestoneId).filter((v): v is string => !!v))] : [];
+  const linked = stageIds.length
+    ? await db.projectBillingMilestone.findMany({ where: { id: { in: stageIds }, documentId }, select: { id: true } })
+    : [];
+  const keep = new Set(linked.map((s) => s.id));
+  // One line per stage: the first that carries it. A second would bill the same stage twice over.
+  const taken = new Set<string>();
+  return {
+    lines: lines.map((l) => {
+      const stage = l.billingMilestoneId && keep.has(l.billingMilestoneId) && !taken.has(l.billingMilestoneId) ? l.billingMilestoneId : "";
+      if (stage) taken.add(stage);
+      return { ...l, billingMilestoneId: stage };
+    }),
+  };
+}
+
 function lineData(input: TradeDocumentInput["lines"][number], computed: ReturnType<typeof computeDocument>["lines"][number], index: number) {
   return {
     itemId: input.itemId || null,
     companyProductId: input.companyProductId || null,
+    // Indian calendar days, stored as a @db.Date holds them; both or neither (the schema checked).
+    servicePeriodFrom: periodDay(input.servicePeriodFrom),
+    servicePeriodTo: periodDay(input.servicePeriodTo),
+    billingMilestoneId: input.billingMilestoneId || null,
     name: input.name.trim(),
     description: input.description?.trim() || null,
     hsnCode: input.hsnCode || null,
@@ -426,6 +477,8 @@ export async function createTradeDocument(
   }
   const leadError = await validateLinkedLead(data.leadId, data.companyId);
   if (leadError) return { ok: false, error: leadError };
+  const links = await checkLineLinks(data.lines, data.companyId, null);
+  if ("error" in links) return { ok: false, error: links.error };
 
   const typedNumber = data.docNumber?.trim() || null;
   const numberProblem = typedNumber ? gstNumberProblem(data.docType, typedNumber) : null;
@@ -440,7 +493,7 @@ export async function createTradeDocument(
   });
   if ("error" in picked) return { ok: false, error: picked.error };
   const { branch } = picked;
-  const built = await buildDocumentData(data, branch);
+  const built = await buildDocumentData({ ...data, lines: links.lines }, branch);
   // Only India has the government's e-invoice system; elsewhere it never applies.
   const einvoiceStatus = isEInvoiceEligible(data.docType) && (await countryFeatureAvailable("einvoice")) ? "PENDING" : "NOT_APPLICABLE";
 
@@ -531,6 +584,8 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
 
   const leadError = await validateLinkedLead(data.leadId, data.companyId);
   if (leadError) return { ok: false, error: leadError };
+  const links = await checkLineLinks(data.lines, data.companyId, id);
+  if ("error" in links) return { ok: false, error: links.error };
 
   // Typed in this save: the form sends the number back every time, so only a changed one counts.
   const typedNumber = data.docNumber?.trim() && data.docNumber.trim() !== existing.docNumber ? data.docNumber.trim() : null;
@@ -552,7 +607,7 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
   });
   if ("error" in picked) return { ok: false, error: picked.error };
   const { branch } = picked;
-  const built = await buildDocumentData(data, branch);
+  const built = await buildDocumentData({ ...data, lines: links.lines }, branch);
 
   // Lines are replaced wholesale: the form submits the full set every time, and matching them up
   // row by row would only add a way for the stored totals to drift from the stored lines.
@@ -634,7 +689,12 @@ export async function deleteTradeDocument(id: string): Promise<ActionResult<{ id
     return { ok: false, error: "Other documents were created from this one, so it can't be deleted." };
   }
 
-  await db.tradeDocument.delete({ where: { id } });
+  await db.$transaction(async (tx) => {
+    // A project billing stage raised on this draft goes back to DUE, rather than reading INVOICED
+    // with nothing behind it once the foreign key has cleared the link.
+    await releaseBillingMilestones(id, tx);
+    await tx.tradeDocument.delete({ where: { id } });
+  });
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
@@ -994,6 +1054,7 @@ export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id:
       },
     });
     await reverseDocumentPosting(tx, id, user.id);
+    await syncBillingMilestones(id, tx);
   });
   await recordAudit({
     userId: user.id,
@@ -1121,6 +1182,11 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
         create: source.lines.map((line, index) => ({
           itemId: line.itemId,
           companyProductId: line.companyProductId,
+          // The period travels with the line: a quote for a year's cover is invoiced for that year,
+          // and credited against it. The billing stage does not — "Raise invoice" links a stage to
+          // one document, and a copy would claim a stage it doesn't hold.
+          servicePeriodFrom: line.servicePeriodFrom,
+          servicePeriodTo: line.servicePeriodTo,
           name: line.name,
           description: line.description,
           hsnCode: line.hsnCode,
@@ -1178,6 +1244,8 @@ export async function setTradeDocumentStatus(id: string, status: TradeDocumentSt
     // A cancelled document is reversed rather than unposted: the original entry stays in the
     // journal and a dated reversal sits beside it, which is what an audit trail means.
     if (status === "CANCELLED") await reverseDocumentPosting(tx, id, user.id);
+    // A project billing stage raised on it follows: paid, or released for a fresh invoice.
+    await syncBillingMilestones(id, tx);
   });
   await recordAudit({
     userId: user.id,
@@ -1419,7 +1487,42 @@ export async function listDocumentItems(search?: string) {
     },
     orderBy: { name: "asc" },
     take: 50,
-    select: { id: true, name: true, sku: true, description: true, unit: true, hsnCode: true, sellingPrice: true, taxRatePercent: true },
+    // The type and cycle decide whether the line offers a service period, and the one it starts with.
+    select: { id: true, name: true, sku: true, description: true, unit: true, hsnCode: true, sellingPrice: true, taxRatePercent: true, type: true, billingCycle: true },
+  });
+  return toPlain(rows);
+}
+
+/**
+ * A customer's orders, for the document form's "Bills order" picker on a line: picking one fills the
+ * line from the order and links it (`companyProductId`), and the order's term becomes the line's
+ * service period.
+ *
+ * Orders are the Orders module's, so outside the plan, switched off, or without `orders.view`, there
+ * are none to offer — the line is simply typed or taken from the catalogue, as before. Scoped to
+ * parties this person can see, like the locations beside it. Cancelled and rejected orders are left
+ * out; everything else, newest term first.
+ */
+export async function listPartyOrders(companyId: string) {
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
+  if (!(await viewerHas("documents.view"))) return [];
+  if ((await moduleAccessFor(user.id, "orders")) !== "available") return [];
+  if (!(await maySeeParty(user.id, companyId))) return [];
+  const rows = await db.companyProduct.findMany({
+    where: { companyId, orderStatus: { notIn: ["REJECTED", "CANCELLED"] } },
+    orderBy: [{ startDate: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+    take: 100,
+    select: {
+      id: true,
+      orderSeq: true,
+      quantity: true,
+      unitPrice: true,
+      startDate: true,
+      endDate: true,
+      item: {
+        select: { id: true, name: true, description: true, unit: true, hsnCode: true, sellingPrice: true, taxRatePercent: true, type: true, billingCycle: true },
+      },
+    },
   });
   return toPlain(rows);
 }

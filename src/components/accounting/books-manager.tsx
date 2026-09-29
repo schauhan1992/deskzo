@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatIstDate } from "@/lib/india-time";
 
 type Status = Awaited<ReturnType<typeof getBooksStatus>>;
 
@@ -26,8 +27,10 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // The lock arrives as a Date (a calendar day at UTC midnight); `String(date)` would give "Sat Aug 15",
+  // which a date field silently drops — and the note below compares `yyyy-mm-dd` strings.
   const [lockDate, setLockDate] = useState(
-    status.lockedUntil ? String(status.lockedUntil).slice(0, 10) : "",
+    status.lockedUntil ? new Date(status.lockedUntil).toISOString().slice(0, 10) : "",
   );
   const [note, setNote] = useState(status.lockNote ?? "");
   const [closing, setClosing] = useState<string | null>(null);
@@ -47,6 +50,15 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
       router.refresh();
     });
   }
+
+  // Months the month-end close shows as closed that a change here would reopen: a lock moved back
+  // below a closed month's last day (or removed) reopens that month and every later one.
+  const closedMonths = status.closedMonths ?? [];
+  const reopenedByLock = lockDate ? closedMonths.filter((m) => m.end > lockDate) : [];
+  const reopeningYear = reopening ? status.closes.find((c) => c.label === reopening) : undefined;
+  const reopenedByYear = reopeningYear
+    ? closedMonths.filter((m) => m.end >= new Date(reopeningYear.fromDate).toISOString().slice(0, 10))
+    : [];
 
   // Years that have finished and aren't closed yet — the only ones that can be closed.
   const closedLabels = new Set(status.closes.map((c) => c.label));
@@ -140,6 +152,24 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
                 </Button>
               )}
             </div>
+          )}
+
+          {isAdmin && reopenedByLock.length > 0 && (
+            <p className="rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
+              Locking to {formatIstDate(`${lockDate}T00:00:00.000Z`)} reopens {listOf(reopenedByLock.map((m) => m.label))} on
+              the{" "}
+              <Link href="/accounting/close" className="font-medium underline underline-offset-2">
+                month-end close
+              </Link>
+              : {reopenedByLock.length === 1 ? "it is" : "they are"} closed there, and the lock would no longer cover{" "}
+              {reopenedByLock.length === 1 ? "it" : "them"}. {reopenedByLock.length === 1 ? "It" : "They"} will need
+              closing again.
+            </p>
+          )}
+          {isAdmin && status.lockedUntil && closedMonths.length > 0 && (
+            <p className="text-xs text-subtle">
+              Removing the lock reopens every month closed on the month-end close ({listOf(closedMonths.map((m) => m.label))}).
+            </p>
           )}
         </CardContent>
       </Card>
@@ -260,6 +290,11 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
             one that was closed and reopened. The lock rolls back to the start of the year, and everything in it
             becomes postable again — including figures you may already have filed against.
           </p>
+          {reopenedByYear.length > 0 && (
+            <p className="rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
+              It also reopens {listOf(reopenedByYear.map((m) => m.label))} on the month-end close.
+            </p>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="confirmYear">Type {reopening} to confirm</Label>
             <Input id="confirmYear" value={confirmLabel} onChange={(e) => setConfirmLabel(e.target.value)} />
@@ -288,4 +323,10 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
       </Dialog>
     </div>
   );
+}
+
+/** "May 2025", "May 2025 and June 2025", "May 2025, June 2025 and July 2025". */
+function listOf(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 }

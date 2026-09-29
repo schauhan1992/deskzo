@@ -4,6 +4,7 @@ import { GST_STATE_CODES, GSTIN_PATTERN } from "@/lib/gst-engine";
 import { gstTreatmentValues } from "@/lib/gst";
 import { BASE_CURRENCY, CURRENCY_CODES } from "@/lib/currency";
 import { postalCodeField, refinePostalCode } from "@/lib/geo/postal";
+import { servicePeriodProblem } from "@/lib/documents/service-period";
 
 const number = (fallback?: number) =>
   z.preprocess((v) => (v === "" || v === undefined || v === null ? fallback : Number(v)), z.number());
@@ -23,6 +24,18 @@ export const tradeDocumentLineSchema = z.object({
   discountMode: z.enum(["PERCENT", "AMOUNT"]).default("PERCENT"),
   discountValue: number(0).pipe(z.number().min(0, "A discount can't be negative")),
   taxRatePercent: number(0).pipe(z.number().min(0).max(100, "Tax rate can't exceed 100%")),
+  /**
+   * The period the line pays for, as Indian calendar days (`yyyy-mm-dd`), both inclusive. Both or
+   * neither; the rules are checked on the document (`servicePeriodProblem`) so the message can say
+   * which line. See src/lib/documents/service-period.ts.
+   */
+  servicePeriodFrom: z.string().trim().optional().or(z.literal("")),
+  servicePeriodTo: z.string().trim().optional().or(z.literal("")),
+  /**
+   * The project billing stage this line bills. Only "Raise invoice" sets it; the form carries it
+   * through an edit, and the action keeps it only while the stage still points at this document.
+   */
+  billingMilestoneId: z.string().optional().or(z.literal("")),
 });
 
 export type TradeDocumentLineInput = z.infer<typeof tradeDocumentLineSchema>;
@@ -148,6 +161,17 @@ export const tradeDocumentSchema = z
         path: ["withholdingRatePercent"],
       });
     }
+    // Named by line: "the service period ends before it starts" on a twelve-line invoice is a hunt.
+    val.lines.forEach((line, index) => {
+      const problem = servicePeriodProblem(line.servicePeriodFrom, line.servicePeriodTo);
+      if (problem) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lines", index, "servicePeriodTo"],
+          message: `Line ${index + 1}: ${problem.charAt(0).toLowerCase()}${problem.slice(1)}`,
+        });
+      }
+    });
   });
 
 export type TradeDocumentInput = z.infer<typeof tradeDocumentSchema>;

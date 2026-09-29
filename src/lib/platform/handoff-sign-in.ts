@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { doorCheck } from "@/lib/access/record";
 import { spendHandoffTicket } from "@/lib/platform/handoff";
 import { activeSupportGrant } from "@/lib/platform/support";
+import { isAutomationKind } from "@/lib/people";
 
 /**
  * The account a one-time pass signs in at this workspace — or nobody. The "handoff" sign-in
@@ -18,6 +19,8 @@ export async function handoffAccount(ticket: string, tenantId: string) {
   if (!pass) return null;
   const user = await db.user.findUnique({ where: { email: pass.email } });
   if (!user || !user.active || user.twoFactorEnabledAt) return null;
+  // Never the workspace's Automation account (src/lib/automation-user.ts), whatever the pass is for.
+  if (isAutomationKind(user.kind)) return null;
   if (pass.purpose === "owner-signup") {
     if (user.kind !== "MEMBER" || (await doorCheck(user))) return null;
   } else if (pass.purpose === "support") {

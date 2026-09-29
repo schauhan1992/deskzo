@@ -12,14 +12,15 @@ export default async function EditItemPage({ params }: { params: Promise<{ id: s
   }
 
   const { id } = await params;
-  const [item, brands] = await Promise.all([getItem(id), listBrands()]);
+  // How revenue is recognised is asked only where Revenue & Close is available.
+  const [item, brands, revenueCapture] = await Promise.all([getItem(id), listBrands(), isModuleEnabled("revenue_close")]);
   if (!item) notFound();
 
   return (
     <div>
       <h1 className="text-xl font-semibold text-text">Edit item</h1>
       <div className="mt-6">
-        <EditItemForm item={item} brands={brands} />
+        <EditItemForm item={item} brands={brands} showRevenuePattern={revenueCapture} />
       </div>
     </div>
   );

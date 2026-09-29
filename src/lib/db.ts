@@ -49,6 +49,11 @@ type Callable = (...args: unknown[]) => unknown;
  * and every listing of roles leaves out the role they sign in with. A query that names its rows —
  * by id, by key, or by kind itself — is left as it is: resolving "who did this" still finds them.
  *
+ * The same goes for the workspace's own Automation account (User.kind AUTOMATION —
+ * src/lib/automation-user.ts), which automatic postings are made by: only MEMBER accounts are listed.
+ * A query this can't reach (one naming `id` or `kind`, or one inside a transaction) says `PEOPLE_ONLY`
+ * (src/lib/people.ts) itself.
+ *
  * Queries inside a transaction (`tx.user…`) are not touched; none of those list people.
  */
 const LISTINGS = new Set(["findMany", "findFirst", "findFirstOrThrow", "count", "aggregate", "groupBy"]);

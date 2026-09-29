@@ -7,6 +7,7 @@ import { recordAudit } from "@/lib/audit";
 import { runBackup } from "@/lib/backup/run";
 import { dataResetEnabled, keptTables, RESET_PHRASE, resetAllData, resetOverview } from "@/lib/data-reset";
 import { workspaceAccountsReset } from "@/lib/platform/account-hooks";
+import { forgetAutomationUser } from "@/lib/automation-user";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -61,6 +62,8 @@ export async function resetAllDataNow(input: { confirm: string; backupFirst: boo
   // Here, from the workspace's own request, not in resetAllData: that also runs against scratch
   // databases in check:data-reset, where "the current workspace" would be the developer's own.
   await workspaceAccountsReset("reset");
+  // The reset removed the Automation account with every other user; the next posting makes it again.
+  await forgetAutomationUser();
 
   // The audit log was just emptied with everything else; this is its first line.
   await recordAudit({

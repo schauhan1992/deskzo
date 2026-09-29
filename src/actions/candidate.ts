@@ -21,6 +21,7 @@ import { accountsChanged } from "@/lib/platform/account-hooks";
 import { actorContext } from "@/lib/authz/guards";
 import { sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
 import { noPasswordYet } from "@/lib/no-password";
+import { isSystemAddress } from "@/lib/people";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -136,6 +137,8 @@ export async function saveCandidate(input: {
   const email = input.email.trim().toLowerCase();
   if (!name) return { ok: false, error: "Name the candidate." };
   if (!email.includes("@")) return { ok: false, error: "A valid email — the intake link goes there." };
+  // Platform support's and the Automation account's addresses are nobody's (src/lib/people.ts).
+  if (isSystemAddress(email)) return { ok: false, error: "That address is reserved. Use the candidate's own email." };
 
   // Somebody already on the payroll is not a candidate. Catching it here saves discovering it at
   // conversion, when the unique constraint on User.email fails and the work is already done.
@@ -296,6 +299,7 @@ export async function convertCandidate(
   if (!canConvert(candidate.status)) {
     return { ok: false, error: "Mark the offer accepted first — only somebody who has said yes can be converted." };
   }
+  if (isSystemAddress(candidate.email)) return { ok: false, error: "That address is reserved. Give the candidate their own email first." };
   const clash = await db.user.findUnique({ where: { email: candidate.email }, select: { name: true } });
   if (clash) return { ok: false, error: `${clash.name} already has an account with that email.` };
   // Becoming an employee means an account, and an account takes a seat.

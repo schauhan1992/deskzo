@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isSystemAddress } from "@/lib/people";
 
 
 /**
@@ -26,7 +27,12 @@ export type UpdateUserAssignmentInput = z.infer<typeof updateUserAssignmentSchem
  */
 export const createUserSchema = z.object({
   name: z.string().trim().min(2, "Name is required"),
-  email: z.string().trim().email("Enter a valid email"),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email")
+    // Platform support's and the Automation account's addresses (src/lib/people.ts) are nobody's.
+    .refine((email) => !isSystemAddress(email), "That address is reserved. Enter the person's own email."),
   role: roleKey,
   departmentId: z.string().optional().or(z.literal("")),
   /** "This person already uses another workspace on this platform": the setup email is the one-step invite, which also offers linking. */

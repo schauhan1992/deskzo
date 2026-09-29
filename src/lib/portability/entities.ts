@@ -712,4 +712,21 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Immutable history — who gave which customer more credit than their record supported, and why. The rating behind it is recomputed from the payments, which export as records; the decisions are the part a target could not rebuild, and the part an auditor asks for.",
   },
+  // ─── Revenue & Close (the add-on) ──────────────────────────────────────────────────────────────
+  RevenueSchedule: {
+    disposition: "archive",
+    reason:
+      "Immutable history — which invoice's revenue was deferred, over which period, and who approved the plan. The journal entries it posted archive with the ledger; the schedule is what explains them to an auditor, and no target CRM has a place for it.",
+  },
+  RevenueScheduleLine: { disposition: "archive", reason: "Immutable history. Each month's share of a revenue schedule and the entry that recognised it — archived beside the ledger it posted into." },
+  RevenueScheduleAdjustment: { disposition: "archive", reason: "Immutable history. What a credit note took off a revenue schedule — archived with the schedule it adjusted." },
+  AccountingSchedule: { disposition: "archive", reason: "Immutable history. A prepaid or accrual schedule and the entries it posted — archived beside the ledger, as depreciation charges are." },
+  AccountingScheduleLine: { disposition: "archive", reason: "Immutable history. One month of a prepaid or accrual schedule and the entries (and reversal) it posted." },
+  CloseMonth: { disposition: "archive", reason: "Immutable history. When each month was closed or reopened and by whom — the evidence behind the period lock." },
+  CloseTask: { disposition: "archive", reason: "Immutable history. The month-end checklist as it was worked: who did what, when, and what the automatic checks found." },
+  CloseTaskAttachment: { disposition: "archive", reason: "Immutable history. The working papers attached to a month-end task — archived with the task." },
+  FluxNote: { disposition: "archive", reason: "Immutable history. Why an account moved as it did in a month, as explained at the close." },
+  CloseTaskTemplate: { disposition: "specification", reason: "Configuration rather than records. The month-end checklist's tasks are described in the workflow specification, to be rebuilt in the target." },
+  RevenueCloseSettings: { disposition: "specification", reason: "Configuration rather than records: automatic posting on or off, how revenue is spread, and the thresholds for explaining a month's movements." },
+  DailyJobRun: { disposition: "excluded", reason: "Which once-a-day job ran on which day, so it runs only once. Operational bookkeeping of this installation, not a record." },
 };

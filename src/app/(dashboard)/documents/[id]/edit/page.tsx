@@ -11,6 +11,7 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { DocumentForm } from "@/components/documents/document-form";
 import { isEditable, tradeDocumentLabels } from "@/lib/trade-documents";
 import { istDateTimeInput } from "@/lib/india-time";
+import { periodKey } from "@/lib/documents/service-period";
 
 /**
  * A stored date as the Indian calendar day, for a date input. Right whether the date was saved at UTC
@@ -52,7 +53,8 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     );
   }
 
-  const [parties, salespeople, org, branches, numberSetting] = await Promise.all([
+  const itemIds = [...new Set(document.lines.map((line) => line.itemId).filter((v): v is string => !!v))];
+  const [parties, salespeople, org, branches, numberSetting, lineItems] = await Promise.all([
     listDocumentParties(document.docType),
     listAssignableUsers(),
     getOrganisation(),
@@ -60,7 +62,10 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     // draft says, and a draft on an inactive branch can still be saved (just not issued).
     listBranchChoices({ include: document.branchId ? [document.branchId] : [] }),
     getNumberSetting(document.docType, document.branchId),
+    // What each line's item is, so the form offers a service period where the item suggests one.
+    itemIds.length ? db.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, type: true, billingCycle: true } }) : [],
   ]);
+  const itemOf = (id: string | null) => lineItems.find((item) => item.id === id);
   // Written before branches (null): the head office's.
   const branch = branches.find((b) => b.id === document.branchId) ?? branches.find((b) => b.isHeadOffice);
   const isSales = document.direction === "SALES";
@@ -153,6 +158,17 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
             discountMode: line.discountMode,
             discountValue: String(line.discountValue),
             taxRatePercent: String(line.taxRatePercent),
+            // The links and the period go back exactly as saved: the form replaces lines wholesale,
+            // so whatever isn't round-tripped here would be deleted by the next save.
+            companyProductId: line.companyProductId ?? "",
+            itemType: itemOf(line.itemId)?.type ?? "",
+            itemCycle: itemOf(line.itemId)?.billingCycle ?? "",
+            servicePeriodFrom: periodKey(line.servicePeriodFrom),
+            servicePeriodTo: periodKey(line.servicePeriodTo),
+            // A saved period is somebody's decision, not a default to be replaced.
+            periodSource: line.servicePeriodFrom ? ("typed" as const) : ("" as const),
+            periodOpen: false,
+            billingMilestoneId: line.billingMilestoneId ?? "",
           })),
         }}
       />

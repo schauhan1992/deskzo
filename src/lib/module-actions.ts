@@ -24,6 +24,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "access-gate.ts": "core",
   "access-lock.ts": "core",
   "access.ts": "core",
+  // Revenue & Close: prepaids and accruals (src/lib/close/schedules.ts).
+  "accounting-schedules.ts": ["revenue_close"],
   "activity-awards.ts": ["wins"],
   "activity-tracking.ts": "core",
   "activity.ts": "core",
@@ -44,6 +46,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "calling-activity.ts": ["calls"],
   "candidate.ts": ["hr"],
   "celebration.ts": ["hr"],
+  // Revenue & Close: the month-end checklist, closing a month, flux and the close settings (src/lib/close).
+  "close.ts": ["revenue_close"],
   "commission-party.ts": ["commission_parties"],
   "company-location.ts": "core",
   "company-merge.ts": "core",
@@ -131,6 +135,10 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "renewal-stage.ts": ["renewals"],
   "renewal.ts": ["renewals"],
   "reseller.ts": ["resellers"],
+  // Revenue & Close: revenue recognition — schedules, the run, the opening wizard (src/lib/revenue).
+  "revenue.ts": ["revenue_close"],
+  // Revenue & Close: what the revenue screens read beside it, and the waterfall's CSV.
+  "revenue-screens.ts": ["revenue_close"],
   "role.ts": "core",
   "search.ts": "core",
   "security-policy.ts": "core",

@@ -445,6 +445,8 @@ export async function leadDocumentDraft(leadId: string) {
             select: {
               id: true, name: true, sku: true, unit: true, hsnCode: true,
               sellingPrice: true, taxRatePercent: true, description: true,
+              // Whether the line starts with a service period, and which (src/lib/documents/service-period.ts).
+              type: true, billingCycle: true,
             },
           },
         },

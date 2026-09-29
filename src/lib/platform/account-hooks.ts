@@ -3,6 +3,7 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { indexWorkspaceUsers } from "@/lib/platform/email-index";
 import { revokeLinksForUser, revokeWorkspaceLinks, type RevokeReason } from "@/lib/platform/linked/groups";
 import { currentTenant } from "@/lib/tenancy/resolve";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * The one call every code path that changes a workspace's accounts makes once its write has succeeded
@@ -69,7 +70,7 @@ export async function workspaceAccountsReset(by: string): Promise<void> {
     }
     // The accounts there now, and every one the index still holds — so the rows of those the reset removed go too.
     const [users, rows] = await Promise.all([
-      db.user.findMany({ where: { active: true, kind: "MEMBER" }, select: { id: true } }),
+      db.user.findMany({ where: { active: true, ...PEOPLE_ONLY }, select: { id: true } }),
       controlDb().workspaceEmail.findMany({ where: { tenantId: tenant.id }, select: { userId: true } }),
     ]);
     await indexWorkspaceUsers([...users.map((user) => user.id), ...rows.map((row) => row.userId)]);

@@ -11,6 +11,7 @@
 import type { Prisma } from "@prisma/client";
 import { postYearEndCloseToLedger, reversedLines, reversibleLineSelect, writeEntry } from "@/lib/ledger/journal";
 import { startYearOf, yearEndDates } from "@/lib/ledger/period";
+import { reopenCloseMonthsAbove, type ReopenedCloseMonth } from "@/lib/ledger/books-lock";
 
 type Tx = Prisma.TransactionClient;
 
@@ -93,7 +94,7 @@ export async function closeFinancialYearInBooks(
 export async function reopenFinancialYearInBooks(
   tx: Tx,
   params: { label: string; userId: string },
-): Promise<{ closeId: string; reversal: { id: string; entryNumber: string } | null }> {
+): Promise<{ closeId: string; reversal: { id: string; entryNumber: string } | null; reopenedMonths: ReopenedCloseMonth[] }> {
   const label = params.label;
   const close = await tx.fiscalYearClose.findUnique({
     where: { label },
@@ -119,6 +120,10 @@ export async function reopenFinancialYearInBooks(
       note: `Year ${label} reopened`,
     },
   });
+  // The month-end close's months in (or after) the year, shown as CLOSED, are under the lock no longer:
+  // reopened with the year, as a hand-loosened lock reopens them (src/lib/ledger/books-lock.ts).
+  const lockNow = await tx.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
+  const reopenedMonths = await reopenCloseMonthsAbove(tx, { lockedUntil: lockNow?.lockedUntil ?? null, why: `${label} was reopened on Close the Books` });
 
   let reversal: { id: string; entryNumber: string } | null = null;
   if (close.closingEntryId) {
@@ -144,5 +149,5 @@ export async function reopenFinancialYearInBooks(
   }
 
   await tx.fiscalYearClose.delete({ where: { label } });
-  return { closeId: close.id, reversal };
+  return { closeId: close.id, reversal, reopenedMonths };
 }

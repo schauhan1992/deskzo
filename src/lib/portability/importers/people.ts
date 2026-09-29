@@ -1,5 +1,6 @@
 import { EmploymentType, Gender } from "@prisma/client";
 import { db } from "@/lib/db";
+import { PEOPLE_ONLY } from "@/lib/people";
 import { requireUserRef } from "./lookups";
 import {
   createRow,
@@ -65,8 +66,9 @@ type EmployeeUser = { id: string; name: string; userSeq: number };
 async function resolveUser(column: string, raw: string): Promise<Resolved<EmployeeUser>> {
   const seq = seqFromKey("USR", raw);
   if (seq !== null) {
-    const byKey = await db.user.findUnique({
-      where: { userSeq: seq },
+    // A person's account only: never platform support's or the Automation account (src/lib/people.ts).
+    const byKey = await db.user.findFirst({
+      where: { userSeq: seq, ...PEOPLE_ONLY },
       select: { id: true, name: true, userSeq: true },
     });
     if (!byKey) return { error: `No user with key ${keyOf("USR", seq)} (${column}).` };

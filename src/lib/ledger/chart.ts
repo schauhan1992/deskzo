@@ -53,6 +53,15 @@ export const SYSTEM_ACCOUNTS = {
   FX_GAIN_LOSS: "FX_GAIN_LOSS",
 
   /**
+   * Revenue & Close: the timing accounts. Revenue invoiced before it is earned, and earned before it
+   * is invoiced; costs paid before the months they cover, and incurred before their bill arrives.
+   */
+  DEFERRED_REVENUE: "DEFERRED_REVENUE",
+  UNBILLED_REVENUE: "UNBILLED_REVENUE",
+  PREPAID_EXPENSES: "PREPAID_EXPENSES",
+  ACCRUED_EXPENSES: "ACCRUED_EXPENSES",
+
+  /**
    * One per expense category, so the mapping from a claim to an account is total and the compiler
    * catches a category that nobody gave a home to.
    */
@@ -124,6 +133,23 @@ export const DEFAULT_CHART: Seed[] = [
     parent: "1100",
     systemKey: "TDS_RECEIVABLE",
     description: "Tax others deducted or collected from us, claimable against our own liability.",
+  },
+  {
+    code: "1160",
+    name: "Unbilled Revenue",
+    type: "ASSET",
+    parent: "1100",
+    systemKey: "UNBILLED_REVENUE",
+    description: "Revenue earned but not yet invoiced — work delivered ahead of its bill.",
+  },
+  {
+    code: "1170",
+    name: "Prepaid Expenses",
+    type: "ASSET",
+    parent: "1100",
+    systemKey: "PREPAID_EXPENSES",
+    description:
+      "Paid ahead for months not yet used — a year's insurance, an annual licence. Expensed month by month as they pass.",
   },
   { code: "1200", name: "Fixed Assets", type: "ASSET", isGroup: true, parent: "1000" },
   { code: "1210", name: "Computers & Equipment", type: "ASSET", parent: "1200" },
@@ -216,6 +242,24 @@ export const DEFAULT_CHART: Seed[] = [
     parent: "2100",
     systemKey: "PT_PAYABLE",
     description: "Deducted from staff and paid to the state.",
+  },
+  {
+    code: "2150",
+    name: "Deferred Revenue",
+    type: "LIABILITY",
+    parent: "2100",
+    systemKey: "DEFERRED_REVENUE",
+    description:
+      "Invoiced but not yet earned — the unexpired part of a subscription or contract billed in advance. Moved to Sales month by month as it is earned.",
+  },
+  {
+    code: "2155",
+    name: "Accrued Expenses",
+    type: "LIABILITY",
+    parent: "2100",
+    systemKey: "ACCRUED_EXPENSES",
+    description:
+      "Costs incurred whose bill hasn't arrived yet. Reversed on the 1st of the next month, so the bill books normally.",
   },
 
   { code: "3000", name: "Equity", type: "EQUITY", isGroup: true },

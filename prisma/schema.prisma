@@ -432,6 +432,8 @@ model User {
    * MEMBER: somebody who works here. SUPPORT: the platform's support staff, let in for a while by
    * the super admin's grant (src/lib/platform/support.ts) — never listed among the people, never
    * a seat, never assignable. Every list of users leaves them out (src/lib/db.ts).
+   * AUTOMATION: the workspace's own account for entries nobody keyed in (see the enum) — hidden
+   * like SUPPORT, and unable to sign in at all.
    */
   kind                   UserKind  @default(MEMBER)
   /**
@@ -750,6 +752,17 @@ model User {
   branchesCreated         Branch[]          @relation("BranchCreatedBy")
   gstRegistrationsCreated GstRegistration[] @relation("GstRegistrationCreatedBy")
 
+  revenueSchedulesCreated    RevenueSchedule[]      @relation("RevenueScheduleCreatedBy")
+  revenueSchedulesApproved   RevenueSchedule[]      @relation("RevenueScheduleApprovedBy")
+  accountingSchedulesCreated AccountingSchedule[]   @relation("AccountingScheduleCreatedBy")
+  closeMonthsClosed          CloseMonth[]           @relation("CloseMonthClosedBy")
+  closeTemplatesOwned        CloseTaskTemplate[]    @relation("CloseTaskTemplateOwner")
+  closeTasksOwned            CloseTask[]            @relation("CloseTaskOwner")
+  closeTasksDone             CloseTask[]            @relation("CloseTaskDoneBy")
+  closeAttachmentsUploaded   CloseTaskAttachment[]  @relation("CloseTaskAttachmentBy")
+  fluxNotesWritten           FluxNote[]             @relation("FluxNoteBy")
+  revenueCloseSettings       RevenueCloseSettings[] @relation("RevenueCloseSettingsBy")
+
   @@index([departmentId])
   @@index([managerId])
   @@map("users")
@@ -780,6 +793,8 @@ model Department {
   vaultShares   VaultShare[]   @relation("VaultSharedWithDepartment")
   surveyTargets SurveyTarget[] @relation("SurveyTargetDepartment")
   visitors      VisitorEntry[] @relation("VisitorDepartment")
+
+  accountingSchedules AccountingSchedule[] @relation("AccountingScheduleCostCentre")
 
   @@map("departments")
 }
@@ -946,6 +961,9 @@ model Company {
    */
   mergedFrom       CompanyMerge[]    @relation("CompanyMergedInto")
   visitorCompanies VisitorCompany[]  @relation("VisitorCompanyOrigin")
+
+  revenueSchedules    RevenueSchedule[]    @relation("RevenueScheduleCustomer")
+  accountingSchedules AccountingSchedule[] @relation("AccountingScheduleVendor")
 
   @@index([stage])
   @@index([assignedToUserId])
@@ -1546,10 +1564,11 @@ model GstRegistration {
   createdById String?
   createdBy   User?    @relation("GstRegistrationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  branches       Branch[]
-  documents      TradeDocument[]
-  journalLines   JournalLine[]
-  documentSeries DocumentSeries[]
+  branches         Branch[]
+  documents        TradeDocument[]
+  journalLines     JournalLine[]
+  documentSeries   DocumentSeries[]
+  revenueSchedules RevenueSchedule[]
 
   @@index([active])
   @@map("gst_registrations")
@@ -1611,12 +1630,14 @@ model Branch {
   createdById String?
   createdBy   User?    @relation("BranchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  members        User[]           @relation("UserBranch")
-  documents      TradeDocument[]
-  payments       Payment[]
-  consignments   Consignment[]
-  journalLines   JournalLine[]
-  documentSeries DocumentSeries[]
+  members             User[]               @relation("UserBranch")
+  documents           TradeDocument[]
+  payments            Payment[]
+  consignments        Consignment[]
+  journalLines        JournalLine[]
+  documentSeries      DocumentSeries[]
+  revenueSchedules    RevenueSchedule[]
+  accountingSchedules AccountingSchedule[]
 
   @@index([active])
   @@index([gstRegistrationId])
@@ -1972,6 +1993,14 @@ model TradeDocument {
   journalEntries JournalEntry[] @relation("DocumentJournal")
   consignments   Consignment[]  @relation("ConsignmentDocument")
 
+  /**
+   * Revenue & Close: the schedules this invoice's deferring lines made; on a credit note, what it took
+   * off them; on a bill, the prepaid schedules it was spread by.
+   */
+  revenueSchedules    RevenueSchedule[]           @relation("RevenueScheduleDocument")
+  revenueAdjustments  RevenueScheduleAdjustment[] @relation("RevenueAdjustmentCreditNote")
+  accountingSchedules AccountingSchedule[]        @relation("AccountingScheduleSource")
+
   @@index([companyId])
   @@index([leadId])
   @@index([docType, status])
@@ -1998,6 +2027,25 @@ model TradeDocumentLine {
    */
   companyProductId String?
   companyProduct   CompanyProduct? @relation(fields: [companyProductId], references: [id])
+
+  /**
+   * The period this line pays for, when it pays for time: a subscription's term, a support contract, a
+   * retainer. Calendar days, both inclusive; both set or both null, and never ending before it starts
+   * (CHECK trade_document_lines_service_period). An invoice line whose period runs past the month it was
+   * issued in is deferred and recognised month by month (Revenue & Close, src/lib/revenue).
+   */
+  servicePeriodFrom  DateTime?                @db.Date
+  servicePeriodTo    DateTime?                @db.Date
+  /**
+   * The project billing stage this line bills, set by "Raise invoice" on the stage. While the stage's
+   * delivery milestone is not yet done, the line's revenue waits for it.
+   */
+  billingMilestoneId String?
+  billingMilestone   ProjectBillingMilestone? @relation("BillingMilestoneLines", fields: [billingMilestoneId], references: [id], onDelete: SetNull)
+  /**
+   * The schedule this line's revenue is recognised by, when it defers.
+   */
+  revenueSchedule    RevenueSchedule?         @relation("RevenueScheduleInvoiceLine")
 
   /**
    * Copied from the item at the time of writing — a later catalogue rename must not alter an issued document.
@@ -2033,6 +2081,7 @@ model TradeDocumentLine {
 
   @@index([documentId])
   @@index([itemId])
+  @@index([billingMilestoneId])
   @@map("trade_document_lines")
 }
 
@@ -2287,12 +2336,20 @@ model Item {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
+  /**
+   * How revenue from this item is earned (Ind AS 115). Null means derived rather than chosen: a
+   * SUBSCRIPTION is RATABLE; anything else is earned at a point in time, unless its invoice line carries a
+   * service period running past the month it was issued in (src/lib/revenue).
+   */
+  revenuePattern RevenuePattern?
+
   stockMovements     StockMovement[]
   leadRequirements   LeadRequirement[]
   companyProducts    CompanyProduct[]
   resellerPrices     ResellerItemPrice[]
   tradeDocumentLines TradeDocumentLine[]
   assets             Asset[]
+  revenueSchedules   RevenueSchedule[]
 
   @@index([type])
   @@index([brandId])
@@ -2469,6 +2526,7 @@ model CompanyProduct {
   amcAssets        Asset[]           @relation("AssetAmc")
   feedbackRequests FeedbackRequest[] @relation("FeedbackOrder")
   projects         Project[]         @relation("ProjectOrder")
+  revenueSchedules RevenueSchedule[]
 
   @@index([companyId])
   @@index([locationId])
@@ -3129,6 +3187,10 @@ model LedgerAccount {
   assetsHeld        FixedAsset[] @relation("AssetCostAccount")
   assetsDepreciated FixedAsset[] @relation("AssetDepreciationAccount")
 
+  schedulesExpensed AccountingSchedule[] @relation("AccountingScheduleExpense")
+  schedulesHeld     AccountingSchedule[] @relation("AccountingScheduleBalance")
+  fluxNotes         FluxNote[]
+
   @@index([type])
   @@index([parentId])
   @@map("ledger_accounts")
@@ -3165,6 +3227,17 @@ enum JournalSource {
    * The gain or loss from settling a foreign-currency document at a different rate.
    */
   FX
+  /**
+   * Revenue & Close: a month's revenue recognised off its schedules, from Deferred Revenue into Sales —
+   * and the entries that move revenue in or out of deferral apart from an invoice's own posting (opening
+   * deferred revenue, undoing recognised months when an invoice is cancelled).
+   */
+  REVENUE
+  /**
+   * Revenue & Close: a prepaid expense amortised, an accrual for a bill not yet in and its reversal on
+   * the 1st of the next month, and the reclass that opens a prepaid.
+   */
+  SCHEDULE
 }
 
 /**
@@ -3216,6 +3289,15 @@ model JournalEntry {
   fiscalYearClose    FiscalYearClose?    @relation("FiscalYearClosingEntry")
   depreciationCharge DepreciationCharge? @relation("DepreciationEntry")
   assetDisposal      FixedAsset?         @relation("AssetDisposalEntry")
+  prepaidOpened      AccountingSchedule? @relation("AccountingScheduleReclass")
+
+  /**
+   * Revenue & Close: the schedule months this entry posted. One recognition or schedule run writes a
+   * single entry per month for every schedule due, so these are lists.
+   */
+  revenueLinesPosted    RevenueScheduleLine[]    @relation("RevenueRecognitionEntry")
+  scheduleLinesPosted   AccountingScheduleLine[] @relation("AccountingScheduleEntry")
+  scheduleLinesReversed AccountingScheduleLine[] @relation("AccountingScheduleReversal")
 
   @@index([date])
   @@index([source])
@@ -8081,6 +8163,11 @@ model ProjectMilestone {
   completedById String?
   completedBy   User?     @relation("MilestoneCompletedBy", fields: [completedById], references: [id])
 
+  /**
+   * The billing stages invoiced on this milestone's delivery.
+   */
+  billingStages ProjectBillingMilestone[] @relation("BillingOnDelivery")
+
   @@index([projectId])
   @@map("project_milestones")
 }
@@ -8112,9 +8199,21 @@ model ProjectBillingMilestone {
   documentId String?
   document   TradeDocument? @relation("BillingMilestoneDocument", fields: [documentId], references: [id], onDelete: SetNull)
 
+  /**
+   * The delivery this stage is billed on: "40% on UAT" is earned when UAT is done, whenever it is
+   * invoiced. Revenue invoiced on a stage whose delivery milestone is not yet complete is deferred until
+   * it is (Revenue & Close). Same project as the stage; the application keeps it so.
+   */
+  deliveryMilestoneId String?
+  deliveryMilestone   ProjectMilestone? @relation("BillingOnDelivery", fields: [deliveryMilestoneId], references: [id], onDelete: SetNull)
+
   sortOrder Int @default(0)
 
+  documentLines    TradeDocumentLine[] @relation("BillingMilestoneLines")
+  revenueSchedules RevenueSchedule[]   @relation("RevenueScheduleMilestone")
+
   @@index([projectId])
+  @@index([deliveryMilestoneId])
   @@map("project_billing_milestones")
 }
 
@@ -10638,4 +10737,587 @@ model PasswordResetToken {
 enum UserKind {
   MEMBER
   SUPPORT
+  /**
+   * The workspace's own account that automatic postings are made by: revenue recognised overnight, and
+   * prepaids and accruals run on schedule (Revenue & Close). A journal entry needs somebody to have
+   * created it, and these entries have no person behind them. One per workspace. It can't sign in (its
+   * password is the no-password placeholder), isn't a seat and isn't listed or assignable anywhere. Its
+   * entries read "Posted automatically".
+   */
+  AUTOMATION
+}
+
+// ─── Revenue & Close ──────────────────────────────────────────────────────────
+// A paid add-on on top of Accounting: revenue recognised as it is earned rather than when it is
+// invoiced (Ind AS 115), and a month-end close with a checklist that mostly checks itself.
+// Engines: src/lib/revenue (recognition), src/lib/close (checklist, prepaids and accruals, flux).
+// Every `month` column is a calendar date holding the first of its month (a CHECK on each table), and
+// every amount is in rupees.
+
+/**
+ * How an item's revenue is earned, when somebody has said. See `Item.revenuePattern`.
+ */
+enum RevenuePattern {
+  /**
+   * All of it when it is delivered: goods, a perpetual licence, a one-off service.
+   */
+  POINT_IN_TIME
+  /**
+   * Evenly across the period it covers: a subscription, a support contract.
+   */
+  RATABLE
+}
+
+enum RevenueScheduleKind {
+  /**
+   * Spread across `startDate`–`endDate`: by day, or in equal months when `spreadEvenly`.
+   */
+  RATABLE
+  /**
+   * All at once, in the month the billing stage's delivery milestone is completed. No dates.
+   */
+  MILESTONE
+}
+
+enum RevenueScheduleStatus {
+  /**
+   * Made or changed by hand, waiting for a second person with revenue.manage. Recognises nothing.
+   */
+  PENDING_APPROVAL
+  ACTIVE
+  /**
+   * Every month posted.
+   */
+  COMPLETED
+  /**
+   * Its invoice was cancelled or credited in full. Months already posted stay posted; cancelling the
+   * invoice reverses them in an entry of its own.
+   */
+  CANCELLED
+}
+
+enum CloseMonthStatus {
+  OPEN
+  CLOSED
+}
+
+enum CloseTaskStatus {
+  TODO
+  DONE
+  /**
+   * Doesn't apply this month — always with a note saying why.
+   */
+  NOT_APPLICABLE
+}
+
+enum AccountingScheduleKind {
+  /**
+   * Paid ahead — a year's insurance, an annual licence — and expensed over the months it covers.
+   */
+  PREPAID
+  /**
+   * A cost incurred every month whose bill comes later: booked at month end and reversed on the 1st of
+   * the next, so the real bill posts normally.
+   */
+  ACCRUAL
+}
+
+enum AccountingScheduleStatus {
+  ACTIVE
+  COMPLETED
+  /**
+   * Stopped: its unposted months will never post.
+   */
+  CANCELLED
+}
+
+/**
+ * One invoice line's revenue, earned over time rather than on the day it was invoiced.
+ * The invoice credits the line's taxable value to Deferred Revenue instead of Sales; this schedule then
+ * moves it to Sales — month by month across the service period (RATABLE), or all at once in the month
+ * the billing stage's delivery milestone is completed (MILESTONE). GST is untouched: it is due on the
+ * invoice, not on recognition.
+ * ## Posted months never change
+ * Re-planning a schedule (new dates, a new amount, a credit note) rewrites only its unposted months. A
+ * month already closed when its turn comes is posted in the first open month instead (`catchUp`).
+ * ## Why most links are Restrict
+ * A schedule stands behind entries in the books. A document that has one is issued, and issued documents
+ * are cancelled, never deleted (only drafts are) — so a delete that reaches a schedule is a bug, and
+ * failing it is the right answer. The item and the order are only descriptions of the line, which is
+ * why those two let go instead.
+ */
+model RevenueSchedule {
+  id String @id @default(cuid())
+
+  /**
+   * The invoice, and the line on it whose revenue this is — one schedule per line. Null only on a
+   * schedule the "Open deferred revenue" wizard made (`opening`), which stands for revenue invoiced
+   * before this add-on and need not point at a document.
+   */
+  documentId         String?
+  document           TradeDocument?           @relation("RevenueScheduleDocument", fields: [documentId], references: [id], onDelete: Restrict)
+  lineId             String?                  @unique
+  line               TradeDocumentLine?       @relation("RevenueScheduleInvoiceLine", fields: [lineId], references: [id], onDelete: Restrict)
+  /**
+   * The customer. A company is merged rather than deleted, and a merge moves this with everything else.
+   */
+  companyId          String
+  company            Company                  @relation("RevenueScheduleCustomer", fields: [companyId], references: [id], onDelete: Restrict)
+  itemId             String?
+  item               Item?                    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  /**
+   * The order (subscription) the line billed, for the customer's revenue and the waterfall.
+   */
+  companyProductId   String?
+  companyProduct     CompanyProduct?          @relation(fields: [companyProductId], references: [id], onDelete: SetNull)
+  /**
+   * The billing stage a MILESTONE schedule waits on (required for one: CHECK
+   * revenue_schedules_milestone_has_stage). Restrict, because without it the revenue would never be
+   * recognised: the stage has to let go of the schedule before it can be deleted.
+   */
+  billingMilestoneId String?
+  billingMilestone   ProjectBillingMilestone? @relation("RevenueScheduleMilestone", fields: [billingMilestoneId], references: [id], onDelete: Restrict)
+
+  kind         RevenueScheduleKind
+  status       RevenueScheduleStatus
+  /**
+   * The revenue to recognise, in rupees at the invoice's own rate. More than zero.
+   */
+  amount       Decimal               @db.Decimal(14, 2)
+  /**
+   * The service period, both ends inclusive. Required for RATABLE (CHECK revenue_schedules_ratable_has_period),
+   * null for MILESTONE.
+   */
+  startDate    DateTime?             @db.Date
+  endDate      DateTime?             @db.Date
+  /**
+   * Equal months instead of by day. Off by default: by day is exact — a 1 Jan–31 Dec year puts 31/365 of
+   * it in January — and equal months are the setting (`RevenueCloseSettings.spreadEvenly`).
+   */
+  spreadEvenly Boolean               @default(false)
+  /**
+   * Made by the "Open deferred revenue" wizard, for revenue invoiced before this add-on and booked to
+   * Sales in full. Its opening balance was moved into Deferred Revenue by the wizard's adjusting entry.
+   */
+  opening      Boolean               @default(false)
+
+  /**
+   * Copied from the document, so recognition posts under the same branch and GSTIN as the invoice did.
+   */
+  branchId          String?
+  branch            Branch?          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  gstRegistrationId String?
+  gstRegistration   GstRegistration? @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+
+  note String?
+
+  /**
+   * Who made it, and — for one made or changed by hand — who approved it. The approver is somebody
+   * else, except the super admin, who may approve their own (approvedById = createdById records that).
+   */
+  createdById  String
+  createdBy    User      @relation("RevenueScheduleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedById String?
+  approvedBy   User?     @relation("RevenueScheduleApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  lines       RevenueScheduleLine[]
+  adjustments RevenueScheduleAdjustment[]
+
+  @@index([status])
+  @@index([companyId])
+  @@index([documentId])
+  @@index([billingMilestoneId])
+  @@map("revenue_schedules")
+}
+
+/**
+ * One month of a revenue schedule: how much is recognised in it, and the entry that did.
+ * Unique per schedule and month. The recognition run claims unposted lines and writes one entry per
+ * month in the same transaction, so a line is never posted twice however many runs overlap.
+ */
+model RevenueScheduleLine {
+  id         String          @id @default(cuid())
+  scheduleId String
+  schedule   RevenueSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  /**
+   * The first of the month (CHECK revenue_schedule_lines_month_first).
+   */
+  month  DateTime @db.Date
+  /**
+   * Zero or more; the last month takes the rounding difference.
+   */
+  amount Decimal  @db.Decimal(14, 2)
+
+  /**
+   * The recognition entry that posted it; null until then. An entry is never deleted — it is reversed —
+   * so Restrict only ever refuses a bug.
+   */
+  entryId  String?
+  entry    JournalEntry? @relation("RevenueRecognitionEntry", fields: [entryId], references: [id], onDelete: Restrict)
+  postedAt DateTime?
+  /**
+   * Posted in a later open month because its own was already closed.
+   */
+  catchUp  Boolean       @default(false)
+
+  @@unique([scheduleId, month])
+  @@index([entryId])
+  @@map("revenue_schedule_lines")
+}
+
+/**
+ * What a credit note took off a revenue schedule's unrecognised balance — kept so cancelling the credit
+ * note puts back exactly that, and not a figure worked out again from a schedule that has moved on.
+ */
+model RevenueScheduleAdjustment {
+  id         String          @id @default(cuid())
+  scheduleId String
+  schedule   RevenueSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  /**
+   * The credit note. Issued, so never deleted.
+   */
+  documentId String
+  document   TradeDocument   @relation("RevenueAdjustmentCreditNote", fields: [documentId], references: [id], onDelete: Restrict)
+  /**
+   * Rupees taken off the unrecognised balance. More than zero.
+   */
+  amount     Decimal         @db.Decimal(14, 2)
+  /**
+   * Set when the credit note was cancelled and the amount restored.
+   */
+  reversedAt DateTime?
+  createdAt  DateTime        @default(now())
+
+  @@unique([scheduleId, documentId])
+  @@index([documentId])
+  @@map("revenue_schedule_adjustments")
+}
+
+/**
+ * A prepaid expense expensed over its months, or an accrual booked for a bill that comes later.
+ * PREPAID: made from an issued bill or by hand. On creation one reclass moves the amount from the
+ * expense account into the balance account (Prepaid Expenses), dated the bill's date; each month then
+ * expenses its share back. ACCRUAL: each month books the expected cost against the balance account
+ * (Accrued Expenses) at month end and reverses it on the 1st of the next, so the real bill books
+ * normally; "Stop" ends it. Posting follows the revenue run's rules: one entry per month, claimed lines,
+ * catch-up into the first open month.
+ */
+model AccountingSchedule {
+  id   String                 @id @default(cuid())
+  kind AccountingScheduleKind
+  name String
+
+  /**
+   * Who the cost is owed to or was paid to, when there is somebody.
+   */
+  vendorCompanyId  String?
+  vendorCompany    Company?      @relation("AccountingScheduleVendor", fields: [vendorCompanyId], references: [id], onDelete: Restrict)
+  /**
+   * Where the cost lands each month, and the balance-sheet account it passes through — Prepaid Expenses
+   * or Accrued Expenses unless changed. Two different accounts (CHECK accounting_schedules_two_accounts).
+   */
+  expenseAccountId String
+  expenseAccount   LedgerAccount @relation("AccountingScheduleExpense", fields: [expenseAccountId], references: [id], onDelete: Restrict)
+  balanceAccountId String
+  balanceAccount   LedgerAccount @relation("AccountingScheduleBalance", fields: [balanceAccountId], references: [id], onDelete: Restrict)
+
+  /**
+   * The total, in rupees, that the months split between them. More than zero.
+   */
+  amount     Decimal  @db.Decimal(14, 2)
+  /**
+   * The first month, as the first of it (CHECK accounting_schedules_start_month_first), and how many
+   * months: 1 to 60.
+   */
+  startMonth DateTime @db.Date
+  months     Int
+
+  /**
+   * The bill a PREPAID was made from. Issued, so never deleted.
+   */
+  sourceDocumentId String?
+  sourceDocument   TradeDocument? @relation("AccountingScheduleSource", fields: [sourceDocumentId], references: [id], onDelete: Restrict)
+  /**
+   * The reclass a PREPAID opened with (Dr Prepaid Expenses, Cr the expense). Only a PREPAID has one
+   * (CHECK accounting_schedules_reclass_is_prepaid).
+   */
+  reclassEntryId   String?        @unique
+  reclassEntry     JournalEntry?  @relation("AccountingScheduleReclass", fields: [reclassEntryId], references: [id], onDelete: Restrict)
+
+  status AccountingScheduleStatus @default(ACTIVE)
+
+  /**
+   * The dimensions every posting carries: the branch, and the department as cost centre.
+   */
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  departmentId String?
+  department   Department? @relation("AccountingScheduleCostCentre", fields: [departmentId], references: [id], onDelete: SetNull)
+
+  note String?
+
+  createdById String
+  createdBy   User     @relation("AccountingScheduleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lines AccountingScheduleLine[]
+
+  @@index([status])
+  @@index([vendorCompanyId])
+  @@index([sourceDocumentId])
+  @@map("accounting_schedules")
+}
+
+/**
+ * One month of a prepaid or accrual schedule, and the entries that posted it — for an accrual, also the
+ * reversal on the 1st of the next month.
+ */
+model AccountingScheduleLine {
+  id         String             @id @default(cuid())
+  scheduleId String
+  schedule   AccountingSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  /**
+   * The first of the month (CHECK accounting_schedule_lines_month_first).
+   */
+  month  DateTime @db.Date
+  /**
+   * Zero or more.
+   */
+  amount Decimal  @db.Decimal(14, 2)
+
+  /**
+   * The month-end entry, and (an accrual's) reversal of it. A reversal only follows an entry (CHECK
+   * accounting_schedule_lines_reversal_after_entry).
+   */
+  entryId         String?
+  entry           JournalEntry? @relation("AccountingScheduleEntry", fields: [entryId], references: [id], onDelete: Restrict)
+  reversalEntryId String?
+  reversalEntry   JournalEntry? @relation("AccountingScheduleReversal", fields: [reversalEntryId], references: [id], onDelete: Restrict)
+  postedAt        DateTime?
+  /**
+   * Posted in a later open month because its own was already closed.
+   */
+  catchUp         Boolean       @default(false)
+
+  @@unique([scheduleId, month])
+  @@index([entryId])
+  @@index([reversalEntryId])
+  @@map("accounting_schedule_lines")
+}
+
+/**
+ * One month's close. Closing it moves `LedgerLock.lockedUntil` to its last day through the audited
+ * books-lock path; reopening loosens the lock the same way and reopens every later closed month.
+ * The year-end close stays on the Close the Books page and is not this.
+ */
+model CloseMonth {
+  id     String           @id @default(cuid())
+  /**
+   * The first of the month (CHECK close_months_month_first).
+   */
+  month  DateTime         @unique @db.Date
+  status CloseMonthStatus @default(OPEN)
+
+  closedAt   DateTime?
+  closedById String?
+  closedBy   User?     @relation("CloseMonthClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  reopenedAt DateTime?
+  /**
+   * Anything worth saying about this close — including why it was closed with tasks still open.
+   */
+  note       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("close_months")
+}
+
+/**
+ * A task every month's close checklist gets. A month's tasks are copied from the active templates, so
+ * editing a template changes the months to come, not the ones already generated.
+ */
+model CloseTaskTemplate {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+  /**
+   * Who usually does it. Null: nobody in particular.
+   */
+  ownerId     String?
+  owner       User?   @relation("CloseTaskTemplateOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  /**
+   * Due on this working day of the following month: 3 is the third working day. 1 to 31
+   * (CHECK close_task_templates_due_day); a day past the month's last working day means the last one.
+   */
+  dueDay      Int     @default(3)
+  /**
+   * The check that ticks it without anybody, when there is one — a key the close engine knows
+   * (src/lib/close). Null: done by hand.
+   */
+  autoCheck   String?
+  sortOrder   Int     @default(0)
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks CloseTask[]
+
+  @@index([active, sortOrder])
+  @@map("close_task_templates")
+}
+
+/**
+ * One task on one month's checklist.
+ * Unique per month and template, so generating a month twice gives it one set; a one-off task has no
+ * template, and any number of those can share a month.
+ */
+model CloseTask {
+  id    String   @id @default(cuid())
+  /**
+   * The month being closed, as the first of it (CHECK close_tasks_month_first).
+   */
+  month DateTime @db.Date
+
+  /**
+   * The template it was copied from. A template deleted later leaves its tasks behind as one-offs.
+   */
+  templateId String?
+  template   CloseTaskTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  title      String
+  ownerId    String?
+  owner      User?              @relation("CloseTaskOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  dueOn      DateTime           @db.Date
+
+  status   CloseTaskStatus @default(TODO)
+  /**
+   * When it was marked done or not applicable, and by whom. A task ticked by its automatic check is
+   * done by the workspace's Automation account (src/lib/automation-user.ts), shown as "Checked
+   * automatically".
+   */
+  doneAt   DateTime?
+  doneById String?
+  doneBy   User?           @relation("CloseTaskDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  note     String?
+
+  /**
+   * The automatic check, as copied from the template, and its last result: whether it passed, what it
+   * found (the reason and the links a failing check shows), and when it ran.
+   */
+  autoCheck     String?
+  autoOk        Boolean?
+  autoDetail    Json?
+  autoCheckedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attachments CloseTaskAttachment[]
+
+  @@unique([month, templateId])
+  @@index([ownerId])
+  @@index([status, dueOn])
+  @@map("close_tasks")
+}
+
+/**
+ * A file somebody attached to a close task: the statement a reconciliation was agreed to, the GST
+ * working. Kept the way project and HR documents are, as a data URL in the row — the same storage, not
+ * a new one.
+ */
+model CloseTaskAttachment {
+  id     String    @id @default(cuid())
+  taskId String
+  task   CloseTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  name        String
+  fileDataUrl String
+  mimeType    String
+  sizeBytes   Int
+
+  uploadedById String?
+  uploadedBy   User?    @relation("CloseTaskAttachmentBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([taskId])
+  @@map("close_task_attachments")
+}
+
+/**
+ * Why an account moved as it did in a month — the answer to a flagged row on the flux tab. One per
+ * account per month. An account that has a note has journal lines, and so can't be deleted while it does.
+ */
+model FluxNote {
+  id          String        @id @default(cuid())
+  /**
+   * The first of the month (CHECK flux_notes_month_first).
+   */
+  month       DateTime      @db.Date
+  accountId   String
+  account     LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /**
+   * At most 1,000 characters, and not blank (CHECK flux_notes_explanation_length).
+   */
+  explanation String
+  /**
+   * Who wrote it, and when it was last written.
+   */
+  byId        String
+  by          User          @relation("FluxNoteBy", fields: [byId], references: [id], onDelete: Restrict)
+  at          DateTime      @default(now())
+
+  @@unique([month, accountId])
+  @@map("flux_notes")
+}
+
+/**
+ * Revenue & Close's settings. A singleton, like LedgerLock: created with its defaults the first time
+ * it is read.
+ */
+model RevenueCloseSettings {
+  id           String  @id @default("global")
+  /**
+   * "Post recognition and schedules automatically": the nightly job runs recognition, prepaids and
+   * accruals through the last completed month, as the Automation account.
+   */
+  autoPost     Boolean @default(true)
+  /**
+   * What a new revenue schedule's `spreadEvenly` starts as.
+   */
+  spreadEvenly Boolean @default(false)
+  /**
+   * A flux row is flagged when its change is at least this percentage and at least this amount — both.
+   * Neither negative (CHECK revenue_close_settings_thresholds).
+   */
+  fluxPercent  Decimal @default(20) @db.Decimal(6, 2)
+  fluxAmount   Decimal @default(25000) @db.Decimal(14, 2)
+
+  updatedById String?
+  updatedBy   User?    @relation("RevenueCloseSettingsBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+
+  @@map("revenue_close_settings")
+}
+
+/**
+ * A once-a-day job's claim on a day, per workspace. The first run of the heartbeat to insert
+ * (job, day) does the work; every later one hits the key and leaves. `ok` and `error` record how it
+ * went. `day` is the date in India.
+ */
+model DailyJobRun {
+  job   String
+  day   DateTime @db.Date
+  ranAt DateTime @default(now())
+  ok    Boolean?
+  error String?
+
+  @@id([job, day])
+  @@map("daily_job_runs")
 }

@@ -9,6 +9,7 @@ import { reverseJournalEntry } from "@/actions/ledger";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
+import { authorLabel } from "@/lib/people";
 import { Amount } from "@/components/accounting/report-chrome";
 
 const SOURCE_LABEL: Record<JournalSource, string> = {
@@ -23,6 +24,8 @@ const SOURCE_LABEL: Record<JournalSource, string> = {
   DEPRECIATION: "Depreciation",
   CLOSING: "Year end",
   FX: "Exchange",
+  REVENUE: "Revenue",
+  SCHEDULE: "Schedule",
 };
 
 const SOURCE_TONE: Record<JournalSource, "default" | "green" | "blue" | "red" | "amber"> = {
@@ -37,6 +40,8 @@ const SOURCE_TONE: Record<JournalSource, "default" | "green" | "blue" | "red" | 
   DEPRECIATION: "default",
   CLOSING: "red",
   FX: "amber",
+  REVENUE: "green",
+  SCHEDULE: "default",
 };
 
 type Entry = {
@@ -49,7 +54,7 @@ type Entry = {
   reversesId: string | null;
   reversedBy: { id: string; entryNumber: string } | null;
   company: { id: string; name: string } | null;
-  createdBy: { name: string };
+  createdBy: { name: string; kind?: string | null };
   amount: number;
   lines: {
     id: string;
@@ -113,6 +118,8 @@ function EntryCard({ entry, canReverse }: { entry: Entry; canReverse: boolean })
             <span className="font-mono text-sm font-medium text-text">{entry.entryNumber}</span>
             <Badge tone={SOURCE_TONE[entry.source]}>{SOURCE_LABEL[entry.source]}</Badge>
             <span className="text-xs text-subtle">{formatDate(entry.date)}</span>
+            {/* "Posted automatically" for the Automation account's entries (src/lib/people.ts), "by <name>" for a person's. */}
+            <span className="text-xs text-subtle">{authorLabel(entry.createdBy)}</span>
             {entry.reversedBy && (
               <Badge tone="red">Reversed by {entry.reversedBy.entryNumber}</Badge>
             )}
