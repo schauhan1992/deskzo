@@ -69,12 +69,26 @@ export async function unlinkCommissionPartyFromCompany(linkId: string): Promise<
   return { ok: true, data: null };
 }
 
-/** A commission party's payee accounts (related parties) — label, PAN, bank, UPI — for both display and the order-expense "pay into account" picker. */
+/** A commission party's payee accounts (related parties) — label, PAN, bank, UPI — for display. The order form's picker uses `listCommissionPartyAccountOptions`. */
 export async function listCommissionPartyAccounts(commissionPartyId: string) {
   await requireModuleUser("commission_parties");
   return db.commissionPartyAccount.findMany({
     where: { commissionPartyId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+  });
+}
+
+/**
+ * The same accounts as `listCommissionPartyAccounts`, as the order form's "which account" picker needs
+ * them: which one, and whether it is the default. Anybody punching an order can reach this, so the PAN
+ * and bank details the full rows carry stay on the server.
+ */
+export async function listCommissionPartyAccountOptions(commissionPartyId: string) {
+  await requireModuleUser("commission_parties");
+  return db.commissionPartyAccount.findMany({
+    where: { commissionPartyId },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: { id: true, label: true, isDefault: true },
   });
 }
 

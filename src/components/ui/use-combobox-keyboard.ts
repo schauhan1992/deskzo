@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 /**
  * The keyboard half of a combobox, for the four type-to-search pickers that already share a shape.
@@ -27,6 +27,13 @@ import { useEffect, useId, useState } from "react";
  * Nothing here decides *what* an option is. The caller passes how many rows there are and what
  * choosing row `n` means, so a picker whose list ends in a "create new" row can count that row as
  * the last option and reach it with the same arrow keys as the rest.
+ *
+ * `autoHighlightFirst` is for a form where the picked value is mandatory and Enter is the habit —
+ * the order punching screen. Without it, typing a name and pressing Enter submits the form with the
+ * name typed but nothing picked, because typing clears the value and lands on no row. With it, the
+ * first row is highlighted whenever the list is showing rows and nothing else is, so Enter takes
+ * the top match; and Enter while the list is open never reaches the form, even with no rows to take
+ * (still searching, nothing found). Off by default: everywhere else Enter keeps its old meaning.
  */
 export function useComboboxKeyboard({
   label,
@@ -35,6 +42,7 @@ export function useComboboxKeyboard({
   setOpen,
   onChoose,
   resetKey,
+  autoHighlightFirst = false,
 }: {
   /** Names the listbox itself, e.g. "Companies" — the field is named separately by its own label. */
   label: string;
@@ -46,8 +54,11 @@ export function useComboboxKeyboard({
   onChoose: (index: number) => void;
   /** Changes whenever the result rows do — typically the query. Drops a stale highlight. */
   resetKey: string;
+  /** Highlight the first row when nothing is, and keep Enter from submitting while the list is open. */
+  autoHighlightFirst?: boolean;
 }) {
   const listboxId = useId();
+  /** Where the arrows put the highlight; -1 until the user aims. */
   const [activeIndex, setActiveIndex] = useState(-1);
   const [lastResetKey, setLastResetKey] = useState(resetKey);
   const [wasOpen, setWasOpen] = useState(isOpen);
@@ -70,7 +81,14 @@ export function useComboboxKeyboard({
   // A shrinking list can strand the highlight past the end of it.
   if (activeIndex >= optionCount) setActiveIndex(-1);
 
-  const activeOptionId = activeIndex >= 0 && activeIndex < optionCount ? optionId(activeIndex) : undefined;
+  // The highlight actually shown. Derived rather than stored: the reset above already drops the
+  // aimed-at row whenever the rows change, so "the first row once results change" falls out of it
+  // with no effect and no second state to keep in step — and the moment a new answer lands, its top
+  // row is the one Enter takes.
+  const aimed = activeIndex >= 0 && activeIndex < optionCount;
+  const highlighted = aimed ? activeIndex : autoHighlightFirst && isOpen && optionCount > 0 ? 0 : -1;
+
+  const activeOptionId = highlighted >= 0 ? optionId(highlighted) : undefined;
 
   // A highlight below the fold is not a highlight. `block: "nearest"` scrolls the panel just enough
   // to show the row and leaves the page alone when the row is already visible.
@@ -80,9 +98,9 @@ export function useComboboxKeyboard({
   // `getElementById` also takes the id verbatim, where `querySelector` would need it escaped —
   // `useId` returns ids containing punctuation that is not valid in a CSS selector.
   useEffect(() => {
-    if (!isOpen || activeIndex < 0) return;
-    document.getElementById(`${listboxId}option-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
-  }, [isOpen, activeIndex, listboxId]);
+    if (!isOpen || highlighted < 0) return;
+    document.getElementById(`${listboxId}option-${highlighted}`)?.scrollIntoView({ block: "nearest" });
+  }, [isOpen, highlighted, listboxId]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     switch (event.key) {
@@ -94,18 +112,22 @@ export function useComboboxKeyboard({
         if (!isOpen) {
           setOpen(true);
           // Opening with the arrows lands on an end of the list; opening by typing or clicking
-          // deliberately lands on nothing, so Enter still submits the form until you choose to aim.
+          // deliberately lands on nothing, so Enter still submits the form until you choose to aim
+          // (or, with `autoHighlightFirst`, lands on the first row).
           setActiveIndex(optionCount === 0 ? -1 : isDown ? 0 : optionCount - 1);
           return;
         }
         if (optionCount === 0) return;
-        setActiveIndex((current) =>
-          isDown
-            ? (current + 1) % optionCount
-            : current <= 0
+        setActiveIndex((current) => {
+          // The automatic highlight on the first row counts as where the arrows start, so the first
+          // ArrowDown moves to row 2 rather than "arriving" on the row that already looks chosen.
+          const from = current < 0 && autoHighlightFirst ? 0 : current;
+          return isDown
+            ? (from + 1) % optionCount
+            : from <= 0
               ? optionCount - 1
-              : current - 1,
-        );
+              : from - 1;
+        });
         return;
       }
       case "Home":
@@ -113,17 +135,25 @@ export function useComboboxKeyboard({
         // Only once the user is navigating the list. While they are still typing, Home and End are
         // how you get to the start and end of your own query — and since the list opens on focus
         // and stays open, taking those keys unconditionally would mean this field is the one place
-        // in the app where you cannot jump the caret.
+        // in the app where you cannot jump the caret. The automatic first-row highlight is not
+        // navigating, which is why this reads `activeIndex` and not `highlighted`.
         if (!isOpen || activeIndex < 0 || optionCount === 0) return;
         event.preventDefault();
         setActiveIndex(event.key === "Home" ? 0 : optionCount - 1);
         return;
       }
       case "Enter": {
-        // With nothing highlighted, Enter is left alone to submit the form, as it does today.
-        if (!isOpen || activeIndex < 0 || activeIndex >= optionCount) return;
+        if (!isOpen) return;
+        if (highlighted < 0) {
+          // With nothing highlighted, Enter is left alone to submit the form, as it does today —
+          // unless the caller asked for the first row to be taken. Then an open list with no row to
+          // take (still searching, nothing found) holds Enter back too, or a name that is typed but
+          // not picked would submit the form exactly as if the field were filled.
+          if (autoHighlightFirst) event.preventDefault();
+          return;
+        }
         event.preventDefault();
-        onChoose(activeIndex);
+        onChoose(highlighted);
         return;
       }
       case "Escape": {
@@ -144,7 +174,8 @@ export function useComboboxKeyboard({
   }
 
   return {
-    activeIndex,
+    /** The row to draw highlighted: the one aimed at, or the automatic first row. */
+    activeIndex: highlighted,
     /** Spread onto the text field. */
     comboboxProps: {
       role: "combobox" as const,
@@ -169,8 +200,82 @@ export function useComboboxKeyboard({
     optionProps: (index: number) => ({
       id: optionId(index),
       role: "option" as const,
-      "aria-selected": index === activeIndex,
+      "aria-selected": index === highlighted,
       tabIndex: -1,
     }),
+  };
+}
+
+/** Under this, a search would match half the book; the picker's own list answers instead. */
+const SEARCH_MIN_LENGTH = 2;
+
+/** Long enough that a name typed at speed sends one request, short enough to feel immediate. */
+const SEARCH_DEBOUNCE_MS = 200;
+
+/**
+ * The search half of a combobox, for a picker whose full list is too long to send to the browser.
+ *
+ * The picker goes on filtering its own list for a query under two characters and asks the server
+ * once the query is longer. Three things here are deliberate:
+ *
+ *   · debounced, so "sharma" typed at speed is one request rather than six;
+ *   · the newest request wins — an answer for "sha" that turns up after the one for "sharma" is
+ *     dropped, or the list would show the older, wider matches under the narrower query;
+ *   · an answer is kept with the query it answers and shown only for that query. Between a
+ *     keystroke and its answer the picker says "Searching…" rather than leaving the previous rows up,
+ *     because with `autoHighlightFirst` Enter would take the top one of those.
+ *
+ * It searches only while the list is open, so picking a row — which puts that row's name in the
+ * field and closes the list — does not send the name off as a fresh search.
+ */
+export function useComboboxSearch<T>({
+  search,
+  query,
+  isOpen,
+}: {
+  /** The server lookup. Without one the hook does nothing and `active` stays false. */
+  search: ((query: string) => Promise<T[]>) | undefined;
+  /** The text in the field, already trimmed. */
+  query: string;
+  isOpen: boolean;
+}) {
+  const [answer, setAnswer] = useState<{ for: string; options: T[]; failed: boolean } | null>(null);
+  /** Numbers the requests; only the newest one's answer is kept. */
+  const latest = useRef(0);
+  const active = Boolean(search) && query.length >= SEARCH_MIN_LENGTH;
+
+  // Reads `search` when the timer fires rather than when it was set, so a caller that passes a new
+  // arrow function on every render neither restarts the debounce each time nor runs a stale lookup.
+  const run = useEffectEvent((text: string, request: number) => {
+    if (!search) return;
+    // Started inside the chain so a lookup that throws, rather than rejects, lands in the same place.
+    Promise.resolve()
+      .then(() => search(text))
+      .then(
+        (options) => {
+          if (request === latest.current) setAnswer({ for: text, options, failed: false });
+        },
+        () => {
+          if (request === latest.current) setAnswer({ for: text, options: [], failed: true });
+        },
+      );
+  });
+
+  useEffect(() => {
+    if (!active || !isOpen) return;
+    const request = ++latest.current;
+    const timer = window.setTimeout(() => run(query, request), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [active, isOpen, query]);
+
+  const current = active && answer?.for === query ? answer : null;
+  return {
+    /** The server answers for this query, not the picker's own list. */
+    active,
+    /** Waiting on the debounce or on the server. */
+    searching: active && !current,
+    /** The lookup failed; the picker says so rather than "no matches". */
+    failed: current?.failed ?? false,
+    options: current?.options ?? [],
   };
 }

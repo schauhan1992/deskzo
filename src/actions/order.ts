@@ -188,7 +188,7 @@ async function resolveQuote(data: QuoteData, now: Date) {
 }
 
 /** The order-punching form (sales). Vendor/purchase price aren't collected here — that's the purchase team's job once accounts approves. */
-export async function createOrder(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createOrder(input: unknown): Promise<ActionResult<{ id: string; orderSeq: number }>> {
   const user = await requireModuleUser("orders");
   const parsed = createOrderSchema.safeParse(input);
   if (!parsed.success) {
@@ -379,7 +379,9 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
 
   revalidatePath("/orders");
   revalidatePath(`/companies/${data.companyId}`);
-  return { ok: true, data: { id: order.id } };
+  // The sequence as well as the id: the form goes straight to the order's clean address (ORD-…),
+  // where the id alone would land on the cuid URL first and be redirected from there.
+  return { ok: true, data: { id: order.id, orderSeq: order.orderSeq } };
 }
 
 /** Accounts reviews payment terms and gives (or refuses) the go-ahead. */

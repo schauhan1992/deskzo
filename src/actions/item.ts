@@ -311,13 +311,57 @@ export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ co
   return { ok: true, data: { count: result.count } };
 }
 
-export async function listItemOptions() {
+/** What an item picker needs — the order form prices and taxes the line from these. */
+const ITEM_OPTION_SELECT = {
+  id: true,
+  name: true,
+  sku: true,
+  type: true,
+  unit: true,
+  sellingPrice: true,
+  taxRatePercent: true,
+} as const;
+
+/**
+ * Every active item, for the item pickers. `take` stops at that many rows, for a picker that searches
+ * the server for the rest (`searchItemOptions`) — ask for one more than you show, and the extra row
+ * says the list is incomplete.
+ */
+export async function listItemOptions(params?: { take?: number }) {
   await requireModuleUser("items");
+  const take = params?.take;
   return toPlain(
     await db.item.findMany({
       where: { active: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, sku: true, type: true, unit: true, sellingPrice: true, taxRatePercent: true },
+      // A positive whole number or no limit: whatever else a caller sends is ignored, not queried with.
+      ...(typeof take === "number" && Number.isInteger(take) && take > 0 ? { take } : {}),
+      select: ITEM_OPTION_SELECT,
+    }),
+  );
+}
+
+/** How many items one search answers with — the picker says so when the cap bites. */
+const ITEM_SEARCH_LIMIT = 20;
+
+/**
+ * Active items whose name or SKU contains what was typed, for the order form's product picker once the
+ * catalogue is too long to send to the browser whole. Two characters at least, the first twenty by
+ * name — the same fields `listItemOptions` gives, and the brand the item belongs to.
+ */
+export async function searchItemOptions(query: string) {
+  await requireModuleUser("items");
+  const typed = String(query ?? "").trim().slice(0, 120);
+  if (typed.length < 2) return [];
+  return toPlain(
+    await db.item.findMany({
+      where: {
+        active: true,
+        OR: [{ name: { contains: typed, mode: "insensitive" } }, { sku: { contains: typed, mode: "insensitive" } }],
+      },
+      orderBy: { name: "asc" },
+      take: ITEM_SEARCH_LIMIT,
+      select: { ...ITEM_OPTION_SELECT, brandId: true },
     }),
   );
 }

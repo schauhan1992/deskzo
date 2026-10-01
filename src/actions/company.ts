@@ -26,6 +26,7 @@ import {
   normalizeCompanyName,
   payoutDetailsSchema,
   vendorRelationshipTypeValues,
+  customerRelationshipTypeValues,
   isVendorRelationshipType,
   isCustomerRelationshipType,
   type CreateCompanyInput,
@@ -981,33 +982,98 @@ export async function listVendorsPaged(params: VendorListParams & { page: number
   return { rows, total };
 }
 
-export async function listCompanyOptions(params?: { relationshipTypes?: CompanyRelationshipType[] }) {
+/**
+ * The companies a picker may offer this person — the `where` behind both `listCompanyOptions` and
+ * `searchCustomerOptions`, written once so that searching can never reach further than the list does.
+ */
+async function companyOptionsWhere(
+  userId: string,
+  relationshipTypes?: readonly CompanyRelationshipType[],
+): Promise<Prisma.CompanyWhereInput> {
+  return {
+    /**
+     * Scoped to the accounts this person manages, or their team's.
+     *
+     * This list feeds every company picker in the app, and it was returning the whole book to
+     * anybody signed in — which is the failure `company-scope.ts` describes as the dangerous one,
+     * because a filter that is too wide is never reported. `companies.viewAll` lifts it, and the
+     * presets already grant that to the functions that genuinely serve every account: support,
+     * purchasing and accounts.
+     */
+    ...(await companyScope(userId)),
+    stage: { not: "DISQUALIFIED" },
+    // A reseller's end customer can never be the party we deal with directly — the reseller is.
+    managedByResellerId: null,
+    ...(relationshipTypes ? { relationshipType: { in: [...relationshipTypes] } } : {}),
+  };
+}
+
+/** A company as a picker shows it: the name, what kind of account, and the category chip. */
+const COMPANY_OPTION_SELECT = {
+  id: true,
+  name: true,
+  relationshipType: true,
+  customerCategory: { select: CATEGORY_SELECT },
+} as const;
+
+/** A positive whole number of rows to stop at, or no limit — whatever else a caller sends is ignored, not queried with. */
+function rowLimit(take: unknown): { take?: number } {
+  return typeof take === "number" && Number.isInteger(take) && take > 0 ? { take } : {};
+}
+
+/**
+ * The company pickers' list. By default every company in reach, each with its contacts — the lead
+ * and ticket forms read those.
+ *
+ * `withContacts: false` leaves the contacts join off for a picker that only shows names; it is most
+ * of the payload, and the order form sends this list to the browser. `take` stops at that many rows,
+ * for a caller that searches the server for the rest (`searchCustomerOptions`) — ask for one more
+ * than you show, and the extra row says the list is incomplete.
+ */
+export async function listCompanyOptions(params?: {
+  relationshipTypes?: CompanyRelationshipType[];
+  withContacts?: boolean;
+  take?: number;
+}) {
   const user = await requireUser();
+  const where = await companyOptionsWhere(user.id, params?.relationshipTypes);
+  if (params?.withContacts === false) {
+    return db.company.findMany({ where, orderBy: { name: "asc" }, ...rowLimit(params.take), select: COMPANY_OPTION_SELECT });
+  }
   return db.company.findMany({
-    where: {
-      /**
-       * Scoped to the accounts this person manages, or their team's.
-       *
-       * This list feeds every company picker in the app, and it was returning the whole book to
-       * anybody signed in — which is the failure `company-scope.ts` describes as the dangerous one,
-       * because a filter that is too wide is never reported. `companies.viewAll` lifts it, and the
-       * presets already grant that to the functions that genuinely serve every account: support,
-       * purchasing and accounts.
-       */
-      ...(await companyScope(user.id)),
-      stage: { not: "DISQUALIFIED" },
-      // A reseller's end customer can never be the party we deal with directly — the reseller is.
-      managedByResellerId: null,
-      ...(params?.relationshipTypes ? { relationshipType: { in: params.relationshipTypes } } : {}),
-    },
+    where,
     orderBy: { name: "asc" },
+    ...rowLimit(params?.take),
     select: {
-      id: true,
-      name: true,
-      relationshipType: true,
-      customerCategory: { select: CATEGORY_SELECT },
+      ...COMPANY_OPTION_SELECT,
       contacts: { select: { id: true, name: true, designation: true }, orderBy: { isPrimary: "desc" } },
     },
+  });
+}
+
+/** How many customers one search answers with — the picker says so when the cap bites. */
+const CUSTOMER_SEARCH_LIMIT = 20;
+
+/**
+ * Customers whose name contains what was typed, for the order form's picker once the customer book is
+ * too long to send to the browser whole.
+ *
+ * The same accounts `listCompanyOptions` offers for customers — the scope, nothing disqualified, no
+ * reseller's end customer — searched rather than listed: two characters at least (one matches most of
+ * the book, and says nothing about which customer is meant), the first twenty by name, and no contacts.
+ */
+export async function searchCustomerOptions(query: string) {
+  const user = await requireUser();
+  const typed = String(query ?? "").trim().slice(0, 120);
+  if (typed.length < 2) return [];
+  return db.company.findMany({
+    where: {
+      ...(await companyOptionsWhere(user.id, customerRelationshipTypeValues)),
+      name: { contains: typed, mode: "insensitive" },
+    },
+    orderBy: { name: "asc" },
+    take: CUSTOMER_SEARCH_LIMIT,
+    select: COMPANY_OPTION_SELECT,
   });
 }
 

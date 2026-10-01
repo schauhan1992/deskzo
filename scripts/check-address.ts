@@ -406,6 +406,9 @@ async function main() {
     "src/components/companies/new-company-form.tsx",
     "src/components/leads/new-lead-form.tsx",
     "src/components/orders/new-order-form.tsx",
+    // The order form's rebate and expense rows moved out of it into these.
+    "src/components/orders/punch/rebate-fold.tsx",
+    "src/components/orders/punch/extras-fold.tsx",
   ];
   for (const file of ROW_FORMS) {
     const source = readFileSync(file, "utf8");

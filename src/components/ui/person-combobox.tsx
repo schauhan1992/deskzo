@@ -41,6 +41,7 @@ export function PersonCombobox({
   emptyText = "Nobody matches that.",
   disabled = false,
   id,
+  autoHighlightFirst = false,
 }: {
   people: PersonOption[];
   value: string;
@@ -49,6 +50,13 @@ export function PersonCombobox({
   emptyText?: string;
   disabled?: boolean;
   id?: string;
+  /**
+   * For a picker inside a form: Enter takes the top match instead of submitting the form, which would
+   * otherwise go with the name typed and nobody picked; see `useComboboxKeyboard`. `"typed"` waits
+   * until something is typed, so Enter on an empty field still submits rather than picking whoever
+   * sorts first. Off by default, where Enter keeps its old meaning.
+   */
+  autoHighlightFirst?: boolean | "typed";
 }) {
   const [query, setQuery] = useState(() => people.find((p) => p.id === value)?.name ?? "");
   const [syncedValue, setSyncedValue] = useState(value);
@@ -108,6 +116,8 @@ export function PersonCombobox({
     },
     // Keyed on the rows rather than the query: `people` can change under a steady query.
     resetKey: results.map((p) => p.id).join(","),
+    // Only while nobody is picked: a chosen name in the field should let Enter submit, not re-pick.
+    autoHighlightFirst: !value && (autoHighlightFirst === true || (autoHighlightFirst === "typed" && trimmed !== "")),
   });
 
   return (
