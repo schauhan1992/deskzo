@@ -11,12 +11,14 @@ import { moduleEntitled, parseEntitlements, type Entitlements } from "@/lib/enti
 import { getModuleDefinition } from "@/lib/modules";
 import { JOB_SAFE_SELECT, TENANT_SAFE_SELECT, clampInt, staffNameMap, toActivityItems, type SafeTenant } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
+import { DomainRefused } from "@/lib/platform/domain-rules";
+import { workspaceDomains, type WorkspaceDomains } from "@/lib/platform/domains";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { RETENTION_DAYS } from "@/lib/platform/lifecycle";
 import { liveGatewaySubscription, moduleCatalogue } from "@/lib/platform/plans";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { behindBy, workspaceMigrationNames } from "@/lib/platform/schema-info";
-import { gatewayModes } from "@/lib/platform/settings";
+import { customDomainsOffered, gatewayModes } from "@/lib/platform/settings";
 import { activeSupportGrant, type ActiveGrant } from "@/lib/platform/support";
 import { protocolFor } from "@/lib/tenancy/host";
 import { subdomainHost } from "@/lib/tenancy/registry";
@@ -40,7 +42,7 @@ const GONE = "That workspace no longer exists.";
 const FORMER_STAFF = "A former staff member";
 
 /** Proven at compile time to be a subset of the safe select: no sealed column can be added here by mistake. */
-const PLAN_TENANT = { status: true, country: true, entitlements: true, seatOverride: true, copilotTokenOverride: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
+const PLAN_TENANT = { status: true, country: true, entitlements: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
 const USAGE_TENANT = { entitlements: true, seatOverride: true, copilotTokenOverride: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
 const SUPPORT_TENANT = { ownerEmail: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
 const OPS_TENANT = { dbName: true, dbRole: true, region: true, schemaVersion: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
@@ -102,8 +104,8 @@ export async function workspaceNotes(tenantId: string, viewerId: string): Promis
 // ─── Header (features F4) ────────────────────────────────────────────────────────────────────────
 
 export type WorkspaceHeader = {
-  tenant: SafeTenant & { domains: { host: string; kind: "CUSTOM" | "LEGACY"; isPrimary: boolean }[] };
-  /** Its own subdomain, and the address links are built on (a primary custom domain, or the subdomain). */
+  tenant: SafeTenant & { domains: { host: string; kind: "CUSTOM" | "LEGACY"; status: "PENDING" | "ACTIVE" | "BROKEN"; isPrimary: boolean }[] };
+  /** Its own subdomain, and the address links are built on (a live primary custom domain, or the subdomain). */
   host: string;
   primaryHost: string;
   hostUrl: string;
@@ -151,7 +153,7 @@ export async function workspaceHeader(slug: string, viewerId: string, now = new 
   const control = controlDb();
   const tenant = await control.tenant.findUnique({
     where: { slug },
-    select: { ...TENANT_SAFE_SELECT, domains: { select: { host: true, kind: true, isPrimary: true }, orderBy: { createdAt: "asc" } } },
+    select: { ...TENANT_SAFE_SELECT, domains: { select: { host: true, kind: true, status: true, isPrimary: true }, orderBy: { createdAt: "asc" } } },
   });
   if (!tenant) return null;
 
@@ -175,7 +177,8 @@ export async function workspaceHeader(slug: string, viewerId: string, now = new 
   const migrations = workspaceMigrationNames();
   const behind = behindBy(tenant.schemaVersion, migrations);
   const host = subdomainHost(tenant.slug);
-  const primaryHost = tenant.domains.find((d) => d.isPrimary)?.host ?? host;
+  // As the registry serves it: a primary that is waiting or stopped is not where links go.
+  const primaryHost = tenant.domains.find((d) => d.isPrimary && d.status === "ACTIVE")?.host ?? host;
 
   let hold: WorkspaceHeader["hold"] = null;
   if (tenant.status === "SUSPENDED") {
@@ -226,7 +229,14 @@ export type PlanPanel = {
   overrides: { moduleKey: string; label: string; granted: boolean; reason: string; byStaffId: string; byName: string; createdAt: Date }[];
   /** What its plans may be set to: every plan on sale, and retired ones it is on already. */
   choices: { key: string; name: string; kind: PlanKindKey; active: boolean; countries: string[] }[];
-  limits: { seats: number | null; copilotTokens: number | null; seatOverride: number | null; copilotTokenOverride: number | null };
+  limits: {
+    seats: number | null;
+    copilotTokens: number | null;
+    customDomains: number | null;
+    seatOverride: number | null;
+    copilotTokenOverride: number | null;
+    customDomainOverride: number | null;
+  };
   /** Whether a save of its plans could go through: not closed, and not paying at a gateway (whose plans change there). */
   canSetPlans: boolean;
   gateway: { gateway: "STRIPE" | "RAZORPAY"; status: SubscriptionStatusKey } | null;
@@ -299,7 +309,14 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
       createdAt: o.createdAt,
     })),
     choices,
-    limits: { seats: entitlements.seats, copilotTokens: entitlements.copilotTokens, seatOverride: tenant.seatOverride, copilotTokenOverride: tenant.copilotTokenOverride },
+    limits: {
+      seats: entitlements.seats,
+      copilotTokens: entitlements.copilotTokens,
+      customDomains: entitlements.customDomains,
+      seatOverride: tenant.seatOverride,
+      copilotTokenOverride: tenant.copilotTokenOverride,
+      customDomainOverride: tenant.customDomainOverride,
+    },
     canSetPlans: gateway === null && tenant.status !== "DEPROVISIONED",
     gateway,
     catalogue,
@@ -546,7 +563,8 @@ export type OpsPanel = {
   jobs: { id: string; status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED"; step: string; attempts: number; runAfter: Date; startedAt: Date | null; finishedAt: Date | null; error: string | null; createdAt: Date }[];
   migrations: { id: string; runId: string; target: string; startedAt: Date; finishedAt: Date | null; ok: boolean | null; fromVersion: string | null; toVersion: string | null; output: string | null }[];
   terminals: { serial: string; createdAt: Date; lastSeenAt: Date | null; state: TerminalState }[];
-  domains: { host: string; kind: "CUSTOM" | "LEGACY"; isPrimary: boolean }[];
+  /** Its addresses with their state, records and last check (src/lib/platform/domains.ts), and whether owners may add them now. */
+  domains: WorkspaceDomains & { offered: boolean };
   database: { dbName: string | null; dbRole: string | null; region: string; schemaVersion: string | null; latest: string | null; behindBy: number | null };
 };
 
@@ -559,7 +577,7 @@ function terminalState(lastSeenAt: Date | null, now: Date): TerminalState {
 
 export async function workspaceOps(tenantId: string, now = new Date()): Promise<OpsPanel> {
   const control = controlDb();
-  const [tenant, leases, jobs, runs, routes, domains] = await Promise.all([
+  const [tenant, leases, jobs, runs, routes, domains, offered] = await Promise.all([
     control.tenant.findUnique({ where: { id: tenantId }, select: OPS_TENANT }),
     control.tenantJobLease.findMany({
       where: { tenantId },
@@ -574,7 +592,11 @@ export async function workspaceOps(tenantId: string, now = new Date()): Promise<
       select: { id: true, runId: true, target: true, startedAt: true, finishedAt: true, ok: true, fromVersion: true, toVersion: true, output: true },
     }),
     control.biometricDeviceRoute.findMany({ where: { tenantId }, orderBy: { createdAt: "asc" }, select: { serial: true, createdAt: true, lastSeenAt: true } }),
-    control.tenantDomain.findMany({ where: { tenantId }, orderBy: { createdAt: "asc" }, select: { host: true, kind: true, isPrimary: true } }),
+    workspaceDomains(tenantId).catch((err) => {
+      if (err instanceof DomainRefused) throw new ConsoleRefused(GONE);
+      throw err;
+    }),
+    customDomainsOffered(),
   ]);
   if (!tenant) throw new ConsoleRefused(GONE);
   const migrations = workspaceMigrationNames();
@@ -589,7 +611,7 @@ export async function workspaceOps(tenantId: string, now = new Date()): Promise<
     jobs: jobs.map((j) => ({ ...j, error: redactSecrets(j.error) })),
     migrations: runs.map((r) => ({ ...r, output: redactSecrets(r.output) })),
     terminals: routes.map((t) => ({ ...t, state: terminalState(t.lastSeenAt, now) })),
-    domains,
+    domains: { ...domains, offered },
     database: { ...tenant, latest: migrations.at(-1) ?? null, behindBy: behindBy(tenant.schemaVersion, migrations) },
   };
 }

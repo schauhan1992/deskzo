@@ -69,6 +69,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "document-mail.ts": ["sales_documents", "purchase_documents"],
   "document-number.ts": ["sales_documents", "purchase_documents"],
   "domain.ts": ["domains"],
+  // Settings › Domain: the workspace's own addresses (custom domains) — the owner's, like billing; not the Domains module above.
+  "domains.ts": "core",
   // Checking a contact's address belongs to having contacts, which every plan has; the Contact Checks
   // page that lists the failures is the Workspace module's.
   "email-verification.ts": "core",
@@ -174,6 +176,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "platform/console-billing.ts": "platform",
   "platform/console-commissions.ts": "platform",
   "platform/console-directory.ts": "platform",
+  "platform/console-domains.ts": "platform",
   "platform/console-linked.ts": "platform",
   "platform/console-partners.ts": "platform",
   "platform/console-shell.ts": "platform",

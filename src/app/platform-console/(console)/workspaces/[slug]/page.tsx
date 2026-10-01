@@ -149,7 +149,7 @@ export default async function ConsoleWorkspacePage({ params, searchParams }: Pag
           />
           <div className="mt-6">
             <TabPanel idPrefix={TABS_ID} tabKey="overview" active={tab === "overview"}>
-              <OverviewTab header={header} plan={plan} support={support} timeline={timeline} alerts={alerts} notes={notes} caps={caps} modes={billing.modes} />
+              <OverviewTab header={header} plan={plan} support={support} timeline={timeline} alerts={alerts} notes={notes} caps={caps} modes={billing.modes} domains={ops.domains} />
               <AttributionPanel view={attribution} tenant={{ id, name: tenant.name }} caps={caps} />
             </TabPanel>
             <TabPanel idPrefix={TABS_ID} tabKey="plan" active={tab === "plan"}>

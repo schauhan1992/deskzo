@@ -14,6 +14,7 @@ import {
   KeyRound,
   Landmark,
   LayoutGrid,
+  Link2,
   MessageSquareHeart,
   Globe,
   LifeBuoy,
@@ -153,6 +154,14 @@ export const SETTINGS: SettingsSection[] = [
             description: "Your plan, paying for it, invoices, and how much of it is in use. The workspace owner's alone.",
             href: "/settings/billing",
             icon: CreditCard,
+            permission: "settings.manage",
+          },
+          {
+            key: "domain",
+            label: "Custom domain",
+            description: "Reach the workspace at an address of your own, like erp.yourcompany.com — its DNS records and which address links use. The workspace owner's alone.",
+            href: "/settings/domain",
+            icon: Link2,
             permission: "settings.manage",
           },
           {

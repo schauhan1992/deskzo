@@ -311,9 +311,19 @@ export async function consoleSetModuleOverride(tenantId: string, moduleKey: stri
   });
 }
 
-export async function consoleSetLimitOverrides(tenantId: string, input: { seats: string | number | null; copilotTokens: string | number | null }) {
+/** `customDomains` left out keeps the workspace's custom-domain override as it is. */
+export async function consoleSetLimitOverrides(tenantId: string, input: { seats: string | number | null; copilotTokens: string | number | null; customDomains?: string | number | null }) {
   return asStaff(SELLERS, async (staff) => {
-    await setLimitOverrides(String(tenantId ?? ""), { seats: input?.seats ?? null, copilotTokens: input?.copilotTokens ?? null }, `staff:${staff.id}`);
+    const given = input && typeof input === "object" ? input : { seats: null, copilotTokens: null };
+    await setLimitOverrides(
+      String(tenantId ?? ""),
+      {
+        seats: given.seats ?? null,
+        copilotTokens: given.copilotTokens ?? null,
+        ...("customDomains" in given && given.customDomains !== undefined ? { customDomains: given.customDomains } : {}),
+      },
+      `staff:${staff.id}`,
+    );
     return null;
   });
 }

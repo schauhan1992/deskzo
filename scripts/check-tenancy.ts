@@ -125,6 +125,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/documents/pdf.ts:testRenderer": { reason: "test override, set only by check scripts" },
   "src/lib/mail/microsoft.ts:endpoints": { reason: "test override of Microsoft's addresses, set only by check scripts" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },
+  "src/lib/platform/domains.ts:testResolver": { reason: "test override, set only by check scripts — no check asks real DNS" },
 };
 
 // ─── The scan ────────────────────────────────────────────────────────────────────────────────────

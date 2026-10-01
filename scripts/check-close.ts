@@ -234,7 +234,7 @@ async function run(scratchUrl: string) {
     isDefault: false,
     keyBundleCipher: null,
     country: "IN",
-    entitlements: { v: 1 as const, ...entitlements, seats: null, copilotTokens: null, plans: [] },
+    entitlements: { v: 1 as const, ...entitlements, seats: null, copilotTokens: null, customDomains: null, plans: [] },
     holdReason: null,
   });
   // The add-on in the plan, and a workspace whose plan has Accounting but not the add-on.

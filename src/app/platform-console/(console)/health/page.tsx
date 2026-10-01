@@ -171,6 +171,29 @@ function LastTickPanel({ tick, by, check, showRevenue }: { tick: TickSummary | n
                 <span className="text-muted">Not on this run</span>
               ),
             },
+            ...(tick.domains
+              ? [
+                  {
+                    term: "Custom domains",
+                    wide: true,
+                    value: (
+                      <>
+                        {[
+                          `${plural(tick.domains.checked, "address", "addresses")} checked`,
+                          tick.domains.failing ? `${tick.domains.failing.toLocaleString("en-IN")} failing` : null,
+                          tick.domains.stopped ? `${tick.domains.stopped.toLocaleString("en-IN")} stopped` : null,
+                          tick.domains.recovered ? `${tick.domains.recovered.toLocaleString("en-IN")} working again` : null,
+                          tick.domains.expired ? `${plural(tick.domains.expired, "unproved address", "unproved addresses")} removed` : null,
+                          tick.domains.mailed ? `${plural(tick.domains.mailed, "owner")} told` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        {tick.domains.failed > 0 && <span className="text-danger">{` · ${tick.domains.failed.toLocaleString("en-IN")} could not be checked`}</span>}
+                      </>
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       ) : (

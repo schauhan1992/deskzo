@@ -709,7 +709,7 @@ async function run(scratchName: string) {
   ok("  while the run still recognises the schedules there are", offRun.months.length > 0 && offRun.months.every((m) => m.amount > 0), offRun.months.map((m) => `${m.month} ₹${m.amount}`).join("; "));
   await db.systemModule.update({ where: { key: "revenue_close" }, data: { enabled: true } });
   const envTenant = await tenancy.currentTenant();
-  const narrow = { ...envTenant, entitlements: { v: 1 as const, all: false, modules: ["accounting", "sales_documents", "purchase_documents", "receivables", "payments", "items"], seats: null, copilotTokens: null, plans: [] } };
+  const narrow = { ...envTenant, entitlements: { v: 1 as const, all: false, modules: ["accounting", "sales_documents", "purchase_documents", "receivables", "payments", "items"], seats: null, copilotTokens: null, customDomains: null, plans: [] } };
   await tenancy.runAsTenant(narrow, async () => {
     const [mineOff, theirsOff] = await Promise.all([db.$transaction((tx) => deferral.revenueAddonOn(tx)), access.moduleAvailableForTenant("revenue_close")]);
     ok("out of the plan: revenueAddonOn = moduleAvailableForTenant = false", !mineOff && !theirsOff);

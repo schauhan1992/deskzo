@@ -200,15 +200,22 @@ async function domainHits(c: Ctx): Promise<SearchHit[]> {
     where: { host: ci(c.term) },
     orderBy: { host: "asc" },
     take: TAKE,
-    select: { host: true, kind: true, isPrimary: true, tenant: { select: { slug: true, name: true } } },
+    select: { host: true, kind: true, status: true, isPrimary: true, tenant: { select: { slug: true, name: true } } },
   });
   return closestFirst(rows, (d) => closeness(c.term, [d.host]))
     .slice(0, SHOW)
     .map((d) => ({
       kind: "domain",
-      key: d.host,
+      // Several workspaces may be waiting on one address: each is its own hit.
+      key: d.status === "PENDING" ? `${d.host} ${d.tenant.slug}` : d.host,
       title: d.host,
-      subtitle: line(text(d.tenant.name), d.tenant.slug, d.kind === "CUSTOM" ? "its own address" : "an earlier address", d.isPrimary && "primary"),
+      subtitle: line(
+        text(d.tenant.name),
+        d.tenant.slug,
+        d.kind === "CUSTOM" ? "its own address" : "an earlier address",
+        d.status === "PENDING" ? "waiting for its DNS records" : d.status === "BROKEN" ? "stopped" : null,
+        d.isPrimary && "primary",
+      ),
       href: `/workspaces/${encode(d.tenant.slug)}`,
     }));
 }

@@ -142,7 +142,15 @@ async function main() {
   const takes = rules.dependentsOf("items");
   ok("taking one away takes what needs it", takes.has("orders") && takes.has("renewals") && takes.has("sales_documents"), [...takes].join(", "));
   ok("a malformed or missing answer is the core only", rules.parseEntitlements({ v: 2 }).all === false && rules.parseEntitlements(null).modules.length === 0 && rules.parseEntitlements("x").seats === 1);
-  const everything = { v: 1 as const, all: true, modules: [], seats: null, copilotTokens: null, plans: [] };
+  const everything = { v: 1 as const, all: true, modules: [], seats: null, copilotTokens: null, customDomains: null, plans: [] };
+  ok(
+    "custom domains: an answer from before them allows none, the environment's workspace has no limit",
+    rules.parseEntitlements({ v: 1, all: true, modules: [], seats: null, copilotTokens: null, plans: [] }).customDomains === 0 &&
+      rules.UNRESTRICTED.customDomains === null &&
+      rules.CORE_ONLY.customDomains === 0 &&
+      rules.parseEntitlements({ ...everything, customDomains: 2 }).customDomains === 2 &&
+      rules.parseEntitlements({ ...everything, customDomains: -1 }).seats === 1,
+  );
   ok("India's modules are India's, even on a plan of everything", rules.moduleEntitled(everything, "IN", "accounting") && !rules.moduleEntitled(everything, "AE", "accounting") && !rules.moduleEntitled(everything, "AE", "payroll"));
   ok("  and so are e-way bills and e-invoices", rules.featureAvailable("IN", "eway") && !rules.featureAvailable("AE", "eway") && !rules.featureAvailable("AE", "einvoice"));
   const nothing = rules.CORE_ONLY;

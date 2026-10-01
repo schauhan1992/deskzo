@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, CircleCheck, Globe, Pin } from "lucide-react";
+import { ArrowRight, CircleCheck, Pin } from "lucide-react";
 import { consoleResume } from "@/actions/platform/console";
 import { ActionButton } from "@/components/console/kit/action-button";
 import { ActivityFeed } from "@/components/console/kit/activity-feed";
@@ -13,8 +13,9 @@ import { ALERT_SEVERITY, HELD_FOR } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { GatewayModes } from "@/lib/console-shared/types";
 import type { Alert } from "@/lib/platform/alerts";
-import type { NoteView, PlanPanel, SupportPanel, TimelinePage, WorkspaceHeader } from "@/lib/platform/workspace-data";
+import type { NoteView, OpsPanel, PlanPanel, SupportPanel, TimelinePage, WorkspaceHeader } from "@/lib/platform/workspace-data";
 import { CloseWorkspaceButton } from "./close-dialog";
+import { DomainsPanel } from "./domains-panel";
 import { TabLink } from "./header-actions";
 import { HoldButton } from "./hold-dialog";
 import { SupportAccessCard } from "./support-tab";
@@ -100,6 +101,7 @@ export function OverviewTab({
   notes,
   caps,
   modes,
+  domains,
 }: {
   header: WorkspaceHeader;
   plan: PlanPanel;
@@ -109,6 +111,8 @@ export function OverviewTab({
   notes: NoteView[];
   caps: Caps;
   modes?: GatewayModes;
+  /** Its addresses, as the Operations tab has them (`workspaceOps`). */
+  domains: OpsPanel["domains"];
 }) {
   const { tenant } = header;
   const base = `/workspaces/${encodeURIComponent(tenant.slug)}`;
@@ -184,28 +188,7 @@ export function OverviewTab({
             <DefinitionList columns={1} items={details} />
           </Panel>
 
-          <Panel title="Domains" padded={tenant.domains.length === 0}>
-            {tenant.domains.length === 0 ? (
-              <p className="flex items-start gap-2 text-sm text-muted">
-                <Globe aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-subtle" />
-                <span>
-                  Its own subdomain only: <span className="font-mono text-xs break-all text-text">{header.host}</span>
-                </span>
-              </p>
-            ) : (
-              <ul className="divide-y divide-line">
-                {tenant.domains.map((d) => (
-                  <li key={d.host} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5">
-                    <span className="min-w-0 font-mono text-xs break-all text-text">{d.host}</span>
-                    <span className="flex items-center gap-1.5">
-                      {d.isPrimary && <StatusPill tone="brand">Primary</StatusPill>}
-                      <StatusPill tone="neutral">{d.kind === "CUSTOM" ? "Custom" : "Legacy"}</StatusPill>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
+          <DomainsPanel domains={domains} tenant={{ id: tenant.id, slug: tenant.slug, status: tenant.status }} caps={caps} />
 
           {pinned.length > 0 && (
             <Panel

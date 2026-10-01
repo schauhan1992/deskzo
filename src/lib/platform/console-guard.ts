@@ -7,6 +7,7 @@ import { actorLabel, auditHref, auditLabel, auditSummary } from "@/lib/console-s
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { ActivityItem } from "@/lib/console-shared/types";
 import { controlDb } from "@/lib/platform/control-db";
+import { DomainRefused } from "@/lib/platform/domain-rules";
 import { LifecycleRefused } from "@/lib/platform/lifecycle";
 import { PlanRefused } from "@/lib/platform/plans";
 import { ProvisioningRefused } from "@/lib/platform/provisioning";
@@ -30,7 +31,7 @@ export const BULK_CAPS = { applyStanding: 50, extendTrial: 50, tag: 100 } as con
 /** How many rows one CSV export may hold; more is refused with "narrow it down". */
 export const EXPORT_CAPS = { workspaces: 5000, invoices: 10000, audit: 10000 } as const;
 
-const REFUSALS = [StaffRefused, StaffChangeRefused, LifecycleRefused, PlanRefused, PriceRefused, GatewayError, CheckoutRefused, ProvisioningRefused, ConsoleRefused];
+const REFUSALS = [StaffRefused, StaffChangeRefused, LifecycleRefused, PlanRefused, PriceRefused, GatewayError, CheckoutRefused, ProvisioningRefused, DomainRefused, ConsoleRefused];
 
 /**
  * The message to give whoever asked, when `err` is a refusal — something they can act on — or null
@@ -91,6 +92,7 @@ export const TENANT_SAFE_SELECT = {
   entitlements: true,
   seatOverride: true,
   copilotTokenOverride: true,
+  customDomainOverride: true,
   suspendedFor: true,
   billingEmail: true,
   taxId: true,

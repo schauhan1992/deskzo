@@ -11,6 +11,7 @@ import {
   limitOf,
   liveGatewaySubscription,
   planChoiceRefusal,
+  savedCustomDomains,
   wantedPlans,
   type LiveGateway,
   type PlanInput,
@@ -35,12 +36,19 @@ import { ConsoleRefused } from "@/lib/platform/refused";
 export type EntitlementChange =
   | { plans: { planKey: string; quantity: number }[] }
   | { override: { moduleKey: string; granted: boolean | null } }
-  | { limits: { seats: number | null; copilotTokens: number | null } };
+  /** `customDomains` left out keeps the override it has. */
+  | { limits: { seats: number | null; copilotTokens: number | null; customDomains?: number | null } };
 
 export type EntitlementPreview = {
   current: Entitlements;
   next: Entitlements;
-  diff: { modulesAdded: string[]; modulesRemoved: string[]; seats: [number | null, number | null]; copilotTokens: [number | null, number | null] };
+  diff: {
+    modulesAdded: string[];
+    modulesRemoved: string[];
+    seats: [number | null, number | null];
+    copilotTokens: [number | null, number | null];
+    customDomains: [number | null, number | null];
+  };
   gateway: LiveGateway | null;
   /** The save's refusal, word for word — or null when it would go through. The reason a change asks for is the caller's to check. */
   refusal: string | null;
@@ -58,6 +66,7 @@ export type PlanSavePreview = {
   /** The plan's allowance for each unit: before (null for a new plan) and after. Null is no limit. */
   seats: [number | null, number | null];
   copilotTokens: [number | null, number | null];
+  customDomains: [number | null, number | null];
   /** Workspaces that would lose modules they have now, and which — of the first 200, alphabetically. */
   losingModules: { slug: string; modules: string[] }[];
 };
@@ -92,7 +101,7 @@ const HAND_GIVEN: StandingSub = { gateway: "MANUAL", status: "ACTIVE", trialEnds
 export async function previewEntitlements(tenantId: string, change: EntitlementChange, now = new Date()): Promise<EntitlementPreview> {
   const control = controlDb();
   const [tenant, subs, overrides, gateway] = await Promise.all([
-    control.tenant.findUnique({ where: { id: tenantId }, select: { isDefault: true, status: true, country: true, seatOverride: true, copilotTokenOverride: true } }),
+    control.tenant.findUnique({ where: { id: tenantId }, select: { isDefault: true, status: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
     control.subscription.findMany({
       where: { tenantId },
       select: {
@@ -140,9 +149,9 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     const manual = subs.find((s) => s.gateway === "MANUAL" && LIVE.includes(s.status));
     for (const plan of plans) refuse(planChoiceRefusal(plan, !!manual?.items.some((i) => i.planId === plan.id), tenant.country));
 
-    const chosen: EntItem[] = plans.map(({ key, kind, allModules, seats, copilotTokens, modules }) => ({
+    const chosen: EntItem[] = plans.map(({ key, kind, allModules, seats, copilotTokens, customDomains, modules }) => ({
       quantity: wanted.get(key)!,
-      plan: { key, kind, allModules, seats, copilotTokens, modules },
+      plan: { key, kind, allModules, seats, copilotTokens, customDomains, modules },
     }));
     next = entitlementsFrom(tenant, [...itemsOf(subs.filter((s) => s !== manual)), ...chosen], overrides);
     subsAfter = manual ? subs : [...subs, HAND_GIVEN];
@@ -168,7 +177,9 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     };
     const seatOverride = limit(change.limits.seats, "Seats", tenant.seatOverride);
     const copilotTokenOverride = limit(change.limits.copilotTokens, "Copilot tokens", tenant.copilotTokenOverride);
-    next = entitlementsFrom({ country: tenant.country, seatOverride, copilotTokenOverride }, itemsOf(subs), overrides);
+    const customDomainOverride =
+      change.limits.customDomains === undefined ? tenant.customDomainOverride : limit(change.limits.customDomains, "Custom domains", tenant.customDomainOverride);
+    next = entitlementsFrom({ country: tenant.country, seatOverride, copilotTokenOverride, customDomainOverride }, itemsOf(subs), overrides);
   } else {
     throw new ConsoleRefused("Say what to preview: its plans, a module, or its limits.");
   }
@@ -177,7 +188,13 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
   return {
     current,
     next,
-    diff: { modulesAdded: added, modulesRemoved: removed, seats: [current.seats, next.seats], copilotTokens: [current.copilotTokens, next.copilotTokens] },
+    diff: {
+      modulesAdded: added,
+      modulesRemoved: removed,
+      seats: [current.seats, next.seats],
+      copilotTokens: [current.copilotTokens, next.copilotTokens],
+      customDomains: [current.customDomains, next.customDomains],
+    },
     gateway,
     refusal: refusals[0] ?? null,
     standingAfter: standingOf(tenant.isDefault, subsAfter, now).kind,
@@ -195,11 +212,16 @@ const listedModules = (allModules: boolean, modules: string[]): Set<string> => n
 export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview> {
   const { key, modules, data } = checkPlanInput(input);
   const control = controlDb();
-  const existing = await control.plan.findUnique({ where: { key }, select: { id: true, kind: true, allModules: true, seats: true, copilotTokens: true, modules: { select: { moduleKey: true } } } });
+  const existing = await control.plan.findUnique({
+    where: { key },
+    select: { id: true, kind: true, allModules: true, seats: true, copilotTokens: true, customDomains: true, modules: { select: { moduleKey: true } } },
+  });
   if (existing?.kind === "INTERNAL" && data.kind !== "INTERNAL") throw new PlanRefused(PLAN_REFUSALS.internalStaysInternal);
 
   const before = existing ? listedModules(existing.allModules, existing.modules.map((m) => m.moduleKey)) : new Set<string>();
   const after = listedModules(data.allModules, modules);
+  // Left out of the input: kept as it is, or the default for a new plan — as the save does it.
+  const customDomains = savedCustomDomains(data, existing);
   const preview: PlanSavePreview = {
     workspaces: 0,
     sample: [],
@@ -207,6 +229,7 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     modulesRemoved: REGISTRY_KEYS.filter((k) => before.has(k) && !after.has(k)),
     seats: [existing?.seats ?? null, data.seats],
     copilotTokens: [existing?.copilotTokens ?? null, data.copilotTokens],
+    customDomains: [existing ? existing.customDomains : null, customDomains],
     losingModules: [],
   };
   if (!existing) return preview;
@@ -216,7 +239,12 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
   const onPlan = { subscriptions: { some: { status: { in: [...LIVE_STATUSES] }, items: { some: { planId: existing.id } } } } };
   const [workspaces, tenants] = await Promise.all([
     control.tenant.count({ where: onPlan }),
-    control.tenant.findMany({ where: onPlan, select: { id: true, slug: true, country: true, seatOverride: true, copilotTokenOverride: true }, orderBy: { slug: "asc" }, take: PREVIEW_WORKSPACES }),
+    control.tenant.findMany({
+      where: onPlan,
+      select: { id: true, slug: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true },
+      orderBy: { slug: "asc" },
+      take: PREVIEW_WORKSPACES,
+    }),
   ]);
   preview.workspaces = workspaces;
   preview.sample = tenants.slice(0, SAMPLE_SIZE).map((t) => t.slug);
@@ -237,6 +265,7 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     allModules: data.allModules,
     seats: data.seats,
     copilotTokens: data.copilotTokens,
+    customDomains,
     modules: data.allModules ? [] : modules.map((moduleKey) => ({ moduleKey })),
   };
   for (const t of tenants) {

@@ -62,6 +62,11 @@ export type PlanInput = {
   countries: string[];
   seats: number | null;
   copilotTokens: number | null;
+  /**
+   * Custom domains for each unit (null: no limit; 0: none). Left out: a plan being changed keeps its
+   * own, and a new one starts with none — no limit for an internal plan, which is never sold.
+   */
+  customDomains?: number | null;
   isDefault?: boolean;
   active?: boolean;
   sortOrder?: number;
@@ -73,7 +78,7 @@ async function audit(actor: string, action: string, detail: Record<string, unkno
   await tx.platformAuditLog.create({ data: { actorKind: kind, actor: actor.replace(/^(staff|script):/, ""), action, tenantId: tenantId ?? null, detail: detail as never } });
 }
 
-/** A seat or copilot-token limit as typed: a whole number, or empty for none. Refused otherwise. */
+/** A seat, copilot-token or custom-domain limit as typed: a whole number, or empty for none. Refused otherwise. */
 export const limitOf = (value: unknown, what: string): number | null => {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -85,8 +90,31 @@ export const limitOf = (value: unknown, what: string): number | null => {
 export type CheckedPlan = {
   key: string;
   modules: string[];
-  data: { name: string; kind: PlanKind; description: string | null; allModules: boolean; countries: string[]; seats: number | null; copilotTokens: number | null; isDefault: boolean; active: boolean; sortOrder: number };
+  data: {
+    name: string;
+    kind: PlanKind;
+    description: string | null;
+    allModules: boolean;
+    countries: string[];
+    seats: number | null;
+    copilotTokens: number | null;
+    /** Undefined: not given — see `savedCustomDomains`. */
+    customDomains?: number | null;
+    isDefault: boolean;
+    active: boolean;
+    sortOrder: number;
+  };
 };
+
+/**
+ * The custom domains a plan is saved with: as given; or, left out, what the plan has now — and for a
+ * new plan none, or no limit when it is internal (never sold, like its seats).
+ */
+export function savedCustomDomains(data: Pick<CheckedPlan["data"], "kind" | "customDomains">, existing: { customDomains: number | null } | null): number | null {
+  if (data.customDomains !== undefined) return data.customDomains;
+  if (existing) return existing.customDomains;
+  return data.kind === "INTERNAL" ? null : 0;
+}
 
 /** Checks a plan's definition, refusing what `savePlan` refuses, in the same order and words. */
 export function checkPlanInput(input: PlanInput): CheckedPlan {
@@ -114,6 +142,7 @@ export function checkPlanInput(input: PlanInput): CheckedPlan {
   if (allModules && input.kind !== "INTERNAL") throw new PlanRefused("Only an internal plan can include every module — a sold plan lists what it sells.");
   const seats = limitOf(input.seats, "Seats");
   const copilotTokens = limitOf(input.copilotTokens, "Copilot tokens");
+  const customDomains = input.customDomains === undefined ? undefined : limitOf(input.customDomains, "Custom domains");
   const isDefault = !!input.isDefault;
   if (isDefault && input.kind === "INTERNAL") throw new PlanRefused("New workspaces cannot start on an internal plan.");
   if (isDefault && input.active === false) throw new PlanRefused("A retired plan cannot be the one new workspaces start on.");
@@ -125,6 +154,7 @@ export function checkPlanInput(input: PlanInput): CheckedPlan {
     countries,
     seats,
     copilotTokens,
+    ...(customDomains === undefined ? {} : { customDomains }),
     isDefault,
     active: input.active !== false,
     sortOrder: Number.isInteger(input.sortOrder) ? input.sortOrder! : 0,
@@ -138,13 +168,21 @@ export async function savePlan(input: PlanInput, actor: string): Promise<{ id: s
   const { allModules, countries, seats, copilotTokens, isDefault, name } = data;
 
   const plan = await controlDb().$transaction(async (tx) => {
-    const existing = await tx.plan.findUnique({ where: { key }, select: { id: true, kind: true } });
+    const existing = await tx.plan.findUnique({ where: { key }, select: { id: true, kind: true, customDomains: true } });
     if (existing?.kind === "INTERNAL" && input.kind !== "INTERNAL") throw new PlanRefused(PLAN_REFUSALS.internalStaysInternal);
     if (isDefault) await tx.plan.updateMany({ where: { isDefault: true, NOT: { key } }, data: { isDefault: false } });
-    const saved = await tx.plan.upsert({ where: { key }, create: { key, ...data }, update: data, select: { id: true } });
+    const customDomains = savedCustomDomains(data, existing);
+    const row = { ...data, customDomains };
+    const saved = await tx.plan.upsert({ where: { key }, create: { key, ...row }, update: row, select: { id: true } });
     await tx.planModule.deleteMany({ where: { planId: saved.id } });
     if (!allModules && modules.length) await tx.planModule.createMany({ data: modules.map((moduleKey) => ({ planId: saved.id, moduleKey })) });
-    await audit(actor, existing ? "plan.update" : "plan.create", { key, name, kind: input.kind, modules: allModules ? "all" : modules, countries, seats, copilotTokens, isDefault }, undefined, tx);
+    await audit(
+      actor,
+      existing ? "plan.update" : "plan.create",
+      { key, name, kind: input.kind, modules: allModules ? "all" : modules, countries, seats, copilotTokens, customDomains, isDefault },
+      undefined,
+      tx,
+    );
     return saved;
   });
   const workspaces = await refreshEntitlementsForPlan(plan.id);
@@ -336,12 +374,21 @@ export async function setModuleOverride(tenantId: string, moduleKey: string, gra
   await refreshEntitlements(tenantId);
 }
 
-/** Seats and copilot tokens for one workspace, in place of what its plans add up to (null: the plans). */
-export async function setLimitOverrides(tenantId: string, input: { seats: unknown; copilotTokens: unknown }, actor: string): Promise<void> {
+/**
+ * Seats, copilot tokens and custom domains for one workspace, in place of what its plans add up to
+ * (null: the plans). `customDomains` left out (undefined) keeps the override it has.
+ */
+export async function setLimitOverrides(tenantId: string, input: { seats: unknown; copilotTokens: unknown; customDomains?: unknown }, actor: string): Promise<void> {
   const seatOverride = limitOf(input.seats, "Seats");
   const copilotTokenOverride = limitOf(input.copilotTokens, "Copilot tokens");
-  await controlDb().tenant.update({ where: { id: tenantId }, data: { seatOverride, copilotTokenOverride } });
-  await audit(actor, "tenant.limit-override", { seats: seatOverride, copilotTokens: copilotTokenOverride }, tenantId);
+  const keepDomains = input.customDomains === undefined;
+  const customDomainOverride = keepDomains ? undefined : limitOf(input.customDomains, "Custom domains");
+  const saved = await controlDb().tenant.update({
+    where: { id: tenantId },
+    data: { seatOverride, copilotTokenOverride, ...(keepDomains ? {} : { customDomainOverride }) },
+    select: { customDomainOverride: true },
+  });
+  await audit(actor, "tenant.limit-override", { seats: seatOverride, copilotTokens: copilotTokenOverride, customDomains: saved.customDomainOverride }, tenantId);
   await refreshEntitlements(tenantId);
 }
 

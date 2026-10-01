@@ -38,6 +38,18 @@ enum DomainKind {
   LEGACY
 }
 
+/// Whether an address is served. Only ACTIVE ones reach a workspace or are used for its links.
+enum DomainStatus {
+  /// Added by its workspace, waiting for its DNS records to prove the domain is theirs. Several
+  /// workspaces may be waiting on the same address; whichever's record is found first gets it.
+  PENDING
+  /// Verified (or a legacy address, which needs none): served, and may be the address links use.
+  ACTIVE
+  /// Was active, but its records stopped checking out for longer than the grace period. Not served
+  /// until a check passes again.
+  BROKEN
+}
+
 /// A customer of the SaaS: one database, one set of keys, one or more addresses.
 model Tenant {
   id     String       @id @default(cuid())
@@ -83,6 +95,8 @@ model Tenant {
   /// Staff overrides of the plans' limits, for this workspace alone. Null: the plans decide.
   seatOverride         Int?
   copilotTokenOverride Int?
+  /// Staff override of how many custom domains it may have. Null: the plans decide.
+  customDomainOverride Int?
 
   /// Why it is held, when it is. A billing hold lets its owner reach the billing page and nothing
   /// else, and is lifted by paying; a staff hold only by staff.
@@ -142,17 +156,34 @@ model Tenant {
 
 /// An address other than the workspace's own subdomain.
 model TenantDomain {
-  id        String     @id @default(cuid())
+  id        String       @id @default(cuid())
   tenantId  String
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// Normalised: lower-case, with the port when there is one ("erp.acme.com", "localhost:3000").
-  host      String     @unique
+  /// Unique among addresses that are not PENDING (a partial unique index in the migration).
+  host      String
   kind      DomainKind
-  /// Links in emails and documents are built on this one, when set; otherwise on the subdomain.
-  isPrimary Boolean    @default(false)
-  createdAt DateTime   @default(now())
+  status    DomainStatus @default(ACTIVE)
+  /// Links in emails and documents are built on this one, when set and ACTIVE; otherwise on the
+  /// subdomain.
+  isPrimary Boolean      @default(false)
+  /// The value of the TXT record at `_domain-verify.<host>` that proves the workspace controls the
+  /// domain. Kept after verification: the daily re-check reads it again. None for a LEGACY address.
+  verifyToken    String?
+  verifiedAt     DateTime?
+  lastCheckedAt  DateTime?
+  /// What the last check found wrong, in words for the workspace's owner; null when it passed.
+  lastCheckError String?
+  /// Since when an ACTIVE address's checks have been failing; cleared when one passes.
+  failingSince   DateTime?
+  /// Who added it: a workspace person's email, or "staff:<email>".
+  addedBy        String?
+  createdAt      DateTime     @default(now())
 
+  @@unique([tenantId, host])
+  @@index([host])
   @@index([tenantId])
+  @@index([status])
   @@map("tenant_domains")
 }
 
@@ -489,6 +520,9 @@ model Plan {
   seats         Int?
   /// AI copilot tokens a month, for each unit of quantity. Null: no limit; 0: none.
   copilotTokens Int?
+  /// Custom domains a workspace may add, for each unit of quantity. Null: no limit; 0: none (the
+  /// default, so a plan offers them only when staff say so).
+  customDomains Int?    @default(0)
   /// New workspaces start on it unless their invitation names another. At most one (a partial
   /// unique index).
   isDefault   Boolean  @default(false)

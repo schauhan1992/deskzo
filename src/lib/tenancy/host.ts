@@ -109,8 +109,14 @@ export function requestHost(headers: Headers): string | null | typeof HOST_MISMA
 const onPlatform = (h: HostKind) => h.kind === "tenant" || h.kind === "console" || h.kind === "cms" || h.kind === "partners" || h.kind === "root";
 const sameSite = (a: HostKind, b: HostKind) => a.kind === b.kind && (a.kind !== "tenant" || (b.kind === "tenant" && a.slug === b.slug));
 
-/** http for local development hosts, https everywhere else. */
+/**
+ * http for local development hosts, https everywhere else. Outside production a `.test` name is one
+ * too: it is how a custom domain is tried locally (erp.acme.test — a name under `.localhost` would be
+ * read as a platform subdomain here, see src/lib/platform/domain-rules.ts), and over plain http its
+ * session cookie must not be marked Secure or the browser drops it.
+ */
 export function protocolFor(host: string): "http" | "https" {
   const name = hostnameOf(host);
+  if (name.endsWith(".test") && process.env.NODE_ENV !== "production") return "http";
   return name === "localhost" || name.endsWith(".localhost") || /^\d+\.\d+\.\d+\.\d+$/.test(name) ? "http" : "https";
 }

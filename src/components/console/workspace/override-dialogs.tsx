@@ -277,33 +277,47 @@ function limitOf(text: string): { ok: true; value: number | null } | { ok: false
 const PREVIEW_DELAY_MS = 400;
 
 /**
- * Seats and copilot tokens for this workspace alone, in place of what its plans add up to — empty
- * lets the plans decide again. The preview follows the typing (after a short pause).
+ * Seats, copilot tokens and custom domains for this workspace alone, in place of what its plans add
+ * up to — empty lets the plans decide again. The preview follows the typing (after a short pause).
  */
-export function LimitsButton({ tenantId, seats, copilotTokens }: { tenantId: string; seats: number | null; copilotTokens: number | null }) {
+export function LimitsButton({
+  tenantId,
+  seats,
+  copilotTokens,
+  customDomains,
+}: {
+  tenantId: string;
+  seats: number | null;
+  copilotTokens: number | null;
+  customDomains: number | null;
+}) {
   const [open, setOpen] = useState(false);
   const [seatText, setSeatText] = useState("");
   const [tokenText, setTokenText] = useState("");
+  const [domainText, setDomainText] = useState("");
   const preview = useEntitlementPreview(tenantId);
   const save = useConsoleAction<null>();
   const seatId = useId();
   const tokenId = useId();
+  const domainId = useId();
 
   const seatValue = limitOf(seatText);
   const tokenValue = limitOf(tokenText);
-  const valid = seatValue.ok && tokenValue.ok;
-  const key = `${seatText.trim()}|${tokenText.trim()}`;
-  const unchanged = valid && seatValue.value === seats && tokenValue.value === copilotTokens;
+  const domainValue = limitOf(domainText);
+  const valid = seatValue.ok && tokenValue.ok && domainValue.ok;
+  const key = `${seatText.trim()}|${tokenText.trim()}|${domainText.trim()}`;
+  const unchanged = valid && seatValue.value === seats && tokenValue.value === copilotTokens && domainValue.value === customDomains;
   const ready = valid && !unchanged && preview.key === key && !preview.pending && preview.preview !== null && !preview.preview.refusal;
 
-  function ask(nextSeats: string, nextTokens: string) {
+  function ask(nextSeats: string, nextTokens: string, nextDomains: string) {
     const s = limitOf(nextSeats);
     const t = limitOf(nextTokens);
-    if (!s.ok || !t.ok || (s.value === seats && t.value === copilotTokens)) {
+    const d = limitOf(nextDomains);
+    if (!s.ok || !t.ok || !d.ok || (s.value === seats && t.value === copilotTokens && d.value === customDomains)) {
       preview.clear();
       return;
     }
-    preview.request({ limits: { seats: s.value, copilotTokens: t.value } }, `${nextSeats.trim()}|${nextTokens.trim()}`, PREVIEW_DELAY_MS);
+    preview.request({ limits: { seats: s.value, copilotTokens: t.value, customDomains: d.value } }, `${nextSeats.trim()}|${nextTokens.trim()}|${nextDomains.trim()}`, PREVIEW_DELAY_MS);
   }
 
   function start() {
@@ -311,6 +325,7 @@ export function LimitsButton({ tenantId, seats, copilotTokens }: { tenantId: str
     preview.clear();
     setSeatText(seats === null ? "" : String(seats));
     setTokenText(copilotTokens === null ? "" : String(copilotTokens));
+    setDomainText(customDomains === null ? "" : String(customDomains));
     setOpen(true);
   }
 
@@ -321,10 +336,10 @@ export function LimitsButton({ tenantId, seats, copilotTokens }: { tenantId: str
   }
 
   function confirm() {
-    if (!ready || !seatValue.ok || !tokenValue.ok) return;
-    const both = seatValue.value === null && tokenValue.value === null;
-    save.run(() => consoleSetLimitOverrides(tenantId, { seats: seatValue.value, copilotTokens: tokenValue.value }), {
-      success: both ? "Limits cleared — its plans decide again." : "Limits saved.",
+    if (!ready || !seatValue.ok || !tokenValue.ok || !domainValue.ok) return;
+    const all = seatValue.value === null && tokenValue.value === null && domainValue.value === null;
+    save.run(() => consoleSetLimitOverrides(tenantId, { seats: seatValue.value, copilotTokens: tokenValue.value, customDomains: domainValue.value }), {
+      success: all ? "Limits cleared — its plans decide again." : "Limits saved.",
       onDone: () => setOpen(false),
     });
   }
@@ -358,7 +373,7 @@ export function LimitsButton({ tenantId, seats, copilotTokens }: { tenantId: str
               aria-invalid={!seatValue.ok || undefined}
               onChange={(e) => {
                 setSeatText(e.target.value);
-                ask(e.target.value, tokenText);
+                ask(e.target.value, tokenText, domainText);
               }}
             />
             <p className={cn("text-xs", seatValue.ok ? "text-subtle" : "text-danger")}>{seatValue.ok ? "People who may hold an active account." : "A whole number, 0 or more."}</p>
@@ -374,13 +389,31 @@ export function LimitsButton({ tenantId, seats, copilotTokens }: { tenantId: str
               aria-invalid={!tokenValue.ok || undefined}
               onChange={(e) => {
                 setTokenText(e.target.value);
-                ask(seatText, e.target.value);
+                ask(seatText, e.target.value, domainText);
               }}
             />
             <p className={cn("text-xs", tokenValue.ok ? "text-subtle" : "text-danger")}>{tokenValue.ok ? "Across everybody; 0 switches the copilot off." : "A whole number, 0 or more."}</p>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={domainId}>Custom domains</Label>
+            <Input
+              id={domainId}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="Plans decide"
+              value={domainText}
+              aria-invalid={!domainValue.ok || undefined}
+              onChange={(e) => {
+                setDomainText(e.target.value);
+                ask(seatText, tokenText, e.target.value);
+              }}
+            />
+            <p className={cn("text-xs", domainValue.ok ? "text-subtle" : "text-danger")}>
+              {domainValue.ok ? "Addresses of its own, waiting or live; 0 allows none." : "A whole number, 0 or more."}
+            </p>
+          </div>
         </div>
-        {(seatText.trim() !== "" || tokenText.trim() !== "") && (
+        {(seatText.trim() !== "" || tokenText.trim() !== "" || domainText.trim() !== "") && (
           <Button
             type="button"
             size="sm"
@@ -388,10 +421,11 @@ export function LimitsButton({ tenantId, seats, copilotTokens }: { tenantId: str
             onClick={() => {
               setSeatText("");
               setTokenText("");
-              ask("", "");
+              setDomainText("");
+              ask("", "", "");
             }}
           >
-            Clear both — let the plans decide
+            Clear all — let the plans decide
           </Button>
         )}
         {unchanged ? (

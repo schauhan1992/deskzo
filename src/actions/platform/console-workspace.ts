@@ -280,7 +280,8 @@ function changeOf(change: unknown): EntitlementChange {
     const l = c.limits as Record<string, unknown>;
     // As typed: empty is "the plans decide"; anything else is the save's to accept or refuse.
     const limit = (v: unknown): number | null => (v === null || v === undefined || (typeof v === "string" && !v.trim()) ? null : Number(v));
-    return { limits: { seats: limit(l.seats), copilotTokens: limit(l.copilotTokens) } };
+    // Custom domains left out: the preview keeps the override it has, as the save does.
+    return { limits: { seats: limit(l.seats), copilotTokens: limit(l.copilotTokens), ...("customDomains" in l && l.customDomains !== undefined ? { customDomains: limit(l.customDomains) } : {}) } };
   }
   throw new ConsoleRefused("Say what to preview: its plans, a module, or its limits.");
 }

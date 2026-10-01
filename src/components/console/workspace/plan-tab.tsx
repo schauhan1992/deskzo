@@ -20,7 +20,7 @@ import { PlansEditor } from "./plans-editor";
  *              change from its own billing page; everybody else reads the list.
  *   Modules    the catalogue with this workspace's standing on each.
  *   Overrides  managers add and remove them.
- *   Limits     sellers override seats and copilot tokens.
+ *   Limits     sellers override seats, copilot tokens and custom domains.
  *
  * A closed workspace shows all of it read-only.
  */
@@ -77,7 +77,11 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
           <Panel
             title="Limits"
             description="What its plans add up to, unless staff set a limit in their place."
-            actions={canLimit ? <LimitsButton tenantId={tenant.id} seats={plan.limits.seatOverride} copilotTokens={plan.limits.copilotTokenOverride} /> : undefined}
+            actions={
+              canLimit ? (
+                <LimitsButton tenantId={tenant.id} seats={plan.limits.seatOverride} copilotTokens={plan.limits.copilotTokenOverride} customDomains={plan.limits.customDomainOverride} />
+              ) : undefined
+            }
           >
             <dl className="divide-y divide-line">
               <LimitRow term="Seats" value={plan.limits.seats === null ? "No limit" : INTEGER.format(plan.limits.seats)} overridden={plan.limits.seatOverride !== null} />
@@ -86,8 +90,13 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
                 value={plan.limits.copilotTokens === null ? "No limit" : plan.limits.copilotTokens === 0 ? "None" : INTEGER.format(plan.limits.copilotTokens)}
                 overridden={plan.limits.copilotTokenOverride !== null}
               />
+              <LimitRow
+                term="Custom domains"
+                value={plan.limits.customDomains === null ? "No limit" : plan.limits.customDomains === 0 ? "None" : INTEGER.format(plan.limits.customDomains)}
+                overridden={plan.limits.customDomainOverride !== null}
+              />
             </dl>
-            {(plan.limits.seatOverride !== null || plan.limits.copilotTokenOverride !== null) && (
+            {(plan.limits.seatOverride !== null || plan.limits.copilotTokenOverride !== null || plan.limits.customDomainOverride !== null) && (
               <p className="mt-3 text-xs text-muted">An overridden limit stays when its plans change. Clear it to let the plans decide again.</p>
             )}
           </Panel>

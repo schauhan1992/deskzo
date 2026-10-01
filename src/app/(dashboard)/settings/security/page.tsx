@@ -11,7 +11,17 @@ import { SecurityPolicyForm } from "@/components/settings/security-policy-form";
 import { SecuritySettingsForm } from "@/components/settings/security-settings-form";
 import { SupportAccessCard } from "@/components/settings/support-access-card";
 import { can } from "@/lib/authz/resolve";
-import { tenantOrigin } from "@/lib/tenancy/resolve";
+import { protocolFor } from "@/lib/tenancy/host";
+import { currentTenant } from "@/lib/tenancy/resolve";
+
+/**
+ * Every address the workspace answers at now — its own subdomain, then each live custom (or kept)
+ * address — as origins. Microsoft needs a redirect address for each one people sign in at.
+ */
+async function workspaceOrigins(): Promise<string[]> {
+  const tenant = await currentTenant();
+  return [...new Set(tenant.hosts)].map((host) => `${protocolFor(host)}://${host}`);
+}
 
 export default async function SecuritySettingsPage() {
   const sessionUser = await currentUser();
@@ -25,10 +35,10 @@ export default async function SecuritySettingsPage() {
     );
   }
 
-  const [policy, loginSettings, origin, support, linked] = await Promise.all([
+  const [policy, loginSettings, origins, support, linked] = await Promise.all([
     getSecurityPolicyForAdmin(),
     getSecuritySettings(),
-    tenantOrigin(),
+    workspaceOrigins(),
     getSupportAccess(),
     // One card, never a reason for the page to fail: a control plane out of reach just hides it.
     getLinkedSignInAdmin().catch(() => null),
@@ -43,7 +53,7 @@ export default async function SecuritySettingsPage() {
 
       <Card className="mt-6">
         <CardHeader className="text-sm font-medium text-text">Sign-in</CardHeader>
-        <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} origin={origin} />}</CardContent>
+        <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} origins={origins} />}</CardContent>
       </Card>
 
       {/* Linked sign-in (spec §2.5) — null while viewing as somebody and in a workspace outside the control plane. */}

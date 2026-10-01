@@ -5,6 +5,7 @@ import { reconcileSubscriptions, snapshotUsage } from "@/lib/billing/reconcile";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { istDateParts } from "@/lib/india-time";
 import { runPartnerChores } from "@/lib/partners/commission";
+import { domainSweep, type DomainSweep } from "@/lib/platform/domains";
 import { reconcileEmailIndex } from "@/lib/platform/email-index";
 import { sweepLinkedSignIn } from "@/lib/platform/linked/sweep";
 import { snapshotRevenue } from "@/lib/platform/revenue";
@@ -25,9 +26,10 @@ import { runSupportRetention } from "@/lib/support/retention";
  * (src/lib/billing/reconcile.ts) and the day's revenue (src/lib/platform/revenue.ts). Under a lease,
  * so two schedulers never run it at once — nor a run started from the console.
  *
- * The daily call also runs linked sign-in's nightly sweep (src/lib/platform/linked/sweep.ts) and brings the
- * "find my workspace" email index up to date (src/lib/platform/email-index.ts), each failing into the day's
- * `failed` without stopping anything else.
+ * The daily call also runs linked sign-in's nightly sweep (src/lib/platform/linked/sweep.ts), brings the
+ * "find my workspace" email index up to date (src/lib/platform/email-index.ts), and checks every custom
+ * domain's DNS records again (src/lib/platform/domains.ts — `domains` in the result and the summary),
+ * each failing into the day's `failed` without stopping anything else.
  *
  * Every call also tidies Contact Support's files (src/lib/support/retention.ts): uploads never sent
  * go after a day, and closed requests' files after the retention the console sets. A failure there is
@@ -55,7 +57,7 @@ async function handle(request: Request) {
     const lifecycle = await runBillingLifecycle(now);
     const { year, month, day } = istDateParts(now);
     const today = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    let daily: { reconciled: number; failed: string[]; usage: number; revenue: number } | null = null;
+    let daily: { reconciled: number; failed: string[]; usage: number; revenue: number; domains: DomainSweep | null } | null = null;
     if ((await getSetting("billing.dailyRanOn")) !== today) {
       const reconciled = await reconcileSubscriptions();
       const usage = await snapshotUsage();
@@ -80,8 +82,16 @@ async function handle(request: Request) {
       } catch (err) {
         failed.push(`email-index: ${err instanceof Error ? err.message : String(err)}`);
       }
+      // Custom domains: re-checked, stale waiting ones removed, owners told once — an address that fails to check is reported, never stops the day.
+      let domains: DomainSweep | null = null;
+      try {
+        domains = await domainSweep(now);
+        failed.push(...domains.failed.map((f) => `domains: ${f}`));
+      } catch (err) {
+        failed.push(`domains: ${err instanceof Error ? err.message : String(err)}`);
+      }
       await setSetting("billing.dailyRanOn", today, "tick");
-      daily = { reconciled: reconciled.read, failed, usage: usage.length, revenue };
+      daily = { reconciled: reconciled.read, failed, usage: usage.length, revenue, domains };
     }
     // After the daily block, so its decision is the same one, and the gateways' day is read back first.
     // runPartnerChores never throws; null means another run holds its lease.
@@ -112,6 +122,7 @@ async function handle(request: Request) {
           reminded: result.reminded.length,
           daily: daily && { reconciled: daily.reconciled, failed: daily.failed.length, usage: daily.usage, revenue: daily.revenue },
           partners,
+          domains: daily?.domains ? { ...daily.domains, failed: daily.domains.failed.length } : null,
         },
         "tick",
       );

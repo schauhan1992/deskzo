@@ -64,6 +64,7 @@ export function planInputOf(plan: PlanListRow): PlanInput {
     countries: plan.countries,
     seats: plan.seats,
     copilotTokens: plan.copilotTokens,
+    customDomains: plan.customDomains,
     isDefault: plan.isDefault,
     active: plan.active,
     sortOrder: plan.sortOrder,

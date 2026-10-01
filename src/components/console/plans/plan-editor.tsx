@@ -39,7 +39,7 @@ import { PriceEditor } from "./price-editor";
 
 type Mode = "create" | "edit" | "duplicate";
 type SectionKey = "basics" | "availability" | "limits" | "modules" | "prices" | "workspaces";
-type Field = "key" | "name" | "order" | "seats" | "copilot" | "countries" | "modules";
+type Field = "key" | "name" | "order" | "seats" | "copilot" | "domains" | "countries" | "modules";
 type Problem = { section: SectionKey; field: Field; message: string };
 
 type Draft = {
@@ -53,6 +53,8 @@ type Draft = {
   countries: string[];
   seats: string;
   copilot: string;
+  /** Custom domains per unit: blank is no limit, 0 none. */
+  domains: string;
   allModules: boolean;
   modules: string[];
 };
@@ -91,6 +93,8 @@ const EMPTY: Draft = {
   countries: [],
   seats: "",
   copilot: "",
+  // A sold plan offers no custom domain until staff say so.
+  domains: "0",
   allModules: false,
   modules: [],
 };
@@ -108,6 +112,7 @@ function draftOf(plan: PlanDetail | null): Draft {
     countries: [...plan.countries],
     seats: plan.seats === null ? "" : String(plan.seats),
     copilot: plan.copilotTokens === null ? "" : String(plan.copilotTokens),
+    domains: plan.customDomains === null ? "" : String(plan.customDomains),
     allModules: plan.allModules,
     modules: [...plan.modules],
   };
@@ -130,6 +135,7 @@ function inputOf(d: Draft): PlanInput {
     countries: [...d.countries],
     seats: limitOf(d.seats),
     copilotTokens: limitOf(d.copilot),
+    customDomains: limitOf(d.domains),
     // New workspaces never start on an internal plan, nor on a retired one — the save refuses both.
     isDefault: !internal && d.active && d.isDefault,
     active: d.active,
@@ -165,6 +171,7 @@ function problemsOf(d: Draft, mode: Mode, takenKeys: readonly string[], byKey: M
   const badLimit = (n: number | null) => n !== null && !(Number.isInteger(n) && n >= 0 && n <= MAX_LIMIT);
   if (badLimit(input.seats)) out.push({ section: "limits", field: "seats", message: "Users per unit is a whole number, 0 or more — or empty for no limit." });
   if (badLimit(input.copilotTokens)) out.push({ section: "limits", field: "copilot", message: "Copilot tokens is a whole number, 0 or more — or empty for no limit." });
+  if (badLimit(input.customDomains ?? null)) out.push({ section: "limits", field: "domains", message: "Custom domains is a whole number, 0 or more — or empty for no limit." });
   if (!input.allModules) {
     for (const key of input.modules) {
       const only = byKey.get(key)?.countries;
@@ -744,8 +751,10 @@ function AvailabilitySection({ draft, update, readOnly }: { draft: Draft; update
 function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; update: Update; readOnly: boolean; errors: Partial<Record<Field, string>> }) {
   const seatsId = "plan-field-seats";
   const copilotId = "plan-field-copilot";
+  const domainsId = "plan-field-domains";
   const seats = limitOf(draft.seats);
   const copilot = limitOf(draft.copilot);
+  const domains = limitOf(draft.domains);
 
   if (readOnly) {
     return (
@@ -754,6 +763,7 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
           items={[
             { term: "Users per unit", value: <span className="tabular-nums">{limitText(seats)}</span> },
             { term: "Copilot tokens a month", value: <span className="tabular-nums">{copilot === 0 ? "None" : limitText(copilot)}</span> },
+            { term: "Custom domains", value: <span className="tabular-nums">{domains === 0 ? "None" : limitText(domains)}</span> },
           ]}
         />
       </Panel>
@@ -810,6 +820,37 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
                   ? "No copilot on this plan."
                   : valid(copilot)
                     ? `${compactNumber(copilot)} tokens a month for each unit.`
+                    : "A whole number."}
+            </Hint>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={domainsId}>Custom domains</Label>
+          <Input
+            id={domainsId}
+            data-plan-field="domains"
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={draft.domains}
+            placeholder="No limit"
+            aria-invalid={errors.domains ? true : undefined}
+            onChange={(e) => update("domains", e.target.value)}
+            className="tabular-nums"
+          />
+          {errors.domains ? (
+            <FieldError message={errors.domains} />
+          ) : (
+            <Hint>
+              {domains === null
+                ? draft.kind === "ADDON"
+                  ? "Empty adds none — an add-on without a number gives nothing."
+                  : "No limit. 0 means none."
+                : domains === 0
+                  ? "No custom domain on this plan."
+                  : valid(domains)
+                    ? `${plural(domains, "address", "addresses")} of a workspace's own for each unit.`
                     : "A whole number."}
             </Hint>
           )}
@@ -1069,11 +1110,14 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
   if (mode === "edit") {
     const seats = change(limitText(preview.seats[0]), limitText(preview.seats[1]));
     const copilot = change(limitText(preview.copilotTokens[0]), limitText(preview.copilotTokens[1]));
+    const domainText = (n: number | null) => (n === 0 ? "None" : limitText(n));
+    const domains = change(domainText(preview.customDomains[0]), domainText(preview.customDomains[1]));
     const offered = change(yesNo(before.active !== false), yesNo(sent.active !== false));
     const byDefault = change(yesNo(before.isDefault), yesNo(sent.isDefault));
     const soldIn = change(before.countries.join(", ") || "Everywhere", sent.countries.join(", ") || "Everywhere");
     if (seats) items.push({ label: "Users per unit", value: seats });
     if (copilot) items.push({ label: "Copilot tokens a month", value: copilot });
+    if (domains) items.push({ label: "Custom domains", value: domains });
     if (soldIn) items.push({ label: "Sold in", value: soldIn });
     if (offered) items.push({ label: "Offered to new sales", value: offered, tone: sent.active === false ? "warning" : "success" });
     if (byDefault) items.push({ label: "Default for new workspaces", value: byDefault, tone: sent.isDefault ? "brand" : "warning" });
@@ -1081,6 +1125,7 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     items.push({ label: "Kind", value: planKindLabel(sent.kind) });
     items.push({ label: "Users per unit", value: limitText(sent.seats) });
     items.push({ label: "Copilot tokens a month", value: sent.copilotTokens === 0 ? "None" : limitText(sent.copilotTokens) });
+    items.push({ label: "Custom domains", value: preview.customDomains[1] === 0 ? "None" : limitText(preview.customDomains[1]) });
     items.push({ label: "Sold in", value: sent.countries.join(", ") || "Everywhere" });
     items.push({ label: "Offered to new sales", value: yesNo(sent.active !== false) });
     if (sent.isDefault) items.push({ label: "Default for new workspaces", value: "Yes — in place of any other", tone: "brand" });

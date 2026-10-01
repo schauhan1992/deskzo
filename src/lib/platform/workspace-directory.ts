@@ -309,7 +309,8 @@ async function directoryRows(
         createdAt: true,
         schemaVersion: true,
         tags: true,
-        domains: { where: { isPrimary: true }, select: { host: true }, orderBy: { createdAt: "asc" } },
+        // The address links use: a primary that is live (one waiting or stopped is not served).
+        domains: { where: { isPrimary: true, status: "ACTIVE" }, select: { host: true }, orderBy: { createdAt: "asc" } },
         _count: { select: { domains: true } },
       },
     }),

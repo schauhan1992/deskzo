@@ -208,7 +208,7 @@ async function run(scratchUrl: string) {
     isDefault: false,
     keyBundleCipher: null,
     country: "IN",
-    entitlements: { v: 1 as const, all: true, modules: [], seats: null, copilotTokens: null, plans: [] },
+    entitlements: { v: 1 as const, all: true, modules: [], seats: null, copilotTokens: null, customDomains: null, plans: [] },
     holdReason: null,
   };
 

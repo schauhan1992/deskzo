@@ -45,7 +45,7 @@ export async function requestSupportAccess(staff: Staff, tenantId: string, reaso
       status: true,
       ownerEmail: true,
       // The address links are built on — as the registry picks it, without opening its sealed columns.
-      domains: { where: { isPrimary: true }, orderBy: { createdAt: "asc" }, take: 1, select: { host: true } },
+      domains: { where: { isPrimary: true, status: "ACTIVE" }, orderBy: { createdAt: "asc" }, take: 1, select: { host: true } },
     },
   });
   if (!tenant) throw new ConsoleRefused("That workspace no longer exists.");

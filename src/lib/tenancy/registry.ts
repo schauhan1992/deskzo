@@ -102,7 +102,8 @@ const SELECT = {
   country: true,
   entitlements: true,
   suspendedFor: true,
-  domains: { select: { host: true, isPrimary: true }, orderBy: { createdAt: "asc" as const } },
+  // Only addresses that are served: a PENDING one has not been proved, a BROKEN one stopped checking out.
+  domains: { where: { status: "ACTIVE" as const }, select: { host: true, isPrimary: true }, orderBy: { createdAt: "asc" as const } },
 };
 
 function fromControl(row: ControlRow): Tenant {
@@ -153,7 +154,7 @@ async function controlBy(key: string, where: { slug: string } | { id: string } |
 
 async function controlByDomain(host: string): Promise<Tenant | null> {
   return remembered(`domain:${host}`, async () => {
-    const domain = await controlDb().tenantDomain.findUnique({ where: { host }, select: { tenant: { select: SELECT } } });
+    const domain = await controlDb().tenantDomain.findFirst({ where: { host, status: "ACTIVE" }, select: { tenant: { select: SELECT } } });
     return domain ? fromControl(domain.tenant) : null;
   });
 }

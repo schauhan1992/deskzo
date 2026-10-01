@@ -217,6 +217,8 @@ function planInput(input: unknown): PlanInput {
     countries: list(i.countries, 300),
     seats: limit(i.seats),
     copilotTokens: limit(i.copilotTokens),
+    // Left out: the plan keeps its own — as the save does it.
+    ...(i.customDomains === undefined ? {} : { customDomains: limit(i.customDomains) }),
     isDefault: !!i.isDefault,
     active: i.active !== false,
     sortOrder: Number.isInteger(i.sortOrder) ? (i.sortOrder as number) : 0,

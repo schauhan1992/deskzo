@@ -160,6 +160,11 @@ export function CompareMatrix({ plans, catalogue }: { plans: PlanListRow[]; cata
               <span className="text-sm text-text tabular-nums">{p.copilotTokens === null ? "No limit" : p.copilotTokens === 0 ? "None" : `${compactNumber(p.copilotTokens)} tokens`}</span>
             )}
           />
+          <SummaryRow
+            label="Custom domains"
+            plans={plans}
+            render={(p) => <span className="text-sm text-text tabular-nums">{p.customDomains === null ? "No limit" : p.customDomains === 0 ? "None" : compactNumber(p.customDomains)}</span>}
+          />
           <SummaryRow label="Sold in" plans={plans} render={(p) => <span className="text-sm text-text">{p.countries.length ? p.countries.join(", ") : "Everywhere"}</span>} />
           <SummaryRow
             label="Prices"

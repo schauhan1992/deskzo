@@ -642,7 +642,7 @@ async function run(scratchName: string) {
   ok("  and the invoice no schedule link", !(await html(createElement(DocumentDetail, { id: a.id }))).includes("/accounting/revenue/"));
   await db.systemModule.update({ where: { key: "revenue_close" }, data: { enabled: true } });
   const envTenant = await tenancy.currentTenant();
-  const narrow = { ...envTenant, entitlements: { v: 1 as const, all: false, modules: ["accounting", "sales_documents", "purchase_documents", "receivables", "payments", "items"], seats: null, copilotTokens: null, plans: [] } };
+  const narrow = { ...envTenant, entitlements: { v: 1 as const, all: false, modules: ["accounting", "sales_documents", "purchase_documents", "receivables", "payments", "items"], seats: null, copilotTokens: null, customDomains: null, plans: [] } };
   await tenancy.runAsTenant(narrow, async () => {
     const outList = text(await renderPage(RevenuePage));
     ok("out of the plan: the page says so", outList.includes("isn't part of this workspace's plan"), outList.slice(0, 120));

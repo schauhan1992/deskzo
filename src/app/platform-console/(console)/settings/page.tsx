@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, LifeBuoy, Link2, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
 import { Banner } from "@/components/console/kit/banner";
 import { EnvBadge } from "@/components/console/kit/env-badge";
 import { PageHeader } from "@/components/console/kit/page-header";
@@ -9,6 +9,7 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { GatewayKeysEditor } from "@/components/console/settings/gateway-keys";
+import { DomainsOfferedSwitch } from "@/components/console/settings/domains-offered-setting";
 import { LinkedSignInSwitch } from "@/components/console/settings/linked-sign-in-setting";
 import { TwoFactorPolicyEditor } from "@/components/console/settings/security-settings";
 import { ChangedBy, SignupSettingsForm } from "@/components/console/settings/signup-settings";
@@ -23,7 +24,7 @@ import { consoleStaff, platformEnv } from "@/lib/platform/console-page";
 import { controlDb } from "@/lib/platform/control-db";
 import { configurationPresence, securityFacts } from "@/lib/platform/health";
 import { linkedSignInSetting } from "@/lib/platform/linked/groups";
-import { autoDeprovision, gatewayModes, settingsOverview, signupOpen, staffTwoFactorPolicy, trialDays, type SettingRow } from "@/lib/platform/settings";
+import { autoDeprovision, customDomainsOffered, gatewayModes, settingsOverview, signupOpen, staffTwoFactorPolicy, trialDays, type SettingRow } from "@/lib/platform/settings";
 import { lastTick, type TickSummary } from "@/lib/platform/tick-summary";
 import { SUPPORT_SETTING_KEYS, getSupportSettings } from "@/lib/support/settings";
 
@@ -34,6 +35,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "gateways", label: "Payment gateways", icon: CreditCard },
   { id: "security", label: "Staff security", icon: ShieldCheck },
   { id: "linked-sign-in", label: "Linked sign-in", icon: Link2 },
+  { id: "custom-domains", label: "Custom domains", icon: Globe },
   { id: "support", label: "Support", icon: LifeBuoy },
   { id: "environment", label: "Environment", icon: Server },
 ];
@@ -55,7 +57,7 @@ export default async function ConsoleSettingsPage() {
   // First: signed out, the page ends here with a redirect to /login; support and read-only staff get "not found".
   const staff = await consoleStaff(PAGE_ROLES.settings);
   const caps = capsFor(staff.role);
-  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support, linked] = await Promise.all([
+  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support, linked, domainsOffered] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
@@ -67,6 +69,7 @@ export default async function ConsoleSettingsPage() {
     securityFacts(),
     getSupportSettings(),
     linkedSignInState(),
+    customDomainsOffered(),
   ]);
   const env = platformEnv();
   const production = env.key === "production";
@@ -225,6 +228,14 @@ export default async function ConsoleSettingsPage() {
             description="Switching between linked workspaces from the header, without signing in again — one switch for every workspace."
           >
             <LinkedSignInSwitch enabled={linked.enabled} change={linked.change} readOnly={!caps.owner} />
+          </Panel>
+
+          <Panel
+            id="custom-domains"
+            title="Custom domains"
+            description="Whether workspace owners may reach their workspace at an address of their own. Each plan says how many; staff add them from a workspace's page either way."
+          >
+            <DomainsOfferedSwitch offered={domainsOffered} change={changeOf(row("domains.offered"))} readOnly={!caps.owner} />
           </Panel>
 
           <Panel id="support" title="Support" description="Contact Support in the workspaces: where requests are announced, the helpline, recording, and how long files are kept.">

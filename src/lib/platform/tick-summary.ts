@@ -12,6 +12,10 @@ import { getSetting, setSetting } from "@/lib/platform/settings";
  * `runPartnerChores`): commission entries written, statements drafted, deal registrations expired,
  * and what failed. Null when the run did none — started from the console, the partner chores' lease
  * held elsewhere — and in summaries written before the programme existed, which still read back.
+ *
+ * `domains` is the daily custom-domain sweep's (src/lib/platform/domains.ts, `domainSweep`): addresses
+ * checked again, failing, stopped, working again, waiting ones removed, owners told, failures. Null on
+ * runs that did not do the daily chores, and in summaries from before custom domains.
  */
 
 export type TickSummary = {
@@ -27,17 +31,24 @@ export type TickSummary = {
   daily: { reconciled: number; failed: number; usage: number; revenue: number } | null;
   /** The partner chores, on a run that did them: accrual and reversal entries written, statements drafted, deals expired, failures. */
   partners: PartnerTick | null;
+  /** The custom-domain sweep, on the run that did the daily chores. */
+  domains: DomainTick | null;
 };
 
 export type PartnerTick = { accrued: number; reversed: number; statements: number; expiredDeals: number; failed: number };
+export type DomainTick = { checked: number; failing: number; stopped: number; recovered: number; expired: number; mailed: number; failed: number };
 
 const MAX_SLUGS = 20;
 
 const slugs = (list: unknown): string[] => (Array.isArray(list) ? list.filter((s): s is string => typeof s === "string").slice(0, MAX_SLUGS) : []);
 const count = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null);
 
-/** `partners` may be left out: a run started from the console does no partner chores. */
-export async function recordTick(summary: Omit<TickSummary, "at" | "by" | "partners"> & { partners?: PartnerTick | null }, by: string, now = new Date()): Promise<void> {
+/** `partners` and `domains` may be left out: a run started from the console does neither. */
+export async function recordTick(
+  summary: Omit<TickSummary, "at" | "by" | "partners" | "domains"> & { partners?: PartnerTick | null; domains?: DomainTick | null },
+  by: string,
+  now = new Date(),
+): Promise<void> {
   const whole = (n: number) => Math.max(0, Math.round(Number.isFinite(n) ? n : 0));
   const record: TickSummary = {
     at: now.toISOString(),
@@ -57,6 +68,17 @@ export async function recordTick(summary: Omit<TickSummary, "at" | "by" | "partn
           statements: whole(summary.partners.statements),
           expiredDeals: whole(summary.partners.expiredDeals),
           failed: whole(summary.partners.failed),
+        }
+      : null,
+    domains: summary.domains
+      ? {
+          checked: whole(summary.domains.checked),
+          failing: whole(summary.domains.failing),
+          stopped: whole(summary.domains.stopped),
+          recovered: whole(summary.domains.recovered),
+          expired: whole(summary.domains.expired),
+          mailed: whole(summary.domains.mailed),
+          failed: whole(summary.domains.failed),
         }
       : null,
   };
@@ -88,7 +110,17 @@ function parseTick(json: unknown): TickSummary | null {
     if (accrued === null || reversed === null || statements === null || expiredDeals === null || failed === null) return null;
     partners = { accrued, reversed, statements, expiredDeals, failed };
   }
-  return { at: t.at, by: t.by, ms, held: slugs(t.held), lifted: slugs(t.lifted), closed: slugs(t.closed), reminded, daily, partners };
+  // Absent in summaries from before custom domains: read as none.
+  let domains: DomainTick | null = null;
+  if (t.domains !== null && t.domains !== undefined) {
+    if (typeof t.domains !== "object" || Array.isArray(t.domains)) return null;
+    const d = t.domains as Record<string, unknown>;
+    const values = [d.checked, d.failing, d.stopped, d.recovered, d.expired, d.mailed, d.failed].map(count);
+    if (values.some((v) => v === null)) return null;
+    const [checked, failing, stopped, recovered, expired, mailed, failed] = values as number[];
+    domains = { checked, failing, stopped, recovered, expired, mailed, failed };
+  }
+  return { at: t.at, by: t.by, ms, held: slugs(t.held), lifted: slugs(t.lifted), closed: slugs(t.closed), reminded, daily, partners, domains };
 }
 
 export async function lastTick(): Promise<TickSummary | null> {

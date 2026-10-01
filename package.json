@@ -156,6 +156,7 @@
     "check:close": "tsx scripts/check-close.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",
+    "check:domains": "tsx scripts/check-domains.ts",
     "site:seed-pages": "tsx scripts/site-seed-pages.ts"
   },
   "dependencies": {

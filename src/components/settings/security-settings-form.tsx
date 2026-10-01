@@ -15,8 +15,11 @@ type Settings = {
   hasClientSecret: boolean;
 };
 
-/** `origin`: this workspace's address, to show the exact redirect addresses Microsoft must be given. */
-export function SecuritySettingsForm({ settings, origin }: { settings: Settings; origin: string }) {
+/**
+ * `origins`: every address the workspace answers at — its own and each live custom one — to show the
+ * exact redirect addresses Microsoft must be given: one for each address people sign in at.
+ */
+export function SecuritySettingsForm({ settings, origins }: { settings: Settings; origins: string[] }) {
   const router = useRouter();
   const [enforceTwoFactor, setEnforceTwoFactor] = useState(settings.enforceTwoFactor);
   const [ssoEnabled, setSsoEnabled] = useState(settings.ssoEnabled);
@@ -76,13 +79,16 @@ export function SecuritySettingsForm({ settings, origin }: { settings: Settings;
           <h3 className="text-sm font-medium text-text">Microsoft sign-in (SSO)</h3>
           <p className="mt-0.5 text-sm text-muted">
             Register an app in your Microsoft Entra ID (Azure AD) admin center, then paste its details here.
-            Redirect URI:{" "}
-            <code className="break-all rounded bg-surface-sunken px-1 py-0.5 text-xs">{origin}/api/auth/callback/microsoft-entra-id</code>
+            {origins.length > 1 ? " Redirect URIs — one for each address this workspace answers at:" : " Redirect URI:"}
           </p>
+          <RedirectList origins={origins} path="/api/auth/callback/microsoft-entra-id" label="Sign-in redirect URIs" />
           {/* The same app sends documents from people's own Outlook — src/lib/mail/microsoft.ts. */}
           <p className="mt-2 text-sm text-muted">
-            To let people email invoices and proposals from their own Outlook, add to the same app a second redirect URI,{" "}
-            <code className="break-all rounded bg-surface-sunken px-1 py-0.5 text-xs">{origin}/api/mail/microsoft/callback</code>, and the delegated Microsoft Graph
+            To let people email invoices and proposals from their own Outlook, add to the same app {origins.length > 1 ? "these redirect URIs as well" : "a second redirect URI"}:
+          </p>
+          <RedirectList origins={origins} path="/api/mail/microsoft/callback" label="Outlook redirect URIs" />
+          <p className="mt-2 text-sm text-muted">
+            Outlook also needs the delegated Microsoft Graph
             permissions <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">Mail.Send</code>,{" "}
             <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">User.Read</code> and{" "}
             <code className="rounded bg-surface-sunken px-1 py-0.5 text-xs">offline_access</code>. Each person then connects their own mailbox from My
@@ -153,5 +159,18 @@ export function SecuritySettingsForm({ settings, origin }: { settings: Settings;
         </Button>
       </div>
     </div>
+  );
+}
+
+/** One redirect address for each address the workspace answers at. */
+function RedirectList({ origins, path, label }: { origins: string[]; path: string; label: string }) {
+  return (
+    <ul aria-label={label} className="mt-1 space-y-1">
+      {origins.map((origin) => (
+        <li key={origin}>
+          <code className="break-all rounded bg-surface-sunken px-1 py-0.5 text-xs">{`${origin}${path}`}</code>
+        </li>
+      ))}
+    </ul>
   );
 }

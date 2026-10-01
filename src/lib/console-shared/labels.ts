@@ -509,6 +509,15 @@ export const ACTION_LABELS: Record<string, string> = {
   "cms.admin.invite": "Website CMS admin invited",
   "cms.admin.setup-link": "Website CMS set-password link sent",
   "tenant.domain.remove": "Workspace address removed",
+  "tenant.domain.add": "Workspace address added",
+  "tenant.domain.check": "Workspace address checked",
+  "tenant.domain.verified": "Workspace address verified",
+  "tenant.domain.broken": "Workspace address stopped",
+  "tenant.domain.recovered": "Workspace address working again",
+  "tenant.domain.primary": "Primary address changed",
+  "tenant.domain.expired": "Unproved address removed",
+  "tenant.domain.mail": "Owner told about a failing address",
+  "domains.settings": "Custom domains setting changed",
   "bulk.apply-standing": "Billing rules applied to a batch",
   "bulk.trial-extend": "Trials extended in bulk",
   "export.invoices": "Invoices exported",
@@ -623,7 +632,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
-  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "export.workspaces", "export.audit", "cms.", "linked.settings"] },
+  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings"] },
 ];
 
 export function categoryOf(action: string): AuditCategoryKey | null {
@@ -644,6 +653,11 @@ const ACTION_TONES: Record<string, Tone> = {
   "tenant.provision.requested": "info",
   "tenant.provision.done": "success",
   "tenant.plans.manual-ended": "warning",
+  "tenant.domain.verified": "success",
+  "tenant.domain.broken": "danger",
+  "tenant.domain.recovered": "success",
+  "tenant.domain.remove": "warning",
+  "tenant.domain.mail": "warning",
   "plan.price.retire": "warning",
   "billing.keys": "warning",
   "billing.event.view-raw": "warning",
@@ -812,7 +826,23 @@ export function auditSummary(action: string, detail: unknown): string | null {
     case "tenant.module-override":
       return join([text(d.module), d.granted === true ? "added" : d.granted === false ? "taken away" : "override removed", quote(d.reason)]);
     case "tenant.limit-override":
-      return join([`seats ${limitText(d.seats)}`, `copilot tokens ${limitText(d.copilotTokens)}`]);
+      return join([`seats ${limitText(d.seats)}`, `copilot tokens ${limitText(d.copilotTokens)}`, "customDomains" in d ? `custom domains ${limitText(d.customDomains)}` : null]);
+    case "tenant.domain.add":
+    case "tenant.domain.verified":
+    case "tenant.domain.broken":
+    case "tenant.domain.recovered":
+    case "tenant.domain.expired":
+      return text(d.host);
+    case "tenant.domain.remove":
+      return join([text(d.host), quote(d.reason)]);
+    case "tenant.domain.check":
+      return join([text(d.host), text(d.outcome)]);
+    case "tenant.domain.primary":
+      return d.host ? text(d.host) : "back to its own address";
+    case "tenant.domain.mail":
+      return join([text(d.host), d.kind === "broken" ? "stopped" : d.kind === "failing" ? "failing" : null, d.mailed === false ? "no owner email" : null]);
+    case "domains.settings":
+      return typeof d.offered === "boolean" ? (d.offered ? "offered to workspaces" : "not offered") : null;
     case "tenant.trial":
       return join([date(d.endsAt) ? `ends ${dayMonthYear(date(d.endsAt))}` : null, typeof d.days === "number" ? `+${d.days} days` : null]);
     case "tenant.billing-details":

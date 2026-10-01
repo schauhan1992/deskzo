@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, ChevronRight, Clock, Cpu, DatabaseZap, Globe, Rocket } from "lucide-react";
+import { ArrowRight, ChevronRight, Clock, Cpu, DatabaseZap, Rocket } from "lucide-react";
 import { consoleReleaseDevice, consoleRetryJob } from "@/actions/platform/console";
 import { ActionButton } from "@/components/console/kit/action-button";
 import { CopyField } from "@/components/console/kit/copy-field";
@@ -14,6 +14,7 @@ import { TERMINAL_STATE, leaseOutcome, runOutcome, schemaLabel } from "@/lib/con
 import type { Caps } from "@/lib/console-shared/roles";
 import type { TenantStatusKey } from "@/lib/console-shared/types";
 import type { OpsPanel } from "@/lib/platform/workspace-data";
+import { DomainsPanel } from "./domains-panel";
 import { OutputPaneButton, ProbeDatabase, ReapplyLimitsButton } from "./ops-actions";
 
 /**
@@ -99,26 +100,7 @@ export function OpsTab({ ops, tenant, caps }: { ops: OpsPanel; tenant: { id: str
           </div>
         </Panel>
 
-        <Panel title="Domains" description="Addresses besides its own subdomain." padded={ops.domains.length === 0}>
-          {ops.domains.length === 0 ? (
-            <p className="flex items-center gap-2 text-sm text-muted">
-              <Globe aria-hidden="true" className="h-4 w-4 shrink-0 text-subtle" />
-              Reached at its own subdomain only.
-            </p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {ops.domains.map((d) => (
-                <li key={d.host} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5">
-                  <span className="min-w-0 font-mono text-xs break-all text-text">{d.host}</span>
-                  <span className="flex items-center gap-1.5">
-                    {d.isPrimary && <StatusPill tone="brand">Primary</StatusPill>}
-                    <StatusPill tone="neutral">{d.kind === "CUSTOM" ? "Custom" : "Legacy"}</StatusPill>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
+        <DomainsPanel domains={ops.domains} tenant={tenant} caps={caps} />
       </div>
 
       <Panel title="Setup" description="Its provisioning jobs, newest first." actions={<SeeAll href={`/provisioning?q=${slugParam}`}>Provisioning</SeeAll>} padded={false}>

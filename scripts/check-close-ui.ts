@@ -261,7 +261,7 @@ async function run(scratchUrl: string) {
     isDefault: false,
     keyBundleCipher: null,
     country: "IN",
-    entitlements: { v: 1 as const, ...entitlements, seats: null, copilotTokens: null, plans: [] },
+    entitlements: { v: 1 as const, ...entitlements, seats: null, copilotTokens: null, customDomains: null, plans: [] },
     holdReason: null,
   });
   const ON = tenant("zzcloseui-on", { all: true, modules: [] });

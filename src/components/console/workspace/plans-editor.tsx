@@ -313,7 +313,7 @@ function limitChange(pair: [number | null, number | null], text: (n: number | nu
 /**
  * The preview in a confirmation: the save's refusal first (it is why the button is off), then the
  * modules gained and lost, the limits before and after, and the billing standing it lands in.
- * `limits` shows the two limits alone — a limit changes no module.
+ * `limits` shows the limits alone — a limit changes no module.
  */
 export function EntitlementImpact({
   pending,
@@ -342,6 +342,7 @@ export function EntitlementImpact({
     const label = (key: string) => moduleLabels?.[key] ?? key;
     const seats = limitChange(preview.diff.seats, seatsText);
     const tokens = limitChange(preview.diff.copilotTokens, tokensText);
+    const domains = limitChange(preview.diff.customDomains, tokensText);
     const standing = standingLabel(preview.standingAfter, null, "");
     body = (
       <div className="space-y-3">
@@ -357,6 +358,7 @@ export function EntitlementImpact({
           items={[
             { label: "Seats", value: seats.value, tone: seats.tone },
             { label: "Copilot tokens a month", value: tokens.value, tone: tokens.tone },
+            { label: "Custom domains", value: domains.value, tone: domains.tone },
             ...(scope === "all" ? [{ label: "Billing standing after", value: <StatusPill tone={standing.tone}>{standing.label}</StatusPill> }] : []),
           ]}
         />

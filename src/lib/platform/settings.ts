@@ -16,6 +16,7 @@ export type SecretKey = (typeof SECRET_KEYS)[number];
  * `platform.lastTick`: what the platform tick did last, as JSON (src/lib/platform/tick-summary.ts).
  * `support.*`: Contact Support — typed, with their defaults, in src/lib/support/settings.ts.
  * `partners.*`: the partner programme — typed, with their defaults, in src/lib/partners/settings.ts.
+ * `domains.offered`: whether workspaces may add custom domains (`customDomainsOffered`).
  */
 export const PLAIN_KEYS = [
   "signup.open",
@@ -24,6 +25,7 @@ export const PLAIN_KEYS = [
   "billing.dailyRanOn",
   "staff.twoFactor",
   "platform.lastTick",
+  "domains.offered",
   "support.enabled",
   "support.email",
   "support.helpline",
@@ -170,4 +172,13 @@ export async function trialDays(): Promise<number> {
  */
 export async function autoDeprovision(): Promise<boolean> {
   return (await getSetting("billing.autoDeprovision")) === "1";
+}
+
+/**
+ * Whether workspace owners may add custom domains from Settings › Domain (src/lib/platform/
+ * domains.ts). Off until staff turn it on — once the HTTPS certificates for them are automated. Staff
+ * add and check addresses from the console whatever it says, and addresses already added keep working.
+ */
+export async function customDomainsOffered(): Promise<boolean> {
+  return (await getSetting("domains.offered")) === "1";
 }
