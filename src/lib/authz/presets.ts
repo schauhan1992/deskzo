@@ -75,7 +75,9 @@ export const ROLE_PRESETS: RolePreset[] = [
       // Their own event invitations and requirement assessments.
       "forms.create",
       // Their own accounts and leads, to a colleague — never somebody else's.
-      "accounts.handOffOwn"],
+      "accounts.handOffOwn",
+      // Chasing what their clients owe, and logging what they said (off by default; this profile turns it on).
+      "collections.followUp"],
   },
   {
     key: "sales-manager",
@@ -90,6 +92,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "accounts.reassign",
       "accounts.handOffOwn",
       "tickets.create",
+      // Their team's collections, and the broken promises the team is told about.
+      "collections.followUp",
       "documents.issue",
       "documents.send",
       // A manager may pull back a document a rep raised in error; an executive may not.

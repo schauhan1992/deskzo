@@ -21,6 +21,8 @@ import { handoffBadge, impliedMargin, priceCeiling, priceEventLabels, vendorPoLa
 import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 import { CategoryChip } from "@/components/customers/category-chip";
+import { followUpPanel } from "@/actions/collections";
+import { FollowUpPanel } from "@/components/collections/follow-up-panel";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -141,6 +143,10 @@ export async function OrderDetail({
   const salePrice = Number(order.unitPrice ?? order.item.sellingPrice);
   const quoteMargin = quotePrice !== null ? impliedMargin(salePrice, quotePrice, order.quantity) : null;
   const saving = order.purchaseSaving;
+
+  // Collections: what has been said to the customer about paying for this order, and any promise —
+  // Receivables' own, so only where it is on for this viewer (and null outside the account's money).
+  const followUps = (await isModuleEnabled("receivables")) ? await followUpPanel({ companyProductId: order.id }) : null;
 
   return (
     <div className="@container space-y-6">
@@ -433,6 +439,8 @@ export async function OrderDetail({
               </div>
             </CardContent>
           </Card>
+
+          {followUps && (followUps.history.length > 0 || followUps.canLog) && <FollowUpPanel panel={followUps} />}
 
           {order.expenses.length > 0 && (
             <Card>

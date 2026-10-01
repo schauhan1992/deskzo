@@ -584,6 +584,7 @@ model User {
   orderVendorPosSettled      CompanyProduct[]         @relation("OrderVendorPoSettledBy")
   orderPriceChanges          OrderPriceChange[]       @relation("OrderPriceChangeBy")
   purchaseSavings            PurchaseSaving[]         @relation("PurchaseSavingPurchaser")
+  paymentFollowUps           PaymentFollowUp[]        @relation("PaymentFollowUpBy")
   renewalStagesSet           CompanyProduct[]         @relation("RenewalStageSetBy")
   documentsSubmitted         TradeDocument[]          @relation("DocumentSubmittedBy")
   documentsApproved          TradeDocument[]          @relation("DocumentApprovedBy")
@@ -973,6 +974,7 @@ model Company {
 
   revenueSchedules    RevenueSchedule[]    @relation("RevenueScheduleCustomer")
   accountingSchedules AccountingSchedule[] @relation("AccountingScheduleVendor")
+  paymentFollowUps    PaymentFollowUp[]
 
   @@index([stage])
   @@index([assignedToUserId])
@@ -2009,6 +2011,7 @@ model TradeDocument {
   revenueSchedules    RevenueSchedule[]           @relation("RevenueScheduleDocument")
   revenueAdjustments  RevenueScheduleAdjustment[] @relation("RevenueAdjustmentCreditNote")
   accountingSchedules AccountingSchedule[]        @relation("AccountingScheduleSource")
+  paymentFollowUps    PaymentFollowUp[]
 
   @@index([companyId])
   @@index([leadId])
@@ -2570,6 +2573,7 @@ model CompanyProduct {
 
   priceChanges   OrderPriceChange[]
   purchaseSaving PurchaseSaving?
+  paymentFollowUps PaymentFollowUp[]
 
   /**
    * Internal stakeholders (e.g. Tech Support, HR) who should have visibility into this order for installation/demo/delivery coordination — notified when added.
@@ -2680,6 +2684,64 @@ model PurchaseSaving {
 
   @@index([purchaserId, recordedOn])
   @@map("purchase_savings")
+}
+
+/// How a payment follow-up reached the client.
+enum FollowUpChannel {
+  CALL
+  WHATSAPP
+  EMAIL
+  VISIT
+  MEETING
+  OTHER
+}
+
+/// A promise to pay: open until the money comes (kept), the date passes (broken), or a newer
+/// promise on the same invoice or order replaces it (superseded).
+enum PromiseStatus {
+  OPEN
+  KEPT
+  BROKEN
+  SUPERSEDED
+}
+
+/**
+ * A follow-up on money a client owes — by the salesperson on the account, or by accounts: what was
+ * said, and any promise to pay by a date. The invoice or order chased, when one was.
+ */
+model PaymentFollowUp {
+  id                String           @id @default(cuid())
+  companyId         String
+  company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /** The invoice chased, if one. */
+  documentId        String?
+  document          TradeDocument?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  /** The order chased, if one. */
+  companyProductId  String?
+  companyProduct    CompanyProduct?  @relation(fields: [companyProductId], references: [id], onDelete: SetNull)
+  byUserId          String?
+  byUser            User?            @relation("PaymentFollowUpBy", fields: [byUserId], references: [id], onDelete: SetNull)
+  channel           FollowUpChannel
+  /** What the client said. At most 1,000 characters. */
+  remarks           String
+  promisedOn        DateTime?        @db.Date
+  /** In the invoice's currency when an invoice is chased; otherwise rupees. */
+  promisedAmount    Decimal?         @db.Decimal(14, 2)
+  nextFollowUpOn    DateTime?        @db.Date
+  /** Set exactly when promisedOn is. */
+  promiseStatus     PromiseStatus?
+  promiseResolvedAt DateTime?
+  brokenNotifiedAt  DateTime?
+  /** The reminder task for nextFollowUpOn, when the tasks module is on. */
+  taskId            String?
+  createdAt         DateTime         @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([promiseStatus, promisedOn])
+  @@index([byUserId, createdAt])
+  @@index([documentId])
+  @@index([companyProductId])
+  @@map("payment_follow_ups")
 }
 
 /**

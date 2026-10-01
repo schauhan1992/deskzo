@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 
 /**
@@ -177,6 +177,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       { href: "/receivables", label: "Receivables", icon: Scale },
       // Who is safe to give terms to — the credit engine's list (src/lib/credit/engine.ts).
       { href: "/receivables/credit", label: "Customer credit", icon: ShieldCheck },
+      // A salesperson's dues to chase, and the promises they logged (src/actions/collections.ts).
+      { href: "/collections", label: "My collections", icon: Coins, permission: "collections.followUp" },
     ],
   },
   {

@@ -15,6 +15,8 @@ import { firstOpenDate } from "@/lib/ledger/period";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import { syncBillingMilestones } from "@/lib/projects/billing-sync";
 import { bookOnFirstPayment } from "@/lib/orders/handoff";
+import { settlePromisesFor } from "@/lib/collections/promises";
+import { loadFollowUps, mayLogFollowUps, receivableFollowUps } from "@/lib/collections/load";
 import {
   settleInvoice,
   settledStatus,
@@ -155,6 +157,8 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
   });
 
   await syncInvoiceStatus(invoiceId);
+  // A promise to pay this invoice, kept by this money (src/lib/collections/promises.ts). Never fails the payment.
+  await settlePromisesFor({ documentIds: [invoiceId] });
   await recordAudit({
     userId: user.id,
     action: "CREATE",
@@ -303,6 +307,7 @@ export async function applyPaymentToInvoice(
     return row;
   });
   await syncInvoiceStatus(invoiceId);
+  await settlePromisesFor({ documentIds: [invoiceId] });
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
@@ -381,6 +386,8 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
   }
 
   await syncInvoiceStatus(invoiceId);
+  // A credit note settles too: a promise is kept when the invoice's settled amount rises by what was promised.
+  await settlePromisesFor({ documentIds: [invoiceId] });
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
@@ -652,7 +659,16 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
   const unappliedCredits = Math.max(credited - Number(appliedCredits._sum.amount ?? 0), 0);
   const outstanding = Object.values(aging).reduce((t, v) => t + v, 0);
 
+  // Collections: every follow-up on this account's invoices and orders — one history for sales and
+  // accounts, to anybody who can see the account (the same scope, spread in as above).
+  const [followUps, canLogFollowUps] = await Promise.all([
+    loadFollowUps({ companyId, ...(documentScope as Prisma.PaymentFollowUpWhereInput) }, asOf),
+    mayLogFollowUps(user.id),
+  ]);
+
   return toPlain({
+    followUps,
+    canLogFollowUps,
     ledger: withRunningBalance(filtered),
     aging,
     openInvoices: openInvoices.sort((a, b) => b.daysOverdue - a.daysOverdue),
@@ -672,10 +688,12 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
  * Computed in memory because the bucket depends on each invoice's own due date against today,
  * which SQL can't group on without a date-arithmetic expression per bucket.
  */
-export async function agingReport(params?: { search?: string }) {
+export async function agingReport(params?: { search?: string; promise?: string }) {
   const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return { rows: [], totals: { buckets: emptyAging(), total: 0 } };
   const asOf = new Date();
+  /** Collections' filters: customers with a broken promise to pay, or one due in the next seven days. */
+  const promiseFilter = params?.promise === "broken" || params?.promise === "week" ? params.promise : null;
 
   const invoices = await db.tradeDocument.findMany({
     where: {
@@ -708,6 +726,7 @@ export async function agingReport(params?: { search?: string }) {
       total: true,
       company: { select: { id: true, name: true } },
       ...invoiceSettlementInclude,
+      lines: { where: { companyProductId: { not: null } }, select: { companyProductId: true } },
     },
   });
 
@@ -715,10 +734,12 @@ export async function agingReport(params?: { search?: string }) {
     string,
     { id: string; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; invoiceCount: number }
   >();
+  const open: { id: string; companyId: string; orderIds: string[] }[] = [];
 
   for (const invoice of invoices) {
     const settlement = settlementOf(invoice);
     if (settlement.balance < 0.01) continue;
+    open.push({ id: invoice.id, companyId: invoice.company.id, orderIds: invoice.lines.map((l) => l.companyProductId!) });
     const bucket = agingBucket(invoice.dueDate, invoice.issueDate, asOf);
     const overdue = daysOverdue(invoice.dueDate, invoice.issueDate, asOf);
 
@@ -732,7 +753,16 @@ export async function agingReport(params?: { search?: string }) {
     byCompany.set(invoice.company.id, row);
   }
 
-  const rows = [...byCompany.values()].sort((a, b) => b.total - a.total);
+  // Each customer's last follow-up and the promise that matters most (src/lib/collections/load.ts) —
+  // read for the customers already scoped above, so it can't widen anything.
+  const followUps = await receivableFollowUps(open, asOf);
+  const rows = [...byCompany.values()]
+    .map((row) => {
+      const f = followUps.get(row.id);
+      return { ...row, lastFollowUp: f?.lastFollowUp ?? null, promise: f?.promise ?? null, broken: f?.broken ?? false, promisedThisWeek: f?.promisedThisWeek ?? false };
+    })
+    .filter((row) => (promiseFilter === "broken" ? row.broken : promiseFilter === "week" ? row.promisedThisWeek : true))
+    .sort((a, b) => b.total - a.total);
   const totals = rows.reduce(
     (acc, row) => {
       for (const key of Object.keys(acc.buckets) as AgingBucket[]) acc.buckets[key] += row.buckets[key];

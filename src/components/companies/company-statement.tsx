@@ -3,6 +3,8 @@ import { customerStatement } from "@/actions/receivable";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { AGING_BUCKETS } from "@/lib/receivables";
+import { FollowUpHistory } from "@/components/collections/follow-up-history";
+import { LogFollowUpButton } from "@/components/collections/log-follow-up-button";
 
 type Statement = NonNullable<Awaited<ReturnType<typeof customerStatement>>>;
 
@@ -110,6 +112,11 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
                   <th className="px-3 py-2">Due</th>
                   <th className="px-3 py-2">Age</th>
                   <th className="px-3 py-2 text-right">Balance</th>
+                  {statement.canLogFollowUps && (
+                    <th className="px-5 py-2 text-right">
+                      <span className="sr-only">Follow up</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -130,10 +137,36 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
                       )}
                     </td>
                     <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(invoice.balance, invoice.currency)}</td>
+                    {statement.canLogFollowUps && (
+                      <td className="px-5 py-2 text-right">
+                        <LogFollowUpButton
+                          label="Follow up"
+                          variant="ghost"
+                          target={{ documentId: invoice.id, label: invoice.docNumber, companyName: "", balance: invoice.balance, currency: invoice.currency }}
+                        />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* One history for sales and accounts: every follow-up on this account's invoices and orders. */}
+      {(statement.followUps.length > 0 || statement.canLogFollowUps) && (
+        <Card>
+          <CardHeader className="text-sm font-medium text-text">
+            Payment follow-ups
+            <span className="ml-2 text-xs font-normal text-subtle">What the customer said about paying, and what they promised.</span>
+          </CardHeader>
+          <CardContent>
+            <FollowUpHistory
+              history={statement.followUps}
+              showTarget
+              emptyText="Nobody has followed up a payment on this account yet. Use Follow up beside an open invoice."
+            />
           </CardContent>
         </Card>
       )}

@@ -18,7 +18,8 @@ import { pageOf } from "@/lib/pagination";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postPaymentToLedger } from "@/lib/ledger/journal";
-import { calculateOrderAmount } from "@/lib/gst";
+import { computeOrderFinancials } from "@/lib/orders/financials";
+import { settlePromisesFor } from "@/lib/collections/promises";
 import { defaultBranchIdFor } from "@/lib/branches/identity";
 import {
   recordPaymentSchema,
@@ -35,26 +36,7 @@ const orderItemSelect = {
   taxRatePercent: true,
 } as const;
 
-function computeOrderFinancials(order: {
-  quantity: number;
-  unitPrice?: unknown;
-  item: { sellingPrice: unknown; taxRatePercent: unknown };
-  allocations: { amount: unknown }[];
-}) {
-  const { subtotal, gstAmount, total } = calculateOrderAmount({
-    quantity: order.quantity,
-    // A punched order's own negotiated price wins over the item's catalog default, if one was set.
-    unitPrice: Number(order.unitPrice ?? order.item.sellingPrice),
-    taxRatePercent: order.item.taxRatePercent
-      ? Number(order.item.taxRatePercent)
-      : null,
-  });
-  const paid = order.allocations.reduce((sum, a) => sum + Number(a.amount), 0);
-  const balance = Math.round((total - paid) * 100) / 100;
-  const status: PaymentStatusFilter =
-    paid <= 0 ? "unpaid" : paid < total ? "partial" : "paid";
-  return { subtotal, gstAmount, total, paid, balance, status };
-}
+// The order arithmetic lives in src/lib/orders/financials.ts — one copy, which Collections reads too.
 
 /**
  * Whether the caller may see one company's money at all.
@@ -157,6 +139,8 @@ export async function recordPayment(
     if (order) await bookOnFirstPayment(tx, { id: order.id }, new Date());
     return created;
   });
+  // A promise to pay this order, kept by this money (src/lib/collections/promises.ts). Never fails the payment.
+  if (order) await settlePromisesFor({ orderIds: [order.id] });
 
   await recordAudit({
     userId: user.id,
@@ -260,6 +244,7 @@ export async function allocatePayment(
     await bookOnFirstPayment(tx, { id: companyProductId }, new Date());
     return row;
   });
+  await settlePromisesFor({ orderIds: [companyProductId] });
 
   revalidatePath(`/companies/${payment.companyId}`);
   revalidatePath("/payments");

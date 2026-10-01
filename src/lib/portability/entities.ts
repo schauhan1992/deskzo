@@ -740,4 +740,10 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Immutable history — what each purchaser saved (or, where an increase was accepted, gave up) against the salesperson's distributor price. A performance record rather than a trading one, kept for the reviews it was used in; a cancelled order's stays, marked cancelled.",
   },
+  // ─── Collections: payment follow-ups ───────────────────────────────────────────────────────────
+  PaymentFollowUp: {
+    disposition: "archive",
+    reason:
+      "Immutable history — every follow-up on money a client owed: who chased it, how, what the client said, and any promise to pay with whether it was kept or broken. The invoices and payments it is about export on their own; this is the conversation around them, which no target CRM loads as receivables, and which is kept as the record of how each debt was pursued.",
+  },
 };

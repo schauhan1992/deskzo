@@ -6,6 +6,7 @@ import { announceActivityAwards } from "@/lib/performance/announce";
 import { announcePrizes } from "@/lib/wins/prize-announce";
 import { runRevenueAndClose } from "@/lib/close/nightly";
 import { runOrderReleases } from "@/lib/orders/handoff";
+import { runCollectionsDaily } from "@/lib/collections/daily";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -78,6 +79,15 @@ export async function runHeartbeat() {
     console.error("order release failed", err);
     return { ran: false, released: 0 };
   });
+  /**
+   * Collections, once a day: promises to pay resolved (kept, or broken once their day has passed), each
+   * broken one told to whoever logged it and their manager, one summary to accounts, and that morning's
+   * follow-up reminders where there is no task. Its own claim row decides who runs it.
+   */
+  const collections = await runCollectionsDaily().catch((err) => {
+    console.error("collections daily failed", err);
+    return { ran: false, broken: 0 };
+  });
   return {
     ...result,
     leadScoresRefreshed,
@@ -87,5 +97,6 @@ export async function runHeartbeat() {
     prizesAnnounced: prizes.announced,
     revenueAndCloseRan: revenueAndClose.ran,
     ordersReleased: orderReleases.released,
+    promisesBroken: collections.broken,
   };
 }

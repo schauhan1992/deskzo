@@ -4,21 +4,35 @@ import { isModuleEnabled } from "@/actions/module";
 import { Badge, Card } from "@/components/ui/card";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { SearchParamInput } from "@/components/ui/search-param-input";
+import { PromiseBadge, promiseText } from "@/components/collections/follow-up-history";
 import { formatCurrency } from "@/lib/utils";
 import { AGING_BUCKETS } from "@/lib/receivables";
+import { followUpChannelLabels } from "@/lib/collections/rules";
+import { formatIstDate } from "@/lib/india-time";
+
+/** Collections' views of the list: customers with a promise to pay broken, or due in the next week. */
+const PROMISE_FILTERS = [
+  { value: undefined, label: "All" },
+  { value: "broken", label: "Broken promises" },
+  { value: "week", label: "Promised this week" },
+] as const;
 
 /**
  * Accounts receivable, aged. One row per customer with something outstanding, bucketed by how long
- * past due each of their invoices is — the report a collections call is made from.
+ * past due each of their invoices is — the report a collections call is made from — with the last
+ * follow-up anybody logged and the promise that matters most.
  */
-export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<{ q?: string; promise?: string }> }) {
   const enabled = await isModuleEnabled("receivables");
   if (!enabled) return <ModuleDisabledNotice moduleKey="receivables" />;
 
   const params = await searchParams;
-  const { rows, totals } = await agingReport({ search: params.q });
+  const promise = params.promise === "broken" || params.promise === "week" ? params.promise : undefined;
+  const { rows, totals } = await agingReport({ search: params.q, promise });
 
   const overdue = totals.total - totals.buckets.current;
+  const query = (overrides: Record<string, string | undefined>) =>
+    Object.fromEntries(Object.entries({ q: params.q, promise, ...overrides }).filter(([, v]) => v)) as Record<string, string>;
 
   return (
     <div className="animate-fade-rise">
@@ -58,7 +72,33 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <SearchParamInput paramName="q" placeholder="Search customer name…" />
+        <nav aria-label="Promises to pay" className="flex flex-wrap items-center gap-2">
+          {PROMISE_FILTERS.map((f) => (
+            <Link
+              key={f.label}
+              href={{ pathname: "/receivables", query: query({ promise: f.value }) }}
+              aria-current={promise === f.value ? "page" : undefined}
+              className={`rounded-full px-3 py-1 text-sm ${
+                promise === f.value ? "bg-brand text-brand-contrast" : "border border-line-strong bg-surface text-muted"
+              }`}
+            >
+              {f.label}
+            </Link>
+          ))}
+        </nav>
       </div>
+      {promise && (
+        <p className="mt-2 text-xs text-muted">
+          {promise === "broken"
+            ? "Customers with a promise to pay on an open invoice whose day has passed unpaid."
+            : "Customers who promised to pay an open invoice today or in the next six days."}{" "}
+          Each invoice and order, with who logged what, is on{" "}
+          <Link href={{ pathname: "/collections", query: { filter: promise } }} className="underline hover:text-text">
+            Collections
+          </Link>
+          .
+        </p>
+      )}
 
       <Card className="mt-5 overflow-x-auto p-0">
         <table className="w-full text-sm">
@@ -71,6 +111,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
                 </th>
               ))}
               <th className="px-4 py-2.5 text-right">Total</th>
+              <th className="px-4 py-2.5">Last follow-up</th>
             </tr>
           </thead>
           <tbody>
@@ -96,12 +137,36 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
                   </td>
                 ))}
                 <td className="px-4 py-2.5 text-right font-semibold text-text">{formatCurrency(row.total)}</td>
+                <td className="min-w-48 px-4 py-2.5 text-xs">
+                  {row.lastFollowUp ? (
+                    <div className="text-muted">
+                      <span className="text-text">{formatIstDate(row.lastFollowUp.createdAt)}</span> ·{" "}
+                      {followUpChannelLabels[row.lastFollowUp.channel]}
+                      {row.lastFollowUp.byName ? ` · ${row.lastFollowUp.byName}` : ""}
+                    </div>
+                  ) : (
+                    <span className="text-subtle">None logged</span>
+                  )}
+                  {row.promise && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-muted">
+                      <span>
+                        {row.promise.targetLabel ? `${row.promise.targetLabel}: ` : ""}
+                        {promiseText(row.promise)}
+                      </span>
+                      <PromiseBadge view={row.promise} />
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={AGING_BUCKETS.length + 2} className="px-4 py-10 text-center text-subtle">
-                  Nothing outstanding — every issued invoice is settled.
+                <td colSpan={AGING_BUCKETS.length + 3} className="px-4 py-10 text-center text-subtle">
+                  {promise === "broken"
+                    ? "No broken promises on an open invoice."
+                    : promise === "week"
+                      ? "Nobody has promised to pay an open invoice this week."
+                      : "Nothing outstanding — every issued invoice is settled."}
                 </td>
               </tr>
             )}
@@ -116,6 +181,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
                   </td>
                 ))}
                 <td className="px-4 py-2.5 text-right">{formatCurrency(totals.total)}</td>
+                <td />
               </tr>
             </tfoot>
           )}

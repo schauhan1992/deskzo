@@ -23,6 +23,8 @@ import { DocumentApprovalBar } from "@/components/documents/document-approval-ba
 import { approvalContext } from "@/actions/document-approval";
 import { InvoiceSettlementPanel, CreditNoteApplications } from "@/components/documents/invoice-settlement";
 import { BillSettlementPanel } from "@/components/documents/bill-settlement";
+import { followUpPanel } from "@/actions/collections";
+import { FollowUpPanel } from "@/components/collections/follow-up-panel";
 import { getBillSettlement } from "@/actions/payable";
 import { formatDate } from "@/lib/utils";
 import { formatMoney, formatRate, isBaseCurrency, toBase } from "@/lib/currency";
@@ -90,6 +92,12 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
 
   // Only asked for once the document is loaded, because it needs the type to find the policy.
   const approval = await approvalContext(document.id);
+
+  // Collections: what sales and accounts have said to the customer about paying this invoice, and any
+  // promise — for anybody who can see the account's money (null otherwise). Receivables' own, so only
+  // where the plan has it.
+  const followUps =
+    document.docType === "INVOICE" && document.status !== "DRAFT" && receivablesInPlan ? await followUpPanel({ documentId: document.id }) : null;
 
   // Revenue & Close: an issued invoice's deferring lines each link to their revenue schedule — where
   // the add-on is available, and for somebody who may read revenue (the link would refuse anyone else).
@@ -264,6 +272,13 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             canRecord={canRecord}
             canRemove={canRemove}
           />
+        </div>
+      )}
+
+      {/* Nothing to say on a settled invoice nobody chased: the card appears with a history or a debt. */}
+      {followUps && (followUps.history.length > 0 || followUps.canLog) && (
+        <div className="mt-4">
+          <FollowUpPanel panel={followUps} />
         </div>
       )}
 

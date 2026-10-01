@@ -752,6 +752,19 @@ export const PERMISSION_REGISTRY = [
     group: "Finance",
   },
   {
+    /**
+     * Collections (src/actions/collections.ts): a salesperson chasing what their clients owe. Off for
+     * everybody until an admin grants it — per role or per person — because it shows a salesperson
+     * money on orders they punched on somebody else's account (owner decision C-D1), which "View
+     * payments" alone does not. Accounts log follow-ups through `payments.record` without it.
+     */
+    key: "collections.followUp",
+    label: "Follow up payments on their accounts",
+    description:
+      "My collections: what is still owed on the accounts they manage (their team's too, for a manager) and on orders they punched on anybody's account, and logging each follow-up — what the client said, a promise to pay by a date, when to call next. A promise that passes unpaid is flagged to them, their manager and accounts. Needs View payments as well.",
+    defaultRoles: [],
+  },
+  {
     key: "credit.override",
     label: "Override credit terms & limits",
     description:
@@ -1049,6 +1062,8 @@ const GROUP_BY_PREFIX: Record<string, string> = {
   products: "Orders & fulfilment",
   orders: "Orders & fulfilment",
   payments: "Finance",
+  // Beside View and Record payments, where whoever grants it will look for it.
+  collections: "Finance",
   expenses: "Finance",
   contacts: "Sales & customers",
   feedback: "Sales & customers",

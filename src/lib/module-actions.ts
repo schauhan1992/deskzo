@@ -48,6 +48,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "celebration.ts": ["hr"],
   // Revenue & Close: the month-end checklist, closing a month, flux and the close settings (src/lib/close).
   "close.ts": ["revenue_close"],
+  // Collections: a salesperson's dues and payment follow-ups — Receivables' (src/lib/collections).
+  "collections.ts": ["receivables"],
   "commission-party.ts": ["commission_parties"],
   "company-location.ts": "core",
   "company-merge.ts": "core",
