@@ -492,6 +492,21 @@ async function run(db: PrismaClient, scratchUrl: string) {
   const dry = await repost.repairFxPostings(db, { apply: false, say: (l) => lines.push(l) });
   ok("  a dry run writes nothing", (await db.journalEntry.count()) === entriesBefore && dry.repaired.length === 0 && dry.found.length === 3, `${entriesBefore} entries`);
   ok("  and says where each would be dated", lines.some((l) => l.includes(oldInvoice.docNumber) && l.includes("re-posted 2025-10-01, after the lock")), lines.find((l) => l.includes(oldInvoice.docNumber)));
+  // The rate-1 receipt against it: what it booked, and the figures it should have (PAY-FIXES). $1,000 at
+  // the invoice's 84.10 clears ₹84,100; recorded as ₹1,000 it cleared ₹1,000, so ₹83,100 stays open.
+  const juneReceipt = june?.ratelessPayments.items[0];
+  ok(
+    "  its rupee receipt's correct figures: $1,000 at 84.10 clears ₹84,100, leaving ₹83,100 open",
+    juneReceipt?.booked === 1000 && juneReceipt.expected === 84100 && juneReceipt.open === 83100,
+    JSON.stringify(juneReceipt && { booked: juneReceipt.booked, expected: juneReceipt.expected, open: juneReceipt.open }),
+  );
+  const receiptLine = lines.find((l) => l.includes(`payment #${juneReceipt?.paymentSeq} (2025-07-01)`));
+  ok(
+    "  and the dry run says so in words, without touching the payment",
+    !!receiptLine && receiptLine.includes("clearing ₹1,000.00") && receiptLine.includes("it clears ₹84,100.00, leaving ₹83,100.00 open") &&
+      lines.some((l) => l.includes("₹83,100.00 stays open on the party")),
+    receiptLine?.trim(),
+  );
 
   const originals = new Map<string, { id: string; date: Date; lines: Awaited<ReturnType<typeof entryLines>> }>();
   for (const f of found) originals.set(f.documentId, { id: f.entryId, date: f.entryDate, lines: await entryLines(f.entryId) });

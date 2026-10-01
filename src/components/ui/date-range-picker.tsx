@@ -8,6 +8,7 @@ import {
   PRESETS,
   type PresetKey,
   computePreset,
+  indianToday,
   matchPreset,
   toISODate,
   fromISODate,
@@ -16,7 +17,6 @@ import {
   startOfMonth,
   endOfMonth,
   startOfWeek,
-  startOfDay,
   addDays,
   isSameDay,
 } from "@/lib/date-range-presets";
@@ -76,7 +76,7 @@ function MonthGrid({
   const gridStart = startOfWeek(firstOfMonth);
   const weeks = Array.from({ length: 6 }, (_, w) => Array.from({ length: 7 }, (_, i) => addDays(gridStart, w * 7 + i)));
   const effectiveEnd = rangeEnd ?? previewEnd;
-  const today = startOfDay(new Date());
+  const today = indianToday();
   const monthName = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   return (
@@ -174,7 +174,7 @@ export function DateRangePicker({
   const [draftTo, setDraftTo] = useState<Date | null>(urlTo);
   const [hoverDay, setHoverDay] = useState<Date | null>(null);
   const [selectingEnd, setSelectingEnd] = useState(false);
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(addMonths(urlTo ?? new Date(), -1)));
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(addMonths(urlTo ?? indianToday(), -1)));
   const [focusedDay, setFocusedDay] = useState<Date | null>(null);
 
   const gridsRef = useRef<HTMLDivElement>(null);
@@ -219,8 +219,8 @@ export function DateRangePicker({
     setDraftFrom(urlFrom);
     setDraftTo(urlTo);
     setSelectingEnd(false);
-    setViewMonth(startOfMonth(addMonths(urlTo ?? new Date(), -1)));
-    setFocusedDay(urlTo ?? urlFrom ?? startOfDay(new Date()));
+    setViewMonth(startOfMonth(addMonths(urlTo ?? indianToday(), -1)));
+    setFocusedDay(urlTo ?? urlFrom ?? indianToday());
     setOpen(true);
   }
 
@@ -229,8 +229,8 @@ export function DateRangePicker({
     setDraftFrom(from);
     setDraftTo(to);
     setSelectingEnd(false);
-    setViewMonth(startOfMonth(addMonths(to ?? from ?? new Date(), -1)));
-    setFocusedDay(to ?? from ?? startOfDay(new Date()));
+    setViewMonth(startOfMonth(addMonths(to ?? from ?? indianToday(), -1)));
+    setFocusedDay(to ?? from ?? indianToday());
   }
 
   function handleSelectDay(d: Date) {

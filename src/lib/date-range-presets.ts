@@ -1,3 +1,21 @@
+import { istDateParts } from "@/lib/india-time";
+
+/**
+ * How this module holds a day: a `Date` at local midnight of that calendar date, as the date-range
+ * picker's grid does — its arithmetic (`addDays`, `startOfWeek`, `startOfMonth`…) is calendar
+ * arithmetic on those, and `toISODate` turns one back into the `yyyy-mm-dd` the server reads as an
+ * Indian day.
+ *
+ * What was wrong was only where "today" came from: the host's clock. A browser outside India, or a
+ * server in UTC before 05:30 IST, is on a different date from India, so "Today", "This month" and
+ * "Last month" were a day — or a month — out. `indianToday` anchors every preset to India's date and
+ * keeps the rest of the model as it was.
+ */
+export function indianToday(now: Date = new Date()) {
+  const { year, month, day } = istDateParts(now);
+  return new Date(year, month, day);
+}
+
 export function startOfDay(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -83,7 +101,8 @@ export const PRESETS: { key: PresetKey; label: string }[] = [
 ];
 
 export function computePreset(key: PresetKey, now: Date = new Date()): { from: Date | null; to: Date | null } {
-  const today = startOfDay(now);
+  // India's date, whatever clock the browser or the server keeps.
+  const today = indianToday(now);
   switch (key) {
     case "today":
       return { from: today, to: today };

@@ -1,5 +1,15 @@
+import type { JournalSource } from "@prisma/client";
 import { SYSTEM_ACCOUNTS, type SystemAccountKey } from "@/lib/ledger/chart";
 import { isBaseCurrency } from "@/lib/currency";
+
+/** The sources a document's own posting is written under — not a reversal's, not an exchange difference's. */
+export const DOCUMENT_SOURCES = ["INVOICE", "CREDIT_NOTE", "BILL"] as const satisfies readonly JournalSource[];
+
+/**
+ * The sources a payment's own entries are written under: the payment itself and its cheque clearing
+ * (PAYMENT), and the exchange difference on each allocation (FX). Not a reversal's.
+ */
+export const PAYMENT_SOURCES = ["PAYMENT", "FX"] as const satisfies readonly JournalSource[];
 
 /**
  * A line the posting engine wants written, before account ids are resolved.
@@ -110,6 +120,22 @@ function signedLine(account: SystemAccountKey, amount: number, positiveSide: "de
 export function bookingRate(doc: { currency: string; exchangeRate: unknown }): number {
   if (isBaseCurrency(doc.currency)) return 1;
   return Number(doc.exchangeRate) || 1;
+}
+
+/**
+ * A rate someone typed for a settlement — "Rate on the day (₹ per USD)". Stored as `exchangeRate`
+ * (Decimal(14, 6)), so it is more than zero and has at most six decimals; and capped at 1,00,000 as a
+ * document's rate is, so a slipped decimal (8410 for 84.10) is refused rather than booked as a gain.
+ * Returns the error to show, or null when the rate is usable.
+ */
+export function settlementRateError(rate: number): string | null {
+  if (!Number.isFinite(rate) || !(rate > 0)) return "The rate must be more than zero.";
+  if (rate > 100000) return "That rate is too high — check the decimal point.";
+  // Six places, as the column stores them: 84.1234567 would be silently cut to 84.123457.
+  if (Math.abs(Math.round(rate * 1e6) - rate * 1e6) > 1e-6 * Math.max(1, rate)) {
+    return "The rate can have at most six decimal places.";
+  }
+  return null;
 }
 
 /**
@@ -602,6 +628,55 @@ export function postChequeClearing(params: {
  */
 export function exchangeDifference(allocated: number, paymentRate: number, docRate: number): number {
   return round2(round2(allocated * paymentRate) - round2(allocated * docRate));
+}
+
+/**
+ * The exchange difference one allocation books: how many more rupees it moved than the document booked
+ * for the part it settles. `null` when the allocation is not an exchange difference at all.
+ *
+ * Two kinds of allocation:
+ *
+ *   · **Same currency** — a $400 receipt at ₹84.10 against a USD invoice booked at ₹83. The payment
+ *     posted `amount × its rate`, so the difference is `exchangeDifference(amount, payment rate, doc rate)`:
+ *     33,640 − 33,200 = ₹440.
+ *   · **Across currencies** — rupees received on account and set against a USD invoice at a rate agreed on
+ *     the day (`PaymentAllocation.paymentAmount` / `exchangeRate`). The rupees it moved are
+ *     `paymentAmount` at the payment's own rate; the document booked `amount × doc rate` for the part
+ *     settled. ₹84,100 settling $1,000 of an invoice booked at ₹83 is 84,100 − 83,000 = ₹1,100.
+ *
+ * Two different currencies with no `paymentAmount` is not a gain or a loss but a mistake (a dollar
+ * receipt set against a euro invoice), and gets `null`, as `postExchangeDifferenceToLedger` always did.
+ */
+export function settlementDifference(
+  allocation: { amount: number; paymentAmount?: number | null },
+  payment: { currency: string; exchangeRate: unknown },
+  doc: { currency: string; exchangeRate: unknown },
+): number | null {
+  const docRate = bookingRate(doc);
+  const paymentRate = bookingRate(payment);
+  if (allocation.paymentAmount !== null && allocation.paymentAmount !== undefined) {
+    return round2(round2(allocation.paymentAmount * paymentRate) - round2(allocation.amount * docRate));
+  }
+  if (payment.currency !== doc.currency) return null;
+  return exchangeDifference(allocation.amount, paymentRate, docRate);
+}
+
+/**
+ * What an allocation across currencies takes out of the payment: the document-currency amount it
+ * settles at the rate agreed on the day, rounded as a posting rounds. $1,000 at ₹84.10 is ₹84,100.
+ */
+export function crossCurrencyPaymentAmount(amount: number, rate: number): number {
+  return round2(amount * rate);
+}
+
+/**
+ * What an allocation took out of its payment, in the payment's currency — the figure every reader on the
+ * payment's side subtracts ("how much of this receipt is still unapplied"). An allocation across
+ * currencies records it (`paymentAmount`); on every other one it is the allocation's own `amount`.
+ */
+export function takenFromPayment(allocation: { amount: unknown; paymentAmount?: unknown }): number {
+  const across = allocation.paymentAmount;
+  return Number(across !== null && across !== undefined ? across : allocation.amount);
 }
 
 /**

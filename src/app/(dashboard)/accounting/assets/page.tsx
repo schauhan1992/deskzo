@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { ReportHeader } from "@/components/accounting/report-chrome";
 import { MonthPicker } from "@/components/accounting/month-picker";
 import { AssetsManager } from "@/components/accounting/assets-manager";
+import { previousIstMonth } from "@/lib/india-time";
 
 export default async function AssetsPage({
   searchParams,
@@ -19,9 +20,11 @@ export default async function AssetsPage({
   const params = await searchParams;
   const now = new Date();
   // Last month by default: this month isn't over, and depreciation is charged at a month end.
-  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const month = Number(params.month) || previous.getMonth() + 1;
-  const year = Number(params.year) || previous.getFullYear();
+  // India's last month (india-time `previousIstMonth`): the host's, on a server in UTC, was still the
+  // month before that until 05:30 IST on the 1st.
+  const previous = previousIstMonth(now);
+  const month = Number(params.month) || previous.month;
+  const year = Number(params.year) || previous.year;
 
   const [assets, preview, accounts, departments, people, org] = await Promise.all([
     listAssets({ status: (params.status as "ACTIVE" | "DISPOSED" | "ALL") ?? "ALL" }),

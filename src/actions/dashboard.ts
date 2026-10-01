@@ -16,6 +16,7 @@ import { daysLate, isActive, milestoneProgress } from "@/lib/projects/status";
 import {
   cashFlow,
   fiscalYearOf,
+  cashWindowFrom,
   incomeAndExpense,
   payablesOutstanding,
   receivablesOutstanding,
@@ -460,9 +461,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   let finance: DashboardSummary["finance"] = null;
   if (accountingEnabled && (await can(user.id, "payments.manage"))) {
     const fy = fiscalYearOf(now);
-    // Twelve months back from the start of this one, so the line ends on the month in progress
-    // rather than a fortnight into a thirteenth bar.
-    const cashFrom = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    // Twelve Indian months back from the start of this one (finance/dashboard.ts `cashWindowFrom`).
+    const cashFrom = cashWindowFrom(now);
     const [ie, top, flow, ar, ap] = await Promise.all([
       incomeAndExpense(fy.from, fy.to, "accrual"),
       topExpenses(fy.from, fy.to),

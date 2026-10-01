@@ -249,7 +249,10 @@ export async function previewDepreciation(params: { month: number; year: number 
  * month adds nothing. That matters because the natural way to use this is to press the button and,
  * if unsure whether it worked, press it again.
  */
-export async function runDepreciation(params: { month: number; year: number }): Promise<ActionResult<{ charged: number; total: number; skipped: number }>> {
+export async function runDepreciation(params: {
+  month: number;
+  year: number;
+}): Promise<ActionResult<{ charged: number; total: number; skipped: number; alreadyCharged: number }>> {
   const { user, allowed } = await requireAssets();
   if (!allowed) return { ok: false, error: "You can't run depreciation." };
 
@@ -272,11 +275,15 @@ export async function runDepreciation(params: { month: number; year: number }): 
   let charged = 0;
   let total = 0;
   let skipped = 0;
+  // Of those skipped, the ones this month had already been charged for — a second run says so rather
+  // than folding them into "needed nothing".
+  let alreadyCharged = 0;
 
   for (const a of assets) {
     const accumulated = a.charges.reduce((t, c) => t + Number(c.amount), 0);
     if (a.charges.some((c) => sameDay(c.toDate, periodEnd))) {
       skipped += 1;
+      alreadyCharged += 1;
       continue;
     }
     const amount = monthlyCharge(
@@ -327,7 +334,7 @@ export async function runDepreciation(params: { month: number; year: number }): 
   });
   revalidatePath("/accounting/assets");
   revalidatePath("/accounting/journal");
-  return { ok: true, data: { charged, total, skipped } };
+  return { ok: true, data: { charged, total, skipped, alreadyCharged } };
 }
 
 /** Selling or scrapping — the gain or loss falls out of the figures rather than being typed. */

@@ -11,6 +11,12 @@ export const recordInvoicePaymentSchema = z.object({
   method: z.enum(paymentMethodValues).default("BANK_TRANSFER"),
   reference: z.string().trim().optional().or(z.literal("")),
   notes: z.string().trim().optional().or(z.literal("")),
+  /**
+   * "Rate on the day (₹ per USD)", for an invoice in another currency: what the money actually came in
+   * at. Left out, it is the invoice's own rate. A rupee invoice ignores it — its rate is 1. Checked in
+   * the action (posting.ts `settlementRateError`), which knows the invoice's currency.
+   */
+  exchangeRate: z.preprocess((v) => (v === "" || v === undefined || v === null ? undefined : Number(v)), z.number({ error: "Enter the rate as a number, such as 84.10." }).optional()),
 });
 
 export const applyCreditNoteSchema = z.object({

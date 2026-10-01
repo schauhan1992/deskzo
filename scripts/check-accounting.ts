@@ -31,9 +31,10 @@ import {
   type DraftLine,
   type PayrollTotals,
 } from "../src/lib/ledger/posting";
-import { computeDocument, type SupplyType } from "../src/lib/gst-engine";
+import { computeDocument, financialYearOf, shortFinancialYear, type SupplyType } from "../src/lib/gst-engine";
+import { computePreset, indianToday, matchPreset, toISODate } from "../src/lib/date-range-presets";
 import { toBase } from "../src/lib/currency";
-import { firstOpenDate, isLockedDate, startYearOf, yearEndDates } from "../src/lib/ledger/period";
+import { closableYears, firstOpenDate, isLockedDate, startYearOf, yearEndDates } from "../src/lib/ledger/period";
 import { resolvePeriod } from "../src/lib/finance/periods";
 import {
   calendarDateOf,
@@ -42,7 +43,9 @@ import {
   financialYearWindow,
   istCalendarDate,
   istDateKey,
+  istDateParts,
   istMonthWindow,
+  previousIstMonth,
 } from "../src/lib/india-time";
 import { EXPENSE_CATEGORY_ACCOUNT, SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { bookValue, depreciableAmount, monthlyCharge, schedule } from "../src/lib/ledger/depreciation";
@@ -920,6 +923,62 @@ console.log("\n— Months and years on India's calendar, whatever the host's (F5
 
   // The reconciliation screen's "as at" day (src/actions/bank.ts): up to India's midnight after it.
   ok("As at 30 September runs to 1 October 00:00 IST", same(endOfIndianDay("2026-09-30")!, ist("2026-10-01T00:00:00")), "not 23:59:59.999 UTC, which is 05:29 IST the next morning");
+}
+
+// ── The remaining host-clock dates (PAY-FIXES §3) ─────────────────────────────────────────────────
+//
+// Each instant below is one where the host's calendar and India's disagree on a UTC server: between
+// midnight and 05:30 IST the UTC date is still yesterday, and on the 1st still last month.
+
+console.log("\n— The last host-clock dates (PAY-FIXES §3) —\n");
+{
+  // The GST, TDS and depreciation screens default to India's last month.
+  const oct1 = previousIstMonth(ist("2026-10-01T00:30:00"));
+  ok("At 00:30 IST on 1 October, last month is September", oct1.month === 9 && oct1.year === 2026, `${oct1.month}/${oct1.year} — the host's calendar on UTC said August`);
+  const jan1 = previousIstMonth(ist("2027-01-01T02:00:00"));
+  ok("  at 02:00 IST on 1 January, December of the year before", jan1.month === 12 && jan1.year === 2026, `${jan1.month}/${jan1.year}`);
+  const sep30 = previousIstMonth(ist("2026-09-30T23:59:00"));
+  ok("  and at 23:59 IST on 30 September, still August", sep30.month === 8 && sep30.year === 2026, `${sep30.month}/${sep30.year}`);
+
+  // The date-range presets: "today" is India's date, held as the picker holds a day.
+  const early = ist("2026-10-01T02:00:00");
+  ok("At 02:00 IST on 1 October, Today is 1 October", toISODate(indianToday(early)) === "2026-10-01", toISODate(indianToday(early)));
+  const today = computePreset("today", early);
+  const yesterday = computePreset("yesterday", early);
+  const thisMonth = computePreset("thisMonth", early);
+  const lastMonth = computePreset("lastMonth", early);
+  ok("  the Today preset says so", toISODate(today.from!) === "2026-10-01" && toISODate(today.to!) === "2026-10-01");
+  ok("  Yesterday is 30 September", toISODate(yesterday.from!) === "2026-09-30");
+  ok("  This month starts on 1 October", toISODate(thisMonth.from!) === "2026-10-01" && toISODate(thisMonth.to!) === "2026-10-01");
+  ok("  Last month is 1–30 September", toISODate(lastMonth.from!) === "2026-09-01" && toISODate(lastMonth.to!) === "2026-09-30", `${toISODate(lastMonth.from!)} – ${toISODate(lastMonth.to!)}`);
+  ok("  and the picker recognises its own preset", matchPreset(lastMonth.from, lastMonth.to, early) === "lastMonth");
+  const late = computePreset("today", ist("2026-09-30T23:30:00"));
+  ok("  at 23:30 IST on 30 September, Today is still the 30th", toISODate(late.from!) === "2026-09-30");
+
+  // The month picker's newest year.
+  ok("At 01:00 IST on 1 January 2027 the month picker's year is 2027", istDateParts(ist("2027-01-01T01:00:00")).year === 2027);
+
+  // Which years the books screen offers to close.
+  const eve = closableYears(ist("2026-03-31T20:00:00"), new Set());
+  ok("At 20:00 IST on 31 March 2026, 2025-26 is not over and not offered", !eve.includes("2025-26") && eve[0] === "2024-25" && eve.length === 5, eve.join(", "));
+  const dawn = closableYears(ist("2026-04-01T00:00:00"), new Set());
+  ok("  from 00:00 IST on 1 April it is", dawn[0] === "2025-26" && dawn.length === 5, dawn.join(", "));
+  const february = closableYears(ist("2026-02-10T12:00:00"), new Set(["2023-24"]));
+  ok("  in February, the five before the year in progress, less one already closed", february.join(",") === "2024-25,2022-23,2021-22,2020-21", february.join(", "));
+
+  // gst-engine's financial year now comes from india-time: the same answers as its own copy gave.
+  const ownCopy = (at: Date) => {
+    const shifted = new Date(at.getTime() + 5.5 * 3600_000);
+    const start = shifted.getUTCMonth() >= 3 ? shifted.getUTCFullYear() : shifted.getUTCFullYear() - 1;
+    return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+  };
+  let differ = 0;
+  for (let t = ist("2024-03-30T00:00:00").getTime(); t < ist("2026-04-03T00:00:00").getTime(); t += 3 * 3600_000 + 17 * 60_000) {
+    if (financialYearOf(new Date(t)) !== ownCopy(new Date(t))) differ += 1;
+  }
+  ok("financialYearOf agrees with gst-engine's old private helper at every instant over two years", differ === 0, `${differ} disagreement(s)`);
+  ok("  00:30 IST on 1 April 2026 is 2026-27, and its short form 2627", financialYearOf(ist("2026-04-01T00:30:00")) === "2026-27" && shortFinancialYear(ist("2026-04-01T00:30:00")) === "2627");
+  ok("  23:59 IST on 31 March 2026 is 2025-26", financialYearOf(ist("2026-03-31T23:59:00")) === "2025-26");
 }
 
 console.log(failures === 0 ? "\nAll accounting checks passed.\n" : `\n${failures} check(s) FAILED.\n`);

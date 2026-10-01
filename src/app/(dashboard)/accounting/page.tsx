@@ -16,6 +16,7 @@ import { unpostedPayrollRuns } from "@/actions/payroll";
 import { Lock } from "lucide-react";
 import {
   cashFlow,
+  cashWindowFrom,
   fiscalYearOf,
   incomeAndExpense,
   payablesOutstanding,
@@ -59,9 +60,8 @@ export default async function AccountingOverviewPage() {
   const now = new Date();
   const fy = financialYearBounds(now);
   const fiscal = fiscalYearOf(now);
-  // Twelve months back from the start of this one, so the cash line ends on the month in
-  // progress rather than a fortnight into a thirteenth point.
-  const cashFrom = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  // Twelve Indian months back from the start of this one (finance/dashboard.ts `cashWindowFrom`).
+  const cashFrom = cashWindowFrom(now);
 
   const [tb, pl, bs, org, books, strayExpenses, strayPayroll, ie, top, flow, ar, ap] = await Promise.all([
     trialBalance(),

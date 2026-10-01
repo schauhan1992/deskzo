@@ -11,6 +11,7 @@ import { MonthPicker } from "@/components/accounting/month-picker";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { monthName } from "@/lib/ledger/period";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { previousIstMonth } from "@/lib/india-time";
 
 /** Money to the paisa, so a sum of three heads can't show a floating-point tail. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -40,9 +41,11 @@ export default async function GstPage({
   const params = await searchParams;
   const now = new Date();
   // Defaults to last month, because that is the one being filed.
-  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const month = Number(params.month) || previous.getMonth() + 1;
-  const year = Number(params.year) || previous.getFullYear();
+  // India's last month (india-time `previousIstMonth`): the host's, on a server in UTC, was still the
+  // month before that until 05:30 IST on the 1st.
+  const previous = previousIstMonth(now);
+  const month = Number(params.month) || previous.month;
+  const year = Number(params.year) || previous.year;
   // Absent means the head office's registration — the returns fall back to it themselves (spec §8.4).
   const gstRegistrationId = params.gstin || undefined;
 

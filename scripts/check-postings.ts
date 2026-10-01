@@ -20,6 +20,7 @@ import {
   hasOneSidedLines,
   type DocumentFinancials,
 } from "../src/lib/ledger/posting";
+import { findLedgerDrift } from "../src/lib/ledger/drift";
 
 const db = directClient();
 
@@ -92,54 +93,19 @@ function checkSynthetic() {
 
 
 /**
- * Whether the ledger still agrees with the documents.
+ * Whether the ledger still agrees with the documents and the payments (src/lib/ledger/drift.ts).
  *
  * The posting engine being correct doesn't mean the books are: a code path that cancels a document
  * without reversing its entry leaves revenue in the accounts for an invoice that no longer exists,
- * and nothing about that looks wrong until someone reads the P&L. This catches it.
+ * and nothing about that looks wrong until someone reads the P&L. This catches it — judging each entry
+ * by its source, so a payment's exchange difference that names a cancelled document is checked as the
+ * payment's, not reported as the document's own posting left standing.
  */
 async function checkDrift() {
-  let failures = 0;
-
-  const unposted = await db.tradeDocument.findMany({
-    where: {
-      docType: { in: ["INVOICE", "CREDIT_NOTE", "BILL"] },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
-      journalEntries: { none: {} },
-    },
-    select: { docNumber: true, docType: true },
-  });
-  for (const d of unposted) {
-    failures++;
-    console.log(`✗ ${d.docType} ${d.docNumber} is issued but has no ledger entry.`);
-  }
-
-  const cancelled = await db.tradeDocument.findMany({
-    where: { status: "CANCELLED", journalEntries: { some: {} } },
-    select: {
-      docNumber: true,
-      journalEntries: { select: { entryNumber: true, reversesId: true, reversedBy: { select: { id: true } } } },
-    },
-  });
-  for (const d of cancelled) {
-    const live = d.journalEntries.filter((e) => !e.reversesId && !e.reversedBy);
-    for (const e of live) {
-      failures++;
-      console.log(`✗ ${d.docNumber} is cancelled but ${e.entryNumber} has not been reversed.`);
-    }
-  }
-
-  const rows: { entryNumber: string }[] = await db.$queryRaw`
-    SELECT e."entryNumber" FROM journal_lines l
-    JOIN journal_entries e ON e.id = l."entryId"
-    GROUP BY e."entryNumber" HAVING SUM(l.debit) <> SUM(l.credit)`;
-  for (const r of rows) {
-    failures++;
-    console.log(`✗ ${r.entryNumber} does not balance in the database.`);
-  }
-
-  console.log(`Ledger checked against ${unposted.length + cancelled.length} document(s); ${failures} problem(s).`);
-  return failures;
+  const { problems, documentsChecked } = await findLedgerDrift(db);
+  for (const p of problems) console.log(`✗ ${p.message}`);
+  console.log(`Ledger checked against ${documentsChecked} document(s) and every payment entry; ${problems.length} problem(s).`);
+  return problems.length;
 }
 
 async function main() {

@@ -55,7 +55,35 @@ export type FxMispost = {
    * carried the document's currency. They cleared the receivable by the rate-1 figure, so once the
    * document is at its rate they leave the difference open. The repair does not touch payments.
    */
-  ratelessPayments: { count: number; amount: number };
+  ratelessPayments: {
+    count: number;
+    amount: number;
+    /** Each one, with the figures it booked and the ones it should have (`RatelessPayment`). */
+    items: RatelessPayment[];
+  };
+};
+
+/**
+ * A payment against a foreign document that was recorded as rupees at rate 1, and what it should have
+ * booked. Reported by the dry run and never changed by the repair: re-rating a payment is a decision
+ * about the rate the money really came in at, which only somebody who saw the bank statement can make.
+ *
+ * The "should" figures are at the document's own rate — what the payment screens record by default
+ * today — so the party clears exactly; the real rate on the day would add an exchange gain or loss on
+ * top, which the dry run says in words rather than guessing.
+ */
+export type RatelessPayment = {
+  paymentId: string;
+  paymentSeq: number;
+  paidOn: Date;
+  /** The figure on the payment, which is really in the document's currency. */
+  amount: number;
+  /** What its posting took off the party: the amount as rupees. */
+  booked: number;
+  /** What it should take off the party: amount × the document's rate. */
+  expected: number;
+  /** `expected − booked`: left on the party until the payment is re-rated. */
+  open: number;
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -95,7 +123,10 @@ export async function findFxMisposts(client: Tx | PrismaClient): Promise<FxMispo
           lines: { select: { debit: true, credit: true, account: { select: { systemKey: true } } } },
         },
       },
-      payments: { select: { amount: true, payment: { select: { currency: true, exchangeRate: true } } } },
+      payments: {
+        orderBy: { createdAt: "asc" },
+        select: { amount: true, payment: { select: { id: true, paymentSeq: true, paidOn: true, currency: true, exchangeRate: true } } },
+      },
     },
   });
 
@@ -115,6 +146,20 @@ export async function findFxMisposts(client: Tx | PrismaClient): Promise<FxMispo
     const rateless = doc.payments.filter(
       (p) => p.payment.currency === BASE_CURRENCY && Number(p.payment.exchangeRate) === 1,
     );
+    const items: RatelessPayment[] = rateless.map((p) => {
+      const amount = Number(p.amount);
+      const booked = round2(amount);
+      const should = toBase(amount, rate);
+      return {
+        paymentId: p.payment.id,
+        paymentSeq: p.payment.paymentSeq,
+        paidOn: p.payment.paidOn,
+        amount,
+        booked,
+        expected: should,
+        open: round2(should - booked),
+      };
+    });
     found.push({
       documentId: doc.id,
       docType: doc.docType,
@@ -130,6 +175,7 @@ export async function findFxMisposts(client: Tx | PrismaClient): Promise<FxMispo
       ratelessPayments: {
         count: rateless.length,
         amount: round2(rateless.reduce((t, p) => t + Number(p.amount), 0)),
+        items,
       },
     });
   }
@@ -232,10 +278,20 @@ export async function repairFxPostings(
         `${on.getTime() !== m.entryDate.getTime() ? ` → re-posted ${istDateKey(on)}, after the lock` : ""})`,
     );
     if (m.ratelessPayments.count > 0) {
+      const open = round2(m.ratelessPayments.items.reduce((t, p) => t + p.open, 0));
       say(
         `      ${m.ratelessPayments.count} payment(s) against it were recorded in rupees at rate 1 (${m.ratelessPayments.amount.toFixed(2)});` +
-          ` they are not re-posted, so ${inr(round2(m.ratelessPayments.amount * (m.rate - 1)))} stays open on the party until they are.`,
+          ` they are not re-posted, so ${inr(open)} stays open on the party until they are.`,
       );
+      // What each should have been: in the document's currency, clearing amount × its rate. Nothing is
+      // written for them, with or without --apply.
+      for (const p of m.ratelessPayments.items) {
+        say(
+          `        payment #${p.paymentSeq} (${istDateKey(p.paidOn)}): recorded ₹${p.amount.toFixed(2)} at 1, clearing ${inr(p.booked)};` +
+            ` as ${m.currency} ${p.amount.toFixed(2)} at the document's ${m.rate} it clears ${inr(p.expected)}, leaving ${inr(p.open)} open.` +
+            ` Re-rated to the rate it really came in at, the difference from ${inr(p.expected)} is an exchange gain or loss.`,
+        );
+      }
     }
   }
   if (!options.apply) {

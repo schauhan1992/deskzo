@@ -11,10 +11,13 @@ import { AllocatePaymentButton } from "@/components/payments/allocate-payment-bu
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { paymentMethodLabels } from "@/lib/gst";
+import { isBaseCurrency } from "@/lib/currency";
 
 type PaymentRow = {
   id: string;
   amount: number | string;
+  /** What it was received in — a receipt against a USD invoice is in dollars. */
+  currency?: string;
   paidOn: Date | string;
   method: string;
   reference: string | null;
@@ -50,6 +53,8 @@ export function PaymentsReceivedTable({
       const result = await bulkDeletePayments(selection.ids);
       if (!result.ok) {
         setError(result.error);
+        // Some may have gone even so: each payment is deleted on its own.
+        router.refresh();
         return;
       }
       setNotice(`Deleted ${result.data.count} payment(s).`);
@@ -122,16 +127,16 @@ export function PaymentsReceivedTable({
                       {p.company.name}
                     </Link>
                   </td>
-                  <td className="px-4 py-2.5 text-muted">{formatCurrency(String(p.amount))}</td>
+                  <td className="px-4 py-2.5 text-muted">{formatCurrency(String(p.amount), p.currency)}</td>
                   <td className="px-4 py-2.5 text-muted">{formatDate(p.paidOn)}</td>
                   <td className="px-4 py-2.5 text-muted">
                     {paymentMethodLabels[p.method as keyof typeof paymentMethodLabels] ?? p.method}
                   </td>
                   <td className="px-4 py-2.5 text-muted">{p.reference ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-muted">{formatCurrency(String(p.allocated))}</td>
+                  <td className="px-4 py-2.5 text-muted">{formatCurrency(String(p.allocated), p.currency)}</td>
                   <td className="px-4 py-2.5">
                     {p.unallocated > 0 ? (
-                      <Badge tone="amber">{formatCurrency(String(p.unallocated))}</Badge>
+                      <Badge tone="amber">{formatCurrency(String(p.unallocated), p.currency)}</Badge>
                     ) : (
                       <span className="text-subtle">—</span>
                     )}
@@ -139,7 +144,8 @@ export function PaymentsReceivedTable({
                   <td className="px-4 py-2.5 text-muted">{p.recordedBy.name}</td>
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex justify-end gap-1">
-                      {canRecord && p.unallocated > 0 && (
+                      {/* Orders are in rupees; money in another currency is applied to an invoice in it instead. */}
+                      {canRecord && p.unallocated > 0 && isBaseCurrency(p.currency) && (
                         <AllocatePaymentButton payment={{ id: p.id, unallocated: p.unallocated, company: p.company }} />
                       )}
                       {canDelete && (

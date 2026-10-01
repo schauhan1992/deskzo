@@ -12,6 +12,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { formatIstDate } from "@/lib/india-time";
+import { closableYears } from "@/lib/ledger/period";
 
 type Status = Awaited<ReturnType<typeof getBooksStatus>>;
 
@@ -62,13 +63,8 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
 
   // Years that have finished and aren't closed yet — the only ones that can be closed.
   const closedLabels = new Set(status.closes.map((c) => c.label));
-  const closable: string[] = [];
-  for (let i = 0; i < 5; i += 1) {
-    const startYear = new Date().getFullYear() - 1 - i;
-    const label = `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
-    const ended = new Date(Date.UTC(startYear + 1, 2, 31));
-    if (ended < new Date() && !closedLabels.has(label)) closable.push(label);
-  }
+  // On India's calendar (period.ts `closableYears`).
+  const closable = closableYears(new Date(), closedLabels);
 
   return (
     <div className="space-y-4">

@@ -106,6 +106,17 @@ export function istMonthWindow(at: Date, offset = 0): { from: Date; to: Date } {
   return { from: istMidnight(year, month + offset, 1), to: istMidnight(year, month + offset + 1, 1) };
 }
 
+/**
+ * The Indian month before the one an instant falls in, as a monthly return names it: `month` 1–12.
+ * The default period of the GST, TDS and depreciation screens — last month is the one being filed.
+ * Built from India's calendar: `new Date(y, m − 1, 1)` on the host's put a server in UTC a month
+ * behind until 05:30 IST on the 1st.
+ */
+export function previousIstMonth(at: Date): { month: number; year: number } {
+  const { year, month } = istDateParts(at);
+  return month === 0 ? { month: 12, year: year - 1 } : { month, year };
+}
+
 /** The calendar year the Indian financial year containing an instant starts in: April onwards is that year's. */
 export function financialYearStartOf(at: Date): number {
   const { year, month } = istDateParts(at);

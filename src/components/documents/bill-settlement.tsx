@@ -8,6 +8,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatRate, isBaseCurrency } from "@/lib/currency";
+import { istDateKey } from "@/lib/india-time";
+import { ReceiptRateHint } from "@/components/documents/invoice-settlement";
 
 /**
  * Paying a vendor bill.
@@ -32,6 +35,10 @@ const METHODS = [
 ] as const;
 
 export type BillSettlement = {
+  /** The bill's own currency — every figure here is in it. Absent reads as rupees. */
+  currency?: string;
+  /** The rate the bill was booked at, which a foreign payment's rate is measured against. */
+  exchangeRate?: number;
   total: number;
   paid: number;
   credited: number;
@@ -57,10 +64,17 @@ export function BillSettlementPanel({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const currency = settlement.currency ?? "INR";
+  const foreign = !isBaseCurrency(currency);
+  const bookedAt = settlement.exchangeRate ?? 1;
+  const money = (value: number | string | null | undefined) => formatCurrency(value, currency);
   const [form, setForm] = useState({
     // Pre-filled with what is actually outstanding, which is the amount in all but the rare case.
     amount: settlement.balance > 0 ? String(settlement.balance) : "",
-    paidOn: new Date().toISOString().slice(0, 10),
+    // A foreign bill: the rate the money went out at, the bill's own until somebody says otherwise.
+    rate: String(bookedAt),
+    // Today in India, not in UTC: before 05:30 IST the UTC date is still yesterday.
+    paidOn: istDateKey(new Date()),
     method: "BANK_TRANSFER" as (typeof METHODS)[number]["value"],
     reference: "",
   });
@@ -75,6 +89,7 @@ export function BillSettlementPanel({
         paidOn: form.paidOn,
         method: form.method,
         reference: form.reference || undefined,
+        ...(foreign ? { exchangeRate: form.rate } : {}),
       });
       setBusy(false);
       if (!result.ok) {
@@ -94,7 +109,7 @@ export function BillSettlementPanel({
           Paid to vendor
         </span>
         <span className={settlement.balance > 0 ? "text-sm font-medium text-danger" : "text-sm text-success"}>
-          {settlement.balance > 0 ? `${formatCurrency(settlement.balance)} outstanding` : "Settled in full"}
+          {settlement.balance > 0 ? `${money(settlement.balance)} outstanding` : "Settled in full"}
         </span>
       </CardHeader>
 
@@ -102,19 +117,19 @@ export function BillSettlementPanel({
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-xs uppercase tracking-wide text-subtle">Billed</dt>
-            <dd className="tabular-nums text-text">{formatCurrency(settlement.total)}</dd>
+            <dd className="tabular-nums text-text">{money(settlement.total)}</dd>
           </div>
           <div>
             <dt className="text-xs uppercase tracking-wide text-subtle">Paid</dt>
-            <dd className="tabular-nums text-text">{formatCurrency(settlement.paid)}</dd>
+            <dd className="tabular-nums text-text">{money(settlement.paid)}</dd>
           </div>
           <div>
             <dt className="text-xs uppercase tracking-wide text-subtle">Credited</dt>
-            <dd className="tabular-nums text-text">{formatCurrency(settlement.credited)}</dd>
+            <dd className="tabular-nums text-text">{money(settlement.credited)}</dd>
           </div>
           <div>
             <dt className="text-xs uppercase tracking-wide text-subtle">Balance</dt>
-            <dd className="tabular-nums font-medium text-text">{formatCurrency(settlement.balance)}</dd>
+            <dd className="tabular-nums font-medium text-text">{money(settlement.balance)}</dd>
           </div>
         </dl>
 
@@ -126,7 +141,7 @@ export function BillSettlementPanel({
                   {p.payment ? formatDate(p.payment.paidOn) : "—"}
                   {p.payment?.reference && <span className="ml-2 text-subtle">{p.payment.reference}</span>}
                 </span>
-                <span className="tabular-nums text-text">{formatCurrency(Number(p.amount))}</span>
+                <span className="tabular-nums text-text">{money(Number(p.amount))}</span>
               </li>
             ))}
           </ul>
@@ -145,7 +160,7 @@ export function BillSettlementPanel({
           <div className="space-y-3 rounded-base border border-line bg-surface-sunken p-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label htmlFor="bill-amount">Amount</Label>
+                <Label htmlFor="bill-amount">{foreign ? `Amount paid (${currency})` : "Amount"}</Label>
                 <Input
                   id="bill-amount"
                   inputMode="decimal"
@@ -153,6 +168,23 @@ export function BillSettlementPanel({
                   onChange={(e) => setForm({ ...form, amount: e.target.value })}
                 />
               </div>
+              {foreign && (
+                <div className="space-y-1">
+                  <Label htmlFor="bill-rate">Rate on the day (₹ per {currency})</Label>
+                  <Input
+                    id="bill-rate"
+                    inputMode="decimal"
+                    value={form.rate}
+                    onChange={(e) => setForm({ ...form, rate: e.target.value })}
+                  />
+                </div>
+              )}
+              {foreign && (
+                <div className="sm:col-span-2">
+                  <p className="mb-1 text-xs text-subtle">The bill was booked at {formatRate(bookedAt)}.</p>
+                  <ReceiptRateHint amount={form.amount} rate={form.rate} documentRate={bookedAt} currency={currency} receivable={false} />
+                </div>
+              )}
               <div className="space-y-1">
                 <Label htmlFor="bill-paid-on">Paid on</Label>
                 <Input

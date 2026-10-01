@@ -99,7 +99,9 @@ export function AssetsManager({
                 const result = await runDepreciation({ month, year });
                 if (result.ok) {
                   setMessage(
-                    `Charged ${formatCurrency(result.data.total)} across ${result.data.charged} asset(s). ${result.data.skipped} needed nothing.`,
+                    `Charged ${formatCurrency(result.data.total)} across ${result.data.charged} asset(s).` +
+                      (result.data.alreadyCharged > 0 ? ` ${result.data.alreadyCharged} already charged for this month.` : "") +
+                      (result.data.skipped - result.data.alreadyCharged > 0 ? ` ${result.data.skipped - result.data.alreadyCharged} needed nothing.` : ""),
                   );
                 }
                 return result;

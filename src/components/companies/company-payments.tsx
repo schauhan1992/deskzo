@@ -7,6 +7,7 @@ import { AllocatePaymentButton } from "@/components/payments/allocate-payment-bu
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { paymentMethodLabels } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
+import { isBaseCurrency } from "@/lib/currency";
 
 type Payment = Awaited<ReturnType<typeof listCompanyPayments>>[number];
 type Summary = Awaited<ReturnType<typeof companyPaymentSummary>>;
@@ -75,7 +76,7 @@ export function CompanyPayments({
               {payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-line align-top last:border-0">
                   <td className="px-3 py-2 text-muted">{formatDate(payment.paidOn)}</td>
-                  <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(payment.amount)}</td>
+                  <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(payment.amount, payment.currency)}</td>
                   <td className="px-3 py-2 text-muted">{paymentMethodLabels[payment.method]}</td>
                   <td className="px-3 py-2 text-subtle">{payment.reference ?? "—"}</td>
                   <td className="px-3 py-2">
@@ -99,12 +100,17 @@ export function CompanyPayments({
                             ) : (
                               <span className="text-subtle">Unlinked</span>
                             )}
-                            <span className="text-subtle"> · {formatCurrency(allocation.amount)}</span>
+                            {/* What it settled, in the document's currency; and, across currencies, what it took from this payment. */}
+                            <span className="text-subtle">
+                              {" "}
+                              · {formatCurrency(allocation.amount, allocation.document?.currency ?? payment.currency)}
+                              {allocation.paymentAmount !== null && ` (${formatCurrency(allocation.paymentAmount, payment.currency)})`}
+                            </span>
                           </div>
                         ))}
                         {payment.unallocated > 0 && (
                           <div className="text-xs text-warning">
-                            {formatCurrency(payment.unallocated)} still unallocated
+                            {formatCurrency(payment.unallocated, payment.currency)} still unallocated
                           </div>
                         )}
                       </div>
@@ -113,7 +119,7 @@ export function CompanyPayments({
                   <td className="px-3 py-2 text-muted">{payment.recordedBy.name}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-1">
-                      {canRecord && payment.unallocated > 0 && (
+                      {canRecord && payment.unallocated > 0 && isBaseCurrency(payment.currency) && (
                         <AllocatePaymentButton
                           payment={{
                             id: payment.id,

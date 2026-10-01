@@ -129,7 +129,7 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
                         <Badge tone="default">Not due</Badge>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(invoice.balance)}</td>
+                    <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(invoice.balance, invoice.currency)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { syncInvoiceStatus } from "@/lib/receivables/sync";
-import { reversePaymentPosting } from "@/lib/ledger/journal";
+import { reverseAllocationExchange, reversePaymentPosting } from "@/lib/ledger/journal";
+import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
+import { isBaseCurrency } from "@/lib/currency";
 import { requireModuleUser } from "@/lib/modules-access";
 import {
   canSeeCompany,
@@ -188,6 +190,14 @@ export async function allocatePayment(
   if (!payment) {
     return { ok: false, error: "Payment not found." };
   }
+  // An order is priced in rupees. A receipt taken in a foreign invoice's currency (and freed again
+  // when its allocation was removed) would be set against it dollar for rupee.
+  if (!isBaseCurrency(payment.currency)) {
+    return {
+      ok: false,
+      error: `This payment is in ${payment.currency}; an order is in rupees. Apply it to a ${payment.currency} invoice instead.`,
+    };
+  }
 
   const order = await db.companyProduct.findUnique({
     where: { id: companyProductId },
@@ -203,8 +213,10 @@ export async function allocatePayment(
     };
   }
 
+  // What each earlier allocation took out of this payment — an allocation across currencies records
+  // the rupees separately from the figure it settled (`takenFromPayment`).
   const alreadyAllocated = payment.allocations.reduce(
-    (sum, a) => sum + Number(a.amount),
+    (sum, a) => sum + takenFromPayment(a),
     0,
   );
   const remaining =
@@ -257,11 +269,52 @@ export async function deleteAllocation(
     return { ok: false, error: "Allocation not found." };
   }
 
-  await db.paymentAllocation.delete({ where: { id } });
+  /**
+   * An allocation to an invoice or a bill is more than a row. Setting a foreign receipt against a
+   * document raised at another rate booked an exchange difference, and the document's status is a
+   * cache of its allocations — so removing one used to leave the gain in the P&L and the invoice
+   * reading PAID. The difference is reversed in the same transaction as the row goes; the payment's
+   * own entry stays, because the money was still received — it is simply on account again.
+   */
+  await db.$transaction(async (tx) => {
+    await reverseAllocationExchange(tx, id, user.id);
+    await tx.paymentAllocation.delete({ where: { id } });
+  });
+  if (allocation.documentId) await syncInvoiceStatus(allocation.documentId);
 
   revalidatePath(`/companies/${allocation.payment.companyId}`);
   revalidatePath("/payments");
+  if (allocation.documentId) {
+    revalidatePath(`/documents/${allocation.documentId}`);
+    revalidatePath("/receivables");
+    revalidatePath("/payables");
+  }
   return { ok: true, data: null };
+}
+
+/**
+ * Deletes one payment the way the books need it deleted. Three things, and once only the first.
+ *
+ * The row went, and its ledger entries stayed posted with a dangling `paymentId` — bank overstated,
+ * receivables understated, for good — while the invoice it had settled kept its PAID status and
+ * quietly stopped being chased. A deletion that leaves the books wrong and the customer unchased is
+ * worse than a refusal. So: every live entry of the payment's is reversed (the receipt, its cheque
+ * clearing, the exchange difference on each allocation — `reversePaymentPosting`), in the same
+ * transaction as the row goes; then each document it settled has its status derived again.
+ *
+ * Module-private: a "use server" file publishes only what it exports.
+ */
+async function removePayment(id: string, userId: string, allocations: { documentId: string | null }[]) {
+  await db.$transaction(async (tx) => {
+    await reversePaymentPosting(tx, id, userId);
+    await tx.payment.delete({ where: { id } });
+  });
+
+  const documentIds = [...new Set(allocations.map((a) => a.documentId).filter((x): x is string => !!x))];
+  for (const documentId of documentIds) {
+    await syncInvoiceStatus(documentId);
+  }
+  return documentIds;
 }
 
 export async function deletePayment(id: string): Promise<ActionResult<null>> {
@@ -277,6 +330,7 @@ export async function deletePayment(id: string): Promise<ActionResult<null>> {
     select: {
       companyId: true,
       amount: true,
+      currency: true,
       paymentSeq: true,
       // The invoices this payment was settling. Their status is a cache of their allocations, so
       // removing the allocations without re-deriving it leaves an unpaid invoice reading PAID —
@@ -288,35 +342,20 @@ export async function deletePayment(id: string): Promise<ActionResult<null>> {
     return { ok: false, error: "Payment not found." };
   }
 
-  /**
-   * Three things, and previously only the first.
-   *
-   * The row went, and its ledger entry stayed posted with a dangling `paymentId` — bank overstated,
-   * receivables understated, for good — while the invoice it had settled kept its PAID status and
-   * quietly stopped being chased. A deletion that leaves the books wrong and the customer unchased
-   * is worse than a refusal.
-   */
-  await db.$transaction(async (tx) => {
-    await reversePaymentPosting(tx, id, user.id);
-    await tx.payment.delete({ where: { id } });
-  });
-
-  const invoiceIds = [...new Set(payment.allocations.map((a) => a.documentId).filter((x): x is string => !!x))];
-  for (const invoiceId of invoiceIds) {
-    await syncInvoiceStatus(invoiceId);
-  }
+  await removePayment(id, user.id, payment.allocations);
 
   await recordAudit({
     userId: user.id,
     action: "DELETE",
     entityType: "Payment",
     entityId: id,
-    entityLabel: `Deleted payment #${payment.paymentSeq} of ${payment.amount}`,
+    entityLabel: `Deleted payment #${payment.paymentSeq} of ${isBaseCurrency(payment.currency) ? "" : `${payment.currency} `}${payment.amount}`,
   });
 
   revalidatePath(`/companies/${payment.companyId}`);
   revalidatePath("/payments");
   revalidatePath("/receivables");
+  revalidatePath("/payables");
   return { ok: true, data: null };
 }
 
@@ -492,7 +531,7 @@ export async function listPayments(params?: {
               item: { select: { name: true } },
             },
           },
-          document: { select: { id: true, docNumber: true } },
+          document: { select: { id: true, docNumber: true, currency: true } },
         },
       },
     },
@@ -500,8 +539,10 @@ export async function listPayments(params?: {
   });
 
   const withRemaining = toPlain(payments).map((payment) => {
+    // In the payment's own currency: an allocation across currencies (rupees on account set against a
+    // USD invoice) settles dollars but takes rupees, and it is the rupees that leave this payment.
     const allocated = payment.allocations.reduce(
-      (sum, a) => sum + Number(a.amount),
+      (sum, a) => sum + takenFromPayment(a),
       0,
     );
     const unallocated =
@@ -539,15 +580,16 @@ export async function listCompanyPayments(companyId: string) {
               item: { select: { name: true } },
             },
           },
-          document: { select: { id: true, docNumber: true } },
+          document: { select: { id: true, docNumber: true, currency: true } },
         },
       },
     },
   });
 
   return toPlain(payments).map((payment) => {
+    // In the payment's own currency, as `listPayments` counts it.
     const allocated = payment.allocations.reduce(
-      (sum, a) => sum + Number(a.amount),
+      (sum, a) => sum + takenFromPayment(a),
       0,
     );
     return {
@@ -569,7 +611,7 @@ export async function companyPaymentSummary(companyId: string) {
     return { billed: 0, received: 0, outstanding: 0, credit: 0, unallocated: 0 };
   }
 
-  const [orders, received] = await Promise.all([
+  const [orders, receipts] = await Promise.all([
     db.companyProduct.findMany({
       where: { companyId },
       select: {
@@ -579,7 +621,10 @@ export async function companyPaymentSummary(companyId: string) {
         allocations: { select: { amount: true } },
       },
     }),
-    db.payment.aggregate({ where: { companyId, direction: "RECEIVED" }, _sum: { amount: true } }),
+    db.payment.findMany({
+      where: { companyId, direction: "RECEIVED" },
+      select: { amount: true, currency: true, exchangeRate: true, allocations: { select: { amount: true, paymentAmount: true } } },
+    }),
   ]);
 
   const billed = orders.reduce(
@@ -590,9 +635,18 @@ export async function companyPaymentSummary(companyId: string) {
     (sum, order) => sum + computeOrderFinancials(order).paid,
     0,
   );
-  const receivedTotal = Number(received._sum.amount ?? 0);
 
   const round = (n: number) => Math.round(n * 100) / 100;
+  /**
+   * Received and unallocated are in rupees, like the order figures beside them: a receipt in dollars
+   * at its own rate. Unallocated is what each receipt has not been set against — orders *or* invoices.
+   * It was "received less what the orders took", so money applied to an invoice read as unallocated.
+   */
+  const receivedTotal = receipts.reduce((sum, p) => sum + round(Number(p.amount) * bookingRate(p)), 0);
+  const unallocatedTotal = receipts.reduce((sum, p) => {
+    const left = round(Number(p.amount) - p.allocations.reduce((t, a) => t + takenFromPayment(a), 0));
+    return sum + (left > 0 ? round(left * bookingRate(p)) : 0);
+  }, 0);
   const net = round(billed - allocated);
 
   return {
@@ -603,7 +657,7 @@ export async function companyPaymentSummary(companyId: string) {
     // as a bug even when the arithmetic is right.
     outstanding: Math.max(net, 0),
     credit: Math.max(-net, 0),
-    unallocated: Math.max(round(receivedTotal - allocated), 0),
+    unallocated: round(unallocatedTotal),
   };
 }
 
@@ -636,8 +690,9 @@ export async function listPaymentsPaged(params: {
     search: params.search,
     unallocatedOnly: params.unallocatedOnly,
   });
+  // In rupees, the one currency a total can be in: a receipt in dollars counts at its own rate.
   const unallocated = all.reduce(
-    (sum, p) => sum + Math.max(p.unallocated, 0),
+    (sum, p) => sum + Math.round(Math.max(p.unallocated, 0) * bookingRate(p) * 100) / 100,
     0,
   );
   return { ...pageOf(all, params.page, params.pageSize), unallocated };
@@ -670,15 +725,47 @@ export async function bulkDeletePayments(
    */
   const payments = await db.payment.findMany({
     where: { id: { in: paymentIds }, ...(await paymentScope(user.id)) },
-    select: { id: true, companyId: true },
+    select: { id: true, companyId: true, amount: true, currency: true, paymentSeq: true, allocations: { select: { documentId: true } } },
   });
-  const result = await db.payment.deleteMany({
-    where: { id: { in: payments.map((p) => p.id) } },
-  });
+
+  /**
+   * One at a time, each exactly as `deletePayment` does it. This was a single `deleteMany`, which
+   * removed the rows and nothing else: every entry of every payment selected stayed in the ledger
+   * with its `paymentId` let go, and every invoice they had settled kept reading PAID — the bulk
+   * path was the single delete's old bug, at the size of a page.
+   *
+   * A transaction per payment, so one that can't be reversed (the books closed to today, say) is
+   * reported and leaves the others deleted, rather than failing the lot after some had gone.
+   */
+  let count = 0;
+  const failures: string[] = [];
+  for (const payment of payments) {
+    try {
+      await removePayment(payment.id, user.id, payment.allocations);
+      count += 1;
+      await recordAudit({
+        userId: user.id,
+        action: "DELETE",
+        entityType: "Payment",
+        entityId: payment.id,
+        entityLabel: `Deleted payment #${payment.paymentSeq} of ${isBaseCurrency(payment.currency) ? "" : `${payment.currency} `}${payment.amount}`,
+      });
+    } catch (error) {
+      failures.push(`#${payment.paymentSeq}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   for (const companyId of new Set(payments.map((p) => p.companyId))) {
     revalidatePath(`/companies/${companyId}`);
   }
   revalidatePath("/payments");
-  return { ok: true, data: { count: result.count } };
+  revalidatePath("/receivables");
+  revalidatePath("/payables");
+  if (failures.length > 0 && count === 0) {
+    return { ok: false, error: `No payment was deleted. ${failures.join(" ")}` };
+  }
+  if (failures.length > 0) {
+    return { ok: false, error: `${count} deleted; ${failures.length} could not be. ${failures.join(" ")}` };
+  }
+  return { ok: true, data: { count } };
 }

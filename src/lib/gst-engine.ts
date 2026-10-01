@@ -11,7 +11,7 @@
  */
 
 import { BASE_CURRENCY, getCurrency } from "@/lib/currency";
-import { istDateParts } from "@/lib/india-time";
+import { financialYearStartOf } from "@/lib/india-time";
 
 export type SupplyType = "INTRA_STATE" | "INTER_STATE";
 
@@ -311,12 +311,6 @@ export function computeDocument(
   };
 }
 
-/** The calendar year an Indian financial year starts in — read on India's calendar, not the host's. */
-function financialYearStart(date: Date) {
-  const { year, month } = istDateParts(date);
-  return month >= 3 ? year : year - 1;
-}
-
 /**
  * Indian financial year (April–March) a date falls in, e.g. "2026-27" — the unit invoice series reset on.
  *
@@ -324,13 +318,14 @@ function financialYearStart(date: Date) {
  * 1 April took the previous year's prefix and journal series on a server running in UTC.
  */
 export function financialYearOf(date: Date) {
-  const startYear = financialYearStart(date);
+  // india-time's, the one definition of when the year starts (it kept a private copy of the same rule).
+  const startYear = financialYearStartOf(date);
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
 }
 
 /** The same year in four digits, "2627" — `{FY2}`, for prefixes that must fit GST's 16 characters. */
 export function shortFinancialYear(date: Date) {
-  const startYear = financialYearStart(date);
+  const startYear = financialYearStartOf(date);
   return `${String(startYear % 100).padStart(2, "0")}${String((startYear + 1) % 100).padStart(2, "0")}`;
 }
 

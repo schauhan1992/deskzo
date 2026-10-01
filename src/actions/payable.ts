@@ -7,6 +7,9 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
+import { bookingRate, settlementRateError } from "@/lib/ledger/posting";
+import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
+import { hasEffectivePermission } from "@/actions/permission";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import {
   agingBucket,
@@ -43,7 +46,15 @@ function settlementOf(bill: {
   );
 }
 
-/** Records money paid to a vendor against one of their bills. */
+/**
+ * Records money paid to a vendor against one of their bills.
+ *
+ * A bill in another currency is paid in that currency at the rate the money actually went out at
+ * ("Rate on the day"), defaulting to the bill's own. The payment posts Dr AP / Cr Bank at that rate, and
+ * the exchange difference against the bill's rate is a realised gain or loss — the payable's mirror of
+ * `recordInvoicePayment`: $1,180 of a bill booked at ₹83 (₹97,940) paid at ₹82.50 is ₹97,350 out of
+ * the bank and a gain of ₹590. A rupee bill is paid at 1.
+ */
 export async function recordBillPayment(input: {
   billId: string;
   amount: string;
@@ -51,8 +62,16 @@ export async function recordBillPayment(input: {
   method: "BANK_TRANSFER" | "UPI" | "CHEQUE" | "CASH" | "CARD" | "OTHER";
   reference?: string;
   notes?: string;
+  /** ₹ per unit of the bill's currency, for a foreign bill. Left out, the bill's own rate. */
+  exchangeRate?: string | number;
 }): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("payables");
+  // The same permission its receivables twin asks for. Payables checked only that the module was in the
+  // plan, so anybody who could open a bill could pay it — and posting money out of the bank is the one
+  // thing in this module that most needs asking.
+  if (!(await hasEffectivePermission(user.id, "payments.record"))) {
+    return { ok: false, error: "You don't have permission to record payments." };
+  }
   const amount = Number(input.amount);
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   if (!input.paidOn) return { ok: false, error: "Pick the date it was paid." };
@@ -78,9 +97,14 @@ export async function recordBillPayment(input: {
       error:
         settlement.balance < 0.01
           ? "This bill is already settled in full."
-          : `Only ₹${settlement.balance.toFixed(2)} is outstanding on this bill. Record the excess as a separate payment.`,
+          : `Only ${formatMoney(settlement.balance, bill.currency)} is outstanding on this bill. Record the excess as a separate payment.`,
     };
   }
+
+  const given = input.exchangeRate === undefined || input.exchangeRate === "" ? null : Number(input.exchangeRate);
+  const rate = isBaseCurrency(bill.currency) ? 1 : (given ?? bookingRate(bill));
+  const rateError = settlementRateError(rate);
+  if (rateError) return { ok: false, error: rateError };
 
   // Paid by the branch the bill was raised on (a bill from before branches: the head office). Resolved
   // before the transaction — the head office lookup uses its own connection.
@@ -93,10 +117,11 @@ export async function recordBillPayment(input: {
         branchId,
         direction: "PAID",
         amount: new Prisma.Decimal(amount),
-        // In the bill's currency and at its rate, as a receipt against an invoice is (receivable.ts):
-        // the payable is cleared by exactly the rupees the bill booked.
+        // In the bill's currency, at the rate it went out at, as a receipt against an invoice is
+        // (receivable.ts). The exchange difference below makes the payable clear by exactly the rupees
+        // the bill booked; the rest is a realised gain or loss.
         currency: bill.currency,
-        exchangeRate: bill.exchangeRate,
+        exchangeRate: new Prisma.Decimal(rate),
         paidOn: new Date(input.paidOn),
         method: input.method,
         reference: input.reference || null,
@@ -134,7 +159,7 @@ export async function recordBillPayment(input: {
     action: "CREATE",
     entityType: "Payment",
     entityId: payment.id,
-    entityLabel: `₹${amount.toFixed(2)} paid against ${bill.docNumber}`,
+    entityLabel: `${formatMoney(amount, bill.currency)}${isBaseCurrency(bill.currency) ? "" : ` at ${formatRate(rate)}`} paid against ${bill.docNumber}`,
   });
 
   revalidatePath(`/documents/${bill.id}`);
@@ -151,6 +176,8 @@ export async function getBillSettlement(billId: string) {
     select: {
       id: true,
       total: true,
+      currency: true,
+      exchangeRate: true,
       payments: {
         orderBy: { createdAt: "desc" },
         select: {
@@ -164,7 +191,7 @@ export async function getBillSettlement(billId: string) {
     },
   });
   if (!bill) return null;
-  return toPlain({ ...settlementOf(bill), payments: bill.payments });
+  return toPlain({ ...settlementOf(bill), currency: bill.currency, exchangeRate: bookingRate(bill), payments: bill.payments });
 }
 
 /**

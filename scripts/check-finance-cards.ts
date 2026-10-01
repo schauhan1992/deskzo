@@ -15,6 +15,8 @@
 import { db } from "../src/lib/db";
 import {
   cashFlow,
+  // The window the dashboard and the Accounting page draw the cash line over — theirs, not a copy.
+  cashWindowFrom,
   fiscalYearOf,
   incomeAndExpense,
   payablesOutstanding,
@@ -25,7 +27,7 @@ import { financialYearBounds } from "../src/lib/ledger/period";
 import { settleInvoice } from "../src/lib/receivables";
 import { SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { PERIODS, resolvePeriod, type PeriodKey } from "../src/lib/finance/periods";
-import { istDateParts, istMidnight, istMonthWindow } from "../src/lib/india-time";
+import { istDateParts, istMidnight } from "../src/lib/india-time";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: unknown = "") {
@@ -157,10 +159,6 @@ async function main() {
   process.exit(failures === 0 ? 0 : 1);
 }
 
-/** The twelve-month window the cash-flow card covers. One definition, used by both readings. */
-function cashWindowFrom(now: Date) {
-  return istMonthWindow(now, -11).from;
-}
 
 async function run(
   now: Date,
@@ -168,6 +166,22 @@ async function run(
   fixture: { expenseName: string },
   before: Awaited<ReturnType<typeof cashFlow>>,
 ) {
+
+  section("The cash line's twelve months are India's");
+
+  // The dashboard and the Accounting page both built this as `new Date(y, m − 11, 1)`: midnight on the
+  // host's calendar, so a UTC server started the line at 05:30 IST — and on the 1st before 05:30 IST a
+  // month early.
+  ok(
+    "At noon IST on 29 September 2026 the line starts 1 October 2025, 00:00 IST",
+    cashWindowFrom(ist("2026-09-29T12:00:00")).getTime() === ist("2025-10-01T00:00:00").getTime(),
+    cashWindowFrom(ist("2026-09-29T12:00:00")).toISOString(),
+  );
+  ok(
+    "  at 00:30 IST on 1 October 2026, on 1 November 2025 — the host's calendar on UTC still said September",
+    cashWindowFrom(ist("2026-10-01T00:30:00")).getTime() === ist("2025-11-01T00:00:00").getTime(),
+    cashWindowFrom(ist("2026-10-01T00:30:00")).toISOString(),
+  );
 
   section("The financial year is the one the rest of the app uses");
 

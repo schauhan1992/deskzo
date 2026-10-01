@@ -1,7 +1,7 @@
 import type { JournalSource, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
-import { bookingRate } from "@/lib/ledger/posting";
+import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import { DOCUMENT_SOURCES } from "@/lib/ledger/journal";
 import { istDateKey } from "@/lib/india-time";
 import { dayKey, monthEnd, monthLabel, monthWindow } from "@/lib/close/months";
@@ -315,7 +315,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     select: {
       id: true, paymentSeq: true, companyId: true, currency: true, exchangeRate: true, amount: true,
       company: { select: { name: true } },
-      allocations: { where: { documentId: { not: null } }, select: { documentId: true, amount: true } },
+      allocations: { where: { documentId: { not: null } }, select: { documentId: true, amount: true, paymentAmount: true } },
     },
   });
   const payments: TieOutPayment[] = paymentRows.map((p) => ({
@@ -327,7 +327,9 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     // As its posting converts it (postPaymentToLedger).
     rate: Number(p.exchangeRate) || 1,
     amount: Number(p.amount),
-    applied: round2(p.allocations.filter((a) => a.documentId && live.has(a.documentId)).reduce((t, a) => t + Number(a.amount), 0)),
+    // What each allocation took out of the payment, in its currency: rupees on account set against a USD
+    // invoice settle dollars but spend rupees (`takenFromPayment`).
+    applied: round2(p.allocations.filter((a) => a.documentId && live.has(a.documentId)).reduce((t, a) => t + takenFromPayment(a), 0)),
   }));
 
   if (!account) {

@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { settleInvoice } from "@/lib/receivables";
 import { bucketOf } from "@/lib/analytics/types";
-import { financialYearStartOf, financialYearWindow, istDateParts, istMidnight } from "@/lib/india-time";
+import { financialYearStartOf, financialYearWindow, istDateParts, istMidnight, istMonthWindow } from "@/lib/india-time";
 
 /**
  * The finance headline figures, read off the ledger rather than recomputed.
@@ -33,6 +33,19 @@ const money = (v: unknown) => Number(v ?? 0);
 export function fiscalYearOf(date: Date): { from: Date; to: Date; label: string } {
   const year = financialYearWindow(financialYearStartOf(date));
   return { from: year.from, to: new Date(year.to.getTime() - 1), label: `FY ${year.label}` };
+}
+
+/**
+ * Where the twelve-month cash line starts: the 1st of the Indian month eleven months back, at midnight
+ * IST — so the line ends on the month in progress rather than a fortnight into a thirteenth bar.
+ *
+ * One definition for the dashboard, the Accounting page and check:finance. Both pages built it as
+ * `new Date(y, m − 11, 1)`, which is midnight on the *host's* calendar: on a server in UTC the window
+ * began at 05:30 IST, dropping the first five and a half hours of the first month; and between midnight
+ * and 05:30 IST on the 1st the host was still in the previous month, so the whole window slid back one.
+ */
+export function cashWindowFrom(now: Date): Date {
+  return istMonthWindow(now, -11).from;
 }
 
 /**

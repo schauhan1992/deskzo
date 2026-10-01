@@ -13,6 +13,7 @@ import { BASE_CURRENCY, CURRENCIES, formatMoney, formatRate, getCurrency, isBase
 import { tradeDocumentSchema } from "../src/lib/validation/trade-document";
 import { lookupRate } from "../src/lib/finance/exchange-rate";
 import { amountInWords } from "../src/lib/gst-engine";
+import { crossCurrencyPaymentAmount, settlementDifference, settlementRateError, takenFromPayment } from "../src/lib/ledger/posting";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: unknown = "") {
@@ -229,6 +230,74 @@ async function main() {
   );
   ok("  a negative total says so", amountInWords(-4500, "USD").startsWith("Minus"), amountInWords(-4500, "USD"));
   ok("  and zero is spelled out", amountInWords(0, "AED") === "Zero Dirhams Only", amountInWords(0, "AED"));
+
+  section("Settling a foreign document at the rate on the day (PAY-FIXES)");
+
+  // The rate a payment form takes: more than zero, at most six places (Decimal(14, 6)), under the cap.
+  ok("₹84.10 is a rate", settlementRateError(84.1) === null);
+  ok("  so is ₹84.123456 — six places, as the column keeps them", settlementRateError(84.123456) === null);
+  ok("  ₹84.1234567 is refused rather than cut to six places", settlementRateError(84.1234567)?.includes("six decimal") === true, settlementRateError(84.1234567));
+  ok("  0, a negative and NaN are refused", [0, -1, Number.NaN].every((r) => settlementRateError(r)?.includes("more than zero") === true));
+  ok("  and 8,410 for 84.10 is not, but 1,00,001 is", settlementRateError(8410) === null && settlementRateError(100001) !== null);
+
+  // Invoices at ₹83 per dollar throughout. The difference is the rupees the payment moved less the
+  // rupees the invoice booked for the part it settles.
+  const usdAt83 = { currency: "USD", exchangeRate: 83 };
+  const usd = (rate: number) => ({ currency: "USD", exchangeRate: rate });
+  const inr = { currency: "INR", exchangeRate: 1 };
+  ok("$1,000 received at ₹84.10: a gain of ₹1,100", settlementDifference({ amount: 1000 }, usd(84.1), usdAt83) === 1100);
+  ok("  $400 at ₹84.10: ₹440", settlementDifference({ amount: 400 }, usd(84.1), usdAt83) === 440);
+  ok("  then $600 at ₹82.60: a loss of ₹240", settlementDifference({ amount: 600 }, usd(82.6), usdAt83) === -240);
+  ok("  at the invoice's own rate: nothing", settlementDifference({ amount: 1000 }, usd(83), usdAt83) === 0);
+  ok(
+    "  ₹84,100 on account settling $1,000: ₹1,100, measured from the rupees it took",
+    settlementDifference({ amount: 1000, paymentAmount: 84100 }, inr, usdAt83) === 1100,
+  );
+  ok(
+    "  $1,180 of a bill at ₹83 paid at ₹82.50: −₹590, which on a payable is a gain",
+    settlementDifference({ amount: 1180 }, usd(82.5), usdAt83) === -590,
+  );
+  ok("  dollars against a euro invoice, with no rate between them: not an exchange difference", settlementDifference({ amount: 100 }, usd(84), { currency: "EUR", exchangeRate: 90 }) === null);
+  ok(
+    "  a rupee payment carrying a leftover rate against a rupee invoice: nothing (both are booked at 1)",
+    settlementDifference({ amount: 11800 }, { currency: "INR", exchangeRate: 83.25 }, inr) === 0,
+  );
+
+  ok("What an allocation across currencies takes: $1,000 at ₹84.10 is ₹84,100", crossCurrencyPaymentAmount(1000, 84.1) === 84100);
+  ok("  $118.44 at ₹83.47 is ₹9,886.19, rounded as a posting rounds", crossCurrencyPaymentAmount(118.44, 83.47) === 9886.19);
+  ok("  and the payment's side reads it, not the $1,000", takenFromPayment({ amount: "1000", paymentAmount: "84100" }) === 84100);
+  ok("  an ordinary allocation takes its own amount", takenFromPayment({ amount: "500", paymentAmount: null }) === 500 && takenFromPayment({ amount: 250 }) === 250);
+
+  // The receivable nets to nil whichever way the invoice is settled: the invoice's AR, less what the
+  // payment cleared, plus the exchange difference.
+  const ar = (booked: number, ...parts: { cleared: number; difference: number }[]) =>
+    Math.round((booked - parts.reduce((t, p) => t + p.cleared - p.difference, 0)) * 100) / 100;
+  ok(
+    "In full at ₹84.10: 83,000 − 84,100 + 1,100 = 0",
+    ar(toBase(1000, 83), { cleared: toBase(1000, 84.1), difference: settlementDifference({ amount: 1000 }, usd(84.1), usdAt83)! }) === 0,
+  );
+  ok(
+    "  in two parts at two more rates: 83,000 − (33,640 − 440) − (49,560 + 240) = 0",
+    ar(
+      toBase(1000, 83),
+      { cleared: toBase(400, 84.1), difference: settlementDifference({ amount: 400 }, usd(84.1), usdAt83)! },
+      { cleared: toBase(600, 82.6), difference: settlementDifference({ amount: 600 }, usd(82.6), usdAt83)! },
+    ) === 0,
+  );
+  ok(
+    "  from rupees on account: 83,000 − 84,100 + 1,100 = 0 for the invoice; the other ₹5,900 of ₹90,000 stays on account",
+    ar(toBase(1000, 83), { cleared: 84100, difference: settlementDifference({ amount: 1000, paymentAmount: 84100 }, inr, usdAt83)! }) === 0,
+  );
+  // A sweep: every whole-dollar amount up to $2,000 at rates a paisa apart, settled in full, leaves nothing.
+  let residue = 0;
+  for (let cents = 100; cents <= 200000; cents += 997) {
+    const amount = cents / 100;
+    for (const [booked, paid] of [[83, 84.1], [82.915, 84.4444], [83.47, 85], [91.123456, 90.5]] as const) {
+      const left = ar(toBase(amount, booked), { cleared: toBase(amount, paid), difference: settlementDifference({ amount }, usd(paid), usd(booked))! });
+      if (left !== 0) residue += 1;
+    }
+  }
+  ok("  and across a sweep of amounts and rates, a full settlement never leaves a paisa", residue === 0, `${residue} residual(s)`);
 
   section("What the rate lookup refuses before it reaches the network");
 

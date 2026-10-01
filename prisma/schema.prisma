@@ -2663,6 +2663,16 @@ model PaymentAllocation {
   documentId        String?
   document          TradeDocument?  @relation("InvoicePayment", fields: [documentId], references: [id], onDelete: Cascade)
   amount            Decimal         @db.Decimal(12, 2)
+  /**
+   * Set only when the payment and the document are in different currencies, e.g. rupees received on
+   * account and applied to a USD invoice. `amount` is then what the allocation settles, in the
+   * document's currency, as it is on every other allocation. `paymentAmount` is what it takes out of
+   * the payment, in the payment's currency: round(amount × exchangeRate, 2). `exchangeRate` is the rate
+   * agreed on the day, ₹ per unit of the document's currency. Null everywhere else: both amounts are
+   * then `amount`.
+   */
+  paymentAmount     Decimal?        @db.Decimal(12, 2)
+  exchangeRate      Decimal?        @db.Decimal(14, 6)
   allocatedByUserId String
   allocatedBy       User            @relation("PaymentAllocatedBy", fields: [allocatedByUserId], references: [id])
   createdAt         DateTime        @default(now())

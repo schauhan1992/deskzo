@@ -1,4 +1,4 @@
-import { calendarDateOf, financialYearWindow, istCalendarDate } from "@/lib/india-time";
+import { calendarDateOf, financialYearStartOf, financialYearWindow, istCalendarDate } from "@/lib/india-time";
 
 /**
  * The Indian financial year a date falls in, as `yyyy-mm-dd` strings and a label. It lives in
@@ -66,6 +66,24 @@ export function startYearOf(label: string): number | null {
  * gets a reference it cannot invoke, which compiles fine and throws on the first request. Anything
  * both sides need has to live in a plain module like this one.
  */
+/**
+ * The financial years the books screen offers to close at `now`: the `count` before the one in
+ * progress, oldest last, less those already closed. Each is over at 1 April 00:00 IST.
+ *
+ * On India's calendar. The screen counted back from the host's calendar year and called a year over at
+ * midnight UTC on 31 March — 05:30 IST — so on the evening of 31 March it offered a close the server
+ * refuses ("the year isn't over yet"), and from January to March it offered one year fewer.
+ */
+export function closableYears(now: Date, closed: ReadonlySet<string>, count = 5): string[] {
+  const current = financialYearStartOf(now);
+  const out: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const year = financialYearWindow(current - 1 - i);
+    if (year.to.getTime() <= now.getTime() && !closed.has(year.label)) out.push(year.label);
+  }
+  return out;
+}
+
 export const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",

@@ -34,8 +34,10 @@ import {
   postVendorBill,
   postYearEndClose,
   bookingRate,
-  exchangeDifference,
   inRupees,
+  settlementDifference,
+  DOCUMENT_SOURCES,
+  PAYMENT_SOURCES,
   reverseLines,
   revenueOf,
   type PayrollTotals,
@@ -369,8 +371,9 @@ export function revenueInRupees(doc: PostableDocument): number {
   return revenueOf(financialsOf(doc));
 }
 
-/** The sources a document's own posting is written under — not a reversal's, not an exchange difference's. */
-export const DOCUMENT_SOURCES = ["INVOICE", "CREDIT_NOTE", "BILL"] as const satisfies readonly JournalSource[];
+// DOCUMENT_SOURCES and PAYMENT_SOURCES live in posting.ts, which is pure, so a read-only check can ask
+// the same question without loading the write path; they are re-exported here for the ledger's callers.
+export { DOCUMENT_SOURCES, PAYMENT_SOURCES } from "@/lib/ledger/posting";
 
 /**
  * The entry that books a document now: its own posting, not a reversal, and not reversed since.
@@ -546,15 +549,18 @@ export async function postPaymentToLedger(
   });
   if (!payment) return null;
 
+  // Its own posting, not an exchange difference or a cheque clearing that also names it. This runs as
+  // the payment is recorded, before either can exist, so the first PAYMENT entry is the payment's.
   const already = await tx.journalEntry.findFirst({
-    where: { paymentId, reversesId: null },
+    where: { paymentId, source: "PAYMENT", reversesId: null },
     select: { id: true, entryNumber: true },
   });
   if (already) return already;
 
   const intoCash = payment.method === "CASH";
-  // In rupees, which is what the ledger holds — a foreign receipt is converted at its own rate.
-  const amount = Math.round(Number(payment.amount) * (Number(payment.exchangeRate) || 1) * 100) / 100;
+  // In rupees, which is what the ledger holds — a foreign receipt is converted at its own rate, and a
+  // rupee one is taken as written whatever rate it carries (`bookingRate`), as a rupee document is.
+  const amount = Math.round(Number(payment.amount) * bookingRate(payment) * 100) / 100;
   const draft =
     payment.direction === "PAID"
       ? postPaymentMade({
@@ -611,6 +617,44 @@ export function reversedLines(lines: Prisma.JournalLineGetPayload<{ select: type
   return reverseLines(lines.map((l) => ({ ...l, debit: Number(l.debit), credit: Number(l.credit) })));
 }
 
+/** Every entry of a payment's that is still standing: its own sources, not a reversal, not reversed since. */
+function livePaymentEntriesWhere(paymentId: string) {
+  return {
+    paymentId,
+    source: { in: [...PAYMENT_SOURCES] },
+    reversesId: null,
+    reversedBy: { is: null },
+  } satisfies Prisma.JournalEntryWhereInput;
+}
+
+const reversibleEntrySelect = {
+  id: true, entryNumber: true, companyId: true, paymentId: true, documentId: true,
+  lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect },
+} satisfies Prisma.JournalEntrySelect;
+
+/**
+ * One entry reversed, today, through the write door: every line swapped with its tags, and the
+ * reversal carrying the payment and document the original named so both trails show it.
+ */
+async function reverseEntry(
+  tx: Tx,
+  original: Prisma.JournalEntryGetPayload<{ select: typeof reversibleEntrySelect }>,
+  userId: string,
+  why: string,
+) {
+  return writeEntry(tx, {
+    date: new Date(),
+    narration: `Reversal of ${original.entryNumber} — ${why}`,
+    source: "MANUAL",
+    userId,
+    lines: reversedLines(original.lines),
+    companyId: original.companyId,
+    paymentId: original.paymentId,
+    documentId: original.documentId,
+    reversesId: original.id,
+  });
+}
+
 /**
  * Reverses whatever a document posted, used when it's cancelled.
  *
@@ -649,6 +693,19 @@ export async function reverseDocumentPosting(tx: Tx, documentId: string, userId:
     reversesId: original.id,
   });
 
+  // The exchange differences booked by payments settling it go too. A cancelled document settles
+  // nothing, so the money set against it is back on the party's account at the rate it came in at —
+  // which is where the payment's own entry already put it; the gain or loss measured against the
+  // document's rate no longer has a document. Left standing, the party was out by exactly that
+  // difference, and the close's receivables tie-out (which stops counting an allocation to a
+  // cancelled document) said so. The allocations themselves stay, as the record of what happened.
+  const exchange = await tx.journalEntry.findMany({
+    where: { documentId, source: "FX", reversesId: null, reversedBy: { is: null } },
+    orderBy: { entryNumber: "asc" },
+    select: reversibleEntrySelect,
+  });
+  for (const fx of exchange) await reverseEntry(tx, fx, userId, "document cancelled");
+
   const docNumber = original.document?.docNumber ?? original.entryNumber;
   const revenue =
     original.source === "INVOICE"
@@ -673,27 +730,78 @@ export async function reverseDocumentPosting(tx: Tx, documentId: string, userId:
  * a trial balance still balanced. The entry is reversed rather than deleted for the same reason a
  * cancelled invoice is: a posted period is a statement somebody may already have filed, and the way
  * to undo a statement is another statement.
+ *
+ * **Every** live entry of the payment's is reversed: the payment, its cheque clearing, and the exchange
+ * difference on each allocation. It used to take the first entry carrying the payment's id, in no
+ * particular order — so deleting a foreign receipt could reverse its exchange gain and leave the
+ * receipt itself in the bank, or reverse the receipt and leave the gain in the P&L. Reversals are
+ * dated today, as a document's are. Deleting twice finds nothing live and writes nothing.
  */
 export async function reversePaymentPosting(tx: Tx, paymentId: string, userId: string) {
-  const original = await tx.journalEntry.findFirst({
-    where: { paymentId, reversesId: null },
+  const live = await tx.journalEntry.findMany({
+    where: livePaymentEntriesWhere(paymentId),
+    orderBy: { entryNumber: "asc" },
+    select: reversibleEntrySelect,
+  });
+  const reversals: { id: string; entryNumber: string }[] = [];
+  for (const original of live) reversals.push(await reverseEntry(tx, original, userId, "payment deleted"));
+  return reversals;
+}
+
+/**
+ * Reverses the exchange difference one allocation booked, when the allocation is removed and the
+ * payment stays. Returns null when it booked none (a rupee settlement, or one at the document's rate).
+ *
+ * The entry is found among the pair's live `FX` entries by its amount, which is the allocation's own
+ * (`settlementDifference`): neither rate can move after posting — a payment has no edit path, and a
+ * document is editable only as a draft — so the figure it booked is the figure it books now. Two
+ * allocations of one payment to one document with the same difference booked identical entries, and
+ * reversing either is the same.
+ */
+export async function reverseAllocationExchange(tx: Tx, allocationId: string, userId: string) {
+  const allocation = await tx.paymentAllocation.findUnique({
+    where: { id: allocationId },
     select: {
-      id: true, entryNumber: true, companyId: true,
-      reversedBy: { select: { id: true } },
-      lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect },
+      paymentId: true, documentId: true, amount: true, paymentAmount: true,
+      payment: { select: { currency: true, exchangeRate: true } },
+      document: { select: { docType: true, currency: true, exchangeRate: true } },
     },
   });
-  if (!original || original.reversedBy) return null;
+  if (!allocation?.documentId || !allocation.document) return null;
 
-  return writeEntry(tx, {
-    date: new Date(),
-    narration: `Reversal of ${original.entryNumber} — payment deleted`,
-    source: "MANUAL",
-    userId,
-    lines: reversedLines(original.lines),
-    companyId: original.companyId,
-    reversesId: original.id,
+  const difference = settlementDifference(
+    { amount: Number(allocation.amount), paymentAmount: allocation.paymentAmount === null ? null : Number(allocation.paymentAmount) },
+    allocation.payment,
+    allocation.document,
+  );
+  if (!difference) return null;
+
+  const receivable = allocation.document.docType !== "BILL";
+  const party = await resolveAccounts(tx, [receivable ? SYSTEM_ACCOUNTS.AR : SYSTEM_ACCOUNTS.AP]);
+  const partyId = party.get(receivable ? SYSTEM_ACCOUNTS.AR : SYSTEM_ACCOUNTS.AP)!;
+  const live = await tx.journalEntry.findMany({
+    where: { paymentId: allocation.paymentId, documentId: allocation.documentId, source: "FX", reversesId: null, reversedBy: { is: null } },
+    orderBy: { entryNumber: "asc" },
+    select: reversibleEntrySelect,
   });
+  // The difference an entry booked, signed as `settlementDifference` signs it: more rupees moved than
+  // booked debits a receivable (and credits a payable).
+  const booked = (entry: (typeof live)[number]) =>
+    Math.round(
+      entry.lines
+        .filter((l) => l.accountId === partyId)
+        .reduce((t, l) => t + (receivable ? Number(l.debit) - Number(l.credit) : Number(l.credit) - Number(l.debit)), 0) * 100,
+    ) / 100;
+  let match = live.find((entry) => booked(entry) === difference);
+  if (!match && live.length === 1) {
+    // An entry from before the difference was taken as a difference of rounded postings (posting.ts
+    // `exchangeDifference`) can be a paisa off today's figure. When it is the pair's only one and this
+    // is the pair's only allocation, it can only be this allocation's.
+    const siblings = await tx.paymentAllocation.count({ where: { paymentId: allocation.paymentId, documentId: allocation.documentId } });
+    if (siblings === 1 && Math.abs(booked(live[0]!) - difference) <= 0.02) match = live[0];
+  }
+  if (!match) return null;
+  return reverseEntry(tx, match, userId, "allocation removed");
 }
 
 
@@ -1049,7 +1157,8 @@ export async function postChequeClearingToLedger(
 
   const received = payment.direction !== "PAID";
   const draft = postChequeClearing({
-    amount: Number(payment.amount) * Number(payment.exchangeRate),
+    // In rupees, as the payment's own posting converted it — so the clearing empties cheques in hand exactly.
+    amount: Number(payment.amount) * bookingRate(payment),
     received,
     partyName: payment.company.name,
     reference: payment.reference,
@@ -1185,14 +1294,25 @@ export async function postAssetDisposalToLedger(
  *
  * Domestic settlements pass through untouched: both rates are 1, the difference is zero, and
  * nothing is written.
+ *
+ * Measured against the rate the document was booked at (posting.ts `bookingRate`), which is what the
+ * receivable or payable holds — see `settlementDifference` for both kinds of allocation. An allocation
+ * across currencies (rupees on account set against a USD invoice) passes `paymentAmount`, the rupees it
+ * took out of the payment; every other one leaves it out and is measured at the payment's own rate.
+ *
+ * Dated on the payment's day unless `date` says otherwise: money on account set against an invoice
+ * raised after it settles it no earlier than the invoice (receivable.ts `applyPaymentToInvoice`).
  */
 export async function postExchangeDifferenceToLedger(
   tx: Tx,
   params: {
     paymentId: string;
     documentId: string;
-    /** In the foreign currency — the figure the allocation was made in. */
+    /** In the document's currency — the part of it the allocation settles. */
     allocatedAmount: number;
+    /** Across currencies only: what the allocation took out of the payment, in the payment's currency. */
+    paymentAmount?: number | null;
+    date?: Date;
     userId: string;
   },
 ): Promise<{ id: string; entryNumber: string } | null> {
@@ -1211,15 +1331,13 @@ export async function postExchangeDifferenceToLedger(
   ]);
   if (!payment || !doc) return null;
 
-  const paymentRate = Number(payment.exchangeRate) || 1;
-  // The rate the document was booked at (posting.ts `bookingRate`), which is what the receivable or
-  // payable holds and so what this payment is measured against.
-  const docRate = bookingRate(doc);
-  if (paymentRate === docRate) return null;
-  // A rate difference between two different currencies is not an exchange gain, it is a mistake.
-  if (payment.currency !== doc.currency) return null;
-
-  const difference = exchangeDifference(params.allocatedAmount, paymentRate, docRate);
+  // Null when the two currencies differ and nothing says at what rate — not a gain, a mistake.
+  const difference = settlementDifference(
+    { amount: params.allocatedAmount, paymentAmount: params.paymentAmount ?? null },
+    payment,
+    doc,
+  );
+  if (!difference) return null;
   const draft = postExchangeDifference({
     companyId: payment.companyId,
     difference,
@@ -1230,7 +1348,7 @@ export async function postExchangeDifferenceToLedger(
   if (!draft) return null;
 
   return writeEntry(tx, {
-    date: payment.paidOn,
+    date: params.date ?? payment.paidOn,
     narration: draft.narration,
     source: "FX",
     userId: params.userId,

@@ -17,9 +17,48 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { paymentMethodValues, paymentMethodLabels } from "@/lib/gst";
+import { formatRate, isBaseCurrency, toBase } from "@/lib/currency";
+import { istDateKey } from "@/lib/india-time";
+import { exchangeDifference, settlementRateError } from "@/lib/ledger/posting";
 
 type Settlement = NonNullable<Awaited<ReturnType<typeof getInvoiceSettlement>>>;
-type CreditNote = { id: string; docNumber: string; total: number; remaining: number };
+type CreditNote = { id: string; docNumber: string; total: number; remaining: number; currency?: string };
+
+/**
+ * The line under a foreign receipt's rate: what the money comes to in the books, and the exchange
+ * difference it will book against the rate the document was raised at — so somebody typing 8410 for
+ * 84.10 sees a gain of lakhs before they save it rather than after. `receivable` is false for a bill,
+ * where more rupees paid out is a loss.
+ */
+export function ReceiptRateHint({
+  amount,
+  rate,
+  documentRate,
+  currency,
+  receivable = true,
+}: {
+  amount: string;
+  rate: string;
+  documentRate: number;
+  currency: string;
+  receivable?: boolean;
+}) {
+  const a = Number(amount);
+  const r = Number(rate);
+  if (!(a > 0)) return null;
+  const error = settlementRateError(r);
+  if (error) return <p className="text-xs text-danger">{error}</p>;
+  const difference = exchangeDifference(a, r, documentRate);
+  const gain = receivable ? difference > 0 : difference < 0;
+  return (
+    <p className="text-xs text-subtle">
+      {formatCurrency(a, currency)} × {formatRate(r)} = {formatCurrency(toBase(a, r))} in the books
+      {difference === 0
+        ? " — the document's own rate, so no exchange difference."
+        : ` — an exchange ${gain ? "gain" : "loss"} of ${formatCurrency(Math.abs(difference))} against ${formatRate(documentRate)}.`}
+    </p>
+  );
+}
 
 /**
  * What's been settled against an invoice and what's left. This is the panel the whole accounting
@@ -46,8 +85,16 @@ export function InvoiceSettlementPanel({
   const [payOpen, setPayOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
 
+  // Every figure here is in the invoice's own currency — a USD invoice's balance is dollars, not rupees.
+  const currency = settlement.currency;
+  const foreign = !isBaseCurrency(currency);
+  const money = (value: number | string | null | undefined) => formatCurrency(value, currency);
+
   const [amount, setAmount] = useState(settlement.balance.toFixed(2));
-  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10));
+  // The rate the money came in at, for a foreign invoice: the invoice's own until somebody says otherwise.
+  const [rate, setRate] = useState(String(settlement.exchangeRate));
+  // Today in India, not in UTC: before 05:30 IST the UTC date is still yesterday.
+  const [paidOn, setPaidOn] = useState(istDateKey(new Date()));
   const [method, setMethod] = useState("BANK_TRANSFER");
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
@@ -80,16 +127,16 @@ export function InvoiceSettlementPanel({
         ) : (
           <span className="text-sm">
             <span className="text-muted">Balance due </span>
-            <span className="font-semibold text-danger">{formatCurrency(settlement.balance)}</span>
+            <span className="font-semibold text-danger">{money(settlement.balance)}</span>
           </span>
         )}
       </CardHeader>
       <CardContent className="@container space-y-4">
         <div className="grid grid-cols-2 gap-3 @xl:grid-cols-4">
-          <Figure label="Invoiced" value={formatCurrency(settlement.total)} />
-          <Figure label="Received" value={formatCurrency(settlement.paid)} tone="success" />
-          <Figure label="Credited" value={formatCurrency(settlement.credited)} tone="warning" />
-          <Figure label="Balance" value={formatCurrency(settlement.balance)} tone={settled ? undefined : "danger"} />
+          <Figure label="Invoiced" value={money(settlement.total)} />
+          <Figure label="Received" value={money(settlement.paid)} tone="success" />
+          <Figure label="Credited" value={money(settlement.credited)} tone="warning" />
+          <Figure label="Balance" value={money(settlement.balance)} tone={settled ? undefined : "danger"} />
         </div>
 
         {canRecord && !settled && (
@@ -98,6 +145,7 @@ export function InvoiceSettlementPanel({
               size="sm"
               onClick={() => {
                 setAmount(settlement.balance.toFixed(2));
+                setRate(String(settlement.exchangeRate));
                 setPayOpen(true);
               }}
             >
@@ -135,7 +183,17 @@ export function InvoiceSettlementPanel({
                     <td className="px-3 py-2 text-muted">
                       {p.payment.reference ?? paymentMethodLabels[p.payment.method as keyof typeof paymentMethodLabels]}
                     </td>
-                    <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(p.amount)}</td>
+                    <td className="px-3 py-2 text-right font-medium text-text">
+                      {money(p.amount)}
+                      {/* A foreign receipt: the rate it came in at. Rupees on account set against this invoice: what they came to. */}
+                      {p.paymentAmount !== null ? (
+                        <div className="text-xs font-normal text-subtle">
+                          {formatCurrency(p.paymentAmount, p.payment.currency)} at {formatRate(p.exchangeRate)}
+                        </div>
+                      ) : (
+                        foreign && <div className="text-xs font-normal text-subtle">at {formatRate(p.payment.exchangeRate)}</div>
+                      )}
+                    </td>
                     <td className="px-3 py-2" />
                   </tr>
                 ))}
@@ -150,7 +208,7 @@ export function InvoiceSettlementPanel({
                         {c.creditNote.docNumber}
                       </Link>
                     </td>
-                    <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(c.amount)}</td>
+                    <td className="px-3 py-2 text-right font-medium text-text">{money(c.amount)}</td>
                     <td className="px-3 py-2 text-right">
                       {canRemove && (
                         <Button
@@ -175,11 +233,12 @@ export function InvoiceSettlementPanel({
       <Dialog open={payOpen} onClose={() => setPayOpen(false)} title="Record payment">
         <div className="space-y-4">
           <p className="text-sm text-muted">
-            {formatCurrency(settlement.balance)} outstanding on this invoice.
+            {money(settlement.balance)} outstanding on this invoice
+            {foreign && <> · raised at {formatRate(settlement.exchangeRate)}</>}.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="payAmount">Amount</Label>
+              <Label htmlFor="payAmount">{foreign ? `Amount received (${currency})` : "Amount"}</Label>
               <Input
                 id="payAmount"
                 type="number"
@@ -189,6 +248,25 @@ export function InvoiceSettlementPanel({
                 onChange={(e) => setAmount(e.target.value)}
               />
             </div>
+            {foreign && (
+              <div className="space-y-1.5">
+                <Label htmlFor="payRate">Rate on the day (₹ per {currency})</Label>
+                <Input
+                  id="payRate"
+                  type="number"
+                  step="0.000001"
+                  min="0"
+                  inputMode="decimal"
+                  value={rate}
+                  onChange={(e) => setRate(e.target.value)}
+                />
+              </div>
+            )}
+            {foreign && (
+              <div className="col-span-2">
+                <ReceiptRateHint amount={amount} rate={rate} documentRate={settlement.exchangeRate} currency={currency} />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="paidOn">Received on</Label>
               <Input id="paidOn" type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
@@ -218,7 +296,16 @@ export function InvoiceSettlementPanel({
               disabled={pending || !amount}
               onClick={() =>
                 run(
-                  () => recordInvoicePayment({ invoiceId, amount, paidOn, method, reference, notes }),
+                  () =>
+                    recordInvoicePayment({
+                      invoiceId,
+                      amount,
+                      paidOn,
+                      method,
+                      reference,
+                      notes,
+                      ...(foreign ? { exchangeRate: rate } : {}),
+                    }),
                   () => setPayOpen(false),
                 )
               }
@@ -249,7 +336,7 @@ export function InvoiceSettlementPanel({
               <option value="">Select…</option>
               {availableCredits.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.docNumber} — {formatCurrency(c.remaining)} available
+                  {c.docNumber} — {formatCurrency(c.remaining, c.currency)} available
                 </option>
               ))}
             </Select>
@@ -266,8 +353,8 @@ export function InvoiceSettlementPanel({
             />
             {selectedCredit && (
               <p className="text-xs text-subtle">
-                {formatCurrency(selectedCredit.remaining)} unapplied on this credit note ·{" "}
-                {formatCurrency(settlement.balance)} outstanding here.
+                {formatCurrency(selectedCredit.remaining, selectedCredit.currency)} unapplied on this credit note ·{" "}
+                {money(settlement.balance)} outstanding here.
               </p>
             )}
           </div>
@@ -334,13 +421,13 @@ export function CreditNoteApplications({
         <span>Applied to invoices</span>
         <span className="text-sm">
           <span className="text-muted">Unapplied </span>
-          <span className="font-semibold text-text">{formatCurrency(balance.remaining)}</span>
+          <span className="font-semibold text-text">{formatCurrency(balance.remaining, balance.currency)}</span>
         </span>
       </CardHeader>
       <CardContent className="space-y-3">
         {balance.applications.length === 0 ? (
           <p className="text-sm text-subtle">
-            Not applied to anything yet — the full {formatCurrency(balance.total)} is sitting on the customer&apos;s
+            Not applied to anything yet — the full {formatCurrency(balance.total, balance.currency)} is sitting on the customer&apos;s
             account.
           </p>
         ) : (
@@ -351,7 +438,7 @@ export function CreditNoteApplications({
                   {a.invoice.docNumber}
                 </Link>
                 <span className="text-muted">{formatDate(a.invoice.issueDate)}</span>
-                <span className="font-medium text-text">{formatCurrency(a.amount)}</span>
+                <span className="font-medium text-text">{formatCurrency(a.amount, balance.currency)}</span>
               </div>
             ))}
           </div>
@@ -382,7 +469,7 @@ export function CreditNoteApplications({
               <option value="">Select an open invoice…</option>
               {openInvoices.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {i.docNumber} — {formatCurrency(i.balance)} due
+                  {i.docNumber} — {formatCurrency(i.balance, i.currency)} due
                 </option>
               ))}
             </Select>

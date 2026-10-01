@@ -9,6 +9,7 @@ import { Amount, ReportHeader } from "@/components/accounting/report-chrome";
 import { MonthPicker } from "@/components/accounting/month-picker";
 import { monthName } from "@/lib/ledger/period";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { previousIstMonth } from "@/lib/india-time";
 
 /**
  * What was withheld, both ways.
@@ -27,9 +28,11 @@ export default async function TdsPage({
 
   const params = await searchParams;
   const now = new Date();
-  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const month = Number(params.month) || previous.getMonth() + 1;
-  const year = Number(params.year) || previous.getFullYear();
+  // India's last month (india-time `previousIstMonth`): the host's, on a server in UTC, was still the
+  // month before that until 05:30 IST on the 1st.
+  const previous = previousIstMonth(now);
+  const month = Number(params.month) || previous.month;
+  const year = Number(params.year) || previous.year;
 
   const [tds, org] = await Promise.all([tdsSummary({ month, year }), getOrganisation()]);
   if (!tds) {

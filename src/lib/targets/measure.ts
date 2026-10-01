@@ -22,6 +22,8 @@
  */
 import type { PrismaClient, TargetMetric, TargetScope } from "@prisma/client";
 import { Prisma } from "@prisma/client";
+import { toBase } from "@/lib/currency";
+import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 
 export type MeasureWindow = { from: Date; to: Date; userIds: string[] };
 
@@ -129,12 +131,21 @@ async function splitByUser(
           payment: { paidOn: range, direction: "RECEIVED" },
           document: { salespersonId: { in: userIds }, docType: "INVOICE" },
         },
-        select: { amount: true, document: { select: { salespersonId: true } } },
+        select: {
+          amount: true,
+          paymentAmount: true,
+          payment: { select: { currency: true, exchangeRate: true } },
+          document: { select: { salespersonId: true } },
+        },
       });
+      // In rupees, at the rate the money came in at: what it took out of the payment (`takenFromPayment`
+      // — the dollars of a USD receipt, the rupees of money on account set against a USD invoice) at the
+      // payment's own rate, rounded as its posting rounds. Adding allocation amounts as they stand
+      // counted $1,000 collected as 1,000.
       const byUser = new Map<string, Prisma.Decimal>();
       for (const a of allocations) {
         const owner = a.document?.salespersonId;
-        if (owner) bumpMoney(byUser, owner, dec(a.amount));
+        if (owner) bumpMoney(byUser, owner, dec(toBase(takenFromPayment(a), bookingRate(a.payment))));
       }
       return addUpMoney(byUser);
     }

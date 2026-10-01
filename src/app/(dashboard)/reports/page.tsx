@@ -3,7 +3,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { reportOptions } from "@/actions/analytics";
 import { workbookFilterOptions } from "@/actions/workspace";
 import { ReportExplorer } from "@/components/reports/report-explorer";
-import { toISODate, startOfMonth } from "@/lib/date-range-presets";
+import { istDateKey, istMonthWindow } from "@/lib/india-time";
 
 export default async function ReportsPage() {
   /**
@@ -35,8 +35,9 @@ export default async function ReportsPage() {
         sources={sources}
         grains={grains}
         filterOptions={filterOptions}
-        today={toISODate(now)}
-        monthStart={toISODate(startOfMonth(now))}
+        // India's date and month, not the server's: in UTC before 05:30 IST those are still yesterday's.
+        today={istDateKey(now)}
+        monthStart={istDateKey(istMonthWindow(now).from)}
       />
     </div>
   );

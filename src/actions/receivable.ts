@@ -9,6 +9,9 @@ import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
+import { bookingRate, crossCurrencyPaymentAmount, settlementRateError, takenFromPayment } from "@/lib/ledger/posting";
+import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
+import { firstOpenDate } from "@/lib/ledger/period";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import { syncBillingMilestones } from "@/lib/projects/billing-sync";
 import {
@@ -94,9 +97,15 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
   if (amount > settlement.balance) {
     return {
       ok: false,
-      error: `Only ₹${settlement.balance.toFixed(2)} is outstanding on this invoice. Record the excess as a separate payment so it stays unapplied.`,
+      error: `Only ${formatMoney(settlement.balance, invoice.currency)} is outstanding on this invoice. Record the excess as a separate payment so it stays unapplied.`,
     };
   }
+
+  // The rate the money actually came in at. A foreign invoice asks for it ("Rate on the day"), and it
+  // defaults to the invoice's own; a rupee invoice is 1, whatever rate an older row still carries.
+  const rate = isBaseCurrency(invoice.currency) ? 1 : (parsed.data.exchangeRate ?? bookingRate(invoice));
+  const rateError = settlementRateError(rate);
+  if (rateError) return { ok: false, error: rateError };
 
   // The money comes in to the branch that billed it (an invoice from before branches: the head office).
   // Resolved before the transaction — the head office lookup uses its own connection.
@@ -111,12 +120,12 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
         branchId,
         amount: new Prisma.Decimal(amount),
         // The amount is in the invoice's currency — it was checked against the invoice's balance — so
-        // the payment is too, at the invoice's rate: the ledger then clears exactly the rupees the
-        // invoice booked. Without them a $1,000 receipt posted as ₹1,000 against a receivable the
-        // invoice booked at ₹83,000. (No rate of its own is asked for yet, so no exchange difference
-        // is booked here; a payment that carries one gets it from postExchangeDifferenceToLedger.)
+        // the payment is too, at the rate it came in at. Its posting is Dr Bank amount × that rate /
+        // Cr AR the same; the exchange difference below adds back what the invoice booked at its own
+        // rate, so AR clears by exactly amount × the invoice's rate and the rest is a realised gain or
+        // loss. $1,000 of an invoice booked at ₹83, received at ₹84.10: Bank 84,100, AR 83,000, gain 1,100.
         currency: invoice.currency,
-        exchangeRate: invoice.exchangeRate,
+        exchangeRate: new Prisma.Decimal(rate),
         paidOn: new Date(paidOn),
         method,
         reference: reference || null,
@@ -147,7 +156,7 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
     action: "CREATE",
     entityType: "Payment",
     entityId: payment.id,
-    entityLabel: `₹${amount.toFixed(2)} against ${invoice.docNumber}`,
+    entityLabel: `${formatMoney(amount, invoice.currency)}${isBaseCurrency(invoice.currency) ? "" : ` at ${formatRate(rate)}`} against ${invoice.docNumber}`,
   });
 
   revalidatePath(`/documents/${invoiceId}`);
@@ -160,27 +169,64 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
 /**
  * Applies an existing unapplied payment to an invoice — for a lump sum received on account and
  * settled against invoices later, which is the other half of how money actually arrives.
+ *
+ * `amount` is how much of the **invoice** the money settles, in the invoice's currency — the figure its
+ * balance is kept in.
+ *
+ * **Rupees on account against a foreign invoice** (the payment in INR, the invoice in USD): `rate` is
+ * required — the rate agreed on the day, ₹ per unit of the invoice's currency. The allocation settles
+ * `amount` of the invoice, takes `round(amount × rate)` rupees out of the payment, and stores both
+ * (`paymentAmount`, `exchangeRate`). The payment's own posting credited AR with the rupees when they
+ * came in; the invoice booked `amount × its rate` for the part now settled, and the difference is a
+ * realised gain or loss (`postExchangeDifferenceToLedger`). ₹84,100 settling $1,000 of an invoice
+ * booked at ₹83 is a gain of ₹1,100, and the customer's AR is back to nil.
+ *
+ * **Same currency** (rupees to a rupee invoice, dollars to a dollar one): the payment's own rate is the
+ * rate, so `rate` is left out (or is that rate), and the difference is the payment's rate against the
+ * invoice's, as when the payment is recorded against the invoice directly.
+ *
+ * A payment in one foreign currency is not applied to a document in another: there is no rate between
+ * two of them that the books could take.
+ *
+ * The exchange difference is dated when the settlement became possible: the later of the payment's
+ * day and the invoice's — which is also how the close's receivables tie-out counts an allocation (from
+ * its payment's date, against documents issued by then), so the two agree at every month end. When
+ * that day is in closed books it goes to the first open day instead, as the FX repair does.
+ *
+ * An action only: there is no form for it in the app yet.
  */
 export async function applyPaymentToInvoice(
   paymentId: string,
   invoiceId: string,
   amount: number,
+  rate?: number,
 ): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("receivables");
   if (!(await hasEffectivePermission(user.id, "payments.record"))) {
     return { ok: false, error: "You don't have permission to allocate payments." };
   }
-  if (!(amount > 0)) return { ok: false, error: "Enter an amount greater than zero." };
+  if (!(Number.isFinite(amount) && amount > 0)) return { ok: false, error: "Enter an amount greater than zero." };
+  const settled = Math.round(amount * 100) / 100;
 
   const [payment, invoice] = await Promise.all([
-    db.payment.findUnique({ where: { id: paymentId }, include: { allocations: { select: { amount: true } } } }),
+    db.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true, companyId: true, direction: true, amount: true, currency: true, exchangeRate: true, paidOn: true,
+        allocations: { select: { amount: true, paymentAmount: true } },
+      },
+    }),
     db.tradeDocument.findUnique({
       where: { id: invoiceId },
-      select: { id: true, companyId: true, docType: true, status: true, total: true, ...invoiceSettlementInclude },
+      select: {
+        id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, currency: true, exchangeRate: true,
+        issueDate: true, ...invoiceSettlementInclude,
+      },
     }),
   ]);
   if (!payment) return { ok: false, error: "That payment no longer exists." };
   if (!invoice) return { ok: false, error: "That invoice no longer exists." };
+  if (payment.direction !== "RECEIVED") return { ok: false, error: "That is a payment made, not one received." };
   if (invoice.companyId !== payment.companyId) {
     return { ok: false, error: "That invoice belongs to a different customer." };
   }
@@ -188,35 +234,81 @@ export async function applyPaymentToInvoice(
     return { ok: false, error: "That isn't an open invoice." };
   }
 
-  const unapplied =
-    Number(payment.amount) - payment.allocations.reduce((t, a) => t + Number(a.amount), 0);
-  if (amount > unapplied + 0.001) {
-    return { ok: false, error: `Only ₹${unapplied.toFixed(2)} of this payment is unapplied.` };
+  const across = payment.currency !== invoice.currency;
+  const given = rate === undefined || rate === null ? null : Number(rate);
+  if (across && !isBaseCurrency(payment.currency)) {
+    return {
+      ok: false,
+      error: `This payment is in ${payment.currency} and the invoice in ${invoice.currency}. A ${payment.currency} payment is applied to a ${payment.currency} invoice.`,
+    };
   }
+  if (across && given === null) {
+    return { ok: false, error: `Enter the rate on the day (₹ per ${invoice.currency}) this money settles the invoice at.` };
+  }
+  if (!across && given !== null && given !== bookingRate(payment)) {
+    return { ok: false, error: `This payment is already in ${payment.currency} at ${formatRate(bookingRate(payment))}; it settles at its own rate.` };
+  }
+  if (across) {
+    const rateError = settlementRateError(given!);
+    if (rateError) return { ok: false, error: rateError };
+  }
+  // What this allocation takes out of the payment, in the payment's currency.
+  const taken = across ? crossCurrencyPaymentAmount(settled, given!) : settled;
+
+  // The invoice first — it is the figure being typed — then what that comes to against the payment.
   const settlement = settlementOf(invoice);
-  if (amount > settlement.balance + 0.001) {
-    return { ok: false, error: `Only ₹${settlement.balance.toFixed(2)} is outstanding on that invoice.` };
+  if (settled > settlement.balance + 0.001) {
+    return { ok: false, error: `Only ${formatMoney(settlement.balance, invoice.currency)} is outstanding on that invoice.` };
+  }
+  const unapplied =
+    Math.round((Number(payment.amount) - payment.allocations.reduce((t, a) => t + takenFromPayment(a), 0)) * 100) / 100;
+  if (taken > unapplied + 0.001) {
+    return {
+      ok: false,
+      error: across
+        ? `${formatMoney(settled, invoice.currency)} at ${formatRate(given)} is ${formatMoney(taken, payment.currency)}; only ${formatMoney(unapplied, payment.currency)} of this payment is unapplied.`
+        : `Only ${formatMoney(unapplied, payment.currency)} of this payment is unapplied.`,
+    };
   }
 
+  const settledOn = payment.paidOn.getTime() > invoice.issueDate.getTime() ? payment.paidOn : invoice.issueDate;
   const allocation = await db.$transaction(async (tx) => {
+    const lock = await tx.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
+    const on = firstOpenDate(settledOn, lock?.lockedUntil);
     const row = await tx.paymentAllocation.create({
-      data: { paymentId, documentId: invoiceId, amount: new Prisma.Decimal(amount), allocatedByUserId: user.id },
+      data: {
+        paymentId,
+        documentId: invoiceId,
+        amount: new Prisma.Decimal(settled),
+        ...(across ? { paymentAmount: new Prisma.Decimal(taken), exchangeRate: new Prisma.Decimal(given!) } : {}),
+        allocatedByUserId: user.id,
+      },
     });
     // The difference only exists once you know which invoice the money is against — the same
     // $1,000 settling an invoice raised at ₹83 and one raised at ₹86 are different gains.
     await postExchangeDifferenceToLedger(tx, {
       paymentId,
       documentId: invoiceId,
-      allocatedAmount: amount,
+      allocatedAmount: settled,
+      paymentAmount: across ? taken : null,
+      date: on,
       userId: user.id,
     });
     return row;
   });
   await syncInvoiceStatus(invoiceId);
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Payment",
+    entityId: paymentId,
+    entityLabel: `${formatMoney(settled, invoice.currency)} applied to ${invoice.docNumber}${across ? ` at ${formatRate(given)} (${formatMoney(taken, payment.currency)})` : ""}`,
+  });
 
   revalidatePath(`/documents/${invoiceId}`);
   revalidatePath(`/companies/${invoice.companyId}`);
   revalidatePath("/receivables");
+  revalidatePath("/payments");
   return { ok: true, data: { id: allocation.id } };
 }
 
@@ -238,11 +330,11 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
   const [creditNote, invoice] = await Promise.all([
     db.tradeDocument.findUnique({
       where: { id: creditNoteId },
-      select: { id: true, companyId: true, docType: true, status: true, total: true, docNumber: true, creditsApplied: { select: { amount: true } } },
+      select: { id: true, companyId: true, docType: true, status: true, total: true, docNumber: true, currency: true, creditsApplied: { select: { amount: true } } },
     }),
     db.tradeDocument.findUnique({
       where: { id: invoiceId },
-      select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, ...invoiceSettlementInclude },
+      select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, currency: true, ...invoiceSettlementInclude },
     }),
   ]);
   if (!creditNote || creditNote.docType !== "CREDIT_NOTE") return { ok: false, error: "That isn't a credit note." };
@@ -254,15 +346,20 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
   if (creditNote.companyId !== invoice.companyId) {
     return { ok: false, error: "The credit note and invoice belong to different customers." };
   }
+  // Both balances are kept in each document's own currency, and a credit application books nothing to
+  // convert one into the other — $100 of credit would take ₹100 off a rupee invoice.
+  if (creditNote.currency !== invoice.currency) {
+    return { ok: false, error: `The credit note is in ${creditNote.currency} and the invoice in ${invoice.currency}; a credit note is applied to an invoice in its own currency.` };
+  }
 
   const creditRemaining =
     Number(creditNote.total) - creditNote.creditsApplied.reduce((t, a) => t + Number(a.amount), 0);
   if (amount > creditRemaining + 0.001) {
-    return { ok: false, error: `Only ₹${creditRemaining.toFixed(2)} of this credit note is unapplied.` };
+    return { ok: false, error: `Only ${formatMoney(creditRemaining, creditNote.currency)} of this credit note is unapplied.` };
   }
   const settlement = settlementOf(invoice);
   if (amount > settlement.balance + 0.001) {
-    return { ok: false, error: `Only ₹${settlement.balance.toFixed(2)} is outstanding on that invoice.` };
+    return { ok: false, error: `Only ${formatMoney(settlement.balance, invoice.currency)} is outstanding on that invoice.` };
   }
 
   try {
@@ -335,13 +432,19 @@ export async function getInvoiceSettlement(invoiceId: string) {
     select: {
       id: true,
       total: true,
+      // Every figure below is in this currency; the panel shows them in it, and asks for the rate a
+      // foreign receipt came in at against this one.
+      currency: true,
+      exchangeRate: true,
       payments: {
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
           amount: true,
+          paymentAmount: true,
+          exchangeRate: true,
           createdAt: true,
-          payment: { select: { id: true, paidOn: true, method: true, reference: true } },
+          payment: { select: { id: true, paidOn: true, method: true, reference: true, currency: true, exchangeRate: true } },
         },
       },
       creditsReceived: {
@@ -362,6 +465,8 @@ export async function getInvoiceSettlement(invoiceId: string) {
       invoice.payments.reduce((t, p) => t + Number(p.amount), 0),
       invoice.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
     ),
+    currency: invoice.currency,
+    exchangeRate: bookingRate(invoice),
     payments: invoice.payments,
     credits: invoice.creditsReceived,
   });
@@ -375,6 +480,7 @@ export async function getCreditNoteBalance(creditNoteId: string) {
     where: { id: creditNoteId, ...(await viaCompanyScope(user.id)) },
     select: {
       total: true,
+      currency: true,
       creditsApplied: {
         orderBy: { createdAt: "desc" },
         select: { id: true, amount: true, invoice: { select: { id: true, docNumber: true, issueDate: true } } },
@@ -384,6 +490,7 @@ export async function getCreditNoteBalance(creditNoteId: string) {
   if (!creditNote) return null;
   const applied = creditNote.creditsApplied.reduce((t, a) => t + Number(a.amount), 0);
   return toPlain({
+    currency: creditNote.currency,
     total: Number(creditNote.total),
     applied,
     remaining: Math.max(Number(creditNote.total) - applied, 0),
@@ -401,7 +508,7 @@ export async function listOpenInvoices(companyId: string) {
   const invoices = await db.tradeDocument.findMany({
     where: { companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
     orderBy: { issueDate: "asc" },
-    select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, ...invoiceSettlementInclude },
+    select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, currency: true, ...invoiceSettlementInclude },
   });
   return invoices
     .map((invoice) => ({
@@ -409,6 +516,7 @@ export async function listOpenInvoices(companyId: string) {
       docNumber: invoice.docNumber,
       issueDate: invoice.issueDate,
       dueDate: invoice.dueDate,
+      currency: invoice.currency,
       ...settlementOf(invoice),
     }))
     .filter((invoice) => invoice.balance > 0.01);
@@ -438,7 +546,7 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
     db.tradeDocument.findMany({
       where: { companyId, ...documentScope, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
       orderBy: { issueDate: "asc" },
-      select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, ...invoiceSettlementInclude },
+      select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, currency: true, ...invoiceSettlementInclude },
     }),
     db.payment.findMany({
       where: { companyId, ...receiptScope },
@@ -497,7 +605,9 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
     docNumber: string;
     issueDate: Date;
     dueDate: Date | null;
+    /** In the invoice's own currency, which the row shows it in. */
     balance: number;
+    currency: string;
     daysOverdue: number;
     bucket: AgingBucket;
   }[] = [];
@@ -513,6 +623,7 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
       issueDate: invoice.issueDate,
       dueDate: invoice.dueDate,
       balance: settlement.balance,
+      currency: invoice.currency,
       daysOverdue: daysOverdue(invoice.dueDate, invoice.issueDate, asOf),
       bucket,
     });
@@ -525,11 +636,13 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
   // Money received or credited that hasn't been set against an invoice yet. Without this the
   // statement reads as a contradiction: nothing outstanding, but a negative closing balance. They
   // measure different things — what's still owed on invoices, versus what's sitting on account.
+  // What each allocation took out of its payment (`takenFromPayment`): rupees on account set against a
+  // USD invoice settle dollars but spend rupees, and it is the rupees that leave the payment.
   const [appliedPayments, appliedCredits] = await Promise.all([
-    db.paymentAllocation.aggregate({ where: { payment: { companyId, ...receiptScope } }, _sum: { amount: true } }),
+    db.paymentAllocation.findMany({ where: { payment: { companyId, ...receiptScope } }, select: { amount: true, paymentAmount: true } }),
     db.creditNoteApplication.aggregate({ where: { creditNote: { companyId, ...documentScope } }, _sum: { amount: true } }),
   ]);
-  const unappliedPayments = Math.max(received - Number(appliedPayments._sum.amount ?? 0), 0);
+  const unappliedPayments = Math.max(received - appliedPayments.reduce((t, a) => t + takenFromPayment(a), 0), 0);
   const unappliedCredits = Math.max(credited - Number(appliedCredits._sum.amount ?? 0), 0);
   const outstanding = Object.values(aging).reduce((t, v) => t + v, 0);
 
@@ -634,7 +747,7 @@ export async function listAvailableCredits(companyId: string) {
   const creditNotes = await db.tradeDocument.findMany({
     where: { companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } },
     orderBy: { issueDate: "asc" },
-    select: { id: true, docNumber: true, total: true, creditsApplied: { select: { amount: true } } },
+    select: { id: true, docNumber: true, total: true, currency: true, creditsApplied: { select: { amount: true } } },
   });
   return creditNotes
     .map((c) => {
@@ -642,6 +755,7 @@ export async function listAvailableCredits(companyId: string) {
       return {
         id: c.id,
         docNumber: c.docNumber,
+        currency: c.currency,
         total: Number(c.total),
         remaining: Math.max(Number(c.total) - applied, 0),
       };
