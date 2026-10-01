@@ -20,42 +20,25 @@
  * workspaces is refused: the proxy did not write that header. This file is the only one allowed to
  * read it (check:tenancy).
  */
+import { PLATFORM_HOSTS, SLUG_PATTERN } from "@/lib/workspace-names";
 
 export const PLATFORM_DOMAIN = (process.env.PLATFORM_DOMAIN ?? "localhost").trim().toLowerCase().replace(/\.$/, "");
 
 /**
- * Subdomains nobody can take as a workspace name: what the platform answers on itself, what it may
- * one day (a product of its own — books., helpdesk., crm. — a status page, a help centre), and words a
- * customer would read as the platform speaking (official., security., verify.). Our own name and
- * competitors' are refused for new workspaces by src/lib/workspace-names.ts instead, since
- * the platform's own first workspace is called "deskzo".
+ * The platform's own addresses — subdomains it answers on itself, or will: never served as a
+ * workspace (`classifyHost`), never given to one, never released by staff. The list is written in
+ * src/lib/workspace-names.ts, beside the other name lists, so the name rules there stay client-safe;
+ * this file is what makes it law for requests.
+ *
+ * Only these. The words staff may release — official-sounding ones, the products' (books., crm.) —
+ * are refused for *new* workspaces by those rules, but once released, or held for a customer on an
+ * invitation, such a workspace must be served like any other; and our own name is not here at all,
+ * since the platform's own first workspace is called "deskzo".
  */
-export const RESERVED_SLUGS = new Set([
-  // The platform's own hosts and infrastructure.
-  "www", "admin", "api", "app", "apps", "auth", "billing", "console", "dashboard", "devices", "docs", "help",
-  "mail", "smtp", "imap", "pop", "pop3", "mx", "ns", "ns1", "ns2", "dns", "ftp", "sftp", "vpn", "status", "support",
-  "static", "cdn", "assets", "files", "uploads", "media", "images", "img", "download", "downloads", "login", "logout",
-  "signin", "signout", "signup", "register", "account", "accounts", "platform", "system", "root", "test", "testing",
-  "dev", "developer", "developers", "sandbox", "staging", "demo", "beta", "alpha", "preview", "blog", "news", "shop",
-  "store", "cms", "partners", "partner", "reseller", "resellers", "affiliate", "affiliates", "portal", "my", "me",
-  "home", "about", "pricing", "contact", "careers", "jobs", "press", "events", "community", "forum", "learn",
-  "academy", "training", "webinar", "webinars", "updates", "changelog", "roadmap", "feedback", "uptime",
-  "oauth", "sso", "id", "identity", "password", "reset", "verify", "verification", "secure", "security", "trust",
-  "privacy", "legal", "terms", "compliance", "gdpr", "abuse", "postmaster", "hostmaster", "webmaster", "noreply",
-  "no-reply", "info", "hello", "sales", "enquiry", "enquiries", "care", "service", "services", "helpcenter",
-  "helpcentre", "knowledgebase", "kb", "official", "officials", "staff", "team", "internal", "corp", "corporate",
-  "owner", "administrator", "sysadmin", "superadmin", "null", "undefined", "default", "example",
-  // Products the platform has, or may sell on their own.
-  "one", "suite", "erp", "crm", "books", "accounting", "finance", "invoice", "invoices", "invoicing", "payments",
-  "pay", "payroll", "people", "hr", "hrms", "recruit", "hiring", "expense", "expenses", "inventory", "stock",
-  "orders", "purchase", "procurement", "projects", "tasks", "desk", "helpdesk", "servicedesk", "tickets",
-  "ticketing", "marketing", "campaigns", "mailer", "survey", "surveys", "forms", "analytics", "reports",
-  "insights", "vault", "sign", "esign", "drive", "workdrive", "chat", "meet", "connect", "workplace",
-  "office", "commerce", "pos", "gst", "einvoice", "ewaybill", "copilot", "ai", "assistant",
-]);
+export { PLATFORM_HOSTS, SLUG_PATTERN };
 
-/** A workspace name: lower-case letters, digits and hyphens, 3–40, not starting or ending with a hyphen. */
-export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
+/** The old name of PLATFORM_HOSTS, still imported by scripts (platform-adopt) and the checks. */
+export const RESERVED_SLUGS = PLATFORM_HOSTS;
 
 export type HostKind =
   | { kind: "tenant"; slug: string; host: string }
@@ -98,7 +81,7 @@ export function classifyHost(host: string): HostKind {
   // The public site answers on www. as well as the bare domain (unless TENANCY_LEGACY_HOSTS gives the
   // bare address to a workspace from before).
   if (sub === "www") return { kind: "root", host };
-  if (sub.includes(".") || RESERVED_SLUGS.has(sub) || !SLUG_PATTERN.test(sub)) return { kind: "invalid", host };
+  if (sub.includes(".") || PLATFORM_HOSTS.has(sub) || !SLUG_PATTERN.test(sub)) return { kind: "invalid", host };
   return { kind: "tenant", slug: sub, host };
 }
 

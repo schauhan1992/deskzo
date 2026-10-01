@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AtSign,
   BellRing,
   Building2,
   CreditCard,
@@ -42,6 +43,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   Hourglass,
   UserPlus,
   Ticket,
+  AtSign,
   Handshake,
   Megaphone,
   CreditCard,

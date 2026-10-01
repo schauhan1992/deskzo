@@ -4,13 +4,15 @@
  *
  * Owner decisions, 1 Oct 2026: a business signing itself up gets an address of at least eight letters
  * or digits, made from its registered business name; nobody gets one of the platform's own words, our
- * name or a competitor's.
+ * name or a competitor's. The platform's own addresses are locked; the other reserved words, ours and
+ * competitors' may be released by staff, who also block names and hold addresses on invitations —
+ * that is check:name-rules.
  *
  *   npm run check:workspace-names
  *
  * Reads the control plane (existing workspaces); writes nothing.
  */
-import { MIN_SIGNUP_NAME, legalNameWords, protectedNameIn, signupNameProblem, suggestedName } from "../src/lib/workspace-names";
+import { MIN_SIGNUP_NAME, PLATFORM_HOSTS, RESERVED_WORDS, legalNameWords, protectedNameIn, signupNameProblem, suggestedName } from "../src/lib/workspace-names";
 import { RESERVED_SLUGS, SLUG_PATTERN, classifyHost } from "../src/lib/tenancy/host";
 
 let failures = 0;
@@ -51,13 +53,18 @@ async function main() {
   for (const slug of ["deskzo-support", "mydeskzo", "deskzoone", "wroffy-crm", "zoho-india", "zohoindia", "tallysolutions", "odoo-partners", "salesforce", "hubspot-agency"]) ok(`"${slug}" is protected`, protectedNameIn(slug) !== null);
   for (const slug of ["digitallyyours", "acmetechnologies", "totallyfresh", "zohra-textiles"]) ok(`  "${slug}" isn't`, protectedNameIn(slug) === null, protectedNameIn(slug));
 
-  console.log("\n— Reserved subdomains —");
-  for (const word of ["official", "books", "crm", "helpdesk", "desk", "accounting", "payroll", "support", "security", "verify", "one", "erp", "status", "partners"]) ok(`"${word}" is reserved`, RESERVED_SLUGS.has(word));
-  ok("every reserved word is itself a valid address shape (or it would be refused anyway)", [...RESERVED_SLUGS].every((w) => SLUG_PATTERN.test(w) || w.length < 3));
-  ok("a reserved word is never served as a workspace", classifyHost(`books.${process.env.PLATFORM_DOMAIN ?? "localhost"}${process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_PORT}` : ""}`).kind === "invalid");
+  console.log("\n— Platform addresses and reserved words —");
+  for (const word of ["support", "security", "verify", "status", "partners", "admin", "api", "www"]) ok(`"${word}" is a platform address — locked`, PLATFORM_HOSTS.has(word) && RESERVED_SLUGS.has(word));
+  for (const word of ["official", "books", "crm", "helpdesk", "desk", "accounting", "payroll", "one", "erp"]) ok(`"${word}" is a reserved word — staff may release it`, RESERVED_WORDS.has(word) && !PLATFORM_HOSTS.has(word));
+  ok('"deskzo" is neither — the platform\'s own workspace is called that', !PLATFORM_HOSTS.has("deskzo") && !RESERVED_WORDS.has("deskzo"));
+  ok("every platform address and reserved word is itself a valid address shape (or it would be refused anyway)", [...PLATFORM_HOSTS, ...RESERVED_WORDS].every((w) => SLUG_PATTERN.test(w) || w.length < 3));
+  const suffix = `${process.env.PLATFORM_DOMAIN ?? "localhost"}${process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_PORT}` : ""}`;
+  ok("a platform address is never served as a workspace", classifyHost(`api.${suffix}`).kind === "invalid" && classifyHost(`status.${suffix}`).kind === "invalid");
+  ok("a reserved word is, once a workspace has it (released, or held for a customer)", classifyHost(`books.${suffix}`).kind === "tenant");
 
   console.log("\n— Every path that makes a workspace (slugProblem) —");
   const { slugProblem } = await import("../src/lib/platform/provisioning");
+  ok("a platform address: refused", (await slugProblem("status")) === "That name is reserved.");
   ok("a reserved word: refused", (await slugProblem("helpdesk")) === "That name is reserved.");
   ok("our name inside one: refused", (await slugProblem("deskzo-support")) === "That name is reserved.");
   ok("a competitor's: refused", (await slugProblem("zoho-india")) === "That name is reserved.");
@@ -67,8 +74,8 @@ async function main() {
   const { controlDb, controlConfigured } = await import("../src/lib/platform/control-db");
   if (controlConfigured()) {
     const existing = await controlDb().tenant.findMany({ select: { slug: true, isDefault: true } });
-    const clash = existing.filter((t) => RESERVED_SLUGS.has(t.slug));
-    ok("no existing workspace's address is now reserved — it would stop being served", clash.length === 0, clash.map((t) => t.slug).join(", "));
+    const clash = existing.filter((t) => PLATFORM_HOSTS.has(t.slug));
+    ok("no existing workspace's address is a platform address — it would stop being served", clash.length === 0, clash.map((t) => t.slug).join(", "));
     const protectedOnes = existing.filter((t) => !t.isDefault && protectedNameIn(t.slug));
     ok("  and none but the platform's own carries our name or a competitor's", protectedOnes.length === 0, protectedOnes.map((t) => t.slug).join(", "));
   }

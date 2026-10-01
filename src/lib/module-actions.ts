@@ -178,6 +178,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "platform/console-directory.ts": "platform",
   "platform/console-domains.ts": "platform",
   "platform/console-linked.ts": "platform",
+  "platform/console-names.ts": "platform",
   "platform/console-partners.ts": "platform",
   "platform/console-shell.ts": "platform",
   "platform/console-support.ts": "platform",

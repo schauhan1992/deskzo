@@ -332,6 +332,13 @@ export const INVITE_STATE: Record<InviteState, Label> = {
   ended: { label: "Ended", tone: "neutral" },
 };
 
+/** What a staff rule about workspace names does (WorkspaceNameRule.kind), in words. */
+export const NAME_RULE_KIND: Record<"BLOCK_EXACT" | "BLOCK_WORD" | "RELEASE", Label> = {
+  BLOCK_EXACT: { label: "Blocked: this exact name", tone: "warning" },
+  BLOCK_WORD: { label: "Blocked: any name with this word", tone: "warning" },
+  RELEASE: { label: "Released: a built-in word let through", tone: "info" },
+};
+
 export const SIGNUP_STAGE: Record<StuckStage, Label> = {
   "never-verified": { label: "Code not entered", tone: "warning" },
   "setup-stuck": { label: "Setup stuck", tone: "danger" },
@@ -531,6 +538,12 @@ export const ACTION_LABELS: Record<string, string> = {
   "invite.create": "Invitation created",
   "invite.end": "Invitation ended",
   "invite.extend": "Invitation extended",
+  "invite.hold": "Address held on an invitation",
+
+  "names.block": "Workspace name blocked",
+  "names.unblock": "Workspace name unblocked",
+  "names.release": "Reserved name released",
+  "names.unrelease": "Reserved name blocked again",
 
   "partner.create": "Partner created",
   "partner.update": "Partner updated",
@@ -629,6 +642,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
   { key: "setup", label: "Setup and migrations", prefixes: ["provision.", "warm-pool.", "migrate.", "tenant.migration", "tenant.role-limits", "tenant.adopt"] },
   { key: "reference", label: "Reference data", prefixes: ["reference."] },
   { key: "invites", label: "Invitations", prefixes: ["invite."] },
+  { key: "names", label: "Workspace names", prefixes: ["names."] },
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
@@ -663,6 +677,9 @@ const ACTION_TONES: Record<string, Tone> = {
   "billing.event.view-raw": "warning",
   "tenant.migration.failed": "danger",
   "invite.create": "success",
+  "invite.hold": "info",
+  "names.block": "warning",
+  "names.release": "info",
   "device-route.release": "warning",
   "reference.pin-key.remove": "warning",
   "staff.create": "success",
@@ -803,7 +820,6 @@ export function auditSummary(action: string, detail: unknown): string | null {
     case "tenant.note.pin":
     case "provision.retry":
     case "warm-pool.top-up":
-    case "invite.end":
     case "reference.pin-key.save":
     case "reference.pin-key.remove":
     case "reference.pin.sync":
@@ -895,7 +911,19 @@ export function auditSummary(action: string, detail: unknown): string | null {
     case "migrate.workspace":
       return join([text(d.slug), d.ok === true ? "done" : d.ok === false ? "failed" : null]);
     case "invite.create":
-      return join([quote(d.note), typeof d.days === "number" ? `valid ${d.days} days` : null, d.planKey ? `plan ${text(d.planKey)}` : null]);
+      return join([quote(d.note), typeof d.days === "number" ? `valid ${d.days} days` : null, d.planKey ? `plan ${text(d.planKey)}` : null, d.heldSlug ? `holds ${text(d.heldSlug)}` : null]);
+    case "invite.end":
+      return d.heldSlug ? `${text(d.heldSlug)} no longer held` : null;
+    case "invite.hold":
+      return join([text(d.slug), d.skipsReserved === true ? "may be reserved or blocked" : null]);
+    case "names.block":
+      return join([text(d.value), d.kind === "BLOCK_WORD" ? "any name with this word" : d.kind === "BLOCK_EXACT" ? "this exact name" : null, quote(d.reason), typeof d.workspaces === "number" && d.workspaces > 0 ? `${plural(d.workspaces, "workspace")} ${d.workspaces === 1 ? "keeps" : "keep"} it` : null]);
+    case "names.unblock":
+      return join([text(d.value), d.kind === "BLOCK_WORD" ? "any name with this word" : d.kind === "BLOCK_EXACT" ? "this exact name" : null]);
+    case "names.release":
+      return join([text(d.value), quote(d.reason)]);
+    case "names.unrelease":
+      return text(d.value);
     case "invite.extend":
       return typeof d.days === "number" ? `+${d.days} days` : null;
     case "device-route.release":
@@ -992,6 +1020,7 @@ export function auditHref(action: string, detail: unknown, workspaceSlug: string
   }
   if (action.startsWith("staff.")) return "/staff";
   if (action.startsWith("invite.")) return "/invites";
+  if (action.startsWith("names.")) return "/names";
   if (action.startsWith("device-route.")) return "/devices";
   if (action.startsWith("reference.")) return "/reference";
   if (action.startsWith("alert.")) return "/alerts";

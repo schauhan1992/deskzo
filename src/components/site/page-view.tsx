@@ -71,8 +71,8 @@ export async function SiteShell({ children }: { children: ReactNode }) {
   );
 }
 
-/** The query keys the signup form block reads its "Referred by" line from. */
-const REFERRAL_KEYS = ["ref", "refVia", "refName"] as const;
+/** The query keys the signup form block reads its "Referred by" line from, and the address an invitation holds. */
+const REFERRAL_KEYS = ["ref", "refVia", "refName", "held"] as const;
 
 /**
  * A page's blocks, and its structured data; an address the site has no page for is the site's
@@ -81,7 +81,8 @@ const REFERRAL_KEYS = ["ref", "refVia", "refName"] as const;
  * The referral keys are dropped from every query unless the caller says it checked them: a signup form
  * block on any page shows `refName` as "Referred by …", and a hand-made link must not put words of
  * its own there on the platform's site. Only the signup page, which looks the code up and writes all
- * three itself, passes `trustedReferral`.
+ * three itself, passes `trustedReferral`. The same goes for `held`, the address an invitation code
+ * holds, which locks the form's address field: only the signup page looks it up and writes it.
  */
 export async function SitePageView({ slug, searchParams, trustedReferral = false }: { slug: string; searchParams?: Query; trustedReferral?: boolean }) {
   const query = trustedReferral || !searchParams ? searchParams : Object.fromEntries(Object.entries(searchParams).filter(([key]) => !(REFERRAL_KEYS as readonly string[]).includes(key)));

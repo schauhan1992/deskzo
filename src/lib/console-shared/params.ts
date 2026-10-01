@@ -142,7 +142,7 @@ const GATEWAYS: readonly GatewayKey[] = ["MANUAL", "STRIPE", "RAZORPAY"];
 const SUBSCRIPTION_STATUSES: readonly SubscriptionStatusKey[] = ["INCOMPLETE", "TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED"];
 const INVOICE_STATUSES: readonly InvoiceStatusKey[] = ["DRAFT", "OPEN", "PAID", "VOID", "UNCOLLECTIBLE"];
 const PLAN_KINDS: readonly PlanKindKey[] = ["EDITION", "BUNDLE", "ADDON", "INTERNAL"];
-const AUDIT_CATEGORY_KEYS: readonly AuditCategoryKey[] = ["lifecycle", "billing", "staff", "support", "setup", "reference", "invites", "notes", "terminals", "console", "partners"];
+const AUDIT_CATEGORY_KEYS: readonly AuditCategoryKey[] = ["lifecycle", "billing", "staff", "support", "setup", "reference", "invites", "names", "notes", "terminals", "console", "partners"];
 
 // ─── Workspaces directory ────────────────────────────────────────────────────────────────────────
 

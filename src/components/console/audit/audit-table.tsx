@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  AtSign,
   Building2,
   ChevronRight,
   Cpu,
@@ -47,6 +48,7 @@ const CATEGORY_ICON: Record<AuditCategoryKey, LucideIcon> = {
   setup: Rocket,
   reference: Earth,
   invites: Ticket,
+  names: AtSign,
   notes: StickyNote,
   terminals: FingerprintPattern,
   console: LayoutDashboard,

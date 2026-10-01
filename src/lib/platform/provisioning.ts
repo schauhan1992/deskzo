@@ -8,12 +8,13 @@ import { sendPlatformMail } from "@/lib/platform/mailer";
 import { latestMigrationName, migrateDeploy } from "@/lib/platform/migrate";
 import { createWorkspaceDatabase } from "@/lib/platform/provisioner";
 import { newKeyBundle, sealKeyBundle } from "@/lib/tenancy/keys";
-import { PLATFORM_DOMAIN, RESERVED_SLUGS, SLUG_PATTERN, protocolFor } from "@/lib/tenancy/host";
+import { PLATFORM_DOMAIN, protocolFor } from "@/lib/tenancy/host";
 import { forgetRegistry, subdomainHost } from "@/lib/tenancy/registry";
 import { PlanRefused, planForNewWorkspace, startOnPlan } from "@/lib/platform/plans";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { trialDays } from "@/lib/platform/settings";
-import { protectedNameIn } from "@/lib/workspace-names";
+import { workspaceNameVerdict, type InviteHold } from "@/lib/platform/name-rules";
+import { NAME_TAKEN } from "@/lib/workspace-names";
 import { mailNewCustomer, recordSignupAttribution, type AttributionDecision } from "@/lib/partners/attribution";
 
 /**
@@ -51,24 +52,29 @@ export type ProvisioningInput = {
   planKey?: string | null;
   /** The partner signup credited it to (src/lib/partners/attribution.ts); none: a direct customer. */
   attribution?: AttributionDecision | null;
+  /** The address its invitation holds for it, when the invitation holds one — checked again here, never skipped. */
+  hold?: InviteHold | null;
 };
 
-/** What `slugProblem` says of a name that is fine but belongs to a workspace already. */
-export const SLUG_TAKEN = "That name is taken.";
+/** What `slugProblem` says of a name that is fine but belongs to a workspace already (or is held for another customer). */
+export const SLUG_TAKEN = NAME_TAKEN;
 
-/** Why a workspace name cannot be had, or null when it can — the signup form asks this live. */
-export async function slugProblem(slug: string): Promise<string | null> {
-  if (!SLUG_PATTERN.test(slug)) return "Use 3–40 lower-case letters, digits and hyphens, not starting or ending with a hyphen.";
-  if (RESERVED_SLUGS.has(slug)) return "That name is reserved.";
-  // Never one carrying our name or a competitor's, whoever is setting it up (src/lib/workspace-names.ts).
-  if (protectedNameIn(slug)) return "That name is reserved.";
-  const taken = await controlDb().tenant.findUnique({ where: { slug }, select: { id: true } });
-  return taken ? SLUG_TAKEN : null;
+/**
+ * Why a workspace name cannot be had, or null when it can — every new workspace, whoever makes it:
+ * the pattern, never a platform address, staff's blocks, the built-in reserved words, our name and
+ * competitors' (unless staff released the word), never a name an open invitation holds for somebody
+ * else, never one taken (src/lib/workspace-names.ts, with src/lib/platform/name-rules.ts). `hold`: the
+ * invitation this workspace comes with, whose address it may have — and, when the invitation says
+ * so, even a reserved word or a blocked name.
+ */
+export async function slugProblem(slug: string, opts: { hold?: InviteHold | null } = {}): Promise<string | null> {
+  const verdict = await workspaceNameVerdict(slug, opts.hold ?? null);
+  return verdict.ok ? null : verdict.message;
 }
 
 export async function startProvisioning(input: ProvisioningInput): Promise<{ tenantId: string; jobId: string }> {
   const slug = input.slug.trim().toLowerCase();
-  const problem = await slugProblem(slug);
+  const problem = await slugProblem(slug, { hold: input.hold ?? null });
   if (problem) throw new ProvisioningRefused(problem);
   const country = WORLD_COUNTRIES.find((c) => c.code === input.country.toUpperCase());
   if (!country) throw new ProvisioningRefused("Choose a country from the list.");

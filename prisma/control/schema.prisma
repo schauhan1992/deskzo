@@ -323,9 +323,43 @@ model SignupInvite {
   partner   Partner?  @relation(fields: [partnerId], references: [id], onDelete: Restrict)
   /// The code's last four characters, so a partner can tell its codes apart.
   codeHint  String?
+  /// An address staff hold for the customer this invitation is for: nobody else may take it while
+  /// the invitation is open, and a signup with this code gets exactly it — without the signup rules
+  /// (eight letters, made from the registered name). Never a platform address, never one taken.
+  heldSlug              String?  @unique
+  /// The held address may also be a reserved word or a blocked name (an owner or admin's choice).
+  heldSlugSkipsReserved Boolean  @default(false)
 
   @@index([partnerId, createdAt])
   @@map("signup_invites")
+}
+
+/// What a staff rule about workspace names does.
+enum NameRuleKind {
+  /// Refused: exactly this name.
+  BLOCK_EXACT
+  /// Refused: any name with this word in it.
+  BLOCK_WORD
+  /// A built-in reserved word, or our name or a competitor's, that staff have let through.
+  RELEASE
+}
+
+/// Staff's own rules for workspace names, on top of the built-in ones (src/lib/workspace-names.ts):
+/// names and words they block, and built-in words they release. A platform address
+/// (src/lib/tenancy/host.ts) can never be released.
+model WorkspaceNameRule {
+  id        String       @id @default(cuid())
+  /// Lower-case. A name for BLOCK_EXACT; a word of letters and digits for BLOCK_WORD and RELEASE.
+  value     String
+  kind      NameRuleKind
+  /// Why — shown in the console, never to a customer.
+  reason    String
+  /// The staff member's id.
+  createdBy String
+  createdAt DateTime     @default(now())
+
+  @@unique([kind, value])
+  @@map("workspace_name_rules")
 }
 
 /// A signup between the form and the workspace: waiting for its email code, then provisioning.

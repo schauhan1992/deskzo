@@ -386,7 +386,7 @@ export type BillingOverviewData = Awaited<ReturnType<typeof billingOverview>>;
 // ─── Invitations ─────────────────────────────────────────────────────────────────────────────────
 
 /** Every SignupInvite column — the code itself is never kept, only its hash, which is the invitation's id. */
-const INVITE_SELECT = { codeHash: true, note: true, maxUses: true, uses: true, expiresAt: true, createdBy: true, planKey: true, createdAt: true } as const satisfies Prisma.SignupInviteSelect;
+const INVITE_SELECT = { codeHash: true, note: true, maxUses: true, uses: true, expiresAt: true, createdBy: true, planKey: true, createdAt: true, heldSlug: true, heldSlugSkipsReserved: true } as const satisfies Prisma.SignupInviteSelect;
 type InviteRecord = Prisma.SignupInviteGetPayload<{ select: typeof INVITE_SELECT }>;
 type InviteExtras = { state: InviteState; createdByName: string | null; planName: string | null; workspaces: { slug: string }[] };
 
@@ -480,6 +480,10 @@ export type InviteRow = {
   createdByName: string | null;
   state: InviteState;
   workspaces: { slug: string }[];
+  /** The address it holds for its customer — held while the invitation is live. */
+  heldSlug: string | null;
+  /** The held address may be a reserved word or a blocked name. */
+  heldSkipsReserved: boolean;
 };
 export type InvitesBoard = {
   rows: InviteRow[];
@@ -490,6 +494,8 @@ export type InvitesBoard = {
   counts: { live: number; used: number; expired: number; all: number };
   signupOpen: boolean;
   signupUrl: string;
+  /** What follows a workspace's name in its address (".<domain>"), for the address an invitation holds. */
+  workspaceSuffix: string;
   /** What a new invitation may start a workspace on: offered, and never an internal plan. */
   plans: { key: string; name: string }[];
 };
@@ -543,6 +549,8 @@ export async function invitesBoard(f: InviteFilters, now = new Date()): Promise<
         createdByName: extra.createdByName,
         state: extra.state,
         workspaces: extra.workspaces,
+        heldSlug: r.heldSlug,
+        heldSkipsReserved: r.heldSlugSkipsReserved,
       };
     }),
     total,
@@ -551,6 +559,7 @@ export async function invitesBoard(f: InviteFilters, now = new Date()): Promise<
     counts: { live, used, expired, all },
     signupOpen: open,
     signupUrl: `${protocolFor(siteHost)}://${siteHost}/signup`,
+    workspaceSuffix: `.${PLATFORM_DOMAIN}${process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_PORT}` : ""}`,
     plans: offered,
   };
 }

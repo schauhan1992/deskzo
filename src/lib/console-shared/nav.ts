@@ -18,6 +18,7 @@ export type ConsolePageKey =
   | "trials"
   | "signups"
   | "invites"
+  | "names"
   | "partners"
   | "announcements"
   | "billing"
@@ -45,6 +46,7 @@ export type NavIconName =
   | "Hourglass"
   | "UserPlus"
   | "Ticket"
+  | "AtSign"
   | "Handshake"
   | "Megaphone"
   | "CreditCard"
@@ -91,6 +93,8 @@ export const PAGE_ROLES: Record<ConsolePageKey, readonly ConsoleRole[] | undefin
   trials: undefined,
   signups: SIGNUP_VIEWERS,
   invites: undefined,
+  // Every staff member reads it; OWNER and ADMIN change it (MANAGERS, in its actions).
+  names: undefined,
   partners: undefined,
   announcements: undefined,
   billing: SELLERS,
@@ -117,6 +121,7 @@ export const CONSOLE_PAGES: readonly ConsolePage[] = [
   { key: "trials", href: "/trials", label: "Trials", group: "customers", icon: "Hourglass", badge: "trials", keywords: ["trial", "ending", "conversion"], shortcut: "t", inNav: true },
   { key: "signups", href: "/signups", label: "Signups", group: "customers", icon: "UserPlus", roles: PAGE_ROLES.signups, badge: "signups", keywords: ["sign up", "funnel", "pending", "stuck"], inNav: true },
   { key: "invites", href: "/invites", label: "Invitations", group: "customers", icon: "Ticket", keywords: ["invite", "codes", "invitation"], inNav: true },
+  { key: "names", href: "/names", label: "Workspace names", group: "customers", icon: "AtSign", keywords: ["reserved", "blocked", "address", "slug", "subdomain", "release", "names"], inNav: true },
   { key: "partners", href: "/partners", label: "Partners", group: "customers", icon: "Handshake", badge: "partners", keywords: ["resellers", "distributors", "channel", "referrals", "deals"], inNav: true },
   { key: "announcements", href: "/announcements", label: "Announcements", group: "customers", icon: "Megaphone", badge: "announcements", keywords: ["banner", "notice", "message", "broadcast"], inNav: true },
   { key: "billing", href: "/billing", label: "Billing", group: "revenue", icon: "CreditCard", roles: PAGE_ROLES.billing, badge: "billing", keywords: ["revenue", "invoices", "subscriptions", "webhooks", "mrr", "stripe", "razorpay"], shortcut: "b", inNav: true },

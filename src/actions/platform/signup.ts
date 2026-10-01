@@ -13,8 +13,10 @@ import { controlDb } from "@/lib/platform/control-db";
 import { createHandoffTicket } from "@/lib/platform/handoff";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { signupOpen } from "@/lib/platform/settings";
-import { ProvisioningRefused, SLUG_TAKEN, slugProblem, startProvisioning } from "@/lib/platform/provisioning";
-import { signupNameProblem } from "@/lib/workspace-names";
+import { siteAllowance } from "@/lib/platform/find-workspaces";
+import { inviteHold, judgeName, type InviteHold } from "@/lib/platform/name-rules";
+import { ProvisioningRefused, startProvisioning } from "@/lib/platform/provisioning";
+import { signupNameVerdict } from "@/lib/workspace-names";
 import { lockoutState, recordFailure } from "@/lib/security/lockout";
 import { clientIpFrom } from "@/lib/client-ip";
 import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
@@ -31,6 +33,10 @@ import { subdomainHost } from "@/lib/tenancy/registry";
  *      the workspace on a free trial (src/lib/platform/provisioning.ts) and starts the worker.
  *   3. `signupProgress`: what the progress page polls. Once the workspace is up, it hands the owner
  *      a one-time pass to it — once, to this browser only — and the page follows it straight in.
+ *
+ * An invitation may hold an address for the customer it is for (made in the console): its signup gets
+ * exactly that address — filled in and locked on the form (`heldAddress`) — without the signup rules,
+ * and provisioning checks it again with the same hold. Nobody else may take it while it is open.
  *
  * Partners (src/lib/partners): a partner's invitation code works only while its partner is ACTIVE,
  * and a partner's referral code on the form must be live. Verifying works out which partner the
@@ -67,21 +73,47 @@ async function limited(email: string): Promise<string | null> {
 }
 
 /**
- * Signup's whole answer about an address: the rules for every workspace (pattern, reserved, our name
- * and competitors'), then what a business signing itself up must also meet — eight letters at least,
- * made from its registered name (src/lib/workspace-names.ts) — and only then whether it is free.
+ * Signup's whole answer about an address: the rules for every workspace (pattern, platform addresses,
+ * staff's blocks, reserved words, our name and competitors'), then what a business signing itself up
+ * must also meet — eight letters at least, made from its registered name — and only then whether it
+ * is free (src/lib/workspace-names.ts `signupNameVerdict`). With an invitation that holds an address
+ * for its customer: that address exactly, without the signup rules.
  */
-async function signupSlugProblem(slug: string, legalName: string): Promise<string | null> {
-  const general = await slugProblem(slug);
-  if (general && general !== SLUG_TAKEN) return general;
-  return signupNameProblem(slug, legalName) ?? general;
+async function signupSlugProblem(slug: string, legalName: string, hold: InviteHold | null = null): Promise<string | null> {
+  const verdict = await judgeName(slug, hold, (facts) => signupNameVerdict(slug, legalName, facts));
+  return verdict.ok ? null : verdict.message;
 }
 
-/** The live check beside the address field, against the registered name typed above it. */
+/**
+ * The live check beside the address field, against the registered name typed above it. Never with an
+ * invitation's hold: an address held for the visitor is filled in and locked, and not checked live
+ * (`heldAddress` is the one, limited, way to ask about a code).
+ */
 export async function checkWorkspaceName(input: string, legalName = ""): Promise<SignupResult<{ host: string }>> {
   const slug = String(input ?? "").trim().toLowerCase();
   const problem = await signupSlugProblem(slug, String(legalName ?? "").trim().slice(0, 120));
   return problem ? { ok: false, error: problem } : { ok: true, data: { host: subdomainHost(slug) } };
+}
+
+/** How often one caller, and the whole process, may ask which address a code holds — an hour at a time. */
+const HELD_LOOKUPS = { perCaller: 30, all: 1000 } as const;
+
+/**
+ * The address an invitation code holds for its customer, for the form to fill in and lock — typed, or
+ * from the signup link (`?invite=`). Only a live code that holds one is answered; anything else — a
+ * wrong code, one used up, expired or ended, one that holds nothing, a partner's — is the same `null`,
+ * so this says nothing about codes beyond what they hold. Limited per caller (when known) and for the
+ * whole process, like the site's other lookups; past the limit the answer is `null` too, and signup
+ * still works — `startSignup` names the held address if a different one is sent.
+ */
+export async function heldAddress(code: string): Promise<{ slug: string } | null> {
+  const value = String(code ?? "").trim();
+  if (value.length < 6 || value.length > 100) return null;
+  const ip = clientIpFrom(await headers());
+  const allowed = siteAllowance([...(ip ? [{ key: `platform|held-lookup-caller:${ip}`, max: HELD_LOOKUPS.perCaller }] : []), { key: "platform|held-lookup:all", max: HELD_LOOKUPS.all }]);
+  if (!allowed) return null;
+  const hold = await inviteHold(sha256(value));
+  return hold ? { slug: hold.slug } : null;
 }
 
 export type SignupForm = {
@@ -130,10 +162,13 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   if (isDisposableDomain(email.domain)) return { ok: false, error: "Use your work address — throwaway addresses can't own a workspace." };
   if (!country) return { ok: false, error: "Choose your country." };
   if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
-  const nameProblem = await signupSlugProblem(slug, companyName);
+  // An invitation that holds an address for its customer: this signup gets exactly it, without the
+  // signup rules. The registered name is still asked for, and kept — just not matched against it.
+  const inviteCode = String(form.invite ?? "").trim();
+  const hold = inviteCode ? await inviteHold(sha256(inviteCode)) : null;
+  const nameProblem = await signupSlugProblem(slug, companyName, hold);
   if (nameProblem) return { ok: false, error: nameProblem };
   // Without an invitation only once signup is open; one given is checked either way.
-  const inviteCode = String(form.invite ?? "").trim();
   const open = await signupOpen();
   if (!open || inviteCode) {
     const badInvite = await inviteProblem(inviteCode, open);
@@ -223,6 +258,8 @@ export async function verifySignup(input: string): Promise<SignupResult> {
   }
 
   const invite = inviteCodeHash ? await controlDb().signupInvite.findUnique({ where: { codeHash: inviteCodeHash }, select: { planKey: true } }) : null;
+  // The address it holds, if any — though spending it may have just used it up, this signup is the one it was for.
+  const hold = inviteCodeHash ? await inviteHold(inviteCodeHash, { open: false }) : null;
   let tenantId: string;
   try {
     // A partner's invitation whose partner is no longer ACTIVE is refused in the usual words — and goes back, below.
@@ -240,6 +277,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
       country: pending.country,
       planKey: invite?.planKey ?? referral?.planKey ?? null,
       attribution,
+      hold,
     }));
   } catch (err) {
     // The invitation goes back: nothing was made with it.

@@ -3,8 +3,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import type { StaffRole } from "@wroffy/control-client";
+import { Prisma, type StaffRole } from "@wroffy/control-client";
 import { gatewayLabel } from "@/lib/console-shared/labels";
+import { hasRole } from "@/lib/console-shared/roles";
 import { isoDateOrUndefined } from "@/lib/console-shared/params";
 import { controlDb } from "@/lib/platform/control-db";
 import { ALL_ROLES, ENTER, MANAGERS, OWNERS, SELLERS, cleanText, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
@@ -15,6 +16,7 @@ import { addPlanPrice, retirePlanPrice } from "@/lib/billing/prices";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { SECRET_KEYS, setSecret, setSetting, type SecretKey } from "@/lib/platform/settings";
 import { forgetRegistry } from "@/lib/tenancy/registry";
+import { holdProblem, openInviteWhere } from "@/lib/platform/name-rules";
 import { removePinApiKey, savePinApiKey, startPinSync, startWorldSync } from "@/lib/platform/reference-sync";
 import { enterAsSupport } from "@/lib/platform/support";
 import { StaffChangeRefused, createStaff, deactivateStaff, endStaffSessions, issuePasswordSetup, resetStaffTwoFactor, setStaffRole } from "@/lib/platform/staff";
@@ -188,30 +190,57 @@ export async function consoleTopUpWarmPool() {
 
 // ─── Invitations, terminals, reference data ─────────────────────────────────────────────────────
 
-/** The code is shown once, to whoever made it; only its hash is kept. */
-export async function consoleCreateInvite(input: { note: string; uses: number; days: number; planKey?: string | null }) {
+/** Who may hold a reserved word or a blocked name for a customer: owners and admins (an ordinary name, whoever makes the invitation). */
+const HOLD_RESERVED = MANAGERS;
+
+/**
+ * The code is shown once, to whoever made it; only its hash is kept.
+ *
+ * It may hold an address for the customer it is for (`holdSlug`): nobody else may take it while the
+ * invitation is open, and the signup with this code gets exactly it, without the signup rules. Never a
+ * platform address, one a workspace has, or one another open invitation holds; a reserved word or a
+ * blocked name only when `holdSkipsReserved` — which only an owner or admin may tick. An invitation
+ * that holds an address signs up one workspace. An invitation used up, expired or ended that still
+ * holds the name lets go of it here, in the same transaction, before the new one takes it.
+ */
+export async function consoleCreateInvite(input: { note: string; uses: number; days: number; planKey?: string | null; holdSlug?: string | null; holdSkipsReserved?: boolean }) {
   return asStaff(MANAGERS, async (staff) => {
     const code = randomBytes(9).toString("base64url");
+    const codeHash = createHash("sha256").update(code).digest("hex");
     const days = Math.min(90, Math.max(1, Math.round(Number(input?.days) || 14)));
-    const uses = Math.min(100, Math.max(1, Math.round(Number(input?.uses) || 1)));
     const note = cleanText(input?.note, 200) || null;
     const planKey = cleanText(input?.planKey, 64) || null;
+    const heldSlug = cleanText(input?.holdSlug, 64).toLowerCase() || null;
+    const skipsReserved = input?.holdSkipsReserved === true;
+    const uses = heldSlug ? 1 : Math.min(100, Math.max(1, Math.round(Number(input?.uses) || 1)));
     if (planKey) {
       const plan = await controlDb().plan.findUnique({ where: { key: planKey }, select: { active: true, kind: true } });
       if (!plan || !plan.active || plan.kind === "INTERNAL") throw new StaffChangeRefused("That plan is not one a new workspace can start on.");
     }
-    await controlDb().signupInvite.create({
-      data: {
-        codeHash: createHash("sha256").update(code).digest("hex"),
-        note,
-        maxUses: uses,
-        expiresAt: new Date(Date.now() + days * 86_400_000),
-        createdBy: staff.id,
-        planKey,
-      },
-      select: { codeHash: true },
-    });
-    await consoleAudit(staff, "invite.create", { note, days, planKey });
+    if (skipsReserved && !heldSlug) throw new ConsoleRefused("Give the address to hold, or leave the reserved-word box unticked.");
+    if (skipsReserved && !hasRole(staff.role, HOLD_RESERVED)) throw new ConsoleRefused("Only an owner or an admin may hold a reserved word or a blocked name.");
+    if (heldSlug) {
+      const problem = await holdProblem(heldSlug, skipsReserved);
+      if (problem) throw new ConsoleRefused(problem);
+    }
+    const now = new Date();
+    try {
+      await controlDb().$transaction(async (tx) => {
+        // A dead invitation still holding the name lets go of it first: only an open one holds.
+        if (heldSlug) await tx.signupInvite.updateMany({ where: { heldSlug, NOT: openInviteWhere(now) }, data: { heldSlug: null, heldSlugSkipsReserved: false } });
+        await tx.signupInvite.create({
+          data: { codeHash, note, maxUses: uses, expiresAt: new Date(now.getTime() + days * 86_400_000), createdBy: staff.id, planKey, heldSlug, heldSlugSkipsReserved: !!heldSlug && skipsReserved },
+          select: { codeHash: true },
+        });
+      });
+    } catch (err) {
+      // Another invitation took it between the check and now.
+      const unique = (err instanceof Prisma.PrismaClientKnownRequestError || (err instanceof Error && err.name === "PrismaClientKnownRequestError")) && (err as { code?: unknown }).code === "P2002";
+      if (heldSlug && unique) throw new ConsoleRefused(`Another live invitation already holds ${heldSlug}.`);
+      throw err;
+    }
+    await consoleAudit(staff, "invite.create", { note, days, planKey, ...(heldSlug ? { heldSlug } : {}) });
+    if (heldSlug) await consoleAudit(staff, "invite.hold", { slug: heldSlug, skipsReserved, codeHashPrefix: codeHash.slice(0, 8) });
     return { code };
   });
 }
@@ -219,20 +248,24 @@ export async function consoleCreateInvite(input: { note: string; uses: number; d
 /**
  * Its code stops working now. Only a live invitation is ended — an expired or used-up one keeps the
  * end it had. The audit entry names it by its hash's first eight characters, which is how the
- * Invitations page tells an ended invitation from an expired one.
+ * Invitations page tells an ended invitation from an expired one. An address it held is let go of:
+ * anybody may have it again (the audit entry names it).
  */
 export async function consoleEndInvite(codeHash: string) {
   return asStaff(MANAGERS, async (staff) => {
     const hash = String(codeHash ?? "").trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new ConsoleRefused("That no longer exists.");
     const control = controlDb();
-    const invite = await control.signupInvite.findUnique({ where: { codeHash: hash }, select: { uses: true, maxUses: true } });
+    const invite = await control.signupInvite.findUnique({ where: { codeHash: hash }, select: { uses: true, maxUses: true, heldSlug: true } });
     if (!invite) throw new ConsoleRefused("That no longer exists.");
     if (invite.uses >= invite.maxUses) throw new ConsoleRefused("It is used up already — its code no longer works.");
     const now = new Date();
-    const ended = await control.signupInvite.updateMany({ where: { codeHash: hash, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }, data: { expiresAt: now } });
+    const ended = await control.signupInvite.updateMany({
+      where: { codeHash: hash, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+      data: { expiresAt: now, heldSlug: null, heldSlugSkipsReserved: false },
+    });
     if (ended.count === 0) throw new ConsoleRefused("It has ended already.");
-    await consoleAudit(staff, "invite.end", { codeHashPrefix: hash.slice(0, 8) });
+    await consoleAudit(staff, "invite.end", { codeHashPrefix: hash.slice(0, 8), ...(invite.heldSlug ? { heldSlug: invite.heldSlug } : {}) });
     return null;
   });
 }

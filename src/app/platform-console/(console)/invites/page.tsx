@@ -67,7 +67,7 @@ export default async function ConsoleInvitesPage({ searchParams }: PageProps<"/p
       <PageHeader
         title="Invitations"
         subtitle={`${plural(counts.live, "invitation")} live · ${num(counts.used)} used up · ${num(counts.all)} in all${f.q ? " matching the search" : ""}`}
-        actions={caps.manage ? <NewInviteButton plans={board.plans} signupUrl={board.signupUrl} /> : undefined}
+        actions={caps.manage ? <NewInviteButton plans={board.plans} signupUrl={board.signupUrl} workspaceSuffix={board.workspaceSuffix} mayHoldReserved={caps.manage} /> : undefined}
       />
 
       <div className="space-y-6">

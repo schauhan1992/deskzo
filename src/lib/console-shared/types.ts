@@ -28,7 +28,7 @@ export type SubscriptionStatusKey = "INCOMPLETE" | "TRIALING" | "ACTIVE" | "PAST
 export type InvoiceStatusKey = "DRAFT" | "OPEN" | "PAID" | "VOID" | "UNCOLLECTIBLE";
 export type PlanKindKey = "EDITION" | "BUNDLE" | "ADDON" | "INTERNAL";
 
-export type AuditCategoryKey = "lifecycle" | "billing" | "staff" | "support" | "setup" | "reference" | "invites" | "partners" | "notes" | "terminals" | "console";
+export type AuditCategoryKey = "lifecycle" | "billing" | "staff" | "support" | "setup" | "reference" | "invites" | "names" | "partners" | "notes" | "terminals" | "console";
 
 /** One audit row as the console shows it — built by `toActivityItems` (src/lib/platform/console-guard.ts). */
 export type ActivityItem = {

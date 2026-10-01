@@ -4,6 +4,7 @@ import { fill } from "@/components/site/links";
 import { Container } from "@/components/site/ui";
 import { SignupFlow, type SignupReferral } from "@/components/platform/signup-flow";
 import { COUNTRIES } from "@/lib/geo/countries";
+import { SLUG_PATTERN } from "@/lib/workspace-names";
 
 /**
  * A partner's referral, as the signup page put it in the query (src/app/platform-site/signup/page.tsx):
@@ -14,6 +15,17 @@ function referralFrom(query: SiteRenderContext["searchParams"]): SignupReferral 
   const partnerName = String(query.refName ?? "").trim();
   const via = query.refVia;
   return code && partnerName && (via === "link" || via === "cookie") ? { code, partnerName, via } : null;
+}
+
+/**
+ * The invitation code from the signup link (`?invite=`), and the address it holds as the signup page
+ * looked it up (`held`) — that page drops any `held` a visitor sends, and the site drops it everywhere
+ * else (src/components/site/page-view.tsx), so a hand-made link can't lock somebody's address field.
+ */
+function invitationFrom(query: SiteRenderContext["searchParams"]): { invite: string; held: string | null } {
+  const invite = String(query.invite ?? "").trim().slice(0, 100);
+  const held = String(query.held ?? "").trim();
+  return { invite, held: invite && SLUG_PATTERN.test(held) ? held : null };
 }
 
 /**
@@ -46,7 +58,7 @@ export function SignupFormBlock({ props, ctx }: { props: SignupFormProps; ctx: S
             )}
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-lg sm:p-8">
-            <SignupFlow suffix={ctx.workspaceSuffix} countries={COUNTRIES} inviteRequired={!ctx.signupOpen} referral={referralFrom(ctx.searchParams)} />
+            <SignupFlow suffix={ctx.workspaceSuffix} countries={COUNTRIES} inviteRequired={!ctx.signupOpen} referral={referralFrom(ctx.searchParams)} {...invitationFrom(ctx.searchParams)} />
           </div>
         </div>
       </Container>

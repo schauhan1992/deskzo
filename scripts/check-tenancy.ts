@@ -116,7 +116,10 @@ const STATE: Record<string, Allowed> = {
   "src/lib/support/console.ts:opened": { reason: "console-wide: when each staff member last had each support attachment's opening audited (ten-minute dedupe, bounded) — platform staff, no workspace's data" },
   "src/lib/partners/settings.ts:referralCookieCache": { reason: "shared: the platform's referral-cookie lifetime, a platform setting cached for a minute — no workspace's data" },
   "src/lib/platform/linked/groups.ts:enabledCache": { reason: "shared: the platform's linked sign-in switch (kill switch), one per install — no workspace's data" },
-  "src/lib/platform/find-workspaces.ts:allowances": { reason: "shared: the public site's request counts (find my workspaces, the contact form), keyed platform|… by hashed address, caller or all — no workspace's data" },
+  "src/lib/platform/name-rules.ts:cache": { reason: "shared: staff's rules for new workspace names (control plane), the same for every workspace — read every 30 s, and again after a change" },
+  "src/lib/platform/name-rules.ts:generation": { reason: "shared: counts the name rules cache's invalidations, so a read begun before one is not stored — no workspace data" },
+  "src/lib/platform/name-rules.ts:lastFailureLog": { reason: "shared: when a failed read of the name rules was last logged (at most once a minute)" },
+  "src/lib/platform/find-workspaces.ts:allowances": { reason: "shared: the public site's request counts (find my workspaces, the contact form, the address an invitation holds), keyed platform|… by hashed address, caller or all — no workspace's data" },
   "src/lib/tenancy/log-labels.ts:requestStore": { reason: "shared: a reference to Next's own request store, looked up once — it holds no workspace's data" },
 
   "src/lib/access/lock.ts:testLock": { reason: "test override, set only by check scripts" },

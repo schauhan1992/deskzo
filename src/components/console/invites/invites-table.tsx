@@ -26,6 +26,9 @@ import { cn } from "@/lib/utils";
  *
  * Managers may end a live invitation or give one more days (both T1). An invitation that is used up,
  * or was ended, cannot be brought back — the server refuses, so the menu does not offer it.
+ *
+ * An invitation may hold an address for its customer: nobody else may take it while the invitation
+ * is live. Ending it lets the address go; one that is used up or has lapsed no longer holds it either.
  */
 
 const DAY_MS = 86_400_000;
@@ -53,9 +56,10 @@ export function InvitesTable({ rows, caps }: { rows: InviteRow[]; caps: Caps }) 
 
   return (
     <>
-      <DataTable caption="Invitations" minWidth={manage ? 1100 : 1060}>
+      <DataTable caption="Invitations" minWidth={manage ? 1240 : 1200}>
         <THead>
           <Th>For</Th>
+          <Th>Holds address</Th>
           <Th>Plan</Th>
           <Th>Uses</Th>
           <Th>Status</Th>
@@ -79,6 +83,9 @@ export function InvitesTable({ rows, caps }: { rows: InviteRow[]; caps: Caps }) 
                   ) : (
                     <span className="text-subtle">No note</span>
                   )}
+                </Td>
+                <Td nowrap>
+                  <HeldAddress row={row} />
                 </Td>
                 <Td nowrap>
                   {row.planName ?? (row.planKey ? <span className="font-mono text-xs text-muted">{row.planKey}</span> : <span className="text-muted">Default plan</span>)}
@@ -125,6 +132,20 @@ export function InvitesTable({ rows, caps }: { rows: InviteRow[]; caps: Caps }) 
         </>
       )}
     </>
+  );
+}
+
+/** The address an invitation holds: held while it is live; after that, kept here only as what it was for. */
+function HeldAddress({ row }: { row: InviteRow }): ReactNode {
+  if (!row.heldSlug) return <span className="text-subtle">—</span>;
+  const live = row.state === "live";
+  return (
+    <span className="inline-flex flex-col">
+      <span className={cn("font-mono text-xs", live ? "text-text" : "text-subtle line-through")} title={live ? "Held for this invitation's customer" : "No longer held"}>
+        {row.heldSlug}
+      </span>
+      <span className="text-[11px] text-muted">{live ? (row.heldSkipsReserved ? "Held · may be reserved" : "Held") : "No longer held"}</span>
+    </span>
   );
 }
 
@@ -181,6 +202,7 @@ function EndInviteDialog({ row, onClose }: { row: InviteRow | null; onClose: () 
         <p>
           The code for <strong className="font-medium">{nameOf(row)}</strong> stops working now
           {row.uses > 0 ? `. The ${plural(row.uses, "workspace")} already made with it ${row.uses === 1 ? "is" : "are"} not affected.` : "."}
+          {row.heldSlug ? <> The address it holds, <span className="font-mono">{row.heldSlug}</span>, is let go: anybody may have it again.</> : null}
         </p>
       )}
     </ConfirmDialog>

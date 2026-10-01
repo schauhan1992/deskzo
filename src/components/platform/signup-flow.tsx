@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { ChevronDown, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { checkWorkspaceName, signupProgress, startSignup, verifySignup, type SignupForm } from "@/actions/platform/signup";
+import { checkWorkspaceName, heldAddress, signupProgress, startSignup, verifySignup, type SignupForm } from "@/actions/platform/signup";
 import { MIN_SIGNUP_NAME, suggestedName } from "@/lib/workspace-names";
 import type { Country } from "@/lib/geo/countries";
 
@@ -20,10 +20,38 @@ export type SignupReferral = { code: string; partnerName: string; via: "link" | 
  * A partner's code (spec §4.2): prefilled from a referral — "Referred by …", which the visitor may
  * remove — or typed into the "Have a partner code?" disclosure. It goes with the form, saying where it
  * came from; `startSignup` checks it again.
+ *
+ * An invitation code that holds an address for its customer — from the signup link (`invite`, looked
+ * up by the page: `held`) or typed — fills the address in and locks it: "This address was set up for
+ * you." It stays locked while that code is in the field; change the code and the address is the
+ * visitor's own again. The registered business name is still asked for, but the address is no longer
+ * made from it. `startSignup` holds it to the same rule.
  */
-export function SignupFlow({ suffix, countries, inviteRequired = true, referral = null }: { suffix: string; countries: Country[]; inviteRequired?: boolean; referral?: SignupReferral | null }) {
+export function SignupFlow({
+  suffix,
+  countries,
+  inviteRequired = true,
+  referral = null,
+  invite = "",
+  held = null,
+}: {
+  suffix: string;
+  countries: Country[];
+  inviteRequired?: boolean;
+  referral?: SignupReferral | null;
+  /** An invitation code to start with — from the signup link. */
+  invite?: string;
+  /** The address `invite` holds, as the page looked it up; null when it holds none. */
+  held?: string | null;
+}) {
   const [stage, setStage] = useState<Stage>({ at: "form" });
-  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite: "", referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
+  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite, referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
+  // The address an invitation code holds, with the code it belongs to — it applies only while that code is the one typed.
+  const [hold, setHold] = useState<{ code: string; slug: string } | null>(held && invite.trim() ? { code: invite.trim(), slug: held } : null);
+  const inviteCode = form.invite.trim();
+  const activeHold = hold && hold.code === inviteCode ? hold : null;
+  // Each code is asked about once: the lookup is limited, and its answer does not change while the form is open.
+  const asked = useRef(new Set(invite.trim() ? [invite.trim()] : []));
   // The partner's name is shown until the visitor removes it; after that, the code is theirs to type or not.
   const [referredBy, setReferredBy] = useState(referral?.partnerName ?? null);
   // Remembered with the address and registered name it was for, so an answer about earlier ones is never shown.
@@ -35,18 +63,33 @@ export function SignupFlow({ suffix, countries, inviteRequired = true, referral 
   const [pending, startTransition] = useTransition();
   const set = (key: keyof SignupForm) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
-  // The address, checked as it (or the registered name it must come from) is typed — half a second after the last key.
+  // The address, checked as it (or the registered name it must come from) is typed — half a second after
+  // the last key. Not one held for the visitor: that was set up for them, and is not theirs to change.
   const slug = form.slug.trim().toLowerCase();
   const legalName = form.companyName.trim();
   const checkKey = `${slug}|${legalName}`;
   useEffect(() => {
-    if (!slug) return;
+    if (!slug || activeHold) return;
     const timer = setTimeout(() => {
       checkWorkspaceName(slug, legalName).then((r) => setNameCheck(r.ok ? { key: checkKey, ok: true, text: `${r.data.host} is free` } : { key: checkKey, ok: false, text: r.error }));
     }, 500);
     return () => clearTimeout(timer);
-  }, [slug, legalName, checkKey]);
-  const shownCheck = nameCheck && nameCheck.key === checkKey ? nameCheck : null;
+  }, [slug, legalName, checkKey, activeHold]);
+  const shownCheck = !activeHold && nameCheck && nameCheck.key === checkKey ? nameCheck : null;
+
+  // An invitation code typed in: does it hold an address for this visitor? Asked once per code, half a second after the last key.
+  useEffect(() => {
+    if (inviteCode.length < 8 || asked.current.has(inviteCode)) return;
+    const timer = setTimeout(() => {
+      asked.current.add(inviteCode);
+      heldAddress(inviteCode)
+        .then((r) => {
+          if (r) setHold({ code: inviteCode, slug: r.slug });
+        })
+        .catch(() => asked.current.delete(inviteCode));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [inviteCode]);
   const setLegalName = (e: { target: { value: string } }) => {
     const value = e.target.value;
     setForm((f) => ({ ...f, companyName: value, ...(slugTyped ? {} : { slug: suggestedName(value) }) }));
@@ -124,7 +167,7 @@ export function SignupFlow({ suffix, countries, inviteRequired = true, referral 
         e.preventDefault();
         setError(null);
         startTransition(async () => {
-          const r = await startSignup(form);
+          const r = await startSignup(activeHold ? { ...form, slug: activeHold.slug } : form);
           if (r.ok) setStage({ at: "code", email: r.data.email });
           else setError(r.error);
         });
@@ -133,15 +176,34 @@ export function SignupFlow({ suffix, countries, inviteRequired = true, referral 
       <div>
         <Label htmlFor="company">Registered business name</Label>
         <Input id="company" value={form.companyName} onChange={setLegalName} autoComplete="organization" aria-describedby="company-hint" required />
-        <p id="company-hint" className="mt-1 text-xs text-muted">Exactly as on your GST registration or certificate of incorporation — your address is made from it.</p>
+        <p id="company-hint" className="mt-1 text-xs text-muted">
+          {activeHold ? "Exactly as on your GST registration or certificate of incorporation." : "Exactly as on your GST registration or certificate of incorporation — your address is made from it."}
+        </p>
       </div>
       <div>
         <Label htmlFor="slug">Your address</Label>
-        <div className="flex items-center rounded-base border border-line bg-surface pr-2 text-sm">
-          <Input id="slug" value={form.slug} onChange={setSlug} placeholder="acmetechnologies" className="border-0 shadow-none" autoComplete="off" aria-describedby="slug-hint" required />
+        <div className={`flex items-center rounded-base border border-line pr-2 text-sm ${activeHold ? "bg-surface-sunken" : "bg-surface"}`}>
+          <Input
+            id="slug"
+            value={activeHold ? activeHold.slug : form.slug}
+            onChange={setSlug}
+            readOnly={!!activeHold}
+            placeholder="acmetechnologies"
+            className="border-0 bg-transparent shadow-none"
+            autoComplete="off"
+            aria-describedby="slug-hint"
+            required
+          />
           <span className="whitespace-nowrap text-muted">{suffix}</span>
+          {activeHold && <Lock aria-hidden="true" className="ml-2 h-4 w-4 shrink-0 text-muted" />}
         </div>
-        <p id="slug-hint" className="mt-1 text-xs text-muted">At least {MIN_SIGNUP_NAME} letters or digits, made from your registered name — its words in order.</p>
+        {activeHold ? (
+          <p id="slug-hint" className="mt-1 text-xs text-muted" role="status">
+            This address was set up for you with your invitation.
+          </p>
+        ) : (
+          <p id="slug-hint" className="mt-1 text-xs text-muted">At least {MIN_SIGNUP_NAME} letters or digits, made from your registered name — its words in order.</p>
+        )}
         {shownCheck && <p className={`mt-1 text-xs ${shownCheck.ok ? "text-success" : "text-danger"}`} role="status">{shownCheck.text}</p>}
       </div>
       <div>

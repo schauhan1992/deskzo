@@ -8,17 +8,22 @@ import { CopyField } from "@/components/console/kit/copy-field";
 import { OnceSecret } from "@/components/console/kit/once-secret";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
+import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { plural } from "@/lib/console-shared/format";
 import { cn } from "@/lib/utils";
+import { MIN_SIGNUP_NAME, PLATFORM_HOSTS, SLUG_PATTERN } from "@/lib/workspace-names";
 
 /**
  * "New invitation" (spec §3.7): the button, and the dialog it opens — who it is for, the plan the new
- * workspace starts on, how many sign-ups it allows and for how long. Once made, the code is shown
- * exactly once, with the signup link and a ready-to-send message; nothing is kept on the client after
- * the dialog closes.
+ * workspace starts on, how many sign-ups it allows and for how long, and — optionally — an address
+ * held for that customer: nobody else may take it while the invitation is open, and their signup gets
+ * exactly it, without the signup rules. Owners and admins may tick that it may be a reserved word or a
+ * blocked name. An invitation that holds an address signs up one workspace. Once made, the code is
+ * shown exactly once, with the signup link and a ready-to-send message; nothing is kept on the client
+ * after the dialog closes.
  *
  * The dialog also opens from the address — `?new=1`, with `?note=` filled in (the command palette,
  * and the workspace directory's "New invitation" after a search that found nobody). Those params are
@@ -26,13 +31,22 @@ import { cn } from "@/lib/utils";
  * dialog is drawn into `<body>`, which the server does not have.
  */
 
-type Created = { code: string; note: string; uses: number; days: number; planName: string | null };
+type Created = { code: string; note: string; uses: number; days: number; planName: string | null; heldSlug: string | null };
+type Props = { plans: { key: string; name: string }[]; signupUrl: string; workspaceSuffix: string; mayHoldReserved: boolean };
 
 const NOTE_MAX = 200;
 const USES = { min: 1, max: 100, start: "1" };
 const DAYS = { min: 1, max: 90, start: "14" };
 
 const noSubscribe = () => () => {};
+
+/** Why an address can't be held, as far as the browser can tell (the server checks the rest); null when it may be. */
+function heldShapeProblem(slug: string): string | null {
+  if (!slug) return null;
+  if (!SLUG_PATTERN.test(slug)) return "3–40 lower-case letters, digits and hyphens, not starting or ending with a hyphen.";
+  if (PLATFORM_HOSTS.has(slug)) return "One of the platform's own addresses — it can never be a workspace's.";
+  return null;
+}
 
 /** A whole number within bounds, or null — the field's text as typed, checked before it is sent. */
 function wholeIn(text: string, min: number, max: number): number | null {
@@ -41,7 +55,7 @@ function wholeIn(text: string, min: number, max: number): number | null {
   return n >= min && n <= max ? n : null;
 }
 
-export function NewInviteButton({ plans, signupUrl }: { plans: { key: string; name: string }[]; signupUrl: string }) {
+export function NewInviteButton({ plans, signupUrl, workspaceSuffix, mayHoldReserved }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isClient = useSyncExternalStore(noSubscribe, () => true, () => false);
@@ -89,7 +103,7 @@ export function NewInviteButton({ plans, signupUrl }: { plans: { key: string; na
         New invitation
       </Button>
       <Dialog open={open && isClient} onClose={close} title="New invitation">
-        <NewInviteForm plans={plans} signupUrl={signupUrl} initialNote={initialNote} action={action} onClose={close} />
+        <NewInviteForm plans={plans} signupUrl={signupUrl} workspaceSuffix={workspaceSuffix} mayHoldReserved={mayHoldReserved} initialNote={initialNote} action={action} onClose={close} />
       </Dialog>
     </>
   );
@@ -102,12 +116,12 @@ export function NewInviteButton({ plans, signupUrl }: { plans: { key: string; na
 function NewInviteForm({
   plans,
   signupUrl,
+  workspaceSuffix,
+  mayHoldReserved,
   initialNote,
   action,
   onClose,
-}: {
-  plans: { key: string; name: string }[];
-  signupUrl: string;
+}: Props & {
   initialNote: string;
   action: ReturnType<typeof useConsoleAction<{ code: string }>>;
   onClose: () => void;
@@ -117,6 +131,8 @@ function NewInviteForm({
   const [planKey, setPlanKey] = useState("");
   const [uses, setUses] = useState(USES.start);
   const [days, setDays] = useState(DAYS.start);
+  const [held, setHeld] = useState("");
+  const [heldMayBeReserved, setHeldMayBeReserved] = useState(false);
   const [created, setCreated] = useState<Created | null>(null);
   const noteRef = useRef<HTMLInputElement>(null);
 
@@ -127,22 +143,26 @@ function NewInviteForm({
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const usesN = wholeIn(uses, USES.min, USES.max);
+  const heldSlug = held.trim().toLowerCase();
+  const heldProblem = heldShapeProblem(heldSlug);
+  // An invitation that holds an address signs up one workspace: the address can only be had once.
+  const usesN = heldSlug ? 1 : wholeIn(uses, USES.min, USES.max);
   const daysN = wholeIn(days, DAYS.min, DAYS.max);
-  const ready = usesN !== null && daysN !== null && !action.pending;
+  const ready = usesN !== null && daysN !== null && !heldProblem && !action.pending;
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!ready || usesN === null || daysN === null) return;
     const planName = plans.find((p) => p.key === planKey)?.name ?? null;
     const sent = note.trim();
-    action.run(() => consoleCreateInvite({ note: sent, uses: usesN, days: daysN, planKey: planKey || null }), {
+    const hold = heldSlug || null;
+    action.run(() => consoleCreateInvite({ note: sent, uses: usesN, days: daysN, planKey: planKey || null, holdSlug: hold, holdSkipsReserved: !!hold && mayHoldReserved && heldMayBeReserved }), {
       success: "Invitation created.",
-      onDone: (data) => setCreated({ code: data.code, note: sent, uses: usesN, days: daysN, planName }),
+      onDone: (data) => setCreated({ code: data.code, note: sent, uses: usesN, days: daysN, planName, heldSlug: hold }),
     });
   }
 
-  if (created) return <CreatedInvite created={created} signupUrl={signupUrl} onDone={onClose} />;
+  if (created) return <CreatedInvite created={created} signupUrl={signupUrl} workspaceSuffix={workspaceSuffix} onDone={onClose} />;
 
   const noteId = `${id}-note`;
   const planId = `${id}-plan`;
@@ -150,6 +170,9 @@ function NewInviteForm({
   const usesHint = `${id}-uses-hint`;
   const daysId = `${id}-days`;
   const daysHint = `${id}-days-hint`;
+  const heldId = `${id}-held`;
+  const heldHint = `${id}-held-hint`;
+  const reservedId = `${id}-held-reserved`;
 
   return (
     // p-0.5: the dialog body scrolls, and a scroll box clips the focus ring of a field at its edge.
@@ -182,6 +205,42 @@ function NewInviteForm({
         <p className="text-xs text-muted">The plan a workspace made with this code starts its trial on.</p>
       </div>
 
+      <div className="space-y-1.5">
+        <Label htmlFor={heldId}>Hold an address for this customer (optional)</Label>
+        <div className="flex items-center rounded-base border border-line-strong bg-surface pr-3 text-sm shadow-sm">
+          <Input
+            id={heldId}
+            value={held}
+            maxLength={40}
+            onChange={(e) => setHeld(e.target.value)}
+            placeholder="acme"
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            className="border-0 bg-transparent font-mono shadow-none"
+            aria-invalid={heldProblem ? true : undefined}
+            aria-describedby={heldHint}
+            readOnly={action.pending}
+          />
+          <span className="whitespace-nowrap text-muted">{workspaceSuffix}</span>
+        </div>
+        <p id={heldHint} className={cn("text-xs", heldProblem ? "text-danger" : "text-muted")}>
+          {heldProblem ??
+            (heldSlug
+              ? `Nobody else may take it while this invitation is open. Their signup gets exactly it — without the ${MIN_SIGNUP_NAME}-letter and registered-name rules.`
+              : "Leave it empty to let them choose, under the signup rules.")}
+        </p>
+        {mayHoldReserved && heldSlug && (
+          <div className="flex items-start gap-2.5 pt-1">
+            <Checkbox id={reservedId} checked={heldMayBeReserved} onChange={(e) => setHeldMayBeReserved(e.target.checked)} disabled={action.pending} className="mt-0.5 shrink-0" />
+            <label htmlFor={reservedId} className="cursor-pointer text-sm text-text">
+              It may be a reserved word or a blocked name
+              <span className="block text-xs text-muted">Never one of the platform&apos;s own addresses, or one a workspace has.</span>
+            </label>
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor={usesId}>Uses</Label>
@@ -192,14 +251,18 @@ function NewInviteForm({
             min={USES.min}
             max={USES.max}
             step={1}
-            value={uses}
+            value={heldSlug ? "1" : uses}
             onChange={(e) => setUses(e.target.value)}
             aria-invalid={usesN === null || undefined}
             aria-describedby={usesHint}
-            readOnly={action.pending}
+            readOnly={action.pending || !!heldSlug}
           />
           <p id={usesHint} className={cn("text-xs", usesN === null ? "text-danger" : "text-muted")}>
-            {usesN === null ? `A whole number from ${USES.min} to ${USES.max}.` : `Signs up ${plural(usesN, "workspace")}.`}
+            {heldSlug
+              ? "One workspace: the address it holds can only be had once."
+              : usesN === null
+                ? `A whole number from ${USES.min} to ${USES.max}.`
+                : `Signs up ${plural(usesN, "workspace")}.`}
           </p>
         </div>
         <div className="space-y-1.5">
@@ -238,11 +301,17 @@ function NewInviteForm({
   );
 }
 
-/** The one time the code is shown: the code, the signup link, and a message with both, ready to paste. */
-function CreatedInvite({ created, signupUrl, onDone }: { created: Created; signupUrl: string; onDone: () => void }) {
+/**
+ * The one time the code is shown: the code, the signup link, and a message with both, ready to paste.
+ * An invitation that holds an address says so, and its link carries the code (`?invite=`), so the
+ * signup form opens with the address filled in and locked.
+ */
+function CreatedInvite({ created, signupUrl, workspaceSuffix, onDone }: { created: Created; signupUrl: string; workspaceSuffix: string; onDone: () => void }) {
+  const link = created.heldSlug ? `${signupUrl}?invite=${encodeURIComponent(created.code)}` : signupUrl;
   const message = [
     `You're invited to set up a workspace${created.planName ? ` on the ${created.planName} plan` : ""}.`,
-    `Sign up at ${signupUrl} and enter this invitation code: ${created.code}`,
+    ...(created.heldSlug ? [`Your address is set up for you: ${created.heldSlug}${workspaceSuffix}`] : []),
+    `Sign up at ${link} and enter this invitation code: ${created.code}`,
     `The code works for ${plural(created.days, "day")}${created.uses > 1 ? ` and for up to ${plural(created.uses, "workspace")}` : ""}.`,
   ].join("\n");
 
@@ -257,6 +326,12 @@ function CreatedInvite({ created, signupUrl, onDone }: { created: Created; signu
           "The invitation is ready."
         )}{" "}
         Send them the code and the signup link — or copy the whole message.
+        {created.heldSlug && (
+          <>
+            {" "}
+            It holds <span className="font-mono">{created.heldSlug}</span> for them.
+          </>
+        )}
       </p>
       <OnceSecret
         label="Invitation code"
@@ -267,7 +342,7 @@ function CreatedInvite({ created, signupUrl, onDone }: { created: Created; signu
           <div className="space-y-3">
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted">Signup link</p>
-              <CopyField value={signupUrl} label="signup link" />
+              <CopyField value={link} label="signup link" />
             </div>
             <CopyMessageButton text={message} />
           </div>

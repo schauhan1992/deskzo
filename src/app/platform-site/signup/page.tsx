@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { heldAddress } from "@/actions/platform/signup";
 import { SitePageView, sitePageMetadata } from "@/components/site/page-view";
 import { findActiveReferral } from "@/lib/partners/referrals";
 import { controlConfigured } from "@/lib/platform/control-db";
@@ -12,6 +13,10 @@ import { controlConfigured } from "@/lib/platform/control-db";
  * checked here, and only a live one reaches the form (src/components/site/blocks/signup-form.tsx),
  * with its partner's name: any `ref`, `refVia` or `refName` a visitor sends is dropped first, and a
  * code that isn't live is dropped without a word.
+ *
+ * An invitation code may come in the link too (`?invite=`): it fills the form's code in, and when it
+ * holds an address for its customer, the page looks that up and passes it on as `held` — any `held`
+ * a visitor sends is dropped first — so the form opens with the address filled in and locked.
  */
 
 const REFERRAL_COOKIE = "wroffy_ref";
@@ -36,6 +41,21 @@ export async function generateMetadata(): Promise<Metadata> {
   return sitePageMetadata("signup");
 }
 
+/**
+ * The address an invitation code from the link holds, for the form to fill in and lock — through the
+ * same limited lookup the form uses (`heldAddress`). Null for anything else, a control plane that can't
+ * answer included.
+ */
+async function heldFor(invite: string): Promise<string | null> {
+  if (!invite || !controlConfigured()) return null;
+  try {
+    return (await heldAddress(invite))?.slug ?? null;
+  } catch (err) {
+    console.warn(`[site] an invitation code could not be looked up, so the signup form holds no address: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);
+    return null;
+  }
+}
+
 export default async function SignupPage({ searchParams }: PageProps<"/platform-site/signup">) {
   const query: Query = { ...(await searchParams) };
   const fromLink = firstValue(query.ref);
@@ -45,5 +65,11 @@ export default async function SignupPage({ searchParams }: PageProps<"/platform-
   const code = fromLink || firstValue((await cookies()).get(REFERRAL_COOKIE)?.value);
   const referral = await liveReferral(code);
   if (referral) Object.assign(query, { ref: referral.code, refVia: fromLink ? "link" : "cookie", refName: referral.partnerName });
+  // An invitation code in the link (`?invite=`) fills the code in; one that holds an address fills that in too, locked.
+  delete query.held;
+  const invite = firstValue(query.invite).slice(0, 100);
+  if (invite) query.invite = invite;
+  const held = await heldFor(invite);
+  if (held) query.held = held;
   return <SitePageView slug="signup" searchParams={query} trustedReferral />;
 }

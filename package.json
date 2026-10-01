@@ -154,6 +154,7 @@
     "check:order-handoff": "tsx scripts/check-order-handoff.ts",
     "check:collections": "tsx scripts/check-collections.ts",
     "check:workspace-names": "tsx scripts/check-workspace-names.ts",
+    "check:name-rules": "tsx scripts/check-name-rules.ts",
     "check:close": "tsx scripts/check-close.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",
