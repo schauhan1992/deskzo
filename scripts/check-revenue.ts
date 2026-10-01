@@ -143,7 +143,7 @@ async function main() {
     // variable that is missing, never for one that is set).
     process.env.DATABASE_URL = scratchUrl;
     process.env.CONTROL_DATABASE_URL = "";
-    process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+    process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { db } = require("../src/lib/db") as typeof import("../src/lib/db");

@@ -97,7 +97,7 @@ export const RESERVED_WORD_GROUPS = [
 export const RESERVED_WORDS: ReadonlySet<string> = new Set(RESERVED_WORD_GROUPS.flatMap((g) => g.words));
 
 /** Ours: refused anywhere in an address. Distinctive enough never to sit inside an ordinary word. */
-export const OUR_NAMES = ["deskzo", "wroffy"] as const;
+export const OUR_NAMES = ["deskzo"] as const;
 
 /** Competitors': refused as a word of the address (between hyphens, or how it starts). */
 export const COMPETITOR_NAMES = ["zoho", "tally", "odoo", "salesforce", "hubspot", "freshworks", "freshdesk", "freshsales", "pipedrive", "netsuite", "quickbooks"] as const;

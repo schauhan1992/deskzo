@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { istDayKey } from "@/lib/console-shared/format";
 import { STUCK_STAGES, isoDateOrUndefined, type StuckStage } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";

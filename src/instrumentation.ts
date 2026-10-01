@@ -8,7 +8,7 @@
  * And labels every log line with the workspace it is about (src/lib/tenancy/log-labels.ts).
  */
 export async function register() {
-  (globalThis as { __wroffyInNext?: boolean }).__wroffyInNext = true;
+  (globalThis as { __deskzoInNext?: boolean }).__deskzoInNext = true;
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { installLogLabels } = await import("@/lib/tenancy/log-labels");
     installLogLabels();

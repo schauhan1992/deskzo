@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { nameVerdict, verdictInWords, type NameFacts, type NameHold, type NameRule, type NameVerdict } from "@/lib/workspace-names";
 

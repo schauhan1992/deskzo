@@ -26,7 +26,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
 // The shared reference database is not this check's to migrate.
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -139,7 +139,7 @@ async function main() {
     ok("the form is accepted and a code is emailed", started.ok && mail.length === 1 && /\d{6}/.test(mail[0].subject), started.ok ? mail[0]?.subject : started.error);
     const code = mail[0]?.subject.match(/(\d{6})$/)?.[1] ?? "";
     ok("  to the address given, with nothing else in it worth stealing", mail[0]?.to === form.email && !mail[0].text.includes(form.password));
-    ok("  and only this browser holds the signup", jar.has("wroffy.signup"));
+    ok("  and only this browser holds the signup", jar.has("deskzo.signup"));
     const pendingRow = await control.pendingSignup.findFirst({ where: { slug: "zzprov-alpha" } });
     ok("  the password is kept only as a hash", !!pendingRow && pendingRow.passwordHash !== form.password && (await bcrypt.compare(form.password, pendingRow.passwordHash)));
 

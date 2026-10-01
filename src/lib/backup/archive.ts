@@ -21,7 +21,7 @@ import { platformHmac } from "@/lib/platform/kek";
  *
  * ## Layout
  *
- *     magic      8 bytes    "WROFFYBK"
+ *     magic      8 bytes    "DESKZOBK"
  *     version    1 byte     1
  *     headerLen  4 bytes    big-endian
  *     header     headerLen  UTF-8 JSON, PLAINTEXT
@@ -58,7 +58,7 @@ import { platformHmac } from "@/lib/platform/kek";
  * the passphrase can be proved in microseconds before anything expensive or destructive starts.
  */
 
-export const ARCHIVE_MAGIC = Buffer.from("WROFFYBK", "latin1");
+export const ARCHIVE_MAGIC = Buffer.from("DESKZOBK", "latin1");
 /** Written: 2, signed by the platform. Read: 1 (from before signatures) and 2. */
 export const ARCHIVE_VERSION = 2;
 const READABLE_VERSIONS = new Set([1, 2]);
@@ -76,7 +76,7 @@ const PREAMBLE_BYTES = ARCHIVE_MAGIC.length + 1 + 4;
 const trailerBytes = (header: Pick<ArchiveHeader, "signature">) => (header.signature ? SIGNATURE_BYTES : 0);
 
 /** What `verifier` holds. Any fixed string works; this one says what it is in a hex dump. */
-const VERIFIER_PLAINTEXT = "wroffy-backup-verifier-v1";
+const VERIFIER_PLAINTEXT = "deskzo-backup-verifier-v1";
 
 /**
  * Cost parameters, fixed here and recorded in every header.

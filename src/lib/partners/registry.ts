@@ -1,4 +1,4 @@
-import { Prisma, type PartnerKind, type PartnerRole, type PartnerStatus } from "@wroffy/control-client";
+import { Prisma, type PartnerKind, type PartnerRole, type PartnerStatus } from "@deskzo/control-client";
 import { istDayKey } from "@/lib/console-shared/format";
 import { parseEmailAddress } from "@/lib/email-verification";
 import { COUNTRIES } from "@/lib/geo/countries";

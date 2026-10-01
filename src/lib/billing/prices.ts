@@ -1,4 +1,4 @@
-import type { BillingInterval } from "@wroffy/control-client";
+import type { BillingInterval } from "@deskzo/control-client";
 import { createRazorpayPlan } from "@/lib/billing/razorpay";
 import { createStripePrice, createStripeProduct } from "@/lib/billing/stripe";
 import { controlDb } from "@/lib/platform/control-db";

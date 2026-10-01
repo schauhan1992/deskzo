@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Resolver } from "node:dns/promises";
-import { Prisma } from "@wroffy/control-client";
+import { Prisma } from "@deskzo/control-client";
 import { parseEntitlements } from "@/lib/entitlements";
 import { platformBrandName } from "@/lib/platform/brand";
 import { controlDb } from "@/lib/platform/control-db";

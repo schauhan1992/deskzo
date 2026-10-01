@@ -8,7 +8,7 @@ import { endPlatformSupport, grantPlatformSupport, type SupportAccessState } fro
 import { formatIstDateTime } from "@/lib/india-time";
 
 /**
- * The super admin letting Wroffy's support staff in (src/actions/support-access.ts): read-only, or an
+ * The super admin letting Deskzo's support staff in (src/actions/support-access.ts): read-only, or an
  * administrator's access, for a few hours, with a reason. Ending it signs them out at once.
  */
 export function SupportAccessCard({ state }: { state: SupportAccessState }) {

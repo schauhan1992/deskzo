@@ -3,7 +3,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { Prisma, type StaffRole } from "@wroffy/control-client";
+import { Prisma, type StaffRole } from "@deskzo/control-client";
 import { gatewayLabel } from "@/lib/console-shared/labels";
 import { hasRole } from "@/lib/console-shared/roles";
 import { isoDateOrUndefined } from "@/lib/console-shared/params";

@@ -2,7 +2,7 @@
 
 > **Draft for review by counsel. Not legal advice.** Written from how the platform actually handles data (so the technical promises below are ones it keeps today); the legal wording, governing law and liability terms need a lawyer's review for India (DPDP Act 2023 and its Rules), the EU/UK (GDPR, UK GDPR) and any other market sold into.
 
-This agreement forms part of the Terms of Service between **Wroffy** ("Processor", the provider of the Wroffy ERP platform) and the **Customer** who holds a workspace on it ("Controller" under the GDPR; "Data Fiduciary" under the DPDP Act).
+This agreement forms part of the Terms of Service between **Deskzo** ("Processor", the provider of the Deskzo One platform) and the **Customer** who holds a workspace on it ("Controller" under the GDPR; "Data Fiduciary" under the DPDP Act).
 
 ## 1. Subject matter, duration, nature and purpose
 
@@ -57,7 +57,7 @@ The Customer authorises the sub-processors listed in docs/privacy/subprocessors.
 
 Services the **Customer** connects to its own workspace with its own credentials — its mail provider, its AI provider for the copilot, the government e-invoice and e-way bill portals, Microsoft for single sign-on — act for the Customer, not as the Processor's sub-processors.
 
-**Partners** — the resellers and distributors who sell or support the service under Wroffy's partner programme — are not sub-processors: they never access the Customer's workspace or the personal data in it, and receive none of it from the Processor. What a partner is shown about a Customer it sold to is limited to the Customer's account with Wroffy (its plan, status, what it pays and its renewal date), which Wroffy holds as controller, not under this agreement.
+**Partners** — the resellers and distributors who sell or support the service under Deskzo's partner programme — are not sub-processors: they never access the Customer's workspace or the personal data in it, and receive none of it from the Processor. What a partner is shown about a Customer it sold to is limited to the Customer's account with Deskzo (its plan, status, what it pays and its renewal date), which Deskzo holds as controller, not under this agreement.
 
 ## 7. Data subjects' rights
 

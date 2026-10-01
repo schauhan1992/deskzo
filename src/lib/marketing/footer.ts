@@ -33,7 +33,7 @@ export type FooterAddress = {
 /**
  * Formats the registered office the way a postal address reads, dropping whatever is missing.
  *
- * A half-filled address still beats none — "Wroffy Technologies, Mumbai" is a real address and an
+ * A half-filled address still beats none — "Acme Technologies, Mumbai" is a real address and an
  * empty footer is a filtered email — so this returns what it has rather than insisting on all of it.
  */
 export function formatRegisteredAddress(org: AddressParts): string | null {

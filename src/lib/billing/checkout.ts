@@ -1,4 +1,4 @@
-import type { BillingInterval } from "@wroffy/control-client";
+import type { BillingInterval } from "@deskzo/control-client";
 import { GatewayError } from "@/lib/billing/gateway";
 import { choiceRefusal } from "@/lib/billing/plan-choice";
 import { cancelRazorpaySubscription, createRazorpaySubscription } from "@/lib/billing/razorpay";

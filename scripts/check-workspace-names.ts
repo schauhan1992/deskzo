@@ -50,7 +50,7 @@ async function main() {
   ok("  never more than 40 characters, and always one the rules allow", suggestedName("Ab".repeat(30) + " Holdings") .length <= 40 && allowed(suggestedName(acme), acme) && allowed(suggestedName("Smith & Sons Traders LLP"), "Smith & Sons Traders LLP"));
 
   console.log("\n— Our name and competitors' —");
-  for (const slug of ["deskzo-support", "mydeskzo", "deskzoone", "wroffy-crm", "zoho-india", "zohoindia", "tallysolutions", "odoo-partners", "salesforce", "hubspot-agency"]) ok(`"${slug}" is protected`, protectedNameIn(slug) !== null);
+  for (const slug of ["deskzo-support", "mydeskzo", "deskzoone", "deskzo", "zoho-india", "zohoindia", "tallysolutions", "odoo-partners", "salesforce", "hubspot-agency"]) ok(`"${slug}" is protected`, protectedNameIn(slug) !== null);
   for (const slug of ["digitallyyours", "acmetechnologies", "totallyfresh", "zohra-textiles"]) ok(`  "${slug}" isn't`, protectedNameIn(slug) === null, protectedNameIn(slug));
 
   console.log("\n— Platform addresses and reserved words —");

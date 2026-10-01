@@ -12,7 +12,7 @@ import { tenancyState, type Tenant } from "@/lib/tenancy/state";
  *   2. The host of the request being served (pages, server actions, route handlers). Next keeps
  *      the request in its own async context, so this works from any depth of the call stack.
  *   3. Only for scripts and check suites, and only when switched on: the first workspace, as if
- *      nothing had changed (WROFFY_TENANCY_FALLBACK=legacy, and not inside the Next server —
+ *      nothing had changed (DESKZO_TENANCY_FALLBACK=legacy, and not inside the Next server —
  *      src/instrumentation.ts marks that). Inside `next dev` or `next start` there is no fallback:
  *      a request whose workspace can't be told apart fails, rather than being answered as the
  *      first customer.
@@ -56,7 +56,7 @@ function isOutsideRequest(err: unknown): boolean {
 }
 
 function insideNextServer(): boolean {
-  return (globalThis as { __wroffyInNext?: boolean }).__wroffyInNext === true;
+  return (globalThis as { __deskzoInNext?: boolean }).__deskzoInNext === true;
 }
 
 async function requestHeaders(): Promise<Headers | null> {
@@ -88,7 +88,7 @@ export async function currentTenant(): Promise<Tenant> {
     }
   }
 
-  if (process.env.WROFFY_TENANCY_FALLBACK === "legacy" && !insideNextServer()) {
+  if (process.env.DESKZO_TENANCY_FALLBACK === "legacy" && !insideNextServer()) {
     const legacy = await legacyTenant();
     if (legacy) return legacy;
   }

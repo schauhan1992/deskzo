@@ -7,7 +7,7 @@ import { createHash, randomBytes } from "node:crypto";
  * for as long as it keeps its cookies. Held only by browsers that reach a signed-in page or the
  * sign-in screen — never set on the public customer pages, which have no business being tracked.
  */
-export const DEVICE_COOKIE = "wroffy_device";
+export const DEVICE_COOKIE = "deskzo_device";
 export const DEVICE_COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
 
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;

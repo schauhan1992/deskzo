@@ -2,7 +2,7 @@
  * Console staff, from the server — above all the first owner, before anybody can sign in to add them.
  *
  *   npm run platform:staff -- list
- *   npm run platform:staff -- create --email asha@wroffy.com --name "Asha" [--role OWNER]
+ *   npm run platform:staff -- create --email asha@deskzo.com --name "Asha" [--role OWNER]
  *   npm run platform:staff -- link <email>          a new one-time link to choose a password
  *   npm run platform:staff -- role <email> <OWNER|ADMIN|SUPPORT|BILLING|READONLY>
  *   npm run platform:staff -- reset-2fa <email>     a lost phone: they enrol again at their next sign-in
@@ -14,7 +14,7 @@
  * off. Everything is in the platform's audit log, as this script.
  */
 import "dotenv/config";
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
 import { createStaff, deactivateStaff, issuePasswordSetup, resetStaffTwoFactor, setStaffRole } from "../src/lib/platform/staff";
 import { setSetting, staffTwoFactorPolicy } from "../src/lib/platform/settings";

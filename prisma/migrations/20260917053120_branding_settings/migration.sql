@@ -1,7 +1,7 @@
 -- CreateTable
 CREATE TABLE "branding_settings" (
     "id" TEXT NOT NULL DEFAULT 'global',
-    "appName" TEXT NOT NULL DEFAULT 'Wroffy ERP',
+    "appName" TEXT NOT NULL DEFAULT 'Deskzo One',
     "shortName" TEXT,
     "tagline" TEXT,
     "logoDataUrl" TEXT,

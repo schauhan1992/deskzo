@@ -1,4 +1,4 @@
-import type { Prisma, SiteLeadStatus } from "@wroffy/control-client";
+import type { Prisma, SiteLeadStatus } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CmsRefused, LEAD_STATUSES, LEAD_TOPICS, type LeadDetail, type LeadFilters, type LeadRow, type Paged } from "@/lib/cms/types";
 import { csvRow } from "@/lib/csv";

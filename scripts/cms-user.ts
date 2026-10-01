@@ -15,7 +15,7 @@
  * as "script". The CMS's address is cms.<PLATFORM_DOMAIN> (docs/runbook.md).
  */
 import "dotenv/config";
-import type { CmsRole } from "@wroffy/control-client";
+import type { CmsRole } from "@deskzo/control-client";
 import { cmsTwoFactorPolicy } from "../src/lib/cms/session";
 import { CMS_ROLES } from "../src/lib/cms/types";
 import { cmsAdminCount, createCmsUser, deactivateCmsUser, newCmsSetupLink, resetCmsUserTwoFactor, setCmsTwoFactorPolicy, setCmsUserRole } from "../src/lib/cms/users";

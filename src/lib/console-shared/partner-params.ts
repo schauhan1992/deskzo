@@ -1,6 +1,6 @@
 import { istDayKey } from "@/lib/console-shared/format";
 import { isoDateOrUndefined, one, parseCurrency, type RawParams } from "@/lib/console-shared/params";
-import type { CommissionKind, CommissionStatus, PartnerKind, PartnerStatus, StatementStatus } from "@wroffy/control-client";
+import type { CommissionKind, CommissionStatus, PartnerKind, PartnerStatus, StatementStatus } from "@deskzo/control-client";
 
 /**
  * The partner programme's URL contracts in the console: /partners, a partner's own page, /partners/requests

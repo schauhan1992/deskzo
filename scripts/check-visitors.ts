@@ -547,7 +547,7 @@ async function main() {
   );
 
   const message = inviteMessage({
-    name: "Anita", code: invited.data.code, hostName: host.name, companyName: "Wroffy",
+    name: "Anita", code: invited.data.code, hostName: host.name, companyName: "Acme",
     expectedAt: soon, formatWhen: (d) => d.toDateString(),
   });
   ok("The shareable message carries the code", message.includes(invited.data.code));

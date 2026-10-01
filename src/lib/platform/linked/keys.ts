@@ -90,9 +90,9 @@ export function credentialStamp(tenantId: string, user: { id: string; email: str
 
 export type LinkCookie = "link" | "link-in" | "switch";
 
-/** `__Host-wroffy.<cookie>` over https — bound to the exact host — and the plain name over http, as the session cookie is. */
+/** `__Host-deskzo.<cookie>` over https — bound to the exact host — and the plain name over http, as the session cookie is. */
 export function linkCookieName(cookie: LinkCookie, secure: boolean): string {
-  return `${secure ? "__Host-" : ""}wroffy.${cookie}`;
+  return `${secure ? "__Host-" : ""}deskzo.${cookie}`;
 }
 
 /** Seconds: the asking browser's and the approving browser's cookies last as long as a request; the switch's as its finish. */

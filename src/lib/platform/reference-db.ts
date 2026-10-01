@@ -1,7 +1,7 @@
-import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
+import { PrismaClient as ReferenceClient } from "@deskzo/reference-client";
 
 export type { ReferenceClient };
-export type { Prisma as ReferencePrisma } from "@wroffy/reference-client";
+export type { Prisma as ReferencePrisma } from "@deskzo/reference-client";
 
 /**
  * The shared reference database's client — prisma/reference/schema.prisma, at REFERENCE_DATABASE_URL.
@@ -19,7 +19,7 @@ export function referenceConfigured(): boolean {
 export function refDb(): ReferenceClient {
   if (!referenceConfigured()) throw new Error("REFERENCE_DATABASE_URL is not set — see .env.example.");
   const g = globalThis as { [key: symbol]: ReferenceClient | undefined };
-  const key = Symbol.for("wroffy.reference-db");
+  const key = Symbol.for("deskzo.reference-db");
   if (!g[key]) g[key] = new ReferenceClient({ datasourceUrl: process.env.REFERENCE_DATABASE_URL });
   return g[key]!;
 }
@@ -27,7 +27,7 @@ export function refDb(): ReferenceClient {
 /** For scripts: close it, so the process can exit. */
 export async function closeRefDb(): Promise<void> {
   const g = globalThis as { [key: symbol]: ReferenceClient | undefined };
-  const key = Symbol.for("wroffy.reference-db");
+  const key = Symbol.for("deskzo.reference-db");
   const client = g[key];
   g[key] = undefined;
   await client?.$disconnect().catch(() => {});

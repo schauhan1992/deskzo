@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { Prisma, type DealStatus } from "@wroffy/control-client";
+import { Prisma, type DealStatus } from "@deskzo/control-client";
 import { isDisposableDomain, parseEmailAddress } from "@/lib/email-verification";
 import { formatIstDate } from "@/lib/india-time";
 import { partnerAudit, type PartnerActor } from "@/lib/partners/audit";

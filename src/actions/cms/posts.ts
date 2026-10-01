@@ -1,6 +1,6 @@
 "use server";
 
-import type { SitePostStatus } from "@wroffy/control-client";
+import type { SitePostStatus } from "@deskzo/control-client";
 import { archivePost, createPost, deletePost, getPost, listPostTags, listPosts, postPreviewLink, publishPost, savePost, unarchivePost, unpublishPost } from "@/lib/cms/content";
 import { cmsAction, revalidateCms } from "@/lib/cms/guard";
 import { CMS_EVERYONE, CMS_PUBLISHERS, CMS_WRITERS, type CmsResult, type Paged, type PostDetail, type PostInput, type PostListRow, type PostSaved, type RedirectRow } from "@/lib/cms/types";

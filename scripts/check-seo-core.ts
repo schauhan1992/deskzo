@@ -256,11 +256,11 @@ async function main() {
   // parity section, which must load them after its stubs are in place.
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } = require("../src/components/site/defaults") as typeof import("../src/components/site/defaults");
-  const settings: SiteSettings = { ...DEFAULT_SITE_SETTINGS, social: [{ network: "linkedin", href: "https://www.linkedin.com/company/wroffy" }] };
+  const settings: SiteSettings = { ...DEFAULT_SITE_SETTINGS, social: [{ network: "linkedin", href: "https://www.linkedin.com/company/deskzo" }] };
   const site: SeoSiteContext = siteContextFrom(settings, {
     trialDays: 14,
     signupOpen: true,
-    origin: "https://wroffy.test",
+    origin: "https://deskzo.test",
     aiSearchCrawlersAllowed: true,
     placeholderTagline: DEFAULT_SITE_SETTINGS.tagline,
     livePostCount: 5,
@@ -351,7 +351,7 @@ async function main() {
   const posting = post.jsonLd.find((o) => o["@type"] === "BlogPosting")!;
   ok("its JSON-LD: BlogPosting and BreadcrumbList", isDeepStrictEqual(types(post.jsonLd), ["BlogPosting", "BreadcrumbList"]), types(post.jsonLd));
   ok("  BlogPosting: headline, description, both dates, the author as a Person, the publisher", posting.headline === "How GST invoice numbering works" && !!posting.description && posting.datePublished === "2026-08-12T04:30:00.000Z" && posting.dateModified === "2026-09-20T09:00:00.000Z" && isDeepStrictEqual(posting.author, { "@type": "Person", name: "Asha Rao" }) && (posting.publisher as { name?: string }).name === "Deskzo One", posting);
-  ok("  image (absolute), main category, tags as keywords, mainEntityOfPage", posting.image === "https://wroffy.test/media/cm0cover00000000000000001" && posting.articleSection === "Guides" && isDeepStrictEqual(posting.keywords, ["GST", "Invoicing"]) && isDeepStrictEqual(posting.mainEntityOfPage, { "@type": "WebPage", "@id": "https://wroffy.test/blog/gst-invoice-numbering" }));
+  ok("  image (absolute), main category, tags as keywords, mainEntityOfPage", posting.image === "https://deskzo.test/media/cm0cover00000000000000001" && posting.articleSection === "Guides" && isDeepStrictEqual(posting.keywords, ["GST", "Invoicing"]) && isDeepStrictEqual(posting.mainEntityOfPage, { "@type": "WebPage", "@id": "https://deskzo.test/blog/gst-invoice-numbering" }));
   const crumbs = post.jsonLd.find((o) => o["@type"] === "BreadcrumbList")!.itemListElement as { name: string; item: string }[];
   ok("  the breadcrumb is the visible one — Blog › Guides › the post", isDeepStrictEqual(crumbs.map((c) => c.name), ["Blog", "Guides", "How GST invoice numbering works"]));
   ok("  author and date, freshness and structured data pass", ["aeo.author-dates", "geo.freshness", "geo.machine-readable", "seo.structured-data", "aeo.breadcrumbs"].every((id) => statusOf(postScore, id) === "PASS"), ["aeo.author-dates", "geo.freshness", "geo.machine-readable", "seo.structured-data", "aeo.breadcrumbs"].map((id) => `${id}:${statusOf(postScore, id)}`));
@@ -398,7 +398,7 @@ async function main() {
   explain(homeScore);
   const org = home.jsonLd.find((o) => o["@type"] === "Organization")!;
   ok("the home page is its own kind, with Organization and WebSite JSON-LD", home.kind === "home" && isDeepStrictEqual(types(home.jsonLd), ["Organization", "WebSite"]), types(home.jsonLd));
-  ok("  Organization: name, address and social profiles — no logo (the site's is a letter mark)", org.name === "Deskzo One" && org.url === "https://wroffy.test/" && isDeepStrictEqual(org.sameAs, ["https://www.linkedin.com/company/wroffy"]) && !("logo" in org), org);
+  ok("  Organization: name, address and social profiles — no logo (the site's is a letter mark)", org.name === "Deskzo One" && org.url === "https://deskzo.test/" && isDeepStrictEqual(org.sameAs, ["https://www.linkedin.com/company/deskzo"]) && !("logo" in org), org);
   ok("  entity identification is checked on it", ["PASS", "WARNING"].includes(statusOf(homeScore, "geo.entity")));
   ok("  its default status is INFO", statusOf(homeScore, "seo.status") === "INFO");
   ok("  the placeholder tagline counts as unset", site.tagline === null);
@@ -548,7 +548,7 @@ async function main() {
   const cmpCrumbs = (cmp.jsonLd.find((o) => o["@type"] === "BreadcrumbList")?.itemListElement ?? []) as { name: string; item: string }[];
   ok(
     "a nested page's trail is its breadcrumb: Home › the page above › itself by its title (tokens filled)",
-    cmpCrumbs.map((c) => `${c.name} ${c.item}`).join(" | ") === "Home https://wroffy.test/ | Compare https://wroffy.test/compare | Deskzo One vs Zoho One https://wroffy.test/compare/zoho-one",
+    cmpCrumbs.map((c) => `${c.name} ${c.item}`).join(" | ") === "Home https://deskzo.test/ | Compare https://deskzo.test/compare | Deskzo One vs Zoho One https://deskzo.test/compare/zoho-one",
     cmpCrumbs,
   );
   ok("  the visible breadcrumb is kept apart from the content, the page left off", isDeepStrictEqual(cmp.content.breadcrumbs, [{ name: "Home", path: "/" }, { name: "Compare", path: "/compare" }]));
@@ -568,7 +568,7 @@ async function main() {
   const { ComparisonTableBlock } = require("../src/components/site/blocks/comparison-table") as typeof import("../src/components/site/blocks/comparison-table");
   const { RelatedLinksBlock } = require("../src/components/site/blocks/related-links") as typeof import("../src/components/site/blocks/related-links");
   const { ModuleHighlightsBlock } = require("../src/components/site/blocks/module-highlights") as typeof import("../src/components/site/blocks/module-highlights");
-  const renderCtx = { settings, signupOpen: true, trialDays: 14, searchParams: {}, workspaceSuffix: ".wroffy.test" };
+  const renderCtx = { settings, signupOpen: true, trialDays: 14, searchParams: {}, workspaceSuffix: ".deskzo.test" };
   const blocksOf = comparePage().blocks;
   // The fixture's own props for a block type, handed to that type's component.
   const propsOf = (type: SiteBlock["type"]) => blocksOf.find((b) => b.type === type)!.props as never;

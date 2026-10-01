@@ -23,7 +23,7 @@
  * SCRIPT entry, "partners:<command>". The portal's address is partners.<PLATFORM_DOMAIN> (docs/runbook.md).
  */
 import "dotenv/config";
-import type { PartnerRole, Prisma } from "@wroffy/control-client";
+import type { PartnerRole, Prisma } from "@deskzo/control-client";
 import { setAttribution } from "../src/lib/partners/attribution";
 import { accrueCommissions } from "../src/lib/partners/commission";
 import { partnerIdBySlug } from "../src/lib/partners/registry";

@@ -31,7 +31,7 @@ import { cloneElement, createElement, isValidElement, type ReactElement, type Re
 import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.PLATFORM_CONSOLE_IP_ALLOWLIST = "";
@@ -175,10 +175,10 @@ async function main() {
     ok("BLOCK_WORD: any name with the word, hyphens ignored", ruleOf("best-scam-co", { rules: blocks }) === "blocked-word" && ruleOf("sc-am-traders", { rules: blocks }) === "blocked-word" && ruleOf("scamper", { rules: blocks }) === "blocked-word");
     ok("  the word that decided is named, for staff", (v("sc-am-traders", { rules: blocks }) as { word: string }).word === "scam");
     ok("a reserved word: the whole address only", ruleOf("books") === "reserved" && ruleOf("booksandmore") === "ok" && ruleOf("acme-books") === "ok");
-    ok("our names anywhere; competitors' as a word or a prefix", ruleOf("mydeskzo") === "ours" && ruleOf("wroffy-crm") === "ours" && ruleOf("zoho-india") === "competitor" && ruleOf("tallysolutions") === "competitor" && ruleOf("digitallyyours") === "ok");
+    ok("our names anywhere; competitors' as a word or a prefix", ruleOf("mydeskzo") === "ours" && ruleOf("deskzo-crm") === "ours" && ruleOf("zoho-india") === "competitor" && ruleOf("tallysolutions") === "competitor" && ruleOf("digitallyyours") === "ok");
     ok("RELEASE: a reserved word let through", ruleOf("books", { rules: [rule("RELEASE", "books")] }) === "ok" && JSON.stringify((v("books", { rules: [rule("RELEASE", "books")] }) as { released: string[] }).released) === '["books"]');
-    ok("  our name let through: \"wroffytechnologies\"", ruleOf("wroffytechnologies", { rules: [rule("RELEASE", "wroffy")] }) === "ok");
-    ok("  but only that one — \"wroffy-deskzo\" still carries the other", ruleOf("wroffy-deskzo", { rules: [rule("RELEASE", "wroffy")] }) === "ours");
+    ok("  our name let through: \"deskzosolutions\"", ruleOf("deskzosolutions", { rules: [rule("RELEASE", "deskzo")] }) === "ok");
+    ok("  but only that one — \"deskzo-zoho\" still carries a competitor's", ruleOf("deskzo-zoho", { rules: [rule("RELEASE", "deskzo")] }) === "competitor");
     ok("  a competitor's let through: \"zoho-india\"", ruleOf("zoho-india", { rules: [rule("RELEASE", "zoho")] }) === "ok");
     ok("a block wins over a release (blocks come first)", ruleOf("books", { rules: [rule("RELEASE", "books"), rule("BLOCK_WORD", "books")] }) === "blocked-word");
     ok("order: platform before a block", ruleOf("support", { rules: [rule("BLOCK_EXACT", "support")] }) === "platform");
@@ -218,7 +218,7 @@ async function main() {
 
     section("  what staff may release or block");
     ok("a platform address can't be released, in words that say why", (names.releaseProblem("admin") ?? "").includes("platform's own addresses") && (names.releaseProblem("www") ?? "").includes("never be released"));
-    ok("only a built-in word can be released", names.releaseProblem("acme") !== null && names.releaseProblem("books") === null && names.releaseProblem("wroffy") === null && names.releaseProblem("zoho") === null);
+    ok("only a built-in word can be released", names.releaseProblem("acme") !== null && names.releaseProblem("books") === null && names.releaseProblem("deskzo") === null && names.releaseProblem("zoho") === null);
     ok("a block: a whole address, or a word of three letters at least, never a platform address", names.blockProblem("acme", "BLOCK_EXACT") === null && names.blockProblem("scam", "BLOCK_WORD") === null && names.blockProblem("ab", "BLOCK_WORD") !== null && names.blockProblem("a-b", "BLOCK_WORD") !== null && names.blockProblem("www", "BLOCK_EXACT") !== null && names.blockProblem("-x-", "BLOCK_EXACT") !== null);
     ok("the words for each step are staff's", names.verdictInWords(v("best-scam-co", { rules: blocks })).includes('"scam"') && names.verdictInWords(v("books", { rules: [rule("RELEASE", "books")] })).includes("released"));
   });
@@ -231,7 +231,7 @@ async function main() {
     ok("RESERVED_WORDS is every other word of the old list — none lost, none added", JSON.stringify([...words].sort()) === JSON.stringify(OLD_RESERVED.filter((w) => !names.PLATFORM_HOSTS.has(w)).sort()));
     ok("  and every old word is in one of the two", OLD_RESERVED.every((w) => names.PLATFORM_HOSTS.has(w) || names.RESERVED_WORDS.has(w)));
     ok("no word is in two lists", words.every((w) => !names.PLATFORM_HOSTS.has(w)) && [...names.OUR_NAMES, ...names.COMPETITOR_NAMES].every((w) => !names.PLATFORM_HOSTS.has(w) && !names.RESERVED_WORDS.has(w)));
-    ok('"deskzo" is never a platform address — the platform\'s own workspace is called that', !names.PLATFORM_HOSTS.has("deskzo") && !names.PLATFORM_HOSTS.has("wroffy"));
+    ok('"deskzo" is never a platform address — the platform\'s own workspace is called that', !names.PLATFORM_HOSTS.has("deskzo"));
     ok("RESERVED_SLUGS (host.ts) is PLATFORM_HOSTS, under its old name", host.RESERVED_SLUGS === names.PLATFORM_HOSTS && host.PLATFORM_HOSTS === names.PLATFORM_HOSTS && host.SLUG_PATTERN === names.SLUG_PATTERN);
     ok('"cms", "partners" and "partner" are platform addresses (check:cms, check:partners)', ["cms", "partners", "partner"].every((w) => host.RESERVED_SLUGS.has(w)));
     const at = hostOf;
@@ -298,7 +298,7 @@ async function main() {
     const actAs = async (userId: string) => {
       const token = randomBytes(32).toString("base64url");
       await control.platformSession.create({ data: { id: sha256(token), userId, expiresAt: new Date(Date.now() + HOUR), mfaAt: new Date(), userAgent: "check:name-rules" } });
-      jar.set("wroffy-console", token);
+      jar.set("deskzo-console", token);
     };
     const addStaff = async (email: string, name: string, role: "OWNER" | "ADMIN" | "SUPPORT" | "BILLING" | "READONLY") => (await staffLib.createStaff({ email, name, role }, "script:check:name-rules")).id;
     const ids = {
@@ -349,7 +349,7 @@ async function main() {
         const impact = await nameActions.consoleNameImpact({ value: "zznope", kind: "BLOCK_EXACT" });
         ok(`${role}: can't block, release or preview`, !block.ok && !release.ok && !impact.ok, [why(block), why(release)].join(" | "));
       }
-      jar.delete("wroffy-console");
+      jar.delete("deskzo-console");
       ok("signed out: nothing", !(await nameActions.consoleTestName({ slug: "books" })).ok);
       await actAs(ids.readonly);
       const test = await nameActions.consoleTestName({ slug: "books", legalName: "Books Pvt Ltd" });
@@ -397,13 +397,16 @@ async function main() {
       ok("  a workspace staff set up may be called books now", (await provisioning.slugProblem("books")) === null);
       ok("  signup still needs eight letters made from the registered name", (await signup.checkWorkspaceName("books", "Books Pvt Ltd")).ok === false && (await signup.checkWorkspaceName("booksandmore", "Books And More Pvt Ltd")).ok === true);
       ok("  books. is served once a workspace has it", hostOf("books").kind === "tenant");
-      ok("\"wroffytechnologies\" is refused before \"wroffy\" is released", !(await signup.checkWorkspaceName("wroffytechnologies", "Wroffy Technologies Pvt Ltd")).ok);
-      const wroffy = await nameActions.consoleReleaseName({ value: "wroffy", reason: "zz the owner's own company" });
-      ok("  and a signup may have it after", wroffy.ok && (await signup.checkWorkspaceName("wroffytechnologies", "Wroffy Technologies Pvt Ltd")).ok === true, why(wroffy));
-      const test = await nameActions.consoleTestName({ slug: "wroffytechnologies", legalName: "Wroffy Technologies Pvt Ltd" });
-      ok("Test a name: what signup says, which rule decided, and staff's reason", test.ok && test.data.signup.ok && test.data.signup.decidedBy.includes('released "wroffy"') && test.data.signup.reason === "wroffy: zz the owner's own company" && test.data.signup.says.startsWith("wroffytechnologies."), JSON.stringify(test));
+      ok("\"deskzosolutions\" is refused before \"deskzo\" is released", !(await signup.checkWorkspaceName("deskzosolutions", "Deskzo Solutions Pvt Ltd")).ok);
+      const ours = await nameActions.consoleReleaseName({ value: "deskzo", reason: "zz a licensed reseller" });
+      ok("  and a signup may have it after", ours.ok && (await signup.checkWorkspaceName("deskzosolutions", "Deskzo Solutions Pvt Ltd")).ok === true, why(ours));
+      const test = await nameActions.consoleTestName({ slug: "deskzosolutions", legalName: "Deskzo Solutions Pvt Ltd" });
+      ok("Test a name: what signup says, which rule decided, and staff's reason", test.ok && test.data.signup.ok && test.data.signup.decidedBy.includes('released "deskzo"') && test.data.signup.reason === "deskzo: zz a licensed reseller" && test.data.signup.says.startsWith("deskzosolutions."), JSON.stringify(test));
       ok("  in the audit log as names.release", (await audits("names.release", ids.owner)).length === 2);
-      const rule = await control.workspaceNameRule.findFirstOrThrow({ where: { kind: "RELEASE", value: "books" } });
+      const ourRelease = await control.workspaceNameRule.findFirstOrThrow({ where: { kind: "RELEASE", value: "deskzo" } });
+      const reprotect = await nameActions.consoleRemoveNameRule(ourRelease.id);
+      ok("  protecting it again: refused again", reprotect.ok && !(await signup.checkWorkspaceName("deskzosolutions", "Deskzo Solutions Pvt Ltd")).ok, why(reprotect));
+      const rule =await control.workspaceNameRule.findFirstOrThrow({ where: { kind: "RELEASE", value: "books" } });
       const reblock = await nameActions.consoleRemoveNameRule(rule.id);
       ok("blocking \"books\" again: reserved again", reblock.ok && (await provisioning.slugProblem("books")) === NAME_RESERVED, why(reblock));
       ok("  in the audit log as names.unrelease", (await audits("names.unrelease", ids.owner)).some((e) => (e.detail as { value?: string }).value === "books"));
@@ -542,7 +545,7 @@ async function main() {
       ok("managers get Block a name, Release and Block again", ["owner", "admin"].every((r) => pages[r].includes("Block a name") && pages[r].includes("Release books") && pages[r].includes("Block zoho again")));
       ok("  support, billing and read-only staff see the same lists, without them", ["support", "billing", "readonly"].every((r) => !pages[r].includes("Block a name") && !pages[r].includes("Release books") && !pages[r].includes("Block zoho again") && pages[r].includes("zoho") && pages[r].includes("zz a partner")));
       ok("staff rules: value, kind in words, reason, who, when", owner.includes("existing") && owner.includes("Blocked: any name with this word") && owner.includes("zz the word") && owner.includes("Zz Names Admin") && owner.includes("Released: a built-in word let through"));
-      jar.delete("wroffy-console");
+      jar.delete("deskzo-console");
       ok("signed out, /names sends you to sign in", (await render(namesPage).catch((err: Error) => err.message)) === "redirect /login");
 
       await actAs(ids.admin);

@@ -67,38 +67,38 @@ type Seeded = {
 
 const ROSTER: Seeded[] = [
   // Heads report to the admin.
-  { name: "Vikram Malhotra", email: "vikram.malhotra@wroffy.com", role: "MANAGEMENT", dept: "Sales", designation: "Sales Head", type: "FULL_TIME", gross: 165000, state: "Maharashtra", managerIndex: -1, joinedMonthsAgo: 74 },
-  { name: "Ananya Deshpande", email: "ananya.deshpande@wroffy.com", role: "MANAGEMENT", dept: "Accounts", designation: "Finance Controller", type: "FULL_TIME", gross: 150000, state: "Maharashtra", managerIndex: -1, joinedMonthsAgo: 61 },
-  { name: "Imran Qureshi", email: "imran.qureshi@wroffy.com", role: "MANAGEMENT", dept: "Support", designation: "Support Manager", type: "FULL_TIME", gross: 118000, state: "Karnataka", managerIndex: -1, joinedMonthsAgo: 49 },
-  { name: "Kavya Reddy", email: "kavya.reddy@wroffy.com", role: "MANAGEMENT", dept: "HR & Admin", designation: "HR Manager", type: "FULL_TIME", gross: 122000, state: "Telangana", managerIndex: -1, joinedMonthsAgo: 43 },
-  { name: "Sandeep Ghosh", email: "sandeep.ghosh@wroffy.com", role: "PURCHASE", dept: "Purchase", designation: "Purchase Head", type: "FULL_TIME", gross: 112000, state: "West Bengal", managerIndex: -1, joinedMonthsAgo: 55 },
+  { name: "Vikram Malhotra", email: "vikram.malhotra@acme.example", role: "MANAGEMENT", dept: "Sales", designation: "Sales Head", type: "FULL_TIME", gross: 165000, state: "Maharashtra", managerIndex: -1, joinedMonthsAgo: 74 },
+  { name: "Ananya Deshpande", email: "ananya.deshpande@acme.example", role: "MANAGEMENT", dept: "Accounts", designation: "Finance Controller", type: "FULL_TIME", gross: 150000, state: "Maharashtra", managerIndex: -1, joinedMonthsAgo: 61 },
+  { name: "Imran Qureshi", email: "imran.qureshi@acme.example", role: "MANAGEMENT", dept: "Support", designation: "Support Manager", type: "FULL_TIME", gross: 118000, state: "Karnataka", managerIndex: -1, joinedMonthsAgo: 49 },
+  { name: "Kavya Reddy", email: "kavya.reddy@acme.example", role: "MANAGEMENT", dept: "HR & Admin", designation: "HR Manager", type: "FULL_TIME", gross: 122000, state: "Telangana", managerIndex: -1, joinedMonthsAgo: 43 },
+  { name: "Sandeep Ghosh", email: "sandeep.ghosh@acme.example", role: "PURCHASE", dept: "Purchase", designation: "Purchase Head", type: "FULL_TIME", gross: 112000, state: "West Bengal", managerIndex: -1, joinedMonthsAgo: 55 },
 
   // Sales, under Vikram (index 0).
-  { name: "Rohit Bhandari", email: "rohit.bhandari@wroffy.com", role: "SALES", dept: "Sales", designation: "Senior Account Executive", type: "FULL_TIME", gross: 78000, state: "Maharashtra", managerIndex: 0, joinedMonthsAgo: 31 },
-  { name: "Meera Krishnan", email: "meera.krishnan@wroffy.com", role: "SALES", dept: "Sales", designation: "Account Executive", type: "FULL_TIME", gross: 58000, state: "Tamil Nadu", managerIndex: 0, joinedMonthsAgo: 19 },
-  { name: "Aditya Rane", email: "aditya.rane@wroffy.com", role: "SALES", dept: "Sales", designation: "Account Executive", type: "FULL_TIME", gross: 54000, state: "Maharashtra", managerIndex: 0, joinedMonthsAgo: 14 },
-  { name: "Simran Kaur", email: "simran.kaur@wroffy.com", role: "SALES", dept: "Sales", designation: "Inside Sales", type: "FULL_TIME", gross: 38000, state: "Delhi", managerIndex: 0, joinedMonthsAgo: 8 },
-  { name: "Harsh Vardhan", email: "harsh.vardhan@wroffy.com", role: "SALES", dept: "Sales", designation: "Sales Trainee", type: "INTERN", gross: 19000, state: "Uttar Pradesh", managerIndex: 0, joinedMonthsAgo: 3 },
+  { name: "Rohit Bhandari", email: "rohit.bhandari@acme.example", role: "SALES", dept: "Sales", designation: "Senior Account Executive", type: "FULL_TIME", gross: 78000, state: "Maharashtra", managerIndex: 0, joinedMonthsAgo: 31 },
+  { name: "Meera Krishnan", email: "meera.krishnan@acme.example", role: "SALES", dept: "Sales", designation: "Account Executive", type: "FULL_TIME", gross: 58000, state: "Tamil Nadu", managerIndex: 0, joinedMonthsAgo: 19 },
+  { name: "Aditya Rane", email: "aditya.rane@acme.example", role: "SALES", dept: "Sales", designation: "Account Executive", type: "FULL_TIME", gross: 54000, state: "Maharashtra", managerIndex: 0, joinedMonthsAgo: 14 },
+  { name: "Simran Kaur", email: "simran.kaur@acme.example", role: "SALES", dept: "Sales", designation: "Inside Sales", type: "FULL_TIME", gross: 38000, state: "Delhi", managerIndex: 0, joinedMonthsAgo: 8 },
+  { name: "Harsh Vardhan", email: "harsh.vardhan@acme.example", role: "SALES", dept: "Sales", designation: "Sales Trainee", type: "INTERN", gross: 19000, state: "Uttar Pradesh", managerIndex: 0, joinedMonthsAgo: 3 },
 
   // Profiling & calling, under Vikram too.
-  { name: "Divya Menon", email: "divya.menon@wroffy.com", role: "PROFILE", dept: "Profiling", designation: "Research Analyst", type: "FULL_TIME", gross: 32000, state: "Karnataka", managerIndex: 0, joinedMonthsAgo: 22 },
-  { name: "Nikhil Joshi", email: "nikhil.joshi@wroffy.com", role: "PROFILE", dept: "Profiling", designation: "Research Analyst", type: "FULL_TIME", gross: 29000, state: "Maharashtra", managerIndex: 0, joinedMonthsAgo: 11 },
-  { name: "Pooja Agarwal", email: "pooja.agarwal@wroffy.com", role: "CALLING", dept: "Profiling", designation: "Tele-caller", type: "FULL_TIME", gross: 24000, state: "Gujarat", managerIndex: 0, joinedMonthsAgo: 16 },
-  { name: "Faisal Khan", email: "faisal.khan@wroffy.com", role: "CALLING", dept: "Profiling", designation: "Tele-caller", type: "CONTRACT", gross: 21000, state: "Delhi", managerIndex: 0, joinedMonthsAgo: 6 },
+  { name: "Divya Menon", email: "divya.menon@acme.example", role: "PROFILE", dept: "Profiling", designation: "Research Analyst", type: "FULL_TIME", gross: 32000, state: "Karnataka", managerIndex: 0, joinedMonthsAgo: 22 },
+  { name: "Nikhil Joshi", email: "nikhil.joshi@acme.example", role: "PROFILE", dept: "Profiling", designation: "Research Analyst", type: "FULL_TIME", gross: 29000, state: "Maharashtra", managerIndex: 0, joinedMonthsAgo: 11 },
+  { name: "Pooja Agarwal", email: "pooja.agarwal@acme.example", role: "CALLING", dept: "Profiling", designation: "Tele-caller", type: "FULL_TIME", gross: 24000, state: "Gujarat", managerIndex: 0, joinedMonthsAgo: 16 },
+  { name: "Faisal Khan", email: "faisal.khan@acme.example", role: "CALLING", dept: "Profiling", designation: "Tele-caller", type: "CONTRACT", gross: 21000, state: "Delhi", managerIndex: 0, joinedMonthsAgo: 6 },
 
   // Support, under Imran (index 2).
-  { name: "Sneha Pillai", email: "sneha.pillai@wroffy.com", role: "SUPPORT", dept: "Support", designation: "Senior Support Engineer", type: "FULL_TIME", gross: 66000, state: "Karnataka", managerIndex: 2, joinedMonthsAgo: 37 },
-  { name: "Tarun Sethi", email: "tarun.sethi@wroffy.com", role: "SUPPORT", dept: "Support", designation: "Support Engineer", type: "FULL_TIME", gross: 44000, state: "Karnataka", managerIndex: 2, joinedMonthsAgo: 20 },
-  { name: "Ritu Chawla", email: "ritu.chawla@wroffy.com", role: "SUPPORT", dept: "Support", designation: "Support Engineer", type: "FULL_TIME", gross: 20500, state: "Delhi", managerIndex: 2, joinedMonthsAgo: 9 },
-  { name: "Manoj Pawar", email: "manoj.pawar@wroffy.com", role: "SUPPORT", dept: "Field Ops", designation: "Field Engineer", type: "FULL_TIME", gross: 27000, state: "Maharashtra", managerIndex: 2, joinedMonthsAgo: 26 },
+  { name: "Sneha Pillai", email: "sneha.pillai@acme.example", role: "SUPPORT", dept: "Support", designation: "Senior Support Engineer", type: "FULL_TIME", gross: 66000, state: "Karnataka", managerIndex: 2, joinedMonthsAgo: 37 },
+  { name: "Tarun Sethi", email: "tarun.sethi@acme.example", role: "SUPPORT", dept: "Support", designation: "Support Engineer", type: "FULL_TIME", gross: 44000, state: "Karnataka", managerIndex: 2, joinedMonthsAgo: 20 },
+  { name: "Ritu Chawla", email: "ritu.chawla@acme.example", role: "SUPPORT", dept: "Support", designation: "Support Engineer", type: "FULL_TIME", gross: 20500, state: "Delhi", managerIndex: 2, joinedMonthsAgo: 9 },
+  { name: "Manoj Pawar", email: "manoj.pawar@acme.example", role: "SUPPORT", dept: "Field Ops", designation: "Field Engineer", type: "FULL_TIME", gross: 27000, state: "Maharashtra", managerIndex: 2, joinedMonthsAgo: 26 },
 
   // Accounts, under Ananya (index 1).
-  { name: "Gaurav Shetty", email: "gaurav.shetty@wroffy.com", role: "ACCOUNTS", dept: "Accounts", designation: "Accounts Executive", type: "FULL_TIME", gross: 41000, state: "Maharashtra", managerIndex: 1, joinedMonthsAgo: 28 },
-  { name: "Lakshmi Rao", email: "lakshmi.rao@wroffy.com", role: "ACCOUNTS", dept: "Accounts", designation: "Accounts Assistant", type: "FULL_TIME", gross: 19500, state: "Telangana", managerIndex: 1, joinedMonthsAgo: 12 },
+  { name: "Gaurav Shetty", email: "gaurav.shetty@acme.example", role: "ACCOUNTS", dept: "Accounts", designation: "Accounts Executive", type: "FULL_TIME", gross: 41000, state: "Maharashtra", managerIndex: 1, joinedMonthsAgo: 28 },
+  { name: "Lakshmi Rao", email: "lakshmi.rao@acme.example", role: "ACCOUNTS", dept: "Accounts", designation: "Accounts Assistant", type: "FULL_TIME", gross: 19500, state: "Telangana", managerIndex: 1, joinedMonthsAgo: 12 },
 
   // Purchase, under Sandeep (index 4).
-  { name: "Zoya Merchant", email: "zoya.merchant@wroffy.com", role: "PURCHASE", dept: "Purchase", designation: "Purchase Executive", type: "FULL_TIME", gross: 43000, state: "West Bengal", managerIndex: 4, joinedMonthsAgo: 24 },
-  { name: "Deepak Yadav", email: "deepak.yadav@wroffy.com", role: "PURCHASE", dept: "Purchase", designation: "Purchase Assistant", type: "CONSULTANT", gross: 35000, state: "Uttar Pradesh", managerIndex: 4, joinedMonthsAgo: 5 },
+  { name: "Zoya Merchant", email: "zoya.merchant@acme.example", role: "PURCHASE", dept: "Purchase", designation: "Purchase Executive", type: "FULL_TIME", gross: 43000, state: "West Bengal", managerIndex: 4, joinedMonthsAgo: 24 },
+  { name: "Deepak Yadav", email: "deepak.yadav@acme.example", role: "PURCHASE", dept: "Purchase", designation: "Purchase Assistant", type: "CONSULTANT", gross: 35000, state: "Uttar Pradesh", managerIndex: 4, joinedMonthsAgo: 5 },
 ];
 
 
@@ -292,7 +292,7 @@ async function main() {
         gender: pick(["FEMALE", "MALE", "UNDISCLOSED"] as const),
         bloodGroup: pick(["O+", "A+", "B+", "AB+", "O-"]),
         maritalStatus: pick(["Single", "Married"]),
-        personalEmail: person.email.replace("@wroffy.com", "@gmail.com"),
+        personalEmail: person.email.replace("@acme.example", "@gmail.com"),
         personalPhone: `9${int(100000000, 999999999)}`,
         addressLine1: `${int(1, 90)}, ${pick(["Shanti", "Gokul", "Sunrise", "Lake View", "Rose"])} ${pick(["Apartments", "Residency", "Heights"])}`,
         city: person.state === "Maharashtra" ? "Mumbai" : person.state === "Delhi" ? "New Delhi" : person.state === "Karnataka" ? "Bengaluru" : person.state,
@@ -719,7 +719,7 @@ async function main() {
       designation: ROSTER[i].designation,
       department: ROSTER[i].dept,
       employeeCode: profile.employeeCode,
-      companyName: org?.legalName || "Wroffy Technologies",
+      companyName: org?.legalName || "Acme Technologies",
       companyAddress: [org?.addressLine1, org?.city, org?.state].filter(Boolean).join("\n") || null,
       annualCtc: Math.round(gross * 12),
       monthlyGross: gross,
@@ -729,7 +729,7 @@ async function main() {
       reportingTo: ROSTER[i].managerIndex === -1 ? admin.name : ROSTER[ROSTER[i].managerIndex].name,
       workLocation: profile.workLocation,
       signatoryName: admin.name,
-      signatoryTitle: "For " + (org?.legalName || "Wroffy Technologies"),
+      signatoryTitle: "For " + (org?.legalName || "Acme Technologies"),
     };
 
     // Everyone gets an appointment letter; the confirmed also get a confirmation letter.
@@ -856,7 +856,7 @@ async function main() {
         designation: c.designation,
         department: c.dept,
         employeeCode: null,
-        companyName: org?.legalName || "Wroffy Technologies",
+        companyName: org?.legalName || "Acme Technologies",
         companyAddress: [org?.addressLine1, org?.city, org?.state].filter(Boolean).join("\n") || null,
         annualCtc: c.ctc,
         monthlyGross: Math.round(c.ctc / 12),
@@ -866,7 +866,7 @@ async function main() {
         workLocation: city,
         offerValidUntil: new Date(TODAY.getTime() + 14 * 86400000).toISOString().slice(0, 10),
         signatoryName: admin.name,
-        signatoryTitle: "For " + (org?.legalName || "Wroffy Technologies"),
+        signatoryTitle: "For " + (org?.legalName || "Acme Technologies"),
       };
       const sequence = (sequenceByType.get("OFFER") ?? 0) + 1;
       sequenceByType.set("OFFER", sequence);
@@ -995,7 +995,7 @@ async function main() {
     where: { id: "global" },
     create: {
       id: "global",
-      legalName: org?.legalName || "Wroffy Technologies Private Limited",
+      legalName: org?.legalName || "Acme Technologies Private Limited",
       letterNumberPrefix: "WRF",
       letterSignatoryName: ROSTER[3].name,
       letterSignatoryTitle: ROSTER[3].designation,

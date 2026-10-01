@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { Prisma, type CommissionKind, type CommissionStatus, type PartnerKind, type PartnerStatus, type StatementStatus } from "@wroffy/control-client";
+import { Prisma, type CommissionKind, type CommissionStatus, type PartnerKind, type PartnerStatus, type StatementStatus } from "@deskzo/control-client";
 import { csvFilename } from "@/lib/console-shared/format";
 import { PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import { reportRange, type CommissionFilters, type ReportFilters, type StatementFilters } from "@/lib/console-shared/partner-params";

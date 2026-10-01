@@ -4,14 +4,14 @@
 // which addresses reach it. One per installation, at CONTROL_DATABASE_URL. Workspace data never
 // lives here, and nothing here is readable from a workspace's database.
 //
-//   npm run control:generate   the client, into node_modules/@wroffy/control-client — a package of
+//   npm run control:generate   the client, into node_modules/@deskzo/control-client — a package of
 //                              its own, like Prisma's main client, so Next loads it as-is instead
 //                              of bundling it (next.config.ts, serverExternalPackages)
 //   npm run control:migrate    apply migrations to CONTROL_DATABASE_URL
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../../node_modules/@wroffy/control-client"
+  output   = "../../node_modules/@deskzo/control-client"
 }
 
 datasource db {

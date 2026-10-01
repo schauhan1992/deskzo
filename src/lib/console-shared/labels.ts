@@ -39,7 +39,7 @@ import type {
   PartnerRequestStatus,
   PartnerStatus,
   StatementStatus,
-} from "@wroffy/control-client";
+} from "@deskzo/control-client";
 
 /**
  * How the console names things: status pills, standing, audit entries, jobs, schemas, actors.

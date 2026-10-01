@@ -143,7 +143,7 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("The email that leaves");
 
-  const footer = { senderName: "Wroffy", unsubscribeUrl: `${ORIGIN}/preferences/tok`, postalAddress: "1 MG Road, Pune", includeUnsubscribe: true, includeAddress: true };
+  const footer = { senderName: "Acme", unsubscribeUrl: `${ORIGIN}/preferences/tok`, postalAddress: "1 MG Road, Pune", includeUnsubscribe: true, includeAddress: true };
   const tracked: string[] = [];
   const track = { openPixelUrl: `${ORIGIN}/track/tok`, link: (url: string) => (tracked.push(url), `${ORIGIN}/track/tok?u=${encodeURIComponent(url)}`) };
   const plain = composeEmail({ format: "TEXT", body: "Hi Asha,\n\nOffer: https://zzmm.example/offer", preheader: "Just for you", footer, origin: ORIGIN, track });

@@ -1,4 +1,4 @@
-import type { PlanKind, Prisma } from "@wroffy/control-client";
+import type { PlanKind, Prisma } from "@deskzo/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { dependentsOf, soldIn, withDependencies, type Entitlements } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";

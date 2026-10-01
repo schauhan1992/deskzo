@@ -53,7 +53,7 @@ import { cloneElement, createElement, isValidElement, type ReactElement, type Re
 import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.TRUST_PROXY_HOPS = "";

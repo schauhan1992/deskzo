@@ -1,7 +1,7 @@
 /**
  * Rules for reseller-managed end customers.
  *
- * When a reseller buys from Wroffy for one of their own customers, the reseller owns that
+ * When a reseller buys from the company for one of their own customers, the reseller owns that
  * relationship: we don't call the end customer, and we don't email them. `Company.managedByResellerId`
  * is the flag, and everything that could reach an end customer must go through here rather than
  * re-deriving the rule — in particular any future marketing automation, which must filter its

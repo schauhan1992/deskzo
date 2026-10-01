@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
-import type { Prisma, StaffRole } from "@wroffy/control-client";
+import type { Prisma, StaffRole } from "@deskzo/control-client";
 import { deviceFromUserAgent, istDayKey } from "@/lib/console-shared/format";
 import type { StaffFilters } from "@/lib/console-shared/params";
 import type { ConsoleRole } from "@/lib/console-shared/types";

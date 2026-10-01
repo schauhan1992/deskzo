@@ -1,4 +1,4 @@
-import type { AnnouncementAudience, AnnouncementTone, Prisma } from "@wroffy/control-client";
+import type { AnnouncementAudience, AnnouncementTone, Prisma } from "@deskzo/control-client";
 import type { AnnouncementTab } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { parseIstDateTime } from "@/lib/india-time";

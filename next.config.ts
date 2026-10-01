@@ -32,7 +32,7 @@ const nextConfig: NextConfig = {
    * Prisma's main client. Bundled, a client's search for its own query engine on disk makes the
    * build trace the entire project.
    */
-  serverExternalPackages: ["@wroffy/control-client", "@wroffy/reference-client", "@prisma/adapter-pg"],
+  serverExternalPackages: ["@deskzo/control-client", "@deskzo/reference-client", "@prisma/adapter-pg"],
 
   /**
    * Server actions accept bodies up to 6 MB: the website CMS uploads images of up to 5 MB through one

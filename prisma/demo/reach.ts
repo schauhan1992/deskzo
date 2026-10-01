@@ -189,9 +189,9 @@ export async function seedReach(
    * are nonsense — nothing here can actually send.
    */
   const PROVIDERS = [
-    ["m365", "Microsoft 365 SMTP", "EMAIL", true, 1, ["TRANSACTIONAL"], "Wroffy", "no-reply@wroffy.com"],
-    ["resend", "Resend", "EMAIL", true, 2, ["MARKETING"], "Wroffy", "hello@mail.wroffy.com"],
-    ["ses", "Amazon SES", "EMAIL", false, 3, ["MARKETING"], "Wroffy", "hello@mail.wroffy.com"],
+    ["m365", "Microsoft 365 SMTP", "EMAIL", true, 1, ["TRANSACTIONAL"], "Acme", "no-reply@acme.example"],
+    ["resend", "Resend", "EMAIL", true, 2, ["MARKETING"], "Acme", "hello@mail.acme.example"],
+    ["ses", "Amazon SES", "EMAIL", false, 3, ["MARKETING"], "Acme", "hello@mail.acme.example"],
     ["gupshup", "Gupshup WhatsApp", "WHATSAPP", false, 4, ["MARKETING"], null, null],
   ] as const;
 
@@ -206,7 +206,7 @@ export async function seedReach(
         classes: [...classes],
         fromName,
         fromEmail,
-        replyTo: fromEmail ? "sales@wroffy.com" : null,
+        replyTo: fromEmail ? "sales@acme.example" : null,
         secretCipher: await encryptSecret(`demo-not-a-real-key-${key}`),
         dailyCap: kind === "EMAIL" ? 2000 : 500,
         lastVerifiedAt: enabled ? daysAgo(int(1, 20)) : null,

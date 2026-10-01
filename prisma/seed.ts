@@ -1,5 +1,5 @@
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
+import { PrismaClient as ReferenceClient } from "@deskzo/reference-client";
 import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { ensurePincodes } from "./reference/pincodes";
@@ -11,11 +11,11 @@ async function main() {
   const passwordHash = await bcrypt.hash("ChangeMe123!", 10);
 
   const users: { name: string; email: string; role: Role }[] = [
-    { name: "Wroffy Admin", email: "admin@wroffy.com", role: "ADMIN" },
-    { name: "Priya Sharma", email: "priya.profile@wroffy.com", role: "PROFILE" },
-    { name: "Arjun Nair", email: "arjun.calling@wroffy.com", role: "CALLING" },
-    { name: "Neha Kapoor", email: "neha.sales@wroffy.com", role: "SALES" },
-    { name: "Rekha Iyer", email: "rekha.accounts@wroffy.com", role: "ACCOUNTS" },
+    { name: "Acme Admin", email: "admin@acme.example", role: "ADMIN" },
+    { name: "Priya Sharma", email: "priya.profile@acme.example", role: "PROFILE" },
+    { name: "Arjun Nair", email: "arjun.calling@acme.example", role: "CALLING" },
+    { name: "Neha Kapoor", email: "neha.sales@acme.example", role: "SALES" },
+    { name: "Rekha Iyer", email: "rekha.accounts@acme.example", role: "ACCOUNTS" },
   ];
 
   /**

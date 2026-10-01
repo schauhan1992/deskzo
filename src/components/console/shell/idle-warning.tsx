@@ -18,7 +18,7 @@ const IDLE_MS = 30 * 60_000;
 const TICK_MS = 30_000;
 
 /** Dispatched by the shell when a background read is refused: the session is gone, whatever the clock says. */
-const ENDED_EVENT = "wroffy-console-session-ended";
+const ENDED_EVENT = "deskzo-console-session-ended";
 
 /** Tells the banner the session has ended — for a read the server refused (the shell's badge poll). */
 export function announceSessionEnded(): void {

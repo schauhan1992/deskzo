@@ -23,7 +23,7 @@ import { isAutomationKind } from "@/lib/people";
  * it, not a determined person writing one with curl.
  */
 
-const COOKIE = "wroffy-view-as";
+const COOKIE = "deskzo-view-as";
 
 /**
  * Long enough for an admin to actually diagnose something, short enough that a forgotten tab does

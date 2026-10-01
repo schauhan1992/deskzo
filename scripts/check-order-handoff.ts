@@ -108,7 +108,7 @@ const MAIL = "@zzprobe-ordho.invalid";
 const BOUNDARY_DAY = "2026-01-15";
 const RENDERS = path.join(
   process.env.ORDHO_RENDERS ??
-    "C:/Users/Sachin/AppData/Local/Temp/claude/C--Users-Sachin-Documents-wroffy-crm/add8f996-e6c0-485a-aa61-d048675d5458/scratchpad/orders/renders",
+    "C:/Users/Sachin/AppData/Local/Temp/claude/C--Users-Sachin-Documents-deskzo/add8f996-e6c0-485a-aa61-d048675d5458/scratchpad/orders/renders",
 );
 
 let failures = 0;

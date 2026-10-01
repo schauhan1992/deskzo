@@ -6,7 +6,7 @@ import type { AnchorHTMLAttributes } from "react";
  * Every one of them is stripped of its referrer. Without that, following a link from a company
  * record hands the far end a `Referer` of something like `/companies/clx…?tab=domain`, which tells
  * a prospect's web server — and their analytics, and anyone who later reads those logs — that
- * somebody at Wroffy was looking at them and roughly what they were looking at. On a LinkedIn
+ * somebody at the company was looking at them and roughly what they were looking at. On a LinkedIn
  * profile or a competitor's site that is genuinely sensitive: it is our pipeline leaking out
  * through a request header.
  *

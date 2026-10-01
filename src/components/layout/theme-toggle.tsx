@@ -20,7 +20,7 @@ export const THEME_CHOICES: { value: ThemeChoice; label: string; Icon: typeof Su
 
 const STORAGE_KEY = "theme";
 /** `storage` only fires in *other* tabs, so this tab tells itself. */
-const CHANGED = "wroffy:theme-changed";
+const CHANGED = "deskzo:theme-changed";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 const isChoice = (value: unknown): value is ThemeChoice => value === "light" || value === "dark";

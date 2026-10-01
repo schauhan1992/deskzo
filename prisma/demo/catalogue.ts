@@ -67,14 +67,14 @@ const CATALOGUE: Seed[] = [
   { name: "Logitech Rally Bar Huddle", type: "GOOD", price: 185000, costRatio: 0.88, hsn: "85258900", gst: 18, brand: "Logitech" },
 
   // ── Services ─────────────────────────────────────────────────────────────────────────────────
-  { name: "Microsoft 365 Tenant Migration (per mailbox)", type: "SERVICE", price: 850, costRatio: 0.35, hsn: "998313", gst: 18, brand: "Wroffy" },
-  { name: "On-site Engineer Visit (per visit)", type: "SERVICE", price: 2500, costRatio: 0.45, hsn: "998313", gst: 18, brand: "Wroffy" },
-  { name: "Annual Maintenance Contract — Comprehensive", type: "SERVICE", price: 48000, costRatio: 0.4, hsn: "998713", gst: 18, brand: "Wroffy" },
-  { name: "Annual Maintenance Contract — Non-comprehensive", type: "SERVICE", price: 26000, costRatio: 0.38, hsn: "998713", gst: 18, brand: "Wroffy" },
-  { name: "Firewall Installation & Configuration", type: "SERVICE", price: 35000, costRatio: 0.4, hsn: "998313", gst: 18, brand: "Wroffy" },
-  { name: "Website Development — Corporate", type: "SERVICE", price: 185000, costRatio: 0.45, hsn: "998314", gst: 18, brand: "Wroffy" },
-  { name: "Managed IT Support (per seat/month)", type: "SERVICE", price: 650, costRatio: 0.4, hsn: "998313", gst: 18, brand: "Wroffy" },
-  { name: "Security Audit & VAPT", type: "SERVICE", price: 165000, costRatio: 0.42, hsn: "998313", gst: 18, brand: "Wroffy" },
+  { name: "Microsoft 365 Tenant Migration (per mailbox)", type: "SERVICE", price: 850, costRatio: 0.35, hsn: "998313", gst: 18, brand: "Acme" },
+  { name: "On-site Engineer Visit (per visit)", type: "SERVICE", price: 2500, costRatio: 0.45, hsn: "998313", gst: 18, brand: "Acme" },
+  { name: "Annual Maintenance Contract — Comprehensive", type: "SERVICE", price: 48000, costRatio: 0.4, hsn: "998713", gst: 18, brand: "Acme" },
+  { name: "Annual Maintenance Contract — Non-comprehensive", type: "SERVICE", price: 26000, costRatio: 0.38, hsn: "998713", gst: 18, brand: "Acme" },
+  { name: "Firewall Installation & Configuration", type: "SERVICE", price: 35000, costRatio: 0.4, hsn: "998313", gst: 18, brand: "Acme" },
+  { name: "Website Development — Corporate", type: "SERVICE", price: 185000, costRatio: 0.45, hsn: "998314", gst: 18, brand: "Acme" },
+  { name: "Managed IT Support (per seat/month)", type: "SERVICE", price: 650, costRatio: 0.4, hsn: "998313", gst: 18, brand: "Acme" },
+  { name: "Security Audit & VAPT", type: "SERVICE", price: 165000, costRatio: 0.42, hsn: "998313", gst: 18, brand: "Acme" },
 ];
 
 export type SeededItem = {

@@ -1,4 +1,4 @@
-import type { PlanKind, Prisma, SubscriptionStatus } from "@wroffy/control-client";
+import type { PlanKind, Prisma, SubscriptionStatus } from "@deskzo/control-client";
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements, refreshEntitlementsForPlan } from "@/lib/platform/entitlements";

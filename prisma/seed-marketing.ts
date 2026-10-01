@@ -84,8 +84,8 @@ async function main() {
       enabled: true,
       priority: 1,
       classes: ["MARKETING", "TRANSACTIONAL"],
-      fromName: "Wroffy",
-      fromEmail: "hello@mail.wroffy.test",
+      fromName: "Acme",
+      fromEmail: "hello@mail.acme.example",
     },
     update: { enabled: true, classes: ["MARKETING", "TRANSACTIONAL"], priority: 1 },
   });

@@ -280,7 +280,7 @@ async function main() {
     ok("without help.manage the helpline can't be changed", !(await help.saveHelpDesk({ phone: "1800 000 0000" })).ok);
     as(manager);
     ok("a bad phone number is refused", !(await help.saveHelpDesk({ phone: "call us!" })).ok);
-    ok("a bad email is refused", !(await help.saveHelpDesk({ email: "support at wroffy" })).ok);
+    ok("a bad email is refused", !(await help.saveHelpDesk({ email: "support at acme" })).ok);
     const saved = await help.saveHelpDesk({ label: `${TAG} Support`, phone: "+91 1800 123 4567", hours: "Mon – Fri", languages: "English, हिन्दी", email: "help@zz.invalid" });
     ok("help.manage can set it", saved.ok, JSON.stringify(saved));
     as(seller);
@@ -375,7 +375,7 @@ async function main() {
       React.createElement(WelcomeHeader, {
         greeting: "Good morning, Sachin",
         moments: [],
-        companyName: "Wroffy Technologies Private Limited",
+        companyName: "Acme Technologies Private Limited",
         logoDataUrl: null,
         helpDesk: { label: "Support", phone: "+91 1800-572 6671", hours: "Mon – Fri", languages: null, email: null },
         tabs: [
@@ -386,8 +386,8 @@ async function main() {
         activeTab: "overview",
       }),
     );
-    ok("the band greets and names the company", band.includes("Good morning, Sachin") && band.includes("Wroffy Technologies Private Limited"));
-    ok("without a logo it shows initials", band.includes(">WT<"));
+    ok("the band greets and names the company", band.includes("Good morning, Sachin") && band.includes("Acme Technologies Private Limited"));
+    ok("without a logo it shows initials", band.includes(">AT<"));
     ok("the helpline dials the digits only", band.includes('href="tel:+9118005726671"'));
     ok("the first tab is the plain dashboard, the others say which", band.includes('href="/dashboard"') && band.includes('href="/dashboard?tab=updates"'));
     ok("the active tab is marked current", /aria-current="page"[^>]*>Dashboard/.test(band));

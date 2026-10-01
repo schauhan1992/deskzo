@@ -19,7 +19,7 @@ import { controlConfigured } from "@/lib/platform/control-db";
  * a visitor sends is dropped first — so the form opens with the address filled in and locked.
  */
 
-const REFERRAL_COOKIE = "wroffy_ref";
+const REFERRAL_COOKIE = "deskzo_ref";
 
 type Query = Record<string, string | string[] | undefined>;
 

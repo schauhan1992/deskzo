@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
 import path from "node:path";
 import Papa from "papaparse";
-import { Prisma, type PrismaClient } from "@wroffy/reference-client";
+import { Prisma, type PrismaClient } from "@deskzo/reference-client";
 import { PIN_DIRECTORY_KEY, mapColumns, parseRow, type PostOfficeRow, type SkipReason } from "../../src/lib/geo/pincode";
 
 /**

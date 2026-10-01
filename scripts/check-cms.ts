@@ -58,7 +58,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { RichInline, SiteBlock, SiteRenderContext } from "../src/components/site/blocks/types";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.TRUST_PROXY_HOPS = "";
@@ -238,7 +238,7 @@ async function main() {
     const ROOT = `${host.PLATFORM_DOMAIN}${port}`;
     const CMS = `cms.${ROOT}`;
     const CONSOLE = `admin.${ROOT}`;
-    const COOKIE = "wroffy-cms";
+    const COOKIE = "deskzo-cms";
     const at = (h: string, extra: Record<string, string> = {}) => {
       requestHeaders = new Headers({ host: h, "user-agent": "check:cms", ...extra });
     };
@@ -398,14 +398,14 @@ async function main() {
     section("A CMS session is nothing anywhere else, and nothing else is one here");
     const cmsToken = await sessionFor(adminRow.id, {});
     at(CONSOLE);
-    jar.set("wroffy-console", cmsToken);
+    jar.set("deskzo-console", cmsToken);
     ok("a CMS token presented as the staff console's cookie is nobody there", (await staffSessions.currentStaffSession()) === null);
     ok("the CMS cookie sent to the console's address is nobody to the CMS", (await sessions.currentCmsSession()) === null);
     const staff = await control.platformUser.create({ data: { email: "owner@zzcms.example", name: "Zz Owner", role: "OWNER", passwordHash: await bcrypt.hash(password(), 10) } });
     const staffToken = randomBytes(32).toString("base64url");
     await control.platformSession.create({ data: { id: sha256(staffToken), userId: staff.id, expiresAt: new Date(Date.now() + 3_600_000), mfaAt: new Date() } });
     jar.clear();
-    jar.set("wroffy-console", staffToken);
+    jar.set("deskzo-console", staffToken);
     ok("  (the staff token is a console session there)", (await staffSessions.currentStaffSession())?.staff.id === staff.id);
     at(CMS);
     jar.set(COOKIE, staffToken);
@@ -1079,7 +1079,7 @@ async function main() {
       const t = randomBytes(32).toString("base64url");
       await control.platformSession.create({ data: { id: sha256(t), userId, expiresAt: new Date(Date.now() + 3_600_000), mfaAt: new Date() } });
       jar.clear();
-      jar.set("wroffy-console", t);
+      jar.set("deskzo-console", t);
       at(CONSOLE);
     };
     const WebsitePage = (require("../src/app/platform-console/(console)/website/page") as { default: Page }).default;
@@ -1896,13 +1896,13 @@ async function main() {
       await actAs(editorId);
 
       section("SEO: no N+1 — a batch's queries don't grow with the site");
-      const { PrismaClient: CountingClient } = require("@wroffy/control-client") as typeof import("@wroffy/control-client");
+      const { PrismaClient: CountingClient } = require("@deskzo/control-client") as typeof import("@deskzo/control-client");
       const counting = new CountingClient({ datasourceUrl: controlUrl, log: [{ emit: "event", level: "query" }] });
       let queries = 0;
       counting.$on("query", () => {
         queries += 1;
       });
-      const slot = Symbol.for("wroffy.control-db");
+      const slot = Symbol.for("deskzo.control-db");
       const g = globalThis as { [key: symbol]: unknown };
       const original = g[slot];
       const measure = async () => {

@@ -1,4 +1,4 @@
-import type { SubscriptionStatus } from "@wroffy/control-client";
+import type { SubscriptionStatus } from "@deskzo/control-client";
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { getRazorpaySubscription } from "@/lib/billing/razorpay";
 import { getStripeSubscription } from "@/lib/billing/stripe";

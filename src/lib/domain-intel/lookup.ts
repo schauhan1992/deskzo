@@ -24,7 +24,7 @@ import {
 
 /** A browser-ish agent: some hosts serve a different page, or none at all, to unknown clients. */
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; WroffyERP/1.0; +https://wroffy.com) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
+  "Mozilla/5.0 (compatible; DeskzoOne/1.0; +https://deskzo.com) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
 
 const HTTP_TIMEOUT_MS = 8_000;
 

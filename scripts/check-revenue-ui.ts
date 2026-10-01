@@ -216,7 +216,7 @@ async function main() {
     // From here on the app's own `db` is the scratch database, and the control plane is off by value.
     process.env.DATABASE_URL = scratchUrl;
     process.env.CONTROL_DATABASE_URL = "";
-    process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+    process.env.DESKZO_TENANCY_FALLBACK = "legacy";
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { db } = require("../src/lib/db") as typeof import("../src/lib/db");
     appDb = db;

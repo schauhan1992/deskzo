@@ -9,11 +9,11 @@ import { useSyncExternalStore } from "react";
  * account and the palette all read them through here, so each key is spelled once.
  */
 export const PREF_KEYS = {
-  density: "wroffy-console-density",
-  landing: "wroffy-console-landing",
-  sidebar: "wroffy-console-sidebar-collapsed",
-  navGroups: "wroffy-console-nav-groups",
-  recent: "wroffy-console-recent",
+  density: "deskzo-console-density",
+  landing: "deskzo-console-landing",
+  sidebar: "deskzo-console-sidebar-collapsed",
+  navGroups: "deskzo-console-nav-groups",
+  recent: "deskzo-console-recent",
 } as const;
 
 type Density = "comfortable" | "compact";

@@ -1,6 +1,6 @@
 "use server";
 
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { alertKeyInfo, alertTenantId } from "@/lib/platform/alerts";
 import { WRITERS, cleanText, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";

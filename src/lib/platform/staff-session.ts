@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import { cidrContains, parseCidr, parseIp } from "@/lib/access/ip";
 import { controlDb } from "@/lib/platform/control-db";
 import { openForPlatform, sealForPlatform } from "@/lib/platform/kek";
@@ -15,7 +15,7 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  * Signing platform staff in to the console (admin.<domain>) — a sign-in of its own, nothing to do with
  * any workspace's.
  *
- *   · The cookie is `__Host-wroffy-console` over https: this host only, never a workspace's.
+ *   · The cookie is `__Host-deskzo-console` over https: this host only, never a workspace's.
  *   · It holds a random token; the control plane holds its SHA-256 as a PlatformSession, checked on
  *     every request — thirty minutes idle, twelve hours at most, revocable from the console.
  *   · Two-factor, when an owner requires it (src/lib/platform/settings.ts — required in production
@@ -29,8 +29,8 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  *     needs TRUST_PROXY=1: the caller's address is only known from our own reverse proxy (callerIp).
  */
 
-const COOKIE_SECURE = "__Host-wroffy-console";
-const COOKIE_PLAIN = "wroffy-console";
+const COOKIE_SECURE = "__Host-deskzo-console";
+const COOKIE_PLAIN = "deskzo-console";
 const IDLE_MS = 30 * 60_000;
 const MAX_MS = 12 * 60 * 60_000;
 /** How often lastSeenAt is written — often enough for the idle limit, not on every request. */

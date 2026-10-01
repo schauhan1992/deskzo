@@ -1,4 +1,4 @@
-import type { SitePost } from "@wroffy/control-client";
+import type { SitePost } from "@deskzo/control-client";
 import type { NavItem, SiteSettings } from "../../src/components/site/blocks/types";
 import { DEFAULT_SITE_SETTINGS } from "../../src/components/site/defaults";
 import { refLabels } from "../../src/lib/cms/audit";

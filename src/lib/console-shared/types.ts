@@ -3,7 +3,7 @@
  * components receive. Pure types only: a client component imports this file without pulling the
  * control plane into its bundle (src/lib/console-shared is outside src/lib/platform on purpose).
  *
- * The string unions mirror the control plane's enums (`@wroffy/control-client`) so a Prisma row can be
+ * The string unions mirror the control plane's enums (`@deskzo/control-client`) so a Prisma row can be
  * handed straight to a client component; `ConsoleRole` is `StaffRole` spelled out, and tsc proves they
  * stay the same wherever one is passed as the other (src/lib/platform/console-page.ts).
  */

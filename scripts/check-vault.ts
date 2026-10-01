@@ -228,7 +228,7 @@ async function main() {
   actAs(owner);
   const created = await vault.saveCredential({
     loginName: `${PREFIX} GoDaddy`,
-    username: "wroffy-admin",
+    username: "deskzo-admin",
     secret: "registrar-pass",
     recoveryKey: "recovery-abc-123",
     rotateAfterDays: 90,

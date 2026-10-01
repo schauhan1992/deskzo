@@ -11,7 +11,7 @@ import type {
   PartnerRole,
   PartnerStatus,
   StatementStatus,
-} from "@wroffy/control-client";
+} from "@deskzo/control-client";
 
 /**
  * The partner programme's shared vocabulary — roles and what each may do, the shapes the portal's

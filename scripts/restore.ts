@@ -1,7 +1,7 @@
 /**
  * Puts a backup back.
  *
- *   npm run db:restore -- backups/wroffy-2026-09-20-143200.dump
+ *   npm run db:restore -- backups/deskzo-2026-09-20-143200.dump
  *
  * This destroys the current contents of the database. There is no undo, and the thing it replaces
  * is every order, invoice and stored password in the system. So it refuses unless told twice:
@@ -71,7 +71,7 @@ async function restoreInto(tenant: Tenant, args: string[]) {
 
   if (!file) {
     say("\n  Which backup?\n");
-    say("    npm run db:restore -- backups/wroffy-2026-09-20-143200.dump\n");
+    say("    npm run db:restore -- backups/deskzo-2026-09-20-143200.dump\n");
     process.exitCode = 1;
     return;
   }
@@ -231,7 +231,7 @@ async function stage(tool: { inContainer?: boolean }, file: string): Promise<Sta
   if (!tool.inContainer) return { pathForTool: file, cleanup: async () => {} };
 
   const service = process.env.BACKUP_DB_SERVICE?.trim() || "postgres";
-  const inside = `/tmp/wroffy-restore-${Date.now()}.dump`;
+  const inside = `/tmp/deskzo-restore-${Date.now()}.dump`;
 
   say(`  Copying the archive into the ${service} container…`);
   await run("docker", ["compose", "cp", file, `${service}:${inside}`]);

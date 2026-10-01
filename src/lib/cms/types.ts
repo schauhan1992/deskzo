@@ -1,4 +1,4 @@
-import type { CmsRole, SeoEntityType, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch } from "@wroffy/control-client";
+import type { CmsRole, SeoEntityType, SiteLeadStatus, SitePageStatus, SitePostStatus, SiteRedirectMatch } from "@deskzo/control-client";
 import type { BlockType, SiteBlock, SiteSeo, SiteSettings } from "@/components/site/blocks/types";
 import type { CheckResult, EntityScore, SeoImage, SeoLabel, SeoSiteContext } from "@/lib/seo/types";
 

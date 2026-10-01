@@ -1,4 +1,4 @@
-import { Prisma } from "@wroffy/control-client";
+import { Prisma } from "@deskzo/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { latestMigrationName } from "@/lib/platform/migrate";
 import { activeSupportGrant } from "@/lib/platform/support";

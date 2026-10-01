@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CmsRefused, MEDIA_MAX_BYTES, type MediaRow, type MediaType, type MediaUsage, type Paged } from "@/lib/cms/types";
 import { controlDb } from "@/lib/platform/control-db";

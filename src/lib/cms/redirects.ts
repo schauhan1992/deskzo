@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import type { SiteRedirect } from "@wroffy/control-client";
+import type { SiteRedirect } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import {
   chainProblems,
@@ -579,7 +579,7 @@ let testLoader: (() => Promise<LookupRule[]>) | null = null;
  * module-level flag set by a save would never reach the proxy's copy of this module. The counter is
  * the one thing both share; the proxy's map notices it on its next lookup and is read again.
  */
-const GENERATION = Symbol.for("wroffy.site-redirects.generation");
+const GENERATION = Symbol.for("deskzo.site-redirects.generation");
 const generationNow = () => (globalThis as Record<symbol, number | undefined>)[GENERATION] ?? 0;
 
 /** Every process-local copy of the map is out of date: read it again on the next lookup. Called by every save. */

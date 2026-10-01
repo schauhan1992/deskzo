@@ -79,7 +79,7 @@ const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
 
 // ─── The worker: runs the workload in a process of its own, with the scenario's settings ────
 async function worker() {
-  process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+  process.env.DESKZO_TENANCY_FALLBACK = "legacy";
   /* eslint-disable @typescript-eslint/no-require-imports */
   const registry = require("../src/lib/tenancy/registry") as typeof import("../src/lib/tenancy/registry");
   const { runAsTenant } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");

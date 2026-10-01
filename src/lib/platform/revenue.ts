@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import type { BillingGateway, BillingInterval, Prisma, SubscriptionStatus } from "@wroffy/control-client";
+import type { BillingGateway, BillingInterval, Prisma, SubscriptionStatus } from "@deskzo/control-client";
 import { usageDay } from "@/lib/copilot/settings";
 import { csvFilename, istMonthKey } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, gatewayLabel } from "@/lib/console-shared/labels";

@@ -6,7 +6,7 @@
  *   … -- --force                         load even if unchanged, or much smaller than what is loaded
  */
 import "dotenv/config";
-import { PrismaClient } from "@wroffy/reference-client";
+import { PrismaClient } from "@deskzo/reference-client";
 import { GEONAMES_DIR, downloadGeonames, loadGeonames } from "./geonames";
 
 // The shared reference database (prisma/reference/schema.prisma), which belongs to no workspace.

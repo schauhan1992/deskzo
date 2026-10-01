@@ -1,4 +1,4 @@
-import { Prisma, type PartnerKind } from "@wroffy/control-client";
+import { Prisma, type PartnerKind } from "@deskzo/control-client";
 import { istDayKey } from "@/lib/console-shared/format";
 import { COUNTRIES } from "@/lib/geo/countries";
 import { istDateParts, istMidnight, startOfIndianDay } from "@/lib/india-time";

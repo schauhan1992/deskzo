@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
-import { Prisma, type PartnerRole } from "@wroffy/control-client";
+import { Prisma, type PartnerRole } from "@deskzo/control-client";
 import type { PartnerActor } from "@/lib/partners/audit";
 import { currentPartnerSession, type PartnerSessionState } from "@/lib/partners/session";
 import { PartnerRefused, type PartnerMe, type PartnerResult } from "@/lib/partners/types";

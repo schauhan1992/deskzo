@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import type { Prisma, SubscriptionStatus } from "@wroffy/control-client";
+import type { Prisma, SubscriptionStatus } from "@deskzo/control-client";
 import { billingStandings, standingDate, type Standing } from "@/lib/billing/lifecycle";
 import { csvFilename, daysBetween, istDayKey } from "@/lib/console-shared/format";
 import { STANDING_KIND_LABEL, TENANT_STATUS, actorLabel } from "@/lib/console-shared/labels";

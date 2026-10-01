@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
-import { Prisma, type CmsRole } from "@wroffy/control-client";
+import { Prisma, type CmsRole } from "@deskzo/control-client";
 import type { CmsActor } from "@/lib/cms/audit";
 import { currentCmsSession, type CmsSessionState } from "@/lib/cms/session";
 import { CmsRefused, type CmsMe, type CmsResult } from "@/lib/cms/types";

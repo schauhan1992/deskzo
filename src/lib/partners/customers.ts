@@ -1,4 +1,4 @@
-import type { BillingInterval, PlanKind, SubscriptionStatus, TenantStatus } from "@wroffy/control-client";
+import type { BillingInterval, PlanKind, SubscriptionStatus, TenantStatus } from "@deskzo/control-client";
 import { billingStandings, standingDate, type Standing } from "@/lib/billing/lifecycle";
 import type { Money } from "@/lib/partners/types";
 import { controlDb } from "@/lib/platform/control-db";

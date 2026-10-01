@@ -16,7 +16,7 @@
 import "dotenv/config";
 import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { PrismaClient } from "@wroffy/reference-client";
+import { PrismaClient } from "@deskzo/reference-client";
 import { CANONICAL_FILE, loadPincodes, saveCanonicalCopy } from "./pincodes";
 import { fetchDirectory } from "./fetch";
 

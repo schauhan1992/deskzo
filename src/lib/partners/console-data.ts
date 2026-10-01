@@ -11,7 +11,7 @@ import {
   type PartnerStatus,
   type PlanKind,
   type TenantStatus,
-} from "@wroffy/control-client";
+} from "@deskzo/control-client";
 import { csvFilename } from "@/lib/console-shared/format";
 import { PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import { isoDateOrUndefined, one, type RawParams } from "@/lib/console-shared/params";

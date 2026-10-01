@@ -9,11 +9,11 @@
  * So this creates exactly one super admin and nothing else. The password comes from the
  * environment, never from a file in the repository, and is hashed before it touches the database.
  *
- *   ADMIN_EMAIL=you@wroffy.com ADMIN_PASSWORD='a real password' ADMIN_NAME='Your Name' npm run db:bootstrap
+ *   ADMIN_EMAIL=you@deskzo.com ADMIN_PASSWORD='a real password' ADMIN_NAME='Your Name' npm run db:bootstrap
  *
  * On Windows PowerShell:
  *
- *   $env:ADMIN_EMAIL="you@wroffy.com"; $env:ADMIN_PASSWORD="a real password"; npm run db:bootstrap
+ *   $env:ADMIN_EMAIL="you@deskzo.com"; $env:ADMIN_PASSWORD="a real password"; npm run db:bootstrap
  *
  * Clear the variables afterwards, or your shell history keeps the password.
  */

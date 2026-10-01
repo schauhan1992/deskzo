@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { headers } from "next/headers";
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { auth } from "@/lib/auth";
 import { clientIpFrom } from "@/lib/client-ip";
 import { throttle } from "@/lib/security/throttle";

@@ -8,7 +8,7 @@
  * separate process for the PIN directory's reason: minutes of work that must outlive the request.
  */
 import "dotenv/config";
-import { PrismaClient } from "@wroffy/reference-client";
+import { PrismaClient } from "@deskzo/reference-client";
 import { GEONAMES_DIR, downloadGeonames, loadGeonames } from "./geonames";
 
 // The shared reference database (prisma/reference/schema.prisma), which belongs to no workspace.

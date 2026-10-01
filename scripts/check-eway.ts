@@ -413,7 +413,7 @@ async function main() {
     documentType: "INVOICE",
     documentNumber: "INV/26-27/0119",
     documentDate: at("2026-09-21T00:00:00"),
-    from: { gstin: "27AAAAA0000A1Z5", tradeName: "Wroffy", address1: "1 Road", place: "Mumbai", pincode: "400001", stateCode: "27" },
+    from: { gstin: "27AAAAA0000A1Z5", tradeName: "Acme", address1: "1 Road", place: "Mumbai", pincode: "400001", stateCode: "27" },
     to: { gstin: "29BBBBB1111B1Z5", tradeName: "Acme", address1: "2 Street", place: "Bengaluru", pincode: "560001", stateCode: "29" },
     items: [{ productName: "Laptop", hsnCode: "84713010", quantity: 2, unit: "NOS", taxableValue: 80000 }],
     totalValue: 80000,

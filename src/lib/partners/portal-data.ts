@@ -12,7 +12,7 @@ import type {
   StatementStatus,
   SubscriptionStatus,
   TenantStatus,
-} from "@wroffy/control-client";
+} from "@deskzo/control-client";
 import type { CsvExport } from "@/lib/console-shared/types";
 import { istDateParts, istMidnight, endOfIndianDay } from "@/lib/india-time";
 import { listPartnerAudit } from "@/lib/partners/audit";

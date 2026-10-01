@@ -26,7 +26,7 @@ export const MERGE_FIELDS: MergeField[] = [
   { key: "companyName", label: "Company", example: "Vertex Industries LLP", source: "The company's name" },
   { key: "ourName", label: "Our name", example: "Acme", source: "Trade name from organisation settings" },
   { key: "ownerName", label: "Account manager", example: "Priya Sharma", source: "Whoever owns the account" },
-  { key: "ownerEmail", label: "Account manager's email", example: "priya@wroffy.com", source: "Their user record" },
+  { key: "ownerEmail", label: "Account manager's email", example: "priya@example.com", source: "Their user record" },
   { key: "productName", label: "Product", example: "Microsoft 365 Business Basic", source: "The subscription that triggered this" },
   { key: "quantity", label: "Quantity", example: "20", source: "Seats or units on that subscription" },
   { key: "expiryDate", label: "Expiry", example: "9 Aug 2027", source: "When the subscription or cover ends" },

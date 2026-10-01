@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Prisma, SeoEntityType } from "@wroffy/control-client";
+import type { Prisma, SeoEntityType } from "@deskzo/control-client";
 import type { SiteBlock, SiteSeo, SiteSettings } from "@/components/site/blocks/types";
 import { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } from "@/components/site/defaults";
 import { CMS_ROUTES } from "@/lib/cms/nav";

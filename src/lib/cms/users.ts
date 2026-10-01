@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
-import type { CmsRole, Prisma } from "@wroffy/control-client";
+import type { CmsRole, Prisma } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CMS_IDLE_MS, CMS_MIN_PASSWORD, sha256, storeCmsTwoFactorPolicy } from "@/lib/cms/session";
 import { CMS_ROLES, CmsRefused, type CmsSessionRow, type CmsTwoFactorMode, type CmsUserRow } from "@/lib/cms/types";

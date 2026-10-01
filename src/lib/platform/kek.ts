@@ -27,7 +27,7 @@ function platformKey(): Buffer {
   const isBase64 = decoded.toString("base64").replace(/=+$/, "") === raw.replace(/=+$/, "");
   const material = isBase64 ? decoded : Buffer.from(raw, "utf8");
   if (material.length < 32) throw new Error("PLATFORM_MASTER_KEY must be at least 32 bytes — base64 of 32 random bytes.");
-  const key = Buffer.from(hkdfSync("sha256", material, "wroffy/platform", "kek/v1", 32));
+  const key = Buffer.from(hkdfSync("sha256", material, "deskzo/platform", "kek/v1", 32));
   cached = { raw, key };
   return key;
 }
@@ -75,7 +75,7 @@ export type SignPurpose = "backup-archive" | "cms-preview" | "link-intent" | "li
  * workspace, does not verify (src/lib/backup/archive.ts).
  */
 export function platformHmac(tenantId: string, purpose: SignPurpose): Hmac {
-  const key = Buffer.from(hkdfSync("sha256", platformKey(), "wroffy/platform-sign", `${purpose}|${tenantId}`, 32));
+  const key = Buffer.from(hkdfSync("sha256", platformKey(), "deskzo/platform-sign", `${purpose}|${tenantId}`, 32));
   return createHmac("sha256", key);
 }
 

@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import { directClient, poolSettings } from "../src/lib/tenancy/direct-client";
 import type { Tenant } from "../src/lib/tenancy/state";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 process.env.TENANCY_MAX_CLIENTS = "3";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TENANCY_POOLER_URL = "";
@@ -269,7 +269,7 @@ async function main() {
   const trusted = {
     upstream: at("127.0.0.1:3000", acmeHost),
     passedOn: at(acmeHost, acmeHost),
-    custom: at("wroffy-app:3000", "crm.example.org"),
+    custom: at("deskzo-app:3000", "crm.example.org"),
     spoofed: at(acmeHost, betaHost),
     spoofedConsole: at(acmeHost, consoleHost),
   };

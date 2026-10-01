@@ -1,6 +1,6 @@
 "use server";
 
-import type { PartnerRole } from "@wroffy/control-client";
+import type { PartnerRole } from "@deskzo/control-client";
 import type { CsvExport } from "@/lib/console-shared/types";
 import { partnerAudit } from "@/lib/partners/audit";
 import { partnerActor, partnerRefusal, requirePartner, revalidatePortal, type PartnerMode } from "@/lib/partners/guard";

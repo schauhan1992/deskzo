@@ -12,7 +12,7 @@ import { currentTenant } from "@/lib/tenancy/resolve";
  */
 export async function marketingWebhookSecret(): Promise<string> {
   const { digestKey } = await currentKeys();
-  return createHmac("sha256", digestKey).update("wroffy/marketing-webhook").digest("base64url").slice(0, 32);
+  return createHmac("sha256", digestKey).update("deskzo/marketing-webhook").digest("base64url").slice(0, 32);
 }
 
 /**

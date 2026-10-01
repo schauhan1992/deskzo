@@ -1,6 +1,6 @@
 "use server";
 
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { MANAGERS, SUPPORT_AGENTS } from "@/lib/console-shared/roles";
 import { platformBrandName } from "@/lib/platform/brand";

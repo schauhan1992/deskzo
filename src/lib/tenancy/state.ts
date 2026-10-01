@@ -73,7 +73,7 @@ type TenancyState = {
  */
 export function tenancyState(): TenancyState {
   const g = globalThis as { [key: symbol]: TenancyState | undefined };
-  const key = Symbol.for("wroffy.tenancy");
+  const key = Symbol.for("deskzo.tenancy");
   if (!g[key]) g[key] = { als: new AsyncLocalStorage<Tenant>(), registry: new Map(), shared: null, pools: new Map(), poolCounts: { opened: 0, closed: 0 }, keys: new Map() };
   // A process that loaded an older copy of this module (a dev server across a hot reload).
   g[key]!.keys ??= new Map();

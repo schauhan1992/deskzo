@@ -43,7 +43,7 @@ import type { SwitchState } from "../src/lib/platform/linked/switch";
 import type { Tenant } from "../src/lib/tenancy/state";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.REFERENCE_DATABASE_URL = "";
 // Behind "our proxy", so every caller has an address and the per-caller limits and IP rules apply.
@@ -525,13 +525,13 @@ async function main() {
     const intentHash = keys.tokenHashOf(intentToken) ?? "none";
     ok("L1 with the right password: a URL on B's host, the token in its #i= fragment", asked.url.startsWith(`${keys.originOf(B)}/link/start#i=`) && keys.tokenHashOf(intentToken) !== null, asked.url.split("#")[0]);
     let intentRow = await control.linkIntent.findUnique({ where: { tokenHash: intentHash } });
-    ok("  and this browser's secret for the wroffy.link cookie — the row keeps only its hash", /^[A-Za-z0-9_-]{43}$/.test(asked.browserSecret) && intentRow?.browserSecretHash === keys.sha256Hex(asked.browserSecret));
+    ok("  and this browser's secret for the deskzo.link cookie — the row keeps only its hash", /^[A-Za-z0-9_-]{43}$/.test(asked.browserSecret) && intentRow?.browserSecretHash === keys.sha256Hex(asked.browserSecret));
     ok("  the row keeps the token's hash, never the token", !!intentRow && intentRow.tokenHash !== intentToken && !JSON.stringify(intentRow).includes(intentToken.slice(0, 43)));
     ok("  asked by this session, open for ten minutes", intentRow?.sourceSid === sidA && Math.abs(intentRow.expiresAt.getTime() - intentRow.createdAt.getTime() - keys.LINK_INTENT_TTL_MS) < 5_000);
     const presented = await I.presentLinkIntent(B, intentToken, IP);
     keep(presented.targetSecret);
     intentRow = await control.linkIntent.findUnique({ where: { tokenHash: intentHash } });
-    ok("L2 at B: the secret for B's wroffy.link-in cookie — only its hash kept", /^[A-Za-z0-9_-]{43}$/.test(presented.targetSecret) && intentRow?.targetBrowserHash === keys.sha256Hex(presented.targetSecret) && !!intentRow.presentedAt);
+    ok("L2 at B: the secret for B's deskzo.link-in cookie — only its hash kept", /^[A-Za-z0-9_-]{43}$/.test(presented.targetSecret) && intentRow?.targetBrowserHash === keys.sha256Hex(presented.targetSecret) && !!intentRow.presentedAt);
     ok(
       "  its view: where it was asked (A, its host, that account's address) and B's own name",
       JSON.stringify(presented.view) === JSON.stringify({ sourceName: A.name, sourceHost: A.primaryHost, sourceEmail: uA.email, targetName: B.name, expired: false }),
@@ -795,7 +795,7 @@ async function main() {
     const setLink = lastCall(cookieOps, ops).find((o) => o.op === "set");
     const linkName = keys.linkCookieName("link", false);
     ok(
-      "L1 through its action: ok, and this browser gets wroffy.link (HttpOnly, Lax, Path=/, ten minutes)",
+      "L1 through its action: ok, and this browser gets deskzo.link (HttpOnly, Lax, Path=/, ten minutes)",
       startedLink.value?.ok === true && setLink?.name === linkName && setLink.options.httpOnly === true && setLink.options.sameSite === "lax" && setLink.options.path === "/" && setLink.options.maxAge === 600,
       { value: startedLink.value, setLink: setLink?.name },
     );
@@ -806,15 +806,15 @@ async function main() {
     ops = cookieOps.length;
     const opened = await act(bAtB, B, () => L.openLinkRequest(startedLink.value?.ok ? frag(startedLink.value.url, "i") : ""));
     const setIn = lastCall(cookieOps, ops).find((o) => o.op === "set");
-    ok("L2 through its action: B's browser gets wroffy.link-in, and the session already there is signed out", opened.value?.ok === true && setIn?.name === keys.linkCookieName("link-in", false) && bAtB.session === null, opened);
+    ok("L2 through its action: B's browser gets deskzo.link-in, and the session already there is signed out", opened.value?.ok === true && setIn?.name === keys.linkCookieName("link-in", false) && bAtB.session === null, opened);
     keep(setIn?.value ?? "");
     await signInAt(B, uB, bAtB);
     ops = cookieOps.length;
     const confirmed = await act(bAtB, B, () => L.confirmLinkRequest());
-    ok("L3 through its action: ok, and wroffy.link-in is cleared", confirmed.value?.ok === true && lastCall(cookieOps, ops).some((o) => o.op === "delete" && o.name === keys.linkCookieName("link-in", false)), confirmed);
+    ok("L3 through its action: ok, and deskzo.link-in is cleared", confirmed.value?.ok === true && lastCall(cookieOps, ops).some((o) => o.op === "delete" && o.name === keys.linkCookieName("link-in", false)), confirmed);
     ops = cookieOps.length;
     const finished = await act(bAtC, C, () => L.finishLinkRequest(confirmed.value?.ok ? frag(confirmed.value.url, "c") : ""));
-    ok("L4 through its action: linked to B, and wroffy.link is cleared", finished.value?.ok === true && finished.value.workspace === B.name && lastCall(cookieOps, ops).some((o) => o.op === "delete" && o.name === linkName), finished);
+    ok("L4 through its action: linked to B, and deskzo.link is cleared", finished.value?.ok === true && finished.value.workspace === B.name && lastCall(cookieOps, ops).some((o) => o.op === "delete" && o.name === linkName), finished);
     ok("A–B, then C–B: one group of three", (await G.memberOf(C.id, uC.id))?.groupId === groupAB && sameSet(await tenantsOfGroup(groupAB), [A.id, B.id, C.id]));
     void sidC;
 
@@ -1089,7 +1089,7 @@ async function main() {
       const token = randomBytes(32).toString("base64url");
       await control.platformSession.create({ data: { id: keys.sha256Hex(token), userId: staffId, expiresAt: new Date(Date.now() + 3_600_000), mfaAt: new Date(), userAgent: "check-linked-signin" } });
       const b = browser(`console: ${staffId}`);
-      b.jar.set("wroffy-console", { value: token, options: {} });
+      b.jar.set("deskzo-console", { value: token, options: {} });
       return b;
     };
     const atConsole = async <T>(b: Browser, work: () => Promise<T>): Promise<T> => {
@@ -1557,7 +1557,7 @@ async function main() {
       setupIntent,
     );
     const meeraLinkCookie = lastCall(cookieOps, opsFrom).find((o) => o.op === "set" && o.browser === bMeera.name && o.name === linkName);
-    ok("  and this browser holds wroffy.link for it", !!meeraLinkCookie?.value && keys.sha256Hex(meeraLinkCookie.value) === setupIntent?.browserSecretHash);
+    ok("  and this browser holds deskzo.link for it", !!meeraLinkCookie?.value && keys.sha256Hex(meeraLinkCookie.value) === setupIntent?.browserSecretHash);
     keep(meeraLinkCookie?.value ?? "");
     const bMeeraAtA = browser("A: Meera, confirming");
     const openedAtA = await act(bMeeraAtA, A, () => L.openLinkRequest(frag(startUrl, "i")));
@@ -1589,7 +1589,7 @@ async function main() {
     );
     const omarNow = await accountNow(omar.user.id);
     ok("  the password is saved all the same, and the link spent", (await bcrypt.compare(CHOSEN, omarNow.passwordHash)) && !omarNow.mustChangePassword && (await linkSpent(omar.token)));
-    ok("  signed in here; no request, and no wroffy.link", bOmar.session?.user.id === omar.user.id && (await intentsFrom(omar.user.id)) === 0 && !lastCall(cookieOps, opsFrom).some((o) => o.name === linkName));
+    ok("  signed in here; no request, and no deskzo.link", bOmar.session?.user.id === omar.user.id && (await intentsFrom(omar.user.id)) === 0 && !lastCall(cookieOps, opsFrom).some((o) => o.name === linkName));
     const priti = await addUser("Priti Das", "priti.das@zzlink-b.example", true);
     await setSecurity(B, { enforceSso: true });
     const bPriti = browser("B: Priti, setting up");

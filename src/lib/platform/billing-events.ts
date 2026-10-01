@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import type { EventFilters } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { GatewayKey } from "@/lib/console-shared/types";

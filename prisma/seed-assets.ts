@@ -309,7 +309,7 @@ async function main() {
         reason: "REPAIR_OUT",
         status: "IN_TRANSIT",
         toCompanyId: clients[0].id,
-        fromLabel: "Wroffy — Andheri",
+        fromLabel: "Acme — Andheri",
         courier: "Blue Dart",
         docketNumber: `${int(10000000, 99999999)}`,
         dispatchedOn: daysFrom(-2),

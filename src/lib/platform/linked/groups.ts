@@ -1,4 +1,4 @@
-import { Prisma } from "@wroffy/control-client";
+import { Prisma } from "@deskzo/control-client";
 import { formatIstDateTime } from "@/lib/india-time";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { MAX_LINKED_WORKSPACES, originOf } from "@/lib/platform/linked/keys";

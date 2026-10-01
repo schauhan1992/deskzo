@@ -1,6 +1,6 @@
 "use server";
 
-import type { CmsRole } from "@wroffy/control-client";
+import type { CmsRole } from "@deskzo/control-client";
 import { cmsAction, cmsActor, revalidateCms } from "@/lib/cms/guard";
 import { CMS_ADMINS, type CmsResult, type CmsSessionRow } from "@/lib/cms/types";
 import {

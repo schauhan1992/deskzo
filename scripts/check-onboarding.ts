@@ -328,7 +328,7 @@ async function main() {
       select: { id: true },
     });
     pendingSignupId = row.id;
-    jar.set("wroffy.signup", `${row.id}.${secret}`);
+    jar.set("deskzo.signup", `${row.id}.${secret}`);
     const attempts = async () => (await control.pendingSignup.findUniqueOrThrow({ where: { id: row.id } })).attempts;
     const short = await signup.verifySignup("12");
     ok("two digits: said at the code field, and it costs no try", !short.ok && short.issues?.code === "The code is 6 digits — this one has 2." && (await attempts()) === 0, json(short));

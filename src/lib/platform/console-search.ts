@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { formatMoney } from "@/lib/billing/money";
 import { dayMonth, dayMonthYear } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, INVITE_STATE, PARTNER_KIND, PARTNER_STATUS, ROLE_LABEL, SUBSCRIPTION_STATUS, TENANT_STATUS, planKindLabel, subscriptionKind } from "@/lib/console-shared/labels";

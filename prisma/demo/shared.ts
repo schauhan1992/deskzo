@@ -16,7 +16,7 @@
 
 export const DEMO_TAG = "seed-demo";
 export const DEMO_SKU = "DMO-";
-export const DEMO_EMAIL_DOMAIN = "@demo.wroffy.invalid";
+export const DEMO_EMAIL_DOMAIN = "@demo.deskzo.invalid";
 
 export const TODAY = new Date();
 

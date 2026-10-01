@@ -1,6 +1,6 @@
 "use server";
 
-import type { SiteLeadStatus } from "@wroffy/control-client";
+import type { SiteLeadStatus } from "@deskzo/control-client";
 import { cmsAction, cmsActor, revalidateCms } from "@/lib/cms/guard";
 import { exportLeadsCsv, getLead, listLeads, updateLead } from "@/lib/cms/leads";
 import { CMS_EVERYONE, CMS_PUBLISHERS, type CmsResult, type LeadDetail, type LeadFilters, type LeadRow, type Paged } from "@/lib/cms/types";

@@ -169,7 +169,7 @@ async function counted<T>(work: (adapter: PgAdapter) => Promise<T>): Promise<T> 
 
 const router = {
   provider: "postgres" as const,
-  adapterName: "wroffy-workspaces",
+  adapterName: "deskzo-workspaces",
   queryRaw: (query: Query) => counted((adapter) => adapter.queryRaw(query)),
   executeRaw: (query: Query) => counted((adapter) => adapter.executeRaw(query)),
   executeScript: (script: string) => counted((adapter) => adapter.executeScript(script)),
@@ -226,7 +226,7 @@ const router = {
   dispose: () => closeAllPools(),
 };
 
-const factory = { provider: "postgres" as const, adapterName: "wroffy-workspaces", connect: async () => router };
+const factory = { provider: "postgres" as const, adapterName: "deskzo-workspaces", connect: async () => router };
 
 type Batcher = { _requestHandler?: { dataloader?: { options?: { batchBy?: unknown } } } };
 type BatchedRequest = { transaction?: { id?: string | number } };

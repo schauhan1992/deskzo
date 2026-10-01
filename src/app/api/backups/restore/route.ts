@@ -228,7 +228,7 @@ export async function POST(request: Request) {
       detached: true,
       stdio: "ignore",
       // The workspace it restores, by id: the worker looks the rest up itself (scripts/restore-worker.ts).
-      env: { ...process.env, WROFFY_TENANT_ID: tenant.id },
+      env: { ...process.env, DESKZO_TENANT_ID: tenant.id },
     });
     child.unref();
   } catch (err) {

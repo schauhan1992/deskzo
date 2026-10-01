@@ -146,10 +146,10 @@ async function main() {
   section("Filenames");
 
   const stamped = backupFilename(new Date(2026, 8, 7, 4, 5, 6));
-  ok("named for the app, dated and timed", stamped === "wroffy-2026-09-07-040506.dump", stamped);
+  ok("named for the app, dated and timed", stamped === "deskzo-2026-09-07-040506.dump", stamped);
   ok(
     "single digits padded, so names are a fixed width",
-    /^wroffy-\d{4}-\d{2}-\d{2}-\d{6}\.dump$/.test(stamped),
+    /^deskzo-\d{4}-\d{2}-\d{2}-\d{6}\.dump$/.test(stamped),
     stamped,
   );
   {
@@ -163,8 +163,8 @@ async function main() {
   section("Connection details");
 
   {
-    const c = parseDatabaseUrl("postgresql://wroffy:pw@localhost:5433/wroffy_crm?schema=public");
-    ok("host, port, user and database pulled apart", c?.host === "localhost" && c.port === "5433" && c.user === "wroffy" && c.database === "wroffy_crm", JSON.stringify(c));
+    const c = parseDatabaseUrl("postgresql://deskzo:pw@localhost:5433/deskzo?schema=public");
+    ok("host, port, user and database pulled apart", c?.host === "localhost" && c.port === "5433" && c.user === "deskzo" && c.database === "deskzo", JSON.stringify(c));
   }
   {
     // A password with a `@` or a `/` in it has to be escaped in a URL, and pg_dump wants the real
@@ -357,19 +357,19 @@ async function main() {
 
   section("The sidecar");
 
-  const temp = await mkdtemp(path.join(tmpdir(), "wroffy-backup-check-"));
+  const temp = await mkdtemp(path.join(tmpdir(), "deskzo-backup-check-"));
   try {
-    const dump = path.join(temp, "wroffy-2026-09-20-120000.dump");
+    const dump = path.join(temp, "deskzo-2026-09-20-120000.dump");
     ok("the sidecar sits beside its dump", sidecarPath(dump) === `${dump}.json`);
 
     const written = {
-      filename: "wroffy-2026-09-20-120000.dump",
+      filename: "deskzo-2026-09-20-120000.dump",
       takenAt: NOW.toISOString(),
       schemaVersion: "20260920180000_backups",
       secretFingerprint: legacyFingerprint("a-secret"),
       via: "docker compose (postgres)",
       sizeBytes: 1435618,
-      app: "Wroffy ERP",
+      app: "Deskzo One",
     };
     await writeSidecar(dump, written);
     const read = await readSidecar(dump);
@@ -533,7 +533,7 @@ async function main() {
 
   section("Pruning for real — files and rows together");
 
-  const folder = await mkdtemp(path.join(tmpdir(), "wroffy-backup-prune-"));
+  const folder = await mkdtemp(path.join(tmpdir(), "deskzo-backup-prune-"));
   const planted: { filename: string; startedAt: Date; status: "SUCCEEDED" | "FAILED" | "RUNNING" }[] = [
     { filename: "zzcheck-recent-1.dump", startedAt: realAgo(1 * HOUR), status: "SUCCEEDED" },
     { filename: "zzcheck-recent-2.dump", startedAt: realAgo(2 * HOUR), status: "SUCCEEDED" },
@@ -605,7 +605,7 @@ async function main() {
    *
    * Found by running the thing, not by reading it, which is why it is checked here.
    */
-  const stuckFolder = await mkdtemp(path.join(tmpdir(), "wroffy-backup-stuck-"));
+  const stuckFolder = await mkdtemp(path.join(tmpdir(), "deskzo-backup-stuck-"));
   try {
     const finished = path.join(stuckFolder, "zzstuck-finished.dump");
     await writeFile(finished, "x".repeat(4096), "utf8");
@@ -676,7 +676,7 @@ async function main() {
    * than one that accepts nothing.
    */
   {
-    const dir = await mkdtemp(path.join(tmpdir(), "wroffy-archive-check-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "deskzo-archive-check-"));
     try {
       const PASS = "correct horse battery staple";
       const SECRET = "the-auth-secret-of-the-source-instance";
@@ -849,7 +849,7 @@ async function main() {
    *   3. Deleting one backup must not break the others, because they share their pieces.
    */
   {
-    const dir = await mkdtemp(path.join(tmpdir(), "wroffy-chunk-check-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "deskzo-chunk-check-"));
     try {
       /**
        * Comfortably past `MAX_CHUNK`, so boundaries are actually exercised.
@@ -899,7 +899,7 @@ async function main() {
        * Splicing bytes into an already-compressed file instead makes compression look better than
        * uncompressed, which is an artefact of the test rather than a property of the format.
        */
-      const czDir = await mkdtemp(path.join(tmpdir(), "wroffy-chunk-cz-"));
+      const czDir = await mkdtemp(path.join(tmpdir(), "deskzo-chunk-cz-"));
       try {
         const ca = path.join(czDir, "a.gz");
         const cb = path.join(czDir, "b.gz");
@@ -984,7 +984,7 @@ async function main() {
    * chunks, real rows — and the real functions are run against it.
    */
   {
-    const dir = await mkdtemp(path.join(tmpdir(), "wroffy-backup-wiring-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "deskzo-backup-wiring-"));
     /**
      * The dumps the chunked backups are made from live outside the backup folder.
      *
@@ -993,7 +993,7 @@ async function main() {
      * real run ever leaves — and the `filesOnDisk` counts below would be answering about the
      * fixture rather than about the pruner.
      */
-    const work = await mkdtemp(path.join(tmpdir(), "wroffy-backup-wiring-src-"));
+    const work = await mkdtemp(path.join(tmpdir(), "deskzo-backup-wiring-src-"));
     try {
       const older = syntheticDump(20_000);
       const newer = withInsertion(older);

@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import { ENV_LABEL } from "@/lib/console-shared/labels";
 import { ENTER, MANAGERS, OWNERS, SELLERS, capsFor, hasRole, type Caps } from "@/lib/console-shared/roles";
 import type { PlatformEnv } from "@/lib/console-shared/types";

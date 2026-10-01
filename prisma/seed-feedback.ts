@@ -20,7 +20,7 @@ import { linkState, summarise } from "../src/lib/feedback/rating";
 
 const db = directClient();
 
-const REVIEW_URL = "https://g.page/r/wroffy-seed/review";
+const REVIEW_URL = "https://g.page/r/acme-seed/review";
 const MIN_RATING = 4;
 const REF_PREFIX = "FB/SEED/";
 

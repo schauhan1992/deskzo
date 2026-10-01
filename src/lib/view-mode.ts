@@ -55,7 +55,7 @@ export const LAYOUTS: Record<ViewModeKey, { offers: readonly ViewMode[]; fallbac
 export const DEFAULT_VIEW_MODE: ViewMode = "list";
 
 export function viewModeCookie(key: ViewModeKey) {
-  return `wroffy.view.${key}`;
+  return `deskzo.view.${key}`;
 }
 
 /**

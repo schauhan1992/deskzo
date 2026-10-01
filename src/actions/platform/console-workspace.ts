@@ -1,6 +1,6 @@
 "use server";
 
-import type { Prisma, StaffRole } from "@wroffy/control-client";
+import type { Prisma, StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { ALL_ROLES, ENTER, MANAGERS, SELLERS, WRITERS, cleanText, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";

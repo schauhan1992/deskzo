@@ -1,4 +1,4 @@
-import type { SubscriptionStatus } from "@wroffy/control-client";
+import type { SubscriptionStatus } from "@deskzo/control-client";
 import { standingOf, type Standing, type StandingSub } from "@/lib/billing/lifecycle";
 import { entitledModuleKeys, soldIn, type Entitlements } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";

@@ -16,7 +16,7 @@ import { tenancyState } from "@/lib/tenancy/state";
  */
 
 type Labelled = { installed: boolean };
-const KEY = Symbol.for("wroffy.log-labels");
+const KEY = Symbol.for("deskzo.log-labels");
 const state = (): Labelled => ((globalThis as Record<symbol, Labelled>)[KEY] ??= { installed: false });
 
 type RequestStoreLike = { type?: string; headers?: { get(name: string): string | null } };

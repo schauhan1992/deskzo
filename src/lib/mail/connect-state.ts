@@ -8,7 +8,7 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
  * Kept in an encrypted, short-lived cookie scoped to the two routes that use it.
  */
 
-export const CONNECT_COOKIE = "wroffy.mail-connect";
+export const CONNECT_COOKIE = "deskzo.mail-connect";
 export const CONNECT_COOKIE_PATH = "/api/mail/microsoft";
 export const CONNECT_TTL_SECONDS = 600;
 

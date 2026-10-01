@@ -14,14 +14,14 @@ import type { Tenant } from "@/lib/tenancy/state";
  *     src/lib/tenancy/keys.ts). A cookie carried from one workspace to another does not decrypt.
  *   · It also names the workspace (`tid`), checked again wherever a session is read — a second lock
  *     on the same door, for the day somebody gets the first one wrong.
- *   · The cookie is `__Host-wroffy.session` over https: bound to the exact host, never sent to a
- *     sibling subdomain, never settable by one. Plain `wroffy.session` over http, in development.
+ *   · The cookie is `__Host-deskzo.session` over https: bound to the exact host, never sent to a
+ *     sibling subdomain, never settable by one. Plain `deskzo.session` over http, in development.
  *   · The address is the request's own (`trustHost`), which the proxy has already checked names a
  *     workspace; there is no NEXTAUTH_URL, because there is no one address.
  */
 
-export const SESSION_COOKIE_SECURE = "__Host-wroffy.session";
-export const SESSION_COOKIE_PLAIN = "wroffy.session";
+export const SESSION_COOKIE_SECURE = "__Host-deskzo.session";
+export const SESSION_COOKIE_PLAIN = "deskzo.session";
 
 /** A secret no session was ever issued under — for a request that reaches no workspace. */
 const NO_WORKSPACE_SECRET = randomBytes(32).toString("base64");

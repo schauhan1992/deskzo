@@ -1,4 +1,4 @@
-import { Prisma } from "@wroffy/control-client";
+import { Prisma } from "@deskzo/control-client";
 import { plural } from "@/lib/console-shared/format";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { MANAGERS, SELLERS, SIGNUP_VIEWERS, SUPPORT_VIEWERS, hasRole } from "@/lib/console-shared/roles";

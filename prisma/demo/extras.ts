@@ -465,7 +465,7 @@ export async function seedExtras(
         companyId: company.id,
         domain: `${company.name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14)}.example`,
         emailProvider: pick(["Microsoft 365", "Google Workspace", "Zoho Mail", "On-premise Exchange"]),
-        mxHosts: pick([["wroffy-mail.protection.outlook.com"], ["aspmx.l.google.com"], ["mx.zoho.in"]]),
+        mxHosts: pick([["acme-example.mail.protection.outlook.com"], ["aspmx.l.google.com"], ["mx.zoho.in"]]),
         // The reason this module exists: a customer on Google Workspace is a Microsoft 365
         // conversation waiting to happen, and one with no DMARC is a security conversation.
         platform: pick(["WordPress", "Shopify", "Custom", "Wix"]),

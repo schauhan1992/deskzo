@@ -79,7 +79,7 @@ function section(title: string) {
   console.log(`\n— ${title} —\n`);
 }
 
-/** `postgresql://…/wroffy_crm?schema=public` with the database swapped for another. */
+/** `postgresql://…/deskzo?schema=public` with the database swapped for another. */
 function withDatabase(url: string, database: string): string {
   const u = new URL(url);
   u.pathname = `/${database}`;

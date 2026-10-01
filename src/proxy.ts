@@ -93,7 +93,7 @@ const MAINTENANCE_PAGE = `<!doctype html>
 const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay))\/?$/;
 
 /** The partner programme's first-touch referral cookie on the public site, and a referral code's shape (6–40 characters). */
-const REFERRAL_COOKIE = "wroffy_ref";
+const REFERRAL_COOKIE = "deskzo_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal"];
@@ -251,7 +251,7 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
     /**
      * The partner programme's referral cookie — off unless an owner sets partners.refCookieDays
      * (spec D8: the site promises no tracking cookies by default). A public-site GET with a
-     * well-formed `?ref=` and no `wroffy_ref` yet gets one; the first touch wins and is never
+     * well-formed `?ref=` and no `deskzo_ref` yet gets one; the first touch wins and is never
      * overwritten while present. Without a `ref` nothing is read, so every other request costs
      * nothing; the setting is cached for a minute. Only the code's shape is checked here — the signup
      * page validates it, and prefers the address's own `ref` over the cookie.

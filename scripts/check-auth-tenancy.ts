@@ -22,7 +22,7 @@ import { createCipheriv, createHmac, randomBytes, randomUUID, scryptSync } from 
 import path from "node:path";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
 
 let failures = 0;
@@ -198,13 +198,13 @@ async function main() {
     const adopted = keys.adoptedKeyBundle(authSecret);
     const adoptedKeys = { dataKey: Buffer.from(adopted.data, "base64") };
     // Written exactly as src/lib/crypto.ts did before workspaces.
-    const oldKey = scryptSync(authSecret, "wroffy-crm-secret-store", 32);
+    const oldKey = scryptSync(authSecret, "deskzo-secret-store", 32);
     const iv = randomBytes(12);
     const oldCipher = createCipheriv("aes-256-gcm", oldKey, iv);
     const oldData = Buffer.concat([oldCipher.update("zz-stored-before-workspaces", "utf8"), oldCipher.final()]);
     const oldStored = [iv.toString("base64"), oldCipher.getAuthTag().toString("base64"), oldData.toString("base64")].join(":");
     ok("a secret stored before workspaces opens with the adopted keys", crypto.decryptWith(adoptedKeys, oldStored) === "zz-stored-before-workspaces");
-    const oldDigest = createHmac("sha256", scryptSync(authSecret, "wroffy-crm-secret-digest", 32)).update("hunter2", "utf8").digest("base64");
+    const oldDigest = createHmac("sha256", scryptSync(authSecret, "deskzo-secret-digest", 32)).update("hunter2", "utf8").digest("base64");
     ok("  a digest made before matches one made now", createHmac("sha256", Buffer.from(adopted.digest, "base64")).update("hunter2", "utf8").digest("base64") === oldDigest);
     const oldLink = createHmac("sha256", authSecret).update(`${token}${String.fromCharCode(0)}${destination}`).digest("hex").slice(0, 32);
     ok("  a tracking link already in somebody's inbox still verifies", tracking.signDestinationWith(Buffer.from(adopted.tracking, "base64"), token, destination) === oldLink);
@@ -212,11 +212,11 @@ async function main() {
 
     section("Workers are told their workspace");
     const worker = spawnSync(process.execPath, [path.join("node_modules", "tsx", "dist", "cli.mjs"), path.join("scripts", "restore-worker.ts"), "zzcheck-staged-id"], {
-      env: { ...process.env, WROFFY_TENANT_ID: "" },
+      env: { ...process.env, DESKZO_TENANT_ID: "" },
       encoding: "utf8",
       timeout: 60_000,
     });
-    ok("the restore worker will not start without one", worker.status === 1 && /WROFFY_TENANT_ID is required/.test(worker.stderr), worker.stderr.trim().split("\n").pop());
+    ok("the restore worker will not start without one", worker.status === 1 && /DESKZO_TENANT_ID is required/.test(worker.stderr), worker.stderr.trim().split("\n").pop());
   } finally {
     if (cleanup) await cleanup().catch(() => {});
     for (const name of Object.values(names)) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(() => {});

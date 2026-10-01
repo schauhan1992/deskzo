@@ -14,7 +14,7 @@ backup never touches them, and only the platform may sync them (`src/lib/platfor
 | Command | What it does |
 |---|---|
 | `npm run reference:migrate` | Applies this folder's migrations to the reference database |
-| `npm run reference:generate` | Its Prisma client, into `node_modules/@wroffy/reference-client` |
+| `npm run reference:generate` | Its Prisma client, into `node_modules/@deskzo/reference-client` |
 | `npm run reference:move` | Upgrading a database from before this: copies its reference tables here, checks the copy, empties them — then run `npx prisma migrate deploy` |
 
 ## The PIN directory

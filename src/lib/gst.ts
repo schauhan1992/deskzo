@@ -44,7 +44,7 @@ export const paymentMethodLabels: Record<(typeof paymentMethodValues)[number], s
  * GST is calculated from the item's own tax rate regardless of the company's GST
  * treatment — treatment affects invoice categorization/compliance, not whether tax
  * applies. A jurisdiction-aware CGST/SGST vs IGST split isn't implemented (that needs
- * Wroffy's own registered state to compare against each company's), so this returns a
+ * the company's own registered state to compare against each company's), so this returns a
  * single combined GST amount.
  */
 export function calculateOrderAmount(params: {

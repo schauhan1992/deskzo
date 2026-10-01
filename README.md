@@ -62,9 +62,9 @@ You need Node.js 20.9 or later and Docker.
 ```bash
 npm install
 npm run db:generate          # the three Prisma clients
-npm run docker:up            # Postgres 16 on :5432 (user and password: wroffy)
-docker exec wroffy-crm-postgres createdb -U wroffy wroffy_crm_control
-docker exec wroffy-crm-postgres createdb -U wroffy wroffy_crm_reference
+npm run docker:up            # Postgres 16 on :5432 (user and password: deskzo)
+docker exec deskzo-postgres createdb -U deskzo deskzo_control
+docker exec deskzo-postgres createdb -U deskzo deskzo_reference
 cp .env.example .env
 ```
 
@@ -135,9 +135,3 @@ Before a change is committed: `npx tsc --noEmit`, ESLint on the files touched, t
 | `scripts/` | Platform commands, the check suites, the website's content and seed |
 | `docs/runbook.md` | Running it in production: configuration, releasing, backups, recovery |
 | `docs/ROADMAP.md` | How the product was built, phase by phase |
-
-## A note on names
-
-The product began as Wroffy's own CRM, and some internal identifiers keep that name on purpose: the npm package names
-(`wroffy-crm`, `@wroffy/*`), cookie and storage keys, key-derivation labels, `WROFFY_*` variables and database names.
-Renaming them would sign everyone out or make sealed data unreadable, and no customer ever sees them.

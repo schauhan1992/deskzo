@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
-import type { LinkIntent } from "@wroffy/control-client";
+import type { LinkIntent } from "@deskzo/control-client";
 import { recordAudit } from "@/lib/audit";
 import { decryptSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
@@ -231,7 +231,7 @@ async function reauthenticate(source: Tenant, user: Account, input: { sid: strin
 
 /**
  * L1 — "Add a workspace", asked at the source by its signed-in account. Returns the target's
- * `/link/start` URL (the token in its fragment) and the secret for this browser's `wroffy.link`
+ * `/link/start` URL (the token in its fragment) and the secret for this browser's `deskzo.link`
  * cookie, which alone can finish it (L4).
  */
 export async function createLinkIntent(input: {
@@ -308,7 +308,7 @@ export async function createLinkIntent(input: {
 
 /**
  * L2 — the target's `/link/start` presents the token, once, in one browser: that browser's secret
- * (for `wroffy.link-in`) is returned, and only it can confirm (L3). Signing out any session here
+ * (for `deskzo.link-in`) is returned, and only it can confirm (L3). Signing out any session here
  * and sending the person to sign in is the action's part.
  */
 export async function presentLinkIntent(target: Tenant, token: string, ip: string | null): Promise<{ targetSecret: string; view: IntentView }> {

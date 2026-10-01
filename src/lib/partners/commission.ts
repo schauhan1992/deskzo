@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Prisma } from "@wroffy/control-client";
+import { Prisma } from "@deskzo/control-client";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { istDateParts } from "@/lib/india-time";
 import { attributionAt } from "@/lib/partners/attribution";

@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@wroffy/reference-client";
+import type { Prisma, PrismaClient } from "@deskzo/reference-client";
 import { outwardKey, plainText, postalKey } from "@/lib/geo/geonames";
 
 /**

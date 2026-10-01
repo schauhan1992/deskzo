@@ -16,9 +16,9 @@ import { IconButton } from "@/components/ui/icon-button";
  * asked — for as long as the page stays open.
  */
 
-const STORAGE_KEY = "wroffy-dismissed-announcements";
+const STORAGE_KEY = "deskzo-dismissed-announcements";
 /** `storage` fires only in other tabs, so this tab tells itself. */
-const CHANGED = "wroffy:announcement-dismissed";
+const CHANGED = "deskzo:announcement-dismissed";
 /** Old ids are dropped past this many; an announcement lives 90 days at most. */
 const KEEP = 50;
 

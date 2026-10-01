@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { ATTACHMENT_EXPIRED, CONSENT_MISSING, SupportRefused } from "@/lib/support/refused";
 import { claimStaged, deleteRequestFiles, readStaged, validId, type StagedMeta } from "@/lib/support/storage";

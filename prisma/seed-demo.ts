@@ -21,7 +21,7 @@
  *
  * It refuses to run against a database that already has real-looking data unless `--force` is
  * given, and everything it writes is tagged — companies carry the `seed-demo` tag, catalogue items
- * a `DMO-` SKU, people a `@demo.wroffy.invalid` address — so `--reset` removes exactly what a
+ * a `DMO-` SKU, people a `@demo.deskzo.invalid` address — so `--reset` removes exactly what a
  * previous run added and nothing else.
  *
  * The randomness is seeded, so a re-run produces the same company rather than a different one.

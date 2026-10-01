@@ -1,4 +1,4 @@
-import type { PartnerActorKind, Prisma } from "@wroffy/control-client";
+import type { PartnerActorKind, Prisma } from "@deskzo/control-client";
 import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
 import { controlDb } from "@/lib/platform/control-db";
 import type { Paged, PartnerAuditAction, PartnerAuditFilters, PartnerAuditRow } from "@/lib/partners/types";

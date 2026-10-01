@@ -58,9 +58,9 @@ export async function seedDetail(
 
   const CREDS = [
     ["cPanel — production", "https://cp.hosting.example/login", "root"],
-    ["Registrar account", "https://registrar.example/signin", "billing@wroffy.com"],
+    ["Registrar account", "https://registrar.example/signin", "billing@acme.example"],
     ["Microsoft 365 partner portal", "https://partner.microsoft.com", "admin@tenant.onmicrosoft.com"],
-    ["Firewall admin", "https://10.0.0.1", "wroffy-admin"],
+    ["Firewall admin", "https://10.0.0.1", "acme-admin"],
     ["SMTP relay", "https://relay.example/console", "relay-user"],
     ["Backup console", "https://backup.example", "svc-backup"],
   ] as const;

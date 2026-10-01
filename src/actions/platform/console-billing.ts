@@ -1,6 +1,6 @@
 "use server";
 
-import type { PlanKind, StaffRole } from "@wroffy/control-client";
+import type { PlanKind, StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { GatewayError } from "@/lib/billing/gateway";
 import { previewLifecycle, runBillingLifecycle } from "@/lib/billing/lifecycle";

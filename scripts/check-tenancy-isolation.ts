@@ -24,7 +24,7 @@ import { directClient } from "../src/lib/tenancy/direct-client";
 // Read when src/lib/tenancy/clients.ts loads, so set before anything under src is required.
 const MAX_CLIENTS = 6;
 process.env.TENANCY_MAX_CLIENTS = String(MAX_CLIENTS);
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
 
 let failures = 0;
@@ -213,19 +213,19 @@ async function main() {
     ok("links are built on each workspace's own address", (await runAsTenant(A, () => tenantOrigin())) === `http://zziso-a.${domain}${port}` && (await runAsTenant(B, () => tenantOrigin())) === `http://zziso-b.${domain}${port}`);
 
     section("With no workspace named, inside the server, nothing is guessed");
-    const g = globalThis as { __wroffyInNext?: boolean };
-    g.__wroffyInNext = true;
+    const g = globalThis as { __deskzoInNext?: boolean };
+    g.__deskzoInNext = true;
     try {
       ok("resolution fails", await rejects(currentTenant(), TenantNotResolved));
       ok("  and so does a query", await rejects(db.department.count(), TenantNotResolved));
     } finally {
-      delete g.__wroffyInNext;
+      delete g.__deskzoInNext;
     }
-    process.env.WROFFY_TENANCY_FALLBACK = "";
+    process.env.DESKZO_TENANCY_FALLBACK = "";
     try {
       ok("a script that has not asked for the first workspace gets none either", await rejects(currentTenant(), TenantNotResolved));
     } finally {
-      process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+      process.env.DESKZO_TENANCY_FALLBACK = "legacy";
     }
 
     section("A bounded number of workspace pools, on one shared client");

@@ -476,7 +476,7 @@ ok(
 // that refuses because the unit price was blank is a reminder nobody sends.
 const bare = render(RENEWAL_NOTICE.subject + "\n" + RENEWAL_NOTICE.body, {
   companyName: "Vertex Industries LLP",
-  ourName: "Wroffy",
+  ourName: "Acme",
   unsubscribeUrl: "https://example.test/preferences/abc",
 });
 ok("The standard wording renders with almost nothing filled in", bare.ok, "every field carries a fallback");
@@ -516,7 +516,7 @@ for (const status of ["PENDING_APPROVAL", "APPROVED", "PROCESSING", "REJECTED", 
 
 const fulfilment = render([FULFILMENT_NOTICE.subject, FULFILMENT_NOTICE.body].join(String.fromCharCode(10)), {
   companyName: "Vertex Industries LLP",
-  ourName: "Wroffy",
+  ourName: "Acme",
   unsubscribeUrl: "https://example.test/preferences/abc",
 });
 ok("The fulfilment wording renders with almost nothing filled in", fulfilment.ok, "every field carries a fallback");
@@ -573,8 +573,8 @@ ok(
 console.log("\n— The footer address —\n");
 
 const REGISTERED = {
-  legalName: "Wroffy Technologies Private Limited",
-  tradeName: "Wroffy",
+  legalName: "Acme Technologies Private Limited",
+  tradeName: "Acme",
   addressLine1: "Unit 401, Trade Centre",
   addressLine2: "Andheri East",
   city: "Mumbai",
@@ -586,7 +586,7 @@ const full = formatRegisteredAddress(REGISTERED);
 eq(
   "The registered office reads as an address",
   full,
-  "Wroffy Technologies Private Limited\nUnit 401, Trade Centre, Andheri East\nMumbai, Maharashtra 400069",
+  "Acme Technologies Private Limited\nUnit 401, Trade Centre, Andheri East\nMumbai, Maharashtra 400069",
 );
 eq(
   "  the pincode belongs to the state, not after another comma",
@@ -598,8 +598,8 @@ const derived = postalAddressFor({ ...REGISTERED, marketingPostalAddress: null }
 eq("With nothing set, the registered office is used", derived.source, "REGISTERED", "the app already knows where we are");
 ok("  and it is a real address", (derived.text?.length ?? 0) > 30);
 
-const overridden = postalAddressFor({ ...REGISTERED, marketingPostalAddress: "Wroffy, PO Box 12, Mumbai" });
-eq("An override wins", overridden.text, "Wroffy, PO Box 12, Mumbai");
+const overridden = postalAddressFor({ ...REGISTERED, marketingPostalAddress: "Acme, PO Box 12, Mumbai" });
+eq("An override wins", overridden.text, "Acme, PO Box 12, Mumbai");
 eq("  and says it was deliberate", overridden.source, "OVERRIDE");
 eq(
   "Whitespace is not an override",
@@ -610,7 +610,7 @@ eq(
 
 // A half-filled address still beats none: an empty footer is a filtered email.
 const partial = formatRegisteredAddress({
-  legalName: "Wroffy Technologies Private Limited",
+  legalName: "Acme Technologies Private Limited",
   tradeName: null,
   addressLine1: null,
   addressLine2: null,
@@ -618,12 +618,12 @@ const partial = formatRegisteredAddress({
   state: null,
   pincode: null,
 });
-eq("A half-filled address still produces one", partial, "Wroffy Technologies Private Limited\nMumbai");
+eq("A half-filled address still produces one", partial, "Acme Technologies Private Limited\nMumbai");
 
 eq(
   "A trade name stands in when there is no legal name",
-  formatRegisteredAddress({ ...REGISTERED, legalName: "", tradeName: "Wroffy" })?.split("\n")[0],
-  "Wroffy",
+  formatRegisteredAddress({ ...REGISTERED, legalName: "", tradeName: "Acme" })?.split("\n")[0],
+  "Acme",
 );
 
 const nothing = postalAddressFor({

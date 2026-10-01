@@ -236,7 +236,7 @@ export function NewOrderForm({
 
   // Suggest Renewal when this customer already has a (non-cancelled/rejected) order for the same
   // item — re-checked whenever either changes. Can't detect "new to us but renewal elsewhere",
-  // since that depends on what the customer had before Wroffy, which only the sales person knows.
+  // since that depends on what the customer had before us, which only the sales person knows.
   useEffect(() => {
     if (!selectedCompanyId || !selectedItemId) return;
     let cancelled = false;

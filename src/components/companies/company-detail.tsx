@@ -202,7 +202,7 @@ export async function CompanyDetail({
   if (!company) notFound();
 
   // A vendor is who we buy from, not who we sell to — the sales-pipeline-shaped tabs (Products &
-  // Subscriptions, Leads, Renewals) track what a company has bought from Wroffy, which doesn't
+  // Subscriptions, Leads, Renewals) track what a company has bought from us, which doesn't
   // apply. Resellers are on the buying side, so they keep those tabs: their orders are real orders.
   const isVendor = !isCustomerRelationshipType(company.relationshipType);
   // Who may move this account, decided by the same rules the actions enforce — see

@@ -23,7 +23,7 @@
 import "dotenv/config";
 import { Prisma } from "@prisma/client";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { Prisma as RefPrisma, PrismaClient as ReferenceClient } from "@wroffy/reference-client";
+import { Prisma as RefPrisma, PrismaClient as ReferenceClient } from "@deskzo/reference-client";
 import { decryptWith } from "../src/lib/crypto";
 import { closeControlDb } from "../src/lib/platform/control-db";
 import { sealForPlatform } from "../src/lib/platform/kek";

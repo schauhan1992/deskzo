@@ -24,7 +24,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, renameSync, rmSync, statSync, createWriteStream } from "node:fs";
 import path from "node:path";
-import type { Prisma, PrismaClient } from "@wroffy/reference-client";
+import type { Prisma, PrismaClient } from "@deskzo/reference-client";
 import { parseAdmin1Line, parseCityLine, parsePostalLine, plainText, postalKey } from "../../src/lib/geo/geonames";
 import { fileLines, zipLines } from "../../src/lib/geo/zip-lines";
 

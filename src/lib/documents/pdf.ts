@@ -70,7 +70,7 @@ export async function renderPdf(url: string, options: RenderOptions = {}): Promi
     );
   }
 
-  const work = mkdtempSync(path.join(tmpdir(), "wroffy-pdf-"));
+  const work = mkdtempSync(path.join(tmpdir(), "deskzo-pdf-"));
   const out = path.join(work, "document.pdf");
   try {
     const args = [

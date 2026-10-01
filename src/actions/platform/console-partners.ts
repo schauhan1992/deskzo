@@ -1,6 +1,6 @@
 "use server";
 
-import type { PartnerApplicationStatus, PartnerStatus, StaffRole } from "@wroffy/control-client";
+import type { PartnerApplicationStatus, PartnerStatus, StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { istDayKey } from "@/lib/console-shared/format";
 import type { RawParams } from "@/lib/console-shared/params";

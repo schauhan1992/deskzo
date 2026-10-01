@@ -30,11 +30,11 @@ import bcrypt from "bcryptjs";
 import Papa from "papaparse";
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import type { ConsoleResult } from "../src/actions/platform/console";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.PLATFORM_CONSOLE_IP_ALLOWLIST = "";
@@ -88,7 +88,7 @@ const json = (value: unknown) => JSON.stringify(value, bigintSafe) ?? "";
 const why = (r: ConsoleResult<unknown>) => (r.ok ? "" : r.error);
 
 // ─── A request, as the console sees one ──────────────────────────────────────────────────────────
-const COOKIE = "wroffy-console";
+const COOKIE = "deskzo-console";
 const jar = new Map<string, string>();
 const requestHeaders = new Headers({ host: "admin.localhost:3000", "user-agent": "check:console-plus" });
 /** Every process console.ts would have started — none, for anything this suite runs. */

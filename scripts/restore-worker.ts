@@ -30,7 +30,7 @@
  *
  * ## Which workspace
  *
- * WROFFY_TENANT_ID, set by the route that spawns it, and nothing else: the worker never falls back
+ * DESKZO_TENANT_ID, set by the route that spawns it, and nothing else: the worker never falls back
  * to "the" database. Everything it does — the status file, the database it clears and rebuilds, the
  * migrations after, the keys it installs — is that workspace's. After the data is back, the schema
  * is brought up to this version (`prisma migrate deploy`), because a backup from before the last
@@ -273,7 +273,7 @@ async function stageForTool(tool: NonNullable<Tool>, file: string) {
   if (!tool.inContainer) return { pathForTool: file, cleanup: async () => {} };
 
   const service = process.env.BACKUP_DB_SERVICE?.trim() || "postgres";
-  const inside = `/tmp/wroffy-restore-${path.basename(file)}`;
+  const inside = `/tmp/deskzo-restore-${path.basename(file)}`;
   await run("docker", ["compose", "cp", file, `${service}:${inside}`]);
 
   return {
@@ -356,10 +356,10 @@ async function start() {
     console.error("restore-worker: a staging id is required.");
     process.exit(1);
   }
-  const tenantId = process.env.WROFFY_TENANT_ID?.trim();
+  const tenantId = process.env.DESKZO_TENANT_ID?.trim();
   const tenant = tenantId ? await tenantById(tenantId) : null;
   if (!tenant) {
-    console.error(tenantId ? `restore-worker: no workspace ${tenantId}.` : "restore-worker: WROFFY_TENANT_ID is required — the workspace to restore.");
+    console.error(tenantId ? `restore-worker: no workspace ${tenantId}.` : "restore-worker: DESKZO_TENANT_ID is required — the workspace to restore.");
     process.exit(1);
   }
   await runAsTenant(tenant, async () => {

@@ -34,7 +34,7 @@ function eq(label: string, actual: unknown, expected: unknown, why = "") {
 }
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const NOW = d("2026-09-19");
-const GOOGLE = "https://g.page/r/wroffy/review";
+const GOOGLE = "https://g.page/r/deskzo/review";
 
 console.log("\n— The boundary —\n");
 

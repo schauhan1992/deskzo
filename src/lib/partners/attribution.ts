@@ -1,4 +1,4 @@
-import { Prisma, type AttributionSource } from "@wroffy/control-client";
+import { Prisma, type AttributionSource } from "@deskzo/control-client";
 import { partnerAudit, actorRef, type PartnerActor } from "@/lib/partners/audit";
 import { activeDealFor, cleanReferralCode, emailDomain, findActiveReferral } from "@/lib/partners/referrals";
 import { actorOf, cleanId, mailPartnerUsers, requiredText } from "@/lib/partners/registry";

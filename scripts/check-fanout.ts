@@ -19,7 +19,7 @@ import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
 
 let failures = 0;

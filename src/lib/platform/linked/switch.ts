@@ -1,4 +1,4 @@
-import type { LinkSwitchStage, Prisma } from "@wroffy/control-client";
+import type { LinkSwitchStage, Prisma } from "@deskzo/control-client";
 import { db } from "@/lib/db";
 import { doorCheck } from "@/lib/access/record";
 import { requestFacts } from "@/lib/access/request";
@@ -461,7 +461,7 @@ async function codeMatches(cipher: string, code: string): Promise<boolean> {
 
 /**
  * The code for a ticket at stage CODE (spec §4.3 S3), from the browser that presented it (its
- * `wroffy.switch` cookie). Five wrong codes end the ticket; each also counts on the sign-in lockout.
+ * `deskzo.switch` cookie). Five wrong codes end the ticket; each also counts on the sign-in lockout.
  */
 export async function verifySwitchCode(target: Tenant, presentSecret: string | null, code: string, ip: string | null): Promise<SwitchState> {
   const workspace = target.name;

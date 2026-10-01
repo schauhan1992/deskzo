@@ -1,6 +1,6 @@
 "use server";
 
-import type { PartnerRole } from "@wroffy/control-client";
+import type { PartnerRole } from "@deskzo/control-client";
 import { partnerRefusal, requirePartner, revalidatePortal, type PartnerMode } from "@/lib/partners/guard";
 import { updatePartnerSelf, type PartnerSelfInput } from "@/lib/partners/registry";
 import { requestPayoutChange, requestProfileChange, withdrawRequest, type ProfileChangeInput } from "@/lib/partners/requests";

@@ -220,7 +220,7 @@ async function main() {
     eventDate: "Thu, 15 Oct 2026, 6:30 pm",
     eventVenue: null,
     inviterName: "Priya",
-    ourName: "Wroffy",
+    ourName: "Acme",
     postalAddress: null,
     unsubscribeUrl: "https://erp.example/preferences/t",
   });

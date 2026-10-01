@@ -1,6 +1,6 @@
 "use server";
 
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import type { RawParams } from "@/lib/console-shared/params";
 import { parseCommissionFilters, parseReportFilters, reportRange } from "@/lib/console-shared/partner-params";

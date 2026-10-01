@@ -61,22 +61,22 @@ const random = () => b64(randomBytes(32));
 
 /** The fingerprint of a data key, for a backup's header. */
 function fingerprintOf(dataKey: Buffer): string {
-  return createHmac("sha256", dataKey).update("wroffy-backup-fingerprint").digest("hex").slice(0, 16);
+  return createHmac("sha256", dataKey).update("deskzo-backup-fingerprint").digest("hex").slice(0, 16);
 }
 
 /** The fingerprint backups carried before workspaces: an HMAC under AUTH_SECRET itself. */
 export function legacyFingerprint(authSecret: string): string {
-  return createHmac("sha256", authSecret).update("wroffy-backup-fingerprint").digest("hex").slice(0, 16);
+  return createHmac("sha256", authSecret).update("deskzo-backup-fingerprint").digest("hex").slice(0, 16);
 }
 
 /** The keys the installation used before workspaces, all derived from its AUTH_SECRET. */
 function legacyMaterial(authSecret: string) {
   return {
-    data: scryptSync(authSecret, "wroffy-crm-secret-store", 32),
-    digest: scryptSync(authSecret, "wroffy-crm-secret-digest", 32),
+    data: scryptSync(authSecret, "deskzo-secret-store", 32),
+    digest: scryptSync(authSecret, "deskzo-secret-digest", 32),
     // Tracking links were signed with the secret itself, as a string — the same bytes.
     tracking: Buffer.from(authSecret, "utf8"),
-    render: scryptSync(authSecret, "wroffy-document-render", 32),
+    render: scryptSync(authSecret, "deskzo-document-render", 32),
   };
 }
 
@@ -133,7 +133,7 @@ function authSecret(): string {
 
 function environmentKeys(tenant: Tenant): TenantKeys {
   const secret = authSecret();
-  const derive = (purpose: string) => Buffer.from(hkdfSync("sha256", secret, `wroffy/${purpose}`, tenant.id, 32));
+  const derive = (purpose: string) => Buffer.from(hkdfSync("sha256", secret, `deskzo/${purpose}`, tenant.id, 32));
   if (tenant.isDefault) {
     const legacy = legacyMaterial(secret);
     return {
@@ -195,7 +195,7 @@ export function bundleOf(keys: TenantKeys): KeyBundle {
   };
 }
 
-const ARCHIVE_KIND = "wroffy-key-bundle";
+const ARCHIVE_KIND = "deskzo-key-bundle";
 
 /** What a backup archive carries, sealed under its passphrase, so it restores readable anywhere. */
 export function archiveKeyMaterial(keys: TenantKeys): string {

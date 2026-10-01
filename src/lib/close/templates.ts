@@ -19,7 +19,7 @@ export async function ensureDefaultTemplates(now: Date = new Date()): Promise<bo
   if (await db.dailyJobRun.findFirst({ where: { job: SEED_JOB }, select: { day: true } })) return false;
   return db.$transaction(async (tx) => {
     // One seeding at a time per workspace; the loser finds the row the winner wrote.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('wroffy:close-seed'))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('deskzo:close-seed'))`;
     if (await tx.dailyJobRun.findFirst({ where: { job: SEED_JOB }, select: { day: true } })) return false;
     await tx.dailyJobRun.create({ data: { job: SEED_JOB, day: indiaToday(now), ok: true } });
     // Templates made some other way before the first seeding are the workspace's own list: kept, and

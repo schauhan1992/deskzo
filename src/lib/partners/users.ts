@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { Prisma, type PartnerRole } from "@wroffy/control-client";
+import { Prisma, type PartnerRole } from "@deskzo/control-client";
 import { deviceFromUserAgent } from "@/lib/console-shared/format";
 import { actorRef, partnerAudit, refLabels, type PartnerActor } from "@/lib/partners/audit";
 import { PARTNER_IDLE_MS, sha256 } from "@/lib/partners/session";

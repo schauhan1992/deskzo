@@ -25,11 +25,11 @@ export const DEFAULT_KEEP_MINIMUM = 3;
 /** A warning appears once no successful backup has been taken for this long. */
 export const STALE_AFTER_HOURS = 36;
 
-/** `wroffy-2026-09-20-1432.dump` — sortable, and obvious what it is a year later. */
+/** `deskzo-2026-09-20-1432.dump` — sortable, and obvious what it is a year later. */
 export function backupFilename(at: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return [
-    "wroffy",
+    "deskzo",
     `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}`,
     `${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`,
   ].join("-") + ".dump";

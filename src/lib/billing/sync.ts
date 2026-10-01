@@ -1,4 +1,4 @@
-import { Prisma, type BillingGateway } from "@wroffy/control-client";
+import { Prisma, type BillingGateway } from "@deskzo/control-client";
 import { fromUnix } from "@/lib/billing/gateway";
 import { idOf, stripeInvoiceStatus, stripePeriodEnd, stripeStatus, type StripeCharge, type StripeInvoice, type StripeSubscription } from "@/lib/billing/stripe";
 import { noteOf, razorpayStatus, type RazorpayPayment, type RazorpaySubscription } from "@/lib/billing/razorpay";

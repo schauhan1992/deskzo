@@ -62,7 +62,7 @@ export function searchScope(key: string): SearchScope | undefined {
 }
 
 /** Where a query first lands, and the one remembered per browser. */
-export const SEARCH_SCOPE_STORAGE_KEY = "wroffy.search-scope";
+export const SEARCH_SCOPE_STORAGE_KEY = "deskzo.search-scope";
 
 /** Shortest query worth sending: one letter matches half the database and helps nobody. */
 export const SEARCH_MIN_LENGTH = 2;

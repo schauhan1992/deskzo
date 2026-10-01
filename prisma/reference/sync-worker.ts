@@ -22,7 +22,7 @@ import "dotenv/config";
 import { rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PrismaClient } from "@wroffy/reference-client";
+import { PrismaClient } from "@deskzo/reference-client";
 import { openForPlatform } from "../../src/lib/platform/kek";
 import { PIN_DIRECTORY_KEY } from "../../src/lib/geo/pincode";
 import { fetchDirectory } from "./fetch";

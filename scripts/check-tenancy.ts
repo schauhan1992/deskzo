@@ -59,7 +59,7 @@ const FORWARDED_HOST: Record<string, Allowed> = {};
 /** The caller's address: its first X-Forwarded-For entry is the caller's own claim; only src/lib/client-ip.ts may read it. */
 const FORWARDED_FOR: Record<string, Allowed> = {};
 
-/** Worker processes: each must be told its workspace (WROFFY_TENANT_ID) rather than inherit the install's. */
+/** Worker processes: each must be told its workspace (DESKZO_TENANT_ID) rather than inherit the install's. */
 const SPAWNS: Record<string, Allowed> = {
   "src/lib/platform/reference-sync.ts": { reason: "PIN and GeoNames sync workers write the shared reference database, which belongs to no workspace" },
   "src/lib/platform/migrate.ts": { reason: "prisma migrate deploy, told the one database it migrates — not a workspace" },
@@ -173,7 +173,7 @@ for (const { file, text, client } of files) {
   // A client under any name: `PrismaClient` from @prisma/client or the control plane's generated client,
   // however it is aliased on import.
   const clientNames = new Set(["PrismaClient"]);
-  for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@prisma\/client|@wroffy\/control-client|@wroffy\/reference-client)["']/g)) {
+  for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@prisma\/client|@deskzo\/control-client|@deskzo\/reference-client)["']/g)) {
     for (const spec of m[1].split(",")) {
       const alias = spec.trim().match(/^PrismaClient(?:\s+as\s+(\w+))?$/);
       if (alias) clientNames.add(alias[1] ?? "PrismaClient");
@@ -200,7 +200,7 @@ for (const { file, text, client } of files) {
       found.arrayTx.push(`${file}:${sf.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
     }
     if (ts.isCallExpression(node) && node.expression.getText(sf) === "spawn" && node.arguments[0]?.getText(sf) === "process.execPath") {
-      found.spawns.set(file, (found.spawns.get(file) ?? true) && /WROFFY_TENANT_ID/.test(node.getText(sf)));
+      found.spawns.set(file, (found.spawns.get(file) ?? true) && /DESKZO_TENANT_ID/.test(node.getText(sf)));
     }
     ts.forEachChild(node, visit);
   };
@@ -248,7 +248,7 @@ judge("x-forwarded-for / x-real-ip", found.xff, FORWARDED_FOR);
 
 section("Worker processes");
 const unscoped = [...found.spawns].filter(([, scoped]) => !scoped).map(([f]) => f);
-judge("spawns without WROFFY_TENANT_ID", unscoped, SPAWNS);
+judge("spawns without DESKZO_TENANT_ID", unscoped, SPAWNS);
 
 section("Module-level state");
 judge("caches, counters and timers", found.state, STATE);

@@ -1,4 +1,4 @@
-import { Prisma, type CmsRole, type SiteCategory, type SiteTag } from "@wroffy/control-client";
+import { Prisma, type CmsRole, type SiteCategory, type SiteTag } from "@deskzo/control-client";
 import { actorOfMe, actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { missingMediaIds } from "@/lib/cms/media";
 import { autoRedirect } from "@/lib/cms/redirects";

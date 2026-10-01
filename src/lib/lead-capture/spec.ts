@@ -31,7 +31,7 @@ export const LEAD_FIELDS: FieldSpec[] = [
   { name: "quantity", type: "integer", required: false, description: "Seats or units, applied to each product given.", example: "25" },
   { name: "budget", type: "number, rupees", required: false, description: "The lead's estimated value.", example: "150000" },
   { name: "source", type: `one of: ${LEAD_SOURCE_VALUES.map((v) => v.toLowerCase()).join(", ")}`, required: false, description: "Where the enquiry came from. Defaults to website.", example: "website" },
-  { name: "page_url", type: "URL, up to 500", required: false, description: "The page the form was on — recorded as the source detail.", example: "https://wroffy.com/microsoft-365" },
+  { name: "page_url", type: "URL, up to 500", required: false, description: "The page the form was on — recorded as the source detail.", example: "https://www.example.com/microsoft-365" },
   { name: "utm_source", type: "string", required: false, description: "Campaign tracking, recorded with the source.", example: "google" },
   { name: "utm_medium", type: "string", required: false, description: "Campaign tracking.", example: "cpc" },
   { name: "utm_campaign", type: "string", required: false, description: "Campaign tracking.", example: "m365-sept" },
@@ -59,7 +59,7 @@ export const EXAMPLE_BODY = {
   message: "Need 25 Microsoft 365 Business Standard licences.",
   product_interest: "Microsoft 365",
   budget: 150000,
-  page_url: "https://wroffy.com/microsoft-365",
+  page_url: "https://www.example.com/microsoft-365",
   utm_source: "google",
   external_id: "enq-2026-000481",
 };
@@ -80,7 +80,7 @@ export function phpExample(baseUrl: string): string {
     `$ch = curl_init("${baseUrl}${API_PATH}");`,
     "curl_setopt_array($ch, [",
     "  CURLOPT_POST => true,",
-    "  CURLOPT_USERPWD => getenv('WROFFY_KEY_ID') . ':' . getenv('WROFFY_SECRET'),",
+    "  CURLOPT_USERPWD => getenv('DESKZO_KEY_ID') . ':' . getenv('DESKZO_SECRET'),",
     "  CURLOPT_HTTPHEADER => ['Content-Type: application/json'],",
     "  CURLOPT_POSTFIELDS => json_encode([",
     "    'name' => $_POST['name'],",
@@ -102,7 +102,7 @@ export function phpExample(baseUrl: string): string {
 export function nodeExample(baseUrl: string): string {
   return [
     "// Server side only (Node 18+) — never put the secret in browser code.",
-    "const auth = Buffer.from(`${process.env.WROFFY_KEY_ID}:${process.env.WROFFY_SECRET}`).toString(\"base64\");",
+    "const auth = Buffer.from(`${process.env.DESKZO_KEY_ID}:${process.env.DESKZO_SECRET}`).toString(\"base64\");",
     `const res = await fetch("${baseUrl}${API_PATH}", {`,
     '  method: "POST",',
     '  headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },',

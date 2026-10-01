@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { partnerAudit, type PartnerActor } from "@/lib/partners/audit";
 import { actorOf, cleanCountry, cleanId, mailPartnerUsers, oneLine, optionalText, requiredText, staffActor } from "@/lib/partners/registry";
 import { PartnerRefused, type PayoutInput, type PayoutMask } from "@/lib/partners/types";

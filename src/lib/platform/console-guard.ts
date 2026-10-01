@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { Prisma } from "@wroffy/control-client";
+import { Prisma } from "@deskzo/control-client";
 import { CheckoutRefused } from "@/lib/billing/checkout";
 import { GatewayError } from "@/lib/billing/gateway";
 import { PriceRefused } from "@/lib/billing/prices";

@@ -1,6 +1,6 @@
 "use server";
 
-import type { StaffRole } from "@wroffy/control-client";
+import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { OWNERS, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
 import { saveLinkedSignInSetting } from "@/lib/platform/linked/groups";

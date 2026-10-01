@@ -1,21 +1,23 @@
+name: deskzo
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: wroffy-crm-postgres
+    container_name: deskzo-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: wroffy
-      POSTGRES_PASSWORD: wroffy
-      POSTGRES_DB: wroffy_crm
+      POSTGRES_USER: deskzo
+      POSTGRES_PASSWORD: deskzo
+      POSTGRES_DB: deskzo
     ports:
       - "5432:5432"
     volumes:
-      - wroffy_crm_pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wroffy -d wroffy_crm"]
+      test: ["CMD-SHELL", "pg_isready -U deskzo -d deskzo"]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  wroffy_crm_pgdata:
+  pgdata:

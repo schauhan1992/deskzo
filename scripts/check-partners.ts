@@ -43,11 +43,11 @@ import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { CommissionKind, CommissionStatus, InvoiceStatus, PartnerKind, PartnerRole, PartnerStatus, Prisma, StaffRole } from "@wroffy/control-client";
+import type { CommissionKind, CommissionStatus, InvoiceStatus, PartnerKind, PartnerRole, PartnerStatus, Prisma, StaffRole } from "@deskzo/control-client";
 import type { PartnerMe } from "../src/lib/partners/types";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.TRUST_PROXY_HOPS = "";
@@ -304,7 +304,7 @@ async function main() {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { controlDb, closeControlDb } = require("../src/lib/platform/control-db") as typeof import("../src/lib/platform/control-db");
     const { closeRefDb } = require("../src/lib/platform/reference-db") as typeof import("../src/lib/platform/reference-db");
-    const { Prisma: PrismaNs } = require("@wroffy/control-client") as typeof import("@wroffy/control-client");
+    const { Prisma: PrismaNs } = require("@deskzo/control-client") as typeof import("@deskzo/control-client");
     const DbNull = PrismaNs.DbNull;
     const mailer = require("../src/lib/platform/mailer") as typeof import("../src/lib/platform/mailer");
     const host = require("../src/lib/tenancy/host") as typeof import("../src/lib/tenancy/host");
@@ -380,7 +380,7 @@ async function main() {
     const CONSOLE = `admin.${ROOT}`;
     const CMS = `cms.${ROOT}`;
     const WS = `zzp-a.${ROOT}`;
-    const PCOOKIE = "wroffy-partners";
+    const PCOOKIE = "deskzo-partners";
     const at = (h: string, extra: Record<string, string> = {}) => {
       requestHeaders = new Headers({ host: h, "user-agent": "check:partners", ...extra });
     };
@@ -418,7 +418,7 @@ async function main() {
       staffTokens.push(token);
       await control.platformSession.create({ data: { id: sha256(token), userId: staffIds[key], expiresAt: new Date(Date.now() + HOUR), mfaAt: new Date(), userAgent: "check:partners" } });
       jar.clear();
-      jar.set("wroffy-console", token);
+      jar.set("deskzo-console", token);
       at(CONSOLE);
       return token;
     };
@@ -698,17 +698,17 @@ async function main() {
 
       pSettings.forgetPartnerSettings();
       const off = await through(ROOT, "/signup?ref=zzp-dist-abcde");
-      ok("referral cookie: off by default — a ?ref= link sets nothing", !off.setCookie.includes("wroffy_ref"), off.setCookie);
+      ok("referral cookie: off by default — a ?ref= link sets nothing", !off.setCookie.includes("deskzo_ref"), off.setCookie);
       await platformSettings.setSetting("partners.refCookieDays", "30", staffIds.owner);
       pSettings.forgetPartnerSettings();
       const on = await through(ROOT, "/signup?ref=zzp-dist-abcde");
-      ok("  switched on (30 days): the public host sets wroffy_ref=<code>, httpOnly, lax, for 30 days", /wroffy_ref=zzp-dist-abcde/.test(on.setCookie) && /Max-Age=2592000/i.test(on.setCookie) && /HttpOnly/i.test(on.setCookie) && /SameSite=lax/i.test(on.setCookie) && /Path=\//i.test(on.setCookie), on.setCookie);
-      const firstTouch = await through(ROOT, "/pricing?ref=zzp-other-fghij", { cookie: "wroffy_ref=zzp-dist-abcde" });
-      ok("  first touch: never overwritten while one is present", !firstTouch.setCookie.includes("wroffy_ref"), firstTouch.setCookie);
+      ok("  switched on (30 days): the public host sets deskzo_ref=<code>, httpOnly, lax, for 30 days", /deskzo_ref=zzp-dist-abcde/.test(on.setCookie) && /Max-Age=2592000/i.test(on.setCookie) && /HttpOnly/i.test(on.setCookie) && /SameSite=lax/i.test(on.setCookie) && /Path=\//i.test(on.setCookie), on.setCookie);
+      const firstTouch = await through(ROOT, "/pricing?ref=zzp-other-fghij", { cookie: "deskzo_ref=zzp-dist-abcde" });
+      ok("  first touch: never overwritten while one is present", !firstTouch.setCookie.includes("deskzo_ref"), firstTouch.setCookie);
       const notPublic = [await through(PARTNERS, "/?ref=zzp-dist-abcde"), await through(CONSOLE, "/?ref=zzp-dist-abcde"), await through(CMS, "/?ref=zzp-dist-abcde")];
-      ok("  only on the public host", notPublic.every((r) => !r.setCookie.includes("wroffy_ref")), notPublic.map((r) => r.setCookie).join(" | "));
+      ok("  only on the public host", notPublic.every((r) => !r.setCookie.includes("deskzo_ref")), notPublic.map((r) => r.setCookie).join(" | "));
       const badShape = [await through(ROOT, "/signup?ref=BAD%20CODE!"), await through(ROOT, "/signup?ref=abc"), await through(ROOT, "/signup?ref=zzp-dist-abcde", { method: "POST" })];
-      ok("  never for a code of the wrong shape or length, nor on a POST", badShape.every((r) => !r.setCookie.includes("wroffy_ref")), badShape.map((r) => r.setCookie).join(" | "));
+      ok("  never for a code of the wrong shape or length, nor on a POST", badShape.every((r) => !r.setCookie.includes("deskzo_ref")), badShape.map((r) => r.setCookie).join(" | "));
       await platformSettings.setSetting("partners.refCookieDays", "0", staffIds.owner);
       pSettings.forgetPartnerSettings();
     });
@@ -873,11 +873,11 @@ async function main() {
       section("B. Accounts and sessions: other apps' sessions");
       const partnerToken = await asPartner(accAdminId);
       at(CONSOLE);
-      jar.set("wroffy-console", partnerToken);
+      jar.set("deskzo-console", partnerToken);
       ok("a partner's token presented as the staff console's cookie is nobody there", (await staffSessions.currentStaffSession()) === null);
       ok("  and the partner's own cookie on the console's address is nobody to the portal", (await session.currentPartnerSession()) === null);
       at(CMS);
-      jar.set("wroffy-cms", partnerToken);
+      jar.set("deskzo-cms", partnerToken);
       ok("  presented as the CMS's cookie, nobody there either", (await cmsSessions.currentCmsSession()) === null);
       at(WS);
       ok("  and nobody on a workspace's address", (await session.currentPartnerSession()) === null);
@@ -1975,7 +1975,7 @@ async function main() {
       const partnerToken = await asPartner(f.u.d1Admin);
       const fromPortal = [await cc.consoleRevealPayout(f.d1.id), await cc.consoleMarkStatementPaid(f.s1.id, { reference: "UTR-ZZP-PORTAL", paidOn: istDayKey(new Date()) })];
       at(CONSOLE);
-      jar.set("wroffy-console", partnerToken);
+      jar.set("deskzo-console", partnerToken);
       const asConsoleCookie = await cc.consoleRevealPayout(f.d1.id);
       ok("a partner's session reaches no console action — not as its own cookie, not as the console's (PRT-12)", [...fromPortal, asConsoleCookie].every((r) => !r.ok && r.error === "Sign in to the console.") && (await control.partnerStatement.findUniqueOrThrow({ where: { id: f.s1.id } })).status === "APPROVED", [...fromPortal, asConsoleCookie].map(why).join(" | "));
       const actionLeaks = results.map((r, i) => [i, leaks(r)] as const).filter(([, l]) => l.length);
@@ -2450,7 +2450,7 @@ async function main() {
       const forged = keep(await outcome(() => renderPage(SignupPage, {}, { ref: "zzp-nope-00000", refVia: "link", refName: "Zzp Forged Name" })));
       ok("  a forged partner name in the address shows nothing", !forged.includes("Zzp Forged Name") && !forged.includes("Referred by"));
       const r1Link = await control.partnerReferralLink.findFirstOrThrow({ where: { partnerId: f.r1.id, endedAt: null }, select: { code: true } });
-      jar.set("wroffy_ref", r1Link.code);
+      jar.set("deskzo_ref", r1Link.code);
       const cookieOnly = keep(await outcome(() => renderPage(SignupPage)));
       ok("  the referral cookie, when the address has no ref: 'Referred by Zzp Reseller A'", cookieOnly.includes("Referred by Zzp Reseller A"), cookieOnly.slice(0, 160));
       jar.clear();

@@ -1,4 +1,4 @@
-import { Prisma, type PartnerApplicationStatus, type PartnerKind, type PartnerRequestKind, type PartnerRequestStatus, type PartnerRole } from "@wroffy/control-client";
+import { Prisma, type PartnerApplicationStatus, type PartnerKind, type PartnerRequestKind, type PartnerRequestStatus, type PartnerRole } from "@deskzo/control-client";
 import { isDisposableDomain, parseEmailAddress } from "@/lib/email-verification";
 import { actorRef, partnerAudit } from "@/lib/partners/audit";
 import { cleanPayout, mailPayoutChanged, maskOf, payoutFromJson, writePayout } from "@/lib/partners/payout";

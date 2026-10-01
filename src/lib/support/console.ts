@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { deviceFromUserAgent } from "@/lib/console-shared/format";
 import type { SupportFilters, SupportStatusTab } from "@/lib/console-shared/params";
 import { SUPPORT_AGENTS } from "@/lib/console-shared/roles";

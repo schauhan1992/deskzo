@@ -6,7 +6,7 @@
 // here is encrypted under a workspace's keys, and no workspace can change it: syncing it is the
 // platform's (src/lib/platform/shared-data.ts).
 //
-//   npm run reference:generate   the client, into node_modules/@wroffy/reference-client
+//   npm run reference:generate   the client, into node_modules/@deskzo/reference-client
 //   npm run reference:migrate    apply migrations to REFERENCE_DATABASE_URL
 //   npm run reference:move       move a workspace's copy here (the upgrade from before M3)
 //
@@ -15,7 +15,7 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../../node_modules/@wroffy/reference-client"
+  output   = "../../node_modules/@deskzo/reference-client"
 }
 
 datasource db {

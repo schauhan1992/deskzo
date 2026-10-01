@@ -31,7 +31,7 @@ import { cloneElement, isValidElement, type ReactElement, type ReactNode } from 
 import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.PLATFORM_CONSOLE_IP_ALLOWLIST = "";
@@ -59,7 +59,7 @@ async function thrown(work: () => Promise<unknown>): Promise<string> {
 }
 
 // ─── A request, as the console and the workspace's settings see one ─────────────────────────────
-const COOKIE = "wroffy-console";
+const COOKIE = "deskzo-console";
 const jar = new Map<string, string>();
 let requestHeaders = new Headers({ host: "admin.localhost:3000", "user-agent": "check:console" });
 /** The workspace session the support-access actions see: its super admin, or a member. */

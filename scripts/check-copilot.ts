@@ -259,7 +259,7 @@ async function main() {
       const events: ChatEvent[] = [];
       let error = "";
       try {
-        await agent.runCopilot({ userId, userName: NAMES[userId]!, role: "SALES", conversationId, text, appName: "Wroffy ERP", emit: (e) => events.push(e) });
+        await agent.runCopilot({ userId, userName: NAMES[userId]!, role: "SALES", conversationId, text, appName: "Deskzo One", emit: (e) => events.push(e) });
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
       }

@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
 import type { CmsAuditAction, CmsAuditFilters, CmsAuditRow, CmsMe, Paged } from "@/lib/cms/types";

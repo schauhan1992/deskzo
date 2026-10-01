@@ -96,8 +96,8 @@ export const contactDesignationValues = [
 export const contactInputSchema = z.object({
   name: z.string().trim().min(1, "Contact name is required"),
   designation: z.enum(contactDesignationValues).default("OTHER"),
-  // Lowercased, as the contact importer stores it. Saved as typed, "SACHIN@WROFFY.COM" and
-  // "sachin@wroffy.com" were two different contacts to every comparison and every duplicate check,
+  // Lowercased, as the contact importer stores it. Saved as typed, "PRIYA@EXAMPLE.COM" and
+  // "priya@example.com" were two different contacts to every comparison and every duplicate check,
   // and an export re-imported as a change to a record nobody had touched.
   email: z.string().trim().toLowerCase().email("Invalid email").optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),

@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { deflateRawSync } from "node:zlib";
 import type { ReactElement } from "react";
-import { PrismaClient } from "@wroffy/reference-client";
+import { PrismaClient } from "@deskzo/reference-client";
 import {
   outwardKey,
   parseAdmin1Line,

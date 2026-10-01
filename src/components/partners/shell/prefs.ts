@@ -10,8 +10,8 @@ import { useSyncExternalStore } from "react";
  * reconciles the two without a hydration error. The portal lives on its own host, so these keys are its
  * own even where the names look alike.
  */
-const SIDEBAR_KEY = "wroffy-partners-sidebar-collapsed";
-const GROUPS_KEY = "wroffy-partners-nav-closed";
+const SIDEBAR_KEY = "deskzo-partners-sidebar-collapsed";
+const GROUPS_KEY = "deskzo-partners-nav-closed";
 
 function makeStore<T>(key: string, parse: (raw: string | null) => T, serverValue: T) {
   let lastRaw: string | null | undefined;

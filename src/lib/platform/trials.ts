@@ -1,4 +1,4 @@
-import type { SubscriptionStatus } from "@wroffy/control-client";
+import type { SubscriptionStatus } from "@deskzo/control-client";
 import { TRIAL_GRACE_DAYS } from "@/lib/billing/lifecycle";
 import { noticeLabel } from "@/lib/console-shared/labels";
 import type { TrialView } from "@/lib/console-shared/params";

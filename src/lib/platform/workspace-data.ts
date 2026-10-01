@@ -1,4 +1,4 @@
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { standingDate, standingOf, type Standing } from "@/lib/billing/lifecycle";
 import { formatMoney } from "@/lib/billing/money";
 import { istDayKey, plural, when } from "@/lib/console-shared/format";

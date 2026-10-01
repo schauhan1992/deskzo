@@ -1,4 +1,4 @@
-import type { BillingGateway, Prisma, SubscriptionStatus, SuspendedFor, TenantStatus } from "@wroffy/control-client";
+import type { BillingGateway, Prisma, SubscriptionStatus, SuspendedFor, TenantStatus } from "@deskzo/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { deprovisionTenant, liftBillingHold, suspendTenant } from "@/lib/platform/lifecycle";
 import { sendPlatformMail } from "@/lib/platform/mailer";

@@ -15,7 +15,7 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  * Signing in to the partner portal (partners.<domain>) — a sign-in of its own, nothing to do with
  * the staff console's, the CMS's or any workspace's. Modelled on src/lib/cms/session.ts:
  *
- *   · The cookie is `__Host-wroffy-partners` over https (`wroffy-partners` on plain http in
+ *   · The cookie is `__Host-deskzo-partners` over https (`deskzo-partners` on plain http in
  *     development): this host only. It holds a random token; the control plane keeps its SHA-256 as a
  *     PartnerSession, checked on every request — sixty minutes idle, twelve hours at most, revocable.
  *   · A session counts only on the partners host: the same cookie presented anywhere else (it would
@@ -30,8 +30,8 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  *   · Failed sign-ins lock out per account and per known caller, in a namespace of their own ("partner|").
  */
 
-const COOKIE_SECURE = "__Host-wroffy-partners";
-const COOKIE_PLAIN = "wroffy-partners";
+const COOKIE_SECURE = "__Host-deskzo-partners";
+const COOKIE_PLAIN = "deskzo-partners";
 export const PARTNER_IDLE_MS = 60 * 60_000;
 export const PARTNER_MAX_MS = 12 * 60 * 60_000;
 /** How often lastSeenAt is written — often enough for the idle limit, not on every request. */

@@ -28,10 +28,10 @@ export const SIDE_RAIL_TOOLS: SideRailTool[] = [
 ];
 
 /** Fired by the rail's copilot button; the header's copilot listens and opens its drawer. */
-export const COPILOT_OPEN_EVENT = "wroffy.copilot";
+export const COPILOT_OPEN_EVENT = "deskzo.copilot";
 
 /** Fired when What's new has been opened, so the rail's dot clears without waiting for a reload. */
-export const UPDATES_SEEN_EVENT = "wroffy.updates-seen";
+export const UPDATES_SEEN_EVENT = "deskzo.updates-seen";
 
 /**
  * Where the open tool is remembered.
@@ -41,7 +41,7 @@ export const UPDATES_SEEN_EVENT = "wroffy.updates-seen";
  * is closed on the server's first paint and opens once mounted — which is why the component reads
  * it through `useSyncExternalStore` rather than during render.
  */
-export const SIDE_RAIL_STORAGE_KEY = "wroffy.rail";
+export const SIDE_RAIL_STORAGE_KEY = "deskzo.rail";
 
 export function parseTool(value: string | null | undefined): SideRailTool | null {
   return SIDE_RAIL_TOOLS.includes(value as SideRailTool) ? (value as SideRailTool) : null;

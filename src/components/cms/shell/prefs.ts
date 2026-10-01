@@ -10,8 +10,8 @@ import { useSyncExternalStore } from "react";
  * reconciles the two without a hydration error. The CMS lives on its own host, so these keys are its
  * own even where the names look alike.
  */
-const SIDEBAR_KEY = "wroffy-cms-sidebar-collapsed";
-const GROUPS_KEY = "wroffy-cms-nav-closed";
+const SIDEBAR_KEY = "deskzo-cms-sidebar-collapsed";
+const GROUPS_KEY = "deskzo-cms-nav-closed";
 
 function makeStore<T>(key: string, parse: (raw: string | null) => T, serverValue: T) {
   let lastRaw: string | null | undefined;

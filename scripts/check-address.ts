@@ -18,7 +18,7 @@ import Module from "node:module";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { PrismaClient as ReferenceClient } from "@wroffy/reference-client";
+import { PrismaClient as ReferenceClient } from "@deskzo/reference-client";
 import { readdirSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

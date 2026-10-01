@@ -124,7 +124,7 @@ export function blankLine(): LineDraft {
     unitPrice: "0",
     discountMode: "PERCENT",
     discountValue: "0",
-    // 18% covers most of what Wroffy sells; the catalogue overrides it as soon as an item is picked.
+    // 18% covers most of what is sold here; the catalogue overrides it as soon as an item is picked.
     taxRatePercent: "18",
     companyProductId: "",
     itemType: "",

@@ -1,4 +1,4 @@
-import { Prisma, type SitePage as PageRowModel, type SitePost as PostRowModel } from "@wroffy/control-client";
+import { Prisma, type SitePage as PageRowModel, type SitePost as PostRowModel } from "@deskzo/control-client";
 import type { SiteSettings } from "@/components/site/blocks/types";
 import { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } from "@/components/site/defaults";
 import { actorOfMe, actorRef, cmsAudit, listCmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";

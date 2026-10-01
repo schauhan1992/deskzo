@@ -1,6 +1,6 @@
 "use server";
 
-import { Prisma, type StaffRole } from "@wroffy/control-client";
+import { Prisma, type StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { ALL_ROLES, MANAGERS, cleanText, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";

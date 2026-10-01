@@ -3,7 +3,7 @@ import { headcountLabel } from "@/lib/company-size";
 /**
  * What the technical findings mean for someone about to pick up the phone.
  *
- * Wroffy sells Microsoft 365, Google Workspace, Adobe, Autodesk, security and hardware — so the
+ * Written for a company that resells Microsoft 365, Google Workspace, Adobe, Autodesk, security and hardware — so the
  * useful reading of a domain is "what are they running, and what does that leave open". Each
  * suggestion states the observation first, because a rep who leads with the fact ("you're on
  * Google Workspace") sounds informed, and one who leads with the pitch sounds like a cold call.

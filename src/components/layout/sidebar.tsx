@@ -13,8 +13,8 @@ import { openSupport } from "@/components/support/open-support";
 /** Every module link, for working out which one is the most specific match for the current page. */
 const NAV_HREFS = MODULE_REGISTRY.flatMap((m) => m.navItems.map((i) => i.href));
 
-const COLLAPSED_STORAGE_KEY = "wroffy-sidebar-collapsed";
-const OPEN_GROUPS_STORAGE_KEY = "wroffy-sidebar-open-groups";
+const COLLAPSED_STORAGE_KEY = "deskzo-sidebar-collapsed";
+const OPEN_GROUPS_STORAGE_KEY = "deskzo-sidebar-open-groups";
 
 /**
  * localStorage, read the way React wants a browser-only value read.

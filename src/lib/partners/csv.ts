@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import type { CommissionKind, CommissionStatus } from "@wroffy/control-client";
+import type { CommissionKind, CommissionStatus } from "@deskzo/control-client";
 import { csvFilename } from "@/lib/console-shared/format";
 import { COMMISSION_KIND, COMMISSION_STATUS } from "@/lib/console-shared/labels";
 import type { CsvExport } from "@/lib/console-shared/types";

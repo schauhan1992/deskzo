@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import type { PartnerRole } from "@wroffy/control-client";
+import type { PartnerRole } from "@deskzo/control-client";
 import { partnerActor, partnerRefusal, requirePartner, revalidatePortal, type PartnerMode } from "@/lib/partners/guard";
 import { finishPartnerEnrolment, removeOwnPartnerTwoFactor, signInPartner, signOutPartner, type PartnerSessionState } from "@/lib/partners/session";
 import { PARTNER_EVERYONE, PartnerRefused, type PartnerResult } from "@/lib/partners/types";

@@ -1,4 +1,4 @@
-import { PrismaClient as ControlClient } from "@wroffy/control-client";
+import { PrismaClient as ControlClient } from "@deskzo/control-client";
 
 export type { ControlClient };
 
@@ -18,7 +18,7 @@ export function controlConfigured(): boolean {
 export function controlDb(): ControlClient {
   if (!controlConfigured()) throw new Error("CONTROL_DATABASE_URL is not set.");
   const g = globalThis as { [key: symbol]: ControlClient | undefined };
-  const key = Symbol.for("wroffy.control-db");
+  const key = Symbol.for("deskzo.control-db");
   if (!g[key]) g[key] = new ControlClient({ datasourceUrl: process.env.CONTROL_DATABASE_URL });
   return g[key]!;
 }
@@ -26,7 +26,7 @@ export function controlDb(): ControlClient {
 /** For scripts: close it, so the process can exit. */
 export async function closeControlDb(): Promise<void> {
   const g = globalThis as { [key: symbol]: ControlClient | undefined };
-  const key = Symbol.for("wroffy.control-db");
+  const key = Symbol.for("deskzo.control-db");
   const client = g[key];
   g[key] = undefined;
   await client?.$disconnect().catch(() => {});

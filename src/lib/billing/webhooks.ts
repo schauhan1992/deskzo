@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Prisma, type BillingGateway } from "@wroffy/control-client";
+import { Prisma, type BillingGateway } from "@deskzo/control-client";
 import { GatewayError } from "@/lib/billing/gateway";
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { getRazorpaySubscription, verifyRazorpaySignature, type RazorpayEvent } from "@/lib/billing/razorpay";

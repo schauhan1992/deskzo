@@ -1,4 +1,4 @@
-import type { CommissionKind, Prisma, StatementStatus } from "@wroffy/control-client";
+import type { CommissionKind, Prisma, StatementStatus } from "@deskzo/control-client";
 import { formatMoney } from "@/lib/billing/money";
 import { dayMonthYear, istDayKey, istMonthKey, monthLabel } from "@/lib/console-shared/format";
 import { istDateParts, istMidnight } from "@/lib/india-time";

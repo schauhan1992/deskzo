@@ -8,7 +8,7 @@
  *
  * Kept tiny and free of imports on purpose: the sidebar loads it on every page.
  */
-export const OPEN_SUPPORT_EVENT = "wroffy:open-support";
+export const OPEN_SUPPORT_EVENT = "deskzo:open-support";
 
 export function openSupport() {
   window.dispatchEvent(new Event(OPEN_SUPPORT_EVENT));

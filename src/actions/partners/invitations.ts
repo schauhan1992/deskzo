@@ -1,6 +1,6 @@
 "use server";
 
-import type { PartnerRole } from "@wroffy/control-client";
+import type { PartnerRole } from "@deskzo/control-client";
 import { partnerRefusal, requirePartner, revalidatePortal, type PartnerMode } from "@/lib/partners/guard";
 import type { LinkRow } from "@/lib/partners/portal-data";
 import { createPartnerInvite, createReferralLink, endPartnerInvite, endReferralLink } from "@/lib/partners/referrals";

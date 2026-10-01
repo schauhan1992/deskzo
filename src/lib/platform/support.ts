@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
-import type { SupportAccessLevel } from "@wroffy/control-client";
+import type { SupportAccessLevel } from "@deskzo/control-client";
 import { db } from "@/lib/db";
 import { controlDb } from "@/lib/platform/control-db";
 import { createHandoffTicket } from "@/lib/platform/handoff";

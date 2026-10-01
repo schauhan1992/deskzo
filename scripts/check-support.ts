@@ -43,7 +43,7 @@ import type { LauncherState, SupportSubmitInput, SupportSubmitResult } from "../
 import type { Tenant } from "../src/lib/tenancy/state";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
-process.env.WROFFY_TENANCY_FALLBACK = "legacy";
+process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
 process.env.TRUST_PROXY = "";
 process.env.TRUST_PROXY_HOPS = "";
@@ -370,7 +370,7 @@ async function main() {
       const token = randomBytes(32).toString("base64url");
       await control.platformSession.create({ data: { id: sha256(token), userId, expiresAt: new Date(Date.now() + HOUR), mfaAt: new Date(), userAgent: "check:support" } });
       jar.clear();
-      jar.set("wroffy-console", token);
+      jar.set("deskzo-console", token);
     };
     const signedOut = () => {
       atConsole();
@@ -546,7 +546,7 @@ async function main() {
       supportSettings.forgetSupportSettings();
       const state = (t: Tenant, userId: string | null) => inWs(t, userId, () => actions.supportLauncherState());
       const s = await state(main, asha.id);
-      ok("signed in: the button, with their email and phone, the helpline and the brand", !!s && s.email === asha.email && s.phone === asha.phone && s.helpline === "+91 80 4000 1234" && s.hours === "Mon-Fri, 9:00 AM - 6:00 PM IST" && s.brandName === "Wroffy ERP", JSON.stringify(s));
+      ok("signed in: the button, with their email and phone, the helpline and the brand", !!s && s.email === asha.email && s.phone === asha.phone && s.helpline === "+91 80 4000 1234" && s.hours === "Mon-Fri, 9:00 AM - 6:00 PM IST" && s.brandName === "Deskzo One", JSON.stringify(s));
       ok("  recording offered", s?.recordingAllowed === true && s.recordingBlockedReason === null);
       policy = { ...noDeterrents, blockCopy: true };
       const dlp = await state(main, asha.id);
@@ -953,7 +953,7 @@ async function main() {
       const { RecordingConsent } = require("../src/components/support/recording-consent") as typeof import("../src/components/support/recording-consent");
       require("../src/components/support/recorder");
       ok("the workspace's support components import with no window or document", typeof (globalThis as { window?: unknown }).window === "undefined" && typeof (globalThis as { document?: unknown }).document === "undefined");
-      const state: LauncherState = { email: "asha@zzsup.example", phone: "+91 98765 43210", helpline: "+91 80 4000 1234", hours: "Mon-Fri", recordingAllowed: true, recordingBlockedReason: null, brandName: "Wroffy ERP" };
+      const state: LauncherState = { email: "asha@zzsup.example", phone: "+91 98765 43210", helpline: "+91 80 4000 1234", hours: "Mon-Fri", recordingAllowed: true, recordingBlockedReason: null, brandName: "Deskzo One" };
       const launcher = renderToStaticMarkup(createElement(SupportLauncher, { state }));
       ok("the launcher: nothing on the page until the sidebar asks — the dialog closed", !launcher.includes('role="dialog"'), launcher.slice(0, 300));
       const dialog = renderToStaticMarkup(createElement(SupportDialog, { state, open: true, onClose: () => {} }));

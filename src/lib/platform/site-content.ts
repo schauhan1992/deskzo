@@ -1,5 +1,5 @@
 import { cache as requestCache } from "react";
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import type { SiteBlock, SitePage, SiteSettings } from "@/components/site/blocks/types";
 import { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } from "@/components/site/defaults";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";

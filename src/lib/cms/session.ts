@@ -14,7 +14,7 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  * Signing in to the website CMS (cms.<domain>) — a sign-in of its own, nothing to do with the staff
  * console's or any workspace's. Modelled on src/lib/platform/staff-session.ts:
  *
- *   · The cookie is `__Host-wroffy-cms` over https (`wroffy-cms` on plain http in development): this
+ *   · The cookie is `__Host-deskzo-cms` over https (`deskzo-cms` on plain http in development): this
  *     host only. It holds a random token; the control plane keeps its SHA-256 as a CmsSession,
  *     checked on every request — sixty minutes idle, twelve hours at most, revocable.
  *   · A session counts only on the CMS host: the same cookie presented anywhere else (it would not be
@@ -26,8 +26,8 @@ import { generateTotpSecret, totpQrCodeDataUrl, verifyTotpCode } from "@/lib/tot
  *   · Failed sign-ins lock out per account and per known caller, in a namespace of their own ("cms|").
  */
 
-const COOKIE_SECURE = "__Host-wroffy-cms";
-const COOKIE_PLAIN = "wroffy-cms";
+const COOKIE_SECURE = "__Host-deskzo-cms";
+const COOKIE_PLAIN = "deskzo-cms";
 export const CMS_IDLE_MS = 60 * 60_000;
 export const CMS_MAX_MS = 12 * 60 * 60_000;
 /** How often lastSeenAt is written — often enough for the idle limit, not on every request. */

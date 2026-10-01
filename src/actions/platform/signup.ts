@@ -70,7 +70,7 @@ import { subdomainHost } from "@/lib/tenancy/registry";
  * owns a workspace, and not which way an invitation code is wrong.
  */
 
-const COOKIE = "wroffy.signup";
+const COOKIE = "deskzo.signup";
 const CODE_TTL_MS = CODE_TTL_MINUTES * 60_000;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 

@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import type { Prisma } from "@wroffy/control-client";
+import type { Prisma } from "@deskzo/control-client";
 import { csvFilename, istDayKey } from "@/lib/console-shared/format";
 import { AUDIT_CATEGORIES, actorLabel, auditHref, auditLabel, auditSummary } from "@/lib/console-shared/labels";
 import type { AuditFilters } from "@/lib/console-shared/params";
