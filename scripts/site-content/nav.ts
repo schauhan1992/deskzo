@@ -1,9 +1,16 @@
-import type { NavItem, NavMenu, SiteSettings } from "../../src/components/site/blocks/types";
-import { COMPARE_ENTRIES, PRODUCT_GROUPS, RESOURCE_ENTRIES, SOLUTION_GROUPS, byPath, type CatalogEntry } from "./_catalog";
+import type { NavItem, NavMenu, NavMenuItem, SiteSettings } from "../../src/components/site/blocks/types";
+import { ADD_ONS, PRODUCTS } from "../../src/lib/products";
+import { COMPARE_ENTRIES, PRODUCT_LINE_GROUPS, RESOURCE_ENTRIES, SOLUTION_GROUPS, byPath, type CatalogEntry } from "./_catalog";
+import { ADD_ON_PAGES, CAPABILITY_PAGES } from "./_products";
 
 /**
  * The header's menus and the footer, as the site's settings store them (NavItem[], footer columns).
  * Built from the catalogue, so a menu's line and a hub card's line never disagree.
+ *
+ * The Product menu is the products (src/lib/products.ts): a column per menu group — the suite, sell
+ * and serve, run the business, people and security — each product its name with its tagline under
+ * it, then the add-ons that have a page and what every product has (security and access, linked
+ * workspaces, import and migration), each linking to its module page. "See every module" is at its foot.
  *
  * `partnerPortal` is the partner portal's own address — https://partners.<domain>/ — made by the
  * helper the portal itself uses (src/lib/partners/users.ts partnerOrigin), because a site path can't
@@ -12,12 +19,43 @@ import { COMPARE_ENTRIES, PRODUCT_GROUPS, RESOURCE_ENTRIES, SOLUTION_GROUPS, byP
 
 const item = (e: CatalogEntry) => ({ label: e.label, href: e.path, description: e.tagline });
 
-export function siteNav(options: { partnerPortal: string }): { nav: NavItem[]; footer: SiteSettings["footer"] } {
-  const product: NavMenu = {
+/** The add-ons with a page of their own, then the capabilities every product has. */
+function addOnItems(): NavMenuItem[] {
+  const addOns = ADD_ONS.flatMap((a) => (ADD_ON_PAGES[a.key] ? [{ label: a.name, href: ADD_ON_PAGES[a.key]!, description: a.tagline }] : []));
+  return [...addOns, ...CAPABILITY_PAGES.map((path) => item(byPath(path)))];
+}
+
+/** The Product menu: one column per group of products, then the add-ons and capabilities. */
+export function productMenu(): NavMenu {
+  return {
     label: "Product",
-    columns: PRODUCT_GROUPS.map((g) => ({ title: g.title, items: g.entries.map(item) })),
+    columns: [...PRODUCT_LINE_GROUPS.map((g) => ({ title: g.title, items: g.entries.map(item) })), { title: "Add-ons & capabilities", items: addOnItems() }],
     footer: { label: "See every module", href: "/product" },
   };
+}
+
+/**
+ * The footer's product columns. Eleven products don't fit one column (ten links at most), so there
+ * are two: the suite with the add-ons, every module and pricing; then the ten products.
+ */
+export function productFooterColumns(): SiteSettings["footer"]["columns"] {
+  const suite = PRODUCTS.filter((p) => p.group === "suite");
+  return [
+    {
+      title: "Suite & add-ons",
+      links: [
+        ...suite.map((p) => ({ label: p.name, href: p.path })),
+        ...ADD_ONS.flatMap((a) => (ADD_ON_PAGES[a.key] ? [{ label: a.name, href: ADD_ON_PAGES[a.key]! }] : [])),
+        { label: "Every module", href: "/product" },
+        { label: "Pricing", href: "/pricing" },
+      ],
+    },
+    { title: "Products", links: PRODUCT_LINE_GROUPS.filter((g) => !g.entries.some((e) => suite.some((p) => p.path === e.path))).flatMap((g) => g.entries.map((e) => ({ label: e.label, href: e.path }))) },
+  ];
+}
+
+export function siteNav(options: { partnerPortal: string }): { nav: NavItem[]; footer: SiteSettings["footer"] } {
+  const product = productMenu();
   const solutions: NavMenu = {
     label: "Solutions",
     columns: SOLUTION_GROUPS.map((g) => ({ title: g.title, items: g.entries.map(item) })),
@@ -60,14 +98,7 @@ export function siteNav(options: { partnerPortal: string }): { nav: NavItem[]; f
 
   const footer: SiteSettings["footer"] = {
     columns: [
-      {
-        title: "Product",
-        links: [
-          ...["/product/crm", "/product/quotes-invoices", "/product/accounting-gst", "/product/payroll", "/product/helpdesk", "/product/inventory", "/product/revenue-close", "/product/security"].map((path) => ({ label: byPath(path).label, href: path })),
-          { label: "Pricing", href: "/pricing" },
-          { label: "Every module", href: "/product" },
-        ],
-      },
+      ...productFooterColumns(),
       {
         title: "Solutions",
         links: [

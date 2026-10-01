@@ -1,4 +1,4 @@
-import type { IconName, PreviewKind, RichInline, RichNode, SiteAction, SiteBlock } from "../../src/components/site/blocks/types";
+import type { IconName, PreviewKind, RichInline, RichNode, SiteAction, SiteBlock, SiteLink } from "../../src/components/site/blocks/types";
 import { byPath, type CatalogGroup } from "./_catalog";
 import type { SeedPage } from "./types";
 
@@ -9,11 +9,12 @@ import type { SeedPage } from "./types";
 
 export const SIGNUP: SiteAction = { kind: "signup" };
 export const DEMO: SiteAction = { kind: "link", label: "Book a demo", href: "/contact?topic=demo" };
+export const SALES: SiteAction = { kind: "link", label: "Talk to sales", href: "/contact?topic=sales" };
 const TRIAL_NOTE = "Free for {trialDays} days. No card needed to start.";
 const INVITE_NOTE = "Setting up a workspace is by invitation for now.";
 
 export type Seo = { title: string; description: string; keywords: [string, string, string] };
-export type Feature = { icon: IconName; title: string; body: string; bullets?: string[] };
+export type Feature = { icon: IconName; title: string; body: string; bullets?: string[]; link?: SiteLink };
 /** A question and its answer, one paragraph per string — the first a direct answer of 60 words or fewer. */
 export type Faq = [question: string, ...answer: string[]];
 
@@ -104,7 +105,7 @@ function faqBlock(id: string, heading: string, faqs: Faq[]): SiteBlock {
   return { id, type: "faq", props: { anchor: "faq", heading, items: faqs.map(([question, ...answer]) => ({ question, answer })) } };
 }
 
-function ctaBlock(id: string, cta: { heading: string; body: string } | undefined): SiteBlock {
+function ctaBlock(id: string, cta: { heading: string; body: string } | undefined, secondary: SiteAction = DEMO): SiteBlock {
   return {
     id,
     type: "cta",
@@ -112,7 +113,7 @@ function ctaBlock(id: string, cta: { heading: string; body: string } | undefined
       heading: cta?.heading ?? "See it with your own data",
       body: cta?.body ?? "Set up a workspace for your company and switch on the modules you need. Every workspace starts with a {trialDays}-day free trial.",
       primary: SIGNUP,
-      secondary: DEMO,
+      secondary,
       variant: "band",
     },
   };
@@ -225,6 +226,8 @@ export type HubSpec = {
   eyebrow: string;
   h1: string;
   intro: string;
+  /** Blocks between the header and the map: the product hub leads with the products. */
+  before?: SiteBlock[];
   map: { heading: string; intro: string; groups: CatalogGroup[] };
   extra?: SiteBlock[];
   /** The other hubs, as cards under the map. */
@@ -236,10 +239,65 @@ export function hubPage(spec: HubSpec): SeedPage {
   const k = key(spec.slug);
   const blocks: SiteBlock[] = [
     { id: `${k}-header`, type: "pageHeader", props: { eyebrow: spec.eyebrow, heading: spec.h1, intro: spec.intro } },
+    ...(spec.before ?? []),
     pageMap(`${k}-map`, spec.map.heading, spec.map.intro, spec.map.groups),
     ...(spec.extra ?? []),
     ...(spec.related?.length ? [related(`${k}-related`, "Also on this site", spec.related)] : []),
     ctaBlock(`${k}-cta`, spec.cta),
   ];
   return { slug: spec.slug, document: { title: spec.name, seo: { title: spec.seo.title, description: spec.seo.description, keywords: [...spec.seo.keywords] }, blocks } };
+}
+
+// ─── A product's page (/crm, /books…: src/lib/products.ts) ──────────────────────────────────────
+
+export type ProductLineSpec = {
+  /** The product's path less its "/" ("crm"). */
+  slug: string;
+  /** The product's name, from products.ts: the page's name in the CMS. */
+  name: string;
+  /** Shown as written (no "· {siteName}" after it): a product's name already carries the family's. */
+  seo: Seo;
+  eyebrow: string;
+  h1: string;
+  lead: string;
+  heroPreview?: PreviewKind;
+  answer: { question: string; answer: string; more?: RichInline[]; list?: RichInline[] };
+  /** "What's in it": the product's modules as cards (Deskzo One's page has its products' map instead, in `extra`). */
+  contents?: { heading: string; intro?: string; items: Feature[] };
+  /** Sections after "What's in it", in order: a page map, a product's own features, the add-ons. */
+  extra?: SiteBlock[];
+  how?: How[];
+  /** The other products it pairs with, each with why. */
+  worksWith?: { heading: string; intro?: string; links: { path: string; label: string; description: string }[] };
+  faqHeading: string;
+  faq: Faq[];
+  related: (string | { path: string; label?: string; description?: string })[];
+  cta: { heading: string; body: string };
+};
+
+/**
+ * A product's page: the hero (its one h1), the answer-first opening, what is in it, how it works,
+ * what it works with, the questions buyers ask, related pages, and the call to action — start a
+ * trial, or talk to sales.
+ */
+export function productLinePage(spec: ProductLineSpec): SeedPage {
+  const k = key(spec.slug);
+  const answer: RichNode[] = [p(spec.answer.answer), ...(spec.answer.more ?? []).map((m) => p(m)), ...(spec.answer.list?.length ? [ul(...spec.answer.list)] : [])];
+  const blocks: SiteBlock[] = [
+    hero(`${k}-hero`, spec.eyebrow, spec.h1, spec.lead, spec.heroPreview),
+    { id: `${k}-answer`, type: "richText", props: { heading: spec.answer.question, content: answer } },
+    ...(spec.contents
+      ? [{ id: `${k}-contents`, type: "featureGrid" as const, props: { anchor: "modules", heading: spec.contents.heading, ...(spec.contents.intro ? { intro: spec.contents.intro } : {}), columns: 3 as const, items: spec.contents.items } }]
+      : []),
+    ...(spec.extra ?? []),
+    ...(spec.how ?? []).map((h, i) => howBlock(`${k}-how-${i + 1}`, h)),
+    ...(spec.worksWith
+      ? [{ id: `${k}-works-with`, type: "relatedLinks" as const, props: { heading: spec.worksWith.heading, ...(spec.worksWith.intro ? { intro: spec.worksWith.intro } : {}), links: spec.worksWith.links.map((l) => ({ label: l.label, href: l.path, description: l.description })) } }]
+      : []),
+    faqBlock(`${k}-faq`, spec.faqHeading, spec.faq),
+    // Prices aren't stated on a product's page: the pricing page is always one of its related pages.
+    related(`${k}-related`, "Related pages", spec.related.some((r) => (typeof r === "string" ? r : r.path) === "/pricing") ? spec.related : [...spec.related, "/pricing"]),
+    ctaBlock(`${k}-cta`, spec.cta, SALES),
+  ];
+  return { slug: spec.slug, document: { title: spec.name, seo: { title: spec.seo.title, absoluteTitle: true, description: spec.seo.description, keywords: [...spec.seo.keywords] }, blocks } };
 }

@@ -5,12 +5,13 @@ import type { SeedSection } from "./types";
 
 /**
  * Every data module in this directory, in the order the seed publishes them: the hubs' sections
- * first (a hub's children name it in their breadcrumbs), then anything else alphabetically.
+ * first (a hub's children name it in their breadcrumbs) — the product hub, then the products' own
+ * pages (products.ts) — then anything else alphabetically.
  *
  * A module is any `*.ts` file here except this one, types.ts, nav.ts and names starting with "_";
  * it exports `section` (a SeedSection). A file that doesn't is an error, not skipped silently.
  */
-const ORDER = ["product", "solutions", "compare", "resources", "guides"];
+const ORDER = ["product", "products", "solutions", "compare", "resources", "guides"];
 const NOT_SECTIONS = new Set(["index", "types", "nav"]);
 
 export async function loadSections(only?: string[]): Promise<SeedSection[]> {

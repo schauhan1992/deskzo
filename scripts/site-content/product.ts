@@ -1,12 +1,21 @@
-import { h3, hubPage, p, ul } from "./_build";
-import { PRODUCT_GROUPS } from "./_catalog";
+import { productByKey } from "../../src/lib/products";
+import { h3, hubPage, p, pageMap, ul } from "./_build";
+import { PRODUCT_GROUPS, PRODUCT_LINE_GROUPS } from "./_catalog";
 import { ADVANCED_PAGES } from "./_product-advanced";
 import { PEOPLE_PAGES } from "./_product-people";
 import { RUN_PAGES } from "./_product-run";
 import { SELL_PAGES } from "./_product-sell";
+import { withProductLine } from "./_products";
 import type { SeedSection } from "./types";
 
-/** /product and a page for each module (the modules' pages are in _product-*.ts, one file per menu column). */
+/**
+ * /product and a page for each module (the modules' pages are in _product-*.ts, one file per menu
+ * column). The hub leads with the products (src/lib/products.ts, their pages in products.ts), then
+ * maps every module; each module page carries one line under its header naming the products it is
+ * in (_products.ts PAGE_PLACES).
+ */
+
+const one = productByKey("one")!;
 
 const hub = hubPage({
   slug: "product",
@@ -18,8 +27,15 @@ const hub = hubPage({
   },
   eyebrow: "Product",
   h1: "Cloud ERP software, one module at a time",
-  intro:
-    "Cloud ERP software is one system, reached through a browser, for the work a company runs on: selling, billing, buying, the books, people and support. {siteName} splits that work into modules. Switch on the ones you need; they share one set of records, so an invoice posts itself to the ledger and a payslip reads attendance and leave.",
+  intro: `Cloud ERP software is one system, reached through a browser, for the work a company runs on: selling, billing, buying, the books, people and support. {siteName} sells that work as products, each a set of modules, and ${one.name} is all of them. They share one set of records, so an invoice posts itself to the ledger and a payslip reads attendance and leave.`,
+  before: [
+    pageMap(
+      "product-products",
+      "Every {siteName} product",
+      `Start with the product for the work in front of you, add others as you grow, or take every one as ${one.name}. Each product's page lists the modules in it.`,
+      PRODUCT_LINE_GROUPS,
+    ),
+  ],
   map: {
     heading: "Every module, grouped by the work it runs",
     intro: "Each page says what the module does today, how it works, and which modules it works with.",
@@ -48,4 +64,4 @@ const hub = hubPage({
   cta: { heading: "Start with the modules you need", body: "Set up a workspace and switch modules on as you go. Every workspace starts with a {trialDays}-day free trial." },
 });
 
-export const section: SeedSection = { name: "Product", pages: [hub, ...SELL_PAGES, ...RUN_PAGES, ...PEOPLE_PAGES, ...ADVANCED_PAGES] };
+export const section: SeedSection = { name: "Product", pages: [hub, ...[...SELL_PAGES, ...RUN_PAGES, ...PEOPLE_PAGES, ...ADVANCED_PAGES].map(withProductLine)] };

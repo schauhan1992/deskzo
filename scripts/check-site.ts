@@ -33,7 +33,12 @@
  *     the catch-all with its breadcrumb and BreadcrumbList, in the sitemap, served indexable;
  *   · the comparison pages the website seed publishes (scripts/site-content/compare.ts): each passes the
  *     CMS's validator and renders with one h1, a table whose every source is on the competitor's own
- *     website and linked nofollow, the as-of line and both disclaimers, an FAQ, and no price or superlative.
+ *     website and linked nofollow, the as-of line and both disclaimers, an FAQ, and no price or superlative;
+ *   · the products (src/lib/products.ts, their pages scripts/site-content/products.ts): every product has a
+ *     published page at its path with one h1 naming it, no price or seat count, every link to a page the
+ *     site has; its modules shown and linked to real module pages; the Product menu one link per product
+ *     by its products.ts name and tagline, within NAV_LIMITS, and the footer's product columns within
+ *     theirs; and every module page's line under its header naming the products it is in.
  *
  * No mail leaves: the platform mailer is replaced.
  */
@@ -1188,9 +1193,10 @@ async function main() {
     section("The seeded pages and guides: product, solutions, resources, the glossary and six guides");
     at(ROOT);
     {
-      const seedSections = await (require("./site-content") as typeof import("./site-content")).loadSections(["product", "solutions", "resources", "guides"]);
+      const seedSections = await (require("./site-content") as typeof import("./site-content")).loadSections(["product", "products", "solutions", "resources", "guides"]);
       const catalogue = require("./site-content/_catalog") as typeof import("./site-content/_catalog");
       const { siteNav: seedSiteNav } = require("./site-content/nav") as typeof import("./site-content/nav");
+      const { PRODUCTS } = require("../src/lib/products") as typeof import("../src/lib/products");
       const cmsTypes = require("../src/lib/cms/types") as typeof import("../src/lib/cms/types");
       const seedPages = seedSections.flatMap((s) => s.pages ?? []);
       const seedPosts = seedSections.flatMap((s) => s.posts ?? []);
@@ -1200,10 +1206,11 @@ async function main() {
         "resources",
         "resources/glossary",
         ...[...catalogue.PRODUCT_GROUPS, ...catalogue.SOLUTION_GROUPS].flatMap((g) => g.entries.map((e) => e.path.slice(1))),
+        ...PRODUCTS.map((p) => p.path.slice(1)),
       ].sort();
       ok(
-        "every page in the site map: the three hubs, 25 modules, 13 solutions and the glossary, and six guides",
-        seedPages.map((p) => p.slug).sort().join(" ") === siteMap.join(" ") && siteMap.length === 42 && seedPosts.length === 6,
+        `every page in the site map: the three hubs, 25 modules, 13 solutions and the glossary, a page for each of the ${PRODUCTS.length} products, and six guides`,
+        seedPages.map((p) => p.slug).sort().join(" ") === siteMap.join(" ") && siteMap.length === 42 + PRODUCTS.length && seedPosts.length === 6,
         `${seedPages.length} pages, ${seedPosts.length} posts`,
       );
       const refusedPages = seedPages.map((p) => ({ slug: p.slug, checked: siteValidate.checkPageDocument(p.document, "publish") })).filter((r) => !r.checked.ok);
@@ -1280,9 +1287,147 @@ async function main() {
       const navHrefs = [...siteNav.navLinks(seedNav.nav), ...seedNav.footer.columns.flatMap((c) => c.links)].map((l) => l.href);
       const dangling = navHrefs.filter((h) => h.startsWith("/") && !known.has(h.split(/[?#]/)[0]));
       ok(
-        "the header's six menus and the footer's five columns: valid to publish, every site link to a page the site has, the partner portal on its own host",
-        navChecked.ok && seedNav.nav.length === 6 && seedNav.footer.columns.length === 5 && dangling.length === 0 && navHrefs.includes("https://partners.example.com/"),
+        "the header's six menus and the footer's six columns: valid to publish, every site link to a page the site has, the partner portal on its own host",
+        navChecked.ok && seedNav.nav.length === 6 && seedNav.footer.columns.length === 6 && dangling.length === 0 && navHrefs.includes("https://partners.example.com/"),
         `${navChecked.ok ? "" : JSON.stringify(navChecked.issues.slice(0, 2))} ${dangling.join(" ")}`,
+      );
+
+      // ─── The products (src/lib/products.ts): a page each, the Product menu, the module pages' lines ───
+      section("The products: a page for each in products.ts, the Product menu and footer, and each module page's line");
+      const productsLib = require("../src/lib/products") as typeof import("../src/lib/products");
+      const placing = require("./site-content/_products") as typeof import("./site-content/_products");
+      const { productMenu, productFooterColumns } = require("./site-content/nav") as typeof import("./site-content/nav");
+      const productSection = (require("./site-content/products") as typeof import("./site-content/products")).section;
+      const productPages = new Map((productSection.pages ?? []).map((p) => [p.slug, p]));
+      const builtins = new Set(["/", "/pricing", "/security", "/contact", "/signin", "/terms", "/privacy", "/partners", "/partners/find", "/blog", "/blog/category/guides"]);
+      const resolves = (href: string) => {
+        const path = href.split(/[?#]/)[0]!.replace(/\/$/, "") || "/";
+        return seeded.includes(path) || builtins.has(path) || catalogue.COMPARE_ENTRIES.some((e) => e.path === path) || path === "/compare";
+      };
+
+      // Each product's page: published at its path, one h1 naming it, every link on it to a page the site has, no price.
+      const PRODUCT_PRICE = /[₹$€£]|\bRs\.?\s?\d|\b(INR|USD|EUR)\b|\bper (user|seat|month)\b|\b\d+\s+(seats?|users?)\b/i;
+      const PRODUCT_SUPERLATIVE = /\b(best|#1|number one|leading|world-class|fastest|cheapest|easiest|unbeatable|unmatched)\b/i;
+      const productProblems: string[] = [];
+      const deadLinks: string[] = [];
+      const productMarkup = new Map<string, string>();
+      for (const p of productsLib.PRODUCTS) {
+        const slug = p.path.slice(1);
+        const row = await control.sitePage.findUnique({ where: { slug }, select: { status: true } });
+        if (!productPages.has(slug) || row?.status !== "PUBLISHED") {
+          productProblems.push(`${p.path}: ${productPages.has(slug) ? (row?.status ?? "not in the database") : "no page in products.ts"}`);
+          continue;
+        }
+        const markup = await renderRoute(catchAll as unknown as Route, { slug: [slug] });
+        productMarkup.set(p.path, markup);
+        const main = mainOf(markup);
+        const h1s = [...markup.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/g)].map((m) => textOf(m[1]!).trim());
+        // The words are the page's own copy: the drawn previews beside a hero show sample figures, in rupees.
+        const words = JSON.stringify(productPages.get(slug)!.document);
+        if (h1s.length !== 1 || !h1s[0]!.includes(p.name)) productProblems.push(`${p.path}: ${h1s.length} h1 "${h1s[0] ?? ""}"`);
+        if (PRODUCT_PRICE.test(words) || PRODUCT_SUPERLATIVE.test(words)) productProblems.push(`${p.path}: "${PRODUCT_PRICE.exec(words)?.[0] ?? PRODUCT_SUPERLATIVE.exec(words)?.[0]}"`);
+        if (!main.includes('href="/pricing"') || !main.includes('href="/contact?topic=sales"')) productProblems.push(`${p.path}: no link to pricing, or no "talk to sales"`);
+        for (const href of hrefsIn(main)) if (!resolves(href)) deadLinks.push(`${p.path} → ${href}`);
+      }
+      ok(
+        `every product in products.ts (${productsLib.PRODUCTS.length}) has a published page at its path: one h1 naming it, no price, seat count or superlative, pricing linked and sales a click away`,
+        productProblems.length === 0,
+        productProblems.slice(0, 4).join(" | "),
+      );
+      ok("  every link on them goes to a page the site has", deadLinks.length === 0, deadLinks.slice(0, 4).join(" | "));
+      const brandLeft = [...productPages.values()].filter((page) => {
+        let text = JSON.stringify(page.document);
+        // A tagline may open a sentence after the name ("Deskzo One: every Deskzo product…"), its first letter lowered.
+        for (const p of productsLib.PRODUCTS) text = text.split(p.tagline).join("").split(p.tagline[0]!.toLowerCase() + p.tagline.slice(1)).join("").split(p.name).join("");
+        return text.includes(productsLib.PRODUCT_FAMILY);
+      });
+      ok(`  the family's name ("${productsLib.PRODUCT_FAMILY}") only inside products.ts's names and taglines; the brand otherwise the {siteName} token`, brandLeft.length === 0, brandLeft.map((p) => p.slug).join(" "));
+      const oneMain = mainOf(productMarkup.get(productsLib.productByKey("one")!.path) ?? "");
+      ok("  the suite's page maps every other product, by group, and lists the add-ons", productsLib.PRODUCTS.filter((p) => p.key !== "one").every((p) => oneMain.includes(`href="${p.path}"`)) && productsLib.ADD_ONS.every((a) => textOf(oneMain).includes(a.name)));
+
+      // "What's in it": each product's modules, linked to the module page that describes them, or listed without a link.
+      const modulePages = new Set(catalogue.PRODUCT_GROUPS.flatMap((g) => g.entries.map((e) => e.path)));
+      const unknownModules = productsLib.PRODUCTS.flatMap((p) => p.modules.filter((k) => !placing.MODULES[k] || !MODULE_REGISTRY.some((m) => m.key === k)).map((k) => `${p.key}:${k}`));
+      const badModulePages = Object.entries(placing.MODULES).filter(([, m]) => m.page && !modulePages.has(m.page)).map(([k, m]) => `${k} → ${m.page}`);
+      const missingCards = productsLib.PRODUCTS.flatMap((p) =>
+        p.modules.filter((k) => {
+          const m = placing.MODULES[k];
+          const main = mainOf(productMarkup.get(p.path) ?? "");
+          return !m || !textOf(main).includes(m.label) || (m.page && !main.includes(`href="${m.page}"`));
+        }).map((k) => `${p.path}:${k}`),
+      );
+      ok(
+        "module links resolve: every product's module is a real one the site describes, shown on its page, linked to a module page the site has (or listed without a link)",
+        unknownModules.length === 0 && badModulePages.length === 0 && missingCards.length === 0,
+        [...unknownModules, ...badModulePages, ...missingCards].slice(0, 5).join(" | "),
+      );
+
+      // The Product menu and the footer's product columns, built from products.ts.
+      const menu = productMenu();
+      const menuLinks = menu.columns.flatMap((c) => c.items);
+      const productLinks = productsLib.PRODUCTS.map((p) => menuLinks.filter((l) => l.href === p.path));
+      ok(
+        "the Product menu: one link per product, its products.ts name with its tagline as the line under it",
+        productLinks.every((ls, i) => ls.length === 1 && ls[0]!.label === productsLib.PRODUCTS[i]!.name && ls[0]!.description === productsLib.PRODUCTS[i]!.tagline),
+        productsLib.PRODUCTS.filter((_, i) => productLinks[i]!.length !== 1).map((p) => p.name).join(", "),
+      );
+      const limitsKept =
+        menu.columns.length <= types.NAV_LIMITS.columns &&
+        menu.columns.every((c) => c.items.length <= types.NAV_LIMITS.columnItems) &&
+        menuLinks.every((l) => !l.description || [...l.description].length <= types.NAV_LIMITS.description);
+      ok(
+        `  within NAV_LIMITS (${types.NAV_LIMITS.columns} columns, ${types.NAV_LIMITS.columnItems} links each, ${types.NAV_LIMITS.description}-character lines); the add-ons and capabilities to their module pages; "See every module" at its foot`,
+        limitsKept &&
+          menuLinks.filter((l) => !productsLib.PRODUCTS.some((p) => p.path === l.href)).every((l) => modulePages.has(l.href)) &&
+          Object.values(placing.ADD_ON_PAGES).every((path) => menuLinks.some((l) => l.href === path)) &&
+          placing.CAPABILITY_PAGES.every((path) => menuLinks.some((l) => l.href === path)) &&
+          menu.footer?.href === "/product",
+        menu.columns.map((c) => `${c.title}:${c.items.length}`).join(" "),
+      );
+      const footerColumns = productFooterColumns();
+      ok(
+        "the footer's product columns: every product by its name, within the footer's limits",
+        productsLib.PRODUCTS.every((p) => footerColumns.some((c) => c.links.some((l) => l.href === p.path && l.label === p.name))) &&
+          footerColumns.every((c) => c.links.length <= types.NAV_LIMITS.footerLinks) &&
+          seedNav.footer.columns.length <= types.NAV_LIMITS.footerColumns,
+        footerColumns.map((c) => `${c.title}:${c.links.length}`).join(" "),
+      );
+      await publishSettings({ ...DEFAULT_SITE_SETTINGS, ...seedNav });
+      const productsHeaderPage = await render("/pricing");
+      const productsHeader = headerOf(productsHeaderPage);
+      const productsFooter = footerOf(productsHeaderPage);
+      ok(
+        "  published, the header has every product in the server's HTML (the desktop panel and the phone's accordion) and the footer links each",
+        productsLib.PRODUCTS.every((p) => hrefCount(productsHeader, p.path) >= 2 && hrefCount(productsFooter, p.path) === 1 && textOf(productsHeader).includes(p.tagline)),
+        productsLib.PRODUCTS.map((p) => `${p.path}:${hrefCount(productsHeader, p.path)}/${hrefCount(productsFooter, p.path)}`).join(" "),
+      );
+
+      // Each module page: one line under its header naming the products it is in, linked (productsOfModule through PAGE_PLACES).
+      const unplaced = [...modulePages].filter((path) => !placing.PAGE_PLACES[path]);
+      const strayPlaces = Object.keys(placing.PAGE_PLACES).filter((path) => !modulePages.has(path));
+      const lineProblems: string[] = [];
+      for (const path of modulePages) {
+        if (!placing.PAGE_PLACES[path]) continue;
+        const main = mainOf(await renderRoute(catchAll as unknown as Route, { slug: path.slice(1).split("/") }));
+        const place = placing.PAGE_PLACES[path]!;
+        const boughtWith = "addOn" in place ? productsLib.ADD_ONS.find((a) => a.key === place.addOn)?.onProduct : undefined;
+        const named = "addOn" in place ? [productsLib.productByKey(boughtWith ?? "one")!] : [...placing.productsOfPage(path), productsLib.productByKey("one")!];
+        const firstH2 = main.search(/<h2[\s>]/);
+        const late = named.filter((p) => {
+          const at = main.indexOf(`href="${p.path}"`);
+          return at === -1 || (firstH2 !== -1 && at > firstH2);
+        });
+        if (late.length) lineProblems.push(`${path}: ${late.map((p) => p.path).join(",")}`);
+      }
+      ok(
+        `every module page (${modulePages.size}) has its line under the header, linking the products it is in (productsOfModule over its modules), the add-ons' to the product they're bought with`,
+        unplaced.length === 0 && strayPlaces.length === 0 && lineProblems.length === 0,
+        [...unplaced.map((p) => `no place: ${p}`), ...strayPlaces.map((p) => `not a module page: ${p}`), ...lineProblems].slice(0, 4).join(" | "),
+      );
+      ok(
+        "  the line's products are productsOfModule's: the CRM page names the CRM product alone, the item catalogue's page every product with items",
+        placing.productsOfPage("/product/crm").map((p) => p.key).join(",") === "crm" && placing.productsOfPage("/product/inventory").map((p) => p.key).join(",") === "books,inventory,subscriptions",
+        `${placing.productsOfPage("/product/crm").map((p) => p.key).join(",")} / ${placing.productsOfPage("/product/inventory").map((p) => p.key).join(",")}`,
       );
     }
 

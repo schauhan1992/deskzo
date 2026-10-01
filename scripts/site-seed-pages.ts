@@ -4,7 +4,7 @@
  *
  *   npm run site:seed-pages                      publish (or update) everything, then recalculate the SEO scores
  *   npm run site:seed-pages -- --dry-run         say what it would do; write nothing
- *   npm run site:seed-pages -- --only compare    only these sections (comma-separated: product,solutions,compare,resources,guides)
+ *   npm run site:seed-pages -- --only compare    only these sections (comma-separated: product,products,solutions,compare,resources,guides)
  *   npm run site:seed-pages -- --no-nav          leave the navigation and footer alone
  *   npm run site:seed-pages -- --no-scores       don't recalculate the SEO scores afterwards
  *   npm run site:seed-pages -- --json <file>     also write the result (outcomes, scores, top issues) to a file

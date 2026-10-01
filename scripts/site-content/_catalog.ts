@@ -1,3 +1,5 @@
+import { PRODUCTS, type Product } from "../../src/lib/products";
+
 /**
  * Every page the website seed links to, with its label and its one-line tagline — one list, so the
  * header's menus, the footer, the hub pages' maps and every "related" card say the same thing.
@@ -8,6 +10,31 @@ export type CatalogEntry = { path: string; label: string; tagline: string; summa
 export type CatalogGroup = { title: string; entries: CatalogEntry[] };
 
 const entry = (path: string, label: string, tagline: string, summary: string): CatalogEntry => ({ path, label, tagline, summary });
+
+/**
+ * The products (src/lib/products.ts — their names, paths and taglines are written there and nowhere
+ * else), grouped as the Product menu, the /product hub and Deskzo One's page show them. Each group's
+ * title is the website's; which product is in it is products.ts's `group`.
+ */
+export const PRODUCT_GROUP_TITLES: Record<Product["group"], string> = { suite: "The suite", sell: "Sell & serve", run: "Run the business", people: "People & security" };
+
+/** The order the website lists products in within a group, by key (owner's brief, 1 Oct 2026); one not listed goes last. */
+const PRODUCT_MENU_ORDER: readonly Product["key"][] = ["one", "crm", "desk", "campaigns", "subscriptions", "books", "inventory", "projects", "analytics", "people", "vault"];
+const menuRank = (p: Product) => {
+  const i = PRODUCT_MENU_ORDER.indexOf(p.key);
+  return i === -1 ? PRODUCT_MENU_ORDER.length : i;
+};
+
+const productEntry = (p: Product): CatalogEntry => entry(p.path, p.name, p.tagline, p.tagline);
+
+export const PRODUCT_ENTRIES: CatalogEntry[] = PRODUCTS.map(productEntry);
+
+export const PRODUCT_LINE_GROUPS: CatalogGroup[] = (Object.keys(PRODUCT_GROUP_TITLES) as Product["group"][]).map((group) => ({
+  title: PRODUCT_GROUP_TITLES[group],
+  entries: PRODUCTS.filter((p) => p.group === group)
+    .sort((a, b) => menuRank(a) - menuRank(b))
+    .map(productEntry),
+}));
 
 export const PRODUCT_GROUPS: CatalogGroup[] = [
   {
@@ -116,7 +143,7 @@ export const GUIDE_ENTRIES: CatalogEntry[] = [
 
 /** The hubs, and built-in pages the seed's content links to. */
 export const SITE_ENTRIES: CatalogEntry[] = [
-  entry("/product", "Product", "Every module, grouped by the work it runs", "Every module, grouped by the work it runs: sell and serve, run the business, people, and advanced."),
+  entry("/product", "Product", "Every product, and every module by the work it runs", "Every {siteName} product, then every module, grouped by the work it runs: sell and serve, run the business, people, and advanced."),
   entry("/solutions", "Solutions", "By role, company size and industry", "How {siteName} fits each role, each size of company and four industries."),
   entry("/resources", "Resources", "Guides and a glossary", "Guides to GST, TDS, payroll and the close, and a glossary of the terms you meet in them."),
   entry("/compare", "Compare", "How {siteName} compares", "How {siteName} compares with other products an Indian company considers."),
@@ -126,7 +153,7 @@ export const SITE_ENTRIES: CatalogEntry[] = [
   entry("/partners", "Become a partner", "Sell {siteName} and earn a recurring commission", "Sell {siteName} to the companies you work with and earn a recurring commission."),
 ];
 
-export const ALL_ENTRIES: CatalogEntry[] = [...PRODUCT_GROUPS, ...SOLUTION_GROUPS].flatMap((g) => g.entries).concat(COMPARE_ENTRIES, RESOURCE_ENTRIES, GUIDE_ENTRIES, SITE_ENTRIES);
+export const ALL_ENTRIES: CatalogEntry[] = [...PRODUCT_GROUPS, ...SOLUTION_GROUPS].flatMap((g) => g.entries).concat(PRODUCT_ENTRIES, COMPARE_ENTRIES, RESOURCE_ENTRIES, GUIDE_ENTRIES, SITE_ENTRIES);
 
 /** A catalogue entry by its path; a mistake in the data throws, rather than publishing a card with no words. */
 export function byPath(path: string): CatalogEntry {
