@@ -5,11 +5,11 @@ import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
-import { roleKeys } from "@/lib/authz/role-registry";
+import { roleExists, roleKeys } from "@/lib/authz/role-registry";
 import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey } from "@/lib/permissions";
 import { can, permissionsFor, explain, resolveUserPermissions, describeSource } from "@/lib/authz/resolve";
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
-import { actorContext, assertGrantWithinOwnAuthority, AuthzError } from "@/lib/authz/guards";
+import { actorContext, assertGrantWithinOwnAuthority, assertKeepsOwnAccessAdmin, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
 import type { ActionResult } from "@/actions/company";
 import { AWAITING_SETUP } from "@/lib/no-password";
@@ -146,6 +146,7 @@ export async function setRolePermission(
 
   try {
     await assertGrantWithinOwnAuthority(actor, key);
+    await assertKeepsOwnAccessAdmin(actor, role, key, allowed);
   } catch (err) {
     if (err instanceof AuthzError) return { ok: false, error: err.message };
     throw err;
@@ -195,6 +196,9 @@ export async function resetRolePermission(role: Role, key: PermissionKey | strin
    */
   try {
     await assertGrantWithinOwnAuthority(actor, key);
+    const def = getPermissionDefinition(key);
+    const byDefault = role === "ADMIN" || ((def?.defaultRoles ?? []) as readonly Role[]).includes(role);
+    await assertKeepsOwnAccessAdmin(actor, role, key, byDefault);
   } catch (err) {
     if (err instanceof AuthzError) return { ok: false, error: err.message };
     throw err;
@@ -212,6 +216,86 @@ export async function resetRolePermission(role: Role, key: PermissionKey | strin
   revalidatePath("/settings/access");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
+}
+
+/**
+ * The role dialog's Save: several of `setRolePermission` at once, all or nothing.
+ *
+ * Every change passes the same three guards `setRolePermission` applies — only a super admin changes
+ * what ADMIN holds, nobody grants (or revokes) a key they don't hold themselves, nobody takes away
+ * their own way into the access screens — and all of them are checked before anything is written, so
+ * a refusal on the fifth box leaves the first four as they were rather than half a role saved.
+ *
+ * A key whose answer would not change is skipped, not written: a box left as it was keeps following
+ * the registry default if that is where its answer came from. Each one that does change is recorded,
+ * exactly as one click in the matrix is.
+ */
+export async function setRolePermissions(
+  role: Role,
+  changes: { key: PermissionKey | string; allowed: boolean }[],
+): Promise<ActionResult<{ changed: number }>> {
+  const session = await requireUser();
+  const actor = await actorContext(session.id);
+
+  if (!actor.isSuperAdmin && !(await can(actor.id, "permissions.manage"))) {
+    return { ok: false, error: "You can't change role permissions." };
+  }
+  if (role === "ADMIN" && !actor.isSuperAdmin) {
+    return { ok: false, error: "Only a super admin can change what admins can do." };
+  }
+  if (!(await roleExists(String(role ?? "")))) return { ok: false, error: "That role no longer exists." };
+
+  // The last word for a key wins, as it would have clicking through the matrix.
+  const wanted = new Map<string, boolean>();
+  for (const change of Array.isArray(changes) ? changes : []) {
+    if (!change || typeof change.key !== "string") continue;
+    wanted.set(change.key, change.allowed === true);
+  }
+
+  const writes: { key: string; label: string; before: boolean; allowed: boolean }[] = [];
+  try {
+    for (const [key, allowed] of wanted) {
+      const def = getPermissionDefinition(key);
+      if (!def) return { ok: false, error: `Unknown permission "${key}".` };
+      const before = await rolePermits(role, key);
+      if (before === allowed) continue;
+      await assertGrantWithinOwnAuthority(actor, key);
+      await assertKeepsOwnAccessAdmin(actor, role, key, allowed);
+      writes.push({ key, label: def.label, before, allowed });
+    }
+  } catch (err) {
+    if (err instanceof AuthzError) return { ok: false, error: err.message };
+    throw err;
+  }
+
+  if (writes.length === 0) return { ok: true, data: { changed: 0 } };
+
+  await db.$transaction(async (tx) => {
+    for (const write of writes) {
+      await tx.rolePermission.upsert({
+        where: { role_permission: { role, permission: write.key } },
+        update: { allowed: write.allowed },
+        create: { role, permission: write.key, allowed: write.allowed },
+      });
+    }
+  });
+
+  for (const write of writes) {
+    await recordPermissionChange({
+      actorUserId: actor.id,
+      subjectType: "ROLE",
+      subjectRole: role,
+      permission: write.key,
+      fromAllowed: write.before,
+      toAllowed: write.allowed,
+      changeKind: write.allowed ? "GRANT" : "REVOKE",
+      detail: `${write.label} for ${role}`,
+    });
+  }
+
+  revalidatePath("/settings/access");
+  revalidatePath("/", "layout");
+  return { ok: true, data: { changed: writes.length } };
 }
 
 /**

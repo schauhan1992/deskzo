@@ -32,7 +32,7 @@ export default async function DataSettingsPage() {
       <div className="max-w-md">
         <h1 className="text-xl font-semibold text-text">Import &amp; export</h1>
         <p className="mt-2 text-sm text-muted">
-          You don&rsquo;t hold any import or export permission. A super admin grants these under Users &amp; Access.
+          You don&rsquo;t hold any import or export permission. A super admin grants these under Staff &amp; roles.
         </p>
       </div>
     );

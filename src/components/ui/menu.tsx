@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 
 /**
@@ -13,11 +13,17 @@ import { AnchoredPopover } from "@/components/ui/anchored-popover";
  */
 export function Menu({
   label = "More",
+  icon: Icon,
   children,
   width = 240,
   align = "end",
 }: {
   label?: string;
+  /**
+   * Draw the trigger as this icon alone — a row's "⋯" — the size of an `IconButton`. `label` is then
+   * its accessible name and tooltip ("More actions for Sales"), never shown.
+   */
+  icon?: LucideIcon;
   children: (close: () => void) => React.ReactNode;
   width?: number;
   align?: "start" | "end";
@@ -48,17 +54,32 @@ export function Menu({
 
   return (
     <>
-      <button
-        ref={anchorRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-9 items-center gap-1 rounded-base border border-line-strong bg-surface px-3 text-sm text-text transition-colors hover:bg-surface-sunken"
-      >
-        {label}
-        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
+      {Icon ? (
+        <button
+          ref={anchorRef}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={label}
+          title={label}
+          onClick={() => setOpen((v) => !v)}
+          className="inline-grid h-7 w-7 shrink-0 place-items-center rounded-base text-subtle transition-colors hover:bg-surface-sunken hover:text-brand"
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      ) : (
+        <button
+          ref={anchorRef}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex h-9 items-center gap-1 rounded-base border border-line-strong bg-surface px-3 text-sm text-text transition-colors hover:bg-surface-sunken"
+        >
+          {label}
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      )}
       <AnchoredPopover anchorRef={anchorRef} open={open} width={width} align={align}>
         <div role="menu" data-menu-panel className="py-1">
           {children(() => setOpen(false))}

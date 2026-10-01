@@ -62,7 +62,7 @@ export function NoAccessNotice({ title, permission }: { title: string; permissio
       <h1 className="text-xl font-semibold text-text">{title}</h1>
       <p className="mt-2 text-sm text-muted">
         You don&apos;t have access to this. Ask an admin to grant you &ldquo;{label}&rdquo; under
-        Users &amp; Access.
+        Staff &amp; roles.
       </p>
     </div>
   );

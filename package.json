@@ -63,6 +63,7 @@
     "check:security": "tsx scripts/check-security.ts",
     "check:rbac": "tsx scripts/check-rbac.ts",
     "check:roles": "tsx scripts/check-roles.ts",
+    "check:staff-roles": "tsx scripts/check-staff-roles.ts",
     "grant:superadmin": "tsx scripts/grant-super-admin.ts",
     "access:snapshot": "tsx scripts/access-snapshot.ts",
     "visibility:snapshot": "tsx scripts/visibility-snapshot.ts",

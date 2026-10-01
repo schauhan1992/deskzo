@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { can } from "@/lib/authz/resolve";
+import { can, resolveUserPermissions } from "@/lib/authz/resolve";
 import { getPermissionDefinition, type PermissionKey } from "@/lib/permissions";
 
 /**
@@ -94,6 +94,46 @@ export async function assertGrantWithinOwnAuthority(
   if (!(await can(actor.id, key))) {
     throw new AuthzError(`You can't grant "${def.label}" because you don't hold it yourself.`);
   }
+}
+
+/**
+ * The two keys that open and change the access screens. Taking either away from your own role is a
+ * door you shut behind yourself: without View, Staff & roles no longer opens for you; without Change,
+ * it opens read-only. Either way the change can't be undone from where it was made.
+ */
+export const OWN_ACCESS_KEYS = ["permissions.view", "permissions.manage"] as const;
+
+/**
+ * Nobody takes away their own way into the access screens through their role.
+ *
+ * The role path's version of `assertNotSelf`: somebody holding `permissions.manage` through their
+ * role could untick it, or "Review who can do what", for that role and lock themselves out with it —
+ * and if they were the only one holding it, nobody but the super admin could put it back. Refused
+ * only when they hold the key *through that role*; somebody who also holds it personally keeps it
+ * whatever the role says, so for them the change is just a change. A super admin holds everything
+ * outside the permission system and is never caught by this.
+ *
+ * `allowedAfter` is what the role will grant once the change is made.
+ */
+export async function assertKeepsOwnAccessAdmin(
+  actor: { id: string; role: string; isSuperAdmin: boolean },
+  role: string,
+  key: PermissionKey | string,
+  allowedAfter: boolean,
+) {
+  if (actor.isSuperAdmin || allowedAfter || actor.role !== role) return;
+  if (!(OWN_ACCESS_KEYS as readonly string[]).includes(key)) return;
+  const resolved = await resolveUserPermissions(actor.id);
+  const source = resolved.sources.get(key);
+  const throughRole =
+    source?.via === "roleDefault" ||
+    source?.via === "adminDefault" ||
+    (source?.via === "roleOverride" && source.allowed);
+  if (!throughRole) return;
+  const def = getPermissionDefinition(key);
+  throw new AuthzError(
+    `You can't take "${def?.label ?? key}" away from your own role — you'd lose the access you need to put it back. Ask another admin.`,
+  );
 }
 
 /**

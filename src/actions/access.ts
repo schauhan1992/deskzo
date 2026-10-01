@@ -9,9 +9,11 @@ import { can } from "@/lib/authz/resolve";
 import {
   actorContext,
   assertGrantWithinOwnAuthority,
+  assertKeepsOwnAccessAdmin,
   assertMayActOnTarget,
   assertNotSelf,
   AuthzError,
+  OWN_ACCESS_KEYS,
 } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
 import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
@@ -272,6 +274,18 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
         return refuse(err);
       }
     }
+  }
+
+  // Nor take away, from the applier's own role, their way back into these screens. A key the preset
+  // leaves out falls back to its default below, so that is what the role holds afterwards.
+  try {
+    for (const key of OWN_ACCESS_KEYS) {
+      const byDefault =
+        preset.role === "ADMIN" || ((getPermissionDefinition(key)?.defaultRoles ?? []) as readonly Role[]).includes(preset.role);
+      await assertKeepsOwnAccessAdmin(actor, preset.role, key, wanted.has(key) || byDefault);
+    }
+  } catch (err) {
+    return refuse(err);
   }
 
   let granted = 0;

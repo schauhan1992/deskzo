@@ -154,8 +154,14 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
  *
  * `emailed: false` comes with the link itself (`setupUrl`) for the admin to pass on — shown once, never
  * stored — unless the link couldn't be issued either, when "Resend setup email" tries again.
+ *
+ * Optional, from Staff & roles' Add staff form: a job title (the HR record's designation), a work phone, and
+ * `active: false` for an account made switched off — no seat and no email until somebody switches it on,
+ * answered with `startsSwitchedOff`. Everything else about the account is as without them.
  */
-export async function createUser(input: unknown): Promise<ActionResult<{ id: string } & SetupInvitation>> {
+export async function createUser(
+  input: unknown,
+): Promise<ActionResult<{ id: string } & SetupInvitation & { startsSwitchedOff?: true }>> {
   const session = await requireUser();
   const admin = await actorContext(session.id);
   if (!(await hasEffectivePermission(admin.id, "users.manage"))) {
@@ -165,7 +171,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { name, email, role, departmentId, usesAnotherWorkspace } = parsed.data;
+  const { name, email, role, departmentId, usesAnotherWorkspace, jobTitle, phone, active } = parsed.data;
 
   // The role picker already leaves ADMIN out (see the access page), but the form is not the
   // authority — this action is. Creating a fresh admin is the same escalation as promoting an
@@ -202,21 +208,34 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
     }
   }
 
-  const seats = await seatProblem();
-  if (seats) return { ok: false, error: seats };
+  // A switched-off account takes no seat (src/lib/seats.ts) — it asks for one when it is switched on.
+  const startsActive = active !== false;
+  if (startsActive) {
+    const seats = await seatProblem();
+    if (seats) return { ok: false, error: seats };
+  }
 
   let user: { id: string; name: string; email: string };
   try {
-    user = await db.user.create({
-      data: {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        role,
-        departmentId: departmentId || null,
-        // No usable password until they choose one from the setup link.
-        passwordHash: noPasswordYet(),
-      },
-      select: { id: true, name: true, email: true },
+    user = await db.$transaction(async (tx) => {
+      const made = await tx.user.create({
+        data: {
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          role,
+          departmentId: departmentId || null,
+          phone: phone?.trim() || null,
+          active: startsActive,
+          // No usable password until they choose one from the setup link.
+          passwordHash: noPasswordYet(),
+        },
+        select: { id: true, name: true, email: true },
+      });
+      // A job title is the HR record's designation, made with the account as converting a candidate does.
+      if (jobTitle?.trim()) {
+        await tx.employeeProfile.create({ data: { userId: made.id, designation: jobTitle.trim() } });
+      }
+      return made;
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -225,10 +244,13 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
     throw err;
   }
   await accountsChanged([user.id], { by: `admin:${admin.id}` });
+  revalidatePath("/settings/access");
+  // Switched off: no email yet. "Send setup email" offers it once somebody switches them on — the same
+  // rule as resending, which refuses a switched-off account.
+  if (!startsActive) return { ok: true, data: { id: user.id, emailed: false, startsSwitchedOff: true } };
   // With the tick, the one-step invite: set up here, and link it to the workspace they already use. The account
   // is made exactly as without it — the role chosen here — and the admin never learns which workspace.
   const invitation = await sendSetupInvitation(user, { by: admin, linking: usesAnotherWorkspace === true });
-  revalidatePath("/settings/access");
   return { ok: true, data: { id: user.id, ...invitation } };
 }
 

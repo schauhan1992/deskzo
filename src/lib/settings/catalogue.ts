@@ -209,12 +209,12 @@ export const SETTINGS: SettingsSection[] = [
       },
       {
         key: "people",
-        label: "Users & roles",
+        label: "Staff & security",
         items: [
           {
             key: "access",
-            label: "Users & access",
-            description: "Who has an account, what role they hold, and the permissions behind it.",
+            label: "Staff & roles",
+            description: "Who can sign in, and exactly what each of them may do — their roles and the permissions behind them.",
             href: "/settings/access",
             icon: UserCog,
             permission: "permissions.view",

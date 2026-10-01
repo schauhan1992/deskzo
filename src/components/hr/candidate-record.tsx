@@ -697,7 +697,7 @@ function ConvertPanel({ candidate }: { candidate: Candidate }) {
             <div className="space-y-3">
               <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">
                 {candidate.name} is now an employee, but the setup email couldn&apos;t be sent. Send it again from
-                Settings → Users &amp; access, where they show as Invitation pending.
+                Settings → Staff &amp; roles, where they show as Invited.
               </p>
               <div className="flex justify-end">
                 <Button size="sm" onClick={finish}>

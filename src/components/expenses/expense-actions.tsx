@@ -94,7 +94,7 @@ export function ExpenseActions({
           <span className="text-sm text-subtle">
             {approverName
               ? `Waiting on ${approverName} — it can't be edited until they decide.`
-              : "Submitted, but there's nobody to route it to: you have no reporting manager set, and nobody else can approve claims. Set a manager under Settings → Users & Access."}
+              : "Submitted, but there's nobody to route it to: you have no reporting manager set, and nobody else can approve claims. Set a manager under Settings → Staff & roles."}
           </span>
         )}
       </div>

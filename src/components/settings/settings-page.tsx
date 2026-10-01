@@ -51,7 +51,7 @@ export async function SettingsPage({
         <div className="mt-6 space-y-6">{children}</div>
       ) : (
         <Card className="mt-6 px-4 py-3 text-sm text-muted">
-          You don&rsquo;t have permission to change this. An administrator can grant it under Users &amp; access.
+          You don&rsquo;t have permission to change this. An administrator can grant it under Staff &amp; roles.
         </Card>
       )}
     </div>

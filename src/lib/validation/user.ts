@@ -37,6 +37,15 @@ export const createUserSchema = z.object({
   departmentId: z.string().optional().or(z.literal("")),
   /** "This person already uses another workspace on this platform": the setup email is the one-step invite, which also offers linking. */
   usesAnotherWorkspace: z.boolean().optional(),
+  /**
+   * Added with Staff & roles' Add staff form, and optional so every older caller is unchanged. The job
+   * title is their designation on the HR record (EmployeeProfile), the phone their work number on the
+   * account — the one a quote prints, never their personal mobile.
+   */
+  jobTitle: z.string().trim().max(80, "Keep the job title under 80 characters").optional().or(z.literal("")),
+  phone: z.string().trim().max(32, "That is too long for a phone number").optional().or(z.literal("")),
+  /** False makes the account switched off: no seat, and no setup email until somebody switches it on. Default on. */
+  active: z.boolean().optional(),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;

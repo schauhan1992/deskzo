@@ -8,7 +8,8 @@ export function TabNav({
   basePath,
   otherParams = {},
 }: {
-  tabs: { key: string; label: string }[];
+  /** `count`, when given, is a badge beside the label, read out as "Staff, 3". */
+  tabs: { key: string; label: string; count?: number }[];
   activeKey: string;
   paramName?: string;
   basePath: string;
@@ -32,6 +33,20 @@ export function TabNav({
             )}
           >
             {t.label}
+            {t.count !== undefined && (
+              <>
+                {/* The comma is for a screen reader, so the badge is not run into the word before it. */}
+                <span className="sr-only">, </span>
+                <span
+                  className={cn(
+                    "ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold leading-5 tabular-nums",
+                    active ? "bg-brand-subtle text-brand" : "bg-surface-sunken text-muted",
+                  )}
+                >
+                  {t.count}
+                </span>
+              </>
+            )}
           </Link>
         );
       })}

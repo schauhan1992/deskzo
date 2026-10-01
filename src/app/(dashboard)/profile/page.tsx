@@ -102,7 +102,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
                 <span className="text-text sm:ml-2">{profile.manager?.name ?? "—"}</span>
               </div>
               <p className="col-span-full pt-1 text-xs text-subtle">
-                Name, role, and department are managed by an admin under Users &amp; Access.
+                Name, role, and department are managed by an admin under Staff &amp; roles.
               </p>
             </CardContent>
           </Card>

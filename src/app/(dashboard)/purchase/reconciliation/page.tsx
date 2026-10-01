@@ -17,7 +17,7 @@ export default async function ReconciliationPage() {
       <div className="max-w-md">
         <h1 className="text-xl font-semibold text-text">Vendor reconciliation</h1>
         <p className="mt-2 text-sm text-muted">
-          You don&rsquo;t hold the reconciliation permission. A super admin grants it under Users &amp; Access.
+          You don&rsquo;t hold the reconciliation permission. A super admin grants it under Staff &amp; roles.
         </p>
       </div>
     );

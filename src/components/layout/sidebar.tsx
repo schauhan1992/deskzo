@@ -247,15 +247,15 @@ export function Sidebar({
     {
       // Each administration link is gated on the key its own page requires, not on a blanket
       // "is an admin" flag. The two must agree: a link whose page then refuses you is the
-      // invitation-to-a-locked-door problem, and gating the group as a whole would hide Users &
-      // Access from an auditor who holds permissions.view and nothing else.
+      // invitation-to-a-locked-door problem, and gating the group as a whole would hide Staff &
+      // roles from an auditor who holds permissions.view and nothing else.
       group: "Administration",
       items: [
         ...(permissions.includes("settings.manage")
           ? [{ href: "/settings", label: "Settings", Icon: SettingsIcon }]
           : []),
         ...(permissions.includes("permissions.view")
-          ? [{ href: "/settings/access", label: "Users & Access", Icon: UserCog }]
+          ? [{ href: "/settings/access", label: "Staff & roles", Icon: UserCog }]
           : []),
         ...(permissions.includes("security.manage")
           ? [{ href: "/settings/security", label: "Security & DLP", Icon: ShieldCheck }]
