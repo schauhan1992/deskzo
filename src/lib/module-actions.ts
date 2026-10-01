@@ -113,6 +113,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "notification.ts": ["notifications"],
   "order-notice.ts": ["orders", "renewals"],
   "order.ts": ["orders"],
+  // Backend rebates on orders, their programmes and the report (owner, 1 Oct 2026).
+  "rebate.ts": ["orders"],
   // Branches and GST registrations are the company itself, not a module: every document names one.
   "branch.ts": "core",
   // Getting started: the onboarding wizard's steps, skips and completion (src/lib/help).
@@ -121,6 +123,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "page-layout.ts": "core",
   "password-reset.ts": "public",
   "payable.ts": ["payables"],
+  // What distributors and OEMs give back — set against bills and orders' rebates.
+  "vendor-credit.ts": ["payables"],
   "payment.ts": ["payments"],
   "payroll.ts": ["payroll"],
   "performance.ts": "core",

@@ -303,6 +303,42 @@ export function postVendorBill(doc: DocumentFinancials): DraftEntry {
   return { narration: `Vendor bill ${doc.docNumber}`, lines: clean(lines) };
 }
 
+/**
+ * Money a distributor or an OEM gives back (src/actions/vendor-credit.ts). A credit note takes what we
+ * owe it down; a payout puts the money in the bank. Either way Purchase Rebates & Discounts takes the
+ * amount before GST — a credit balance against the cost of what was bought — and the GST a credit note
+ * carries reverses the input tax we took on the purchase. In rupees: a vendor credit has no other
+ * currency.
+ */
+export function postVendorCredit(c: {
+  form: "CREDIT_NOTE" | "PAYOUT";
+  vendorId: string;
+  vendorName: string;
+  reference: string;
+  taxable: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  total: number;
+  /** A payout's bank, as its ledger account; null is the default bank. */
+  bankLedgerAccountId?: string | null;
+}): DraftEntry {
+  const into: DraftLine =
+    c.form === "CREDIT_NOTE"
+      ? { account: SYSTEM_ACCOUNTS.AP, debit: c.total, credit: 0, companyId: c.vendorId }
+      : { account: SYSTEM_ACCOUNTS.BANK, accountIdOverride: c.bankLedgerAccountId ?? null, debit: c.total, credit: 0, narration: `Rebate from ${c.vendorName}` };
+  return {
+    narration: `${c.form === "CREDIT_NOTE" ? "Credit note" : "Rebate paid"} from ${c.vendorName} (${c.reference})`,
+    lines: clean([
+      into,
+      { account: SYSTEM_ACCOUNTS.PURCHASE_REBATES, debit: 0, credit: c.taxable },
+      { account: SYSTEM_ACCOUNTS.INPUT_CGST, debit: 0, credit: c.cgst, narration: "Input tax reversed" },
+      { account: SYSTEM_ACCOUNTS.INPUT_SGST, debit: 0, credit: c.sgst, narration: "Input tax reversed" },
+      { account: SYSTEM_ACCOUNTS.INPUT_IGST, debit: 0, credit: c.igst, narration: "Input tax reversed" },
+    ]),
+  };
+}
+
 /** Money in from a customer: cash goes up, what they owe goes down. */
 export function postPaymentReceived(params: {
   companyId: string;

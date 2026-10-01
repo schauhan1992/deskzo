@@ -48,6 +48,8 @@ export type BillSettlement = {
     amount: number | string;
     payment: { id: string; paidOn: string | Date; method: string; reference: string | null } | null;
   }[];
+  /** A distributor's or an OEM's credit notes set against it (src/actions/vendor-credit.ts) — part of "Credited". */
+  vendorCredits?: { id: string; amount: number | string; vendorCredit: { id: string; reference: string; date: string | Date } }[];
 };
 
 export function BillSettlementPanel({
@@ -142,6 +144,23 @@ export function BillSettlementPanel({
                   {p.payment?.reference && <span className="ml-2 text-subtle">{p.payment.reference}</span>}
                 </span>
                 <span className="tabular-nums text-text">{money(Number(p.amount))}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {settlement.vendorCredits && settlement.vendorCredits.length > 0 && (
+          <ul className="divide-y divide-line border-t border-line pt-1 text-sm">
+            {settlement.vendorCredits.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 py-1.5">
+                <span className="text-muted">
+                  Credit note{" "}
+                  <a href={`/purchase/vendor-credits/${c.vendorCredit.id}`} className="underline">
+                    {c.vendorCredit.reference}
+                  </a>
+                  <span className="ml-2 text-subtle">{formatDate(c.vendorCredit.date)}</span>
+                </span>
+                <span className="tabular-nums text-text">{money(Number(c.amount))}</span>
               </li>
             ))}
           </ul>

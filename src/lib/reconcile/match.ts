@@ -49,6 +49,11 @@ export type SoldOrder = {
   quantity: number;
   /** What we recorded paying per unit for the full term. Null when nobody filled it in. */
   purchasePrice: number | null;
+  /**
+   * The price per unit the distributor agreed to bill at — under a deal registration, or a special
+   * price (owner, 1 Oct 2026). Billed above it, the deal price wasn't applied: flagged, never blocked.
+   */
+  dealPrice?: number | null;
   startDate: Date | null;
   endDate: Date | null;
   /** Shown on an exception so somebody can act without opening another tab. */
@@ -362,6 +367,21 @@ export function reconcile(
             : `Billed for ${row.quantity}, our order says ${order.quantity} — we may be invoicing for ${-extra} seat${extra === -1 ? "" : "s"} that are not provisioned.`,
       });
       continue;
+    }
+
+    // Billed above the deal price the distributor agreed to: whatever purchase recorded, that is the
+    // first thing to raise with them.
+    if (order.dealPrice != null) {
+      const deal = expectedUnitCost(order.dealPrice, billing);
+      if (row.unitCost > deal && !withinTolerance(deal, row.unitCost)) {
+        lines.push({
+          ...matched,
+          state: "PRICE_MISMATCH",
+          variance: round2((row.unitCost - deal) * row.quantity),
+          note: `Billed ₹${row.unitCost.toFixed(2)} a unit — above the deal price of ₹${deal.toFixed(2)}: the deal registration price wasn't applied.`,
+        });
+        continue;
+      }
     }
 
     if (order.purchasePrice === null) {

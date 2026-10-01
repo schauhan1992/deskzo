@@ -12,7 +12,9 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatOrderId } from "@/lib/order-id";
-import { createOrderSchema, approveOrderSchema, processOrderSchema, orderQuoteSchema } from "@/lib/validation/order";
+import { createOrderSchema, approveOrderSchema, processOrderSchema, orderQuoteSchema, orderDealSchema, approveLossSchema } from "@/lib/validation/order";
+import { COST_SOURCE_LABELS, needsLossApproval, unitCostOf, type CostSource } from "@/lib/rebates/rules";
+import { resolveRebateInput } from "@/lib/rebates/server";
 import {
   MIN_INCREASE_REASON,
   calendarDay,
@@ -85,6 +87,64 @@ async function visibleOrder(userId: string, id: string) {
 /** The salesperson who punched the order, or anyone who approves orders: who decides on its hand-off and its price. */
 async function speaksForSales(userId: string, order: { addedByUserId: string }) {
   return order.addedByUserId === userId || (await hasEffectivePermission(userId, "orders.approve"));
+}
+
+type LossFields = {
+  itemId: string;
+  unitPrice: Prisma.Decimal | null;
+  purchasePrice: Prisma.Decimal | null;
+  dealPrice: Prisma.Decimal | null;
+  quotedPurchasePrice: Prisma.Decimal | null;
+  lossApprovedCost: Prisma.Decimal | null;
+};
+type LossNeed = { unitPrice: number; cost: number; from: CostSource };
+
+/**
+ * Selling below cost — a negative call — needs a manager holding `orders.approveLoss`, whatever the
+ * rebate (owner, 1 Oct 2026). At `at` (what purchase is about to pay) or else the best cost known,
+ * what needs approving — or null when the order isn't below cost there, or was approved at that cost
+ * or more already.
+ */
+async function lossNeeded(order: LossFields, at?: { cost: number; from: CostSource }): Promise<LossNeed | null> {
+  const known = at ?? unitCostOf({ purchasePrice: num(order.purchasePrice), dealPrice: num(order.dealPrice), quotedPurchasePrice: num(order.quotedPurchasePrice) });
+  if (!known) return null;
+  const unitPrice =
+    num(order.unitPrice) ?? num((await db.item.findUnique({ where: { id: order.itemId }, select: { sellingPrice: true } }))?.sellingPrice);
+  if (!needsLossApproval({ unitPrice, unitCost: known.cost, lossApprovedCost: num(order.lossApprovedCost) })) return null;
+  return { unitPrice: unitPrice as number, cost: known.cost, from: known.from };
+}
+
+/** The words a below-cost order is held with. */
+function lossWords(label: string, need: LossNeed) {
+  const under = Math.round((need.cost - need.unitPrice) * 100) / 100;
+  return `${label} sells at ${rupees(need.unitPrice)} a unit — ${rupees(under)} under ${COST_SOURCE_LABELS[need.from]} (${rupees(need.cost)}). Selling below cost needs a manager holding “Approve orders sold below cost”.`;
+}
+
+/**
+ * Keeps the unit cost somebody was stopped at for selling below cost — the highest asked for — so the
+ * order shows a manager exactly what to approve.
+ */
+async function recordLossRequest(order: { id: string; lossRequestedCost: Prisma.Decimal | null }, cost: number, at: Date) {
+  const asked = num(order.lossRequestedCost);
+  if (asked !== null && asked >= cost) return;
+  await db.companyProduct.update({ where: { id: order.id }, data: { lossRequestedCost: cost, lossRequestedAt: at } });
+}
+
+/** Tells the people who may approve a negative call that one is waiting on them. */
+async function askForLossApproval(order: { id: string; orderSeq: number; addedByUserId: string }, need: LossNeed, byUserId: string) {
+  const label = formatOrderId(order.orderSeq);
+  const approvers = (await peopleHolding("orders.approveLoss")).filter((id) => id !== byUserId && id !== order.addedByUserId);
+  await Promise.all(
+    approvers.map((userId) =>
+      notifyUser({
+        userId,
+        type: "ORDER_STATUS_CHANGED",
+        title: `${label}: sold below cost — needs your approval`,
+        message: `It sells at ${rupees(need.unitPrice)} a unit against ${rupees(need.cost)} — ${COST_SOURCE_LABELS[need.from]}.`,
+        link: `/orders/${order.id}`,
+      }),
+    ),
+  );
 }
 
 type QuoteData = {
@@ -215,9 +275,24 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
   if (!quoted.ok) return { ok: false, error: quoted.error };
   const quote = quoted.quote;
 
+  // A backend rebate is seen — and so entered — only with `rebates.view` (owner: managers, not executives).
+  if (data.rebates.length > 0 && !(await hasEffectivePermission(user.id, "rebates.view"))) {
+    return { ok: false, error: "You can't enter a backend rebate — a manager adds it once the order is in." };
+  }
+  const rebateRows: Awaited<ReturnType<typeof resolveRebateInput>>[] = await Promise.all(data.rebates.map((r) => resolveRebateInput(r)));
+  for (const r of rebateRows) if (!r.ok) return { ok: false, error: r.error };
+  const rebateData = rebateRows.flatMap((r) => (r.ok ? [r.data] : []));
+  const dealRegValidTo = data.dealRegValidTo ? calendarDay(data.dealRegValidTo) : null;
+
   const order = await db.companyProduct.create({
     data: {
       ...handoff,
+      dealRegStatus: data.dealRegStatus || null,
+      dealRegNumber: data.dealRegNumber || null,
+      dealRegValidTo,
+      dealPrice: data.dealPrice ?? null,
+      rebates:
+        rebateData.length > 0 ? { create: rebateData.map((r) => ({ ...r, createdById: user.id })) } : undefined,
       ...(quote
         ? {
             ...quote,
@@ -275,7 +350,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
     action: "CREATE",
     entityType: "Order",
     entityId: order.id,
-    entityLabel: `Order for ${company.name}${held}${quote ? ` · distributor price ${rupees(Number(quote.quotedPurchasePrice))}` : ""}`,
+    entityLabel: `Order for ${company.name}${held}${quote ? ` · distributor price ${rupees(Number(quote.quotedPurchasePrice))}` : ""}${data.dealRegStatus ? ` · deal registration ${data.dealRegStatus.toLowerCase()}${data.dealRegNumber ? ` (${data.dealRegNumber})` : ""}` : ""}${data.dealPrice !== undefined ? ` · deal price ${rupees(data.dealPrice)}` : ""}`,
   });
   if (termsCheck.decision) {
     await recordDecision({
@@ -370,6 +445,22 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
     }
   }
 
+  /**
+   * Below cost at the best price known — the deal price, or the distributor's quote — the go-ahead is
+   * a manager's: whoever holds `orders.approveLoss` approves the negative call with the order;
+   * anybody else is told a manager must first (`approveOrderLoss`). Rejecting never needs it.
+   */
+  let lossApprovedAt: number | null = null;
+  if (approved) {
+    const need = await lossNeeded(order);
+    if (need) {
+      if (!(await hasEffectivePermission(user.id, "orders.approveLoss"))) {
+        return { ok: false, error: `${lossWords(formatOrderId(order.orderSeq), need)} Ask one to approve it on the order first, or reject it.` };
+      }
+      lossApprovedAt = need.cost;
+    }
+  }
+
   const nextStatus: OrderStatus = approved ? "APPROVED" : "REJECTED";
   await db.companyProduct.update({
     where: { id: orderId },
@@ -378,6 +469,9 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
       accountsApprovedByUserId: user.id,
       accountsApprovedAt: new Date(),
       accountsNotes: notes || null,
+      ...(lossApprovedAt !== null
+        ? { lossApprovedAt: new Date(), lossApprovedById: user.id, lossApprovedCost: lossApprovedAt, lossApprovalNote: notes || "Approved with the order" }
+        : {}),
     },
   });
 
@@ -536,6 +630,18 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
     return { ok: true, data: { id: orderId, awaitingSales: true } };
   }
 
+  /**
+   * Bought at a price that puts the order below cost, and not approved at that cost: whoever holds
+   * `orders.approveLoss` approves it by buying it (never on their own order); anybody else is stopped,
+   * and the approvers are told.
+   */
+  const lossNeed = await lossNeeded(order, { cost: purchasePrice, from: "PURCHASE" });
+  if (lossNeed && (order.addedByUserId === user.id || !(await hasEffectivePermission(user.id, "orders.approveLoss")))) {
+    await recordLossRequest(order, purchasePrice, now);
+    await askForLossApproval(order, lossNeed, user.id);
+    return { ok: false, error: `${lossWords(label, lossNeed)} The approvers have been told — once one approves it on the order, buy it.` };
+  }
+
   // A re-save that only adds the PO number is not a new purchase: the price's history and the saving
   // (and the period it counts in) stay as they were.
   const priceChanged =
@@ -552,6 +658,9 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
         orderStatus: "PROCESSING",
         // Found it at or under the price after all: whatever was waiting for sales is overtaken.
         ...NO_PENDING_INCREASE,
+        ...(lossNeed
+          ? { lossApprovedAt: now, lossApprovedById: user.id, lossApprovedCost: purchasePrice, lossApprovalNote: "Approved while buying it", lossRequestedCost: null, lossRequestedAt: null }
+          : {}),
       },
     });
     if (priceChanged) {
@@ -626,6 +735,13 @@ export async function acceptPriceIncrease(orderId: string): Promise<ActionResult
   const purchaserId = order.priceReviewRequestedById;
   const vendorId = order.pendingVendorId;
   const now = new Date();
+  // At the higher price the order may sell below cost: that is a manager's call, not the salesperson's.
+  const lossNeed = await lossNeeded(order, { cost: price, from: "PURCHASE" });
+  if (lossNeed && (order.addedByUserId === user.id || !(await hasEffectivePermission(user.id, "orders.approveLoss")))) {
+    await recordLossRequest(order, price, now);
+    await askForLossApproval(order, lossNeed, user.id);
+    return { ok: false, error: `${lossWords(formatOrderId(order.orderSeq), lossNeed)} The approvers have been told — once one approves it on the order, accept the price.` };
+  }
 
   await db.$transaction(async (tx) => {
     await tx.companyProduct.update({
@@ -636,6 +752,9 @@ export async function acceptPriceIncrease(orderId: string): Promise<ActionResult
         purchasedByUserId: purchaserId,
         orderStatus: "PROCESSING",
         ...NO_PENDING_INCREASE,
+        ...(lossNeed
+          ? { lossApprovedAt: now, lossApprovedById: user.id, lossApprovedCost: price, lossApprovalNote: "Approved with the higher price", lossRequestedCost: null, lossRequestedAt: null }
+          : {}),
       },
     });
     await tx.orderPriceChange.create({
@@ -1199,6 +1318,117 @@ export async function listOrdersPaged(params: OrderListParams & { page: number; 
   return { rows: toPlain(rows), total, pendingApproval };
 }
 
+/**
+ * A manager approves selling an order below cost — a negative call (owner, 1 Oct 2026) — at the cost
+ * it would go on at now: a higher price waiting for sales, else the best known. Never on their own
+ * order. Buying it later for more needs approving again.
+ */
+export async function approveOrderLoss(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  if (!(await hasEffectivePermission(user.id, "orders.approveLoss"))) {
+    return { ok: false, error: "You can't approve selling below cost." };
+  }
+  const parsed = approveLossSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const order = await visibleOrder(user.id, parsed.data.orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  try {
+    assertNotOwnRecord("orders.approveLoss", user.id, order.addedByUserId);
+  } catch (err) {
+    if (err instanceof AuthzError) return { ok: false, error: err.message };
+    throw err;
+  }
+  if (order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED") {
+    return { ok: false, error: "This order isn't going ahead any more." };
+  }
+  /**
+   * The highest cost in play: what purchase (or sales) was stopped at, a higher price waiting for sales,
+   * the best known, or one the manager names — so whoever was stopped can go ahead.
+   */
+  const known = unitCostOf({ purchasePrice: num(order.purchasePrice), dealPrice: num(order.dealPrice), quotedPurchasePrice: num(order.quotedPurchasePrice) });
+  const candidates: { cost: number; from: CostSource }[] = [
+    ...(known ? [known] : []),
+    ...(order.lossRequestedCost !== null ? [{ cost: Number(order.lossRequestedCost), from: "PURCHASE" as const }] : []),
+    ...(order.pendingPurchasePrice !== null ? [{ cost: Number(order.pendingPurchasePrice), from: "PURCHASE" as const }] : []),
+    ...(parsed.data.upToCost !== undefined ? [{ cost: parsed.data.upToCost, from: "PURCHASE" as const }] : []),
+  ];
+  const highest = candidates.sort((a, b) => b.cost - a.cost)[0];
+  const need = highest ? await lossNeeded(order, highest) : null;
+  if (!need) return { ok: false, error: "This order isn't sold below cost — there's nothing to approve." };
+  const now = new Date();
+  await db.companyProduct.update({
+    where: { id: order.id },
+    data: {
+      lossApprovedAt: now,
+      lossApprovedById: user.id,
+      lossApprovedCost: need.cost,
+      lossApprovalNote: parsed.data.note,
+      lossRequestedCost: null,
+      lossRequestedAt: null,
+    },
+  });
+  const label = formatOrderId(order.orderSeq);
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: order.id,
+    entityLabel: `${label} — selling below cost approved at ${rupees(need.cost)} a unit (sells at ${rupees(need.unitPrice)}): ${parsed.data.note}`,
+  });
+  const told = new Set([order.addedByUserId, order.priceReviewRequestedById].filter((id): id is string => !!id && id !== user.id));
+  await Promise.all(
+    [...told].map((userId) =>
+      notifyUser({
+        userId,
+        type: "ORDER_STATUS_CHANGED",
+        title: `${label}: selling below cost approved`,
+        message: `Approved at ${rupees(need.cost)} a unit — it can go ahead.`,
+        link: `/orders/${order.id}`,
+      }),
+    ),
+  );
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${order.id}`);
+  return { ok: true, data: { id: order.id } };
+}
+
+/**
+ * The deal registration and deal price on an order already punched — by the salesperson (or an
+ * approver) or by purchase, until it is fulfilled. Recorded for information: nothing waits on it.
+ */
+export async function setOrderDeal(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const parsed = orderDealSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const data = parsed.data;
+  const order = await visibleOrder(user.id, data.orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  if (!(await speaksForSales(user.id, order)) && !(await hasEffectivePermission(user.id, "orders.process"))) {
+    return { ok: false, error: "Only the salesperson, an approver or purchase can change the deal registration." };
+  }
+  if (order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED") {
+    return { ok: false, error: "This order can't be changed any more." };
+  }
+  await db.companyProduct.update({
+    where: { id: order.id },
+    data: {
+      dealRegStatus: data.dealRegStatus || null,
+      dealRegNumber: data.dealRegNumber || null,
+      dealRegValidTo: data.dealRegValidTo ? calendarDay(data.dealRegValidTo) : null,
+      dealPrice: data.dealPrice ?? null,
+    },
+  });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: order.id,
+    entityLabel: `${formatOrderId(order.orderSeq)} — deal registration ${data.dealRegStatus ? data.dealRegStatus.toLowerCase() : "cleared"}${data.dealRegNumber ? ` (${data.dealRegNumber})` : ""}${data.dealPrice !== undefined ? `, deal price ${rupees(data.dealPrice)}` : ""}`,
+  });
+  revalidatePath(`/orders/${order.id}`);
+  return { ok: true, data: { id: order.id } };
+}
+
 export async function getOrder(id: string) {
   const user = await requireModuleUser("orders");
   if (!(await viewerHas("orders.view"))) return null;
@@ -1220,6 +1450,7 @@ export async function getOrder(id: string) {
       proposal: { select: { id: true, status: true } },
       addedBy: { select: { id: true, name: true } },
       accountsApprovedBy: { select: { id: true, name: true } },
+      lossApprovedBy: { select: { id: true, name: true } },
       purchasedBy: { select: { id: true, name: true } },
       watchers: { select: { id: true, name: true } },
       expenses: {

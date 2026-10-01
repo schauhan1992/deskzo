@@ -26,6 +26,8 @@ export const SYSTEM_ACCOUNTS = {
   SALES_RETURNS: "SALES_RETURNS",
   FREIGHT_RECOVERED: "FREIGHT_RECOVERED",
   PURCHASES: "PURCHASES",
+  /** What distributors and OEMs give back — backend rebates and deal-price differences (src/actions/vendor-credit.ts). */
+  PURCHASE_REBATES: "PURCHASE_REBATES",
   ROUND_OFF: "ROUND_OFF",
   ADJUSTMENTS: "ADJUSTMENTS",
   OPENING_BALANCE_EQUITY: "OPENING_BALANCE_EQUITY",
@@ -305,6 +307,14 @@ export const DEFAULT_CHART: Seed[] = [
 
   { code: "5000", name: "Expenses", type: "EXPENSE", isGroup: true },
   { code: "5100", name: "Purchases", type: "EXPENSE", parent: "5000", systemKey: "PURCHASES" },
+  {
+    code: "5190",
+    name: "Purchase Rebates & Discounts",
+    type: "EXPENSE",
+    parent: "5000",
+    systemKey: "PURCHASE_REBATES",
+    description: "Backend rebates and price differences distributors and OEMs give back — by credit note or into the bank. A credit balance: it takes the cost of what was bought down.",
+  },
   { code: "5200", name: "Salaries & Wages", type: "EXPENSE", parent: "5000", systemKey: "SALARIES" },
   {
     code: "5210",

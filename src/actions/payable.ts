@@ -27,22 +27,26 @@ import type { ActionResult } from "@/actions/company";
  *
  * A bill is settled exactly the way an invoice is, by payments allocated against it, so the same
  * `settleInvoice` and aging maths apply. What differs is direction: these payments are money out,
- * and the balance is what we owe rather than what we're owed.
+ * and the balance is what we owe rather than what we're owed. A distributor's or an OEM's credit
+ * note set against a bill (src/actions/vendor-credit.ts) takes it down as a credit note does an
+ * invoice.
  */
 const billSettlementInclude = {
   payments: { select: { amount: true } },
   creditsReceived: { select: { amount: true } },
+  vendorCredits: { select: { amount: true } },
 } as const;
 
 function settlementOf(bill: {
   total: Prisma.Decimal | number;
   payments: { amount: Prisma.Decimal | number }[];
   creditsReceived: { amount: Prisma.Decimal | number }[];
+  vendorCredits: { amount: Prisma.Decimal | number }[];
 }) {
   return settleInvoice(
     Number(bill.total),
     bill.payments.reduce((t, p) => t + Number(p.amount), 0),
-    bill.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
+    bill.creditsReceived.reduce((t, c) => t + Number(c.amount), 0) + bill.vendorCredits.reduce((t, c) => t + Number(c.amount), 0),
   );
 }
 
@@ -145,7 +149,7 @@ export async function recordBillPayment(input: {
     const after = settleInvoice(
       Number(bill.total),
       bill.payments.reduce((t, p) => t + Number(p.amount), 0) + amount,
-      bill.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
+      bill.creditsReceived.reduce((t, c) => t + Number(c.amount), 0) + bill.vendorCredits.reduce((t, c) => t + Number(c.amount), 0),
     );
     await tx.tradeDocument.update({
       where: { id: bill.id },
@@ -188,10 +192,20 @@ export async function getBillSettlement(billId: string) {
         },
       },
       creditsReceived: { select: { amount: true } },
+      vendorCredits: {
+        orderBy: { createdAt: "desc" },
+        select: { id: true, amount: true, createdAt: true, vendorCredit: { select: { id: true, reference: true, date: true } } },
+      },
     },
   });
   if (!bill) return null;
-  return toPlain({ ...settlementOf(bill), currency: bill.currency, exchangeRate: bookingRate(bill), payments: bill.payments });
+  return toPlain({
+    ...settlementOf(bill),
+    currency: bill.currency,
+    exchangeRate: bookingRate(bill),
+    payments: bill.payments,
+    vendorCredits: bill.vendorCredits,
+  });
 }
 
 /**

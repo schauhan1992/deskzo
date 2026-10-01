@@ -746,4 +746,20 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Immutable history — every follow-up on money a client owed: who chased it, how, what the client said, and any promise to pay with whether it was kept or broken. The invoices and payments it is about export on their own; this is the conversation around them, which no target CRM loads as receivables, and which is kept as the record of how each debt was pursued.",
   },
+  // ─── Backend rebates and vendor credits ────────────────────────────────────────────────────────
+  RebateProgramme: {
+    disposition: "specification",
+    reason: "Configuration rather than records: which OEM or distributor pays back what share, on which brand, with or without a deal registration. Described in the workflow specification, to be rebuilt in the target.",
+  },
+  OrderRebate: {
+    disposition: "archive",
+    reason:
+      "Immutable history — the backend rebate each order was sold expecting, who pays it, and any write-off with its reason. The order exports on its own; this is the margin argument behind a negative call, which no target CRM has a place for.",
+  },
+  VendorCredit: {
+    disposition: "archive",
+    reason: "Immutable history. A distributor's or an OEM's credit note or payout and the journal entry it posted — archived beside the ledger, as bills and their payments are.",
+  },
+  RebateAllocation: { disposition: "archive", reason: "Immutable history. Which orders' rebates a vendor credit paid, and how much of each — archived with the credit." },
+  VendorCreditApplication: { disposition: "archive", reason: "Immutable history. Which bills a vendor credit note was set against, and how much of each — archived with the credit and the bill." },
 };

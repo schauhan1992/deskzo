@@ -32,6 +32,7 @@ import {
   postPayrollRun,
   postSalesInvoice,
   postVendorBill,
+  postVendorCredit,
   postYearEndClose,
   bookingRate,
   inRupees,
@@ -244,6 +245,7 @@ export async function writeEntry(
     payrollRunId?: string | null;
     paymentId?: string | null;
     expenseId?: string | null;
+    vendorCreditId?: string | null;
     companyId?: string | null;
     reversesId?: string | null;
     branchId?: string | null;
@@ -267,6 +269,7 @@ export async function writeEntry(
       documentId: params.documentId ?? null,
       paymentId: params.paymentId ?? null,
       expenseId: params.expenseId ?? null,
+      vendorCreditId: params.vendorCreditId ?? null,
       payrollRunId: params.payrollRunId ?? null,
       companyId: params.companyId ?? null,
       reversesId: params.reversesId ?? null,
@@ -611,6 +614,79 @@ export const reversibleLineSelect = {
   accountId: true, debit: true, credit: true, companyId: true, departmentId: true, narration: true,
   branchId: true, gstRegistrationId: true,
 } satisfies Prisma.JournalLineSelect;
+
+/**
+ * Posts a vendor credit — a distributor's or an OEM's credit note, or a rebate paid into the bank
+ * (src/actions/vendor-credit.ts): Dr Accounts Payable (the issuer) or the bank, Cr Purchase Rebates &
+ * Discounts and any input GST it reverses. Dated the credit's own date, tagged to the head office.
+ * Once only — a credit already posted is answered with its entry. In the caller's transaction, so the
+ * credit and its entry stand or fall together.
+ */
+export async function postVendorCreditToLedger(tx: Tx, vendorCreditId: string, userId: string) {
+  const existing = await tx.journalEntry.findFirst({
+    where: { vendorCreditId, reversesId: null, reversedBy: { is: null } },
+    select: { id: true, entryNumber: true },
+  });
+  if (existing) return existing;
+  const c = await tx.vendorCredit.findUniqueOrThrow({
+    where: { id: vendorCreditId },
+    select: {
+      id: true, form: true, vendorId: true, reference: true, date: true,
+      taxableAmount: true, cgstAmount: true, sgstAmount: true, igstAmount: true, total: true,
+      vendor: { select: { name: true } },
+      bankAccount: { select: { ledgerAccountId: true } },
+    },
+  });
+  let bankLedgerAccountId = c.bankAccount?.ledgerAccountId ?? null;
+  if (c.form === "PAYOUT" && !bankLedgerAccountId) {
+    const fallback = await tx.bankAccount.findFirst({ where: { isDefault: true, active: true }, select: { ledgerAccountId: true } });
+    bankLedgerAccountId = fallback?.ledgerAccountId ?? null;
+  }
+  const draft = postVendorCredit({
+    form: c.form,
+    vendorId: c.vendorId,
+    vendorName: c.vendor.name,
+    reference: c.reference,
+    taxable: Number(c.taxableAmount),
+    cgst: Number(c.cgstAmount),
+    sgst: Number(c.sgstAmount),
+    igst: Number(c.igstAmount),
+    total: Number(c.total),
+    bankLedgerAccountId,
+  });
+  const head = await headOfficeOf(tx);
+  return writeEntry(tx, {
+    date: c.date,
+    narration: draft.narration,
+    source: "VENDOR_CREDIT",
+    userId,
+    lines: await materialise(tx, draft),
+    vendorCreditId: c.id,
+    companyId: c.vendorId,
+    branchId: head?.id ?? null,
+    gstRegistrationId: head?.gstRegistrationId ?? null,
+  });
+}
+
+/** Reverses a vendor credit's posting, when it is cancelled — today, every line swapped. Quiet when it never posted. */
+export async function reverseVendorCreditPosting(tx: Tx, vendorCreditId: string, userId: string) {
+  const original = await tx.journalEntry.findFirst({
+    where: { vendorCreditId, reversesId: null, reversedBy: { is: null } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, entryNumber: true, companyId: true, lines: { orderBy: { sortOrder: "asc" }, select: reversibleLineSelect } },
+  });
+  if (!original) return null;
+  return writeEntry(tx, {
+    date: new Date(),
+    narration: `Reversal of ${original.entryNumber} — vendor credit cancelled`,
+    source: "VENDOR_CREDIT",
+    userId,
+    lines: reversedLines(original.lines),
+    companyId: original.companyId,
+    vendorCreditId,
+    reversesId: original.id,
+  });
+}
 
 /** The original's lines, debit and credit swapped, every tag kept — ready for `writeEntry`. */
 export function reversedLines(lines: Prisma.JournalLineGetPayload<{ select: typeof reversibleLineSelect }>[]) {

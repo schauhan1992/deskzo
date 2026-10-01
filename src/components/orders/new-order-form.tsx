@@ -25,7 +25,18 @@ import { getCreditSnapshot } from "@/actions/credit";
 import { CreditBadge } from "@/components/credit/credit-badge";
 import { creditConcerns, termsExceed, type TermsKey } from "@/lib/credit/engine";
 import { formatCurrency } from "@/lib/utils";
-import { handoffValues } from "@/lib/validation/order";
+import { handoffValues, dealRegStatusValues, rebateBasisValues, rebatePayerValues, rebateSettlementValues } from "@/lib/validation/order";
+import { suggestOrderRebates } from "@/actions/rebate";
+import {
+  DEAL_REG_LABELS,
+  REBATE_BASIS_LABELS,
+  REBATE_PAYER_LABELS,
+  REBATE_SETTLEMENT_LABELS,
+  expectedRebate,
+  frontMargin,
+  isBelowCost,
+  type RebateBasisKey,
+} from "@/lib/rebates/rules";
 import { handoffLabels, impliedMargin, istTodayKey } from "@/lib/orders/handoff-rules";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -54,7 +65,10 @@ export function NewOrderForm({
   initialEndCustomers = [],
   creditInPlan = true,
   resellersInPlan = true,
+  canSeeRebates = false,
 }: {
+  /** Holds `rebates.view`: the backend rebate can be entered (owner: managers see rebates, executives don't). */
+  canSeeRebates?: boolean;
   /** The vendors a distributor price can name — or it is typed, for one not in the CRM. */
   vendors?: { id: string; name: string }[];
   /** Receivables are in the workspace's plan: the customer's credit is shown as they are chosen. */
@@ -105,8 +119,14 @@ export function NewOrderForm({
       quoteContact: "",
       quotedOn: "",
       quoteRemarks: "",
+      dealRegStatus: "",
+      dealRegNumber: "",
+      dealRegValidTo: "",
+      dealPrice: "",
+      rebates: [],
     },
   });
+  const { fields: rebateFields, append: appendRebate, remove: removeRebate } = useFieldArray({ control, name: "rebates" });
   const { fields: expenseFields, append: appendExpense, remove: removeExpense } = useFieldArray({ control, name: "expenses" });
 
   const selectedCompanyId = watch("companyId");
@@ -160,6 +180,42 @@ export function NewOrderForm({
       ? impliedMargin(salePrice, quotePrice, Number(watch("quantity")) || 1)
       : null;
   const quoteVendorId = watch("quoteVendorId") ?? "";
+
+  // The deal price, and what one unit costs as far as the form knows: the deal price, else the quote.
+  const dealRaw = watch("dealPrice");
+  const dealPrice = dealRaw === "" || dealRaw === undefined || dealRaw === null || !Number.isFinite(Number(dealRaw)) ? null : Number(dealRaw);
+  const unitCost = dealPrice ?? (quotePrice !== null && Number.isFinite(quotePrice) ? quotePrice : null);
+  const quantityNow = Number(watch("quantity")) || 1;
+  const dealMargin = dealPrice !== null && salePrice > 0 ? impliedMargin(salePrice, dealPrice, quantityNow) : null;
+  const belowCost = salePrice > 0 && isBelowCost(salePrice, unitCost);
+  const dealRegStatus = watch("dealRegStatus") ?? "";
+  const expensesTotal = (watch("expenses") ?? []).reduce((t, e) => t + (Number(e?.amount) || 0), 0);
+  const front = frontMargin({ quantity: quantityNow, unitPrice: salePrice > 0 ? salePrice : null, unitCost, expenses: expensesTotal });
+  const rebateValues = watch("rebates") ?? [];
+  const rebateExpected = rebateValues.map((r) => {
+    const value = Number(r?.value);
+    if (!r || !Number.isFinite(value) || value <= 0) return null;
+    const basis = r.basis as RebateBasisKey;
+    return expectedRebate(
+      { basis, rate: basis === "AMOUNT" ? null : value, amount: basis === "AMOUNT" ? value : null },
+      { quantity: quantityNow, unitPrice: salePrice > 0 ? salePrice : null, unitCost },
+    );
+  });
+  const rebateTotal = rebateExpected.reduce<number>((t, v) => t + (v ?? 0), 0);
+
+  // The rebate programmes that apply — for whoever may see rebates.
+  const [fetchedSuggestions, setSuggestions] = useState<Awaited<ReturnType<typeof suggestOrderRebates>>>([]);
+  const suggestions = canSeeRebates && selectedItemId ? fetchedSuggestions : [];
+  useEffect(() => {
+    if (!canSeeRebates || !selectedItemId) return;
+    let cancelled = false;
+    suggestOrderRebates({ itemId: selectedItemId, vendorId: quoteVendorId || null, dealRegStatus: dealRegStatus || null }).then((rows) => {
+      if (!cancelled) setSuggestions(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canSeeRebates, selectedItemId, quoteVendorId, dealRegStatus]);
 
   function loadCompanyDetails(companyId: string) {
     setValue("locationId", "");
@@ -542,6 +598,193 @@ export function NewOrderForm({
               <Textarea id="quoteRemarks" placeholder="Validity, stock, terms…" {...register("quoteRemarks")} />
             </div>
           </fieldset>
+
+          <fieldset className="space-y-3 rounded-md border border-line p-3">
+            <legend className="px-1 text-sm font-medium text-text">Deal registration (optional)</legend>
+            <p className="text-xs text-muted">
+              The OEM&apos;s deal registration behind this order, and the lower price the distributor bills at under it — the
+              distributor&apos;s bill is checked against that price. Recorded for the record: nothing waits on it.
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="dealRegStatus">Deal registration</Label>
+                <Select id="dealRegStatus" {...register("dealRegStatus")}>
+                  <option value="">None</option>
+                  {dealRegStatusValues.map((v) => (
+                    <option key={v} value={v}>
+                      {DEAL_REG_LABELS[v]}
+                    </option>
+                  ))}
+                </Select>
+                {errors.dealRegStatus && <p className="text-xs text-danger">{errors.dealRegStatus.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dealRegNumber">DR number</Label>
+                <Input id="dealRegNumber" placeholder="The OEM's reference" {...register("dealRegNumber")} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dealRegValidTo">Valid until</Label>
+                <Input id="dealRegValidTo" type="date" {...register("dealRegValidTo")} />
+                {errors.dealRegValidTo && <p className="text-xs text-danger">{errors.dealRegValidTo.message}</p>}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dealPrice">Deal price per unit</Label>
+              <Input id="dealPrice" type="number" step="0.01" min={0} placeholder="What the distributor bills at under the registration" {...register("dealPrice")} />
+              {errors.dealPrice && <p className="text-xs text-danger">{errors.dealPrice.message}</p>}
+              {dealMargin && (
+                <p className={`text-xs ${dealMargin.margin >= 0 ? "text-success" : "text-danger"}`}>
+                  Margin at the deal price: {formatCurrency(dealMargin.margin)}
+                  {dealMargin.percent !== null ? ` (${dealMargin.percent}%)` : ""}
+                </p>
+              )}
+            </div>
+            {belowCost && unitCost !== null && (
+              <p className="rounded-md bg-danger-bg px-3 py-2 text-xs text-danger">
+                Sold below cost — {formatCurrency(salePrice)} a unit against {formatCurrency(unitCost)} (
+                {dealPrice !== null ? "the deal price" : "the distributor's price"}). A negative call waits for a manager&apos;s
+                approval before it goes ahead, whatever rebate is expected.
+              </p>
+            )}
+          </fieldset>
+
+          {canSeeRebates && (
+            <fieldset className="space-y-3 rounded-md border border-line p-3">
+              <legend className="px-1 text-sm font-medium text-text">Backend rebate (optional)</legend>
+              <p className="text-xs text-muted">
+                What the distributor or the OEM pays back after the sale — by credit note or into the bank. It shows on the order
+                and in the rebates report; it never counts toward targets or incentives.
+              </p>
+              {suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-muted">From your rebate programmes:</p>
+                  {suggestions.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-3 rounded-md bg-surface-sunken px-2 py-1.5 text-xs">
+                      <span className="text-text">
+                        {p.name} — {p.rate}% {REBATE_BASIS_LABELS[p.basis as RebateBasisKey].replace(/^% /, "")}, from{" "}
+                        {REBATE_PAYER_LABELS[p.payer].toLowerCase()}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={rebateValues.some((r) => r?.programmeId === p.id)}
+                        onClick={() =>
+                          appendRebate({
+                            programmeId: p.id,
+                            basis: p.basis,
+                            value: p.rate,
+                            payer: p.payer,
+                            payerCompanyId: p.payerCompanyId ?? "",
+                            settlement: p.settlement,
+                            note: "",
+                          })
+                        }
+                      >
+                        Use
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {rebateFields.map((field, index) => {
+                const basis = (watch(`rebates.${index}.basis`) ?? "PURCHASE_VALUE") as RebateBasisKey;
+                const rowError = errors.rebates?.[index];
+                return (
+                  <div key={field.id} className="space-y-2 rounded-md border border-line p-2">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor={`rebates.${index}.basis`}>Worked out as</Label>
+                        <Select id={`rebates.${index}.basis`} {...register(`rebates.${index}.basis`)}>
+                          {rebateBasisValues.map((v) => (
+                            <option key={v} value={v}>
+                              {REBATE_BASIS_LABELS[v]}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`rebates.${index}.value`}>{basis === "AMOUNT" ? "Amount (₹)" : "Percent"}</Label>
+                        <Input id={`rebates.${index}.value`} type="number" step="0.001" min={0} {...register(`rebates.${index}.value`)} />
+                        {rowError?.value && <p className="text-xs text-danger">{rowError.value.message}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Expected back</Label>
+                        <p className="pt-2 text-sm text-text">
+                          {rebateExpected[index] != null ? formatCurrency(rebateExpected[index] as number) : "—"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor={`rebates.${index}.payer`}>Paid by</Label>
+                        <Select id={`rebates.${index}.payer`} {...register(`rebates.${index}.payer`)}>
+                          {rebatePayerValues.map((v) => (
+                            <option key={v} value={v}>
+                              {REBATE_PAYER_LABELS[v]}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`rebates.${index}.payerCompanyId`}>Which company</Label>
+                        <Controller
+                          name={`rebates.${index}.payerCompanyId`}
+                          control={control}
+                          render={({ field: payer }) => (
+                            <CompanyCombobox
+                              id={`rebates.${index}.payerCompanyId`}
+                              companies={vendors}
+                              value={payer.value ?? ""}
+                              onSelect={(company) => payer.onChange(company?.id ?? "")}
+                              placeholder="Distributor or OEM…"
+                            />
+                          )}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`rebates.${index}.settlement`}>Comes as</Label>
+                        <Select id={`rebates.${index}.settlement`} {...register(`rebates.${index}.settlement`)}>
+                          {rebateSettlementValues.map((v) => (
+                            <option key={v} value={v}>
+                              {REBATE_SETTLEMENT_LABELS[v]}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1 space-y-1">
+                        <Label htmlFor={`rebates.${index}.note`}>Note</Label>
+                        <Input id={`rebates.${index}.note`} placeholder="Quarter, scheme, condition…" {...register(`rebates.${index}.note`)} />
+                      </div>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => removeRebate(index)}>
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+              {rebateFields.length < 5 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    appendRebate({ programmeId: "", basis: "PURCHASE_VALUE", value: "", payer: "DISTRIBUTOR", payerCompanyId: quoteVendorId || "", settlement: "CREDIT_NOTE", note: "" })
+                  }
+                >
+                  + Add a rebate
+                </Button>
+              )}
+              {rebateFields.length > 0 && front !== null && (
+                <p className="text-xs text-muted">
+                  Front margin {formatCurrency(front)} · expected back {formatCurrency(rebateTotal)} ·{" "}
+                  <span className={front + rebateTotal >= 0 ? "text-success" : "text-danger"}>net margin {formatCurrency(front + rebateTotal)}</span>
+                </p>
+              )}
+            </fieldset>
+          )}
 
           <div className="space-y-2 rounded-md border border-line p-3">
             <div className="flex items-center justify-between">

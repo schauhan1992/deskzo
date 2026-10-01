@@ -222,6 +222,7 @@ export async function gstr3b(params: { month: number; year: number; gstRegistrat
     }),
     ledgerTaxTotals(from, before, registration?.id ?? null),
   ]);
+  const vendorCredits = await vendorCreditNotesWithTax(from, before, registration?.id ?? null);
 
   return toPlain({
     month: params.month,
@@ -231,10 +232,47 @@ export async function gstr3b(params: { month: number; year: number; gstRegistrat
     registration,
     ...buildGstr3b({
       outwardDocs: outward.map((d) => toReturnDocument(d as unknown as RawDoc)),
-      inwardDocs: inward.map((d) => toReturnDocument(d as unknown as RawDoc)),
+      inwardDocs: [...inward.map((d) => toReturnDocument(d as unknown as RawDoc)), ...vendorCredits],
       ledger,
     }),
   });
+}
+
+/**
+ * A distributor's or an OEM's credits that carry GST (src/actions/vendor-credit.ts), as inward credit
+ * notes: each reverses input tax taken on the purchase, so the credit claimed goes down by it. Without
+ * them the bills alone set the credit and the reversal in the ledger was ignored. A payout with GST
+ * reverses it as a credit note does — its posting credits the same input-tax accounts — so both forms
+ * count. Their posting is the head office's, so they count in its registration's return only.
+ */
+async function vendorCreditNotesWithTax(from: Date, before: Date, registrationId: string | null) {
+  if (registrationId) {
+    const head = await db.branch.findFirst({ where: { isHeadOffice: true }, select: { gstRegistrationId: true } });
+    if (head?.gstRegistrationId && head.gstRegistrationId !== registrationId) return [];
+  }
+  const credits = await db.vendorCredit.findMany({
+    where: {
+      cancelledAt: null,
+      date: { gte: from, lt: before },
+      OR: [{ cgstAmount: { gt: 0 } }, { sgstAmount: { gt: 0 } }, { igstAmount: { gt: 0 } }],
+    },
+    select: { reference: true, date: true, taxableAmount: true, cgstAmount: true, sgstAmount: true, igstAmount: true, total: true, vendor: { select: { name: true } } },
+  });
+  return credits.map((c) => ({
+    docNumber: c.reference,
+    docType: "CREDIT_NOTE" as const,
+    issueDate: c.date,
+    status: "ISSUED",
+    partyName: c.vendor.name,
+    partyGstin: null,
+    placeOfSupplyCode: null,
+    taxableValue: Number(c.taxableAmount),
+    cgstAmount: Number(c.cgstAmount),
+    sgstAmount: Number(c.sgstAmount),
+    igstAmount: Number(c.igstAmount),
+    total: Number(c.total),
+    lines: [],
+  }));
 }
 
 /**

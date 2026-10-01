@@ -160,6 +160,7 @@
     "check:name-rules": "tsx scripts/check-name-rules.ts",
     "check:onboarding": "tsx scripts/check-onboarding.ts",
     "check:close": "tsx scripts/check-close.ts",
+    "check:rebates": "tsx scripts/check-rebates.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",
     "check:domains": "tsx scripts/check-domains.ts",

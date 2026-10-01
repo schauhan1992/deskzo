@@ -755,6 +755,14 @@ model User {
   backupsTriggered       Backup[]                 @relation("BackupTriggeredBy")
   backupScheduleChanges  BackupSchedule[]         @relation("BackupScheduleUpdatedBy")
   vendorStatements       VendorStatement[]        @relation("VendorStatementUploadedBy")
+  ordersLossApproved     CompanyProduct[]         @relation("OrderLossApprovedBy")
+  rebateProgrammesEdited RebateProgramme[]        @relation("RebateProgrammeUpdatedBy")
+  orderRebatesWrittenOff OrderRebate[]            @relation("OrderRebateWrittenOffBy")
+  orderRebatesCreated    OrderRebate[]            @relation("OrderRebateCreatedBy")
+  vendorCreditsCreated   VendorCredit[]           @relation("VendorCreditCreatedBy")
+  vendorCreditsCancelled VendorCredit[]           @relation("VendorCreditCancelledBy")
+  rebateAllocations      RebateAllocation[]       @relation("RebateAllocationCreatedBy")
+  vendorCreditsApplied   VendorCreditApplication[] @relation("VendorCreditAppliedBy")
   reconcileResolutions   VendorStatementLine[]    @relation("VendorStatementLineResolvedBy")
   reconcileMappings      VendorStatementMapping[] @relation("VendorStatementMappingUpdatedBy")
   portalSettingsChanges  PortalSettings[]         @relation("PortalSettingsUpdatedBy")
@@ -924,6 +932,9 @@ model Company {
   quotedOrders           CompanyProduct[]        @relation("OrderQuoteVendor")
   pendingVendorOrders    CompanyProduct[]        @relation("OrderPendingVendor")
   vendorStatements       VendorStatement[]       @relation("VendorStatementVendor")
+  rebateProgrammes       RebateProgramme[]       @relation("RebateProgrammeVendor")
+  rebatesPayable         OrderRebate[]           @relation("OrderRebatePayer")
+  vendorCredits          VendorCredit[]          @relation("VendorCreditIssuer")
   vendorStatementMapping VendorStatementMapping? @relation("VendorStatementMappingVendor")
   reconcileMatches       VendorStatementLine[]   @relation("ReconcileMatchedCompany")
 
@@ -2027,6 +2038,8 @@ model TradeDocument {
    * Where this credit note has been applied.
    */
   creditsApplied  CreditNoteApplication[] @relation("CreditNoteApplied")
+  /** A bill's share of vendor credit notes set against it — what we owe on it goes down. */
+  vendorCredits   VendorCreditApplication[] @relation("BillVendorCredits")
 
   journalEntries JournalEntry[] @relation("DocumentJournal")
   consignments   Consignment[]  @relation("ConsignmentDocument")
@@ -2315,6 +2328,7 @@ model Brand {
 
   items    Item[]
   families ProductFamily[]
+  rebateProgrammes RebateProgramme[]
 
   @@map("brands")
 }
@@ -2598,6 +2612,38 @@ model CompanyProduct {
   vendorPoSettledById String?
   vendorPoSettledBy   User?           @relation("OrderVendorPoSettledBy", fields: [vendorPoSettledById], references: [id], onDelete: SetNull)
 
+  /**
+   * The deal registration with the OEM behind this order (owner, 1 Oct 2026): where it stands, its
+   * number, how long it holds. Recorded for information — nothing waits on it, not even buying at a
+   * deal price. It carries no rebate figures, so whoever punches the order records it.
+   */
+  dealRegStatus  DealRegStatus?
+  dealRegNumber  String?
+  dealRegValidTo DateTime?      @db.Date
+  /**
+   * The upfront price per unit the distributor is to bill at — under the registration, or a special
+   * price — below its usual one. Reconciliation flags a statement line billed above it.
+   */
+  dealPrice      Decimal?       @db.Decimal(12, 2)
+  /**
+   * Selling below cost — a "negative call" — needs a manager holding `orders.approveLoss`, whatever
+   * the rebate (owner, 1 Oct 2026). The unit cost it was approved at: buying it later at a higher cost
+   * needs approving again.
+   */
+  lossApprovedAt   DateTime?
+  lossApprovedById String?
+  lossApprovedBy   User?     @relation("OrderLossApprovedBy", fields: [lossApprovedById], references: [id], onDelete: SetNull)
+  lossApprovedCost Decimal?  @db.Decimal(12, 2)
+  lossApprovalNote String?
+  /**
+   * The unit cost somebody tried to buy (or accept) it at and was stopped for, because it put the order
+   * below cost — so a manager can see what to approve. Cleared once approved at that cost or more.
+   */
+  lossRequestedCost Decimal?  @db.Decimal(12, 2)
+  lossRequestedAt   DateTime?
+  /** What the distributor or the OEM is to pay back after the sale. Seen only with `rebates.view`. */
+  rebates          OrderRebate[]
+
   priceChanges   OrderPriceChange[]
   purchaseSaving PurchaseSaving?
   paymentFollowUps PaymentFollowUp[]
@@ -2711,6 +2757,203 @@ model PurchaseSaving {
 
   @@index([purchaserId, recordedOn])
   @@map("purchase_savings")
+}
+
+/// Where an OEM deal registration stands. Recorded for information only.
+enum DealRegStatus {
+  APPLIED
+  APPROVED
+  REJECTED
+}
+
+/// What a backend rebate is worked out from.
+enum RebateBasis {
+  /// A percentage of what we pay: the purchase price once bought, else the deal price, else the quote.
+  PURCHASE_VALUE
+  /// A percentage of what we sell it for.
+  SALE_VALUE
+  /// A fixed amount in rupees for the whole order line.
+  AMOUNT
+}
+
+/// Who pays a backend rebate back.
+enum RebatePayer {
+  DISTRIBUTOR
+  OEM
+}
+
+/// How money comes back: a credit note against what we owe the issuer, or a payment into our bank.
+enum RebateSettlement {
+  CREDIT_NOTE
+  PAYOUT
+}
+
+/// What a vendor credit is for.
+enum VendorCreditKind {
+  /// A backend rebate, settled against the orders it was expected on.
+  REBATE
+  /// The difference when a bill missed the agreed (deal) price.
+  PRICE_DIFFERENCE
+  OTHER
+}
+
+/**
+ * A standing backend-rebate arrangement with an OEM, perhaps through one distributor — "Adobe VIP
+ * deal registration, 20%", "Microsoft CSP, 2%" (owner, 1 Oct 2026). It suggests the rebate when an
+ * order is punched; the figure on the order is what counts, because terms vary deal by deal.
+ * Seen with `rebates.view`, changed with `rebates.manage`.
+ */
+model RebateProgramme {
+  id                    String           @id @default(cuid())
+  name                  String
+  /** The OEM: orders for this brand's items. Null: any brand. */
+  brandId               String?
+  brand                 Brand?           @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  /** Bought through this distributor only. Null: any. */
+  vendorId              String?
+  vendor                Company?         @relation("RebateProgrammeVendor", fields: [vendorId], references: [id], onDelete: SetNull)
+  /** A percentage of the purchase value or of the sale value — never a fixed amount here. */
+  basis                 RebateBasis      @default(PURCHASE_VALUE)
+  /** Percent. */
+  rate                  Decimal          @db.Decimal(7, 3)
+  /** Only on an order whose deal registration is approved. */
+  needsDealRegistration Boolean          @default(false)
+  payer                 RebatePayer      @default(DISTRIBUTOR)
+  settlement            RebateSettlement @default(CREDIT_NOTE)
+  validFrom             DateTime?        @db.Date
+  validTo               DateTime?        @db.Date
+  active                Boolean          @default(true)
+  notes                 String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  updatedById           String?
+  updatedBy             User?            @relation("RebateProgrammeUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  rebates OrderRebate[]
+
+  @@index([brandId])
+  @@index([vendorId])
+  @@map("rebate_programmes")
+}
+
+/**
+ * A backend rebate expected on one order line, from the distributor or the OEM, paid after the sale.
+ * A percentage is worked out from the order's current prices whenever it is read (src/lib/rebates),
+ * so it follows the price purchase actually paid; only a fixed amount is stored as one. Received is
+ * the sum of its allocations from vendor credits; never counted in targets or incentives (owner).
+ */
+model OrderRebate {
+  id               String           @id @default(cuid())
+  companyProductId String
+  companyProduct   CompanyProduct   @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
+  /** The programme it came from, if any — kept as a pointer; its rate here is what counts. */
+  programmeId      String?
+  programme        RebateProgramme? @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+  basis            RebateBasis
+  /** Percent, for the two percentage bases. */
+  rate             Decimal?         @db.Decimal(7, 3)
+  /** Rupees, for AMOUNT. */
+  amount           Decimal?         @db.Decimal(14, 2)
+  payer            RebatePayer
+  /** Which company pays it — the distributor, or the OEM as a company record. Null: not known yet. */
+  payerCompanyId   String?
+  payerCompany     Company?         @relation("OrderRebatePayer", fields: [payerCompanyId], references: [id], onDelete: SetNull)
+  settlement       RebateSettlement
+  note             String?
+  /** Given up on: what is still outstanding stops counting as due. */
+  writtenOffAt     DateTime?
+  writtenOffById   String?
+  writtenOffBy     User?            @relation("OrderRebateWrittenOffBy", fields: [writtenOffById], references: [id], onDelete: SetNull)
+  writeOffReason   String?
+  createdAt        DateTime         @default(now())
+  createdById      String?
+  createdBy        User?            @relation("OrderRebateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedAt        DateTime         @updatedAt
+
+  allocations RebateAllocation[]
+
+  @@index([companyProductId])
+  @@index([payerCompanyId])
+  @@map("order_rebates")
+}
+
+/**
+ * Money a distributor or an OEM gives back: a credit note against what we owe it, or a payout into
+ * our bank (owner, 1 Oct 2026). It posts to the ledger — what we owe goes down (or the bank up),
+ * Purchase Rebates & Discounts up, and any GST on it reverses the input tax we took — and is settled
+ * against the orders' expected rebates (allocations) and, as a credit note, against the issuer's open
+ * bills (applications). Cancelled rather than deleted: its posting is reversed.
+ */
+model VendorCredit {
+  id            String           @id @default(cuid())
+  /** Who gave it: a distributor, or the OEM itself — a company record either way. */
+  vendorId      String
+  vendor        Company          @relation("VendorCreditIssuer", fields: [vendorId], references: [id], onDelete: Restrict)
+  form          RebateSettlement
+  kind          VendorCreditKind @default(REBATE)
+  /** Their credit note's number, or the payout's bank reference. */
+  reference     String
+  date          DateTime         @db.Date
+  /** Before GST — what is set against the orders' rebates. */
+  taxableAmount Decimal          @db.Decimal(14, 2)
+  /** GST on a credit note that carries it; a financial credit note has none. */
+  cgstAmount    Decimal          @default(0) @db.Decimal(14, 2)
+  sgstAmount    Decimal          @default(0) @db.Decimal(14, 2)
+  igstAmount    Decimal          @default(0) @db.Decimal(14, 2)
+  total         Decimal          @db.Decimal(14, 2)
+  /** A payout: the bank it came into. Null: the default bank. */
+  bankAccountId String?
+  bankAccount   BankAccount?     @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  notes         String?
+  createdById   String
+  createdBy     User             @relation("VendorCreditCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime         @default(now())
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelledBy   User?            @relation("VendorCreditCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelReason  String?
+
+  allocations    RebateAllocation[]
+  applications   VendorCreditApplication[]
+  journalEntries JournalEntry[]            @relation("VendorCreditJournal")
+
+  @@unique([vendorId, reference])
+  @@index([date])
+  @@map("vendor_credits")
+}
+
+/** Part of a vendor credit set against one order's expected rebate. */
+model RebateAllocation {
+  id             String       @id @default(cuid())
+  vendorCreditId String
+  vendorCredit   VendorCredit @relation(fields: [vendorCreditId], references: [id], onDelete: Cascade)
+  orderRebateId  String
+  orderRebate    OrderRebate  @relation(fields: [orderRebateId], references: [id], onDelete: Cascade)
+  amount         Decimal      @db.Decimal(14, 2)
+  createdAt      DateTime     @default(now())
+  createdById    String?
+  createdBy      User?        @relation("RebateAllocationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([vendorCreditId, orderRebateId])
+  @@index([orderRebateId])
+  @@map("rebate_allocations")
+}
+
+/** Part of a vendor credit note set against one of its issuer's open bills — what we owe on it goes down. */
+model VendorCreditApplication {
+  id             String        @id @default(cuid())
+  vendorCreditId String
+  vendorCredit   VendorCredit  @relation(fields: [vendorCreditId], references: [id], onDelete: Cascade)
+  billId         String
+  bill           TradeDocument @relation("BillVendorCredits", fields: [billId], references: [id], onDelete: Cascade)
+  amount         Decimal       @db.Decimal(14, 2)
+  createdAt      DateTime      @default(now())
+  createdById    String?
+  createdBy      User?         @relation("VendorCreditAppliedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([vendorCreditId, billId])
+  @@index([billId])
+  @@map("vendor_credit_applications")
 }
 
 /// How a payment follow-up reached the client.
@@ -3476,6 +3719,10 @@ enum JournalSource {
    * the 1st of the next month, and the reclass that opens a prepaid.
    */
   SCHEDULE
+  /**
+   * A vendor credit: a distributor's or an OEM's credit note, or a rebate paid into the bank.
+   */
+  VENDOR_CREDIT
 }
 
 /**
@@ -3502,6 +3749,8 @@ model JournalEntry {
   expense      Expense?       @relation("ExpenseJournal", fields: [expenseId], references: [id])
   payrollRunId String?
   payrollRun   PayrollRun?    @relation("PayrollJournal", fields: [payrollRunId], references: [id])
+  vendorCreditId String?
+  vendorCredit   VendorCredit?  @relation("VendorCreditJournal", fields: [vendorCreditId], references: [id])
   /**
    * The party this entry concerns, for the subsidiary-ledger views.
    */
@@ -5264,6 +5513,7 @@ model BankAccount {
   updatedAt   DateTime @updatedAt
 
   payments        Payment[]
+  vendorCredits   VendorCredit[]
   statementLines  BankStatementLine[]
   reconciliations BankReconciliation[]
 

@@ -106,6 +106,62 @@ function refineQuote(val: QuoteInput, ctx: z.RefinementCtx) {
   }
 }
 
+export const dealRegStatusValues = ["APPLIED", "APPROVED", "REJECTED"] as const;
+
+/**
+ * The deal registration with the OEM and the upfront deal price (owner, 1 Oct 2026) — optional, and
+ * recorded by whoever punches the order: nothing waits on them. A number or a date says nothing
+ * without where the registration stands.
+ */
+const dealFields = {
+  dealRegStatus: z.enum(dealRegStatusValues).optional().or(z.literal("")),
+  dealRegNumber: z.string().trim().max(100).optional().or(z.literal("")),
+  /** `yyyy-mm-dd`. */
+  dealRegValidTo: z.string().trim().optional().or(z.literal("")),
+  dealPrice: optionalMoney,
+};
+
+type DealInput = { dealRegStatus?: string; dealRegNumber?: string; dealRegValidTo?: string };
+
+function refineDeal(val: DealInput, ctx: z.RefinementCtx) {
+  if (!val.dealRegStatus && (val.dealRegNumber || val.dealRegValidTo)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Say where the deal registration stands", path: ["dealRegStatus"] });
+  }
+  if (val.dealRegValidTo && !/^\d{4}-\d{2}-\d{2}$/.test(val.dealRegValidTo)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter the date the registration runs to", path: ["dealRegValidTo"] });
+  }
+}
+
+export const rebateBasisValues = ["PURCHASE_VALUE", "SALE_VALUE", "AMOUNT"] as const;
+export const rebatePayerValues = ["DISTRIBUTOR", "OEM"] as const;
+export const rebateSettlementValues = ["CREDIT_NOTE", "PAYOUT"] as const;
+
+/**
+ * One backend rebate on an order: a percentage of what we pay or sell for, or a fixed amount; who pays
+ * it and how. Entered only by somebody holding `rebates.view` — the action refuses it from anybody else.
+ */
+export const orderRebateInputSchema = z
+  .object({
+    programmeId: z.string().optional().or(z.literal("")),
+    basis: z.enum(rebateBasisValues),
+    /** Percent for the two percentage bases; rupees for AMOUNT. */
+    value: z.preprocess(
+      (v) => (v === "" || v === undefined || v === null ? undefined : Number(v)),
+      z.number({ error: "Enter the rebate" }).positive("A rebate is more than nothing"),
+    ),
+    payer: z.enum(rebatePayerValues),
+    payerCompanyId: z.string().optional().or(z.literal("")),
+    settlement: z.enum(rebateSettlementValues),
+    note: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .superRefine((val, ctx) => {
+    if (val.basis !== "AMOUNT" && val.value > 100) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A percentage is 100 at most", path: ["value"] });
+    }
+  });
+
+export type OrderRebateInput = z.infer<typeof orderRebateInputSchema>;
+
 /** How the salesperson hands the order to purchase: now (the default, as every order always went), held, or on a day. */
 export const handoffValues = ["NOW", "HOLD", "SCHEDULE"] as const;
 
@@ -135,11 +191,15 @@ export const createOrderSchema = z.object({
   /** The go-ahead day, `yyyy-mm-dd`, for SCHEDULE — checked against India's today in the action. */
   releaseOn: z.string().trim().optional().or(z.literal("")),
   ...quoteFields,
+  ...dealFields,
+  /** Backend rebates — only from somebody holding `rebates.view`. */
+  rebates: z.array(orderRebateInputSchema).max(5, "Five rebates on one order at most").default([]),
 }).superRefine((val, ctx) => {
   if (val.handoff === "SCHEDULE" && !val.releaseOn) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Choose the day it goes to purchase", path: ["releaseOn"] });
   }
   refineQuote(val, ctx);
+  refineDeal(val, ctx);
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
@@ -159,6 +219,27 @@ export const processOrderSchema = z.object({
   ourPoNumber: z.string().trim().optional().or(z.literal("")),
   /** Why purchase is paying more than the salesperson's distributor price — required when it is. */
   increaseReason: z.string().trim().max(1000).optional().or(z.literal("")),
+});
+
+/** The deal registration and deal price on an order already punched. Blank fields clear them. */
+export const orderDealSchema = z
+  .object({ orderId: z.string().min(1), ...dealFields })
+  .superRefine((val, ctx) => refineDeal(val, ctx));
+
+/** Adding or changing one backend rebate on an order. */
+export const saveOrderRebateSchema = z.object({
+  orderId: z.string().min(1),
+  /** Present to change an existing one. */
+  rebateId: z.string().optional().or(z.literal("")),
+  rebate: orderRebateInputSchema,
+});
+
+/** Approving an order sold below cost — a manager, never on their own order. */
+export const approveLossSchema = z.object({
+  orderId: z.string().min(1),
+  note: z.string().trim().min(5, "Say why this negative call is worth taking").max(1000),
+  /** Approve up to this unit cost, when it is higher than any the order knows of. */
+  upToCost: optionalMoney,
 });
 
 /** Adding, changing or removing the distributor price after the order was punched. A blank price removes it. */

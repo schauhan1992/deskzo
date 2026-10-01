@@ -205,6 +205,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "expenses.viewAll",
       "revenue.viewReports",
       "close.work",
+      // The rebate behind a negative call — a manager sees it; an executive does not (owner, 1 Oct 2026).
+      "rebates.view",
     ],
   },
   {
@@ -241,6 +243,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "revenue.manage",
       "close.work",
       "close.manage",
+      "rebates.view",
+      "rebates.manage",
     ],
   },
   // ─── Purchase ───────────────────────────────────────────────────────────────────────────────
@@ -254,7 +258,9 @@ export const ROLE_PRESETS: RolePreset[] = [
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, 
       "vault.use","orders.process", "products.edit", "tickets.create", "companies.viewAll", "data.exportCatalog", "data.importCatalog",
       // Whoever places the order with the distributor is who should be checking its monthly bill.
-      "purchase.reconcile"],
+      "purchase.reconcile",
+      // And the rebate and deal price the distributor agreed to, to buy at.
+      "rebates.view"],
   },
   // ─── Management ─────────────────────────────────────────────────────────────────────────────
   {
@@ -300,6 +306,10 @@ export const ROLE_PRESETS: RolePreset[] = [
       "data.exportCrm",
       "data.exportCatalog",
       "notes.broadcast",
+      // Backend rebates, and the say on selling below cost (owner, 1 Oct 2026).
+      "rebates.view",
+      "rebates.manage",
+      "orders.approveLoss",
     ],
   },
   {

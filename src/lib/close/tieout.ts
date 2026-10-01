@@ -37,7 +37,8 @@ export type TieOutSide = "AR" | "AP";
 export type TieOutDocument = {
   id: string;
   docNumber: string;
-  docType: "INVOICE" | "CREDIT_NOTE" | "BILL";
+  /** VENDOR_CREDIT: a distributor's or an OEM's credit note (src/actions/vendor-credit.ts), on the payables side — it reads as a credit note does. */
+  docType: "INVOICE" | "CREDIT_NOTE" | "BILL" | "VENDOR_CREDIT";
   companyId: string;
   companyName: string;
   currency: string;
@@ -47,9 +48,9 @@ export type TieOutDocument = {
   total: number;
   /** Payments dated by the month end set against it, in its currency. */
   allocated: number;
-  /** Credit notes applied to it (an invoice) by the month end, in its currency. */
+  /** Credit notes applied to it by the month end, in its currency — on a bill, vendor credit notes. */
   credited: number;
-  /** A credit note's: how much of it was applied to invoices by the month end. */
+  /** A credit note's: how much of it was applied to invoices (a vendor credit note's, to bills) by the month end. */
   applied: number;
   /** Its own entries' effect on the account as the ledger stood at the month end: + adds to what is owed. */
   posted: number;
@@ -111,15 +112,17 @@ export const TIE_OUT_TOLERANCE = 1;
 const r2 = (n: number, rate: number) => round2(n * rate);
 
 /** A document's balance at the month end, in rupees at its rate: what it adds to (or, a credit note, takes off) the ageing. */
+const isCreditNote = (doc: TieOutDocument) => doc.docType === "CREDIT_NOTE" || doc.docType === "VENDOR_CREDIT";
+
 export function openInRupees(doc: TieOutDocument): number {
-  if (doc.docType === "CREDIT_NOTE") return -round2(r2(doc.total, doc.rate) - r2(doc.applied, doc.rate));
+  if (isCreditNote(doc)) return -round2(r2(doc.total, doc.rate) - r2(doc.applied, doc.rate));
   return round2(r2(doc.total, doc.rate) - r2(doc.allocated, doc.rate) - r2(doc.credited, doc.rate));
 }
 
 /** What a document's own posting should have put on the account: + for an invoice or bill, − for a credit note. */
 export function expectedPosting(doc: TieOutDocument): number {
   const amount = r2(doc.total, doc.rate);
-  return doc.docType === "CREDIT_NOTE" ? -amount : amount;
+  return isCreditNote(doc) ? -amount : amount;
 }
 
 const entryItem = (e: TieOutEntry): DetailItem => ({
@@ -141,7 +144,7 @@ export function tieOut(input: TieOutInput): CheckOutcome<TieOutDetail> {
   let mismatchAmount = 0;
   for (const doc of input.documents) {
     const open = openInRupees(doc);
-    if (doc.docType === "CREDIT_NOTE") creditNotes = round2(creditNotes + open);
+    if (isCreditNote(doc)) creditNotes = round2(creditNotes + open);
     else documents = round2(documents + open);
     const expected = expectedPosting(doc);
     const gap = round2(doc.posted - expected);
@@ -150,7 +153,7 @@ export function tieOut(input: TieOutInput): CheckOutcome<TieOutDetail> {
       mismatched.push({
         id: doc.id,
         label: `${doc.docNumber} · ${doc.companyName}`,
-        href: `/documents/${doc.id}`,
+        href: doc.docType === "VENDOR_CREDIT" ? `/purchase/vendor-credits/${doc.id}` : `/documents/${doc.id}`,
         amount: gap,
         note: doc.hasEntry
           ? `Posted ${inr(doc.posted)} (${doc.entryNumbers.join(", ")}) against ${inr(expected)}${doc.rate !== 1 ? ` at ${doc.currency} ${doc.rate}` : ""}`
@@ -255,6 +258,8 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
       payments: { where: { payment: { paidOn: { lt: to } } }, select: { amount: true } },
       creditsReceived: { where: { createdAt: { lt: to }, creditNote: { issueDate: { lt: to }, status: { not: "DRAFT" } } }, select: { amount: true } },
       creditsApplied: { where: { createdAt: { lt: to }, invoice: { issueDate: { lt: to } } }, select: { amount: true } },
+      // A bill's: vendor credit notes set against it by the month end.
+      vendorCredits: { where: { createdAt: { lt: to } }, select: { amount: true } },
     },
   });
 
@@ -301,12 +306,66 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
       rate: bookingRate(d),
       total: Number(d.total),
       allocated: round2(sumOf(d.payments)),
-      credited: round2(sumOf(d.creditsReceived)),
+      credited: round2(sumOf(d.creditsReceived) + sumOf(d.vendorCredits)),
       applied: round2(sumOf(d.creditsApplied)),
       posted: posting?.posted ?? 0,
       hasEntry: !!posting,
       entryNumbers: posting?.entryNumbers ?? [],
     });
+  }
+  /**
+   * Payables: a distributor's or an OEM's credit note takes what we owe down (Dr AP) and is set against
+   * their bills. A payout into the bank never touches the account, so only credit notes count; one
+   * cancelled by the month end drops out with its posting, as a cancelled document does.
+   */
+  if (side === "AP") {
+    const credits = await db.vendorCredit.findMany({
+      where: { form: "CREDIT_NOTE", date: { lt: to } },
+      select: {
+        id: true, reference: true, vendorId: true, total: true, cancelledAt: true,
+        vendor: { select: { name: true } },
+        applications: { where: { createdAt: { lt: to } }, select: { amount: true } },
+      },
+    });
+    const creditPostings = new Map<string, { posted: number; entryNumbers: string[] }>();
+    if (account && credits.length > 0) {
+      const lines = await db.journalLine.findMany({
+        where: { accountId: account.id, entry: { source: "VENDOR_CREDIT", vendorCreditId: { not: null }, reversesId: null, date: { lt: to } } },
+        select: { debit: true, credit: true, entry: { select: { id: true, entryNumber: true, vendorCreditId: true, reversedBy: { select: { date: true } } } } },
+      });
+      const counted = new Set<string>();
+      for (const l of lines) {
+        const reversedBy = l.entry.reversedBy;
+        if (reversedBy && reversedBy.date.getTime() < to.getTime()) continue;
+        const row = creditPostings.get(l.entry.vendorCreditId!) ?? { posted: 0, entryNumbers: [] };
+        row.posted = round2(row.posted + owed(l));
+        if (!counted.has(l.entry.id)) {
+          counted.add(l.entry.id);
+          row.entryNumbers.push(l.entry.entryNumber);
+        }
+        creditPostings.set(l.entry.vendorCreditId!, row);
+      }
+    }
+    for (const c of credits) {
+      const posting = creditPostings.get(c.id);
+      if (c.cancelledAt && c.cancelledAt.getTime() < to.getTime() && !posting) continue;
+      documents.push({
+        id: c.id,
+        docNumber: c.reference,
+        docType: "VENDOR_CREDIT",
+        companyId: c.vendorId,
+        companyName: c.vendor.name,
+        currency: "INR",
+        rate: 1,
+        total: Number(c.total),
+        allocated: 0,
+        credited: 0,
+        applied: round2(sumOf(c.applications)),
+        posted: posting?.posted ?? 0,
+        hasEntry: !!posting,
+        entryNumbers: posting?.entryNumbers ?? [],
+      });
+    }
   }
   const live = new Set(documents.map((d) => d.id));
 

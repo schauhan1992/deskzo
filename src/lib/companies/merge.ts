@@ -174,6 +174,22 @@ const CLASH_RULES: Record<string, ClashRule> = {
   "CommissionPartyLink.companyId": { what: "link to the same commission party", outcome: "kept once", settle: "remove-theirs" },
   "CommissionPartyLink.commissionPartyId": { what: "link to the same customer", outcome: "kept once", settle: "remove-theirs" },
   "WorkbookRecord.companyId": { what: "entry on the same calling list", outcome: "the one staying keeps its entry and outcome", settle: "remove-theirs" },
+  "VendorCredit.vendorId": {
+    what: "vendor credit with the same number",
+    outcome: "both stay — each posted to the books — the moving one's number marked “(merged)” so one recorded twice can be found and cancelled",
+    settle: async (tx, fromId, intoId, keys) => {
+      for (const k of keys) {
+        const reference = String(k.reference);
+        // Never removed: a vendor credit has its own journal entry and settlements. Renamed to the
+        // first free "(merged)" number instead, free under both companies.
+        let next = `${reference} (merged)`;
+        for (let n = 2; await tx.vendorCredit.findFirst({ where: { vendorId: { in: [fromId, intoId] }, reference: next }, select: { id: true } }); n += 1) {
+          next = `${reference} (merged ${n})`;
+        }
+        await tx.vendorCredit.updateMany({ where: { vendorId: fromId, reference }, data: { reference: next } });
+      }
+    },
+  },
   // ─ contact links, for people combined into one
   "MarketingListMember.contactId": { what: "place on the same mailing list", outcome: "kept once", settle: "remove-theirs" },
   "ProjectStakeholder.contactId": { what: "place on the same project", outcome: "kept once, in the role the contact staying has", settle: "remove-theirs" },

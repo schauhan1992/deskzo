@@ -283,6 +283,8 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
       issueDate: true,
       payments: { select: { amount: true } },
       creditsReceived: { select: { amount: true } },
+      // A bill's: a distributor's or an OEM's credit notes set against it.
+      vendorCredits: { select: { amount: true } },
     },
   });
 
@@ -293,7 +295,7 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
     const { balance } = settleInvoice(
       money(row.total),
       row.payments.reduce((t, p) => t + money(p.amount), 0),
-      row.creditsReceived.reduce((t, c) => t + money(c.amount), 0),
+      row.creditsReceived.reduce((t, c) => t + money(c.amount), 0) + row.vendorCredits.reduce((t, c) => t + money(c.amount), 0),
     );
     if (balance <= 0) continue;
     count += 1;

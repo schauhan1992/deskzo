@@ -22,6 +22,9 @@ import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 import { CategoryChip } from "@/components/customers/category-chip";
 import { followUpPanel } from "@/actions/collections";
+import { getOrderRebates } from "@/actions/rebate";
+import { OrderDealEditor, OrderLossApproval, OrderRebatesPanel } from "@/components/orders/order-rebates";
+import { COST_SOURCE_LABELS, DEAL_REG_LABELS, needsLossApproval, unitCostOf, type DealRegStatusKey } from "@/lib/rebates/rules";
 import { FollowUpPanel } from "@/components/collections/follow-up-panel";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
@@ -61,13 +64,15 @@ export async function OrderDetail({
 
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
-  const [order, vendorOptions, canApprove, canProcess, canRecordPayments, canDeletePayments] = await Promise.all([
+  const [order, vendorOptions, canApprove, canProcess, canRecordPayments, canDeletePayments, canSeeRebates, canApproveLoss] = await Promise.all([
     getOrder(id),
     listVendorOptions(),
     hasEffectivePermission(userId, "orders.approve"),
     hasEffectivePermission(userId, "orders.process"),
     hasEffectivePermission(userId, "payments.record"),
     hasEffectivePermission(userId, "payments.delete"),
+    hasEffectivePermission(userId, "rebates.view"),
+    hasEffectivePermission(userId, "orders.approveLoss"),
   ]);
   if (!order) notFound();
 
@@ -143,6 +148,25 @@ export async function OrderDetail({
   const salePrice = Number(order.unitPrice ?? order.item.sellingPrice);
   const quoteMargin = quotePrice !== null ? impliedMargin(salePrice, quotePrice, order.quantity) : null;
   const saving = order.purchaseSaving;
+
+  // ── The deal registration, selling below cost, and backend rebates (owner, 1 Oct 2026) ────────────
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const rebates = canSeeRebates ? await getOrderRebates(order.id) : null;
+  /** The cost the order would go on at now: a higher price waiting for sales, else the best known. */
+  // The highest in play: what somebody was stopped at for selling below cost, a higher price waiting
+  // for sales, or the best known.
+  const known = unitCostOf({ purchasePrice: num(order.purchasePrice), dealPrice: num(order.dealPrice), quotedPurchasePrice: num(quotePrice) });
+  const costNow =
+    [
+      ...(known ? [{ cost: known.cost, label: COST_SOURCE_LABELS[known.from] }] : []),
+      ...(order.pendingPurchasePrice !== null ? [{ cost: Number(order.pendingPurchasePrice), label: "the higher price purchase asked for" }] : []),
+      ...(order.lossRequestedCost !== null ? [{ cost: Number(order.lossRequestedCost), label: "the price somebody was stopped at" }] : []),
+    ].sort((a, b) => b.cost - a.cost)[0] ?? null;
+  const awaitingLossApproval =
+    !closed && costNow !== null && needsLossApproval({ unitPrice: salePrice, unitCost: costNow.cost, lossApprovedCost: num(order.lossApprovedCost) });
+  const mayApproveLoss = canApproveLoss && order.addedBy.id !== userId;
+  const dealEditable = !closed && (speaksForSales || canProcess);
+  const hasDeal = !!order.dealRegStatus || order.dealPrice !== null;
 
   // Collections: what has been said to the customer about paying for this order, and any promise —
   // Receivables' own, so only where it is on for this viewer (and null outside the account's money).
@@ -364,6 +388,108 @@ export async function OrderDetail({
             </CardContent>
           </Card>
 
+          {awaitingLossApproval && costNow && (
+            <Card className="border-danger">
+              <CardHeader className="text-sm font-medium text-danger">Sold below cost — needs a manager&apos;s approval</CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p className="text-text">
+                  It sells at {formatCurrency(String(salePrice))} a unit against {formatCurrency(String(costNow.cost))} —{" "}
+                  {costNow.label}: {formatCurrency(String(Math.round((costNow.cost - salePrice) * order.quantity * 100) / 100))} under
+                  cost on {order.quantity} unit{order.quantity === 1 ? "" : "s"}. A negative call goes ahead only once somebody holding
+                  &ldquo;Approve orders sold below cost&rdquo; approves it, whatever rebate is expected.
+                </p>
+                {rebates && rebates.rebates.length > 0 && (
+                  <p className="text-muted">
+                    Backend rebates expected: {formatCurrency(String(rebates.totals.expected))}
+                    {rebates.net !== null ? ` · net margin after them ${formatCurrency(String(rebates.net))}` : ""}
+                  </p>
+                )}
+                {mayApproveLoss ? (
+                  <OrderLossApproval orderId={order.id} />
+                ) : (
+                  <p className="text-xs text-subtle">
+                    {canApproveLoss ? "You punched it, so somebody else approves it." : "The managers who can approve it are told when purchase tries to buy it."}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
+              <span>Deal registration</span>
+              {dealEditable && (
+                <OrderDealEditor
+                  orderId={order.id}
+                  deal={{
+                    status: (order.dealRegStatus ?? null) as DealRegStatusKey | null,
+                    number: order.dealRegNumber,
+                    validTo: order.dealRegValidTo,
+                    price: num(order.dealPrice),
+                  }}
+                />
+              )}
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {!hasDeal ? (
+                <p className="text-muted">None recorded.</p>
+              ) : (
+                <>
+                  {order.dealRegStatus && (
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Deal registration</span>
+                      <span className="text-text">
+                        <Badge tone={order.dealRegStatus === "APPROVED" ? "green" : order.dealRegStatus === "REJECTED" ? "red" : "amber"}>
+                          {DEAL_REG_LABELS[order.dealRegStatus as DealRegStatusKey]}
+                        </Badge>
+                        {order.dealRegNumber ? <span className="ml-2">{order.dealRegNumber}</span> : null}
+                      </span>
+                    </div>
+                  )}
+                  {order.dealRegValidTo && (
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Valid until</span>
+                      <span className="text-text">{formatIstDate(order.dealRegValidTo)}</span>
+                    </div>
+                  )}
+                  {order.dealPrice !== null && (
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Deal price / unit</span>
+                      <span className="text-text">{formatCurrency(String(order.dealPrice))}</span>
+                    </div>
+                  )}
+                  {order.dealPrice !== null && order.purchasePrice !== null && Number(order.purchasePrice) > Number(order.dealPrice) && (
+                    <p className="text-xs text-warning">
+                      Bought at {formatCurrency(String(order.purchasePrice))} — above the deal price. Check the distributor applied it.
+                    </p>
+                  )}
+                </>
+              )}
+              {order.lossApprovedAt && (
+                <p className="border-t border-line pt-2 text-xs text-muted">
+                  Selling below cost approved by {order.lossApprovedBy?.name ?? "a manager"} on {formatIstDate(order.lossApprovedAt)}, at{" "}
+                  {formatCurrency(String(order.lossApprovedCost))} a unit{order.lossApprovalNote ? `: “${order.lossApprovalNote}”` : ""}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {rebates && (
+            <Card>
+              <CardHeader className="text-sm font-medium text-text">Backend rebates</CardHeader>
+              <CardContent>
+                <OrderRebatesPanel
+                  orderId={order.id}
+                  summary={rebates}
+                  vendors={vendorOptions.map((v) => ({ id: v.id, name: v.name }))}
+                  defaultPayerId={order.vendor?.id ?? order.quoteVendor?.id ?? null}
+                  canEdit={!closed || order.orderStatus === "FULFILLED"}
+                  canManage={rebates.canManage}
+                />
+              </CardContent>
+            </Card>
+          )}
+
           {order.priceChanges.length > 0 && (
             <Card>
               <CardHeader className="text-sm font-medium text-text">Price history</CardHeader>
@@ -435,6 +561,23 @@ export async function OrderDetail({
                 </div>
                 {totalExpenses > 0 && (
                   <p className="mt-1 text-xs text-subtle">Includes {formatCurrency(String(totalExpenses))} in expenses.</p>
+                )}
+                {rebates && rebates.rebates.length > 0 && (
+                  <>
+                    <div className="mt-2 flex justify-between text-muted">
+                      <span>Backend rebates</span>
+                      <span className="text-text">+{formatCurrency(String(rebates.totals.expected))}</span>
+                    </div>
+                    <div className="mt-1 flex justify-between text-muted">
+                      <span>Net margin</span>
+                      {rebates.net !== null ? (
+                        <span className={rebates.net >= 0 ? "font-medium text-success" : "font-medium text-danger"}>{formatCurrency(String(rebates.net))}</span>
+                      ) : (
+                        <span className="text-subtle">Once the cost is known</span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-subtle">Targets and incentives count the margin before rebates.</p>
+                  </>
                 )}
               </div>
             </CardContent>

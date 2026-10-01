@@ -113,6 +113,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       { href: "/orders", label: "Orders", icon: ShoppingCart },
       // What purchase saved against sales's distributor prices: for purchase, approvers and performance viewers.
       { href: "/orders/savings", label: "Purchase savings", icon: PiggyBank, permission: ["orders.process", "orders.approve", "performance.view"] },
+      // What OEMs and distributors are to pay back, and what has come in — rebates.view only (owner, 1 Oct 2026).
+      { href: "/orders/rebates", label: "Backend rebates", icon: Percent, permission: "rebates.view" },
     ],
   },
   {
@@ -188,7 +190,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     description:
       "What we owe vendors, aged from each bill's due date — bills settled by payments out, with a statement of account per vendor.",
     navGroup: "Payments",
-    navItems: [{ href: "/payables", label: "Payables", icon: Scale }],
+    navItems: [
+      { href: "/payables", label: "Payables", icon: Scale },
+      // Credit notes and payouts from distributors and OEMs — against their bills, and orders' rebates.
+      { href: "/purchase/vendor-credits", label: "Vendor credits", icon: HandCoins, permission: "rebates.view" },
+    ],
   },
   {
     key: "accounting",

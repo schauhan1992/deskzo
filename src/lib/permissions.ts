@@ -196,6 +196,33 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["PURCHASE", "MANAGEMENT"],
   },
   {
+    key: "orders.approveLoss",
+    label: "Approve orders sold below cost",
+    description:
+      "A negative call — an order whose selling price is below what we pay for it — goes ahead only once somebody holding this approves it, whatever rebate is expected. Approved at a cost: buying it later for more needs approving again. Never on your own order.",
+    defaultRoles: ["MANAGEMENT"],
+    selfExcluded: true,
+    tier: "sensitive",
+  },
+  {
+    key: "rebates.view",
+    label: "See backend rebates",
+    description:
+      "The rebate a distributor or an OEM is to pay back on an order, the net margin after it, the rebate programmes, vendor credits and the rebates report — and entering a rebate when punching or editing an order. Without it, an order shows its deal registration and front margin only.",
+    defaultRoles: ["MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Finance",
+    tier: "sensitive",
+  },
+  {
+    key: "rebates.manage",
+    label: "Manage rebate programmes and vendor credits",
+    description:
+      "Set up the standing rebate programmes that suggest an order's rebate, record the credit notes and payouts distributors and OEMs send — which post to the books and reduce what we owe them — and write off a rebate that will not come.",
+    defaultRoles: ["MANAGEMENT", "ACCOUNTS"],
+    group: "Finance",
+    tier: "sensitive",
+  },
+  {
     key: "hr.manage",
     label: "Manage people records",
     description:

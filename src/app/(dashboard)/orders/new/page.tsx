@@ -9,6 +9,7 @@ import { listItemOptions } from "@/actions/item";
 import { listCompanyLocationOptions } from "@/actions/company-location";
 import { listProposalOptions } from "@/actions/order";
 import { isModuleEnabled } from "@/actions/module";
+import { viewerHas } from "@/actions/permission";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -81,6 +82,7 @@ export default async function NewOrderPage({
           initialEndCustomers={initialEndCustomers}
           creditInPlan={await isModuleEntitled("receivables")}
           resellersInPlan={await isModuleEntitled("resellers")}
+          canSeeRebates={await viewerHas("rebates.view")}
         />
       </div>
     </div>

@@ -3,6 +3,7 @@ import {
   Archive,
   CreditCard,
   Banknote,
+  BadgePercent,
   BookLock,
   Boxes,
   Building2,
@@ -395,6 +396,22 @@ export const SETTINGS: SettingsSection[] = [
     label: "Module settings",
     description: "Configuration that belongs to one part of the app, and lives with it.",
     groups: [
+      {
+        key: "purchase",
+        label: "Purchase",
+        items: [
+          {
+            key: "rebate-programmes",
+            label: "Rebate programmes",
+            description: "The backend rebates OEMs and distributors pay — Adobe 20% on an approved deal registration, Microsoft 2% — suggested on each order.",
+            href: "/settings/rebate-programmes",
+            icon: BadgePercent,
+            // Seen by whoever sees rebates; the page lets only rebates.manage change them.
+            permission: "rebates.view",
+            module: "orders",
+          },
+        ],
+      },
       {
         key: "finance",
         label: "Accounting",
