@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -50,6 +51,8 @@ import { SupportLauncher } from "@/components/support/support-launcher";
 import { linkedSignInEnabled } from "@/lib/platform/linked/groups";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
 import { WorkspaceSwitcher } from "@/components/linked/workspace-switcher";
+import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
+import { wizardAutoOpens, wizardMounted } from "@/lib/help/onboarding";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
@@ -108,7 +111,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Skipped while viewing as someone else: "you must change your password" is about the person
   // signed in, and forcing an admin into a borrowed account's password form would be both useless
   // and the start of an account takeover.
-  if (session?.user && !viewAs && !currentPath.startsWith("/profile")) {
+  // Read on /profile too, where the redirect lands: the onboarding wizard stays shut over that form.
+  let forcedSetup = false;
+  if (session?.user && !viewAs) {
     const [dbUser, security] = await Promise.all([
       db.user.findUnique({
         where: { id: session.user.id },
@@ -117,7 +122,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       getCachedSecuritySettings(),
     ]);
     const needsTwoFactorSetup = !!security?.enforceTwoFactor && !dbUser?.twoFactorEnabledAt;
-    if (dbUser?.mustChangePassword || needsTwoFactorSetup) {
+    forcedSetup = !!dbUser?.mustChangePassword || needsTwoFactorSetup;
+    if (forcedSetup && !currentPath.startsWith("/profile")) {
       redirect("/profile");
     }
   }
@@ -130,7 +136,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // that person's face in the header, for the same reason the name and role already change.
   // The same read carries the account's kind, for the workspace switcher below.
   const viewer = shownUser
-    ? await db.user.findUnique({ where: { id: shownUser.id }, select: { photoUpdatedAt: true, kind: true } })
+    ? await db.user.findUnique({ where: { id: shownUser.id }, select: { photoUpdatedAt: true, kind: true, onboardingCompletedAt: true } })
     : null;
   const viewerPhotoUpdatedAt = viewer?.photoUpdatedAt ?? null;
   // Linked sign-in's workspace switcher (spec §2.1): the person's own member account only — never while
@@ -140,6 +146,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const canSwitch = !viewAs && !!session?.user && viewer?.kind === "MEMBER" && (await linkedSignInEnabled());
 
   const dlpOn = dlpApplies(shownUser?.role, securityPolicy) && hasAnyDeterrent(securityPolicy);
+
+  // The Getting Started wizard (src/lib/help/onboarding.ts): for a person still being onboarded, signed in as
+  // themselves; never while viewing as somebody (then `viewer` is them). It opens by itself once per sign-in — the
+  // key names the sign-in without carrying its id to the page — except over a forced password or two-factor form.
+  const onboardingGate = { person: viewer, viewingAs: !!viewAs, forcedSetup };
+  const onboarding =
+    session?.user && wizardMounted(onboardingGate)
+      ? {
+          autoOpen: wizardAutoOpens(onboardingGate),
+          signInKey: createHash("sha256").update(`onboarding|${session.user.sid ?? session.user.id}`).digest("hex").slice(0, 16),
+        }
+      : null;
 
   // Only when the admin has asked for it — see recordPageView. Not awaited: a page must not wait on
   // its own audit trail, and the write is throttled so a burst of navigation is one row anyway.
@@ -163,6 +181,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           somebody else would record an answer from the wrong person, on a form that cannot be
           answered twice. */}
       {!viewAs && splash && <SurveySplash pending={splash} />}
+
+      {onboarding && <OnboardingWizard autoOpen={onboarding.autoOpen} signInKey={onboarding.signInKey} />}
 
       {dlpOn && (
         <>

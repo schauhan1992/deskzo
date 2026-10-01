@@ -31,7 +31,9 @@ import { getGettingStarted, listUpdates, unreadUpdateCount } from "@/actions/hel
 import { getSupportContact } from "@/actions/support";
 import { getBranding } from "@/actions/branding";
 import { getOrganisation } from "@/lib/organisation";
-import { requireUser } from "@/lib/session";
+import { requireUser, viewAsContext } from "@/lib/session";
+import { db } from "@/lib/db";
+import { DASHBOARD_TAB_LABELS, dashboardTabKeys, onboardingPending, resolveDashboardTab } from "@/lib/help/onboarding";
 import { can } from "@/lib/authz/resolve";
 import { todaysMoments } from "@/lib/hr/today";
 
@@ -129,19 +131,24 @@ function TargetCard({
   );
 }
 
-const TABS: DashboardTab[] = [
-  { key: "overview", label: "Dashboard" },
-  { key: "getting-started", label: "Getting Started" },
-  { key: "updates", label: "Recent Updates" },
-];
-
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab: requested } = await searchParams;
-  const tab = TABS.some((t) => t.key === requested) ? requested! : "overview";
 
   // The band across the top is the same on every tab: the greeting (which resolves the name itself,
   // from todaysMoments()), the company, and the helpline.
   const user = await requireUser();
+  /**
+   * Getting Started is the first tab — and the default — until this person has finished onboarding
+   * (src/lib/help/onboarding.ts); after that it is gone, and a stale `?tab=getting-started` lands on
+   * the dashboard. Whoever the page is acting as: viewing as somebody shows their tabs.
+   */
+  const [me, viewAs] = await Promise.all([
+    db.user.findUnique({ where: { id: user.id }, select: { kind: true, onboardingCompletedAt: true } }),
+    viewAsContext(),
+  ]);
+  const tabKeys = dashboardTabKeys(onboardingPending(me));
+  const TABS: DashboardTab[] = tabKeys.map((key) => ({ key, label: DASHBOARD_TAB_LABELS[key] }));
+  const tab = resolveDashboardTab(requested, tabKeys);
   const [today, branding, organisation, helpDesk, unread, canManageHelp] = await Promise.all([
     todaysMoments(),
     getBranding(),
@@ -172,7 +179,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     return (
       <div>
         {header()}
-        <GettingStarted steps={await getGettingStarted()} />
+        {/* "Continue setup" opens the wizard mounted in the layout — never while viewing as somebody, where there is none. */}
+        <GettingStarted steps={await getGettingStarted()} canContinue={!viewAs} />
       </div>
     );
   }

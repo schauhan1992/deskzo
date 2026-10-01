@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
  * The preview updates before the upload finishes, because a file picker that appears to do nothing
  * for a second gets clicked again — and the second click uploads the same file twice.
  */
-export function PhotoManager({ user }: { user: AvatarUser }) {
+export function PhotoManager({ user, onSaved }: { user: AvatarUser; /** After a photo is saved or removed — the onboarding wizard re-checks its step. */ onSaved?: () => void }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -43,6 +43,7 @@ export function PhotoManager({ user }: { user: AvatarUser }) {
           return;
         }
         router.refresh();
+        onSaved?.();
       });
     };
     reader.onerror = () => setError("That file couldn't be read.");
@@ -97,6 +98,7 @@ export function PhotoManager({ user }: { user: AvatarUser }) {
                     return;
                   }
                   router.refresh();
+                  onSaved?.();
                 });
               }}
             >

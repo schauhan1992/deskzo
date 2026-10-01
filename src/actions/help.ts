@@ -8,11 +8,9 @@ import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { parseIstDateTime } from "@/lib/india-time";
-import { isModuleEnabled } from "@/actions/module";
-import { getBranding } from "@/actions/branding";
-import { getOrganisation, isOrganisationReady } from "@/lib/organisation";
 import { checkLink, youtubeId } from "@/lib/help/links";
-import { gettingStartedSteps, type GettingStartedStep } from "@/lib/help/getting-started";
+import type { GettingStartedStep } from "@/lib/help/getting-started";
+import { gettingStartedFor } from "@/lib/help/onboarding-facts";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -343,32 +341,8 @@ export async function deleteUpdate(id: string): Promise<ActionResult<null>> {
 
 // ─── Getting started ─────────────────────────────────────────────────────────────────────────────
 
+/** Somebody's Getting Started steps — the dashboard's tab. The facts are read in src/lib/help/onboarding-facts.ts. */
 export async function getGettingStarted(): Promise<GettingStartedStep[]> {
   const user = await requireUser();
-  const [admin, helpManager, itemsModule, me] = await Promise.all([
-    can(user.id, "settings.manage"),
-    mayManage(user.id),
-    isModuleEnabled("items"),
-    db.user.findUnique({ where: { id: user.id }, select: { photoUpdatedAt: true, twoFactorEnabledAt: true } }),
-  ]);
-  // Company facts are read only for somebody who will be shown the company steps.
-  const [organisation, branding, activeUsers, itemCount, helpDesk] = await Promise.all([
-    admin ? getOrganisation() : null,
-    admin ? getBranding() : null,
-    admin ? db.user.count({ where: { active: true } }) : 0,
-    admin && itemsModule ? db.item.count() : 0,
-    helpManager ? db.helpDesk.findUnique({ where: { id: "global" }, select: { helplinePhone: true, supportEmail: true } }) : null,
-  ]);
-  return gettingStartedSteps({
-    admin,
-    helpManager,
-    itemsModule,
-    organisationReady: organisation ? isOrganisationReady(organisation) : false,
-    hasLogo: !!branding?.logoDataUrl,
-    activeUsers,
-    itemCount,
-    helplineSet: !!(helpDesk?.helplinePhone || helpDesk?.supportEmail),
-    hasPhoto: !!me?.photoUpdatedAt,
-    hasTwoFactor: !!me?.twoFactorEnabledAt,
-  });
+  return (await gettingStartedFor(user.id)).steps;
 }

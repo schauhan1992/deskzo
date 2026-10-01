@@ -157,6 +157,7 @@
     "check:collections": "tsx scripts/check-collections.ts",
     "check:workspace-names": "tsx scripts/check-workspace-names.ts",
     "check:name-rules": "tsx scripts/check-name-rules.ts",
+    "check:onboarding": "tsx scripts/check-onboarding.ts",
     "check:close": "tsx scripts/check-close.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",

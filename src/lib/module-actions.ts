@@ -115,6 +115,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "order.ts": ["orders"],
   // Branches and GST registrations are the company itself, not a module: every document names one.
   "branch.ts": "core",
+  // Getting started: the onboarding wizard's steps, skips and completion (src/lib/help).
+  "onboarding.ts": "core",
   "organisation.ts": "core",
   "page-layout.ts": "core",
   "password-reset.ts": "public",

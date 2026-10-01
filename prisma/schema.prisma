@@ -538,6 +538,14 @@ model User {
    */
   dashboardWidgets    String[]  @default([])
   dashboardCustomized Boolean   @default(false)
+  /**
+   * Onboarding (src/lib/help/getting-started.ts): when this person finished their Getting started steps.
+   * Until then the wizard opens at sign-in and Getting started is the dashboard's first tab; after,
+   * it is gone for good, whatever later changes. People already here when it arrived were marked done.
+   */
+  onboardingCompletedAt DateTime?
+  /** Their own optional steps they chose to skip (e.g. "photo"); a skipped step counts as finished. */
+  onboardingSkipped     String[]  @default([])
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -1547,6 +1555,12 @@ model OrganisationSettings {
    * A campaign larger than this needs a second person to approve it.
    */
   marketingApprovalThreshold    Int     @default(200)
+
+  /**
+   * The company's optional onboarding steps somebody chose to skip ("logo", "team", "items",
+   * "helpline") — a skipped step counts as finished for everybody. The company profile can't be skipped.
+   */
+  onboardingSkipped String[] @default([])
 
   updatedAt DateTime @updatedAt
 

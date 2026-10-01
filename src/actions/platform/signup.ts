@@ -18,6 +18,24 @@ import { inviteHold, judgeName, type InviteHold } from "@/lib/platform/name-rule
 import { ProvisioningRefused, startProvisioning } from "@/lib/platform/provisioning";
 import { signupNameVerdict } from "@/lib/workspace-names";
 import { lockoutState, recordFailure } from "@/lib/security/lockout";
+import {
+  CODE_ATTEMPTS_USED,
+  CODE_EXPIRED,
+  CODE_TTL_MINUTES,
+  MAX_CODE_ATTEMPTS,
+  codeShapeProblem,
+  companyNameProblem,
+  countryProblem,
+  disposableEmailMessage,
+  emailShapeProblem,
+  firstIssue,
+  ownerNameProblem,
+  passwordProblem,
+  slugRequiredProblem,
+  wrongCodeMessage,
+  type SignupIssueField,
+  type SignupIssues,
+} from "@/lib/signup-fields";
 import { clientIpFrom } from "@/lib/client-ip";
 import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { subdomainHost } from "@/lib/tenancy/registry";
@@ -44,15 +62,35 @@ import { subdomainHost } from "@/lib/tenancy/registry";
  *
  * None of this touches a workspace's database: there is none yet. Attempts are limited per address
  * (src/lib/security/lockout.ts, under "platform|"), codes per signup.
+ *
+ * A refusal names every problem at once, field by field (`issues`, in the words of src/lib/signup-fields.ts
+ * — the same rules the form runs as each field is left), with `formError` for what is no one field's: too
+ * many attempts from here, or signup by invitation only and no code given. `error` repeats the first of
+ * them, for callers that read one line. None of it says more than before: not whether an address already
+ * owns a workspace, and not which way an invitation code is wrong.
  */
 
 const COOKIE = "wroffy.signup";
-const CODE_TTL_MS = 15 * 60_000;
-const MAX_CODE_ATTEMPTS = 5;
-const MIN_PASSWORD = 10;
+const CODE_TTL_MS = CODE_TTL_MINUTES * 60_000;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
-export type SignupResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
+export type SignupResult<T = null> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      /** The first problem — kept for callers that read one line. */
+      error: string;
+      /** Every field's problem, in plain words. */
+      issues?: SignupIssues;
+      /** What isn't one field's: too many attempts, signup by invitation only with no code, an expired signup. */
+      formError?: string;
+    };
+
+/** A refusal: every field's problem, and the form's own if there is one. */
+function refused(issues: SignupIssues, formError?: string): { ok: false; error: string; issues: SignupIssues; formError?: string } {
+  const first = firstIssue(issues);
+  return { ok: false, error: formError ?? (first ? issues[first]! : "Check the form and try again."), issues, ...(formError ? { formError } : {}) };
+}
 
 /**
  * Signups are limited per caller — or, when the caller's address cannot be known (no trusted proxy,
@@ -146,7 +184,7 @@ const REFERRAL_VIA = ["link", "cookie", "typed"] as const;
 
 export async function startSignup(form: SignupForm): Promise<SignupResult<{ email: string }>> {
   const slow = await limited(form.email);
-  if (slow) return { ok: false, error: slow };
+  if (slow) return refused({}, slow);
 
   const companyName = String(form.companyName ?? "").trim();
   const ownerName = String(form.ownerName ?? "").trim();
@@ -156,28 +194,32 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   const country = WORLD_COUNTRIES.find((c) => c.code === String(form.country ?? "").toUpperCase());
   const password = String(form.password ?? "");
 
-  if (companyName.length < 2 || companyName.length > 120) return { ok: false, error: "Give your registered business name." };
-  if (ownerName.length < 2 || ownerName.length > 120) return { ok: false, error: "Give your name." };
-  if (!email) return { ok: false, error: "That doesn't look like an email address." };
-  if (isDisposableDomain(email.domain)) return { ok: false, error: "Use your work address — throwaway addresses can't own a workspace." };
-  if (!country) return { ok: false, error: "Choose your country." };
-  if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
+  // Every field is looked at, and every problem said at once.
+  const issues: SignupIssues = {};
+  const put = (field: SignupIssueField, problem: string | null) => {
+    if (problem && !issues[field]) issues[field] = problem;
+  };
+  put("companyName", companyNameProblem(companyName));
+  put("ownerName", ownerNameProblem(ownerName));
+  put("email", emailShapeProblem(String(form.email ?? "")) ?? (email ? null : "That doesn't look like an email address — check it for a typo."));
+  if (email && isDisposableDomain(email.domain)) put("email", disposableEmailMessage(email.domain));
+  put("country", country ? null : countryProblem("", () => false));
+  put("password", passwordProblem(password));
   // An invitation that holds an address for its customer: this signup gets exactly it, without the
   // signup rules. The registered name is still asked for, and kept — just not matched against it.
   const inviteCode = String(form.invite ?? "").trim();
   const hold = inviteCode ? await inviteHold(sha256(inviteCode)) : null;
-  const nameProblem = await signupSlugProblem(slug, companyName, hold);
-  if (nameProblem) return { ok: false, error: nameProblem };
-  // Without an invitation only once signup is open; one given is checked either way.
+  put("slug", slug ? await signupSlugProblem(slug, companyName, hold) : slugRequiredProblem(slug));
+  // Without an invitation only once signup is open; one given is checked either way — and refused in
+  // the same words whether it is mistyped, used up, expired or a suspended partner's.
   const open = await signupOpen();
-  if (!open || inviteCode) {
-    const badInvite = await inviteProblem(inviteCode, open);
-    if (badInvite) return { ok: false, error: badInvite };
-  }
+  const formError = !open && !inviteCode ? "Signing up is by invitation for now — enter the code from your invitation." : undefined;
+  if (inviteCode) put("invite", await inviteProblem(inviteCode, open));
   // A partner's code on the form must be live; an empty one is simply no partner code.
   const referralInput = String(form.referral ?? "").trim();
   const referral = referralInput ? await findActiveReferral(referralInput, new Date()) : null;
-  if (referralInput && !referral) return { ok: false, error: "That partner code isn't valid — clear it to sign up without one." };
+  if (referralInput && !referral) put("referral", "That partner code isn't valid — clear it to sign up without one.");
+  if (formError || firstIssue(issues) || !email || !country) return refused(issues, formError);
   const referralVia = referral ? ((REFERRAL_VIA as readonly string[]).includes(String(form.referralVia)) ? String(form.referralVia) : "typed") : null;
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -234,16 +276,24 @@ async function thisBrowsersSignup() {
 const WORKER = path.join(process.cwd(), "scripts", "platform-worker.ts");
 const TSX_CLI = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
 
+/**
+ * The emailed code. What is wrong with it is said at the code field — wrong (with the tries left),
+ * expired, or used up — and the form offers to send a new one (`startSignup` again). A code that isn't
+ * six digits is refused without costing a try: it can't be the one.
+ */
 export async function verifySignup(input: string): Promise<SignupResult> {
   const pending = await thisBrowsersSignup();
-  if (!pending) return { ok: false, error: "This signup has expired. Start again." };
+  if (!pending) return refused({}, "This signup has expired — start again, and we'll send you a new code.");
   if (pending.verifiedAt) return { ok: true, data: null };
-  if (pending.attempts >= MAX_CODE_ATTEMPTS || pending.codeExpiresAt < new Date()) return { ok: false, error: "That code has expired. Start again." };
+  if (pending.codeExpiresAt < new Date()) return refused({ code: CODE_EXPIRED });
+  if (pending.attempts >= MAX_CODE_ATTEMPTS) return refused({ code: CODE_ATTEMPTS_USED });
 
   const code = String(input ?? "").replace(/\s+/g, "");
+  const shape = codeShapeProblem(code);
+  if (shape) return refused({ code: shape });
   if (sha256(code) !== pending.codeHash) {
     await controlDb().pendingSignup.update({ where: { id: pending.id }, data: { attempts: { increment: 1 } } });
-    return { ok: false, error: "That isn't the code we sent." };
+    return refused({ code: wrongCodeMessage(MAX_CODE_ATTEMPTS - pending.attempts - 1) });
   }
 
   // The invitation is spent now — conditionally, so two signups on one single-use code get one workspace.
@@ -252,9 +302,9 @@ export async function verifySignup(input: string): Promise<SignupResult> {
     const spent = await controlDb().$executeRaw`
       UPDATE "signup_invites" SET "uses" = "uses" + 1
       WHERE "codeHash" = ${inviteCodeHash} AND "uses" < "maxUses" AND ("expiresAt" IS NULL OR "expiresAt" > now())`;
-    if (spent !== 1) return { ok: false, error: "That invitation has been used in the meantime." };
+    if (spent !== 1) return refused({}, "That invitation has been used in the meantime — ask for a new one.");
   } else if (!(await signupOpen())) {
-    return { ok: false, error: "Signing up is by invitation for now." };
+    return refused({}, "Signing up is by invitation for now.");
   }
 
   const invite = inviteCodeHash ? await controlDb().signupInvite.findUnique({ where: { codeHash: inviteCodeHash }, select: { planKey: true } }) : null;
@@ -282,7 +332,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
   } catch (err) {
     // The invitation goes back: nothing was made with it.
     if (inviteCodeHash) await controlDb().signupInvite.update({ where: { codeHash: inviteCodeHash }, data: { uses: { decrement: 1 } } });
-    if (err instanceof ProvisioningRefused) return { ok: false, error: err.message };
+    if (err instanceof ProvisioningRefused) return refused({}, err.message);
     throw err;
   }
   // The password now lives only on the job, which clears it once the owner exists.

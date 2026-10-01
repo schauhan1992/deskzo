@@ -207,7 +207,8 @@ async function main() {
   const admin = gettingStartedSteps(facts({ admin: true }));
   ok("an admin also sees the company steps", ["organisation", "logo", "team", "items"].every((k) => admin.some((s) => s.key === k)));
   ok("with Items switched off, 'add what you sell' is not offered", !gettingStartedSteps(facts({ admin: true, itemsModule: false })).some((s) => s.key === "items"));
-  ok("the helpline step is for help.manage", gettingStartedSteps(facts({ helpManager: true })).some((s) => s.key === "helpline") && !admin.some((s) => s.key === "helpline"));
+  // A company step since onboarding (1 Oct 2026): for somebody setting the company up who may also change help.
+  ok("the help step is a company step, for settings.manage with help.manage", gettingStartedSteps(facts({ admin: true, helpManager: true })).some((s) => s.key === "helpline" && s.group === "company") && !gettingStartedSteps(facts({ helpManager: true })).some((s) => s.key === "helpline") && !admin.some((s) => s.key === "helpline"));
   const doneAll = gettingStartedSteps(
     facts({ admin: true, helpManager: true, organisationReady: true, hasLogo: true, activeUsers: 5, itemCount: 3, helplineSet: true, hasPhoto: true, hasTwoFactor: true }),
   );
@@ -353,7 +354,7 @@ async function main() {
     const sellerSteps = await help.getGettingStarted();
     ok("a salesperson's checklist is about them", sellerSteps.map((s) => s.key).join(",") === "photo,two-factor", sellerSteps.map((s) => s.key).join(","));
     as(manager);
-    ok("help.manage adds the helpline step", (await help.getGettingStarted()).some((s) => s.key === "helpline"));
+    ok("help.manage alone adds no company step — the help step is the company's", !(await help.getGettingStarted()).some((s) => s.group === "company"));
 
     // ─────────────────────────────────────────────────────────────────────────
     section("What renders");
@@ -411,7 +412,8 @@ async function main() {
     const onStart = render(await Dashboard({ searchParams: Promise.resolve({ tab: "getting-started" }) }));
     ok("the Getting Started tab renders the checklist", onStart.includes("Add your photo") && onStart.includes('role="progressbar"'));
     const onBogus = render(await Dashboard({ searchParams: Promise.resolve({ tab: "../../etc" }) }));
-    ok("an unknown tab falls back to the dashboard", /aria-current="page"[^>]*>Dashboard/.test(onBogus));
+    // The probe is new, so still being onboarded: its first tab is Getting Started (src/lib/help/onboarding.ts, check:onboarding).
+    ok("an unknown tab falls back to the first tab — Getting Started, for somebody still setting up", /aria-current="page"[^>]*>Getting Started/.test(onBogus));
 
     const HelpPage = (load("../src/app/(dashboard)/settings/help/page") as { default: () => Promise<unknown> }).default;
     ok("the help settings page turns away somebody without help.manage", render(await HelpPage()).includes("Only somebody who can manage help"));

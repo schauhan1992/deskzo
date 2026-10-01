@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 
-export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
+export function TwoFactorSetup({ enabled, onEnabled }: { enabled: boolean; /** After an authenticator is confirmed — the onboarding wizard re-checks its step. */ onEnabled?: () => void }) {
   const router = useRouter();
   const [step, setStep] = useState<"idle" | "confirmIdentity" | "setup" | "disable">("idle");
   const [secret, setSecret] = useState<string | null>(null);
@@ -43,6 +43,7 @@ export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
       setStep("idle");
       setCode("");
       router.refresh();
+      onEnabled?.();
     });
   }
 

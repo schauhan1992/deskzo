@@ -58,7 +58,7 @@ export function SignupFormBlock({ props, ctx }: { props: SignupFormProps; ctx: S
             )}
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-lg sm:p-8">
-            <SignupFlow suffix={ctx.workspaceSuffix} countries={COUNTRIES} inviteRequired={!ctx.signupOpen} referral={referralFrom(ctx.searchParams)} {...invitationFrom(ctx.searchParams)} />
+            <SignupFlow suffix={ctx.workspaceSuffix} countries={COUNTRIES} inviteRequired={!ctx.signupOpen} referral={referralFrom(ctx.searchParams)} brandName={ctx.settings.siteName} {...invitationFrom(ctx.searchParams)} />
           </div>
         </div>
       </Container>

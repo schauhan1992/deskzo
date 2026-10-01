@@ -255,6 +255,37 @@
   animation: slide-in-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/*
+ * Signup's logo while it works — SignupLoader in src/components/platform/signup-flow.tsx. A slow, small
+ * bob, with a shadow underneath that shrinks and fades as the mark rises. Still with reduced motion.
+ */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+@keyframes float-shadow {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scaleX(0.7);
+    opacity: 0.15;
+  }
+}
+.animate-float {
+  animation: float 2.4s ease-in-out infinite;
+}
+.animate-float-shadow {
+  animation: float-shadow 2.4s ease-in-out infinite;
+}
+
 /* Confetti for a win — see Confetti in src/components/layout/celebration-splash.tsx. Falls once. */
 @keyframes confetti-fall {
   0% {
@@ -284,6 +315,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  /* The floating logo stands still rather than jumping once. */
+  .animate-float,
+  .animate-float-shadow {
+    animation: none !important;
   }
 }
 

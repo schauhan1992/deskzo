@@ -12,6 +12,7 @@ export function Dialog({
   children,
   wide = false,
   large = false,
+  fullScreenOnPhone = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -21,6 +22,8 @@ export function Dialog({
   wide?: boolean;
   /** Room for a two-column form, so a long one fits a laptop screen without scrolling. */
   large?: boolean;
+  /** The whole screen on a phone, rather than a sheet from the bottom — for a flow somebody stays in (the onboarding wizard). */
+  fullScreenOnPhone?: boolean;
 }) {
   // Escape, the scroll lock, the focus trap and the accessible name — see use-modal-a11y.ts.
   const { titleId, containerRef } = useModalA11y(open, onClose);
@@ -73,7 +76,7 @@ export function Dialog({
          * Reset here rather than at each call site, because every future caller would have to
          * remember, and the one that forgets looks broken in a way that points at its own contents.
          */
-        className={`relative w-full ${wide ? "max-w-6xl" : large ? "max-w-3xl" : "max-w-lg"} animate-scale-in whitespace-normal rounded-t-2xl border border-line bg-surface p-5 text-left shadow-lg sm:rounded-xl`}
+        className={`relative w-full ${wide ? "max-w-6xl" : large ? "max-w-3xl" : "max-w-lg"} animate-scale-in whitespace-normal border-line bg-surface p-5 text-left shadow-lg sm:rounded-xl sm:border ${fullScreenOnPhone ? "flex h-[100dvh] flex-col sm:block sm:h-auto" : "rounded-t-2xl border"}`}
       >
         <div className="flex items-center justify-between gap-4">
           <h2 id={titleId} className="text-sm font-semibold text-text">
@@ -88,7 +91,7 @@ export function Dialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className={`mt-4 ${wide || large ? "max-h-[85vh]" : "max-h-[75vh]"} overflow-y-auto`}>{children}</div>
+        <div className={`mt-4 ${wide || large ? "sm:max-h-[85vh]" : "sm:max-h-[75vh]"} ${fullScreenOnPhone ? "min-h-0 flex-1" : wide || large ? "max-h-[85vh]" : "max-h-[75vh]"} overflow-y-auto`}>{children}</div>
       </div>
     </div>,
     document.body,
