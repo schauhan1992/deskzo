@@ -1,0 +1,40 @@
+# Installed and built inside the image
+node_modules
+.next
+.next-build
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets: set in the hosting platform's environment, never baked into an image
+.env
+.env.*
+
+# What the app writes at runtime — it lives on the /data volume, not in the image
+backups
+storage
+platform-outbox
+geoip
+prisma/reference/geonames
+
+# Version control, editors and local tooling
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+*.log
+npm-debug.log*
+coverage
+
+# Notes and files that only matter beside the code
+docs
+README.md
+AGENTS.md
+CLAUDE.md
+confirmed.json
+fix-groups.json
+followups.json
+docker-compose.yml
+Dockerfile
+.dockerignore
