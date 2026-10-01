@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { ArrowRight, ChevronDown, Menu, X } from "lucide-react";
 import type { NavItem, NavMenu, SiteLink } from "@/components/site/blocks/types";
 import { isNavMenu } from "@/components/site/nav";
@@ -31,8 +31,8 @@ type Open = { index: number; pinned: boolean };
 const HOVER_OPEN_MS = 120;
 const HOVER_SWITCH_MS = 40;
 const HOVER_CLOSE_MS = 200;
-/** The panel's width, by its columns; never wider than the screen less its gutters. */
-const PANEL_WIDTH: Record<number, string> = { 1: "w-72", 2: "w-[34rem]", 3: "w-[48rem]", 4: "w-[60rem]", 5: "w-[68rem]" };
+/** A menu with few columns keeps them together at the left of the page rather than spread across it. */
+const PANEL_GRID_WIDTH: Record<number, string> = { 1: "max-w-xs", 2: "max-w-2xl", 3: "max-w-5xl", 4: "", 5: "" };
 const PANEL_GRID: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4", 5: "grid-cols-5" };
 
 export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; nav: NavItem[]; signin: SiteLink; cta: SiteLink }) {
@@ -44,7 +44,6 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
   const navRef = useRef<HTMLElement>(null);
   const triggers = useRef<(HTMLButtonElement | null)[]>([]);
   const items = useRef<(HTMLLIElement | null)[]>([]);
-  const panels = useRef<(HTMLDivElement | null)[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openIndex = open?.index ?? null;
 
@@ -72,27 +71,6 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onPointer);
     };
-  }, [openIndex]);
-
-  // An open panel is kept on the screen: a menu near the right edge, or a wide one on a narrow screen, is moved left.
-  // The panel's own box is moved (not just the card in it), so nothing reaches past the screen's edge to scroll to.
-  useLayoutEffect(() => {
-    if (openIndex === null) return;
-    const panel = panels.current[openIndex];
-    if (!panel) return;
-    const place = () => {
-      panel.style.transform = "";
-      const rect = panel.getBoundingClientRect();
-      const width = document.documentElement.clientWidth;
-      const gutter = 16;
-      let shift = 0;
-      if (rect.right > width - gutter) shift = width - gutter - rect.right;
-      if (rect.left + shift < gutter) shift = gutter - rect.left;
-      if (shift) panel.style.transform = `translateX(${Math.round(shift)}px)`;
-    };
-    place();
-    window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
   }, [openIndex]);
 
   const clickMenu = (index: number) => {
@@ -136,7 +114,9 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
                   ref={(el) => {
                     items.current[i] = el;
                   }}
-                  className="relative"
+                  // The full height of the header, so the pointer goes from the button into the panel below
+                  // without leaving the item. Not positioned: the panel is placed against the header itself.
+                  className="flex h-16 items-center"
                   onPointerEnter={(e) => hoverIn(i, e)}
                   onPointerLeave={(e) => hoverOut(i, e)}
                   onBlur={(e) => {
@@ -162,12 +142,9 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
                     <ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 text-subtle transition-transform duration-150", openIndex === i && "rotate-180")} />
                   </button>
                   <div
-                    ref={(el) => {
-                      panels.current[i] = el;
-                    }}
                     id={`${baseId}-panel-${i}`}
                     hidden={openIndex !== i}
-                    className="absolute left-0 top-full z-50 pt-3"
+                    className="absolute inset-x-0 top-full z-50"
                     onClick={closeOnLink}
                   >
                     <MenuPanel menu={item} idPrefix={`${baseId}-panel-${i}`} />
@@ -270,12 +247,17 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
   );
 }
 
-/** A menu's panel: a white card, its columns side by side — a title, then each link and its line — and the link along its foot. */
+/**
+ * A menu's panel: the full width of the header, under it, with the page's own content width inside —
+ * its columns side by side (a title, then each link and its line) and the link along its foot. Taller
+ * than the screen, it scrolls on its own rather than the page behind it.
+ */
 function MenuPanel({ menu, idPrefix }: { menu: NavMenu; idPrefix: string }) {
   const cols = Math.min(Math.max(menu.columns.length, 1), 5);
   return (
-    <div className={cn("max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-5 shadow-lg", PANEL_WIDTH[cols])}>
-      <div className={cn("grid gap-x-6 gap-y-5", PANEL_GRID[cols])}>
+    <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-b border-line bg-surface shadow-lg motion-safe:animate-fade-in">
+      <Container className="py-8">
+      <div className={cn("grid gap-x-10 gap-y-6", PANEL_GRID[cols], PANEL_GRID_WIDTH[cols])}>
         {menu.columns.map((column, c) => (
           <div key={c} className="min-w-0">
             {column.title && (
@@ -297,13 +279,14 @@ function MenuPanel({ menu, idPrefix }: { menu: NavMenu; idPrefix: string }) {
         ))}
       </div>
       {menu.footer && (
-        <div className="mt-4 border-t border-line px-2 pt-4">
+        <div className="mt-6 border-t border-line px-2 pt-5">
           <SiteAnchor href={menu.footer.href} className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline">
             {menu.footer.label}
             <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
           </SiteAnchor>
         </div>
       )}
+      </Container>
     </div>
   );
 }

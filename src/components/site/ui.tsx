@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
  */
 
 export function Container({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8", className)}>{children}</div>;
+  // 1440px wide on a large screen, as modern sites are; text inside keeps its own reading width (max-w-2xl/3xl).
+  return <div className={cn("mx-auto w-full max-w-[90rem] px-4 sm:px-6 lg:px-10", className)}>{children}</div>;
 }
 
 export function Section({ id, className, children, tone = "plain" }: { id?: string; className?: string; children: ReactNode; tone?: "plain" | "sunken" }) {
