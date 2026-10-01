@@ -104,6 +104,8 @@ async function cleanup() {
   const ids = users.map((u) => u.id);
   await db.internalFeedback.deleteMany({ where: { body: { startsWith: PREFIX } } });
   await db.survey.deleteMany({ where: { title: { startsWith: PREFIX } } });
+  // A form aimed at everybody notifies the real people in the workspace too, not only this run's.
+  await db.notification.deleteMany({ where: { type: "SURVEY_ASSIGNED", title: { startsWith: PREFIX } } });
   if (ids.length > 0) {
     await db.feedbackQuota.deleteMany({ where: { userId: { in: ids } } });
     await db.notification.deleteMany({ where: { userId: { in: ids } } });

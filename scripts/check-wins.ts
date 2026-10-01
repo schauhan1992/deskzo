@@ -105,6 +105,15 @@ async function cleanup() {
     await db.notification.deleteMany({ where: { type: "ACTIVITY_AWARD", link: "/wins/hall-of-fame", createdAt: { gte: suiteStart } } });
   }
   if (plantedPrize) {
+    // While the probe prize stood in for this month's, the automatic "up for grabs" may have gone out
+    // with it — a month opening during the run, a dashboard load or a tick. Undo the claim, its splash
+    // and everybody's note, real people's too, so the real announcement still goes out.
+    const tainted = await db.prizeAnnouncement.findMany({ where: { race: "TOP_SELLERS", period: plantedPrize.period, announcedAt: { gte: suiteStart } }, select: { id: true } });
+    const taintedKeys = tainted.map((a) => `prizes:${a.id}`);
+    await db.celebrationSeen.deleteMany({ where: { occasionKey: { in: taintedKeys } } });
+    await db.celebration.deleteMany({ where: { occasionKey: { in: taintedKeys } } });
+    await db.prizeAnnouncement.deleteMany({ where: { id: { in: tainted.map((a) => a.id) } } });
+    await db.notification.deleteMany({ where: { type: "ACTIVITY_AWARD", createdAt: { gte: suiteStart }, OR: [{ title: { contains: TAG } }, { message: { contains: TAG } }] } });
     await db.prize.deleteMany({ where: { race: "TOP_SELLERS", ...plantedPrize } });
     if (displacedPrize) await db.prize.create({ data: displacedPrize });
     plantedPrize = null;
@@ -165,8 +174,10 @@ async function main() {
   const SettingsPage = (require("../src/app/(dashboard)/wins/settings/page") as { default: () => Promise<ReactElement> }).default;
   const html = async (el: Promise<ReactElement>) => renderToStaticMarkup((await resolveAsync(await el)) as ReactElement);
 
-  const priorSettings = await db.salesCelebrationSettings.findUnique({ where: { id: "global" } });
+  // After the cleanup, so settings an interrupted run left naming one of its probe people (gone now)
+  // are not what this run puts back.
   await cleanup();
+  const priorSettings = await db.salesCelebrationSettings.findUnique({ where: { id: "global" } });
   try {
     const make = (name: string, grants: Record<string, boolean>) =>
       db.user.create({
@@ -275,7 +286,8 @@ async function main() {
     const PRIZE_IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     if (!hadTop) {
       const real = await db.prize.findUnique({ where: { race_period_slot: { race: "TOP_SELLERS", period: topMonth, slot: "1" } } });
-      displacedPrize = real ? { race: "TOP_SELLERS", period: real.period, slot: real.slot, name: real.name, note: real.note, imageDataUrl: real.imageDataUrl } : null;
+      // A probe prize an interrupted run left behind is not a real one to put back.
+      displacedPrize = real && !real.name.startsWith(TAG) ? { race: "TOP_SELLERS", period: real.period, slot: real.slot, name: real.name, note: real.note, imageDataUrl: real.imageDataUrl } : null;
       plantedPrize = { period: topMonth, slot: "1" };
       await db.prize.deleteMany({ where: { race: "TOP_SELLERS", period: topMonth, slot: "1" } });
       await db.prize.create({ data: { race: "TOP_SELLERS", period: topMonth, slot: "1", name: `${TAG} Gold`, imageDataUrl: PRIZE_IMG } });
