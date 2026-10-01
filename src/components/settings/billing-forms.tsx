@@ -8,6 +8,10 @@ import { OutboundLink } from "@/components/ui/outbound-link";
 import { cancelSubscription, checkoutPlan, openBillingPortal, saveBillingDetails } from "@/actions/billing";
 import type { OfferPlan } from "@/lib/billing/checkout";
 import { formatMoney } from "@/lib/billing/money";
+import { SUITE_NAME, choiceRefusal, needsRefusal } from "@/lib/billing/plan-choice";
+import { COMPANY_NAME } from "@/lib/brand-names";
+import { PRODUCTS, productByKey } from "@/lib/products";
+import { cn } from "@/lib/utils";
 
 /** The billing page's forms (src/actions/billing.ts): choosing a plan, the gateways' own pages, details. */
 
@@ -16,18 +20,68 @@ function go(url: string) {
   window.location.assign(new URL(url));
 }
 
+type Interval = "MONTH" | "YEAR";
+type EditionGroup = { key: string; title: string; tagline: string | null; plans: OfferPlan[] };
+
+/**
+ * The editions on sale, grouped as they are sold: Deskzo One first, then each product in
+ * src/lib/products.ts's order, then editions of no product. Empty groups are left out.
+ */
+function editionGroups(editions: OfferPlan[]): EditionGroup[] {
+  const groups: EditionGroup[] = PRODUCTS.map((p) => ({ key: p.key, title: p.name, tagline: p.tagline, plans: editions.filter((e) => e.productKey === p.key) }));
+  groups.push({ key: "own", title: "Editions", tagline: null, plans: editions.filter((e) => !productByKey(e.productKey)) });
+  return groups.filter((g) => g.plans.length > 0);
+}
+
+/**
+ * Deskzo One, or any number of products — one plan each — or an edition of its own; then extras.
+ * Ticking a plan unticks what cannot come with it (another plan of its product; everything, for
+ * Deskzo One or an edition of its own), so the ticks always make a choice that can be bought. The
+ * rules and their words are src/lib/billing/plan-choice.ts's — checkout says the same.
+ */
 export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; currency: string; gateway: "STRIPE" | "RAZORPAY" }) {
   const intervals = [...new Set(plans.flatMap((p) => p.prices.map((x) => x.interval)))];
-  const [interval, setBilled] = useState<"MONTH" | "YEAR">(intervals.includes("MONTH") ? "MONTH" : "YEAR");
-  const editions = plans.filter((p) => p.kind === "EDITION" && p.prices.some((x) => x.interval === interval));
-  const extras = plans.filter((p) => p.kind !== "EDITION" && p.prices.some((x) => x.interval === interval));
-  const [edition, setEdition] = useState(editions[0]?.key ?? "");
+  const [interval, setBilled] = useState<Interval>(intervals.includes("MONTH") ? "MONTH" : "YEAR");
+  const priceOf = (plan: OfferPlan) => plan.prices.find((x) => x.interval === interval);
+  const editions = plans.filter((p) => p.kind === "EDITION" && !!priceOf(p));
+  const extras = plans.filter((p) => p.kind !== "EDITION" && !!priceOf(p));
+  const groups = editionGroups(editions);
+  const [picked, setPicked] = useState<string[]>(() => {
+    const first = editionGroups(plans.filter((p) => p.kind === "EDITION" && p.prices.some((x) => x.interval === interval)))[0]?.plans[0];
+    return first ? [first.key] : [];
+  });
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [pages, setPages] = useState<{ plan: string; url: string }[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const priceOf = (plan: OfferPlan) => plan.prices.find((x) => x.interval === interval);
   const per = interval === "YEAR" ? "a year" : "a month";
+
+  // What is chosen at this interval: the ticked editions on sale in it, and every extra with a number.
+  const chosenEditions = editions.filter((p) => picked.includes(p.key));
+  const countOf = (plan: OfferPlan, fallback: number) => {
+    const n = Number(quantities[plan.key] ?? fallback);
+    return Number.isInteger(n) && n > 0 ? n : 0;
+  };
+  const lines = [
+    ...chosenEditions.map((plan) => ({ plan, quantity: priceOf(plan)!.perSeat ? Math.max(1, countOf(plan, 1)) : 1 })),
+    ...extras.map((plan) => ({ plan, quantity: countOf(plan, 0) })).filter((l) => l.quantity > 0),
+  ];
+  const total = lines.reduce((sum, l) => sum + priceOf(l.plan)!.amount * l.quantity, 0);
+  const suiteChosen = chosenEditions.some((p) => p.productKey === "one");
+
+  function pick(plan: OfferPlan, on: boolean) {
+    setError(null);
+    setPicked((prev) => {
+      if (!on) return prev.filter((k) => k !== plan.key);
+      const alone = !plan.productKey || plan.productKey === "one";
+      const kept = prev.filter((k) => {
+        const other = plans.find((p) => p.key === k);
+        if (!other || alone) return false;
+        return !!other.productKey && other.productKey !== "one" && other.productKey !== plan.productKey;
+      });
+      return [...kept, plan.key];
+    });
+  }
 
   if (pages) {
     return (
@@ -41,19 +95,16 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
       </div>
     );
   }
-  if (!editions.length) return <p className="text-sm text-muted">No plan is on sale here yet. Contact Deskzo to choose one.</p>;
+  if (!plans.some((p) => p.kind === "EDITION")) return <p className="text-sm text-muted">No plan is on sale here yet. Contact {COMPANY_NAME} to choose one.</p>;
   return (
     <form
-      className="space-y-4"
+      className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
         setError(null);
-        const items = [
-          { planKey: edition, quantity: Number(quantities[edition] || 1) },
-          ...Object.entries(quantities)
-            .filter(([key, q]) => key !== edition && extras.some((x) => x.key === key) && Number(q) > 0)
-            .map(([planKey, q]) => ({ planKey, quantity: Number(q) })),
-        ];
+        const refusal = choiceRefusal(lines.map((l) => l.plan));
+        if (refusal) return setError(refusal);
+        const items = lines.map((l) => ({ planKey: l.plan.key, quantity: l.quantity }));
         startTransition(async () => {
           const r = await checkoutPlan({ interval, items });
           if (!r.ok) return setError(r.error);
@@ -71,51 +122,73 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
           ))}
         </div>
       )}
-      <fieldset className="space-y-2">
-        <legend className="mb-1 text-xs text-muted">Edition</legend>
-        {editions.map((p) => {
-          const price = priceOf(p)!;
-          return (
-            <label key={p.key} className="flex items-start gap-3 rounded-base border border-line px-3 py-2 text-sm">
-              <input type="radio" name="edition" className="mt-1" checked={edition === p.key} onChange={() => setEdition(p.key)} />
-              <span className="flex-1">
-                <span className="font-medium text-text">{p.name}</span>{" "}
-                <span className="text-muted">
-                  {formatMoney(price.amount, currency)} {price.perSeat ? "per person " : ""}
-                  {per}
-                  {p.seats !== null && !price.perSeat ? `, ${p.seats} people included` : ""}
+      <p className="text-xs text-muted">
+        Choose {SUITE_NAME}, or the products you want — one plan for each. {SUITE_NAME} already includes every product.
+      </p>
+      {!editions.length && <p className="text-sm text-muted">Nothing is sold {interval === "YEAR" ? "yearly" : "monthly"} here — try the other period.</p>}
+      {groups.map((group) => (
+        <fieldset key={group.key} className="space-y-2">
+          <legend className="text-sm font-semibold text-text">{group.title}</legend>
+          {group.tagline && <p className="-mt-1 text-xs text-muted">{group.tagline}</p>}
+          {suiteChosen && group.key !== "one" && group.key !== "own" && <p className="text-xs text-subtle">Included in {SUITE_NAME}.</p>}
+          {group.plans.map((p) => {
+            const price = priceOf(p)!;
+            const on = picked.includes(p.key);
+            return (
+              <label key={p.key} className={cn("flex items-start gap-3 rounded-base border px-3 py-2 text-sm", on ? "border-brand bg-brand-subtle/40" : "border-line")}>
+                <input type="checkbox" className="mt-1" checked={on} onChange={(e) => pick(p, e.target.checked)} />
+                <span className="flex-1">
+                  <span className="font-medium text-text">{p.name}</span>{" "}
+                  <span className="text-muted">
+                    {formatMoney(price.amount, currency)} {price.perSeat ? "per person " : ""}
+                    {per}
+                    {p.seats !== null && !price.perSeat ? `, ${p.seats} people included` : ""}
+                  </span>
+                  {p.description && p.description !== group.tagline && <span className="block text-xs text-muted">{p.description}</span>}
                 </span>
-                {p.description && <span className="block text-xs text-muted">{p.description}</span>}
-              </span>
-              {price.perSeat && edition === p.key && (
-                <Input className="h-8 w-20" type="number" min={1} aria-label="People" value={quantities[p.key] ?? "1"} onChange={(e) => setQuantities((q) => ({ ...q, [p.key]: e.target.value }))} />
-              )}
-            </label>
-          );
-        })}
-      </fieldset>
+                {price.perSeat && on && (
+                  <Input className="h-8 w-20" type="number" min={1} aria-label={`People on ${p.name}`} value={quantities[p.key] ?? "1"} onChange={(e) => setQuantities((q) => ({ ...q, [p.key]: e.target.value }))} />
+                )}
+              </label>
+            );
+          })}
+        </fieldset>
+      ))}
       {extras.length > 0 && (
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-xs text-muted">Add-ons — how many of each (none is fine)</legend>
+          <legend className="mb-1 text-sm font-semibold text-text">Add-ons — how many of each (none is fine)</legend>
           {extras.map((p) => {
             const price = priceOf(p)!;
+            const needs = needsRefusal(p, chosenEditions);
             return (
-              <div key={p.key} className="flex items-center gap-3 text-sm">
-                <Input className="h-8 w-20" type="number" min={0} aria-label={`How many of ${p.name}`} value={quantities[p.key] ?? "0"} onChange={(e) => setQuantities((q) => ({ ...q, [p.key]: e.target.value }))} />
-                <span className="text-text">{p.name}</span>
-                <span className="text-muted">
-                  {formatMoney(price.amount, currency)} each, {per}
-                </span>
+              <div key={p.key} className="text-sm">
+                <div className="flex items-center gap-3">
+                  <Input className="h-8 w-20" type="number" min={0} aria-label={`How many of ${p.name}`} value={quantities[p.key] ?? "0"} onChange={(e) => setQuantities((q) => ({ ...q, [p.key]: e.target.value }))} />
+                  <span className="text-text">{p.name}</span>
+                  <span className="text-muted">
+                    {formatMoney(price.amount, currency)} each, {per}
+                  </span>
+                </div>
+                {needs && <p className="mt-1 pl-[92px] text-xs text-warning">{needs}</p>}
               </div>
             );
           })}
         </fieldset>
       )}
+      <p className="text-sm text-text" aria-live="polite">
+        {lines.length ? (
+          <>
+            Total <span className="font-semibold tabular-nums">{formatMoney(total, currency)}</span> {per}, before tax — {lines.map((l) => (l.quantity > 1 ? `${l.plan.name} ×${l.quantity}` : l.plan.name)).join(", ")}.
+          </>
+        ) : (
+          <span className="text-muted">Nothing chosen yet.</span>
+        )}
+      </p>
       <p className="text-xs text-muted">
         {gateway === "STRIPE" ? "Paid by card through Stripe; tax is added as your country requires, and your tax number goes on every invoice." : "Paid through Razorpay, in rupees, by card, UPI or netbanking mandate."}
       </p>
       {error && <p className="text-sm text-danger">{error}</p>}
-      <Button type="submit" disabled={pending || !edition}>
+      <Button type="submit" disabled={pending || chosenEditions.length === 0}>
         {pending ? "Opening…" : "Continue to payment"}
       </Button>
     </form>

@@ -1,9 +1,10 @@
 /**
- * The platform's names, as constants — pure, so client components can show them too.
+ * The platform's names, as constants — pure, so client components can show them too (it lives outside
+ * src/lib/platform, which client code may not import).
  *
  *   · The product, what customers sign up for and see in their tab: "Deskzo One". Its live value is
- *     the website's name as the CMS last published it (`platformBrandName()` in ./brand.ts); this is
- *     the fallback, and the default before anything is published.
+ *     the website's name as the CMS last published it (`platformBrandName()` in
+ *     src/lib/platform/brand.ts); this is the fallback, and the default before anything is published.
  *   · The company behind it — who looks after a plan, whose support staff ask to look inside a
  *     workspace, who runs the console: "Deskzo".
  *

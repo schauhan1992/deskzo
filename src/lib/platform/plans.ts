@@ -2,8 +2,10 @@ import type { PlanKind, Prisma, SubscriptionStatus } from "@wroffy/control-clien
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements, refreshEntitlementsForPlan } from "@/lib/platform/entitlements";
+import { productRefusal, SUITE_NAME } from "@/lib/billing/plan-choice";
 import { soldIn } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition, type ModuleDefinition } from "@/lib/modules";
+import { PRODUCT_KEYS } from "@/lib/products";
 
 /**
  * Plans, and which workspace is on which — from the console, the scripts and signup. Every change is
@@ -50,6 +52,10 @@ export const PLAN_REFUSALS = {
   notPlanModule: "That module is not one a plan decides.",
   moduleSoldOnlyIn: (def: Pick<ModuleDefinition, "label" | "countries">) => `${def.label} is sold only in ${(def.countries ?? []).join(", ")}.`,
   internalStaysInternal: "An internal plan stays internal.",
+  noSuchProduct: (key: string) => `No such product: ${key}.`,
+  productOnEdition: "Only an edition sells a product — an add-on, a bundle or an internal plan belongs to none.",
+  everyModule: `Only an internal plan, or ${SUITE_NAME}, can include every module — a sold plan lists what it sells.`,
+  suiteIsEverything: `${SUITE_NAME} is every module — save it with every module rather than a list.`,
 } as const;
 
 export type PlanInput = {
@@ -67,6 +73,12 @@ export type PlanInput = {
    * own, and a new one starts with none — no limit for an internal plan, which is never sold.
    */
   customDomains?: number | null;
+  /**
+   * The product it sells (src/lib/products.ts `PRODUCT_KEYS`) — an edition's only; null: none, an
+   * edition of its own. "one" is Deskzo One, every module. Left out: a plan being changed keeps its
+   * own, and a new one has none.
+   */
+  productKey?: string | null;
   isDefault?: boolean;
   active?: boolean;
   sortOrder?: number;
@@ -100,6 +112,8 @@ export type CheckedPlan = {
     copilotTokens: number | null;
     /** Undefined: not given — see `savedCustomDomains`. */
     customDomains?: number | null;
+    /** As given — or, left out, the plan's own (`existing` in `checkPlanInput`). */
+    productKey: string | null;
     isDefault: boolean;
     active: boolean;
     sortOrder: number;
@@ -116,13 +130,23 @@ export function savedCustomDomains(data: Pick<CheckedPlan["data"], "kind" | "cus
   return data.kind === "INTERNAL" ? null : 0;
 }
 
-/** Checks a plan's definition, refusing what `savePlan` refuses, in the same order and words. */
-export function checkPlanInput(input: PlanInput): CheckedPlan {
-  const key = String(input.key ?? "").trim().toLowerCase();
+/** A plan's key as the save reads it. */
+export const planKeyOf = (key: unknown) => String(key ?? "").trim().toLowerCase();
+
+/**
+ * Checks a plan's definition, refusing what `savePlan` refuses, in the same order and words.
+ * `existing`: the plan as it is now, when there is one — a product left out of the input is its own.
+ */
+export function checkPlanInput(input: PlanInput, existing?: { productKey: string | null } | null): CheckedPlan {
+  const key = planKeyOf(input.key);
   if (!KEY_PATTERN.test(key)) throw new PlanRefused("A plan's key is 3–50 lower-case letters, digits and dashes, e.g. crm-starter.");
   const name = String(input.name ?? "").trim();
   if (name.length < 2 || name.length > 80) throw new PlanRefused("Give the plan a name.");
   if (!["EDITION", "BUNDLE", "ADDON", "INTERNAL"].includes(input.kind)) throw new PlanRefused("Choose what kind of plan it is.");
+  const asked = input.productKey === undefined ? (existing?.productKey ?? null) : input.productKey;
+  const productKey = asked === null || String(asked).trim() === "" ? null : String(asked).trim().toLowerCase();
+  if (productKey !== null && !(PRODUCT_KEYS as string[]).includes(productKey)) throw new PlanRefused(PLAN_REFUSALS.noSuchProduct(productKey.slice(0, 40)));
+  if (productKey !== null && input.kind !== "EDITION") throw new PlanRefused(PLAN_REFUSALS.productOnEdition);
   const allModules = !!input.allModules;
   const modules = [...new Set((input.modules ?? []).map(String))];
   const unknown = modules.filter((m) => !getModuleDefinition(m));
@@ -130,8 +154,11 @@ export function checkPlanInput(input: PlanInput): CheckedPlan {
   const countries = [...new Set((input.countries ?? []).map((c) => String(c).trim().toUpperCase()).filter(Boolean))];
   if (countries.some((c) => !COUNTRY_PATTERN.test(c))) throw new PlanRefused("Countries are two-letter codes, like IN or AE.");
   // A module sold only in some countries goes only in a plan sold only there — never in a plan sold
-  // anywhere, where a customer abroad would be charged for what they cannot have.
-  if (!allModules) {
+  // anywhere, where a customer abroad would be charged for what they cannot have. A product's plan is
+  // the exception: it is the product wherever it is sold, and such a module drops out abroad by
+  // itself (entitlements, the pricing page and the plan picker list only what the country gets) —
+  // Deskzo People sells payroll in India and the rest of it everywhere.
+  if (!allModules && productKey === null) {
     for (const key of modules) {
       const def = getModuleDefinition(key)!;
       if (def.countries && (countries.length === 0 || countries.some((c) => !def.countries!.includes(c)))) {
@@ -139,7 +166,8 @@ export function checkPlanInput(input: PlanInput): CheckedPlan {
       }
     }
   }
-  if (allModules && input.kind !== "INTERNAL") throw new PlanRefused("Only an internal plan can include every module — a sold plan lists what it sells.");
+  if (allModules && input.kind !== "INTERNAL" && productKey !== "one") throw new PlanRefused(PLAN_REFUSALS.everyModule);
+  if (productKey === "one" && !allModules) throw new PlanRefused(PLAN_REFUSALS.suiteIsEverything);
   const seats = limitOf(input.seats, "Seats");
   const copilotTokens = limitOf(input.copilotTokens, "Copilot tokens");
   const customDomains = input.customDomains === undefined ? undefined : limitOf(input.customDomains, "Custom domains");
@@ -155,6 +183,7 @@ export function checkPlanInput(input: PlanInput): CheckedPlan {
     seats,
     copilotTokens,
     ...(customDomains === undefined ? {} : { customDomains }),
+    productKey,
     isDefault,
     active: input.active !== false,
     sortOrder: Number.isInteger(input.sortOrder) ? input.sortOrder! : 0,
@@ -164,8 +193,10 @@ export function checkPlanInput(input: PlanInput): CheckedPlan {
 
 /** Creates a plan, or changes the one with this key; then every workspace on it. */
 export async function savePlan(input: PlanInput, actor: string): Promise<{ id: string; workspaces: number }> {
-  const { key, modules, data } = checkPlanInput(input);
-  const { allModules, countries, seats, copilotTokens, isDefault, name } = data;
+  // A product left out is the plan's own: read before the checks, which need it.
+  const kept = input.productKey === undefined ? await controlDb().plan.findUnique({ where: { key: planKeyOf(input.key) }, select: { productKey: true } }) : null;
+  const { key, modules, data } = checkPlanInput(input, kept);
+  const { allModules, countries, seats, copilotTokens, isDefault, name, productKey } = data;
 
   const plan = await controlDb().$transaction(async (tx) => {
     const existing = await tx.plan.findUnique({ where: { key }, select: { id: true, kind: true, customDomains: true } });
@@ -179,7 +210,7 @@ export async function savePlan(input: PlanInput, actor: string): Promise<{ id: s
     await audit(
       actor,
       existing ? "plan.update" : "plan.create",
-      { key, name, kind: input.kind, modules: allModules ? "all" : modules, countries, seats, copilotTokens, customDomains, isDefault },
+      { key, name, kind: input.kind, productKey, modules: allModules ? "all" : modules, countries, seats, copilotTokens, customDomains, isDefault },
       undefined,
       tx,
     );
@@ -284,6 +315,29 @@ export function wantedPlans(items: { planKey: string; quantity: number }[]): Map
   return wanted;
 }
 
+/** A plan as `setWorkspacePlans` (and its preview) reads it: what may be put on, and the product rules. */
+export const PLAN_CHOICE_SELECT = {
+  id: true,
+  key: true,
+  name: true,
+  kind: true,
+  active: true,
+  countries: true,
+  productKey: true,
+  allModules: true,
+  modules: { select: { moduleKey: true } },
+} as const satisfies Prisma.PlanSelect;
+
+/** A plan row as the product rules read it (src/lib/billing/plan-choice.ts). */
+export const choicePlanOf = (p: { key: string; name: string; kind: PlanKind; productKey: string | null; allModules: boolean; modules: { moduleKey: string }[] }) => ({
+  key: p.key,
+  name: p.name,
+  kind: p.kind,
+  productKey: p.productKey,
+  allModules: p.allModules,
+  modules: p.modules.map((m) => m.moduleKey),
+});
+
 /** Why a plan may not be put on a workspace, or null: retired, or not offered in its country — unless it is on it already. */
 export function planChoiceRefusal(plan: { name: string; active: boolean; countries: string[] }, already: boolean, country: string): string | null {
   if (already) return null;
@@ -295,7 +349,9 @@ export function planChoiceRefusal(plan: { name: string; active: boolean; countri
 /**
  * The plans a workspace is on, as a whole: what is listed stays or is added, with its quantity;
  * what is not is taken off. Each must be offered and sold in the workspace's country — a retired
- * plan already on it may stay. Never for a workspace that pays at a gateway (see the top of this file).
+ * plan already on it may stay — and together they keep the product rules: one plan for each product,
+ * Deskzo One with no other (src/lib/billing/plan-choice.ts; what else checkout asks of a purchase is
+ * staff's to judge). Never for a workspace that pays at a gateway (see the top of this file).
  */
 export async function setWorkspacePlans(tenantId: string, items: { planKey: string; quantity: number }[], actor: string): Promise<void> {
   const control = controlDb();
@@ -304,7 +360,7 @@ export async function setWorkspacePlans(tenantId: string, items: { planKey: stri
   const gateway = await liveGatewaySubscription(tenantId);
   if (gateway) throw new PlanRefused(PLAN_REFUSALS.paysAtGateway(gateway));
   const wanted = wantedPlans(items);
-  const plans = await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: { id: true, key: true, name: true, active: true, countries: true } });
+  const plans = await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: PLAN_CHOICE_SELECT });
   const missing = [...wanted.keys()].filter((k) => !plans.some((p) => p.key === k));
   if (missing.length) throw new PlanRefused(PLAN_REFUSALS.noSuchPlan(missing));
 
@@ -315,6 +371,9 @@ export async function setWorkspacePlans(tenantId: string, items: { planKey: stri
       const refusal = planChoiceRefusal(plan, current.some((c) => c.planId === plan.id), tenant.country);
       if (refusal) throw new PlanRefused(refusal);
     }
+    // One plan for each product, and Deskzo One with no other — by hand as at checkout.
+    const clash = productRefusal(plans.map(choicePlanOf));
+    if (clash) throw new PlanRefused(clash);
     await tx.subscriptionItem.deleteMany({ where: { subscriptionId, planId: { notIn: plans.map((p) => p.id) } } });
     for (const plan of plans) {
       const quantity = wanted.get(plan.key)!;

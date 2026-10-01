@@ -318,8 +318,8 @@ async function main() {
     ok("in India: Razorpay, in rupees", inOffer.gateway === "RAZORPAY" && inOffer.currency === "INR" && inOffer.plans.find((p) => p.key === "zz-pro")?.prices[0]?.amount === 149900);
     ok("a plan with no price is not on sale", !usOffer.plans.some((p) => p.key === "zz-lite"));
     ok(
-      "one edition, no more and no fewer",
-      /one edition/.test(await refused(() => checkout.startCheckout(US, { interval: "MONTH", items: [{ planKey: "zz-seats", quantity: 1 }] }, "https://zzbill-us.test/settings/billing"))),
+      "an edition first: add-ons alone are not bought (check:products has every rule of what goes together)",
+      /Choose a plan first/.test(await refused(() => checkout.startCheckout(US, { interval: "MONTH", items: [{ planKey: "zz-seats", quantity: 1 }] }, "https://zzbill-us.test/settings/billing"))),
     );
     const started = await checkout.startCheckout(US, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }, { planKey: "zz-seats", quantity: 2 }] }, "https://zzbill-us.test/settings/billing");
     const session = new URLSearchParams(callsTo("POST", "/v1/checkout/sessions").at(-1)!.body);

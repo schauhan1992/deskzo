@@ -13,7 +13,7 @@ import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { compactNumber, plural } from "@/lib/console-shared/format";
 import { planKindLabel } from "@/lib/console-shared/labels";
 import type { CatalogueModuleView, PlanKindKey, Tone } from "@/lib/console-shared/types";
@@ -22,6 +22,7 @@ import { getModuleDefinition, navGroupRank } from "@/lib/modules";
 import type { PlanDetail } from "@/lib/platform/console-data";
 import type { PlanSavePreview } from "@/lib/platform/entitlement-preview";
 import type { PlanInput } from "@/lib/platform/plans";
+import { BASE_MODULES, PRODUCTS, productByKey } from "@/lib/products";
 import { cn } from "@/lib/utils";
 import { PriceEditor } from "./price-editor";
 
@@ -33,6 +34,10 @@ import { PriceEditor } from "./price-editor";
  * and removed, and — when some workspace would lose a module it has now — the plan key typed to go on.
  * The checks here mirror the save's (src/lib/platform/plans.ts `checkPlanInput`) only to point at the
  * field early; the save checks everything again and its refusal is what the dialog shows.
+ *
+ * An edition may sell a product (src/lib/products.ts): Deskzo One is every module, and another
+ * product's plan can take that product's modules in one click. A workspace holds one plan for each
+ * product (src/lib/billing/plan-choice.ts).
  *
  * Read-only viewers get the same sections as definition lists, and no controls at all.
  */
@@ -57,6 +62,8 @@ type Draft = {
   domains: string;
   allModules: boolean;
   modules: string[];
+  /** The product an edition sells; "" for none. */
+  productKey: string;
 };
 
 const KEY_PATTERN = /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/;
@@ -67,7 +74,7 @@ const EVERY_PLAN = "In every plan";
 const PREVIEW_FAILED = "Couldn't work out what saving changes. Close this and try again.";
 
 const KINDS: { value: PlanKindKey; title: string; body: string }[] = [
-  { value: "EDITION", title: "Edition", body: "A workspace's base: the modules it runs on and the people included." },
+  { value: "EDITION", title: "Edition", body: "What a workspace buys: a product, or every product, with the people included." },
   { value: "BUNDLE", title: "Bundle", body: "Several modules sold together, on top of an edition." },
   { value: "ADDON", title: "Add-on", body: "One more thing: a module, more people, more copilot." },
   { value: "INTERNAL", title: "Internal", body: "Never sold: the installation's own workspace and staff test workspaces." },
@@ -97,6 +104,7 @@ const EMPTY: Draft = {
   domains: "0",
   allModules: false,
   modules: [],
+  productKey: "",
 };
 
 function draftOf(plan: PlanDetail | null): Draft {
@@ -115,15 +123,30 @@ function draftOf(plan: PlanDetail | null): Draft {
     domains: plan.customDomains === null ? "" : String(plan.customDomains),
     allModules: plan.allModules,
     modules: [...plan.modules],
+    productKey: plan.productKey ?? "",
   };
 }
+
+/** The product a draft sells: an edition's, or none. */
+const productOf = (d: Pick<Draft, "kind" | "productKey">) => (d.kind === "EDITION" && d.productKey ? d.productKey : null);
+
+/** Deskzo One: every module, as an internal plan may be. */
+const everyModule = (d: Draft) => (d.kind === "INTERNAL" && d.allModules) || productOf(d) === "one";
+
+/** A product's own modules as a plan lists them: the basics every product comes with, and its own. */
+const productModules = (key: string) => {
+  const product = productByKey(key);
+  return product && product.key !== "one" ? [...new Set([...BASE_MODULES, ...product.modules])] : [];
+};
+
+const productName = (key: string | null | undefined) => productByKey(key)?.name ?? "None";
 
 const limitOf = (text: string): number | null => (text.trim() === "" ? null : Number(text.trim()));
 
 /** The draft as the save takes it — what the preview and the save are both sent. */
 function inputOf(d: Draft): PlanInput {
   const internal = d.kind === "INTERNAL";
-  const every = internal && d.allModules;
+  const every = everyModule(d);
   const order = Number(d.sortOrder.trim());
   return {
     key: d.key.trim().toLowerCase(),
@@ -136,6 +159,7 @@ function inputOf(d: Draft): PlanInput {
     seats: limitOf(d.seats),
     copilotTokens: limitOf(d.copilot),
     customDomains: limitOf(d.domains),
+    productKey: productOf(d),
     // New workspaces never start on an internal plan, nor on a retired one — the save refuses both.
     isDefault: !internal && d.active && d.isDefault,
     active: d.active,
@@ -172,7 +196,8 @@ function problemsOf(d: Draft, mode: Mode, takenKeys: readonly string[], byKey: M
   if (badLimit(input.seats)) out.push({ section: "limits", field: "seats", message: "Users per unit is a whole number, 0 or more — or empty for no limit." });
   if (badLimit(input.copilotTokens)) out.push({ section: "limits", field: "copilot", message: "Copilot tokens is a whole number, 0 or more — or empty for no limit." });
   if (badLimit(input.customDomains ?? null)) out.push({ section: "limits", field: "domains", message: "Custom domains is a whole number, 0 or more — or empty for no limit." });
-  if (!input.allModules) {
+  // A product's plan may hold a module sold only in some countries: it drops out elsewhere by itself.
+  if (!input.allModules && !input.productKey) {
     for (const key of input.modules) {
       const only = byKey.get(key)?.countries;
       if (only && (input.countries.length === 0 || input.countries.some((c) => !only.includes(c)))) {
@@ -456,6 +481,7 @@ function BasicsSection({
   const keyId = "plan-field-key";
   const descriptionId = "plan-field-description";
   const orderId = "plan-field-order";
+  const productId = "plan-field-product";
 
   if (readOnly) {
     return (
@@ -465,6 +491,7 @@ function BasicsSection({
             { term: "Name", value: draft.name },
             { term: "Key", value: <span className="font-mono text-xs">{draft.key}</span> },
             { term: "Kind", value: planKindLabel(draft.kind) },
+            ...(draft.kind === "EDITION" ? [{ term: "Product", value: draft.productKey ? productName(draft.productKey) : <span className="text-muted">None — an edition of its own</span> }] : []),
             { term: "Order", value: <span className="tabular-nums">{draft.sortOrder}</span> },
             { term: "Description", value: draft.description || <span className="text-muted">None</span>, wide: true },
           ]}
@@ -574,6 +601,37 @@ function BasicsSection({
             <p className="text-xs text-warning">Once saved as internal it stays internal: never sold, never the default.</p>
           )}
         </fieldset>
+
+        {draft.kind === "EDITION" && (
+          <div className="space-y-1.5">
+            <Label htmlFor={productId}>Product</Label>
+            <Select
+              id={productId}
+              value={draft.productKey}
+              onChange={(e) => {
+                const key = e.target.value;
+                update("productKey", key);
+                // A blank plan given a product starts with that product's modules.
+                if (key && key !== "one" && draft.modules.length === 0) update("modules", productModules(key));
+              }}
+              className="w-full sm:w-80"
+            >
+              <option value="">None — an edition of its own</option>
+              {PRODUCTS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+            <Hint>
+              {draft.productKey === "one"
+                ? "Every module, including ones added later. It is bought on its own: it already holds every product."
+                : draft.productKey
+                  ? `A workspace holds one plan of ${productName(draft.productKey)}, beside any other products.`
+                  : "Bought alone among editions, as editions were before products. Choose a product to sell it beside the others."}
+            </Hint>
+          </div>
+        )}
 
         <div className="space-y-1.5">
           <Label htmlFor={descriptionId}>Description</Label>
@@ -888,8 +946,12 @@ function ModulesSection({
   const [query, setQuery] = useState("");
   const groups = useMemo(() => groupModules(catalogue), [catalogue]);
   const internal = draft.kind === "INTERNAL";
-  const every = internal && draft.allModules;
+  const every = everyModule(draft);
+  const product = productOf(draft);
   const explicit = new Set(draft.modules);
+  // A product's own modules, for the one-click fill — offered while the list differs from them.
+  const ownModules = product && product !== "one" ? productModules(product) : [];
+  const differs = ownModules.length > 0 && (ownModules.length !== explicit.size || ownModules.some((k) => !explicit.has(k)));
 
   // What comes with each listed module: entitlements add what a module needs (src/lib/entitlements.ts).
   const comesWith = new Map<string, string[]>();
@@ -906,7 +968,7 @@ function ModulesSection({
     return (
       <Panel id="plan-modules" title="Modules" description={every ? undefined : `${chosen} of ${sellable}, plus the basics in every plan.`}>
         {every ? (
-          <p className="text-sm text-text">Every module, including ones added later.</p>
+          <p className="text-sm text-text">Every module, including ones added later{product === "one" ? ` — ${productName(product)} is every product` : ""}.</p>
         ) : chosen === 0 ? (
           <p className="text-sm text-muted">Only the basics every workspace has.</p>
         ) : (
@@ -963,7 +1025,9 @@ function ModulesSection({
         )}
 
         {every ? (
-          <InsetBlock className="text-sm text-text">Every module is included, including ones added later.</InsetBlock>
+          <InsetBlock className="text-sm text-text">
+            Every module is included, including ones added later{product === "one" ? ` — ${productName(product)} is every product` : ""}.
+          </InsetBlock>
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -981,9 +1045,16 @@ function ModulesSection({
                   className="h-9 w-full rounded-base border border-line-strong bg-surface pr-3 pl-8 text-sm text-text placeholder:text-subtle"
                 />
               </div>
-              <p className="text-xs text-muted tabular-nums">
-                {chosen} of {sellable} modules
-              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {differs && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => update("modules", ownModules)}>
+                    Use {productName(product)}&apos;s modules
+                  </Button>
+                )}
+                <p className="text-xs text-muted tabular-nums">
+                  {chosen} of {sellable} modules
+                </p>
+              </div>
             </div>
             {errors.modules && (
               <p role="alert" className="rounded-lg border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning">
@@ -1007,7 +1078,7 @@ function ModulesSection({
                       </div>
                       <div className="space-y-0.5 p-1.5">
                         {g.modules.map((m) => (
-                          <ModuleRow key={m.key} module={m} explicit={explicit.has(m.key)} comesWith={comesWith.get(m.key)} countries={draft.countries} onToggle={toggle} />
+                          <ModuleRow key={m.key} module={m} explicit={explicit.has(m.key)} comesWith={comesWith.get(m.key)} countries={draft.countries} product={!!product} onToggle={toggle} />
                         ))}
                       </div>
                     </fieldset>
@@ -1027,22 +1098,30 @@ function ModuleRow({
   explicit,
   comesWith,
   countries,
+  product,
   onToggle,
 }: {
   module: CatalogueModuleView;
   explicit: boolean;
   comesWith: string[] | undefined;
   countries: string[];
+  /** On a product's plan, a module sold only in some countries drops out elsewhere rather than refusing the save. */
+  product: boolean;
   onToggle: (key: string) => void;
 }) {
   const locked = m.inEveryPlan || (!explicit && !!comesWith);
   const checked = m.inEveryPlan || explicit || !!comesWith;
-  const conflict = explicit && !!m.countries && (countries.length === 0 || countries.some((c) => !m.countries!.includes(c)));
+  const beyond = explicit && !!m.countries && (countries.length === 0 || countries.some((c) => !m.countries!.includes(c)));
+  const conflict = beyond && !product;
   const hints: { text: string; tone?: Tone }[] = [];
   if (m.inEveryPlan) hints.push({ text: "In every plan" });
   else if (!explicit && comesWith) hints.push({ text: `Comes with ${comesWith.join(", ")}` });
   if (!m.inEveryPlan && m.requires.length > 0) hints.push({ text: `Needs ${m.requires.map(labelOf).join(", ")}` });
-  if (m.countries) hints.push({ text: conflict ? `${m.countries.join(", ")} only — limit the plan to ${m.countries.join(", ")}` : `${m.countries.join(", ")} only`, tone: conflict ? "danger" : "warning" });
+  if (m.countries) {
+    const only = `${m.countries.join(", ")} only`;
+    const text = conflict ? `${only} — limit the plan to ${m.countries.join(", ")}` : beyond ? `${only} — elsewhere it drops out` : only;
+    hints.push({ text, tone: conflict ? "danger" : "warning" });
+  }
 
   return (
     <label className={cn("flex items-start gap-2.5 rounded-md px-2 py-1.5", locked ? "cursor-default" : "cursor-pointer hover:bg-surface-sunken")}>
@@ -1115,6 +1194,8 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     const offered = change(yesNo(before.active !== false), yesNo(sent.active !== false));
     const byDefault = change(yesNo(before.isDefault), yesNo(sent.isDefault));
     const soldIn = change(before.countries.join(", ") || "Everywhere", sent.countries.join(", ") || "Everywhere");
+    const product = change(productName(before.productKey), productName(sent.productKey));
+    if (product) items.push({ label: "Product", value: product, tone: "brand" });
     if (seats) items.push({ label: "Users per unit", value: seats });
     if (copilot) items.push({ label: "Copilot tokens a month", value: copilot });
     if (domains) items.push({ label: "Custom domains", value: domains });
@@ -1123,6 +1204,7 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     if (byDefault) items.push({ label: "Default for new workspaces", value: byDefault, tone: sent.isDefault ? "brand" : "warning" });
   } else {
     items.push({ label: "Kind", value: planKindLabel(sent.kind) });
+    if (sent.kind === "EDITION") items.push({ label: "Product", value: productName(sent.productKey) });
     items.push({ label: "Users per unit", value: limitText(sent.seats) });
     items.push({ label: "Copilot tokens a month", value: sent.copilotTokens === 0 ? "None" : limitText(sent.copilotTokens) });
     items.push({ label: "Custom domains", value: preview.customDomains[1] === 0 ? "None" : limitText(preview.customDomains[1]) });

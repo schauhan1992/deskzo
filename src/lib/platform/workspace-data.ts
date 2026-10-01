@@ -219,7 +219,7 @@ export async function workspaceHeader(slug: string, viewerId: string, now = new 
 
 export type PlanPanel = {
   /** The plans on its live subscriptions, by hand or at a gateway. */
-  items: { planKey: string; planName: string; kind: PlanKindKey; active: boolean; quantity: number; subscriptionId: string; gateway: GatewayKey; status: SubscriptionStatusKey }[];
+  items: { planKey: string; planName: string; kind: PlanKindKey; productKey: string | null; active: boolean; quantity: number; subscriptionId: string; gateway: GatewayKey; status: SubscriptionStatusKey }[];
   entitlements: Entitlements;
   /**
    * Every module a plan decides, and where this workspace stands with it: "plan" (it has it, from its
@@ -227,8 +227,8 @@ export type PlanPanel = {
    */
   modules: { key: string; label: string; state: "plan" | "added" | "taken" | "none" | "country"; countries: readonly string[] | null; requires: readonly string[] }[];
   overrides: { moduleKey: string; label: string; granted: boolean; reason: string; byStaffId: string; byName: string; createdAt: Date }[];
-  /** What its plans may be set to: every plan on sale, and retired ones it is on already. */
-  choices: { key: string; name: string; kind: PlanKindKey; active: boolean; countries: string[] }[];
+  /** What its plans may be set to: every plan on sale, and retired ones it is on already — with the product each sells, to group them and keep one plan for each product. */
+  choices: { key: string; name: string; kind: PlanKindKey; productKey: string | null; active: boolean; countries: string[] }[];
   limits: {
     seats: number | null;
     copilotTokens: number | null;
@@ -253,7 +253,7 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
       select: {
         quantity: true,
         subscription: { select: { id: true, gateway: true, status: true } },
-        plan: { select: { key: true, name: true, kind: true, active: true } },
+        plan: { select: { key: true, name: true, kind: true, productKey: true, active: true } },
       },
     }),
     control.tenantModuleOverride.findMany({
@@ -270,7 +270,7 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
     control.plan.findMany({
       where: { OR: [{ active: true }, { key: { in: currentKeys } }] },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      select: { key: true, name: true, kind: true, active: true, countries: true },
+      select: { key: true, name: true, kind: true, productKey: true, active: true, countries: true },
     }),
     staffNameMap(overrides.map((o) => o.byStaffId)),
   ]);
@@ -291,6 +291,7 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
       planKey: i.plan.key,
       planName: i.plan.name,
       kind: i.plan.kind,
+      productKey: i.plan.productKey,
       active: i.plan.active,
       quantity: i.quantity,
       subscriptionId: i.subscription.id,

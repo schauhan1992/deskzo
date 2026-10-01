@@ -6,7 +6,7 @@ import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatMoney } from "@/lib/billing/money";
 import { formatIstDate } from "@/lib/india-time";
 import { partnerShownToCustomer } from "@/lib/partners/customer-facing";
-import { COMPANY_NAME } from "@/lib/platform/brand-names";
+import { COMPANY_NAME } from "@/lib/brand-names";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
 /** Where this workspace stands, in a sentence. */

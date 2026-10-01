@@ -219,6 +219,7 @@ function planInput(input: unknown): PlanInput {
     copilotTokens: limit(i.copilotTokens),
     // Left out: the plan keeps its own — as the save does it.
     ...(i.customDomains === undefined ? {} : { customDomains: limit(i.customDomains) }),
+    ...(i.productKey === undefined ? {} : { productKey: i.productKey === null || i.productKey === "" ? null : String(i.productKey).slice(0, 40) }),
     isDefault: !!i.isDefault,
     active: i.active !== false,
     sortOrder: Number.isInteger(i.sortOrder) ? (i.sortOrder as number) : 0,

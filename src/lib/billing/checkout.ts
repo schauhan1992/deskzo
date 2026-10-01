@@ -1,5 +1,6 @@
 import type { BillingInterval } from "@wroffy/control-client";
 import { GatewayError } from "@/lib/billing/gateway";
+import { choiceRefusal } from "@/lib/billing/plan-choice";
 import { cancelRazorpaySubscription, createRazorpaySubscription } from "@/lib/billing/razorpay";
 import { createStripeCheckout, createStripePortal } from "@/lib/billing/stripe";
 import { controlDb } from "@/lib/platform/control-db";
@@ -19,7 +20,18 @@ export const gatewayFor = (country: string): Gateway => (country === "IN" ? "RAZ
 export class CheckoutRefused extends Error {}
 
 export type OfferPrice = { id: string; currency: string; interval: BillingInterval; amount: number; perSeat: boolean };
-export type OfferPlan = { key: string; name: string; kind: "EDITION" | "BUNDLE" | "ADDON"; description: string | null; seats: number | null; modules: string[]; prices: OfferPrice[] };
+export type OfferPlan = {
+  key: string;
+  name: string;
+  kind: "EDITION" | "BUNDLE" | "ADDON";
+  /** The product an edition sells (src/lib/products.ts) — "one" for Deskzo One; null: none. */
+  productKey: string | null;
+  description: string | null;
+  seats: number | null;
+  /** `["all"]` for every module. */
+  modules: string[];
+  prices: OfferPrice[];
+};
 
 /** What this workspace can buy: its gateway, its currency, and the plans with a price in it. */
 export async function offerFor(tenantId: string): Promise<{ gateway: Gateway; currency: string; plans: OfferPlan[] }> {
@@ -41,6 +53,7 @@ export async function offerFor(tenantId: string): Promise<{ gateway: Gateway; cu
         key: p.key,
         name: p.name,
         kind: p.kind as OfferPlan["kind"],
+        productKey: p.productKey,
         description: p.description,
         seats: p.seats,
         modules: p.allModules ? ["all"] : p.modules.map((m) => m.moduleKey),
@@ -57,8 +70,10 @@ export type CheckoutStart =
   | { gateway: "RAZORPAY"; authorisations: { plan: string; url: string }[] };
 
 /**
- * Starts paying: an edition, with any bundles and add-ons, at one interval. A workspace already
- * paying at a gateway changes its plan there instead (Stripe's billing portal), not here.
+ * Starts paying, at one interval: Deskzo One, or a plan for each product wanted (or an edition of its
+ * own), with any bundles and add-ons whose needs those meet — the rules and words of
+ * src/lib/billing/plan-choice.ts. A workspace already paying at a gateway changes its plan there
+ * instead (Stripe's billing portal), not here.
  */
 export async function startCheckout(tenantId: string, selection: Selection, returnUrl: string): Promise<CheckoutStart> {
   const control = controlDb();
@@ -77,7 +92,8 @@ export async function startCheckout(tenantId: string, selection: Selection, retu
     if (!plan || !price) throw new CheckoutRefused(`${plan?.name ?? key} is not on sale ${interval === "YEAR" ? "yearly" : "monthly"} here.`);
     return { plan, price, quantity };
   });
-  if (lines.filter((l) => l.plan.kind === "EDITION").length !== 1) throw new CheckoutRefused("Choose one edition, and any add-ons with it.");
+  const refusal = choiceRefusal(lines.map((l) => l.plan));
+  if (refusal) throw new CheckoutRefused(refusal);
 
   const live = await control.subscription.findMany({ where: { tenantId, gateway: { not: "MANUAL" }, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } }, select: { gateway: true } });
   if (live.length) throw new CheckoutRefused("This workspace is already paying for a plan — change it from Manage billing.");

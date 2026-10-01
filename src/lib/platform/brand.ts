@@ -15,8 +15,8 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
  * (src/lib/support/settings.ts).
  */
 
-export { DEFAULT_BRAND_NAME } from "@/lib/platform/brand-names";
-import { DEFAULT_BRAND_NAME } from "@/lib/platform/brand-names";
+export { DEFAULT_BRAND_NAME } from "@/lib/brand-names";
+import { DEFAULT_BRAND_NAME } from "@/lib/brand-names";
 
 export async function platformBrandName(): Promise<string> {
   if (!controlConfigured()) return DEFAULT_BRAND_NAME;

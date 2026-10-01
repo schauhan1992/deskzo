@@ -4,13 +4,17 @@ import { entitledModuleKeys, soldIn, type Entitlements } from "@/lib/entitlement
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
 import { controlDb } from "@/lib/platform/control-db";
 import { ENTITLEMENT_PLAN_SELECT, LIVE_STATUSES, entitlementsFrom, type EntItem } from "@/lib/platform/entitlements";
+import { productRefusal } from "@/lib/billing/plan-choice";
 import {
+  PLAN_CHOICE_SELECT,
   PLAN_REFUSALS,
   PlanRefused,
   checkPlanInput,
+  choicePlanOf,
   limitOf,
   liveGatewaySubscription,
   planChoiceRefusal,
+  planKeyOf,
   savedCustomDomains,
   wantedPlans,
   type LiveGateway,
@@ -141,13 +145,14 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     // What it would mean, from the items the save could take.
     const wanted = wantedPlans(items.filter((i) => refusalOf(() => wantedPlans([i])) === null));
     const plans = wanted.size
-      ? await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: { id: true, name: true, active: true, countries: true, ...ENTITLEMENT_PLAN_SELECT } })
+      ? await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: { ...PLAN_CHOICE_SELECT, ...ENTITLEMENT_PLAN_SELECT } })
       : [];
     const missing = [...wanted.keys()].filter((k) => !plans.some((p) => p.key === k));
     if (missing.length) refuse(PLAN_REFUSALS.noSuchPlan(missing));
     // The save changes the workspace's live manual subscription, or makes one — active, given by hand.
     const manual = subs.find((s) => s.gateway === "MANUAL" && LIVE.includes(s.status));
     for (const plan of plans) refuse(planChoiceRefusal(plan, !!manual?.items.some((i) => i.planId === plan.id), tenant.country));
+    refuse(productRefusal(plans.map(choicePlanOf)));
 
     const chosen: EntItem[] = plans.map(({ key, kind, allModules, seats, copilotTokens, customDomains, modules }) => ({
       quantity: wanted.get(key)!,
@@ -210,12 +215,13 @@ const listedModules = (allModules: boolean, modules: string[]): Set<string> => n
  * words, when the save would refuse the plan itself.
  */
 export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview> {
-  const { key, modules, data } = checkPlanInput(input);
   const control = controlDb();
   const existing = await control.plan.findUnique({
-    where: { key },
-    select: { id: true, kind: true, allModules: true, seats: true, copilotTokens: true, customDomains: true, modules: { select: { moduleKey: true } } },
+    where: { key: planKeyOf(input.key) },
+    select: { id: true, kind: true, productKey: true, allModules: true, seats: true, copilotTokens: true, customDomains: true, modules: { select: { moduleKey: true } } },
   });
+  // The save's checks first, with the plan's own product when the input leaves it out.
+  const { key, modules, data } = checkPlanInput(input, existing);
   if (existing?.kind === "INTERNAL" && data.kind !== "INTERNAL") throw new PlanRefused(PLAN_REFUSALS.internalStaysInternal);
 
   const before = existing ? listedModules(existing.allModules, existing.modules.map((m) => m.moduleKey)) : new Set<string>();

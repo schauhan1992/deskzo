@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CopyPlus, Globe, Pencil, Sparkles, Star, Users } from "lucide-react";
+import { ArrowRight, Boxes, CopyPlus, Globe, Pencil, Sparkles, Star, Users } from "lucide-react";
 import { StatusPill } from "@/components/console/kit/status";
 import { formatMoney } from "@/lib/billing/money";
 import { compactNumber, plural } from "@/lib/console-shared/format";
@@ -8,13 +8,15 @@ import type { Caps } from "@/lib/console-shared/roles";
 import type { CatalogueModuleView, PlanKindKey } from "@/lib/console-shared/types";
 import type { PlanListRow } from "@/lib/platform/console-data";
 import type { PlanInput } from "@/lib/platform/plans";
+import { PRODUCTS, productByKey } from "@/lib/products";
 import { cn } from "@/lib/utils";
 import { PlanCardActions } from "./plan-card-actions";
 
 /**
- * The plan catalogue as cards, grouped by kind — what each plan includes, where it is sold, what it
- * costs and who is on it, readable at a glance before anybody opens one. Server-safe: the only
- * interactive piece is the retire / offer-again button, a client island per card.
+ * The plan catalogue as cards, grouped by kind — what each plan includes, which product it sells,
+ * where it is sold, what it costs and who is on it, readable at a glance before anybody opens one.
+ * Editions are in product order (src/lib/products.ts: Deskzo One first), editions of no product last.
+ * Server-safe: the only interactive piece is the retire / offer-again button, a client island per card.
  *
  * The helpers below are shared with the compare matrix, so a price reads the same in both views.
  */
@@ -22,7 +24,7 @@ import { PlanCardActions } from "./plan-card-actions";
 export const KIND_ORDER: readonly PlanKindKey[] = ["EDITION", "BUNDLE", "ADDON", "INTERNAL"];
 
 export const KIND_GROUPS: Record<PlanKindKey, { title: string; description: string }> = {
-  EDITION: { title: "Editions", description: "A workspace's base: the modules it runs on and the people included." },
+  EDITION: { title: "Editions", description: "What a workspace buys: a product, or every product, with the people included — one plan for each product." },
   BUNDLE: { title: "Bundles", description: "Several modules sold together, on top of an edition." },
   ADDON: { title: "Add-ons", description: "One more thing: a module, more people, more copilot." },
   INTERNAL: { title: "Internal", description: "Never sold: the installation's own workspace and staff test workspaces." },
@@ -48,6 +50,19 @@ export function copilotText(tokens: number | null): string {
   return `${compactNumber(tokens)} copilot tokens a month`;
 }
 
+/** The product a plan sells, by name — or what it is without one. */
+export function productText(plan: { kind: PlanKindKey; productKey: string | null }): string {
+  const product = productByKey(plan.productKey);
+  if (product) return product.key === "one" ? `${product.name} — every product` : product.name;
+  return plan.kind === "EDITION" ? "No product — an edition of its own" : "No product";
+}
+
+/** Where a plan stands among the products: Deskzo One first, then products.ts's order, then none. */
+export const productRank = (productKey: string | null) => {
+  const i = PRODUCTS.findIndex((p) => p.key === productKey);
+  return i < 0 ? PRODUCTS.length : i;
+};
+
 export function soldInText(countries: readonly string[]): string {
   return countries.length ? `Sold in: ${countries.join(", ")}` : "Sold everywhere";
 }
@@ -65,6 +80,7 @@ export function planInputOf(plan: PlanListRow): PlanInput {
     seats: plan.seats,
     copilotTokens: plan.copilotTokens,
     customDomains: plan.customDomains,
+    productKey: plan.productKey,
     isDefault: plan.isDefault,
     active: plan.active,
     sortOrder: plan.sortOrder,
@@ -80,7 +96,11 @@ const CARD_ACTION = "inline-flex h-7 items-center gap-1 rounded-base px-2 text-x
 export function PlanCards({ plans, catalogue, caps }: { plans: PlanListRow[]; catalogue: CatalogueModuleView[]; caps: Caps }) {
   const labels = new Map(catalogue.map((m) => [m.key, m.label]));
   const order = new Map(catalogue.map((m, i) => [m.key, i]));
-  const groups = KIND_ORDER.map((kind) => ({ kind, plans: plans.filter((p) => p.kind === kind) })).filter((g) => g.plans.length > 0);
+  // Editions in product order; the rest as listed. A stable sort keeps the list's own order within a product.
+  const groups = KIND_ORDER.map((kind) => ({
+    kind,
+    plans: plans.filter((p) => p.kind === kind).sort((a, b) => (kind === "EDITION" ? productRank(a.productKey) - productRank(b.productKey) : 0)),
+  })).filter((g) => g.plans.length > 0);
 
   return (
     <div className="space-y-8">
@@ -161,6 +181,12 @@ function PlanCard({ plan, labels, order, caps }: { plan: PlanListRow; labels: Ma
         </div>
 
         <ul className="space-y-1 text-xs text-muted">
+          {plan.kind === "EDITION" && (
+            <li className={cn("flex items-center gap-2", plan.productKey ? "font-medium text-text" : "")}>
+              <Boxes aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-subtle" />
+              {productText(plan)}
+            </li>
+          )}
           <li className="flex items-center gap-2">
             <Users aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-subtle" />
             {seatsText(plan.seats)}

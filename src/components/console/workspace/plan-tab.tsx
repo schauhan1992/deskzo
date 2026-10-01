@@ -5,10 +5,12 @@ import { Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
+import { productRank } from "@/components/console/plans/plan-cards";
 import { plural } from "@/lib/console-shared/format";
 import { SUBSCRIPTION_STATUS, gatewayLabel, planKindLabel, subscriptionKind } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PlanPanel, WorkspaceHeader } from "@/lib/platform/workspace-data";
+import { productByKey } from "@/lib/products";
 import { AddOverrideButton, LimitsButton, ModuleGrid, RemoveOverrideButton } from "./override-dialogs";
 import { PlansEditor } from "./plans-editor";
 
@@ -17,7 +19,8 @@ import { PlansEditor } from "./plans-editor";
  * put in place of its plans, and its limits.
  *
  *   Plans      sellers change them here (previewed) — unless it pays at a gateway, where its plans
- *              change from its own billing page; everybody else reads the list.
+ *              change from its own billing page; everybody else reads the list. Both are in product
+ *              order, each edition with the product it sells (src/lib/products.ts).
  *   Modules    the catalogue with this workspace's standing on each.
  *   Overrides  managers add and remove them.
  *   Limits     sellers override seats, copilot tokens and custom domains.
@@ -154,12 +157,14 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
   );
 }
 
-/** The plans it is on, read-only: name ×quantity, kind, and where each comes from. */
+/** The plans it is on, read-only, in product order: name ×quantity, kind, the product it sells, and where each comes from. */
 function PlanList({ items }: { items: PlanPanel["items"] }) {
   if (items.length === 0) return <p className="text-sm text-muted">No plan — it has the core modules only.</p>;
+  // Editions by product (Deskzo One first), then everything else as listed.
+  const sorted = [...items].sort((a, b) => (a.kind === "EDITION" ? productRank(a.productKey) : 99) - (b.kind === "EDITION" ? productRank(b.productKey) : 99));
   return (
     <ul className="divide-y divide-line rounded-lg border border-line">
-      {items.map((item) => (
+      {sorted.map((item) => (
         <li key={`${item.subscriptionId}-${item.planKey}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 px-3 py-2">
           <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-text">
@@ -167,6 +172,7 @@ function PlanList({ items }: { items: PlanPanel["items"] }) {
               {item.quantity > 1 && <span className="ml-1 text-muted tabular-nums">×{item.quantity}</span>}
             </span>
             <StatusPill tone={item.kind === "INTERNAL" ? "brand" : "neutral"}>{planKindLabel(item.kind)}</StatusPill>
+            {productByKey(item.productKey) && <StatusPill tone="brand">{productByKey(item.productKey)!.name}</StatusPill>}
             {!item.active && <StatusPill tone="warning">Retired</StatusPill>}
           </span>
           <span className="flex items-center gap-2 text-xs text-muted">

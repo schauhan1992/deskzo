@@ -11,11 +11,11 @@ import { withDependencies } from "@/lib/entitlements";
 import { getModuleDefinition, navGroupRank } from "@/lib/modules";
 import type { PlanListRow } from "@/lib/platform/console-data";
 import { cn } from "@/lib/utils";
-import { priceLine } from "./plan-cards";
+import { priceLine, productText } from "./plan-cards";
 
 /**
- * Plans side by side: the facts that decide a sale first (limits, where it is sold, prices, who is on
- * it), then every module as a row. A module a plan lists is a tick; one it gets because a listed
+ * Plans side by side: the facts that decide a sale first (the product it sells, limits, where it is
+ * sold, prices, who is on it), then every module as a row. A module a plan lists is a tick; one it gets because a listed
  * module needs it is a tick "with …" — entitlements add what a module needs (src/lib/entitlements.ts),
  * so a dash there would be wrong; a module sold only in some countries says so. Server-safe.
  */
@@ -148,6 +148,11 @@ export function CompareMatrix({ plans, catalogue }: { plans: PlanListRow[]; cata
         </thead>
         <TBody>
           <SummaryRow label="Kind" plans={plans} render={(p) => <span className="text-sm text-text">{planKindLabel(p.kind)}</span>} />
+          <SummaryRow
+            label="Product"
+            plans={plans}
+            render={(p) => (p.kind === "EDITION" ? <span className={cn("text-sm", p.productKey ? "text-text" : "text-muted")}>{productText(p)}</span> : <span className="text-xs text-muted">—</span>)}
+          />
           <SummaryRow
             label="Users per unit"
             plans={plans}

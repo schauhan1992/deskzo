@@ -554,6 +554,10 @@ model Plan {
   seats         Int?
   /// AI copilot tokens a month, for each unit of quantity. Null: no limit; 0: none.
   copilotTokens Int?
+  /// The product it sells (src/lib/products.ts: crm, books, … or one for the whole suite). A workspace
+  /// holds at most one plan per product; Deskzo One holds every product, so no other with it. Null: an
+  /// add-on, a bundle or an internal plan, which belongs to no product.
+  productKey    String?
   /// Custom domains a workspace may add, for each unit of quantity. Null: no limit; 0: none (the
   /// default, so a plan offers them only when staff say so).
   customDomains Int?    @default(0)
@@ -572,6 +576,7 @@ model Plan {
   items   SubscriptionItem[]
   prices  PlanPrice[]
 
+  @@index([productKey])
   @@map("plans")
 }
 

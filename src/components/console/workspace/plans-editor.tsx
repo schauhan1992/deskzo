@@ -17,8 +17,10 @@ import { IconButton } from "@/components/ui/icon-button";
 import { plural } from "@/lib/console-shared/format";
 import { planKindLabel, standingLabel } from "@/lib/console-shared/labels";
 import type { Tone } from "@/lib/console-shared/types";
+import { productRefusal } from "@/lib/billing/plan-choice";
 import type { EntitlementChange, EntitlementPreview } from "@/lib/platform/entitlement-preview";
 import type { PlanPanel } from "@/lib/platform/workspace-data";
+import { PRODUCTS, productByKey } from "@/lib/products";
 import { cn } from "@/lib/utils";
 
 /**
@@ -31,6 +33,11 @@ import { cn } from "@/lib/utils";
  *
  * Offered: every plan on sale in the workspace's country, and anything it is on already (a retired
  * plan may stay; it cannot come back once taken off). Internal plans are an owner's to give.
+ *
+ * Grouped as they are sold: Deskzo One, each product in src/lib/products.ts's order, editions of
+ * their own, then bundles and add-ons, then internal plans. One plan for each product, and Deskzo
+ * One with no other — the save refuses otherwise (src/lib/billing/plan-choice.ts), and the list says
+ * so as soon as the ticks break the rule.
  */
 
 const QUANTITY_MAX = 10_000;
@@ -56,6 +63,17 @@ function signature(entries: [string, number | null][]): string {
     .map(([key, q]) => `${key}:${q ?? "?"}`)
     .sort()
     .join("|");
+}
+
+/** The plans offered, grouped as they are sold — see the top of this file. Empty groups are left out. */
+function groupChoices(plans: Choice[]): { key: string; title: string; plans: Choice[] }[] {
+  const groups = [
+    ...PRODUCTS.map((p) => ({ key: p.key, title: p.name, plans: plans.filter((c) => c.kind === "EDITION" && c.productKey === p.key) })),
+    { key: "own", title: "Editions of their own", plans: plans.filter((c) => c.kind === "EDITION" && !productByKey(c.productKey)) },
+    { key: "extras", title: "Bundles and add-ons", plans: plans.filter((c) => c.kind === "BUNDLE" || c.kind === "ADDON") },
+    { key: "internal", title: "Internal", plans: plans.filter((c) => c.kind === "INTERNAL") },
+  ];
+  return groups.filter((g) => g.plans.length > 0);
 }
 
 /** The current plans by key, added up — a key listed twice is one line with both quantities. */
@@ -95,6 +113,8 @@ export function PlansEditor({
   const dirty = signature(entries) !== signature(pairs(initial));
   const items = entries.flatMap(([planKey, quantity]) => (quantity === null ? [] : [{ planKey, quantity }]));
   const ready = preview.key === signature(entries) && !preview.pending && preview.preview !== null && !preview.preview.refusal;
+  // The product rules, said as soon as the ticks break them — the save's own words.
+  const clash = productRefusal(choices.filter((c) => c.key in chosen).map((c) => ({ ...c, modules: [] })));
   const removed = preview.preview?.diff.modulesRemoved.length ?? 0;
 
   function toggle(plan: Choice, on: boolean) {
@@ -155,50 +175,58 @@ export function PlansEditor({
           .
         </p>
       ) : (
-        <ul className="divide-y divide-line rounded-lg border border-line">
-          {offered.map((plan) => {
-            const on = plan.key in chosen;
-            // An internal plan already on it stays in view, but only an owner changes it.
-            const locked = plan.kind === "INTERNAL" && !owner;
-            const text = chosen[plan.key] ?? "";
-            const q = quantityOf(text);
-            const was = initial[plan.key];
-            return (
-              <li key={plan.key} className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2", on && "bg-surface-sunken/60")}>
-                <label className={cn("flex min-w-0 items-center gap-2.5", locked ? "cursor-not-allowed" : "cursor-pointer")}>
-                  <Checkbox checked={on} disabled={locked} onChange={(e) => toggle(plan, e.target.checked)} className="shrink-0" />
-                  <span className="min-w-0 truncate text-sm font-medium text-text">{plan.name}</span>
-                  <StatusPill tone={plan.kind === "INTERNAL" ? "brand" : "neutral"}>{planKindLabel(plan.kind)}</StatusPill>
-                  {!plan.active && <StatusPill tone="warning">Retired</StatusPill>}
-                  {was !== undefined && <span className="text-[11px] whitespace-nowrap text-subtle">{`on it now${was !== "1" ? ` ×${was}` : ""}`}</span>}
-                  {locked && (
-                    <span className="inline-flex items-center gap-1 text-[11px] whitespace-nowrap text-subtle">
-                      <Lock aria-hidden="true" className="h-3 w-3" />
-                      an owner&apos;s to change
-                    </span>
-                  )}
-                </label>
-                {on && !locked && (
-                  <span className="inline-flex items-center rounded-base border border-line-strong bg-surface shadow-sm">
-                    <IconButton icon={Minus} label={`Fewer of ${plan.name}`} onClick={() => step(plan.key, -1)} disabled={q !== null && q <= 1} />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      aria-label={`Quantity of ${plan.name}`}
-                      aria-invalid={q === null || undefined}
-                      value={text}
-                      onChange={(e) => setQuantity(plan.key, e.target.value)}
-                      className={cn("h-7 w-12 border-x border-line bg-transparent text-center text-sm text-text tabular-nums", q === null && "text-danger")}
-                    />
-                    <IconButton icon={Plus} label={`More of ${plan.name}`} onClick={() => step(plan.key, 1)} disabled={q !== null && q >= QUANTITY_MAX} />
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-3">
+          {groupChoices(offered).map((group) => (
+            <div key={group.key}>
+              <p className="mb-1 text-[11px] font-semibold tracking-[0.08em] text-subtle uppercase">{group.title}</p>
+              <ul className="divide-y divide-line rounded-lg border border-line">
+                {group.plans.map((plan) => {
+                  const on = plan.key in chosen;
+                  // An internal plan already on it stays in view, but only an owner changes it.
+                  const locked = plan.kind === "INTERNAL" && !owner;
+                  const text = chosen[plan.key] ?? "";
+                  const q = quantityOf(text);
+                  const was = initial[plan.key];
+                  return (
+                    <li key={plan.key} className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2", on && "bg-surface-sunken/60")}>
+                      <label className={cn("flex min-w-0 items-center gap-2.5", locked ? "cursor-not-allowed" : "cursor-pointer")}>
+                        <Checkbox checked={on} disabled={locked} onChange={(e) => toggle(plan, e.target.checked)} className="shrink-0" />
+                        <span className="min-w-0 truncate text-sm font-medium text-text">{plan.name}</span>
+                        <StatusPill tone={plan.kind === "INTERNAL" ? "brand" : "neutral"}>{planKindLabel(plan.kind)}</StatusPill>
+                        {!plan.active && <StatusPill tone="warning">Retired</StatusPill>}
+                        {was !== undefined && <span className="text-[11px] whitespace-nowrap text-subtle">{`on it now${was !== "1" ? ` ×${was}` : ""}`}</span>}
+                        {locked && (
+                          <span className="inline-flex items-center gap-1 text-[11px] whitespace-nowrap text-subtle">
+                            <Lock aria-hidden="true" className="h-3 w-3" />
+                            an owner&apos;s to change
+                          </span>
+                        )}
+                      </label>
+                      {on && !locked && (
+                        <span className="inline-flex items-center rounded-base border border-line-strong bg-surface shadow-sm">
+                          <IconButton icon={Minus} label={`Fewer of ${plan.name}`} onClick={() => step(plan.key, -1)} disabled={q !== null && q <= 1} />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            aria-label={`Quantity of ${plan.name}`}
+                            aria-invalid={q === null || undefined}
+                            value={text}
+                            onChange={(e) => setQuantity(plan.key, e.target.value)}
+                            className={cn("h-7 w-12 border-x border-line bg-transparent text-center text-sm text-text tabular-nums", q === null && "text-danger")}
+                          />
+                          <IconButton icon={Plus} label={`More of ${plan.name}`} onClick={() => step(plan.key, 1)} disabled={q !== null && q >= QUANTITY_MAX} />
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
 
+      {clash && <ActionNotice tone="error">{clash}</ActionNotice>}
       {invalid.length > 0 && <ActionNotice tone="error">{`A quantity is a whole number from 1 to 10,000 — check ${invalid.join(", ")}.`}</ActionNotice>}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

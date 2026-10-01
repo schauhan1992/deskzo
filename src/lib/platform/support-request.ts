@@ -3,7 +3,7 @@ import { redactSecrets } from "@/lib/console-shared/redact";
 import type { TenantStatusKey } from "@/lib/console-shared/types";
 import { cleanText } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
-import { COMPANY_NAME } from "@/lib/platform/brand-names";
+import { COMPANY_NAME } from "@/lib/brand-names";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import type { Staff } from "@/lib/platform/staff-session";
