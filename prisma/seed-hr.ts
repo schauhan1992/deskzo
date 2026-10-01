@@ -628,6 +628,7 @@ async function main() {
         lopDays: lop,
         state: ROSTER[i].state,
         month,
+        year,
         // Entered by payroll in the app; seeded here for the locked months so they look finished.
         incomeTax: isLast ? 0 : Math.round((ROSTER[i].gross > 60000 ? ROSTER[i].gross * 0.08 : 0) / 10) * 10,
       });

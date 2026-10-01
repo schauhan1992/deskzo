@@ -43,10 +43,43 @@ export function monthlyGross(c: SalaryComponents) {
 // ─── Provident Fund ───────────────────────────────────────────────────────────
 
 /**
- * The wage ceiling above which PF is not compulsory. An employer may contribute on the full basic
- * instead, which is why `pfOnFullBasic` exists rather than being assumed either way.
+ * The statutory wage ceiling for EPF, EPS and EDLI, by the day it took effect. An employer may
+ * contribute on the full basic instead, which is why `pfOnFullBasic` exists rather than being assumed
+ * either way.
+ *
+ * ₹15,000 from 1 Sep 2014; ₹25,000 from **17 Sep 2026** (S.O. 5109(E), EPFO's wage-ceiling circular
+ * and FAQs of 28 Sep 2026). A month in which the ceiling changes is one return, with the wages taken
+ * proportionately by days either side of the change (FAQ Q7/Q9): September 2026 is 1–16 Sep at
+ * ₹15,000 and 17–30 Sep at ₹25,000.
  */
-export const PF_WAGE_CEILING = 15000;
+export const PF_WAGE_CEILINGS: readonly { from: { year: number; month: number; day: number }; ceiling: number }[] = [
+  { from: { year: 2014, month: 9, day: 1 }, ceiling: 15000 },
+  { from: { year: 2026, month: 9, day: 17 }, ceiling: 25000 },
+];
+/** The ceiling in force on a calendar day (month 1–12). */
+export function pfWageCeilingOn(year: number, month: number, day: number): number {
+  const key = year * 10000 + month * 100 + day;
+  let ceiling = PF_WAGE_CEILINGS[0]!.ceiling;
+  for (const c of PF_WAGE_CEILINGS) if (c.from.year * 10000 + c.from.month * 100 + c.from.day <= key) ceiling = c.ceiling;
+  return ceiling;
+}
+/** The newest ceiling — what a salary structure is planned against. */
+export const PF_WAGE_CEILING = PF_WAGE_CEILINGS[PF_WAGE_CEILINGS.length - 1]!.ceiling;
+/**
+ * A month split where the ceiling changes within it: each part's days and ceiling. One part for any
+ * month without a change; two for September 2026 (16 days at ₹15,000, 14 at ₹25,000).
+ */
+export function pfCeilingParts(year: number, month: number): { days: number; ceiling: number }[] {
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const parts: { days: number; ceiling: number }[] = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ceiling = pfWageCeilingOn(year, month, day);
+    const last = parts[parts.length - 1];
+    if (last && last.ceiling === ceiling) last.days += 1;
+    else parts.push({ days: 1, ceiling });
+  }
+  return parts;
+}
 export const PF_EMPLOYEE_RATE = 0.12;
 /**
  * The employer's 12% is split: 8.33% to the pension scheme (capped at the ceiling, always) and the
@@ -57,15 +90,29 @@ export const EPS_RATE = 0.0833;
 
 export type PfResult = { employee: number; employer: number; eps: number; epf: number; wages: number };
 
-export function computePf(basicForPf: number, opts: { applicable: boolean; onFullBasic?: boolean }): PfResult {
+/**
+ * PF on a month's basic. `period` is the wage month (month 1–12): the ceiling in force that month —
+ * and for a month the ceiling changes in, each part's ceiling on its share of the days (EPFO's FAQ Q7:
+ * ₹20,000 in September 2026 is ₹15,000 × 16/30 + ₹20,000 × 14/30 = ₹17,333.33). Without a period, the
+ * newest ceiling: a salary structure being planned now.
+ */
+export function computePf(
+  basicForPf: number,
+  opts: { applicable: boolean; onFullBasic?: boolean; period?: { year: number; month: number } },
+): PfResult {
   if (!opts.applicable || basicForPf <= 0) {
     return { employee: 0, employer: 0, eps: 0, epf: 0, wages: 0 };
   }
-  const wages = opts.onFullBasic ? basicForPf : Math.min(basicForPf, PF_WAGE_CEILING);
+  const parts = opts.period ? pfCeilingParts(opts.period.year, opts.period.month) : [{ days: 1, ceiling: PF_WAGE_CEILING }];
+  const monthDays = parts.reduce((t, p) => t + p.days, 0);
+  // The wage within the ceiling, taken part by part — what EPS is always on, and what PF is on unless
+  // the employer contributes on the full basic.
+  const capped = round2(parts.reduce((t, p) => t + (Math.min(basicForPf, p.ceiling) * p.days) / monthDays, 0));
+  const wages = opts.onFullBasic ? basicForPf : capped;
   const employee = roundRupee(wages * PF_EMPLOYEE_RATE);
   const employer = roundRupee(wages * PF_EMPLOYEE_RATE);
   // EPS is always on the capped wage, even when the employer contributes on more than the ceiling.
-  const eps = roundRupee(Math.min(wages, PF_WAGE_CEILING) * EPS_RATE);
+  const eps = roundRupee(capped * EPS_RATE);
   return { employee, employer, eps, epf: round2(employer - eps), wages };
 }
 
@@ -202,7 +249,9 @@ export type PayslipInput = {
   lopDays: number;
   /** Where the employee works, for professional tax. */
   state?: string | null;
+  /** The wage month (1–12) and its year: professional tax's slab and the PF wage ceiling in force. */
   month: number;
+  year: number;
   /** Entered by whoever runs payroll — see the note at the top of this file. */
   incomeTax?: number;
   otherDeduction?: number;
@@ -268,9 +317,26 @@ export function computePayslip(input: PayslipInput): PayslipResult {
 
   // PF is on basic, so an incentive never touches it. ESI and professional tax are on gross, so it
   // does — a monthly incentive is remuneration, and treating it otherwise would under-deduct both.
-  const pf = computePf(components.basic, { applicable: input.flags.pfApplicable, onFullBasic: input.pfOnFullBasic });
+  const period = { year: input.year, month: input.month };
+  const pf = computePf(components.basic, { applicable: input.flags.pfApplicable, onFullBasic: input.pfOnFullBasic, period });
   const esi = computeEsi(grossEarnings, { applicable: input.flags.esiApplicable });
   const pt = computeProfessionalTax(grossEarnings, input.state, input.month, { applicable: input.flags.ptApplicable });
+
+  // The ceiling rise brings people into PF who were outside it: from 17 Sep 2026, basic above ₹15,000
+  // and up to ₹25,000 (EPF, EPS and EDLI are all compulsory; FAQ Q28–Q31). Flagged, not switched on —
+  // enrolment is the employer's act, with the member's details, and an establishment outside EPF has
+  // nothing to do.
+  const latest = PF_WAGE_CEILINGS[PF_WAGE_CEILINGS.length - 1]!;
+  const previous = PF_WAGE_CEILINGS[PF_WAGE_CEILINGS.length - 2];
+  const inForce = input.year * 100 + input.month >= latest.from.year * 100 + latest.from.month;
+  if (!input.flags.pfApplicable && previous && inForce && c.basic > previous.ceiling && c.basic <= latest.ceiling) {
+    const rupees = (v: number) => `₹${v.toLocaleString("en-IN")}`;
+    const { year, month, day } = latest.from;
+    const since = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    warnings.push(
+      `PF isn't on for this employee, but their basic of ${rupees(c.basic)} is within the PF wage ceiling of ${rupees(latest.ceiling)} from ${since} (it was ${rupees(previous.ceiling)}). If your establishment is covered by EPF, they must be enrolled — switch PF on in their salary structure.`,
+    );
+  }
 
   if (input.flags.ptApplicable && !pt.known) {
     warnings.push(

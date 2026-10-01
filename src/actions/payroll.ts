@@ -261,6 +261,7 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       lopDays: lop,
       state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.employeeProfile?.state ?? null,
       month,
+      year,
       incentive: incentiveByUser.get(person.id)?.total ?? 0,
     });
 
