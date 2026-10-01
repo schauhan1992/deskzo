@@ -13,6 +13,8 @@ For whoever runs the platform: what runs where, what to back up, how to release,
 | PostgreSQL 16 | One database per workspace, plus the control plane and the reference database | With continuous archiving (point-in-time recovery) |
 | PgBouncer | Pools the app's connections to workspace databases | Transaction mode (§7) |
 
+On the Azure VM ([deploy-azure.md](deploy-azure.md)) each of these is a Docker Compose service in `deploy/azure/`: Caddy is the reverse proxy and gets each address its certificate, the scheduler service makes the three calls below from inside the server, and PgBouncer is not set up yet.
+
 ### Scheduled calls
 
 | Every | Call | Secret |

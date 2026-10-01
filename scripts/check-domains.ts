@@ -477,6 +477,36 @@ async function main() {
       await domains.checkDomain(legacy.id);
     })));
 
+    section("Certificates: only for what is served (the HTTPS proxy asks first)");
+    const certs = require("../src/lib/tenancy/certificates") as typeof import("../src/lib/tenancy/certificates");
+    const askRoute = require("../src/app/api/platform/tls-ask/route") as typeof import("../src/app/api/platform/tls-ask/route");
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const asked = async (domain: string) => (await askRoute.GET(new NextRequest(`http://app:3000/api/platform/tls-ask?domain=${encodeURIComponent(domain)}`))).status;
+    const allowed = (host: string | null) => certs.certificateAllowed(host);
+    /** The name a certificate is asked for: never a port, which a development subdomain carries. */
+    const named = (slug: string) => registry.subdomainHost(slug).replace(/:\d+$/, "");
+    registry.forgetRegistry();
+    ok("the platform's own addresses: the site, www., the console, the CMS, the partner portal", (await Promise.all(["localhost", "www.localhost", "admin.localhost", "cms.localhost", "partners.localhost"].map(allowed))).every(Boolean));
+    ok("a workspace's own subdomain", await allowed(named(A.slug)), JSON.stringify({ host: named(A.slug), kind: hostLib.classifyHost(named(A.slug)), status: (await registry.tenantBySlug(A.slug))?.status ?? null }));
+    ok("  however the request writes it", await allowed(`${named(A.slug).toUpperCase()}.`));
+    ok("not a subdomain nobody has, a reserved one, or one under a workspace's", !(await allowed(`${PREFIX}nobody.localhost`)) && !(await allowed("api.localhost")) && !(await allowed(`x.${named(A.slug)}`)));
+    const CERT = "shop.zzdom-d.example";
+    const certRow = await domains.addDomain(D.id, CERT, "owner@d.zzdom.example");
+    registry.forgetRegistry();
+    ok("a workspace's own domain: not while it waits to be proved", !(await allowed(CERT)));
+    publish(CERT, certRow.verifyToken, target(D.slug));
+    ok("  but once verified and live", (await domains.checkDomain(certRow.id)).outcome === "verified" && (await allowed(CERT)));
+    await domains.removeDomain(certRow.id, D.id);
+    unpublish(CERT);
+    registry.forgetRegistry();
+    ok("  and not once removed", !(await allowed(CERT)));
+    ok("never a stranger's domain pointed at the server, nor nothing at all", !(await allowed("stranger.example")) && !(await allowed("")) && !(await allowed(null)) && !(await allowed("admin.localhost:443")));
+    const closed = await control.tenant.create({ data: { slug: `${PREFIX}gone`, name: "Zz Dom Gone", status: "DEPROVISIONED", keyBundleCipher: "pending", ownerEmail: "owner@gone.zzdom.example" } });
+    tenantIds.push(closed.id);
+    registry.forgetRegistry();
+    ok("never a workspace that is closed", !(await allowed(named(closed.slug))));
+    ok("through the route the proxy calls: 200 for ours, 404 for anything else", (await asked("admin.localhost")) === 200 && (await asked(named(A.slug))) === 200 && (await asked("stranger.example")) === 404);
+
     // ─── The sweep ───────────────────────────────────────────────────────────────────────────────
     section("The daily sweep");
     const SW = "sweep.zzdom-d.example";

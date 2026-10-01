@@ -1,0 +1,32 @@
+# HTTPS for Deskzo One. Caddy gets each certificate from Let's Encrypt the first time a name is
+# asked for, after asking the app whether the name is one of ours (src/lib/tenancy/certificates.ts):
+# the site, www., admin., cms., partners., every workspace, and workspaces' own verified domains.
+# A name the app doesn't serve gets no certificate, so nobody can spend the weekly limit.
+
+{
+	email {$ACME_EMAIL}
+	on_demand_tls {
+		ask http://app:3000/api/platform/tls-ask
+	}
+}
+
+# The website's address is www.; the bare domain sends people there.
+{$PLATFORM_DOMAIN} {
+	redir https://www.{$PLATFORM_DOMAIN}{uri} permanent
+}
+
+# Every other name.
+https:// {
+	tls {
+		on_demand
+	}
+
+	# The certificate question is for Caddy inside the server, never for the internet.
+	@tlsAsk path /api/platform/tls-ask
+	respond @tlsAsk 404
+
+	encode zstd gzip
+
+	# Caddy sets X-Forwarded-For, -Host and -Proto itself; the app believes them (TRUST_PROXY=1).
+	reverse_proxy app:3000
+}

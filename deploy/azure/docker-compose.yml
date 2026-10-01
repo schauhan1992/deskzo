@@ -1,0 +1,118 @@
+# Deskzo One on one Azure VM: the HTTPS proxy, the app, the worker, the scheduler and PostgreSQL.
+#
+#   cd /opt/deskzo/deploy/azure
+#   ./deploy.sh                 build, migrate, start (every release)
+#
+# Settings come from .env beside this file (made by ./make-env.sh, never committed). The guide is
+# docs/deploy-azure.md; what each part does is docs/runbook.md §1.
+
+name: deskzo
+
+# One image, built by `app`; the worker, the scheduler and ops run the same one.
+x-app: &app
+  image: deskzo-app:latest
+  pull_policy: never
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: postgresql://deskzo:${POSTGRES_PASSWORD}@postgres:5432/deskzo?schema=public
+    CONTROL_DATABASE_URL: postgresql://deskzo:${POSTGRES_PASSWORD}@postgres:5432/deskzo_control?schema=public
+    REFERENCE_DATABASE_URL: postgresql://deskzo:${POSTGRES_PASSWORD}@postgres:5432/deskzo_reference?schema=public
+    # New workspaces' databases and roles are made through this (runbook §2).
+    PLATFORM_PROVISIONER_URL: postgresql://deskzo:${POSTGRES_PASSWORD}@postgres:5432/postgres
+    # Caddy is the only proxy in front, and it sets the caller's address (runbook §2).
+    TRUST_PROXY: "1"
+    TRUST_PROXY_HOPS: "1"
+    # Chromium prints documents from the app in its own container.
+    INTERNAL_APP_URL: http://127.0.0.1:3000
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  # HTTPS for every address: certificates on demand, only for names the app says are its own.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # Every workspace, the public site, the console, the CMS and the partner portal.
+  app:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        PG_MAJOR: "16"
+    volumes:
+      - app-data:/data
+
+  # Sets new workspaces up and keeps the warm pool full.
+  worker:
+    <<: *app
+    command: ["node_modules/.bin/tsx", "scripts/platform-worker.ts"]
+    volumes:
+      - app-data:/data
+
+  # The three scheduled calls (runbook §1), made to the app inside the server.
+  scheduler:
+    <<: *app
+    command: ["node", "deploy/azure/scheduler.mjs"]
+    depends_on:
+      - app
+
+  # Releases and one-off commands: docker compose run --rm ops npm run <script>
+  ops:
+    <<: *app
+    command: ["npm", "run", "tenants:migrate"]
+    restart: "no"
+    profiles: ["ops"]
+    volumes:
+      - app-data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: deskzo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: deskzo
+    # Without PgBouncer: one app process keeps at most 35 workspace pools of 2 connections (runbook §7).
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=1GB", "-c", "effective_cache_size=4GB"]
+    shm_size: 512mb
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deskzo -d deskzo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  pg-data:
+  app-data:
+  caddy-data:
+  caddy-config:

@@ -168,6 +168,13 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   if (!tenant && api && (kind?.kind === "root" || kind?.kind === "console") && PLATFORM_API.test(pathname)) {
     return NextResponse.next();
   }
+  /**
+   * The HTTPS proxy asks whether a name is ours before it gets a certificate for it
+   * (src/app/api/platform/tls-ask). It calls the app by its address inside the server — no platform
+   * host — so this one path answers on any host. It reads no workspace's data and says only what DNS
+   * already does; the proxy refuses it from outside.
+   */
+  if (!tenant && api && pathname === "/api/platform/tls-ask") return NextResponse.next();
   if (!tenant && api) {
     // A machine asking the wrong address: a plain answer, not a page and not a stack trace.
     return NextResponse.json({ error: "No such workspace." }, { status: 404, headers: { "cache-control": "no-store" } });

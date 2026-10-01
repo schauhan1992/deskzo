@@ -1,0 +1,2 @@
+# Shell scripts run on Linux servers: Unix line endings, whatever the machine that edits them.
+*.sh text eol=lf
