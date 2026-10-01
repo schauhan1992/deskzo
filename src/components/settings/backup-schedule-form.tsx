@@ -199,7 +199,7 @@ export function BackupScheduleForm({
                 <pre className="overflow-x-auto rounded-base border border-line bg-surface p-2 font-mono text-[11px] leading-relaxed text-text">
 {`$action  = New-ScheduledTaskAction -Execute "npm.cmd" \`
   -Argument "run db:backup -- --if-due" \`
-  -WorkingDirectory "C:\\Users\\Sachin\\Documents\\wroffy-crm"
+  -WorkingDirectory "C:\\path\\to\\deskzo"
 $trigger = New-ScheduledTaskTrigger -Once -At 00:00 \`
   -RepetitionInterval (New-TimeSpan -Minutes 10)
 Register-ScheduledTask -TaskName "Deskzo One backup" \`
@@ -209,7 +209,7 @@ Register-ScheduledTask -TaskName "Deskzo One backup" \`
               <div>
                 <div className="mb-1 font-medium text-text">Linux — crontab</div>
                 <pre className="overflow-x-auto rounded-base border border-line bg-surface p-2 font-mono text-[11px] leading-relaxed text-text">
-{`*/10 * * * * cd /srv/wroffy-crm && npm run db:backup -- --if-due`}
+{`*/10 * * * * cd /srv/deskzo && npm run db:backup -- --if-due`}
                 </pre>
               </div>
               <p>
