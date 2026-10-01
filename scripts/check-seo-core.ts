@@ -119,7 +119,7 @@ function nearPerfectPage(): Parameters<typeof inputFromPage>[0] {
       block("b-header", "pageHeader", {
         eyebrow: "Invoicing",
         heading: "GST invoice software for growing Indian companies",
-        intro: "Wroffy ERP is GST invoice software that numbers, taxes and files every invoice for you. It runs from the first quote to the e-invoice the portal accepts.",
+        intro: "Deskzo One is GST invoice software that numbers, taxes and files every invoice for you. It runs from the first quote to the e-invoice the portal accepts.",
       }),
       block("b-what", "richText", {
         content: [
@@ -164,7 +164,7 @@ function nearPerfectPage(): Parameters<typeof inputFromPage>[0] {
           { type: "paragraph", text: "The place of supply is the state where the customer receives the goods or services. When it matches your state, the invoice charges CGST and SGST. When it differs, it charges IGST." },
           {
             type: "paragraph",
-            text: "For services, the rules look at where the customer is registered. For goods, they look at where the delivery ends. Wroffy ERP reads both from the customer's record and the delivery address. It shows the result on the invoice before you issue it, so you correct an address rather than a tax return.",
+            text: "For services, the rules look at where the customer is registered. For goods, they look at where the delivery ends. Deskzo One reads both from the customer's record and the delivery address. It shows the result on the invoice before you issue it, so you correct an address rather than a tax return.",
           },
         ],
       }),
@@ -210,7 +210,7 @@ function goodPost(): PostSource {
           {
             type: "paragraph",
             text: [
-              { text: "The number can hold letters, digits, hyphens and slashes. Most companies start each invoice series again from one every year, with the year in the prefix, so a number never repeats across years. See how Wroffy ERP numbers them on " },
+              { text: "The number can hold letters, digits, hyphens and slashes. Most companies start each invoice series again from one every year, with the year in the prefix, so a number never repeats across years. See how Deskzo One numbers them on " },
               { text: "the pricing page", href: "/pricing" },
               { text: "." },
             ],
@@ -227,8 +227,8 @@ function guidesArchive(): ArchiveSource {
     id: "cat-guides",
     slug: "guides",
     name: "Guides",
-    description: "Step-by-step guides to GST invoicing, payroll and accounting in Wroffy ERP, written for the people who run them every month in growing Indian companies.",
-    seo: { title: "GST, payroll and accounting guides", description: "Step-by-step guides to GST invoicing, payroll and accounting for growing Indian companies, from the team that builds Wroffy ERP.", keywords: ["guides"] },
+    description: "Step-by-step guides to GST invoicing, payroll and accounting in Deskzo One, written for the people who run them every month in growing Indian companies.",
+    seo: { title: "GST, payroll and accounting guides", description: "Step-by-step guides to GST invoicing, payroll and accounting for growing Indian companies, from the team that builds Deskzo One.", keywords: ["guides"] },
     image: { src: "/media/cm0guides0000000000000001", alt: "Guides", width: 1200, height: 630 },
     posts: [{ title: "How GST invoice numbering works", path: "/blog/gst-invoice-numbering", excerpt: "One series per registration and financial year.", cover: { src: "/media/cm0cover00000000000000001", alt: "An invoice register with numbers in sequence" } }],
     total: 1,
@@ -300,7 +300,7 @@ async function main() {
   ok("  its JSON-LD: WebPage, BreadcrumbList and FAQPage", isDeepStrictEqual(types(perfect.jsonLd), ["WebPage", "BreadcrumbList", "FAQPage"]), types(perfect.jsonLd));
   ok("  the meta keywords tag is INFO and worth no points", statusOf(perfectScore, "seo.keywords.meta-tag") === "INFO" && find(perfectScore, "seo.keywords.meta-tag")!.pointsAvailable === 0);
   ok("  its metadata carries the keywords, deduplicated", isDeepStrictEqual(perfect.meta.keywords, NEAR_PERFECT_KEYWORDS));
-  ok("  the final title is the template's: “… · Wroffy ERP”", perfect.meta.title === "GST invoice software for Indian companies · Wroffy ERP", perfect.meta.title);
+  ok("  the final title is the template's: “… · Deskzo One”", perfect.meta.title === "GST invoice software for Indian companies · Deskzo One", perfect.meta.title);
   ok("  the internal link to /pricing and the signup button are found; the portal link is external", perfect.content.links.some((l) => l.href === "/pricing" && l.internal) && perfect.content.links.some((l) => l.href === "/signup") && perfect.content.links.some((l) => l.href.startsWith("https://einvoice1") && !l.internal));
   ok("  a library image is marked as one", perfect.content.images.length === 1 && perfect.content.images[0].library);
   ok("  a block's issue points at blocks[<id>]", find(perfectScore, "seo.h1")?.field === "blocks[b-header]", find(perfectScore, "seo.h1")?.field);
@@ -317,7 +317,7 @@ async function main() {
   ok("no description: FAIL, critical, points at seo.description", descCheck.status === "FAIL" && descCheck.severity === "critical" && descCheck.field === "seo.description");
   ok("  counted as critical issues", bareScore.critical >= 2, bareScore.critical);
   ok("  and the SEO score drops well below the near-perfect page's", bareScore.seo.score < perfectScore.seo.score - 25, `${bareScore.seo.score} vs ${perfectScore.seo.score}`);
-  ok("the rendered title of an empty SEO title is only the template's addition", bare.meta.title === " · Wroffy ERP", bare.meta.title);
+  ok("the rendered title of an empty SEO title is only the template's addition", bare.meta.title === " · Deskzo One", bare.meta.title);
   const postNoDesc = inputFromPost({ ...goodPost(), excerpt: null, seo: { title: "x" } }, site, NOW);
   const postNoDescCheck = find(scoreEntity(postNoDesc), "seo.description.present")!;
   ok("a post with neither a description nor an excerpt: FAIL, critical, and the message says which", postNoDescCheck.status === "FAIL" && postNoDescCheck.severity === "critical" && postNoDescCheck.message.includes("excerpt"));
@@ -350,7 +350,7 @@ async function main() {
   explain(postScore);
   const posting = post.jsonLd.find((o) => o["@type"] === "BlogPosting")!;
   ok("its JSON-LD: BlogPosting and BreadcrumbList", isDeepStrictEqual(types(post.jsonLd), ["BlogPosting", "BreadcrumbList"]), types(post.jsonLd));
-  ok("  BlogPosting: headline, description, both dates, the author as a Person, the publisher", posting.headline === "How GST invoice numbering works" && !!posting.description && posting.datePublished === "2026-08-12T04:30:00.000Z" && posting.dateModified === "2026-09-20T09:00:00.000Z" && isDeepStrictEqual(posting.author, { "@type": "Person", name: "Asha Rao" }) && (posting.publisher as { name?: string }).name === "Wroffy ERP", posting);
+  ok("  BlogPosting: headline, description, both dates, the author as a Person, the publisher", posting.headline === "How GST invoice numbering works" && !!posting.description && posting.datePublished === "2026-08-12T04:30:00.000Z" && posting.dateModified === "2026-09-20T09:00:00.000Z" && isDeepStrictEqual(posting.author, { "@type": "Person", name: "Asha Rao" }) && (posting.publisher as { name?: string }).name === "Deskzo One", posting);
   ok("  image (absolute), main category, tags as keywords, mainEntityOfPage", posting.image === "https://wroffy.test/media/cm0cover00000000000000001" && posting.articleSection === "Guides" && isDeepStrictEqual(posting.keywords, ["GST", "Invoicing"]) && isDeepStrictEqual(posting.mainEntityOfPage, { "@type": "WebPage", "@id": "https://wroffy.test/blog/gst-invoice-numbering" }));
   const crumbs = post.jsonLd.find((o) => o["@type"] === "BreadcrumbList")!.itemListElement as { name: string; item: string }[];
   ok("  the breadcrumb is the visible one — Blog › Guides › the post", isDeepStrictEqual(crumbs.map((c) => c.name), ["Blog", "Guides", "How GST invoice numbering works"]));
@@ -388,7 +388,7 @@ async function main() {
   ok("  and only the first page is in the sitemap", statusOf(page2Score, "seo.sitemap") === "NOT_APPLICABLE");
   const plainTag = inputFromArchive({ kind: "tag", slug: "gst", name: "GST", description: null, seo: null, image: null, posts: guidesArchive().posts, total: 1 }, site, NOW);
   const plainTagScore = scoreEntity(plainTag);
-  ok("a tag with no description: its generated description is a warning, its missing intro too", statusOf(plainTagScore, "seo.description.present") === "WARNING" && statusOf(plainTagScore, "seo.content.length") === "WARNING" && plainTag.meta.description === "Posts tagged GST, from Wroffy ERP.");
+  ok("a tag with no description: its generated description is a warning, its missing intro too", statusOf(plainTagScore, "seo.description.present") === "WARNING" && statusOf(plainTagScore, "seo.content.length") === "WARNING" && plainTag.meta.description === "Posts tagged GST, from Deskzo One.");
 
   // ── The home page and the blog index ─────────────────────────────────────────────────────────
   section("The home page and the blog index");
@@ -398,7 +398,7 @@ async function main() {
   explain(homeScore);
   const org = home.jsonLd.find((o) => o["@type"] === "Organization")!;
   ok("the home page is its own kind, with Organization and WebSite JSON-LD", home.kind === "home" && isDeepStrictEqual(types(home.jsonLd), ["Organization", "WebSite"]), types(home.jsonLd));
-  ok("  Organization: name, address and social profiles — no logo (the site's is a letter mark)", org.name === "Wroffy ERP" && org.url === "https://wroffy.test/" && isDeepStrictEqual(org.sameAs, ["https://www.linkedin.com/company/wroffy"]) && !("logo" in org), org);
+  ok("  Organization: name, address and social profiles — no logo (the site's is a letter mark)", org.name === "Deskzo One" && org.url === "https://wroffy.test/" && isDeepStrictEqual(org.sameAs, ["https://www.linkedin.com/company/wroffy"]) && !("logo" in org), org);
   ok("  entity identification is checked on it", ["PASS", "WARNING"].includes(statusOf(homeScore, "geo.entity")));
   ok("  its default status is INFO", statusOf(homeScore, "seo.status") === "INFO");
   ok("  the placeholder tagline counts as unset", site.tagline === null);
@@ -411,7 +411,7 @@ async function main() {
   ok("the blog index's title and description are INFO: fixed in code", statusOf(blogScore, "seo.title.present") === "INFO" && find(blogScore, "seo.title.present")!.message.includes("fixed in code"));
   ok("  and the recommendation says what the CMS can and can't change", find(blogScore, "seo.title.present")!.recommendation.includes("The CMS changes the posts it lists, not its title or description"));
   ok("  it emits no JSON-LD (S-D1 names none for it)", blog.jsonLd.length === 0);
-  ok("  its metadata is the site's: “Blog · Wroffy ERP”, canonical /blog", blog.meta.title === "Blog · Wroffy ERP" && blog.meta.canonical === "/blog" && blog.meta.twitterCard === "summary");
+  ok("  its metadata is the site's: “Blog · Deskzo One”, canonical /blog", blog.meta.title === "Blog · Deskzo One" && blog.meta.canonical === "/blog" && blog.meta.twitterCard === "summary");
 
   // ── Keywords in the scores ───────────────────────────────────────────────────────────────────
   section("Missing, repeated and stuffed keywords");
@@ -489,7 +489,7 @@ async function main() {
     slug: "compare/zoho-one",
     title: "{siteName} vs Zoho One",
     status: "published",
-    seo: { title: "Zoho One vs Wroffy ERP", description: "How Wroffy ERP and Zoho One compare, feature by feature, from each product's own public information.", keywords: ["Zoho One alternative"] },
+    seo: { title: "Zoho One vs Deskzo One", description: "How Deskzo One and Zoho One compare, feature by feature, from each product's own public information.", keywords: ["Zoho One alternative"] },
     blocks: [
       block("c-head", "pageHeader", { heading: "{siteName} and Zoho One compared", intro: "What each product offers for an Indian company, side by side." }),
       block("c-table", "comparisonTable", {
@@ -524,7 +524,7 @@ async function main() {
   });
   const cmp = inputFromPage({ ...comparePage(), parents: [{ name: "Compare", path: "/compare" }] }, site, NOW);
   const cmpTable = cmp.content.tables[0];
-  ok("the comparison table is read as a table: a column per product and a row per feature", cmp.content.tables.length === 1 && isDeepStrictEqual(cmpTable?.columns, ["Feature", "Wroffy ERP", "Zoho One"]) && cmpTable?.rows === 4, cmpTable);
+  ok("the comparison table is read as a table: a column per product and a row per feature", cmp.content.tables.length === 1 && isDeepStrictEqual(cmpTable?.columns, ["Feature", "Deskzo One", "Zoho One"]) && cmpTable?.rows === 4, cmpTable);
   ok(
     "  each answer as the page shows it — Yes, Partly, No, or the words (tokens filled); a row's note with its feature",
     ["GST e-invoicing", "Yes", "Partly", "No", "From 14 days free", "Payroll. Zoho Payroll is a separate app."].every((s) => cmpTable?.text.split("\n").includes(s)),
@@ -539,7 +539,7 @@ async function main() {
     ),
     external,
   );
-  ok("  its heading an h2; the as-of line and the disclaimer are paragraphs", cmp.content.headings.some((h) => h.level === 2 && h.text === "Zoho One vs Wroffy ERP, feature by feature") && cmp.content.paragraphs.some((p) => p.text === "Information about Zoho One from its public website as of 29 September 2026.") && cmp.content.paragraphs.some((p) => p.text === "Product names and trademarks belong to their owners."));
+  ok("  its heading an h2; the as-of line and the disclaimer are paragraphs", cmp.content.headings.some((h) => h.level === 2 && h.text === "Zoho One vs Deskzo One, feature by feature") && cmp.content.paragraphs.some((p) => p.text === "Information about Zoho One from its public website as of 29 September 2026.") && cmp.content.paragraphs.some((p) => p.text === "Product names and trademarks belong to their owners."));
   const internal = cmp.content.links.filter((l) => l.internal).map((l) => `${l.label} ${l.href}`);
   ok("related links and the page map are internal links with their words — any other address is left out, as the site leaves it out", isDeepStrictEqual(internal, ["Plans and pricing /pricing", "Tally compared /compare/tally", "CRM /product/crm"]), internal);
   ok("  the page map's groups are h3s under its h2 (a group with no page on this site shows nothing)", isDeepStrictEqual(cmp.content.headings.filter((h) => h.level === 3).map((h) => h.text), ["Sell and serve"]) && cmp.content.headings.some((h) => h.level === 2 && h.text === "Everything in the product"));
@@ -548,14 +548,14 @@ async function main() {
   const cmpCrumbs = (cmp.jsonLd.find((o) => o["@type"] === "BreadcrumbList")?.itemListElement ?? []) as { name: string; item: string }[];
   ok(
     "a nested page's trail is its breadcrumb: Home › the page above › itself by its title (tokens filled)",
-    cmpCrumbs.map((c) => `${c.name} ${c.item}`).join(" | ") === "Home https://wroffy.test/ | Compare https://wroffy.test/compare | Wroffy ERP vs Zoho One https://wroffy.test/compare/zoho-one",
+    cmpCrumbs.map((c) => `${c.name} ${c.item}`).join(" | ") === "Home https://wroffy.test/ | Compare https://wroffy.test/compare | Deskzo One vs Zoho One https://wroffy.test/compare/zoho-one",
     cmpCrumbs,
   );
   ok("  the visible breadcrumb is kept apart from the content, the page left off", isDeepStrictEqual(cmp.content.breadcrumbs, [{ name: "Home", path: "/" }, { name: "Compare", path: "/compare" }]));
   const orphan = inputFromPage(comparePage(), site, NOW);
   ok(
     "  with no page above it, Home › itself; a page that isn't nested keeps Home › its H1",
-    ((orphan.jsonLd[1]?.itemListElement ?? []) as { name: string }[]).map((c) => c.name).join(" › ") === "Home › Wroffy ERP vs Zoho One" &&
+    ((orphan.jsonLd[1]?.itemListElement ?? []) as { name: string }[]).map((c) => c.name).join(" › ") === "Home › Deskzo One vs Zoho One" &&
       ((perfect.jsonLd[1]?.itemListElement ?? []) as { name: string }[]).map((c) => c.name).join(" › ") === "Home › GST invoice software for growing Indian companies" &&
       perfect.content.breadcrumbs.length === 0,
   );
@@ -625,7 +625,7 @@ async function main() {
   section("Every score within 0–100 (fixed-seed fuzz)");
   const rand = mulberry32(20260929);
   const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)];
-  const WORDS = ["GST", "invoice", "the", "best", "#1", "40%", "₹1,200", "2025", "</script>", "é", "你好", "", " ", "It", "This", "What is it?", "click here", "https://x.test", "Wroffy ERP", "wroffy-erp", "{siteName}", "{trialDays}", String.fromCharCode(0)];
+  const WORDS = ["GST", "invoice", "the", "best", "#1", "40%", "₹1,200", "2025", "</script>", "é", "你好", "", " ", "It", "This", "What is it?", "click here", "https://x.test", "Deskzo One", "deskzo-one", "{siteName}", "{trialDays}", String.fromCharCode(0)];
   const text = (max = 30) => Array.from({ length: Math.floor(rand() * max) }, () => pick(WORDS)).join(pick([" ", " ", ". ", "? ", ""]));
   const junk = (): unknown => pick([null, undefined, 42, true, [], {}, text(), [text(), 7], { text: text() }]);
   const href = () => pick(["/pricing", "#top", "https://example.com/x", "javascript:alert(1)", "//evil.test", "mailto:a@b.co", "", text(3)]);
@@ -747,7 +747,7 @@ async function main() {
     entry("page", "thank-you", false, 0, { score: fake(0, true) }),
     entry("page", "draft", false, 0, { live: false }),
   ];
-  const meta = { aiSearchCrawlersAllowed: false, defaultOgImage: null, titleTemplate: "%s · Wroffy ERP", siteName: "Wroffy ERP" };
+  const meta = { aiSearchCrawlersAllowed: false, defaultOgImage: null, titleTemplate: "%s · Deskzo One", siteName: "Deskzo One" };
   const ss = siteScore(entries, meta);
   const expected = Math.round((3 * 90 + 2 * 70 + 1 * 50 + 1 * 40 + 0.5 * 20) / (3 + 2 + 1 + 1 + 0.5));
   ok(`weighted: home ×3, built-in marketing ×2, other pages and posts ×1, archives ×½ → ${expected}`, ss.overall === expected && ss.seo === expected, ss.overall);
@@ -855,7 +855,7 @@ async function parity(pages: SitePage[], defaults: SiteSettings) {
       const ours = buildPageMetadata(page, ctx);
       ok(`/${page.slug === "home" ? "" : page.slug}: buildPageMetadata equals sitePageMetadata`, same(ours, theirs) && isDeepStrictEqual(ours, theirs), same(ours, theirs) ? "" : { ours: canon(ours), theirs: canon(theirs) });
       const eff = effectiveMetadata(ours, layoutView(ctx));
-      const expectedTitle = page.seo.absoluteTitle ? (theirs.title as { absolute: string }).absolute : `${theirs.title as string} · Wroffy ERP`;
+      const expectedTitle = page.seo.absoluteTitle ? (theirs.title as { absolute: string }).absolute : `${theirs.title as string} · Deskzo One`;
       if (page.slug === "pricing" || page.slug === "home") ok(`  its HTML title: ${quote(expectedTitle)}`, eff.title === expectedTitle, eff.title);
     }
     ok("an address with no page: buildNotFoundMetadata equals sitePageMetadata", same(buildNotFoundMetadata(ctx), await pageView.sitePageMetadata("no-such-page-here")));
