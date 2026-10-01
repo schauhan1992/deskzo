@@ -107,6 +107,13 @@ async function main() {
       say(`  (${failed.length} did not — ${[...new Set(failed.map((f) => f.where))].join(", ")}. Those were already unreadable to the app; they are re-entered, not recovered.)`);
     }
 
+    // ── Its owner: the workspace's one super admin (the database allows exactly one) ──────────────
+    // Signup records the owner; an adopted installation had none, so the console showed no owner
+    // email and support access had nobody to ask. Recorded only while none is — never replaced.
+    const owner = await workspace.user.findFirst({ where: { isSuperAdmin: true }, select: { email: true } });
+    const ownerEmail = owner?.email?.trim().toLowerCase() || null;
+    if (!existing?.ownerEmail) say(`  owner: ${ownerEmail ?? "no super admin found — left unrecorded"}`);
+
     // ── Its biometric terminals ─────────────────────────────────────────────────────────────────
     const devices = await workspace.biometricDevice.findMany({ select: { serialNumber: true } });
     const serials = devices.map((d) => d.serialNumber.trim()).filter(Boolean);
@@ -145,10 +152,14 @@ async function main() {
             dbUrlCipher: sealForTenant(tenantId, "db-url", databaseUrl),
             keyBundleCipher: sealKeyBundle(tenantId, bundle),
             schemaVersion: latest?.name ?? null,
+            ownerEmail,
           },
         });
       } else {
-        await tx.tenant.update({ where: { id: tenantId }, data: { schemaVersion: latest?.name ?? existing.schemaVersion } });
+        await tx.tenant.update({
+          where: { id: tenantId },
+          data: { schemaVersion: latest?.name ?? existing.schemaVersion, ...(existing.ownerEmail ? {} : { ownerEmail }) },
+        });
       }
       const known = await tx.tenantDomain.findMany({ where: { tenantId }, select: { host: true, isPrimary: true } });
       const hasPrimary = known.some((d) => d.isPrimary);
