@@ -13,6 +13,7 @@ import { forgetRegistry, subdomainHost } from "@/lib/tenancy/registry";
 import { PlanRefused, planForNewWorkspace, startOnPlan } from "@/lib/platform/plans";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { trialDays } from "@/lib/platform/settings";
+import { protectedNameIn } from "@/lib/workspace-names";
 import { mailNewCustomer, recordSignupAttribution, type AttributionDecision } from "@/lib/partners/attribution";
 
 /**
@@ -52,12 +53,17 @@ export type ProvisioningInput = {
   attribution?: AttributionDecision | null;
 };
 
+/** What `slugProblem` says of a name that is fine but belongs to a workspace already. */
+export const SLUG_TAKEN = "That name is taken.";
+
 /** Why a workspace name cannot be had, or null when it can — the signup form asks this live. */
 export async function slugProblem(slug: string): Promise<string | null> {
   if (!SLUG_PATTERN.test(slug)) return "Use 3–40 lower-case letters, digits and hyphens, not starting or ending with a hyphen.";
   if (RESERVED_SLUGS.has(slug)) return "That name is reserved.";
+  // Never one carrying our name or a competitor's, whoever is setting it up (src/lib/workspace-names.ts).
+  if (protectedNameIn(slug)) return "That name is reserved.";
   const taken = await controlDb().tenant.findUnique({ where: { slug }, select: { id: true } });
-  return taken ? "That name is taken." : null;
+  return taken ? SLUG_TAKEN : null;
 }
 
 export async function startProvisioning(input: ProvisioningInput): Promise<{ tenantId: string; jobId: string }> {

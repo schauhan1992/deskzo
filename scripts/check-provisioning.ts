@@ -127,7 +127,7 @@ async function main() {
     section("Signing up");
     const INVITE = "zz-provcheck-invite";
     await control.signupInvite.create({ data: { codeHash: sha256(INVITE), maxUses: 1 } });
-    const form = { companyName: "Zz Provcheck Ltd", slug: "zzprov-a", ownerName: "Asha Zz", email: "asha@zzprov.example", password: "correct horse battery", country: "IN", invite: INVITE };
+    const form = { companyName: "Zzprov Alpha Systems Ltd", slug: "zzprov-alpha", ownerName: "Asha Zz", email: "asha@zzprov.example", password: "correct horse battery", country: "IN", invite: INVITE };
     const refusals = await Promise.all([
       signup.startSignup({ ...form, invite: "not-an-invite" }),
       signup.startSignup({ ...form, email: "someone@mailinator.com" }),
@@ -140,7 +140,7 @@ async function main() {
     const code = mail[0]?.subject.match(/(\d{6})$/)?.[1] ?? "";
     ok("  to the address given, with nothing else in it worth stealing", mail[0]?.to === form.email && !mail[0].text.includes(form.password));
     ok("  and only this browser holds the signup", jar.has("wroffy.signup"));
-    const pendingRow = await control.pendingSignup.findFirst({ where: { slug: "zzprov-a" } });
+    const pendingRow = await control.pendingSignup.findFirst({ where: { slug: "zzprov-alpha" } });
     ok("  the password is kept only as a hash", !!pendingRow && pendingRow.passwordHash !== form.password && (await bcrypt.compare(form.password, pendingRow.passwordHash)));
 
     const wrong = await signup.verifySignup("000000" === code ? "111111" : "000000");
@@ -151,25 +151,25 @@ async function main() {
     ok("the right code from another browser is refused", !noCookie.ok);
     for (const [k, v] of otherBrowser) jar.set(k, v);
     const verified = await signup.verifySignup(code);
-    const tenantRow = await control.tenant.findUnique({ where: { slug: "zzprov-a" } });
+    const tenantRow = await control.tenant.findUnique({ where: { slug: "zzprov-alpha" } });
     ok("the right code here starts the workspace", verified.ok && tenantRow?.status === "PROVISIONING" && workerStarts === 1, verified.ok ? tenantRow?.status : verified.error);
     ok("  and spends the invitation", (await control.signupInvite.findUnique({ where: { codeHash: sha256(INVITE) } }))?.uses === 1);
-    ok("  and forgets the password everywhere but the job", (await control.pendingSignup.findFirst({ where: { slug: "zzprov-a" } }))?.passwordHash === "");
-    ok("the address is now taken", !(await signup.checkWorkspaceName("zzprov-a")).ok);
+    ok("  and forgets the password everywhere but the job", (await control.pendingSignup.findFirst({ where: { slug: "zzprov-alpha" } }))?.passwordHash === "");
+    ok("the address is now taken", !(await signup.checkWorkspaceName("zzprov-alpha", form.companyName)).ok);
     const waiting = await signup.signupProgress();
     ok("the progress page says it is being set up", waiting.state === "setting-up");
 
     section("The worker sets it up");
     const run = await provisioning.runNextJob();
     await remember();
-    const A = await control.tenant.findUniqueOrThrow({ where: { slug: "zzprov-a" } });
+    const A = await control.tenant.findUniqueOrThrow({ where: { slug: "zzprov-alpha" } });
     ok("the job runs", run?.ok === true, run?.error);
     ok("  on the warm database", A.dbName === warm?.dbName && !!(await control.warmDatabase.findFirst({ where: { dbName: A.dbName! } }))?.claimedAt);
     ok("  and the workspace is open", A.status === "ACTIVE");
     const job = await control.provisioningJob.findFirstOrThrow({ where: { tenantId: A.id } });
     ok("  the job no longer holds the password", job.status === "SUCCEEDED" && job.ownerPasswordHash === null);
     registry.forgetRegistry();
-    const tenantA = (await registry.tenantBySlug("zzprov-a"))!;
+    const tenantA = (await registry.tenantBySlug("zzprov-alpha"))!;
     const inA = directClient(tenantA.dbUrl);
     try {
       const owner = await inA.user.findUnique({ where: { email: form.email } });
@@ -181,11 +181,11 @@ async function main() {
     } finally {
       await inA.$disconnect();
     }
-    ok("the owner is told where it is", mail.some((m) => m.to === form.email && /is ready/.test(m.subject) && m.text.includes("zzprov-a.")));
+    ok("the owner is told where it is", mail.some((m) => m.to === form.email && /is ready/.test(m.subject) && m.text.includes("zzprov-alpha.")));
 
     section("Handed straight in");
     const ready = await signup.signupProgress();
-    ok("the progress page hands over a one-time pass to the new address", ready.state === "ready" && ready.url.includes("zzprov-a.") && ready.url.includes("/handoff?t="));
+    ok("the progress page hands over a one-time pass to the new address", ready.state === "ready" && ready.url.includes("zzprov-alpha.") && ready.url.includes("/handoff?t="));
     const again = await signup.signupProgress();
     ok("  once — a second look is sent to the sign-in page", again.state === "ready" && again.url.endsWith("/login"));
     const ticket = ready.state === "ready" ? decodeURIComponent(new URL(ready.url).searchParams.get("t") ?? "") : "";
@@ -219,14 +219,14 @@ async function main() {
     const reset = require("../src/actions/password-reset") as typeof import("../src/actions/password-reset");
     await control.tenant.update({ where: { id: A.id }, data: { isDefault: true } });
     registry.forgetRegistry();
-    const tA = (await registry.tenantBySlug("zzprov-a"))!;
+    const tA = (await registry.tenantBySlug("zzprov-alpha"))!;
     const before = mail.length;
     await runAsTenant(tA, () => reset.requestPasswordReset("nobody@zzprov.example"));
     ok("an address with no account gets the same answer, and no mail", mail.length === before);
     await runAsTenant(tA, () => reset.requestPasswordReset(form.email));
     const resetMail = mail.at(-1);
     const link = resetMail?.text.match(/https?:\/\/\S+reset-password\?t=\S+/)?.[0] ?? "";
-    ok("the owner is emailed a link to their own workspace", resetMail?.to === form.email && link.includes("zzprov-a."));
+    ok("the owner is emailed a link to their own workspace", resetMail?.to === form.email && link.includes("zzprov-alpha."));
     const token = decodeURIComponent(new URL(link || "http://x/").searchParams.get("t") ?? "");
     const short = await runAsTenant(tA, () => reset.resetPassword({ token, password: "short" }));
     ok("a short password is refused", !short.ok);
@@ -244,7 +244,7 @@ async function main() {
     const recordedRuns = await control.tenantMigrationRun.findMany({ where: { runId: first.runId }, select: { target: true, ok: true } });
     ok(
       "  each recorded: the control plane and both workspaces",
-      recordedRuns.length === 3 && ["control", "zzprov-a", "zzprov-b"].every((t) => recordedRuns.some((r) => r.target === t && r.ok === true)),
+      recordedRuns.length === 3 && ["control", "zzprov-alpha", "zzprov-b"].every((t) => recordedRuns.some((r) => r.target === t && r.ok === true)),
       recordedRuns.map((r) => `${r.target}:${r.ok}`).join(", "),
     );
     // B's database becomes unreachable: its next migration fails.
@@ -255,21 +255,21 @@ async function main() {
     registry.forgetRegistry();
     const failing = await runner.migrateEverything();
     ok("a workspace whose migration fails is reported", failing.workspaces.some((w) => w.slug === "zzprov-b" && w.ok === false));
-    ok("  and held at the maintenance page, while the others carry on", (await control.tenant.findUniqueOrThrow({ where: { id: B.id } })).status === "MIGRATING" && failing.workspaces.some((w) => w.slug === "zzprov-a" && w.ok === true));
+    ok("  and held at the maintenance page, while the others carry on", (await control.tenant.findUniqueOrThrow({ where: { id: B.id } })).status === "MIGRATING" && failing.workspaces.some((w) => w.slug === "zzprov-alpha" && w.ok === true));
     await control.tenant.update({ where: { id: B.id }, data: { dbUrlCipher: goodCipher } });
     registry.forgetRegistry();
     const retried = await runner.migrateEverything({ only: "zzprov-b" });
     ok("the next run lets it through again", retried.workspaces.some((w) => w.slug === "zzprov-b" && w.ok === true) && (await control.tenant.findUniqueOrThrow({ where: { id: B.id } })).status === "ACTIVE");
-    const listed = await runner.migrateEverything({ only: ["zzprov-a", "zzprov-b"] });
+    const listed = await runner.migrateEverything({ only: ["zzprov-alpha", "zzprov-b"] });
     const listedRuns = await control.tenantMigrationRun.findMany({ where: { runId: listed.runId }, select: { target: true, ok: true } });
     const slugsOf = (list: { slug?: string; target?: string }[]) => list.map((w) => w.slug ?? w.target).sort().join();
     ok(
       "a list of workspaces: each of them migrated, and nothing else — no control plane, no warm database",
-      listed.platform.length === 0 && slugsOf(listed.workspaces) === "zzprov-a,zzprov-b" && listed.workspaces.every((w) => w.ok === true) && slugsOf(listedRuns) === "zzprov-a,zzprov-b",
+      listed.platform.length === 0 && slugsOf(listed.workspaces) === "zzprov-alpha,zzprov-b" && listed.workspaces.every((w) => w.ok === true) && slugsOf(listedRuns) === "zzprov-alpha,zzprov-b",
       `${JSON.stringify(listed.workspaces)} · recorded ${slugsOf(listedRuns)}`,
     );
-    const named = await runner.migrateEverything({ only: ["zzprov-a", "zz-nobody"] });
-    ok("  a name that is no workspace is passed over, and one left off the list is not touched", named.platform.length === 0 && slugsOf(named.workspaces) === "zzprov-a", JSON.stringify(named.workspaces));
+    const named = await runner.migrateEverything({ only: ["zzprov-alpha", "zz-nobody"] });
+    ok("  a name that is no workspace is passed over, and one left off the list is not touched", named.platform.length === 0 && slugsOf(named.workspaces) === "zzprov-alpha", JSON.stringify(named.workspaces));
 
     section("Held, reopened, closed");
     await lifecycle.suspendTenant(B.id, "check:provisioning", "zz testing");

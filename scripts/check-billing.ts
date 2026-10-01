@@ -579,7 +579,7 @@ async function main() {
 
     section("Open signup");
     requestHeaders = new Headers({ host: "www.localhost:3000", "x-forwarded-for": "203.0.113.9" });
-    const form = { companyName: "Zz Open Ltd", slug: "zzbill-open", ownerName: "Ravi Zz", email: "ravi@zzopen.example", password: "a long enough password", country: "IN", invite: "" };
+    const form = { companyName: "Zzbill Open Systems Ltd", slug: "zzbill-open", ownerName: "Ravi Zz", email: "ravi@zzopen.example", password: "a long enough password", country: "IN", invite: "" };
     const closedSignup = await signup.startSignup(form);
     ok("closed: an invitation is needed", !closedSignup.ok && /invitation/.test(closedSignup.ok ? "" : closedSignup.error));
     await settings.setSetting("signup.open", "1", "check");
@@ -589,7 +589,7 @@ async function main() {
     const verified = await signup.verifySignup(code);
     const openTenant = await control.tenant.findUnique({ where: { slug: "zzbill-open" }, include: { subscriptions: true } });
     ok("open: no invitation, and the workspace starts on a free trial", openSignup.ok && verified.ok && openTenant?.subscriptions[0]?.status === "TRIALING" && !!openTenant.subscriptions[0].trialEndsAt, verified.ok ? "" : verified.error);
-    const badInvite = await signup.startSignup({ ...form, slug: "zzbill-open2", email: "x@zzopen.example", invite: "not-a-code" });
+    const badInvite = await signup.startSignup({ ...form, slug: "zzbill-opensystems", email: "x@zzopen.example", invite: "not-a-code" });
     ok("  an invitation given is still checked", !badInvite.ok && /leave it empty/.test(badInvite.ok ? "" : badInvite.error));
 
     section("The console");

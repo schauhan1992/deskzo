@@ -13,7 +13,8 @@ import { controlDb } from "@/lib/platform/control-db";
 import { createHandoffTicket } from "@/lib/platform/handoff";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { signupOpen } from "@/lib/platform/settings";
-import { ProvisioningRefused, slugProblem, startProvisioning } from "@/lib/platform/provisioning";
+import { ProvisioningRefused, SLUG_TAKEN, slugProblem, startProvisioning } from "@/lib/platform/provisioning";
+import { signupNameProblem } from "@/lib/workspace-names";
 import { lockoutState, recordFailure } from "@/lib/security/lockout";
 import { clientIpFrom } from "@/lib/client-ip";
 import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
@@ -65,10 +66,21 @@ async function limited(email: string): Promise<string | null> {
   return null;
 }
 
-/** The live check beside the address field. */
-export async function checkWorkspaceName(input: string): Promise<SignupResult<{ host: string }>> {
+/**
+ * Signup's whole answer about an address: the rules for every workspace (pattern, reserved, our name
+ * and competitors'), then what a business signing itself up must also meet — eight letters at least,
+ * made from its registered name (src/lib/workspace-names.ts) — and only then whether it is free.
+ */
+async function signupSlugProblem(slug: string, legalName: string): Promise<string | null> {
+  const general = await slugProblem(slug);
+  if (general && general !== SLUG_TAKEN) return general;
+  return signupNameProblem(slug, legalName) ?? general;
+}
+
+/** The live check beside the address field, against the registered name typed above it. */
+export async function checkWorkspaceName(input: string, legalName = ""): Promise<SignupResult<{ host: string }>> {
   const slug = String(input ?? "").trim().toLowerCase();
-  const problem = await slugProblem(slug);
+  const problem = await signupSlugProblem(slug, String(legalName ?? "").trim().slice(0, 120));
   return problem ? { ok: false, error: problem } : { ok: true, data: { host: subdomainHost(slug) } };
 }
 
@@ -112,13 +124,13 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   const country = WORLD_COUNTRIES.find((c) => c.code === String(form.country ?? "").toUpperCase());
   const password = String(form.password ?? "");
 
-  if (companyName.length < 2 || companyName.length > 120) return { ok: false, error: "Give your company's name." };
+  if (companyName.length < 2 || companyName.length > 120) return { ok: false, error: "Give your registered business name." };
   if (ownerName.length < 2 || ownerName.length > 120) return { ok: false, error: "Give your name." };
   if (!email) return { ok: false, error: "That doesn't look like an email address." };
   if (isDisposableDomain(email.domain)) return { ok: false, error: "Use your work address — throwaway addresses can't own a workspace." };
   if (!country) return { ok: false, error: "Choose your country." };
   if (password.length < MIN_PASSWORD) return { ok: false, error: `Choose a password of at least ${MIN_PASSWORD} characters.` };
-  const nameProblem = await slugProblem(slug);
+  const nameProblem = await signupSlugProblem(slug, companyName);
   if (nameProblem) return { ok: false, error: nameProblem };
   // Without an invitation only once signup is open; one given is checked either way.
   const inviteCode = String(form.invite ?? "").trim();

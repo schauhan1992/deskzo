@@ -1320,7 +1320,7 @@ async function main() {
       let slugN = 0;
       const form = (o: Partial<import("../src/actions/platform/signup").SignupForm> = {}): import("../src/actions/platform/signup").SignupForm => {
         slugN += 1;
-        return { companyName: `Zzp E Company ${slugN}`, slug: `zzp-e-${slugN}`, ownerName: "Zzp Owner", email: `owner${slugN}@zzp-e${slugN}.example`, password: password(), country: "IN", invite: codeR1.code, referral: "", referralVia: "", ...o };
+        return { companyName: `Zzp E Company ${slugN}`, slug: `zzp-e-company-${slugN}`, ownerName: "Zzp Owner", email: `owner${slugN}@zzp-e${slugN}.example`, password: password(), country: "IN", invite: codeR1.code, referral: "", referralVia: "", ...o };
       };
       jar.clear();
       const badRef = await signup.startSignup(form({ referral: "zzp-nope-00000" }));
@@ -1350,7 +1350,7 @@ async function main() {
       };
       const linkBefore = (await control.partnerReferralLink.findUniqueOrThrow({ where: { id: linkR2.id } })).signups;
       const mailsBefore = mail.length;
-      const flow1 = await verifyFrom(form({ slug: "zzp-e-flow1", companyName: "Zzp Flow One", email: "owner@zzp-flow1.example", referral: linkR2.code, referralVia: "link" }));
+      const flow1 = await verifyFrom(form({ slug: "zzp-e-flow1", companyName: "Zzp E Flow1 Ltd", email: "owner@zzp-flow1.example", referral: linkR2.code, referralVia: "link" }));
       ok("end to end: an invitation code and another partner's referral link sign a workspace up", flow1.started.ok && flow1.verified.ok && !!flow1.tenant, `${why(flow1.started)} / ${why(flow1.verified)}`);
       const row1 = flow1.tenant ? await control.tenantAttribution.findFirst({ where: { tenantId: flow1.tenant.id, validTo: null } }) : null;
       ok("  attributed to the invitation's partner, by signup, the referral kept as a conflict", row1?.partnerId === f.r1.id && row1.source === "SIGNUP_INVITE" && row1.createdBy === "signup" && sameJson(row1.flags, { conflicts: [{ partnerId: f.r2.id, source: "REFERRAL_LINK" }] }), json(row1));
@@ -1360,8 +1360,8 @@ async function main() {
       ok("  platform audit partner.attribution.signup (SYSTEM, signup, flagged)", sysAudit?.actorKind === "SYSTEM" && sysAudit.actor === "signup" && json(sysAudit.detail).includes('"flagged":true') && json(sysAudit.detail).includes('"partner":"zzp-res-a"'), json(sysAudit));
       ok("  partner audit customer.signup on the winner, visible to it", (await control.partnerAuditLog.count({ where: { partnerId: f.r1.id, action: "customer.signup", entityId: flow1.tenant?.id, visibleToPartner: true } })) === 1);
       const newCustomer = mail.slice(mailsBefore).filter((m) => m.subject === "Partner portal: a new customer signed up");
-      ok("  the winner's ADMIN and SALES are emailed — not FINANCE or VIEWER — with no email address in it", newCustomer.map((m) => m.to).sort().join() === ["admin@zzp-res-a.example", "sales@zzp-res-a.example"].join() && newCustomer.every((m) => !EMAIL.test(m.text) && m.text.includes("Zzp Flow One")), newCustomer.map((m) => m.to).join());
-      const flow2 = await verifyFrom(form({ slug: "zzp-e-flow2", companyName: "Zzp BigCo Ltd", email: "cfo@zzp-bigco.example", country: "AE" }));
+      ok("  the winner's ADMIN and SALES are emailed — not FINANCE or VIEWER — with no email address in it", newCustomer.map((m) => m.to).sort().join() === ["admin@zzp-res-a.example", "sales@zzp-res-a.example"].join() && newCustomer.every((m) => !EMAIL.test(m.text) && m.text.includes("Zzp E Flow1 Ltd")), newCustomer.map((m) => m.to).join());
+      const flow2 = await verifyFrom(form({ slug: "zzp-e-flow2", companyName: "Zzp E Flow2 BigCo Ltd", email: "cfo@zzp-bigco.example", country: "AE" }));
       const row2 = flow2.tenant ? await control.tenantAttribution.findFirst({ where: { tenantId: flow2.tenant.id, validTo: null } }) : null;
       const won = await control.dealRegistration.findUniqueOrThrow({ where: { id: bigco.id } });
       ok("end to end: an approved registration of the email's domain wins over the invitation", flow2.verified.ok && row2?.partnerId === f.d2.id && row2.source === "DEAL_REGISTRATION" && sameJson(row2.flags, { conflicts: [{ partnerId: f.r1.id, source: "SIGNUP_INVITE" }] }), `${why(flow2.verified)} ${json(row2)}`);

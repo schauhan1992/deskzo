@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { checkWorkspaceName, signupProgress, startSignup, verifySignup, type SignupForm } from "@/actions/platform/signup";
+import { MIN_SIGNUP_NAME, suggestedName } from "@/lib/workspace-names";
 import type { Country } from "@/lib/geo/countries";
 
 type Stage = { at: "form" } | { at: "code"; email: string } | { at: "progress"; step: string } | { at: "failed"; message: string };
@@ -25,23 +26,35 @@ export function SignupFlow({ suffix, countries, inviteRequired = true, referral 
   const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite: "", referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
   // The partner's name is shown until the visitor removes it; after that, the code is theirs to type or not.
   const [referredBy, setReferredBy] = useState(referral?.partnerName ?? null);
-  // Remembered with the name it was for, so an answer about an earlier name is never shown.
-  const [nameCheck, setNameCheck] = useState<{ slug: string; ok: boolean; text: string } | null>(null);
+  // Remembered with the address and registered name it was for, so an answer about earlier ones is never shown.
+  const [nameCheck, setNameCheck] = useState<{ key: string; ok: boolean; text: string } | null>(null);
+  // The address follows the registered name until the visitor types one of their own.
+  const [slugTyped, setSlugTyped] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const set = (key: keyof SignupForm) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
-  // The address, checked as it is typed — half a second after the last key.
+  // The address, checked as it (or the registered name it must come from) is typed — half a second after the last key.
   const slug = form.slug.trim().toLowerCase();
+  const legalName = form.companyName.trim();
+  const checkKey = `${slug}|${legalName}`;
   useEffect(() => {
     if (!slug) return;
     const timer = setTimeout(() => {
-      checkWorkspaceName(slug).then((r) => setNameCheck(r.ok ? { slug, ok: true, text: `${r.data.host} is free` } : { slug, ok: false, text: r.error }));
+      checkWorkspaceName(slug, legalName).then((r) => setNameCheck(r.ok ? { key: checkKey, ok: true, text: `${r.data.host} is free` } : { key: checkKey, ok: false, text: r.error }));
     }, 500);
     return () => clearTimeout(timer);
-  }, [slug]);
-  const shownCheck = nameCheck && nameCheck.slug === slug ? nameCheck : null;
+  }, [slug, legalName, checkKey]);
+  const shownCheck = nameCheck && nameCheck.key === checkKey ? nameCheck : null;
+  const setLegalName = (e: { target: { value: string } }) => {
+    const value = e.target.value;
+    setForm((f) => ({ ...f, companyName: value, ...(slugTyped ? {} : { slug: suggestedName(value) }) }));
+  };
+  const setSlug = (e: { target: { value: string } }) => {
+    setSlugTyped(e.target.value.trim() !== "");
+    setForm((f) => ({ ...f, slug: e.target.value }));
+  };
 
   // While it is being set up: every two seconds, until it is ready or has failed.
   useEffect(() => {
@@ -118,16 +131,18 @@ export function SignupFlow({ suffix, countries, inviteRequired = true, referral 
       }}
     >
       <div>
-        <Label htmlFor="company">Company</Label>
-        <Input id="company" value={form.companyName} onChange={set("companyName")} autoComplete="organization" required />
+        <Label htmlFor="company">Registered business name</Label>
+        <Input id="company" value={form.companyName} onChange={setLegalName} autoComplete="organization" aria-describedby="company-hint" required />
+        <p id="company-hint" className="mt-1 text-xs text-muted">Exactly as on your GST registration or certificate of incorporation — your address is made from it.</p>
       </div>
       <div>
         <Label htmlFor="slug">Your address</Label>
         <div className="flex items-center rounded-base border border-line bg-surface pr-2 text-sm">
-          <Input id="slug" value={form.slug} onChange={set("slug")} placeholder="yourcompany" className="border-0 shadow-none" autoComplete="off" required />
+          <Input id="slug" value={form.slug} onChange={setSlug} placeholder="acmetechnologies" className="border-0 shadow-none" autoComplete="off" aria-describedby="slug-hint" required />
           <span className="whitespace-nowrap text-muted">{suffix}</span>
         </div>
-        {shownCheck && <p className={`mt-1 text-xs ${shownCheck.ok ? "text-success" : "text-danger"}`}>{shownCheck.text}</p>}
+        <p id="slug-hint" className="mt-1 text-xs text-muted">At least {MIN_SIGNUP_NAME} letters or digits, made from your registered name — its words in order.</p>
+        {shownCheck && <p className={`mt-1 text-xs ${shownCheck.ok ? "text-success" : "text-danger"}`} role="status">{shownCheck.text}</p>}
       </div>
       <div>
         <Label htmlFor="owner">Your name</Label>
