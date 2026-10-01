@@ -102,9 +102,14 @@ Optional: `npm run site:seed-pages` publishes the website's pages, and `npm run 
 
 ## Deploying
 
-Production runs on one Azure VM in Docker: Caddy for HTTPS (a certificate for each address, issued automatically),
-the app, the worker, the scheduler and PostgreSQL. The `Dockerfile` builds the image, `deploy/azure/` holds the rest,
-and [docs/deploy-azure.md](docs/deploy-azure.md) is the step-by-step guide, from creating the VM to every later release.
+Production runs on an Azure VM from the `Dockerfile`, in one of two ways:
+
+- **Coolify**, whose proxy handles HTTPS: one app container, a PostgreSQL database, and Coolify's Scheduled Tasks for the
+  timed calls and the worker — [docs/deploy-coolify.md](docs/deploy-coolify.md).
+- **Docker Compose with Caddy**, which gets each address its certificate on demand — `deploy/azure/` and
+  [docs/deploy-azure.md](docs/deploy-azure.md).
+
+The scripts both use are in `deploy/`: the scheduler, making the databases, the secrets, and the first run.
 
 ## Everyday commands
 
@@ -139,7 +144,7 @@ Before a change is committed: `npx tsc --noEmit`, ESLint on the files touched, t
 | `src/lib/products.ts`, `src/lib/modules.ts` | What is sold, and the modules it is made of |
 | `prisma/` | The workspace schema and migrations; `prisma/control`, `prisma/reference` for the other two |
 | `scripts/` | Platform commands, the check suites, the website's content and seed |
-| `Dockerfile`, `deploy/azure/` | The image, and the VM's services, settings and scripts |
-| `docs/deploy-azure.md` | Setting production up on an Azure VM, and releasing |
+| `Dockerfile`, `deploy/` | The image; the scheduler and first-run scripts; `deploy/azure/` the Compose setup |
+| `docs/deploy-coolify.md`, `docs/deploy-azure.md` | Setting production up — on Coolify, or with Docker Compose — and releasing |
 | `docs/runbook.md` | Running it in production: configuration, releasing, backups, recovery |
 | `docs/ROADMAP.md` | How the product was built, phase by phase |

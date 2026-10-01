@@ -76,7 +76,7 @@ services:
   # The three scheduled calls (runbook §1), made to the app inside the server.
   scheduler:
     <<: *app
-    command: ["node", "deploy/azure/scheduler.mjs"]
+    command: ["node", "deploy/scheduler.mjs"]
     depends_on:
       - app
 

@@ -13,7 +13,7 @@ For whoever runs the platform: what runs where, what to back up, how to release,
 | PostgreSQL 16 | One database per workspace, plus the control plane and the reference database | With continuous archiving (point-in-time recovery) |
 | PgBouncer | Pools the app's connections to workspace databases | Transaction mode (§7) |
 
-On the Azure VM ([deploy-azure.md](deploy-azure.md)) each of these is a Docker Compose service in `deploy/azure/`: Caddy is the reverse proxy and gets each address its certificate, the scheduler service makes the three calls below from inside the server, and PgBouncer is not set up yet.
+On Coolify ([deploy-coolify.md](deploy-coolify.md)) the app is one container behind Coolify's Traefik, and the worker and the three calls below are Coolify Scheduled Tasks (`node deploy/scheduler.mjs once <name>`). With Docker Compose ([deploy-azure.md](deploy-azure.md)) each is a service in `deploy/azure/`, with Caddy as the reverse proxy. PgBouncer is not set up in either yet.
 
 ### Scheduled calls
 
