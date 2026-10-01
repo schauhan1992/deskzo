@@ -38,6 +38,12 @@ export type Product = {
   tagline: string;
   /** The modules it switches on (src/lib/modules.ts keys). Empty for Deskzo One, which is every module. */
   modules: readonly string[];
+  /**
+   * The countries it is sold in; absent, everywhere. A product whose heart follows one country's rules
+   * is sold only there: Books (India's accounting and GST) and People (owner decision, 1 Oct 2026 —
+   * its payroll is India's PF, ESI, professional tax and TDS).
+   */
+  soldOnlyIn?: readonly string[];
   /** Where it sits in the website's Product menu. */
   group: "suite" | "sell" | "run" | "people";
 };
@@ -52,6 +58,8 @@ export type AddOn = {
   modules: readonly string[];
   /** The product it is bought with, when it needs one; null: any. */
   onProduct: ProductKey | null;
+  /** Products that already include it, so it is never bought on top of them (owner decision, 1 Oct 2026: Revenue & Close comes with Deskzo One). */
+  includedIn: readonly ProductKey[];
 };
 
 /** The product family's own name, before each product's. */
@@ -84,6 +92,7 @@ export const PRODUCTS: readonly Product[] = [
     key: "books",
     name: "Deskzo Books",
     path: "/books",
+    soldOnlyIn: ["IN"],
     tagline: "GST invoicing, accounting, payables, receivables and expenses",
     modules: ["items", "sales_documents", "purchase_documents", "payments", "receivables", "payables", "accounting", "expenses", "vendors"],
     group: "run",
@@ -92,6 +101,7 @@ export const PRODUCTS: readonly Product[] = [
     key: "people",
     name: "Deskzo People",
     path: "/people",
+    soldOnlyIn: ["IN"],
     tagline: "HR, payroll, attendance, leave, recruitment and visitors",
     modules: ["hr", "payroll", "visitors", "engagement"],
     group: "people",
@@ -155,9 +165,9 @@ export const PRODUCTS: readonly Product[] = [
 ];
 
 export const ADD_ONS: readonly AddOn[] = [
-  { key: "revenue_close", name: "Revenue & Close", tagline: "Ind AS 115 revenue recognition and a month-end close", modules: ["revenue_close"], onProduct: "books" },
-  { key: "copilot", name: "AI Copilot", tagline: "Questions about your data, answered by the AI provider you choose", modules: [], onProduct: null },
-  { key: "seats", name: "More people", tagline: "Seats beyond what a plan includes", modules: [], onProduct: null },
+  { key: "revenue_close", name: "Revenue & Close", tagline: "Ind AS 115 revenue recognition and a month-end close", modules: ["revenue_close"], onProduct: "books", includedIn: ["one"] },
+  { key: "copilot", name: "AI Copilot", tagline: "Questions about your data, answered by the AI provider you choose", modules: [], onProduct: null, includedIn: [] },
+  { key: "seats", name: "More people", tagline: "Seats beyond what a plan includes", modules: [], onProduct: null, includedIn: [] },
 ];
 
 export const PRODUCT_KEYS = PRODUCTS.map((p) => p.key);

@@ -52,7 +52,7 @@ const addOnCards: Feature[] = ADD_ONS.map((a) => {
   const on = a.onProduct ? product(a.onProduct) : null;
   const body =
     a.key === "revenue_close"
-      ? `${a.tagline}, for the books kept in ${on?.name ?? "the ledger"}. Offered to companies in India.`
+      ? `${a.tagline}, for the books kept in ${on?.name ?? "the ledger"}, and included in ${product("one").name}. Offered to companies in India.`
       : a.key === "copilot"
         ? `${a.tagline}. It reads only what each person may see, and drafts tasks and notes for them to save.`
         : `${a.tagline}, added to any product.`;
@@ -108,7 +108,7 @@ const onePage = productLinePage({
     {
       id: "one-add-ons",
       type: "featureGrid",
-      props: { anchor: "add-ons", heading: "The add-ons", intro: "Bought alongside a product when a company needs them.", columns: 3, items: addOnCards },
+      props: { anchor: "add-ons", heading: "The add-ons", intro: `Bought alongside a product when a company needs them. ${one.name} already includes ${ADD_ONS.filter((a) => a.includedIn.includes("one")).map((a) => a.name).join(" and ")}.`, columns: 3, items: addOnCards },
     },
   ],
   how: [
@@ -240,7 +240,7 @@ const booksPage = productLinePage({
     ["Can customers pay invoices online?", "Not through {siteName}. Customers pay by bank transfer, UPI, cheque, card or cash, and you record the payment. The invoice prints your bank details and UPI ID."],
     ["Can we have GSTINs in several states?", "Yes, as long as they share the company's PAN. Each registration has its own branches, invoice numbering and returns, and the branch on a document decides the seller's GSTIN and the tax."],
     ["Can we import past invoices?", "No. Lists such as companies, contacts, items, vendors and the chart of accounts are imported from Excel or CSV; invoices, payments and journals are made in {siteName}. Opening balances go in as a journal."],
-    ["What does the Revenue & Close add-on add?", `Revenue recognised as it is earned under Ind AS 115, a revenue waterfall, prepaid and accrual schedules, and a month-end close checklist that checks itself. It is an add-on to ${books.name}.`],
+    ["What does the Revenue & Close add-on add?", `Revenue recognised as it is earned under Ind AS 115, a revenue waterfall, prepaid and accrual schedules, and a month-end close checklist that checks itself. It is an add-on to ${books.name}, and included in ${one.name}.`],
   ],
   related: ["/product/accounting-gst", "/product/quotes-invoices", "/product/payments-receivables", "/product/multi-branch-gst", "/solutions/finance-teams", "/pricing"],
   cta: { heading: `Issue your first invoice in ${books.name}`, body: `Add your items, issue a test invoice and watch it post to the ledger. ${trial}` },
@@ -264,7 +264,7 @@ const peoplePage = productLinePage({
     question: `What is ${people.name}?`,
     answer: `${people.name} is the HR and payroll software in {siteName}, for the whole employee lifecycle: hiring, joining, records, attendance and leave, payroll and exit. Attendance and unpaid leave feed loss of pay into payroll, so each month's salaries come from the records rather than a spreadsheet.`,
     more: [
-      "Each person has a self-service page, My HR, where they clock in, apply for leave and read their payslips. Payroll follows Indian rules, so it is offered to companies in India; HR, attendance and leave, visitors and speak-up work anywhere.",
+      `Each person has a self-service page, My HR, where they clock in, apply for leave and read their payslips. ${people.name} is offered to companies in India, because its payroll follows Indian rules.`,
     ],
   },
   contents: { heading: `What's in ${people.name}`, intro: contentsIntro(people, " HR covers employee records, attendance, leave and hiring, each with a page of its own."), items: moduleCards(people) },
@@ -291,6 +291,7 @@ const peoplePage = productLinePage({
   },
   faqHeading: `Questions about ${people.name}`,
   faq: [
+    [`Is ${people.name} available outside India?`, `No. ${people.name} is offered to companies in India: its payroll follows Indian rules — PF, ESI, professional tax and TDS on salary. ${crm.name}, ${desk.name} and the other products work anywhere.`],
     ["Which biometric devices does it work with?", "eSSL and ZKTeco terminals that push punches over the iclock (ADMS) protocol connect straight to the workspace. If a device can't push, export its log from eTimeTrackLite and import the file."],
     ["Does it calculate income tax (TDS) on salary?", "Not yet. You enter each person's monthly TDS figure; it is kept across re-runs, printed on the payslip and posted to TDS payable. There is no tax regime choice, investment declaration or Form 16."],
     ["Can staff use it on their phones?", "There is no separate app. My HR works in a phone's browser, where staff clock in and out, apply for leave and read their payslips. There is no GPS or geo-fencing on clock-in."],

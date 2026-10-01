@@ -1,3 +1,4 @@
+import { productByKey } from "../../src/lib/products";
 import { productPage } from "./_build";
 import type { SeedPage } from "./types";
 
@@ -31,7 +32,7 @@ const revenue = productPage({
   },
   features: {
     heading: "What Revenue & Close does",
-    intro: "Revenue & Close is an add-on to Accounting, offered to companies in India.",
+    intro: `Revenue & Close is an add-on to ${productByKey("books")!.name}, included in ${productByKey("one")!.name}, and offered to companies in India.`,
     items: [
       { icon: "calendar", title: "Deferred revenue, month by month", body: "Subscriptions and services invoiced ahead wait in deferred revenue and move into sales as each month is delivered." },
       { icon: "chart", title: "A revenue waterfall", body: "What is still to be recognised, by customer or item, over the next 12 months or 24 months, with a roll-forward checked against the ledger." },

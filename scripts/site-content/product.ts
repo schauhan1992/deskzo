@@ -55,7 +55,7 @@ const hub = hubPage({
           h3("Can modules be added later?"),
           p("Yes. A module switched on later works with the records already there: switch on the helpdesk, and every company and contact is ready to raise a ticket against. Nothing has to be keyed in twice."),
           h3("Which modules are sold in India only?"),
-          p("Accounting, Revenue & Close and payroll follow Indian rules, so they are offered to companies in India only. The e-invoice and e-way bill features in quotes and invoices are India's government systems. Every other module works anywhere."),
+          p(`Accounting, Revenue & Close and payroll follow Indian rules, so they are offered to companies in India only — and so are ${productByKey("books")!.name} and ${productByKey("people")!.name}, the products built on them. The e-invoice and e-way bill features in quotes and invoices are India's government systems. Every other module works anywhere.`),
         ],
       },
     },

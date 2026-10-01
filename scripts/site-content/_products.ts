@@ -138,7 +138,9 @@ export function productLine(path: string): RichInline {
   if ("addOn" in place) {
     const addOn = ADD_ONS.find((a) => a.key === place.addOn)!;
     const on = addOn.onProduct ? productByKey(addOn.onProduct) : null;
-    return on ? runs(`${addOn.name} is an add-on to `, link(on), ".") : runs(`${addOn.name} is an add-on to any {siteName} product, `, link(ONE), " included.");
+    const inSuite = addOn.includedIn.includes("one");
+    if (on) return inSuite ? runs(`${addOn.name} is an add-on to `, link(on), ", and included in ", link(ONE), ".") : runs(`${addOn.name} is an add-on to `, link(on), ".");
+    return runs(`${addOn.name} is an add-on to any {siteName} product, `, link(ONE), " included.");
   }
   if ("everyProduct" in place) {
     const also = productsOfPage(path);

@@ -18,6 +18,8 @@ import { BASE_MODULES, PRODUCTS, productByKey, productsOfModule } from "@/lib/pr
  *     (src/lib/entitlements.ts `withDependencies`), so Revenue & Close bought without Books would
  *     quietly bring the whole of accounting with it. A module the add-on lists itself counts as
  *     brought on purpose.
+ *   · Nothing bought twice: an add-on or a bundle whose modules the editions already hold is refused
+ *     as already included — Revenue & Close comes with Deskzo One (owner decision, 1 Oct 2026).
  */
 
 export type ChoiceKind = "EDITION" | "BUNDLE" | "ADDON" | "INTERNAL";
@@ -41,6 +43,8 @@ export const CHOICE_REFUSALS = {
   suiteAlone: `${SUITE_NAME} already includes every product — choose it on its own, with any add-ons.`,
   onePerProduct: (product: string, names: string[]) => `Choose one plan for each product — ${listOf(names, "and")} are both ${product}.`,
   needs: (name: string, needed: string) => `${name} needs ${needed}.`,
+  included: (name: string, by: string) => `${name} is already included in ${by} — there's nothing to add.`,
+  addOnTo: (name: string, products: string) => `${name} is an add-on to ${products}, and included in ${SUITE_NAME}.`,
 } as const;
 
 const isEdition = (p: ChoicePlan) => p.kind === "EDITION";
@@ -72,6 +76,17 @@ export function productRefusal(plans: readonly ChoicePlan[]): string | null {
  * the editions do not have. Names the products that have it, and Deskzo One.
  */
 export function needsRefusal(extra: ChoicePlan, chosen: readonly ChoicePlan[]): string | null {
+  const list = neededGroups(extra, chosen);
+  if (!list) return null;
+  const needed = list.length === 1 ? `${list[0]} or ${SUITE_NAME}` : `${listOf(list, "and")}, or ${SUITE_NAME}`;
+  return CHOICE_REFUSALS.needs(extra.name, needed);
+}
+
+/**
+ * What an add-on or a bundle lacks among these editions, as the products that would supply each
+ * missing module ("Deskzo Books") — or the module itself where no product has it. Null when nothing.
+ */
+function neededGroups(extra: ChoicePlan, chosen: readonly ChoicePlan[]): string[] | null {
   if (isEdition(extra) || extra.kind === "INTERNAL" || everything(extra)) return null;
   const editions = chosen.filter(isEdition);
   if (editions.some(everything)) return null;
@@ -79,24 +94,39 @@ export function needsRefusal(extra: ChoicePlan, chosen: readonly ChoicePlan[]): 
   const own = new Set(extra.modules);
   const missing = [...withDependencies(extra.modules)].filter((key) => !own.has(key) && !have.has(key));
   if (!missing.length) return null;
-  // For each module it lacks, the products that have it — or the module itself when no product does.
   const groups = new Set<string>();
   for (const key of missing) {
     const products = productsOfModule(key).map((p) => p.name);
     groups.add(products.length ? listOf(products, "or") : (getModuleDefinition(key)?.label ?? key));
   }
-  const list = [...groups];
-  const needed = list.length === 1 ? `${list[0]} or ${SUITE_NAME}` : `${listOf(list, "and")}, or ${SUITE_NAME}`;
-  return CHOICE_REFUSALS.needs(extra.name, needed);
+  return [...groups];
 }
 
 /**
- * What an add-on or a bundle needs beyond what every product comes with (`BASE_MODULES`), in the
- * same words — "Revenue & Close needs Deskzo Books or Deskzo One." — for the pricing page to say
- * before anybody chooses. Null when any product will do.
+ * Why an add-on or a bundle would be bought twice, or null: the editions chosen already hold every
+ * module it brings — Deskzo One holds them all. An add-on that brings an allowance rather than a
+ * module (AI Copilot, More people) is never "included".
+ */
+export function includedRefusal(extra: ChoicePlan, chosen: readonly ChoicePlan[]): string | null {
+  if (isEdition(extra) || extra.kind === "INTERNAL" || everything(extra) || !extra.modules.length) return null;
+  const editions = chosen.filter(isEdition);
+  const suite = editions.find(everything);
+  if (suite) return CHOICE_REFUSALS.included(extra.name, suite.name);
+  const have = new Set([...ALWAYS, ...editions.flatMap((p) => p.modules)]);
+  if (!extra.modules.every((m) => have.has(m))) return null;
+  const by = editions.filter((p) => p.modules.some((m) => extra.modules.includes(m))).map((p) => p.name);
+  return CHOICE_REFUSALS.included(extra.name, listOf(by.length ? by : editions.map((p) => p.name), "and"));
+}
+
+/**
+ * What the pricing page says of an add-on or a bundle before anybody chooses: the products it is an
+ * add-on to, and that Deskzo One already includes it — "Revenue & Close is an add-on to Deskzo Books,
+ * and included in Deskzo One." Null when any product will do (AI Copilot, More people).
  */
 export function needsOfExtra(extra: ChoicePlan): string | null {
-  return needsRefusal(extra, [{ key: "", name: "", kind: "EDITION", productKey: null, modules: BASE_MODULES }]);
+  const list = neededGroups(extra, [{ key: "", name: "", kind: "EDITION", productKey: null, modules: BASE_MODULES }]);
+  if (!list) return null;
+  return CHOICE_REFUSALS.addOnTo(extra.name, listOf(list, "and"));
 }
 
 /**
@@ -111,6 +141,8 @@ export function choiceRefusal(plans: readonly ChoicePlan[]): string | null {
   const products = productRefusal(plans);
   if (products) return products;
   for (const extra of plans) {
+    const twice = includedRefusal(extra, plans);
+    if (twice) return twice;
     const needs = needsRefusal(extra, plans);
     if (needs) return needs;
   }

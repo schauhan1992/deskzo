@@ -154,11 +154,10 @@ export function checkPlanInput(input: PlanInput, existing?: { productKey: string
   const countries = [...new Set((input.countries ?? []).map((c) => String(c).trim().toUpperCase()).filter(Boolean))];
   if (countries.some((c) => !COUNTRY_PATTERN.test(c))) throw new PlanRefused("Countries are two-letter codes, like IN or AE.");
   // A module sold only in some countries goes only in a plan sold only there — never in a plan sold
-  // anywhere, where a customer abroad would be charged for what they cannot have. A product's plan is
-  // the exception: it is the product wherever it is sold, and such a module drops out abroad by
-  // itself (entitlements, the pricing page and the plan picker list only what the country gets) —
-  // Deskzo People sells payroll in India and the rest of it everywhere.
-  if (!allModules && productKey === null) {
+  // anywhere, where a customer abroad would be charged for what they cannot have. Products are no
+  // exception: Deskzo Books and Deskzo People are sold in India only (src/lib/products.ts), because
+  // their accounting and payroll are; Deskzo One, every module, drops what a country doesn't get.
+  if (!allModules) {
     for (const key of modules) {
       const def = getModuleDefinition(key)!;
       if (def.countries && (countries.length === 0 || countries.some((c) => !def.countries!.includes(c)))) {

@@ -8,7 +8,7 @@ import { OutboundLink } from "@/components/ui/outbound-link";
 import { cancelSubscription, checkoutPlan, openBillingPortal, saveBillingDetails } from "@/actions/billing";
 import type { OfferPlan } from "@/lib/billing/checkout";
 import { formatMoney } from "@/lib/billing/money";
-import { SUITE_NAME, choiceRefusal, needsRefusal } from "@/lib/billing/plan-choice";
+import { SUITE_NAME, choiceRefusal, includedRefusal, needsRefusal } from "@/lib/billing/plan-choice";
 import { COMPANY_NAME } from "@/lib/brand-names";
 import { PRODUCTS, productByKey } from "@/lib/products";
 import { cn } from "@/lib/utils";
@@ -159,7 +159,8 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
           <legend className="mb-1 text-sm font-semibold text-text">Add-ons — how many of each (none is fine)</legend>
           {extras.map((p) => {
             const price = priceOf(p)!;
-            const needs = needsRefusal(p, chosenEditions);
+            // Already in what's chosen (Revenue & Close with Deskzo One), or missing what it needs.
+            const needs = includedRefusal(p, chosenEditions) ?? needsRefusal(p, chosenEditions);
             return (
               <div key={p.key} className="text-sm">
                 <div className="flex items-center gap-3">

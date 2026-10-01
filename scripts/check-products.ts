@@ -11,7 +11,8 @@
  *     nothing; what staff change afterwards survives; the fields it owns come back when they drift;
  *     a module workspaces have is not taken off unless asked; a dry run writes nothing;
  *   · a plan's product, checked as it is saved and previewed — Deskzo One is every module, only an
- *     edition sells a product, a product's India-only module drops out abroad by itself;
+ *     edition sells a product, a module sold only in India goes only in a plan sold only there —
+ *     products too (Books and People are India's);
  *   · checkout: each rule of what goes together, in its words, and the add-ons' needs;
  *   · plans given by hand: one plan for each product, Deskzo One alone — the preview says the same;
  *   · entitlements: one product, two (the basics once), Deskzo One, and abroad;
@@ -250,8 +251,8 @@ async function main() {
     ok("  and so for every product: its name, tagline, modules and no seat limit", everyProductRight);
     const books = await row("deskzo-books");
     const people = await row("deskzo-people");
-    ok("Books is sold in India only — accounting is India's — and every other product everywhere", books.countries.join() === "IN" && (await control.plan.count({ where: { key: { in: keysMade.filter((k) => k.startsWith("deskzo-") && k !== "deskzo-books") }, NOT: { countries: { isEmpty: true } } } })) === 0);
-    ok("  People holds payroll, India's, while sold everywhere: abroad it drops out by itself", people.countries.length === 0 && people.modules.some((m) => m.moduleKey === "payroll"));
+    ok("Books and People are sold in India only — their accounting and payroll are India's — and every other product everywhere", books.countries.join() === "IN" && people.countries.join() === "IN" && (await control.plan.count({ where: { key: { in: keysMade.filter((k) => k.startsWith("deskzo-") && k !== "deskzo-books" && k !== "deskzo-people") }, NOT: { countries: { isEmpty: true } } } })) === 0);
+    ok("  People holds payroll, and is sold where payroll is", people.countries.join() === "IN" && people.modules.some((m) => m.moduleKey === "payroll"));
     const rc = await row("addon-revenue-close");
     const copilot = await row("addon-ai-copilot");
     const seats = await row("addon-more-people");
@@ -360,8 +361,9 @@ async function main() {
     ok("every module: an internal plan, or Deskzo One — no other sold plan", (await refused(() => plans.savePlan({ ...base, key: "zzprod-x", name: "Zz X", allModules: true }, ACTOR))) === P.everyModule && /internal plan/.test(P.everyModule));
     ok("  and Deskzo One is every module, never a list", (await refused(() => plans.savePlan({ ...base, key: "zzprod-x", name: "Zz X", productKey: "one", modules: ["helpdesk"] }, ACTOR))) === P.suiteIsEverything);
     ok("India's module in a plan of no product sold everywhere is refused, as before", /Payroll is sold only in IN/.test(await refused(() => plans.savePlan({ ...base, key: "zzprod-x", name: "Zz X", modules: ["payroll"] }, ACTOR))));
-    await plans.savePlan({ ...base, key: "zzprod-people-lite", name: "Zz People Lite", productKey: "people", modules: ["hr", "payroll"] }, ACTOR);
-    ok("  but a product's plan holds it, sold everywhere: it drops out abroad", (await row("zzprod-people-lite")).productKey === "people");
+    ok("  and in a product's plan too: People with payroll, sold everywhere, is refused", /Payroll is sold only in IN/.test(await refused(() => plans.savePlan({ ...base, key: "zzprod-people-lite", name: "Zz People Lite", productKey: "people", modules: ["hr", "payroll"] }, ACTOR))));
+    await plans.savePlan({ ...base, key: "zzprod-people-lite", name: "Zz People Lite", productKey: "people", modules: ["hr", "payroll"], countries: ["IN"] }, ACTOR);
+    ok("  sold in India, it is saved", (await row("zzprod-people-lite")).productKey === "people");
     ok("the preview refuses in the same words", (await refused(() => preview.previewPlanSave({ ...base, kind: "BUNDLE", key: "zzprod-x", name: "Zz X", productKey: "books" }))) === P.productOnEdition);
     await plans.savePlan({ ...base, key: "zzprod-crm-pro", name: "Zz CRM Pro", productKey: "crm", modules: [...crmWanted, "forecast"], sortOrder: 15 }, ACTOR);
     await plans.savePlan({ ...base, key: "zzprod-crm-pro", name: "Zz CRM Pro", modules: [...crmWanted, "forecast"], sortOrder: 15 }, ACTOR);
@@ -423,11 +425,14 @@ async function main() {
     ok("one plan for each product", twoCrm === "Choose one plan for each product — Deskzo CRM and Zz CRM Pro are both Deskzo CRM.", twoCrm);
     const rcWords = await refused(() => buy(IN, [["deskzo-crm", 1], ["addon-revenue-close", 1]]));
     ok("Revenue & Close needs Books or One — it never brings accounting with it", rcWords === "Revenue & Close needs Deskzo Books or Deskzo One.", rcWords);
+    const oneRc = await refused(() => buy(IN, [["deskzo-one", 1], ["addon-revenue-close", 1]]));
+    ok("  and is included in Deskzo One: bought on top of it, refused as nothing to add", oneRc === "Revenue & Close is already included in Deskzo One — there's nothing to add.", oneRc);
+    ok("  an allowance is never 'included': Deskzo One with AI Copilot is allowed", choice.includedRefusal({ key: "addon-ai-copilot", name: "AI Copilot", kind: "ADDON", productKey: null, modules: [] }, [{ key: "deskzo-one", name: "Deskzo One", kind: "EDITION", productKey: "one", allModules: true, modules: ["all"] }]) === null);
     ok("  and nothing was started at a gateway for any of them", calls.length === 0, calls.length);
     const withBooks = await buy(IN, [["deskzo-books", 1], ["addon-revenue-close", 1]]);
     ok("Books with Revenue & Close: bought — a Razorpay page for each", withBooks.gateway === "RAZORPAY" && withBooks.authorisations.length === 2);
-    const withOne = await buy(IN, [["deskzo-one", 1], ["addon-revenue-close", 1], ["addon-ai-copilot", 2]]);
-    ok("Deskzo One with Revenue & Close and the copilot ×2: bought", withOne.gateway === "RAZORPAY" && withOne.authorisations.length === 3);
+    const withOne = await buy(IN, [["deskzo-one", 1], ["addon-ai-copilot", 2]]);
+    ok("Deskzo One (Revenue & Close included) with the copilot ×2: bought", withOne.gateway === "RAZORPAY" && withOne.authorisations.length === 2);
     const three = await buy(IN, [["deskzo-crm", 1], ["deskzo-books", 1], ["deskzo-people", 1], ["addon-more-people", 3]]);
     ok("three products and more people: bought, one plan each", three.gateway === "RAZORPAY" && three.authorisations.map((a) => a.plan).join(", ") === "Deskzo CRM, Deskzo Books, Deskzo People, More people", three.gateway === "RAZORPAY" ? three.authorisations.map((a) => a.plan) : three);
     const usBuy = await buy(US, [["deskzo-crm", 1], ["deskzo-desk", 1], ["addon-ai-copilot", 1]]);
@@ -483,10 +488,8 @@ async function main() {
     const e4 = await ent.computeEntitlements(E4);
     ok("  abroad, every module sold there — not India's", e4.all && !rules.moduleEntitled(e4, "AE", "accounting") && !rules.moduleEntitled(e4, "AE", "payroll") && rules.moduleEntitled(e4, "AE", "helpdesk"));
     const E5 = await makeTenant("zzprod-e5", "AE", "AED");
-    await plans.setWorkspacePlans(E5, [{ planKey: "deskzo-people", quantity: 1 }], ACTOR);
-    const e5 = await ent.computeEntitlements(E5);
-    ok("People abroad: HR without payroll", e5.modules.includes("hr") && !e5.modules.includes("payroll"), e5.modules.join());
-    await plans.setWorkspacePlans(E5, [], ACTOR);
+    const e5Words = await refused(() => plans.setWorkspacePlans(E5, [{ planKey: "deskzo-people", quantity: 1 }], ACTOR));
+    ok("People abroad: not offered — staff can't give it to a workspace in the UAE", /Deskzo People/.test(e5Words) && /AE/.test(e5Words), e5Words);
     await control.tenant.update({ where: { id: E5 }, data: { country: "IN" } });
     await plans.setWorkspacePlans(E5, [{ planKey: "deskzo-people", quantity: 1 }], ACTOR);
     ok("  and in India with it", (await ent.computeEntitlements(E5)).modules.includes("payroll"));
@@ -527,7 +530,7 @@ async function main() {
     const usOffer = await checkout.offerFor(US);
     const usPicker = await html(createElement(PlanPicker, { plans: usOffer.plans, currency: usOffer.currency, gateway: usOffer.gateway }));
     save("plan-picker-us", usPicker);
-    ok("abroad: in dollars, through Stripe, without Books or Revenue & Close", textOf(usPicker).includes("$99.00") && !usPicker.includes("Deskzo Books") && !usPicker.includes("Revenue & Close") && /Stripe/.test(usPicker));
+    ok("abroad: in dollars, through Stripe, without Books, People or Revenue & Close", textOf(usPicker).includes("$99.00") && !usPicker.includes("Deskzo Books") && !usPicker.includes("Deskzo People") && !usPicker.includes("Revenue & Close") && /Stripe/.test(usPicker));
     const crmOnly = [...inOffer.plans.filter((p) => p.key !== "deskzo-one")];
     const crmPicker = textOf(await html(createElement(PlanPicker, { plans: crmOnly, currency: "INR", gateway: "RAZORPAY" })));
     ok("  with Deskzo CRM chosen first, Revenue & Close says what it needs", crmPicker.includes("Revenue & Close needs Deskzo Books or Deskzo One.") && /Total ₹1,499\.00 a month/.test(crmPicker), crmPicker.match(/Total[^.]*\./)?.[0]);
@@ -556,10 +559,10 @@ async function main() {
     ok("  People in India includes payroll", inOrder(tIN, [">Deskzo People</h3>", label("payroll"), ">Deskzo Desk</h3>"]));
     ok("  and the add-ons, Revenue & Close among them", inOrder(tIN, [pricingProps.extrasHeading, "Revenue &amp; Close", "AI Copilot", "More people"]));
     const rcRow = textOf(tIN.slice(tIN.indexOf("Revenue &amp; Close<"), tIN.indexOf("AI Copilot<")));
-    ok("  Revenue & Close says what it needs, and lists only its own module — never accounting as if it came with it", rcRow.includes("Revenue & Close needs Deskzo Books or Deskzo One.") && !rcRow.includes(label("accounting")) && rcRow.includes(label("revenue_close")), rcRow);
+    ok("  Revenue & Close says what it is an add-on to, that Deskzo One includes it, and lists only its own module — never accounting as if it came with it", rcRow.includes("Revenue & Close is an add-on to Deskzo Books, and included in Deskzo One.") && !rcRow.includes(label("accounting")) && rcRow.includes(label("revenue_close")), rcRow);
     const crmCard = textOf(tIN.slice(tIN.indexOf(">Deskzo CRM</h4>"), tIN.indexOf(">Zz CRM Pro</h4>")));
     ok("  a product's card names the basics every product comes with once, under Always", crmCard.includes(`Always: `) && crmCard.includes(label("workspace")) && crmCard.indexOf(label("workspace")) > crmCard.indexOf("Always: "), crmCard);
-    ok("the US: dollars, no Books, no Revenue & Close, and People without payroll", txUS.includes("$29") && !txUS.includes("Deskzo Books") && !txUS.includes("Revenue & Close") && inOrder(tUS, [">Deskzo People</h3>", ">Deskzo Desk</h3>"]) && !tUS.slice(tUS.indexOf(">Deskzo People</h3>"), tUS.indexOf(">Deskzo Desk</h3>")).includes(label("payroll")));
+    ok("the US: dollars, and no Books, People or Revenue & Close — India's", txUS.includes("$29") && !txUS.includes("Deskzo Books") && !txUS.includes("Deskzo People") && !txUS.includes("Revenue & Close") && txUS.includes("Deskzo Desk"));
     ok("yearly: the CRM's year, with its saving", textOf(tYear).includes("₹14,990") && textOf(tYear).includes("Save 17%"));
 
     // ─── The console ────────────────────────────────────────────────────────────────────────

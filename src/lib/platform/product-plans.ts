@@ -44,8 +44,6 @@ export const ADD_ON_PLAN_KEYS: Record<AddOnKey, string> = {
 /** Copilot tokens a month for each unit of the AI Copilot add-on, until staff say otherwise. */
 export const COPILOT_TOKENS_PER_UNIT = 1_000_000;
 
-/** Products sold only in some countries — Books, whose heart is India's accounting. */
-const SOLD_ONLY_IN: Partial<Record<ProductKey, string[]>> = { books: ["IN"] };
 
 /** A plan as the catalogue makes it: every field given. */
 export type CataloguePlan = Required<Omit<PlanInput, "customDomains">>;
@@ -62,7 +60,8 @@ export function productCatalogue(): CataloguePlan[] {
       productKey: product.key,
       allModules: suite,
       modules: suite ? [] : [...new Set([...BASE_MODULES, ...product.modules])],
-      countries: SOLD_ONLY_IN[product.key] ?? [],
+      // Sold only where products.ts says (Books and People: India).
+      countries: [...(product.soldOnlyIn ?? [])],
       // No limit on people until staff price the plans; the copilot is bought as an add-on.
       seats: null,
       copilotTokens: 0,
