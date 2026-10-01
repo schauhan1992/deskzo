@@ -422,6 +422,19 @@ enum NotificationType {
    * a rejection nobody is told about is a document that simply stops moving.
    */
   DOCUMENT_APPROVAL_DECIDED
+  /**
+   * A client's promise to pay passed its date without the money. Goes to whoever logged the
+   * follow-up and their reporting manager, once per promise.
+   */
+  PAYMENT_PROMISE_BROKEN
+  /**
+   * The day's broken promises to pay, in one notice, for everybody who records payments.
+   */
+  PAYMENT_PROMISES_SUMMARY
+  /**
+   * The day somebody planned to chase a client's payment again has come (when no task reminds them).
+   */
+  PAYMENT_FOLLOW_UP_DUE
 }
 
 model User {

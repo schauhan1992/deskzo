@@ -26,16 +26,15 @@ import { addDays, dayKey, istToday, shortDay } from "@/lib/collections/rules";
  * and the order release claim theirs: the first heartbeat to insert it runs, and every later one leaves.
  * Every notification also carries a dedupe key, so even a second run could not send one twice.
  *
- * **No new notification types** (that would be a schema change): a broken promise is sent as
- * `TASK_OVERDUE` — "a due date passes with it still open" — and a follow-up reminder as `CALLBACK_DUE` —
- * "a time you promised to ring somebody back arrives". Both are in the "My work" group, where people
- * already choose whether to hear about things they owe. The two constants below are the only places to
- * change if Collections is given types of its own.
+ * **Its own notification types**, in the "Money" group of a person's notification settings, so
+ * Collections can be heard or muted apart from tasks: a broken promise (to whoever logged it and their
+ * manager), the day's summary for accounts, and a follow-up that is due.
  */
 
 export const COLLECTIONS_JOB = "collections";
-export const BROKEN_PROMISE_NOTICE: NotificationType = "TASK_OVERDUE";
-export const FOLLOW_UP_REMINDER: NotificationType = "CALLBACK_DUE";
+export const BROKEN_PROMISE_NOTICE: NotificationType = "PAYMENT_PROMISE_BROKEN";
+export const BROKEN_PROMISES_SUMMARY: NotificationType = "PAYMENT_PROMISES_SUMMARY";
+export const FOLLOW_UP_REMINDER: NotificationType = "PAYMENT_FOLLOW_UP_DUE";
 
 /** A reminder missed because the job didn't run on its day is still sent, up to this many days late. */
 const REMINDER_GRACE_DAYS = 2;
@@ -157,7 +156,7 @@ async function announceBroken(now: Date, report: CollectionsDailyReport) {
     for (const userId of holders) {
       const sent = await notifyOnce({
         userId,
-        type: BROKEN_PROMISE_NOTICE,
+        type: BROKEN_PROMISES_SUMMARY,
         title: `${summaryCount} promise${summaryCount === 1 ? "" : "s"} to pay broken`,
         message,
         link: "/receivables?promise=broken",

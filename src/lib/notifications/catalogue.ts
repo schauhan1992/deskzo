@@ -30,7 +30,7 @@ export const NOTIFICATION_GROUPS: { key: NotificationGroupKey; label: string; bl
   { key: "work", label: "My work", blurb: "Tasks, callbacks and reminders addressed to you." },
   { key: "sales", label: "Sales", blurb: "Leads, orders and renewals." },
   { key: "support", label: "Support", blurb: "Tickets and the customers behind them." },
-  { key: "money", label: "Money", blurb: "Expenses, and what happened to them." },
+  { key: "money", label: "Money", blurb: "Expenses, and the payments clients promised." },
   { key: "people", label: "People", blurb: "Leave, attendance, letters and the office calendar." },
   { key: "customers", label: "Customers", blurb: "Feedback, forms and the customer portal." },
   { key: "security", label: "Security", blurb: "Who opened what. Mostly not optional." },
@@ -82,6 +82,9 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "EXPENSE_SUBMITTED", label: "An expense needs my approval", when: "Somebody who reports to you submits a claim.", group: "money" },
   { type: "EXPENSE_DECIDED", label: "My expense is decided", when: "A claim of yours is approved or rejected.", group: "money" },
   { type: "EXPENSE_REIMBURSED", label: "My expense is paid", when: "A claim of yours is reimbursed.", group: "money" },
+  { type: "PAYMENT_PROMISE_BROKEN", label: "A client broke a promise to pay", when: "The date a client promised to pay by passes without the money — on a follow-up you, or somebody who reports to you, logged.", group: "money" },
+  { type: "PAYMENT_PROMISES_SUMMARY", label: "Broken promises to pay, once a day", when: "Clients' promised dates passed without the money — one summary a day, for whoever records payments.", group: "money" },
+  { type: "PAYMENT_FOLLOW_UP_DUE", label: "A payment follow-up is due", when: "The day you planned to chase a client's payment again arrives, when no task reminds you.", group: "money" },
 
   // ─── People ─────────────────────────────────────────────────────────────────────────────────
   { type: "LEAVE_REQUESTED", label: "Leave needs my approval", when: "Somebody who reports to you asks for leave.", group: "people" },

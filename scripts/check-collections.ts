@@ -578,14 +578,15 @@ async function main() {
     const title = `${TAG} Alpha promised ${formatMoney(1180, "INR")} by 13 Jan — not received`;
     const toSales = await notices({ userId: sales.id, dedupeKey: `promise-broken:${ids[0]}` });
     ok("the salesperson is told: '<Client> promised ₹X by 13 Jan — not received'", toSales.length === 1 && toSales[0]!.title === title && toSales[0]!.link === "/collections?filter=broken", toSales[0]?.title);
+    ok("  as Collections' own type, not a task's", toSales[0]?.type === "PAYMENT_PROMISE_BROKEN", toSales[0]?.type);
     const toManager = await notices({ userId: manager.id, dedupeKey: `promise-broken:${ids[0]}` });
-    ok("  and their reporting manager, saying who logged it", toManager.length === 1 && toManager[0]!.title === title && (toManager[0]!.message ?? "").includes("Logged by Zzprobe sales"), toManager[0]?.message);
+    ok("  and their reporting manager, saying who logged it", toManager.length === 1 && toManager[0]!.title === title && toManager[0]!.type === "PAYMENT_PROMISE_BROKEN" && (toManager[0]!.message ?? "").includes("Logged by Zzprobe sales"), toManager[0]?.message);
     const toAccountsOwn = await notices({ userId: accounts.id, dedupeKey: `promise-broken:${ids[2]}` });
     ok("  accounts, who logged the other, are told of theirs", toAccountsOwn.length === 1);
     const summary = await notices({ dedupeKey: "promise-broken-summary:2026-01-14" });
     const holders = await (async () => {
       // Every active person holding payments.record, less anybody who has switched this type off.
-      const muted = new Set((await db.notificationPreference.findMany({ where: { type: "TASK_OVERDUE", inApp: false }, select: { userId: true } })).map((m) => m.userId));
+      const muted = new Set((await db.notificationPreference.findMany({ where: { type: "PAYMENT_PROMISES_SUMMARY", inApp: false }, select: { userId: true } })).map((m) => m.userId));
       const people = await db.user.findMany({ where: { active: true, kind: "MEMBER" }, select: { id: true } });
       const out: string[] = [];
       for (const p of people) if (!muted.has(p.id) && (await can(p.id, "payments.record"))) out.push(p.id);
@@ -593,13 +594,13 @@ async function main() {
     })();
     ok(
       "one daily summary to every payments.record holder (people only), linking to Broken promises on Receivables",
-      summary.length === holders.length && summary.some((s) => s.userId === accounts.id) && summary.every((s) => s.link === "/receivables?promise=broken" && s.title === "2 promises to pay broken"),
+      summary.length === holders.length && summary.some((s) => s.userId === accounts.id) && summary.every((s) => s.type === "PAYMENT_PROMISES_SUMMARY" && s.link === "/receivables?promise=broken" && s.title === "2 promises to pay broken"),
       `${summary.length} sent, ${holders.length} holders; ${summary[0]?.title}`,
     );
     ok("  naming the clients", (summary.find((s) => s.userId === accounts.id)?.message ?? "").includes(`${TAG} Alpha`) && (summary.find((s) => s.userId === accounts.id)?.message ?? "").includes(`${TAG} Stranger`));
     ok("  not the salesperson or the manager, who hold no payments.record", !summary.some((s) => s.userId === sales.id || s.userId === manager.id));
     const reminder = await notices({ userId: sales.id, dedupeKey: `collections-next:${reminded[0]}` });
-    ok("the morning reminder for the follow-up with no task (tasks were off)", reminder.length === 1 && reminder[0]!.type === "CALLBACK_DUE" && reminder[0]!.title.includes("today"), reminder[0]?.title);
+    ok("the morning reminder for the follow-up with no task (tasks were off)", reminder.length === 1 && reminder[0]!.type === "PAYMENT_FOLLOW_UP_DUE" && reminder[0]!.title.includes("today"), reminder[0]?.title);
     ok("  and none for the one with a task — the task is the reminder", (await notices({ dedupeKey: `collections-next:${reminded[1]}` })).length === 0);
 
     const counts = async () =>
