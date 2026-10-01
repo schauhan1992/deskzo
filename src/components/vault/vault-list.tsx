@@ -409,7 +409,7 @@ function EditDialog({
       <div className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="v-name">What it opens</Label>
-          <Input id="v-name" value={f.loginName} onChange={(e) => set("loginName", e.target.value)} placeholder="GoDaddy — wroffy.com" />
+          <Input id="v-name" value={f.loginName} onChange={(e) => set("loginName", e.target.value)} placeholder="GoDaddy — acme.com" />
         </div>
 
         <div className="space-y-1.5">

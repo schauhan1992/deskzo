@@ -33,7 +33,7 @@ export function CmsAuthFrame({
           <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand text-[11px] font-bold text-brand-contrast">
             W
           </span>
-          <p className="truncate text-sm font-semibold text-text">Wroffy CMS — the website&apos;s editors</p>
+          <p className="truncate text-sm font-semibold text-text">Deskzo CMS — the website&apos;s editors</p>
         </div>
 
         <div className="hidden max-w-sm lg:block">

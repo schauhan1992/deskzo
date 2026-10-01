@@ -372,14 +372,14 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     key: "resellers",
     label: "Resellers",
     description:
-      "Channel partners who buy from Wroffy for their own customers. Orders and payments sit with the reseller, and their end customers are flagged as off limits to direct contact and marketing.",
+      "Channel partners who buy from you for their own customers. Orders and payments sit with the reseller, and their end customers are flagged as off limits to direct contact and marketing.",
     navGroup: "Directory",
     navItems: [{ href: "/resellers", label: "Resellers", icon: Store }],
   },
   {
     key: "commission_parties",
     label: "Commission Parties",
-    description: "Agents, brokers, and referral partners Wroffy pays commission to — with the same onboarding lifecycle as vendors, tracked separately.",
+    description: "Agents, brokers, and referral partners you pay commission to — with the same onboarding lifecycle as vendors, tracked separately.",
     navGroup: "Directory",
     navItems: [{ href: "/commission-parties", label: "Commission Parties", icon: HandCoins }],
   },

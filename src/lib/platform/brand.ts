@@ -1,11 +1,11 @@
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 
 /**
- * What the platform calls itself to its customers — "I agree to allow Wroffy ERP to collect…", the
+ * What the platform calls itself to its customers — "I agree to allow Deskzo One to collect…", the
  * signature on support mail.
  *
  * For now it is the public website's name as the CMS last published it (SiteSettings.siteName), and
- * "Wroffy ERP" — the site's own default — whenever that can't be read: no control plane, nothing
+ * "Deskzo One" — the site's own default — whenever that can't be read: no control plane, nothing
  * published, the database down. A brand setting of its own will replace this later; callers keep
  * calling this.
  *
@@ -15,7 +15,8 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
  * (src/lib/support/settings.ts).
  */
 
-export const DEFAULT_BRAND_NAME = "Wroffy ERP";
+export { DEFAULT_BRAND_NAME } from "@/lib/platform/brand-names";
+import { DEFAULT_BRAND_NAME } from "@/lib/platform/brand-names";
 
 export async function platformBrandName(): Promise<string> {
   if (!controlConfigured()) return DEFAULT_BRAND_NAME;

@@ -146,7 +146,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       schemaVersion: archiveSchema,
       dumpBytes,
       via: row.via ?? sidecar?.via ?? null,
-      app: "Wroffy ERP",
+      app: "Deskzo One",
       /** A dump on this server is not sealed, so there is no key travelling with it — nor any need. */
       carriesSecret: false,
       sameInstance: takenFingerprint ? ours.includes(takenFingerprint) : null,

@@ -41,7 +41,7 @@ export type SiteMeta = {
   aiSearchCrawlersAllowed: boolean;
   /** The site's default sharing image (Settings → SEO), when it has a usable one. */
   defaultOgImage: string | null;
-  /** The title template, tokens filled ("%s · Wroffy ERP"). */
+  /** The title template, tokens filled ("%s · Deskzo One"). */
   titleTemplate: string;
   siteName: string;
 };

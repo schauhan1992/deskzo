@@ -216,7 +216,7 @@ export async function runBackup(options?: {
         secretFingerprint: keys.fingerprint,
         via: tool.via,
         sizeBytes: size,
-        app: "Wroffy ERP",
+        app: "Deskzo One",
       });
     } else {
       const manifest = await storeDump(directory, workingPath);

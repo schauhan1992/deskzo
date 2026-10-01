@@ -24,7 +24,7 @@ import { MODULE_REGISTRY } from "@/lib/modules";
  */
 
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
-  siteName: "Wroffy ERP",
+  siteName: "Deskzo One",
   tagline: "Your tagline goes here",
   displayDomain: "yourdomain.com",
   salesEmail: "sales@yourdomain.com",

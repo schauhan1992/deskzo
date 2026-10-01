@@ -9,7 +9,7 @@ import { platformEnv } from "@/lib/platform/console-page";
 export function generateMetadata(): Metadata {
   const { titlePrefix } = platformEnv();
   return {
-    title: { template: `${titlePrefix}%s · Wroffy console`, default: `${titlePrefix}Wroffy console` },
+    title: { template: `${titlePrefix}%s · Deskzo console`, default: `${titlePrefix}Deskzo console` },
     robots: { index: false, follow: false },
   };
 }

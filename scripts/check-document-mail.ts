@@ -76,7 +76,7 @@ const substitutes = new Map<string, unknown>([
     },
   ],
   [load.resolve("next/cache"), { revalidatePath: () => {}, revalidateTag: () => {}, unstable_cache: <T,>(fn: T) => fn }],
-  [load.resolve("next/headers"), { headers: async () => new Headers({ host: "wroffy.localhost:3000" }), cookies: async () => ({ get: () => undefined }) }],
+  [load.resolve("next/headers"), { headers: async () => new Headers({ host: "deskzo.localhost:3000" }), cookies: async () => ({ get: () => undefined }) }],
   // The Microsoft app's settings, so the suite never touches the real Security settings row.
   [load.resolve("../src/lib/security-settings"), { getCachedSecuritySettings: fakeSecurity, getSecuritySettings: fakeSecurity }],
 ]);

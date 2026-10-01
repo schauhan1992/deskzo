@@ -41,7 +41,7 @@ export type EffectiveMeta = {
   /** The entity's own title before the template: its SEO title, else the fallback the site uses. */
   rawTitle: string;
   titleSource: SeoValueSource;
-  /** What the template adds around the title (" · Wroffy ERP"); "" for an absolute title. */
+  /** What the template adds around the title (" · Deskzo One"); "" for an absolute title. */
   templateAddition: string;
   /** The meta description; "" when the page has none. */
   description: string;
@@ -148,7 +148,7 @@ export type SeoSiteContext = {
   social: { network: string; href: string }[];
   /** "https://example.com", for absolute URLs in JSON-LD; "" when unknown (they are then site paths). */
   origin: string;
-  /** The layout's title template and default title, tokens filled ("%s · Wroffy ERP"). */
+  /** The layout's title template and default title, tokens filled ("%s · Deskzo One"). */
   titleTemplate: string;
   defaultTitle: string;
   /** The site's default sharing image, when it has a usable one. */

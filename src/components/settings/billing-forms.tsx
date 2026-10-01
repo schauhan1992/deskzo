@@ -41,7 +41,7 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
       </div>
     );
   }
-  if (!editions.length) return <p className="text-sm text-muted">No plan is on sale here yet. Contact Wroffy to choose one.</p>;
+  if (!editions.length) return <p className="text-sm text-muted">No plan is on sale here yet. Contact Deskzo to choose one.</p>;
   return (
     <form
       className="space-y-4"

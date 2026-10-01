@@ -27,7 +27,7 @@ export function setTestPlatformMailer(sender: Sender | null) {
 }
 
 export function platformMailFrom(): string {
-  return process.env.PLATFORM_MAIL_FROM?.trim() || "Wroffy <no-reply@localhost>";
+  return process.env.PLATFORM_MAIL_FROM?.trim() || "Deskzo One <no-reply@localhost>";
 }
 
 export async function sendPlatformMail(mail: PlatformMail): Promise<void> {

@@ -118,7 +118,7 @@ const SOURCE_LIST = LEAD_SOURCE_VALUES.map((v) => `\`${v.toLowerCase()}\` (${LEA
 export function renderMarkdown(baseUrl: string): string {
   const req = (r: FieldSpec["required"]) => (r === true ? "Yes" : r === false ? "No" : r);
   return [
-    "# Wroffy ERP — Lead capture API",
+    "# Deskzo One — Lead capture API",
     "",
     "Send enquiries from your websites straight into the CRM as leads. Each lead records which website sent it, is scored, and is assigned by the CRM's lead assignment rules.",
     "",

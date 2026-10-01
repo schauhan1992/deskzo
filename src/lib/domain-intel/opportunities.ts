@@ -50,7 +50,7 @@ export function opportunitiesFrom(signals: DomainSignals, asOf: Date = new Date(
     found.push({
       key: "google-to-m365",
       observation: "They run Google Workspace.",
-      angle: `Worth asking what they use for documents and Teams. A Microsoft 365 comparison for ${seats} is the natural opening, and Wroffy can price both.`,
+      angle: `Worth asking what they use for documents and Teams. A Microsoft 365 comparison for ${seats} is the natural opening, and you can price both.`,
       weight: "strong",
       area: "Email & productivity",
     });

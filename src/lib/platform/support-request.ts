@@ -3,6 +3,7 @@ import { redactSecrets } from "@/lib/console-shared/redact";
 import type { TenantStatusKey } from "@/lib/console-shared/types";
 import { cleanText } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
+import { COMPANY_NAME } from "@/lib/platform/brand-names";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import type { Staff } from "@/lib/platform/staff-session";
@@ -65,16 +66,16 @@ export async function requestSupportAccess(staff: Staff, tenantId: string, reaso
   const workspace = cleanText(tenant.name, 120).replace(/\s+/g, " ") || tenant.slug;
   // Their display name — never their address. A name that looks like one is not used.
   const name = cleanText(staff.name, 80).replace(/\s+/g, " ");
-  const who = name && !name.includes("@") ? name : "A member of Wroffy's support team";
+  const who = name && !name.includes("@") ? name : `A member of ${COMPANY_NAME}'s support team`;
   const text = [
     "Hello,",
     "",
-    `${who}, from Wroffy support, asks to look inside ${workspace} (${host}).`,
+    `${who}, from ${COMPANY_NAME} support, asks to look inside ${workspace} (${host}).`,
     "",
     "What it is for:",
     why,
     "",
-    "Nobody from Wroffy can see inside your workspace unless you let them. If you want to, as its super admin:",
+    `Nobody from ${COMPANY_NAME} can see inside your workspace unless you let them. If you want to, as its super admin:`,
     "",
     "  1. Sign in, and open Settings › Security:",
     `     ${protocolFor(host)}://${host}/settings/security`,
@@ -83,11 +84,11 @@ export async function requestSupportAccess(staff: Staff, tenantId: string, reaso
     "",
     "If you did not expect this, ignore this email — nothing changes unless you grant access.",
     "",
-    "Wroffy",
+    COMPANY_NAME,
   ].join("\n");
 
   try {
-    await sendPlatformMail({ to, subject: `Wroffy support asks to look at ${workspace}`, text });
+    await sendPlatformMail({ to, subject: `${COMPANY_NAME} support asks to look at ${workspace}`, text });
   } catch (err) {
     console.error(`[support] the access request for ${tenant.slug} could not be sent: ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
     throw new ConsoleRefused("The email could not be sent.");

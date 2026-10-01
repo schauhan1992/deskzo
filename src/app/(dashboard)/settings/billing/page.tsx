@@ -6,6 +6,7 @@ import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatMoney } from "@/lib/billing/money";
 import { formatIstDate } from "@/lib/india-time";
 import { partnerShownToCustomer } from "@/lib/partners/customer-facing";
+import { COMPANY_NAME } from "@/lib/platform/brand-names";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
 /** Where this workspace stands, in a sentence. */
@@ -14,7 +15,7 @@ function standingText(view: BillingView): { tone: "green" | "amber" | "red" | "b
   if (view.held) return { tone: "red", text: "The workspace is held until a plan is paid for. Nothing has been deleted — paying opens it again at once." };
   switch (s.kind) {
     case "exempt":
-      return { tone: "default", text: "Your plan is looked after by Wroffy — there is nothing to pay here." };
+      return { tone: "default", text: `Your plan is looked after by ${COMPANY_NAME} — there is nothing to pay here.` };
     case "paid":
       return { tone: "green", text: "Paid up." };
     case "trial":
@@ -28,7 +29,7 @@ function standingText(view: BillingView): { tone: "green" | "amber" | "red" | "b
     case "lapsed":
       return { tone: "red", text: "No plan is paid for." };
     default:
-      return { tone: "default", text: "No plan yet. Contact Wroffy to be put on one." };
+      return { tone: "default", text: `No plan yet. Contact ${COMPANY_NAME} to be put on one.` };
   }
 }
 
@@ -70,7 +71,7 @@ export default async function BillingPage() {
               <span>
                 <span className="font-medium text-text">{s.plans.map((p) => (p.quantity > 1 ? `${p.name} ×${p.quantity}` : p.name)).join(", ") || "—"}</span>
                 <span className="block text-xs text-muted">
-                  {s.gateway === "MANUAL" ? (s.status === "TRIALING" ? "Free trial" : "Given by Wroffy") : `${s.gateway === "STRIPE" ? "Stripe" : "Razorpay"}, ${s.interval === "YEAR" ? "yearly" : "monthly"}`}
+                  {s.gateway === "MANUAL" ? (s.status === "TRIALING" ? "Free trial" : `Given by ${COMPANY_NAME}`) : `${s.gateway === "STRIPE" ? "Stripe" : "Razorpay"}, ${s.interval === "YEAR" ? "yearly" : "monthly"}`}
                   {s.status === "PAST_DUE" && " — payment overdue"}
                   {s.currentPeriodEnd && ` — ${s.cancelAtPeriodEnd ? "ends" : "renews"} ${formatIstDate(s.currentPeriodEnd)}`}
                 </span>

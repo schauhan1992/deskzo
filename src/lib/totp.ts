@@ -16,6 +16,6 @@ export function verifyTotpCode(secret: string, code: string): boolean {
 }
 
 export async function totpQrCodeDataUrl(email: string, secret: string) {
-  const uri = authenticator.keyuri(email, "Wroffy ERP", secret);
+  const uri = authenticator.keyuri(email, "Deskzo One", secret);
   return QRCode.toDataURL(uri);
 }

@@ -47,7 +47,7 @@ const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").rep
  * for may well be the thing a normal page would need. It asks `/api/maintenance/status` every half
  * minute and reloads when the answer changes, so nobody has to keep refreshing.
  */
-export function maintenancePage(state: MaintenanceState, appName = "Wroffy ERP"): string {
+export function maintenancePage(state: MaintenanceState, appName = "Deskzo One"): string {
   const back = state.endsAt ? `<p class="when">Expected back by <strong>${escape(formatIstDateTime(state.endsAt))}</strong> (India time).</p>` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">

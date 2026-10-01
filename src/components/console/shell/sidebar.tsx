@@ -80,11 +80,11 @@ function NavItem({ page, active, badge, rail, onNavigate }: { page: ConsolePage;
 
 function Brand({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void }) {
   return (
-    <Link href="/" onClick={onNavigate} aria-label={rail ? "Wroffy console, Overview" : undefined} className="flex min-w-0 items-center gap-2.5 rounded-base">
+    <Link href="/" onClick={onNavigate} aria-label={rail ? "Deskzo console, Overview" : undefined} className="flex min-w-0 items-center gap-2.5 rounded-base">
       <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand text-[11px] font-bold text-brand-contrast">
         W
       </span>
-      {!rail && <span className="truncate text-sm font-semibold text-text">Wroffy console</span>}
+      {!rail && <span className="truncate text-sm font-semibold text-text">Deskzo console</span>}
     </Link>
   );
 }

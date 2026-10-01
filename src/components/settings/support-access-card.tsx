@@ -55,7 +55,7 @@ export function SupportAccessCard({ state }: { state: SupportAccessState }) {
       }}
     >
       <p className="text-sm text-muted">
-        Wroffy&apos;s support staff cannot see inside this workspace unless you let them. Access ends on its own after the time you choose, or when you end it.
+        Deskzo&apos;s support staff cannot see inside this workspace unless you let them. Access ends on its own after the time you choose, or when you end it.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>

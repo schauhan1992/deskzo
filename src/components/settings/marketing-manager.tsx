@@ -107,7 +107,7 @@ export function MarketingManager({
               id="fromDomain"
               value={form.marketingFromDomain}
               onChange={set("marketingFromDomain")}
-              placeholder="mail.wroffy.com"
+              placeholder="mail.acme.com"
               className="font-mono text-xs"
             />
             <p className="text-xs text-subtle">
@@ -255,7 +255,7 @@ export function MarketingManager({
               rows={3}
               value={form.marketingPostalAddress}
               onChange={set("marketingPostalAddress")}
-              placeholder={registered ?? "Wroffy Technologies, …"}
+              placeholder={registered ?? "Acme Technologies Pvt Ltd, …"}
             />
             <p className="text-xs text-subtle">
               Printed at the bottom of every marketing email — most providers require one.{" "}

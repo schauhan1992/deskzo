@@ -202,7 +202,7 @@ export function BackupScheduleForm({
   -WorkingDirectory "C:\\Users\\Sachin\\Documents\\wroffy-crm"
 $trigger = New-ScheduledTaskTrigger -Once -At 00:00 \`
   -RepetitionInterval (New-TimeSpan -Minutes 10)
-Register-ScheduledTask -TaskName "Wroffy ERP backup" \`
+Register-ScheduledTask -TaskName "Deskzo One backup" \`
   -Action $action -Trigger $trigger -RunLevel Highest`}
                 </pre>
               </div>

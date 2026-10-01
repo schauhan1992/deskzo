@@ -449,7 +449,7 @@ async function main() {
 
     section("The CMS's screens: the doors");
     const meta = cmsRootLayout.generateMetadata();
-    ok("every CMS page is titled '… · Wroffy CMS' and kept out of search", meta.title.template.endsWith("%s · Wroffy CMS") && !meta.robots.index && !meta.robots.follow, meta.title.template);
+    ok("every CMS page is titled '… · Deskzo CMS' and kept out of search", meta.title.template.endsWith("%s · Deskzo CMS") && !meta.robots.index && !meta.robots.follow, meta.title.template);
     signedOut();
     const loginHtml = keep(await renderPage(LoginScreen));
     ok("signed out, /login is the CMS's own sign-in: email, password, and which environment", loginHtml.includes("Sign in to the CMS") && loginHtml.includes('type="email"') && loginHtml.includes('type="password"') && /Development|Staging|Production/.test(loginHtml));
@@ -967,7 +967,7 @@ async function main() {
     ok("  a bad link in the navigation is refused", !badNav.ok && !!badNav.issues?.some((i) => i.path === "nav[0].href"));
     const pubSettings = await act(settingsActions.cmsPublishSettings({}));
     const liveSettings = await site.getSiteSettings();
-    ok("published, the site uses them — the rest keep their defaults", pubSettings.ok && liveSettings.tagline === "Zz tagline" && liveSettings.nav[0]?.label === "Zz Blog" && liveSettings.siteName === "Wroffy ERP");
+    ok("published, the site uses them — the rest keep their defaults", pubSettings.ok && liveSettings.tagline === "Zz tagline" && liveSettings.nav[0]?.label === "Zz Blog" && liveSettings.siteName === "Deskzo One");
 
     section("Site settings: the header's menus and the footer's columns");
     const menuItem = (extra: object = {}) => ({ label: "Zz CRM", href: "/product/zz-crm", description: "Zz companies, contacts and leads", ...extra });

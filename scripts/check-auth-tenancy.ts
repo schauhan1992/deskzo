@@ -124,7 +124,7 @@ async function main() {
     ok("a held workspace is found, and says so — the proxy refuses it", (await registry.tenantBySlug("zzauth-held"))?.status === "SUSPENDED");
     if (!A || !B) throw new Error("registry");
 
-    const envDefault = process.env.TENANCY_DEFAULT_SLUG ?? "wroffy";
+    const envDefault = process.env.TENANCY_DEFAULT_SLUG ?? "deskzo";
     ok("with no default workspace yet, the environment's first one stands in", (await registry.legacyTenant())?.source === "env" && !!(await registry.tenantBySlug(envDefault)));
     await control.tenant.update({ where: { id: idA }, data: { isDefault: true } });
     registry.forgetRegistry();

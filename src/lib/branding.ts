@@ -9,7 +9,7 @@ export type Branding = {
 };
 
 export const DEFAULT_BRANDING: Branding = {
-  appName: "Wroffy ERP",
+  appName: "Deskzo One",
   shortName: null,
   tagline: null,
   logoDataUrl: null,

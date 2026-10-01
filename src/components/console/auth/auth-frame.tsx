@@ -33,11 +33,11 @@ export function AuthFrame({
           <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand text-[11px] font-bold text-brand-contrast">
             W
           </span>
-          <p className="truncate text-sm font-semibold text-text">Wroffy console — staff only</p>
+          <p className="truncate text-sm font-semibold text-text">Deskzo console — staff only</p>
         </div>
 
         <div className="hidden max-w-sm lg:block">
-          <p className="text-2xl font-semibold tracking-tight text-text">For Wroffy staff.</p>
+          <p className="text-2xl font-semibold tracking-tight text-text">For Deskzo staff.</p>
           <p className="mt-3 text-sm leading-relaxed text-muted">
             Workspace accounts don&apos;t sign in here — each customer signs in at their own workspace&apos;s address.
           </p>

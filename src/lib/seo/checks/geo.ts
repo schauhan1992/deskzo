@@ -65,7 +65,7 @@ function present(value: unknown): boolean {
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Every way the site's name is written in the text: "Wroffy ERP", "wroffy-erp", "WroffyERP". */
+/** Every way the site's name is written in the text: "Deskzo One", "deskzo-one", "DeskzoOne". */
 function nameMentions(text: string, name: string): string[] {
   const parts = name.split(/\s+/).filter(Boolean).map(escapeRegExp);
   if (!parts.length) return [];

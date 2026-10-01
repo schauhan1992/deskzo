@@ -94,7 +94,7 @@ export function LeadCaptureManager({ keys, baseUrl }: { keys: Key[]; baseUrl: st
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "wroffy-lead-capture-api.md";
+    a.download = "lead-capture-api.md";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -149,7 +149,7 @@ export function LeadCaptureManager({ keys, baseUrl }: { keys: Key[]; baseUrl: st
           <form onSubmit={create} className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
             <div className="min-w-56 flex-1 space-y-1.5">
               <Label htmlFor="lck-name">New key for</Label>
-              <Input id="lck-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="wroffy.com contact form" autoComplete="off" />
+              <Input id="lck-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="acme.com contact form" autoComplete="off" />
             </div>
             <div className="min-w-56 flex-1 space-y-1.5">
               <Label htmlFor="lck-source">Source label (optional)</Label>

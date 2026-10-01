@@ -52,13 +52,13 @@ async function read(): Promise<{ row: MaintenanceRow | null; appName: string }> 
       db.maintenanceMode.findUnique({ where: { id: "global" }, select: { enabled: true, startsAt: true, endsAt: true, message: true, updatedAt: true } }),
       db.brandingSettings.findUnique({ where: { id: "global" }, select: { appName: true } }),
     ]);
-    const entry = { row, appName: branding?.appName?.trim() || "Wroffy ERP", at: now };
+    const entry = { row, appName: branding?.appName?.trim() || "Deskzo One", at: now };
     cached.set(key, entry);
     return entry;
   } catch {
     // A database that can't answer this can't serve the app either; don't make it worse by holding
     // everybody at a maintenance page nobody switched on.
-    return hit ?? { row: null, appName: "Wroffy ERP" };
+    return hit ?? { row: null, appName: "Deskzo One" };
   }
 }
 

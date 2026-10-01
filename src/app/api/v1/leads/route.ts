@@ -26,7 +26,7 @@ import { MAX_BODY_BYTES, RATE_LIMIT_PER_MINUTE } from "@/lib/lead-capture/spec";
 
 export const dynamic = "force-dynamic";
 
-const deny = () => NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Wroffy ERP lead capture"' } });
+const deny = () => NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Deskzo One lead capture"' } });
 
 async function authenticate(request: Request) {
   const credentials = parseBasicAuth(request.headers.get("authorization"));

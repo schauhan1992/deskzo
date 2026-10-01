@@ -54,13 +54,13 @@ function NavItem({ page, active, badge, rail, onNavigate }: { page: CmsNavPage; 
 /** The CMS's name at the top of the sidebar, and the way home. */
 export function CmsBrand({ rail, siteName, onNavigate }: { rail: boolean; siteName: string; onNavigate?: () => void }) {
   return (
-    <Link href="/" onClick={onNavigate} aria-label={rail ? "Wroffy CMS, Dashboard" : undefined} className="flex min-w-0 items-center gap-2.5 rounded-base">
+    <Link href="/" onClick={onNavigate} aria-label={rail ? "Deskzo CMS, Dashboard" : undefined} className="flex min-w-0 items-center gap-2.5 rounded-base">
       <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand text-[11px] font-bold text-brand-contrast shadow-sm">
         W
       </span>
       {!rail && (
         <span className="min-w-0 leading-tight">
-          <span className="block truncate text-sm font-semibold text-text">Wroffy CMS</span>
+          <span className="block truncate text-sm font-semibold text-text">Deskzo CMS</span>
           <span className="block truncate text-[11px] text-subtle" title={siteName}>
             {siteName}
           </span>

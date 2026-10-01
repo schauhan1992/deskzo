@@ -74,7 +74,7 @@ export async function toWorkbookBuffer(
   meta: { title: string; by: string; generatedAt: Date },
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Wroffy ERP";
+  wb.creator = "Deskzo One";
   wb.created = meta.generatedAt;
 
   // A cover sheet, because an exported file outlives the conversation that produced it. Six months
@@ -84,7 +84,7 @@ export async function toWorkbookBuffer(
     { Field: "Export", Value: meta.title },
     { Field: "Taken", Value: meta.generatedAt.toISOString() },
     { Field: "By", Value: meta.by },
-    { Field: "Source", Value: "Wroffy ERP" },
+    { Field: "Source", Value: "Deskzo One" },
     {
       Field: "Scope",
       Value:

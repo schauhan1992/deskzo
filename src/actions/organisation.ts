@@ -515,7 +515,7 @@ export async function updateMarketingSettings(input: {
   const withoutUser = withoutScheme.includes("@") ? withoutScheme.slice(withoutScheme.indexOf("@") + 1) : withoutScheme;
   const domain = withoutUser.split("/")[0].trim() || null;
   if (domain && (!domain.includes(".") || /[^a-z0-9.-]/.test(domain))) {
-    return { ok: false, error: "That isn't a domain — just the part after the @, like mail.wroffy.com." };
+    return { ok: false, error: "That isn't a domain — just the part after the @, like mail.acme.com." };
   }
 
   const fields = {

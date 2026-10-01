@@ -17,7 +17,7 @@ import { tenancyState, type Tenant } from "@/lib/tenancy/state";
  * ## From the environment
  *
  *   DATABASE_URL           the first workspace, until it is adopted into the control plane
- *   TENANCY_DEFAULT_SLUG   its name in the address (default "wroffy")
+ *   TENANCY_DEFAULT_SLUG   its name in the address (default "deskzo")
  *   TENANCY_DEFAULT_NAME   its display name
  *   TENANCY_LEGACY_HOSTS   addresses from before workspaces, still reaching it ("localhost:3000")
  *   TENANT_DB_<SLUG>       further workspaces — check suites only ("TENANT_DB_ACME=postgres://…")
@@ -35,7 +35,7 @@ const portSuffix = () => (process.env.PLATFORM_PORT ? `:${process.env.PLATFORM_P
 export const subdomainHost = (slug: string) => `${slug}.${PLATFORM_DOMAIN}${portSuffix()}`;
 
 export function defaultSlug(): string {
-  return (process.env.TENANCY_DEFAULT_SLUG ?? "wroffy").trim().toLowerCase();
+  return (process.env.TENANCY_DEFAULT_SLUG ?? "deskzo").trim().toLowerCase();
 }
 
 // ─── The environment ─────────────────────────────────────────────────────────────────────────────

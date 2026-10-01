@@ -204,7 +204,7 @@ export async function sealToStream(input: {
   const iv = randomBytes(12);
 
   const header: ArchiveHeader = {
-    app: "Wroffy ERP",
+    app: "Deskzo One",
     format: ARCHIVE_VERSION,
     takenAt: input.meta.takenAt.toISOString(),
     schemaVersion: input.meta.schemaVersion,
@@ -293,8 +293,8 @@ export async function readArchiveHeader(archivePath: string): Promise<ArchiveHea
       const looksLikeRawDump = preamble.subarray(0, 5).toString("latin1") === "PGDMP";
       throw new ArchiveFormatError(
         looksLikeRawDump
-          ? "That is a raw pg_dump file, not a Wroffy backup archive. Restore it with npm run db:restore."
-          : "That is not a Wroffy backup archive.",
+          ? "That is a raw pg_dump file, not a Deskzo One backup archive. Restore it with npm run db:restore."
+          : "That is not a Deskzo One backup archive.",
       );
     }
 

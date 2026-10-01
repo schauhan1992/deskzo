@@ -200,7 +200,7 @@ export async function cmsEnrolmentChallenge(): Promise<{ qr: string; secret: str
     secret = generateTotpSecret();
     await controlDb().cmsUser.update({ where: { id: user.id }, data: { totpSecretCipher: sealTotp(secret) } });
   }
-  return { qr: await totpQrCodeDataUrl(`${user.email} (Wroffy CMS)`, secret), secret };
+  return { qr: await totpQrCodeDataUrl(`${user.email} (Deskzo CMS)`, secret), secret };
 }
 
 /** Finishes enrolment with a code from the new authenticator. Their other sessions end. */
