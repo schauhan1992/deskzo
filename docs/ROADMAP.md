@@ -1,4 +1,6 @@
-# Wroffy ERP — Roadmap
+# Deskzo One — build history
+
+> How the product was built, phase by phase, in the order it happened. It began as Wroffy's own CRM, grew into an ERP, and became Deskzo One, a multi-workspace SaaS, in September 2026: earlier entries keep the names used at the time.
 
 > Scope note: this started as a CRM and is now explicitly headed toward a full customized ERP (per the user, 2026-09-10). Build every new capability as its own module registered in `src/lib/modules.ts` (nav group + nav items + optionally `core`) so it plugs into the sidebar and the Settings on/off toggle automatically — don't bolt features onto existing pages/nav by hand.
 

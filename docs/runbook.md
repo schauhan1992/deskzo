@@ -1,4 +1,4 @@
-# Wroffy ERP — operations and recovery runbook
+# Deskzo One — operations and recovery runbook
 
 For whoever runs the platform: what runs where, what to back up, how to release, and what to do when something breaks. Kept with the code so it changes with it.
 

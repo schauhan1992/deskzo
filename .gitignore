@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# the template has no secrets in it, and a fresh clone needs it
+!.env.example
 
 # vercel
 .vercel
