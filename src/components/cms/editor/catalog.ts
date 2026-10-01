@@ -7,13 +7,16 @@ import {
   Grid3x3,
   HelpCircle,
   Image as ImageIcon,
+  LayoutGrid,
   LayoutTemplate,
+  Link2,
   LogIn,
   Mail,
   Megaphone,
   MonitorSmartphone,
   PanelTop,
   Quote,
+  Scale,
   ShieldCheck,
   UserPlus,
   type LucideIcon,
@@ -22,6 +25,7 @@ import { BLOCK_TYPES, type BlockPropsMap, type BlockType, type SiteBlock } from 
 import { DEFAULT_SITE_PAGES } from "@/components/site/defaults";
 import { plainInline } from "@/components/cms/editor/inline-markup";
 import { newBlockId } from "@/components/cms/editor/doc-utils";
+import { istDateKey } from "@/lib/india-time";
 
 /**
  * What the editor knows about each block type besides its shape (src/components/site/blocks/types.ts):
@@ -62,6 +66,14 @@ export const BLOCK_INFO: Record<BlockType, BlockInfo> = {
   productPreviews: { label: "Product previews", description: "The drawn product screens (sample data), each with a title and words.", icon: MonitorSmartphone, group: "Sections" },
   workspaceSignin: { label: "Workspace sign-in", description: "Go to a workspace by its name, or find one's workspaces by email.", icon: LogIn, group: "Live data and forms" },
   signupForm: { label: "Signup form", description: "Setting up a new workspace — the signup itself, with words beside it.", icon: UserPlus, group: "Live data and forms" },
+  comparisonTable: {
+    label: "Comparison table",
+    description: "This product beside another, feature by feature, with each claim's source on the other product's own site and the date it was read.",
+    icon: Scale,
+    group: "Sections",
+  },
+  relatedLinks: { label: "Related links", description: "Cards linking to other pages on this site, each with a line on what is there.", icon: Link2, group: "Sections" },
+  moduleHighlights: { label: "Page map", description: "For a hub page: groups of links to the pages under it, each with what it covers.", icon: LayoutGrid, group: "Sections" },
 };
 
 export const BLOCK_GROUPS: BlockGroup[] = ["Top of page", "Sections", "Text", "Live data and forms"];
@@ -130,6 +142,26 @@ const STARTERS: { [K in BlockType]: () => BlockPropsMap[K] } = {
       confirmationBody: "If that address has workspaces, we have sent it their links.",
     },
   signupForm: () => siteDefault("signupForm") ?? { heading: "Set up your workspace" },
+  comparisonTable: () => ({
+    heading: "How {siteName} compares",
+    intro: "What each product offers, point by point, from each one's own public information.",
+    competitor: "Other product's name",
+    // Today in India: the day the other product's website is read, which the page states.
+    asOf: istDateKey(new Date()),
+    rows: [{ feature: "First feature compared", us: "yes", them: "partial", note: "What differs, in a line." }],
+    disclaimer: "Information about other products is from their public websites as of the date above and may have changed since. Product names and trademarks belong to their owners.",
+  }),
+  relatedLinks: () => ({
+    heading: "Related pages",
+    links: [
+      { label: "Plans and pricing", href: "/pricing", description: "What each plan includes, in your country's currency." },
+      { label: "Security", href: "/security", description: "How each company's data is kept apart and protected." },
+    ],
+  }),
+  moduleHighlights: () => ({
+    heading: "Section heading",
+    groups: [{ title: "Group name", items: [{ label: "Page name", href: "/pricing", description: "What the page covers, in a line." }] }],
+  }),
 };
 
 /** A new block of `type`, with a fresh id. Call from an event handler (the id is random). */
@@ -172,6 +204,12 @@ export function blockSummary(block: SiteBlock): string {
       return clip(first("editionsHeading", "extrasHeading"));
     case "logoCloud":
       return clip(first("heading") || (block.props.items ?? []).map((i) => i.name).join(", "));
+    case "comparisonTable":
+      return clip(first("heading") || (block.props.competitor ? `Compared with ${block.props.competitor}` : ""));
+    case "relatedLinks":
+      return clip(first("heading") || (block.props.links ?? []).map((l) => l.label).join(", "));
+    case "moduleHighlights":
+      return clip(first("heading") || (block.props.groups ?? []).map((g) => g.title).join(", "));
     default:
       return clip(first("heading", "eyebrow", "intro"));
   }

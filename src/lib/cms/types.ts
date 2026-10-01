@@ -86,8 +86,15 @@ export class CmsRefused extends Error {
 
 // ─── People ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The signed-in CMS user. */
-export type CmsMe = { id: string; email: string; name: string; role: CmsRole };
+/**
+ * The signed-in CMS user.
+ *
+ * `script`: a script run on the server acting through the CMS's own functions (the website seed,
+ * scripts/site-seed-pages.ts). It acts with `role`; what it changes is recorded as "script" (its
+ * `updatedBy` and the activity log), and a post it creates is by `id`, a real CMS account. Never set
+ * from a session.
+ */
+export type CmsMe = { id: string; email: string; name: string; role: CmsRole; script?: true };
 
 export type CmsUserRow = {
   id: string;
@@ -233,7 +240,11 @@ export type CmsDashboard = {
  */
 export type PostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; keywords?: string[] };
 
-/** The blocks a post's body may use: no second h1 (hero, pageHeader) and no forms or live pricing. */
+/**
+ * The blocks a post's body may use: no second h1 (hero, pageHeader) and no forms or live pricing.
+ * Related links, yes — a guide's "read next" is internal linking; the comparison table and a hub's
+ * module highlights are for pages.
+ */
 export const POST_BLOCK_TYPES = [
   "richText",
   "imageText",
@@ -246,6 +257,7 @@ export const POST_BLOCK_TYPES = [
   "logoCloud",
   "testimonial",
   "productPreviews",
+  "relatedLinks",
 ] as const satisfies readonly BlockType[];
 
 export type PostListRow = {

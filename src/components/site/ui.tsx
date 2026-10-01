@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ChevronRight } from "lucide-react";
 import { isInternal, safeHref } from "@/components/site/links";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +85,29 @@ export function ButtonLink({ href, label, tone = "primary", size = "md", arrow =
       {label}
       {arrow && <ArrowRight aria-hidden="true" className="h-4 w-4 transition-transform duration-150 group-hover:translate-x-0.5" />}
     </SiteAnchor>
+  );
+}
+
+/** Where a page sits on the site — "Home › Product › CRM": the pages above it as links, then this one. */
+export function Breadcrumbs({ trail, current, className }: { trail: { name: string; href: string }[]; current: string; className?: string }) {
+  return (
+    <nav aria-label="Breadcrumb" className={className}>
+      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+        {trail.map((crumb, i) => (
+          <li key={i} className="flex min-w-0 max-w-full items-center gap-1.5">
+            <SiteAnchor href={crumb.href} className="truncate font-medium text-muted transition-colors hover:text-text">
+              {crumb.name}
+            </SiteAnchor>
+            <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-subtle" />
+          </li>
+        ))}
+        <li className="min-w-0 max-w-full">
+          <span aria-current="page" className="block truncate text-subtle">
+            {current}
+          </span>
+        </li>
+      </ol>
+    </nav>
   );
 }
 

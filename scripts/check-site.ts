@@ -23,7 +23,17 @@
  *   · metadata from the SEO engine's builders is what the site sent before, key for key, for every
  *     entity without keywords; keywords become one "a, b, c" meta line; each page type carries its
  *     JSON-LD (owner decision S-D1) in one script that no text can break out of; no public-site file
- *     imports the scoring engine.
+ *     imports the scoring engine;
+ *   · the header's menus: every link in the server's HTML (no script needed to read them), each menu
+ *     a disclosure (aria-expanded, aria-controls, its panel hidden), an accordion on a phone; settings
+ *     saved with links only still render; the footer's six columns; the built-in pages' metadata and
+ *     robots unchanged;
+ *   · the comparison table (caption, headers, marks as words, sources nofollow, the as-of line and
+ *     disclaimer), related links and the page map (pages on this site only); a nested page through
+ *     the catch-all with its breadcrumb and BreadcrumbList, in the sitemap, served indexable;
+ *   · the comparison pages the website seed publishes (scripts/site-content/compare.ts): each passes the
+ *     CMS's validator and renders with one h1, a table whose every source is on the competitor's own
+ *     website and linked nofollow, the as-of line and both disclaimers, an FAQ, and no price or superlative.
  *
  * No mail leaves: the platform mailer is replaced.
  */
@@ -896,6 +906,385 @@ async function main() {
     const notFoundHtml = await html(Layout({ children: await notFoundPage() }));
     ok("the blog index and the not-found page: no structured data", ldScripts(blogHtml).length === 0 && !blogHtml.includes("application/ld+json") && ldScripts(notFoundHtml).length === 0);
     ok("  and every one of these pages still has exactly one h1", [seoPageHtml, halfHtml, postHtml, howToHtml, newsHtml, blogHtml].every((h) => (h.match(/<h1[\s>]/g) ?? []).length === 1));
+
+    // ─── The header's menus, the new blocks, nested pages ───────────────────────────────────────
+    section("The header's menus, the comparison table, related links, the page map, and nested pages");
+    at(ROOT);
+    const siteNav = require("../src/components/site/nav") as typeof import("../src/components/site/nav");
+    const siteValidate = require("../src/lib/cms/validate") as typeof import("../src/lib/cms/validate");
+    const publishSettings = async (settings: unknown) => {
+      const doc = settings as never;
+      await control.siteSettings.upsert({ where: { key: "site" }, create: { key: "site", draft: doc, published: doc, publishedAt: new Date(), updatedBy: "script" }, update: { draft: doc, published: doc, publishedAt: new Date() } });
+      siteContent.invalidateSiteContent();
+    };
+    const headerOf = (markup: string) => markup.slice(markup.indexOf("<header"), markup.indexOf("</header>") + "</header>".length);
+    const footerOf = (markup: string) => markup.slice(markup.indexOf("<footer"), markup.indexOf("</footer>") + "</footer>".length);
+    const hrefCount = (markup: string, href: string) => markup.split(`href="${href}"`).length - 1;
+
+    // Settings saved before menus existed: links only.
+    const flatNav = [
+      { label: "Zz Flat Pricing", href: "/pricing" },
+      { label: "Zz {siteName} blog", href: "/blog" },
+    ];
+    await publishSettings({ ...DEFAULT_SITE_SETTINGS, nav: flatNav });
+    const flatHeader = headerOf(await render("/pricing"));
+    ok(
+      "settings saved with links only still load and render: each link, tokens filled, and no menu buttons",
+      (await siteContent.getSiteSettings()).nav.length === 2 &&
+        hrefCount(flatHeader, "/blog") === 2 &&
+        textOf(flatHeader).includes(`Zz ${DEFAULT_SITE_SETTINGS.siteName} blog`) &&
+        !/aria-controls="[^"]*-panel-\d+"/.test(flatHeader),
+      textOf(flatHeader).slice(0, 200),
+    );
+    ok("  and the validator still takes them, whole, to publish", siteValidate.checkSiteSettings({ ...DEFAULT_SITE_SETTINGS, nav: flatNav }, "publish").ok);
+
+    // A mega-menu: two menus and a link; one of the menus' links is hostile, written straight to the database.
+    const megaNav = [
+      {
+        label: "Zz Product",
+        columns: [
+          {
+            title: "Zz Sell & serve",
+            items: [
+              { label: "Zz CRM", href: "/zz-product/zz-crm", description: "Zz companies, contacts and leads" },
+              { label: "Zz Helpdesk", href: "/zz-product/zz-helpdesk" },
+            ],
+          },
+          { title: "Zz Run the business", items: [{ label: "Zz Accounting", href: "/zz-product/zz-accounting", description: "Zz the ledger and {siteName} GST returns" }] },
+        ],
+        footer: { label: "Zz Every feature", href: "/zz-product" },
+      },
+      { label: "Zz Pricing", href: "/pricing" },
+      {
+        label: "Zz Resources",
+        columns: [
+          {
+            title: "Zz Learn",
+            items: [
+              { label: "Zz Blog", href: "/blog" },
+              { label: "Zz Evil", href: "javascript:alert(1)" },
+            ],
+          },
+        ],
+      },
+    ];
+    const sixColumns = Array.from({ length: 6 }, (_, i) => ({ title: `Zz Footer ${i + 1}`, links: [{ label: `Zz Footer link ${i + 1}`, href: `/zz-footer-${i + 1}` }] }));
+    await publishSettings({ ...DEFAULT_SITE_SETTINGS, nav: megaNav, footer: { ...DEFAULT_SITE_SETTINGS.footer, columns: sixColumns } });
+    const megaPage = await render("/pricing");
+    const megaHeader = headerOf(megaPage);
+    const safeLinks = siteNav.navLinks(siteNav.readNav(megaNav)).filter((l) => l.href.startsWith("/"));
+    ok(
+      "the mega-menu: every link of every menu is in the server's HTML — the desktop panel and the phone's accordion — with no script run",
+      safeLinks.length === 6 && safeLinks.every((l) => hrefCount(megaHeader, l.href) >= 2),
+      safeLinks.map((l) => `${l.href}:${hrefCount(megaHeader, l.href)}`).join(" "),
+    );
+    ok("  each link's line under it, tokens filled", textOf(megaHeader).includes("Zz companies, contacts and leads") && textOf(megaHeader).includes(`Zz the ledger and ${DEFAULT_SITE_SETTINGS.siteName} GST returns`));
+    ok("  a javascript: link is plain text, never a link", !/javascript:/i.test(megaPage) && textOf(megaHeader).includes("Zz Evil"));
+    {
+      // A page switched off for now (the partner directory, until an owner turns it on) answers "not
+      // found", so nothing links to it: the item goes, and a column or menu left empty goes with it.
+      const { linkShown } = require("../src/components/site/links") as typeof import("../src/components/site/links");
+      const hidden = { hiddenPaths: ["/partners/find"] };
+      ok(
+        "a link to a switched-off page is left out — with a query, an anchor or a trailing slash too; its neighbours stay",
+        !linkShown("/partners/find", hidden) && !linkShown("/partners/find?country=IN", hidden) && !linkShown("/partners/find/", hidden) && !linkShown("/partners/find#list", hidden) &&
+          linkShown("/partners", hidden) && linkShown("/partners/finder", hidden) && linkShown("https://example.com/partners/find", hidden) && linkShown("/partners/find", {}),
+      );
+      const partnerNav = [
+        { label: "Zz Partners", columns: [{ title: "Zz Programme", items: [{ label: "Zz Become", href: "/partners" }, { label: "Zz Find", href: "/partners/find" }] }, { title: "Zz Only find", items: [{ label: "Zz Find again", href: "/partners/find?country=IN" }] }] },
+        { label: "Zz Gone", columns: [{ title: "Zz Empty", items: [{ label: "Zz Find", href: "/partners/find" }] }] },
+        { label: "Zz Plain", href: "/partners/find" },
+      ];
+      const filled = siteNav.fillNav(partnerNav, { settings: DEFAULT_SITE_SETTINGS, trialDays: 14, ...hidden });
+      const kept = siteNav.navLinks(filled).map((l) => l.href);
+      ok(
+        "  the header drops it, then any column and menu it leaves empty",
+        kept.join(" ") === "/partners" && filled.length === 1 && siteNav.isNavMenu(filled[0]!) && filled[0].columns.length === 1,
+        kept.join(" "),
+      );
+      ok("  with nothing switched off, the header is as written", siteNav.navLinks(siteNav.fillNav(partnerNav, { settings: DEFAULT_SITE_SETTINGS, trialDays: 14 })).length === 5);
+    }
+    const menuButtons = [...megaHeader.matchAll(/<button[^>]*aria-controls="([^"]+-panel-\d+)"[^>]*>/g)];
+    const panelsHidden = menuButtons.every((m) => /aria-expanded="false"/.test(m[0]) && new RegExp(`<div[^>]*id="${m[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*hidden=""`).test(megaHeader));
+    ok("  each menu a disclosure: a button with aria-expanded=false and aria-controls naming its panel, which is there and hidden", menuButtons.length === 2 && panelsHidden, `${menuButtons.length} buttons`);
+    const accordions = [...megaHeader.matchAll(/<button[^>]*aria-controls="([^"]+-section-\d+)"[^>]*>/g)];
+    ok("  on a phone, each menu an accordion of its own, closed", accordions.length === 2 && accordions.every((m) => /aria-expanded="false"/.test(m[0]) && megaHeader.includes(`id="${m[1]}" hidden=""`)));
+    ok("  a column's title names its list (not a heading: the page's h1 stays its first heading)", !/<h[1-6][\s>]/.test(megaHeader) && /<ul aria-labelledby="[^"]+"/.test(megaHeader) && (megaPage.match(/<h1[\s>]/g) ?? []).length === 1);
+    ok("  the link along the menu's foot, and Sign in and the call to action as before", hrefCount(megaHeader, "/zz-product") >= 2 && megaHeader.includes('href="/signin"') && textOf(megaHeader).includes("Request an invitation"));
+    const megaFooter = footerOf(megaPage);
+    ok("the footer takes six columns, laid out six across on a wide screen", sixColumns.every((c) => megaFooter.includes(`href="${c.links[0].href}"`)) && (megaFooter.match(/<nav aria-label="Zz Footer \d"/g) ?? []).length === 6 && megaFooter.includes("xl:grid-cols-6"));
+    const metaDrift: string[] = [];
+    const ctxMega = { settings: await siteContent.getSiteSettings(), trialDays: (await siteContent.siteStatus()).trialDays };
+    for (const route of Object.keys(routes)) {
+      const theirs = await (await routes[route]!()).generateMetadata({} as never);
+      if (!sameMeta(theirs, before.page(await siteContent.getSitePage(route === "/" ? "home" : route.slice(1)), ctxMega)) || (route !== "/signup" && theirs.robots !== undefined)) metaDrift.push(route);
+    }
+    ok("  and the built-in pages' metadata and robots are as they were", metaDrift.length === 0, metaDrift.join(" "));
+
+    // The new blocks on nested pages, through the catch-all route: a hub, a comparison under it, and a page whose parent level has no page.
+    await cmsPage("zz-compare", "Zz Compare", { title: "Zz comparisons", description: "Every comparison on the site, for check:site's nested pages." }, [
+      { id: "zz-hub-head", type: "pageHeader", props: { heading: "Zz comparisons" } },
+      {
+        id: "zz-map",
+        type: "moduleHighlights",
+        props: {
+          heading: "Zz every comparison",
+          groups: [
+            {
+              title: "Zz Suites",
+              items: [
+                { label: "Zz Rival", href: "/zz-compare/zz-rival", description: "Zz how the two compare." },
+                { label: "Zz Out", href: "https://example.com/zz-out", description: "Zz not a page here." },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    await cmsPage("zz-compare/zz-rival", "Zz Rival compared", { title: "Zz Rival vs the site", description: "A comparison page nested under the hub, for check:site." }, [
+      { id: "zz-rival-head", type: "pageHeader", props: { heading: "Zz {siteName} and Zz Rival" } },
+      {
+        id: "zz-table",
+        type: "comparisonTable",
+        props: {
+          heading: "Zz feature by feature",
+          competitor: "Zz Rival",
+          asOf: "2026-09-29",
+          rows: [
+            { feature: "Zz GST e-invoicing", us: "yes", them: "yes", source: "https://www.zz-rival.example/e-invoicing" },
+            { feature: "Zz Payroll", us: "yes", them: "partial", note: "Zz a separate app.", source: "https://zz-rival.example/payroll" },
+            { feature: "Zz Price", us: "From ₹999 a month", them: "no" },
+          ],
+          disclaimer: "Zz product names and trademarks belong to their owners.",
+        },
+      },
+      {
+        id: "zz-related",
+        type: "relatedLinks",
+        props: {
+          heading: "Zz related",
+          links: [
+            { label: "Zz the hub", href: "/zz-compare", description: "Zz every comparison." },
+            { label: "Zz elsewhere", href: "https://example.com/zz-elsewhere" },
+          ],
+        },
+      },
+    ]);
+    await cmsPage("zz-orphan/zz-child", "Zz Child", { title: "Zz child page", description: "A nested page with no page above it, for check:site." }, [{ id: "zz-child-head", type: "pageHeader", props: { heading: "Zz child" } }]);
+    siteContent.invalidateSiteContent();
+    const rivalHtml = await renderRoute(catchAll as unknown as Route, { slug: ["zz-compare", "zz-rival"] });
+    const rivalMain = rivalHtml.slice(rivalHtml.indexOf("<main"), rivalHtml.indexOf("</main>"));
+    ok(
+      "a nested page renders through the catch-all: one h1, and its breadcrumb Home › the page above › it, visible and in BreadcrumbList",
+      (rivalHtml.match(/<h1[\s>]/g) ?? []).length === 1 &&
+        /<nav aria-label="Breadcrumb"/.test(rivalMain) &&
+        rivalMain.includes('href="/zz-compare"') &&
+        rivalMain.includes('aria-current="page"') &&
+        textOf(rivalMain).includes("Home Zz Compare Zz Rival compared") &&
+        typesOf(rivalHtml) === "WebPage+BreadcrumbList" &&
+        crumbsOf(rivalHtml) === "Home › Zz Compare › Zz Rival compared",
+      `${typesOf(rivalHtml)} ${crumbsOf(rivalHtml)}`,
+    );
+    const rivalLd = ldOf(rivalHtml)?.find((o) => o["@type"] === "BreadcrumbList")?.itemListElement as { item: string }[] | undefined;
+    ok("  its trail's addresses absolute, the page above's included", rivalLd?.map((i) => i.item).join(" ") === `http://${ROOT}/ http://${ROOT}/zz-compare http://${ROOT}/zz-compare/zz-rival`, rivalLd?.map((i) => i.item).join(" "));
+    ok(
+      "the comparison table: a caption, a header per product, a header per feature, and each answer as a word",
+      /<table role="table"/.test(rivalMain) &&
+        /<caption[^>]*>/.test(rivalMain) &&
+        (rivalMain.match(/scope="col"/g) ?? []).length === 3 &&
+        (rivalMain.match(/scope="row"/g) ?? []).length === 3 &&
+        [">Yes<", ">Partly<", ">No<", "From ₹999 a month"].every((s) => rivalMain.includes(s)),
+    );
+    const sourceAnchors = [...rivalMain.matchAll(/<a [^>]*href="https:\/\/(?:www\.)?zz-rival\.example[^"]*"[^>]*>/g)].map((m) => m[0]);
+    ok("  each row's source a link to the other product's page, rel nofollow noopener noreferrer, named by its site", sourceAnchors.length === 2 && sourceAnchors.every((a) => a.includes('rel="nofollow noopener noreferrer"')) && textOf(rivalMain).includes("Source: zz-rival.example"), sourceAnchors.join(" | "));
+    ok("  under it, the day that site was read and the disclaimer", textOf(rivalMain).includes("Information about Zz Rival from its public website as of 29 September 2026.") && textOf(rivalMain).includes("Zz product names and trademarks belong to their owners."));
+    ok("related links: the page on this site, and not the one elsewhere", rivalMain.includes('href="/zz-compare"') && !rivalMain.includes("zz-elsewhere") && textOf(rivalMain).includes("Zz every comparison."));
+    const hubHtml = await renderRoute(catchAll as unknown as Route, { slug: ["zz-compare"] });
+    const hubMain = hubHtml.slice(hubHtml.indexOf("<main"), hubHtml.indexOf("</main>"));
+    ok("the page map: its group a heading, its links to pages on this site — and a page one level down shows no breadcrumb", /<h3[^>]*>Zz Suites<\/h3>/.test(hubMain) && hubMain.includes('href="/zz-compare/zz-rival"') && !hubMain.includes("zz-out") && !hubMain.includes('aria-label="Breadcrumb"') && crumbsOf(hubHtml) === "Home › Zz comparisons");
+    const childHtml = await renderRoute(catchAll as unknown as Route, { slug: ["zz-orphan", "zz-child"] });
+    ok("a nested page with no page above it: Home › it (never a link to a page that isn't there)", crumbsOf(childHtml) === "Home › Zz Child" && !childHtml.includes('href="/zz-orphan"') && /<nav aria-label="Breadcrumb"/.test(childHtml), crumbsOf(childHtml));
+    const rivalMeta = (await catchAll.generateMetadata({ params: Promise.resolve({ slug: ["zz-compare", "zz-rival"] }) } as never)) as Meta;
+    ok("  its metadata: its own canonical, indexable, as any page's", sameMeta(rivalMeta, before.page(await siteContent.getSitePage("zz-compare/zz-rival"), ctxMega)) && rivalMeta.robots === undefined && JSON.stringify(rivalMeta.alternates) === JSON.stringify({ canonical: "/zz-compare/zz-rival" }));
+    const nestedMap = (await sitemap()).map((e) => new URL(e.url).pathname);
+    ok("the sitemap lists nested pages at their addresses", ["/zz-compare", "/zz-compare/zz-rival", "/zz-orphan/zz-child"].every((p) => nestedMap.includes(p)), nestedMap.filter((p) => p.startsWith("/zz-")).join(" "));
+    try {
+      const { NextRequest } = require("next/server") as typeof import("next/server");
+      const proxy = (require("../src/proxy") as { default: (req: unknown, ctx: unknown) => Promise<Response> }).default;
+      const res = await proxy(new NextRequest(`http://${ROOT}/zz-compare/zz-rival`, { headers: { host: ROOT, "user-agent": "Mozilla/5.0 (check:site)" } }), {});
+      ok("  and the proxy serves them from the site's folder, indexable", (res.headers.get("x-middleware-rewrite") ?? "").includes("/platform-site/zz-compare/zz-rival") && res.headers.get("x-robots-tag") === "index, follow", `${res.headers.get("x-middleware-rewrite")} ${res.headers.get("x-robots-tag")}`);
+    } catch (err) {
+      ok("  and the proxy serves them", false, err instanceof Error ? err.message : String(err));
+    }
+
+    // ─── The comparison pages (scripts/site-content/compare.ts, W3), as the seed publishes them ────
+    section("The comparison pages: /compare and one page per competitor");
+    at(ROOT);
+    const compareSection = (require("./site-content/compare") as typeof import("./site-content/compare")).section;
+    const comparePages = compareSection.pages ?? [];
+    // Each page's sources come from the competitor's own websites and nowhere else (the research rule).
+    const OFFICIAL: Record<string, RegExp> = {
+      "compare/zoho-one": /^https:\/\/([a-z0-9-]+\.)*zoho\.(com|in)\//,
+      "compare/tally": /^https:\/\/([a-z0-9-]+\.)*tallysolutions\.com\//,
+      "compare/odoo": /^https:\/\/([a-z0-9-]+\.)*odoo\.com\//,
+      "compare/salesforce": /^https:\/\/([a-z0-9-]+\.)*salesforce\.com\//,
+      "compare/hubspot": /^https:\/\/([a-z0-9-]+\.)*hubspot\.com\//,
+      "compare/freshworks": /^https:\/\/([a-z0-9-]+\.)*(freshworks|freshdesk)\.com\//,
+    };
+    ok("seven pages: the hub and the six comparisons the owner chose", comparePages.map((p) => p.slug).sort().join(" ") === ["compare", ...Object.keys(OFFICIAL)].sort().join(" "), comparePages.map((p) => p.slug).join(" "));
+    const refused = comparePages.map((p) => ({ slug: p.slug, checked: siteValidate.checkPageDocument(p.document, "publish") })).filter((r) => !r.checked.ok);
+    ok("  the CMS's validator takes every one of them to publish", refused.length === 0, refused.map((r) => `${r.slug}: ${JSON.stringify(r.checked.ok ? [] : r.checked.issues.slice(0, 2))}`).join(" | "));
+    for (const p of comparePages) {
+      if (!(await control.sitePage.findUnique({ where: { slug: p.slug }, select: { id: true } }))) await cmsPage(p.slug, p.document.title, p.document.seo as never, p.document.blocks);
+    }
+    siteContent.invalidateSiteContent();
+    const PRICE = /[₹$€£]|\bRs\.?\s?\d|\b(INR|USD|EUR)\b/;
+    const SUPERLATIVE = /\b(best|#1|number one|leading|world-class|fastest|cheapest|easiest|unbeatable|unmatched)\b/i;
+    const TOKEN = /\{(siteName|tagline|displayDomain|salesEmail|trialDays)\}/;
+    for (const p of comparePages) {
+      const markup = await renderRoute(catchAll as unknown as Route, { slug: p.slug.split("/") });
+      const main = markup.slice(markup.indexOf("<main"), markup.indexOf("</main>"));
+      const words = textOf(main);
+      const table = p.document.blocks.find((b) => b.type === "comparisonTable");
+      const where = `/${p.slug}`;
+      ok(`${where}: one h1, no token left unfilled, nothing that reads as a price or a superlative`, (markup.match(/<h1[\s>]/g) ?? []).length === 1 && !TOKEN.test(markup) && !PRICE.test(words) && !SUPERLATIVE.test(words), `${(markup.match(/<h1[\s>]/g) ?? []).length} h1 ${TOKEN.exec(markup)?.[0] ?? ""} ${PRICE.exec(words)?.[0] ?? ""} ${SUPERLATIVE.exec(words)?.[0] ?? ""}`);
+      if (p.slug === "compare") {
+        const mapped = Object.keys(OFFICIAL).filter((s) => main.includes(`href="/${s}"`));
+        ok("  the hub: a page map with a link to each comparison, and no breadcrumb one level down", mapped.length === 6 && /<h3[^>]*>/.test(main) && !main.includes('aria-label="Breadcrumb"'), mapped.join(" "));
+        continue;
+      }
+      if (table?.type !== "comparisonTable") {
+        ok(`${where}: has its comparison table`, false);
+        continue;
+      }
+      const { rows, competitor } = table.props;
+      ok(
+        `  the table: 12–25 rows, a caption, a header per product and one per feature, each answer shown`,
+        rows.length >= 12 && rows.length <= 25 && /<table role="table"/.test(main) && /<caption[^>]*>/.test(main) && (main.match(/scope="col"/g) ?? []).length === 3 && (main.match(/scope="row"/g) ?? []).length === rows.length,
+        `${rows.length} rows, ${(main.match(/scope="row"/g) ?? []).length} row headers`,
+      );
+      const official = OFFICIAL[p.slug];
+      const sources = rows.map((r) => r.source ?? "");
+      const offSite = sources.filter((s) => !official?.test(s));
+      ok(`  every ${competitor} cell has a source, and every source is on the vendor's own website`, offSite.length === 0, offSite.slice(0, 3).join(" "));
+      const anchors = [...main.matchAll(/<a [^>]*href="(https:\/\/[^"]+)"[^>]*rel="nofollow noopener noreferrer"[^>]*>|<a [^>]*rel="nofollow noopener noreferrer"[^>]*href="(https:\/\/[^"]+)"[^>]*>/g)].map((m) => (m[1] ?? m[2]).replace(/&amp;/g, "&"));
+      ok("  each source a link, rel nofollow noopener noreferrer", sources.every((s) => anchors.includes(s)), `${anchors.length} nofollow links for ${sources.length} rows`);
+      const foot = words.lastIndexOf(`Information about ${competitor} on this page is from`);
+      ok(
+        "  the as-of line and the disclaimer under the table, and the page's own disclaimer at its foot",
+        words.includes(`Information about ${competitor} from its public website as of 30 September 2026.`) &&
+          words.includes("Product names and trademarks belong to their owners.") &&
+          foot > words.lastIndexOf("Related pages") &&
+          words.slice(foot).includes("30 September 2026") &&
+          words.trimEnd().endsWith("Check their website for current details."),
+        words.slice(foot, foot + 160),
+      );
+      ok("  the text says it compares (vs), so the table counts as the comparison; and an FAQ with its FAQPage", /\bvs\b/.test(words) && typesOf(markup) === "WebPage+BreadcrumbList+FAQPage", typesOf(markup));
+      ok("  its breadcrumb: Home › Compare › it", crumbsOf(markup) === `Home › Compare › ${p.document.title}`, crumbsOf(markup));
+      ok("  switching: a link to the import and migration page", main.includes('href="/product/import-migration"'));
+    }
+
+    // ─── The seeded pages and guides (scripts/site-content: product, solutions, resources, guides — W2) ───
+    section("The seeded pages and guides: product, solutions, resources, the glossary and six guides");
+    at(ROOT);
+    {
+      const seedSections = await (require("./site-content") as typeof import("./site-content")).loadSections(["product", "solutions", "resources", "guides"]);
+      const catalogue = require("./site-content/_catalog") as typeof import("./site-content/_catalog");
+      const { siteNav: seedSiteNav } = require("./site-content/nav") as typeof import("./site-content/nav");
+      const cmsTypes = require("../src/lib/cms/types") as typeof import("../src/lib/cms/types");
+      const seedPages = seedSections.flatMap((s) => s.pages ?? []);
+      const seedPosts = seedSections.flatMap((s) => s.posts ?? []);
+      const siteMap = [
+        "product",
+        "solutions",
+        "resources",
+        "resources/glossary",
+        ...[...catalogue.PRODUCT_GROUPS, ...catalogue.SOLUTION_GROUPS].flatMap((g) => g.entries.map((e) => e.path.slice(1))),
+      ].sort();
+      ok(
+        "every page in the site map: the three hubs, 25 modules, 13 solutions and the glossary, and six guides",
+        seedPages.map((p) => p.slug).sort().join(" ") === siteMap.join(" ") && siteMap.length === 42 && seedPosts.length === 6,
+        `${seedPages.length} pages, ${seedPosts.length} posts`,
+      );
+      const refusedPages = seedPages.map((p) => ({ slug: p.slug, checked: siteValidate.checkPageDocument(p.document, "publish") })).filter((r) => !r.checked.ok);
+      const refusedPosts = seedPosts.filter((p) => !siteValidate.checkPostBody(p.body, "publish", cmsTypes.POST_BLOCK_TYPES).ok || !siteValidate.checkPostSeo(p.seo).ok);
+      ok("  the CMS's validator takes every page and post to publish", refusedPages.length === 0 && refusedPosts.length === 0, [...refusedPages.map((r) => r.slug), ...refusedPosts.map((p) => p.slug)].join(" "));
+
+      // Written straight to the database, as the seed leaves them: pages published, posts live in the Guides category.
+      for (const p of seedPages) {
+        const checked = siteValidate.checkPageDocument(p.document, "publish");
+        if (checked.ok && !(await control.sitePage.findUnique({ where: { slug: p.slug }, select: { id: true } }))) await cmsPage(p.slug, checked.value.title, checked.value.seo as never, checked.value.blocks);
+      }
+      const guidesCategory = await control.siteCategory.upsert({ where: { slug: "guides" }, update: {}, create: { slug: "guides", name: "Guides", position: 99, updatedBy: "script" } });
+      for (const post of seedPosts) {
+        const body = siteValidate.checkPostBody(post.body, "publish", cmsTypes.POST_BLOCK_TYPES);
+        await control.sitePost.create({
+          data: {
+            slug: post.slug,
+            title: post.title,
+            excerpt: post.excerpt,
+            body: (body.ok ? body.value : []) as never,
+            seo: post.seo as never,
+            status: "PUBLISHED",
+            publishAt: liveAt,
+            publishedAt: liveAt,
+            authorId: archiveAuthor.id,
+            updatedBy: "script",
+            categories: { create: [{ categoryId: guidesCategory.id }] },
+          },
+        });
+      }
+      siteContent.invalidateSiteContent();
+
+      const SEED_TOKEN = /\{(siteName|tagline|displayDomain|salesEmail|trialDays)\}/;
+      const titleOf = (m: Meta) => (typeof m.title === "string" ? m.title : String((m.title as { absolute?: string } | undefined)?.absolute ?? ""));
+      const renderProblems: string[] = [];
+      /** Internal links in each page's and post's own content (its <main>), to the other seeded pages and posts. */
+      const linksFrom = new Map<string, Set<string>>();
+      const mainOf = (markup: string) => markup.slice(markup.indexOf("<main"), markup.indexOf("</main>"));
+      const hrefsIn = (main: string) => new Set([...main.matchAll(/href="(\/[^"#?]*)/g)].map((m) => (m[1] === "/" ? "/" : m[1].replace(/\/$/, ""))));
+      for (const p of seedPages) {
+        const segments = p.slug.split("/");
+        const markup = await renderRoute(catchAll as unknown as Route, { slug: segments });
+        const meta = (await catchAll.generateMetadata({ params: Promise.resolve({ slug: segments }) } as never)) as Meta;
+        const h1s = (markup.match(/<h1[\s>]/g) ?? []).length;
+        const unfilled = SEED_TOKEN.exec(markup)?.[0];
+        if (h1s !== 1 || unfilled || !titleOf(meta).trim() || !String(meta.description ?? "").trim()) renderProblems.push(`/${p.slug}: ${h1s} h1 ${unfilled ?? ""} title "${titleOf(meta)}"`);
+        linksFrom.set(`/${p.slug}`, hrefsIn(mainOf(markup)));
+      }
+      for (const post of seedPosts) {
+        const markup = await renderRoute(postRoute, { slug: post.slug });
+        const meta = await postRoute.generateMetadata({ params: Promise.resolve({ slug: post.slug }) } as never);
+        const h1s = (markup.match(/<h1[\s>]/g) ?? []).length;
+        const unfilled = SEED_TOKEN.exec(markup)?.[0];
+        if (h1s !== 1 || unfilled || !titleOf(meta).trim() || !String(meta.description ?? "").trim() || !markup.includes("Last reviewed:")) renderProblems.push(`/blog/${post.slug}: ${h1s} h1 ${unfilled ?? ""}`);
+        linksFrom.set(`/blog/${post.slug}`, hrefsIn(mainOf(markup)));
+      }
+      ok(`all ${seedPages.length + seedPosts.length} render for a visitor: one h1, no token left unfilled, a title and a description (the guides a "Last reviewed" date)`, renderProblems.length === 0, renderProblems.slice(0, 4).join(" | "));
+      const glossary = await renderRoute(catchAll as unknown as Route, { slug: ["resources", "glossary"] });
+      const questions = (glossary.match(/<h3[^>]*>What (is|are)\b|<h3[^>]*>Who must|<h3[^>]*>Which forms/g) ?? []).length;
+      ok("  the glossary: 40 to 60 terms, each a question, with official sources linked", questions >= 40 && questions <= 60 && /href="https:\/\/(www\.)?(cbic-gst|einvoice\.gst|ewaybillgst)\.gov\.in/.test(glossary) && /href="https:\/\/www\.incometaxindia\.gov\.in/.test(glossary), `${questions} terms`);
+      ok("  a module page's breadcrumb is Home › Product › it", crumbsOf(await renderRoute(catchAll as unknown as Route, { slug: ["product", "crm"] })) === "Home › Product › CRM");
+
+      // At least three internal links in and out of each, counting only the seeded pages' and posts' own content.
+      const seeded = [...linksFrom.keys()];
+      const linksIn = new Map(seeded.map((to) => [to, seeded.filter((from) => from !== to && linksFrom.get(from)?.has(to)).length]));
+      const fewIn = seeded.filter((to) => (linksIn.get(to) ?? 0) < 3);
+      const fewOut = seeded.filter((from) => [...(linksFrom.get(from) ?? [])].filter((to) => to !== from).length < 3);
+      ok("  every one links to at least three other pages, and at least three of them link to it", fewIn.length === 0 && fewOut.length === 0, `in: ${fewIn.map((p) => `${p}(${linksIn.get(p)})`).join(" ")} out: ${fewOut.join(" ")}`);
+
+      // The header and footer the seed publishes: valid settings, and every link on this site goes to a page it has.
+      const seedNav = seedSiteNav({ partnerPortal: "https://partners.example.com/" });
+      const navChecked = siteValidate.checkSiteSettings({ ...DEFAULT_SITE_SETTINGS, ...seedNav }, "publish");
+      const known = new Set([...seeded, ...catalogue.COMPARE_ENTRIES.map((e) => e.path), "/compare", "/", "/pricing", "/security", "/contact", "/signin", "/terms", "/privacy", "/partners", "/partners/find", "/blog", "/blog/category/guides"]);
+      const navHrefs = [...siteNav.navLinks(seedNav.nav), ...seedNav.footer.columns.flatMap((c) => c.links)].map((l) => l.href);
+      const dangling = navHrefs.filter((h) => h.startsWith("/") && !known.has(h.split(/[?#]/)[0]));
+      ok(
+        "the header's six menus and the footer's five columns: valid to publish, every site link to a page the site has, the partner portal on its own host",
+        navChecked.ok && seedNav.nav.length === 6 && seedNav.footer.columns.length === 5 && dangling.length === 0 && navHrefs.includes("https://partners.example.com/"),
+        `${navChecked.ok ? "" : JSON.stringify(navChecked.issues.slice(0, 2))} ${dangling.join(" ")}`,
+      );
+    }
 
     // The scoring engine never runs on a public request: nothing the public site is built from imports it — only the
     // builders (extract, schema, metadata), the crawler policy and the types.

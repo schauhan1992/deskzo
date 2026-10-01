@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type {
   BlockPropsMap,
   BlockType,
+  ComparisonTableProps,
   ContactFormProps,
   CtaProps,
   FaqProps,
@@ -12,9 +13,11 @@ import type {
   ImageTextProps,
   LogoCloudProps,
   ModuleGridProps,
+  ModuleHighlightsProps,
   PageHeaderProps,
   PricingTableProps,
   ProductPreviewsProps,
+  RelatedLinksProps,
   RichTextProps,
   SecurityHighlightsProps,
   SignupFormProps,
@@ -24,7 +27,23 @@ import type {
   WorkspaceSigninProps,
 } from "@/components/site/blocks/types";
 import { PREVIEW_KINDS } from "@/components/site/blocks/types";
-import { ActionField, AnchorField, ChoiceField, HrefField, IconField, ImageField, LinesField, LinkField, ListField, MediaField, PREVIEW_LABELS, SelectField, TextField } from "@/components/cms/editor/fields";
+import {
+  ActionField,
+  AnchorField,
+  ChoiceField,
+  DateField,
+  HrefField,
+  IconField,
+  ImageField,
+  LinesField,
+  LinkField,
+  ListField,
+  MarkField,
+  MediaField,
+  PREVIEW_LABELS,
+  SelectField,
+  TextField,
+} from "@/components/cms/editor/fields";
 import { RichTextField } from "@/components/cms/editor/rich-text-field";
 import { MODULE_REGISTRY } from "@/lib/modules";
 
@@ -572,6 +591,140 @@ function SignupFormForm({ props, onChange }: FormProps<"signupForm">) {
   );
 }
 
+// ─── Comparisons and internal links ──────────────────────────────────────────────────────────────
+
+type ComparisonRow = ComparisonTableProps["rows"][number];
+
+function ComparisonTableForm({ props, onChange }: FormProps<"comparisonTable">) {
+  const set = <K extends keyof ComparisonTableProps>(key: K, value: ComparisonTableProps[K]) => onChange({ ...props, [key]: value });
+  return (
+    <>
+      <SectionHeadFields props={props} onChange={onChange} />
+      <Section title="The other product">
+        <Row>
+          <TextField label="Its name" name="competitor" value={props.competitor} onChange={(v) => set("competitor", v)} max={LABEL} required hint="As this page names it, e.g. Zoho One." />
+          <DateField
+            label="Its website read on"
+            name="asOf"
+            value={props.asOf}
+            onChange={(v) => set("asOf", v)}
+            required
+            hint="Under the table: “Information about … from its public website as of” this day."
+          />
+        </Row>
+      </Section>
+      <ListField<ComparisonRow>
+        label="Rows"
+        name="rows"
+        items={props.rows}
+        onChange={(rows) => onChange({ ...props, rows })}
+        newItem={() => ({ feature: "", us: "yes", them: "yes" })}
+        itemNoun="row"
+        itemTitle={(row) => row.feature}
+        maxItems={40}
+        hint="One feature a row. Say what each product does, from the other product's own website — and link the page you read it on."
+        render={(row, setRow) => (
+          <>
+            <TextField label="Feature" name="feature" value={row.feature} onChange={(feature) => setRow({ ...row, feature })} max={SHORT} required />
+            <Row>
+              <MarkField label="This product" name="us" value={row.us} onChange={(us) => setRow({ ...row, us })} />
+              <MarkField label="The other product" name="them" value={row.them} onChange={(them) => setRow({ ...row, them })} />
+            </Row>
+            <TextField label="Note" name="note" value={row.note} onChange={(note) => setRow({ ...row, note: note || undefined })} max={300} multiline rows={2} hint="Under the feature: what differs, in a line." />
+            <HrefField label="Source: the other product's own page" name="source" value={row.source} onChange={(source) => setRow({ ...row, source: source || undefined })} webOnly />
+          </>
+        )}
+      />
+      <TextField
+        label="Disclaimer"
+        name="disclaimer"
+        value={props.disclaimer}
+        onChange={(v) => set("disclaimer", v)}
+        max={400}
+        multiline
+        rows={3}
+        required
+        hint="Under the table: that what it says about other products is from their public websites as of the date above, and that trademarks belong to their owners."
+      />
+    </>
+  );
+}
+
+type RelatedLink = RelatedLinksProps["links"][number];
+
+function RelatedLinksForm({ props, onChange }: FormProps<"relatedLinks">) {
+  return (
+    <>
+      <SectionHeadFields props={props} onChange={onChange} />
+      <ListField<RelatedLink>
+        label="Links"
+        name="links"
+        items={props.links}
+        onChange={(links) => onChange({ ...props, links })}
+        newItem={() => ({ label: "", href: "" })}
+        itemNoun="link"
+        itemTitle={(l) => l.label}
+        maxItems={12}
+        hint="Pages on this site only. Words that name the page read best: “GST invoicing”, not “Read more”."
+        render={(item, set) => (
+          <>
+            <Row>
+              <TextField label="Words on the link" name="label" value={item.label} onChange={(label) => set({ ...item, label })} max={LABEL} required />
+              <HrefField label="Page" name="href" value={item.href} onChange={(href) => set({ ...item, href })} required internalOnly />
+            </Row>
+            <TextField label="What is there" name="description" value={item.description} onChange={(description) => set({ ...item, description: description || undefined })} max={200} multiline rows={2} />
+          </>
+        )}
+      />
+    </>
+  );
+}
+
+type HighlightGroup = ModuleHighlightsProps["groups"][number];
+type HighlightItem = HighlightGroup["items"][number];
+
+function ModuleHighlightsForm({ props, onChange }: FormProps<"moduleHighlights">) {
+  return (
+    <>
+      <SectionHeadFields props={props} onChange={onChange} />
+      <ListField<HighlightGroup>
+        label="Groups"
+        name="groups"
+        items={props.groups}
+        onChange={(groups) => onChange({ ...props, groups })}
+        newItem={() => ({ title: "", items: [{ label: "", href: "", description: "" }] })}
+        itemNoun="group"
+        itemTitle={(g) => g.title}
+        maxItems={6}
+        render={(group, setGroup) => (
+          <>
+            <TextField label="Group title" name="title" value={group.title} onChange={(title) => setGroup({ ...group, title })} max={SHORT} required />
+            <ListField<HighlightItem>
+              label="Links"
+              name="items"
+              items={group.items}
+              onChange={(items) => setGroup({ ...group, items })}
+              newItem={() => ({ label: "", href: "", description: "" })}
+              itemNoun="link"
+              itemTitle={(i) => i.label}
+              maxItems={12}
+              render={(item, setItem) => (
+                <>
+                  <Row>
+                    <TextField label="Words on the link" name="label" value={item.label} onChange={(label) => setItem({ ...item, label })} max={LABEL} required />
+                    <HrefField label="Page" name="href" value={item.href} onChange={(href) => setItem({ ...item, href })} required internalOnly />
+                  </Row>
+                  <TextField label="What it covers" name="description" value={item.description} onChange={(description) => setItem({ ...item, description })} max={200} multiline rows={2} required />
+                </>
+              )}
+            />
+          </>
+        )}
+      />
+    </>
+  );
+}
+
 /** The form for one block, by its type. */
 export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (next: SiteBlock) => void }) {
   switch (block.type) {
@@ -609,6 +762,12 @@ export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (ne
       return <WorkspaceSigninForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     case "signupForm":
       return <SignupFormForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "comparisonTable":
+      return <ComparisonTableForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "relatedLinks":
+      return <RelatedLinksForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "moduleHighlights":
+      return <ModuleHighlightsForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     default:
       return <p className="text-sm text-muted">This block&apos;s type is not known to this editor. It is kept as it is.</p>;
   }

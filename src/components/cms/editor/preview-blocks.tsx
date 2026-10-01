@@ -4,6 +4,7 @@ import { Component, type ReactNode } from "react";
 import { ArrowLeft, Check, Globe } from "lucide-react";
 import type { PricingTableProps, SiteBlock, SiteRenderContext } from "@/components/site/blocks/types";
 import { ContactFormBlock } from "@/components/site/blocks/contact-form";
+import { ComparisonTableBlock } from "@/components/site/blocks/comparison-table";
 import { CtaBlock } from "@/components/site/blocks/cta";
 import { FaqBlock } from "@/components/site/blocks/faq";
 import { FeatureGridBlock } from "@/components/site/blocks/feature-grid";
@@ -11,8 +12,10 @@ import { HeroBlock } from "@/components/site/blocks/hero";
 import { ImageTextBlock } from "@/components/site/blocks/image-text";
 import { LogoCloudBlock } from "@/components/site/blocks/logo-cloud";
 import { ModuleGridBlock } from "@/components/site/blocks/module-grid";
+import { ModuleHighlightsBlock } from "@/components/site/blocks/module-highlights";
 import { PageHeaderBlock } from "@/components/site/blocks/page-header";
 import { ProductPreviewsBlock } from "@/components/site/blocks/product-previews";
+import { RelatedLinksBlock } from "@/components/site/blocks/related-links";
 import { RichTextBlock } from "@/components/site/blocks/rich-text";
 import { SecurityHighlightsBlock } from "@/components/site/blocks/security-highlights";
 import { SignupFormBlock } from "@/components/site/blocks/signup-form";
@@ -22,6 +25,7 @@ import { WorkspaceSigninBlock } from "@/components/site/blocks/workspace-signin"
 import { SiteFooter } from "@/components/site/footer";
 import { SiteHeader } from "@/components/site/header";
 import { anchorId, fill, resolveAction, safeSrc } from "@/components/site/links";
+import { fillNav } from "@/components/site/nav";
 import { Container } from "@/components/site/ui";
 import { BLOCK_INFO } from "@/components/cms/editor/catalog";
 import { cn } from "@/lib/utils";
@@ -144,6 +148,12 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext): ReactNode {
       return <WorkspaceSigninBlock props={block.props} ctx={ctx} />;
     case "signupForm":
       return <SignupFormBlock props={block.props} ctx={ctx} />;
+    case "comparisonTable":
+      return <ComparisonTableBlock props={block.props} ctx={ctx} />;
+    case "relatedLinks":
+      return <RelatedLinksBlock props={block.props} ctx={ctx} />;
+    case "moduleHighlights":
+      return <ModuleHighlightsBlock props={block.props} ctx={ctx} />;
     default:
       return null;
   }
@@ -189,7 +199,7 @@ export function PreviewChrome({ ctx, year, show, children }: { ctx: SiteRenderCo
   return (
     <div className="flex min-h-screen flex-col bg-bg text-text">
       <div inert>
-        <SiteHeader siteName={settings.siteName} nav={settings.nav.map((l) => ({ label: fill(l.label, ctx), href: l.href }))} signin={{ label: fill(settings.signinLink.label, ctx), href: settings.signinLink.href }} cta={cta} />
+        <SiteHeader siteName={settings.siteName} nav={fillNav(settings.nav, ctx)} signin={{ label: fill(settings.signinLink.label, ctx), href: settings.signinLink.href }} cta={cta} />
       </div>
       <main className="flex-1">{children}</main>
       <div inert>

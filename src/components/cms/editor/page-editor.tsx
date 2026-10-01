@@ -46,7 +46,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label } from "@/components/ui/input";
 import { CMS_ROUTES } from "@/lib/cms/nav";
 import type { AutoRedirect, CmsCaps, CmsIssue, MediaRow, PageDetail, PageDocument, PageSaved, PageVersionRow } from "@/lib/cms/types";
-import { checkPageDocument, PAGE_SLUG, stableJson } from "@/lib/cms/validate";
+import { checkPageDocument, pageSlugProblem, stableJson } from "@/lib/cms/validate";
 import { formatIstDateTime } from "@/lib/india-time";
 import { parseSeoField } from "@/lib/seo/extract";
 
@@ -853,7 +853,9 @@ function SlugSection({
   siteOrigin: string;
 }) {
   const clean = value.trim().toLowerCase().replace(/^\/+|\/+$/g, "");
-  const valid = PAGE_SLUG.test(clean) && clean.length <= 120;
+  // The current address is fine as it is, whatever rules came after it; a new one must pass them all.
+  const problem = clean === current ? null : pageSlugProblem(clean);
+  const valid = !problem;
   if (builtin || !canMove) {
     return (
       <div className="space-y-1">
@@ -881,8 +883,8 @@ function SlugSection({
         </Button>
       </div>
       <p id="page-slug-hint" className={!valid ? "text-xs text-danger" : "text-xs text-subtle"}>
-        {!valid
-          ? "Lower-case words and hyphens, with / between levels — like about or solutions/retail."
+        {problem
+          ? problem
           : published
             ? "Moving it takes effect at once, and a redirect from the old address is made for you — old links keep working."
             : "Moving it takes effect at once."}

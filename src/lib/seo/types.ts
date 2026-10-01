@@ -109,7 +109,7 @@ export type SeoContent = {
   firstSection: string;
   /** The first paragraph of at least eight words — what the page says it is about. */
   firstParagraph: string;
-  /** The visible breadcrumb (posts and archives); [] when the page shows none. */
+  /** The visible breadcrumb, the entity itself left off (posts, archives, and nested pages: Home › Product); [] when the page shows none. */
   breadcrumbs: SeoCrumb[];
   /** Block types in order ("hero", "faq", "pricingTable"…); for a post, its body's. */
   blockTypes: string[];

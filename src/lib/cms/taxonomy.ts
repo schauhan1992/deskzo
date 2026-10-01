@@ -1,5 +1,5 @@
 import { Prisma, type CmsRole, type SiteCategory, type SiteTag } from "@wroffy/control-client";
-import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
+import { actorOfMe, actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { missingMediaIds } from "@/lib/cms/media";
 import { autoRedirect } from "@/lib/cms/redirects";
 import { refreshSeoScores } from "@/lib/cms/seo-scores";
@@ -48,7 +48,7 @@ import { archiveSeoView } from "@/lib/seo/metadata";
  * because a post's save creates tags through here too.
  */
 
-const actorOf = (me: CmsMe): CmsActor => ({ kind: "cms", id: me.id, name: me.name, email: me.email });
+const actorOf = (me: CmsMe): CmsActor => actorOfMe(me);
 const MEDIA_ID = /^[a-z0-9]{20,40}$/;
 /**
  * A category's or tag's id: a cuid when the CMS made it, or a UUID when the taxonomy migration

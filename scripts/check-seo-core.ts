@@ -9,6 +9,9 @@
  *     visible FAQ; structured-data completeness; nothing invented (no author, no date, no image);
  *   · the label bands at 39/40, 59/60 and 79/80, the 50/25/25 weighting, every score an integer
  *     from 0 to 100 under a fixed-seed fuzz, the same input giving the same output;
+ *   · the comparison table (a table, its sources external links), related links and the page map
+ *     (internal links, their headings): extracted as the block components render them, link for
+ *     link; no new JSON-LD; a nested page's BreadcrumbList is its visible trail;
  *   · the site score: weighted, noindex and drafts left out; `serialiseLd` escaping "</script>";
  *   · metadata parity: the pure builders return exactly what the site's own generateMetadata
  *     functions return — every built-in page, the not-found page, the layout, the blog index, an
@@ -479,6 +482,119 @@ async function main() {
   ok("a missing BreadcrumbList is a partial warning", statusOf(scoreEntity(partial), "seo.structured-data") === "WARNING");
   ok("every page kind's JSON-LD is complete when content is", ["geo.machine-readable"].every((id) => statusOf(perfectScore, id) === "PASS" && statusOf(postScore, id) === "PASS" && statusOf(catScore, id) === "PASS"));
 
+  // ── The comparison table, related links and page map ─────────────────────────────────────────
+  section("New blocks: the comparison table, related links and the page map");
+  const comparePage = (): Parameters<typeof inputFromPage>[0] => ({
+    id: "page-compare",
+    slug: "compare/zoho-one",
+    title: "{siteName} vs Zoho One",
+    status: "published",
+    seo: { title: "Zoho One vs Wroffy ERP", description: "How Wroffy ERP and Zoho One compare, feature by feature, from each product's own public information.", keywords: ["Zoho One alternative"] },
+    blocks: [
+      block("c-head", "pageHeader", { heading: "{siteName} and Zoho One compared", intro: "What each product offers for an Indian company, side by side." }),
+      block("c-table", "comparisonTable", {
+        heading: "Zoho One vs {siteName}, feature by feature",
+        intro: "Each answer about Zoho One comes from its own website.",
+        competitor: "Zoho One",
+        asOf: "2026-09-29",
+        rows: [
+          { feature: "GST e-invoicing", us: "yes", them: "YES", source: "https://www.zoho.com/in/books/e-invoicing/" },
+          { feature: "Payroll", us: "yes", them: "partial", note: "Zoho Payroll is a separate app.", source: "https://zoho.com/in/payroll/" },
+          { feature: "Price for 10 people", us: "From {trialDays} days free", them: "no" },
+          { feature: "Hostile source", us: "no", them: "no", source: "javascript:alert(1)" },
+        ],
+        disclaimer: "Product names and trademarks belong to their owners.",
+      }),
+      block("c-related", "relatedLinks", {
+        heading: "Related pages",
+        links: [
+          { label: "Plans and pricing", href: "/pricing", description: "What each plan includes." },
+          { label: "Tally compared", href: "/compare/tally" },
+          { label: "Somewhere else", href: "https://example.com/elsewhere" },
+        ],
+      }),
+      block("c-map", "moduleHighlights", {
+        heading: "Everything in the product",
+        groups: [
+          { title: "Sell and serve", items: [{ label: "CRM", href: "/product/crm", description: "Companies, contacts and leads." }] },
+          { title: "Only elsewhere", items: [{ label: "Out", href: "https://example.com/out", description: "Not a page on this site." }] },
+        ],
+      }),
+    ],
+  });
+  const cmp = inputFromPage({ ...comparePage(), parents: [{ name: "Compare", path: "/compare" }] }, site, NOW);
+  const cmpTable = cmp.content.tables[0];
+  ok("the comparison table is read as a table: a column per product and a row per feature", cmp.content.tables.length === 1 && isDeepStrictEqual(cmpTable?.columns, ["Feature", "Wroffy ERP", "Zoho One"]) && cmpTable?.rows === 4, cmpTable);
+  ok(
+    "  each answer as the page shows it — Yes, Partly, No, or the words (tokens filled); a row's note with its feature",
+    ["GST e-invoicing", "Yes", "Partly", "No", "From 14 days free", "Payroll. Zoho Payroll is a separate app."].every((s) => cmpTable?.text.split("\n").includes(s)),
+    cmpTable?.text,
+  );
+  const external = cmp.content.links.filter((l) => !l.internal);
+  ok(
+    "  each source an external link named by its site (www. dropped); a javascript: source is no link",
+    isDeepStrictEqual(
+      external.map((l) => `${l.label} ${l.href}`),
+      ["zoho.com https://www.zoho.com/in/books/e-invoicing/", "zoho.com https://zoho.com/in/payroll/"],
+    ),
+    external,
+  );
+  ok("  its heading an h2; the as-of line and the disclaimer are paragraphs", cmp.content.headings.some((h) => h.level === 2 && h.text === "Zoho One vs Wroffy ERP, feature by feature") && cmp.content.paragraphs.some((p) => p.text === "Information about Zoho One from its public website as of 29 September 2026.") && cmp.content.paragraphs.some((p) => p.text === "Product names and trademarks belong to their owners."));
+  const internal = cmp.content.links.filter((l) => l.internal).map((l) => `${l.label} ${l.href}`);
+  ok("related links and the page map are internal links with their words — any other address is left out, as the site leaves it out", isDeepStrictEqual(internal, ["Plans and pricing /pricing", "Tally compared /compare/tally", "CRM /product/crm"]), internal);
+  ok("  the page map's groups are h3s under its h2 (a group with no page on this site shows nothing)", isDeepStrictEqual(cmp.content.headings.filter((h) => h.level === 3).map((h) => h.text), ["Sell and serve"]) && cmp.content.headings.some((h) => h.level === 2 && h.text === "Everything in the product"));
+  ok("  each block's content points at its block", cmpTable?.field === "blocks[c-table]" && cmp.content.links.find((l) => l.href === "/product/crm")?.field === "blocks[c-map]");
+  ok("no new JSON-LD types, and no FAQPage without an FAQ block: WebPage and BreadcrumbList", isDeepStrictEqual(types(cmp.jsonLd), ["WebPage", "BreadcrumbList"]), types(cmp.jsonLd));
+  const cmpCrumbs = (cmp.jsonLd.find((o) => o["@type"] === "BreadcrumbList")?.itemListElement ?? []) as { name: string; item: string }[];
+  ok(
+    "a nested page's trail is its breadcrumb: Home › the page above › itself by its title (tokens filled)",
+    cmpCrumbs.map((c) => `${c.name} ${c.item}`).join(" | ") === "Home https://wroffy.test/ | Compare https://wroffy.test/compare | Wroffy ERP vs Zoho One https://wroffy.test/compare/zoho-one",
+    cmpCrumbs,
+  );
+  ok("  the visible breadcrumb is kept apart from the content, the page left off", isDeepStrictEqual(cmp.content.breadcrumbs, [{ name: "Home", path: "/" }, { name: "Compare", path: "/compare" }]));
+  const orphan = inputFromPage(comparePage(), site, NOW);
+  ok(
+    "  with no page above it, Home › itself; a page that isn't nested keeps Home › its H1",
+    ((orphan.jsonLd[1]?.itemListElement ?? []) as { name: string }[]).map((c) => c.name).join(" › ") === "Home › Wroffy ERP vs Zoho One" &&
+      ((perfect.jsonLd[1]?.itemListElement ?? []) as { name: string }[]).map((c) => c.name).join(" › ") === "Home › GST invoice software for growing Indian companies" &&
+      perfect.content.breadcrumbs.length === 0,
+  );
+  const cmpScore = scoreEntity(cmp);
+  ok("the checks read them: the comparison has its table, the links' words say where they go, the sources count", statusOf(cmpScore, "aeo.tables") === "PASS" && statusOf(cmpScore, "seo.links.anchor-text") === "PASS" && statusOf(cmpScore, "seo.links.internal") === "PASS", `${statusOf(cmpScore, "aeo.tables")} ${statusOf(cmpScore, "seo.links.anchor-text")} ${statusOf(cmpScore, "seo.links.internal")}`);
+
+  // Parity with the renderer: what the extractor reads is what the block components put on the page.
+  const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
+  const { createElement } = require("react") as typeof import("react");
+  const { ComparisonTableBlock } = require("../src/components/site/blocks/comparison-table") as typeof import("../src/components/site/blocks/comparison-table");
+  const { RelatedLinksBlock } = require("../src/components/site/blocks/related-links") as typeof import("../src/components/site/blocks/related-links");
+  const { ModuleHighlightsBlock } = require("../src/components/site/blocks/module-highlights") as typeof import("../src/components/site/blocks/module-highlights");
+  const renderCtx = { settings, signupOpen: true, trialDays: 14, searchParams: {}, workspaceSuffix: ".wroffy.test" };
+  const blocksOf = comparePage().blocks;
+  // The fixture's own props for a block type, handed to that type's component.
+  const propsOf = (type: SiteBlock["type"]) => blocksOf.find((b) => b.type === type)!.props as never;
+  const renderedHtml = [
+    renderToStaticMarkup(createElement(ComparisonTableBlock, { props: propsOf("comparisonTable"), ctx: renderCtx })),
+    renderToStaticMarkup(createElement(RelatedLinksBlock, { props: propsOf("relatedLinks"), ctx: renderCtx })),
+    renderToStaticMarkup(createElement(ModuleHighlightsBlock, { props: propsOf("moduleHighlights"), ctx: renderCtx })),
+  ].join("\n");
+  const unescape = (s: string) => s.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+  const anchors = [...renderedHtml.matchAll(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => ({ href: unescape(m[1]), text: unescape(m[2].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim() }));
+  const renderedHrefs = anchors.map((a) => a.href).sort();
+  const extractedHrefs = cmp.content.links.map((l) => l.href).sort();
+  ok("parity: the links rendered are exactly the links extracted, each rendered with its extracted words", isDeepStrictEqual(renderedHrefs, extractedHrefs) && cmp.content.links.every((l) => anchors.some((a) => a.href === l.href && a.text.startsWith(l.label))), { renderedHrefs, extractedHrefs });
+  const renderedText = unescape(renderedHtml.replace(/<[^>]+>/g, "\n")).split("\n").map((s) => s.trim()).filter(Boolean).join(" ");
+  const missingText = [...cmp.content.headings.filter((h) => h.field !== "blocks[c-head]").map((h) => h.text), ...cmp.content.paragraphs.filter((p) => p.field !== "blocks[c-head]").map((p) => p.text), ...(cmpTable?.columns ?? [])].filter((s) => !renderedText.includes(s));
+  ok("  every heading, paragraph and column extracted is on the rendered page", missingText.length === 0, missingText);
+  ok(
+    "  a source link is nofollow, noopener and noreferrer; the table has a caption, column and row headers",
+    anchors.filter((a) => a.href.startsWith("https://")).length === 2 &&
+      (renderedHtml.match(/rel="nofollow noopener noreferrer"/g) ?? []).length === 2 &&
+      /<caption[^>]*>/.test(renderedHtml) &&
+      (renderedHtml.match(/scope="col"/g) ?? []).length === 3 &&
+      (renderedHtml.match(/scope="row"/g) ?? []).length === 4,
+  );
+  ok("  a mark is a word as well as an icon: Yes, Partly and No are on the page", ["Yes", "Partly", "No"].every((w) => new RegExp(`>${w}<`).test(renderedHtml)) && !renderedHtml.includes("javascript:"));
+
   // ── Labels and weights ───────────────────────────────────────────────────────────────────────
   section("Label bands and the overall weighting");
   const bands: [number, string][] = [
@@ -523,7 +639,29 @@ async function main() {
     junk(),
   ]);
   const randomBlock = (i: number): unknown => {
-    const type = pick(["hero", "pageHeader", "featureGrid", "moduleGrid", "richText", "imageText", "stats", "faq", "cta", "pricingTable", "securityHighlights", "contactForm", "logoCloud", "testimonial", "productPreviews", "workspaceSignin", "signupForm", "unknownBlock"]);
+    const type = pick([
+      "hero",
+      "pageHeader",
+      "featureGrid",
+      "moduleGrid",
+      "richText",
+      "imageText",
+      "stats",
+      "faq",
+      "cta",
+      "pricingTable",
+      "securityHighlights",
+      "contactForm",
+      "logoCloud",
+      "testimonial",
+      "productPreviews",
+      "workspaceSignin",
+      "signupForm",
+      "comparisonTable",
+      "relatedLinks",
+      "moduleHighlights",
+      "unknownBlock",
+    ]);
     const props = {
       heading: text(8),
       eyebrow: text(3),
@@ -531,7 +669,12 @@ async function main() {
       subheading: text(),
       body: pick([text(), [text(), text()], junk()]),
       items: pick([[{ title: text(4), body: text(), question: text(6), answer: [text()], value: "12", label: text(3), name: text(2), imageUrl: pick(["/media/cm0abc00000000000000000001", ""]), href: href(), icon: "check", link: { label: text(2), href: href() } }], junk()]),
-      groups: pick([[{ title: text(3), summary: text(), modules: [{ label: text(2), blurb: text() }] }], junk()]),
+      groups: pick([[{ title: text(3), summary: text(), modules: [{ label: text(2), blurb: text() }], items: pick([[{ label: text(2), href: href(), description: text() }], junk()]) }], junk()]),
+      competitor: pick([text(2), junk()]),
+      asOf: pick(["2026-09-29", "2026-02-30", "", text(1), junk()]),
+      rows: pick([[{ feature: text(3), us: pick(["yes", "partial", "no", text(2), junk()]), them: pick(["YES", "Partial", text(2)]), note: pick([undefined, text()]), source: href() }, junk()], junk()]),
+      links: pick([[{ label: text(2), href: href(), description: pick([undefined, text()]) }, junk()], junk()]),
+      disclaimer: pick([text(), junk()]),
       content: pick([Array.from({ length: Math.floor(rand() * 6) }, rich), junk()]),
       primary: pick([{ kind: "signup" }, { kind: "link", label: text(2), href: href() }, junk()]),
       media: media(),

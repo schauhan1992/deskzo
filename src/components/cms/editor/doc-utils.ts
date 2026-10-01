@@ -97,6 +97,7 @@ const WORDS: Record<string, string> = {
   answer: "answer paragraph",
   asideItems: "point",
   blocks: "block",
+  links: "link",
 };
 
 /** "items[2].link.href" → "Item 3 › link › href" — a readable place for an issue in a summary list. */

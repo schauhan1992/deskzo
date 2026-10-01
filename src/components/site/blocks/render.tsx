@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { SiteBlock, SiteRenderContext } from "@/components/site/blocks/types";
 import { ContactFormBlock } from "@/components/site/blocks/contact-form";
+import { ComparisonTableBlock } from "@/components/site/blocks/comparison-table";
 import { CtaBlock } from "@/components/site/blocks/cta";
 import { FaqBlock } from "@/components/site/blocks/faq";
 import { FeatureGridBlock } from "@/components/site/blocks/feature-grid";
@@ -8,9 +9,11 @@ import { HeroBlock } from "@/components/site/blocks/hero";
 import { ImageTextBlock } from "@/components/site/blocks/image-text";
 import { LogoCloudBlock } from "@/components/site/blocks/logo-cloud";
 import { ModuleGridBlock } from "@/components/site/blocks/module-grid";
+import { ModuleHighlightsBlock } from "@/components/site/blocks/module-highlights";
 import { PageHeaderBlock } from "@/components/site/blocks/page-header";
 import { PricingTableBlock } from "@/components/site/blocks/pricing-table";
 import { ProductPreviewsBlock } from "@/components/site/blocks/product-previews";
+import { RelatedLinksBlock } from "@/components/site/blocks/related-links";
 import { RichTextBlock } from "@/components/site/blocks/rich-text";
 import { SecurityHighlightsBlock } from "@/components/site/blocks/security-highlights";
 import { SignupFormBlock } from "@/components/site/blocks/signup-form";
@@ -62,6 +65,12 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext, key: string): Rea
       return <WorkspaceSigninBlock key={key} props={block.props} ctx={ctx} />;
     case "signupForm":
       return <SignupFormBlock key={key} props={block.props} ctx={ctx} />;
+    case "comparisonTable":
+      return <ComparisonTableBlock key={key} props={block.props} ctx={ctx} />;
+    case "relatedLinks":
+      return <RelatedLinksBlock key={key} props={block.props} ctx={ctx} />;
+    case "moduleHighlights":
+      return <ModuleHighlightsBlock key={key} props={block.props} ctx={ctx} />;
     default:
       return null;
   }

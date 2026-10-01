@@ -31,14 +31,15 @@ export const sameValue = (a: unknown, b: unknown) => stableJson(normalize(a)) ==
 const MAX = 70;
 const clip = (text: string) => (text.length > MAX ? `${text.slice(0, MAX - 1)}…` : text);
 const shown = (text: string | undefined | null) => (text && text.trim() ? `“${clip(text.trim())}”` : "(empty)");
-const labels = (links: SiteLink[] | undefined) => (links && links.length ? clip(links.map((l) => l.label.trim() || "(no label)").join(" · ")) : "(none)");
+const labels = (links: readonly { label: string }[] | undefined) => (links && links.length ? clip(links.map((l) => l.label.trim() || "(no label)").join(" · ")) : "(none)");
 const linkText = (link: SiteLink | undefined) => (link ? `${link.label.trim() || "(no label)"} → ${link.href.trim() || "(no address)"}` : "(none)");
 
-function listChange(key: string, label: string, from: SiteLink[] | undefined, to: SiteLink[] | undefined): SettingsChange | null {
+/** A list of links — or of header items, a menu named by its label. */
+function listChange(key: string, label: string, from: readonly { label: string }[] | undefined, to: readonly { label: string }[] | undefined): SettingsChange | null {
   if (sameValue(from, to)) return null;
   const a = labels(from);
   const b = labels(to);
-  return { key, label, from: a, to: a === b ? `${b} (addresses changed)` : b };
+  return { key, label, from: a, to: a === b ? `${b} (links changed)` : b };
 }
 
 function textChange(key: string, label: string, from: string | undefined, to: string | undefined): SettingsChange | null {

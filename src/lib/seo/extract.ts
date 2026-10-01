@@ -1,5 +1,5 @@
 import type { RichInline, RichNode, SiteAction, SiteBlock, SiteMedia, SitePage, SiteSettings } from "@/components/site/blocks/types";
-import { fill, isInternal, resolveAction, safeHref, safeSrc } from "@/components/site/links";
+import { calendarDateLabel, comparisonMark, fill, isInternal, resolveAction, safeHref, safeSrc, sourceSite } from "@/components/site/links";
 import { BUILTIN_PAGE_SLUGS } from "@/lib/cms/types";
 import {
   archiveMetaSources,
@@ -473,6 +473,52 @@ function block(c: Collector, b: SiteBlock, index: number, root: "blocks" | "body
       }
       break;
     }
+    case "comparisonTable": {
+      // A table as the page shows it: a column per product, a row per feature, each answer as its word
+      // ("Yes", "Partly", "No", or the words written); each row's source an external link, by its site's name.
+      sectionHead(c, p, t, field);
+      const competitor = t(p.competitor);
+      const rows = arr(p.rows).map(obj);
+      const mark = (v: unknown) => comparisonMark(t(v)).text;
+      table(
+        c,
+        ["Feature", squash(ctx.settings.siteName), competitor],
+        rows.map((r) => [[t(r.feature), t(r.note)].filter((x) => x.trim()).join(". "), mark(r.us), mark(r.them)]),
+        field,
+      );
+      for (const r of rows) {
+        const source = sourceSite(str(r.source));
+        if (source) link(c, source.href, source.name, field);
+      }
+      const asOf = calendarDateLabel(str(p.asOf));
+      if (asOf) paragraph(c, `Information about ${competitor} from its public website as of ${asOf}.`, field);
+      paragraph(c, t(p.disclaimer), field);
+      break;
+    }
+    case "relatedLinks":
+      sectionHead(c, p, t, field);
+      for (const l of arr(p.links).map(obj)) {
+        if (!safeHref(str(l.href))?.startsWith("/")) continue;
+        link(c, l.href, t(l.label), field);
+        label(c, t(l.label));
+        paragraph(c, t(l.description), field);
+      }
+      break;
+    case "moduleHighlights":
+      sectionHead(c, p, t, field);
+      for (const group of arr(p.groups).map(obj)) {
+        const items = arr(group.items)
+          .map(obj)
+          .filter((i) => safeHref(str(i.href))?.startsWith("/"));
+        if (!items.length) continue;
+        heading(c, 3, t(group.title), field);
+        for (const item of items) {
+          link(c, item.href, t(item.label), field);
+          label(c, t(item.label));
+          paragraph(c, t(item.description), field);
+        }
+      }
+      break;
   }
 }
 
@@ -543,12 +589,19 @@ export type PageSource = {
   status?: SeoStatus;
   /** Defaults to whether the slug is a built-in page's. */
   isBuiltin?: boolean;
+  /**
+   * A nested page's ("product/crm") pages above it, nearest last, by title — those the site has; the
+   * site shows them in its breadcrumb (Home › Product › CRM). Left out: the trail is Home › the page.
+   */
+  parents?: SeoCrumb[];
 };
 
 /** A page — the home page included — as the checks read it. */
 export function inputFromPage(page: PageSource, site: SeoSiteContext, now: Date): SeoInput {
   const ctx = fillCtx(site);
   const slug = str(page.slug);
+  // A nested page shows its place on the site above its content: Home, then the pages above it.
+  const breadcrumbs: SeoCrumb[] = slug.includes("/") ? [{ name: "Home", path: "/" }, ...arr<SeoCrumb>(page.parents).filter((p) => str(p?.name).trim() && str(p?.path))] : [];
   const seo = (page.seo && typeof page.seo === "object" ? page.seo : { title: "", description: "" }) as SitePage["seo"];
   const doc = { slug, seo };
   const kind = slug === "home" ? "home" : "page";
@@ -566,10 +619,10 @@ export function inputFromPage(page: PageSource, site: SeoSiteContext, now: Date)
     live: status === "published" || status === "default",
     isBuiltin: page.isBuiltin ?? isBuiltinSlug(slug),
     pageType: pageTypeFor(kind, slug),
-    name: squash(str(page.title)),
+    name: squash(fill(str(page.title), ctx)),
     meta,
     keywords: enteredKeywords(seo),
-    content: contentOf(c, []),
+    content: contentOf(c, breadcrumbs),
     editorial: noEditorial,
     archive: null,
     site,

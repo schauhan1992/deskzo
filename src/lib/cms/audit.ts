@@ -1,7 +1,7 @@
 import type { Prisma } from "@wroffy/control-client";
 import { controlDb } from "@/lib/platform/control-db";
 import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
-import type { CmsAuditAction, CmsAuditFilters, CmsAuditRow, Paged } from "@/lib/cms/types";
+import type { CmsAuditAction, CmsAuditFilters, CmsAuditRow, CmsMe, Paged } from "@/lib/cms/types";
 
 /**
  * The CMS's activity log (cms_audit_log) and who did things.
@@ -17,6 +17,11 @@ export type CmsActor =
   | { kind: "staff"; id: string; name: string }
   | { kind: "script" }
   | { kind: "site" };
+
+/** Who a CMS user is, as the log records them: themselves — or "script" when a script acts through the CMS (CmsMe.script). */
+export function actorOfMe(me: CmsMe): CmsActor {
+  return me.script ? { kind: "script" } : { kind: "cms", id: me.id, name: me.name, email: me.email };
+}
 
 /** What `createdBy` / `updatedBy` columns hold: "cms:<id>", "staff:<id>", "script", "site". */
 export function actorRef(actor: CmsActor): string {

@@ -155,7 +155,8 @@
     "check:collections": "tsx scripts/check-collections.ts",
     "check:close": "tsx scripts/check-close.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
-    "check:close-ui": "tsx scripts/check-close-ui.ts"
+    "check:close-ui": "tsx scripts/check-close-ui.ts",
+    "site:seed-pages": "tsx scripts/site-seed-pages.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

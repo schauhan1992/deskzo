@@ -1,14 +1,16 @@
 import {
   BLOCK_TYPES,
   ICON_NAMES,
+  NAV_LIMITS,
   PREVIEW_KINDS,
   type BlockPropsMap,
   type BlockType,
+  type NavMenu,
   type SiteBlock,
   type SiteSeo,
   type SiteSettings,
 } from "@/components/site/blocks/types";
-import type { CmsIssue, PageDocument, PostSeo } from "@/lib/cms/types";
+import { BUILTIN_PAGE_SLUGS, RESERVED_PAGE_SEGMENTS, type CmsIssue, type PageDocument, type PostSeo } from "@/lib/cms/types";
 import { keywordProblems, MAX_KEYWORDS, normaliseKeywords } from "@/lib/seo/keywords";
 
 /**
@@ -34,7 +36,8 @@ export type ValidationMode = "draft" | "publish";
 type Field =
   /** `keep`: always a string, possibly empty, never an issue for being empty. `raw`: not trimmed (a rich-text run). */
   | { k: "text"; max: number; req?: boolean; keep?: boolean; raw?: boolean; email?: boolean }
-  | { k: "href"; req?: boolean; webOnly?: boolean }
+  /** `webOnly`: http(s) only. `internalOnly`: a path on this site only ("/pricing"). */
+  | { k: "href"; req?: boolean; webOnly?: boolean; internalOnly?: boolean }
   | { k: "image"; req?: boolean }
   | { k: "anchor" }
   | { k: "enum"; values: readonly (string | number)[]; req?: boolean }
@@ -44,15 +47,18 @@ type Field =
   | { k: "link"; req?: boolean }
   | { k: "media"; req?: boolean }
   | { k: "rich"; maxItems: number; req?: boolean }
-  | { k: "list"; of: Fields; maxItems: number; req?: boolean; min?: number }
+  /** `of` a function: each item's spec is chosen by what it holds (a header item: a link, or a menu). `noun` names the items in "At most 5 columns.". */
+  | { k: "list"; of: Fields | ((item: unknown) => Fields); maxItems: number; req?: boolean; min?: number; noun?: string }
   | { k: "object"; of: Fields; req?: boolean }
+  /** A calendar date, "yyyy-mm-dd". */
+  | { k: "date"; req?: boolean }
   /** The primary keywords (`checkKeywords`): stored normalised, left out when there are none. */
   | { k: "keywords" };
 type Fields = Record<string, Field>;
 
 const text = (max: number, req = false): Field => ({ k: "text", max, req });
 const keep = (max: number): Field => ({ k: "text", max, keep: true });
-const list = (of: Fields, maxItems: number, req = false, min?: number): Field => ({ k: "list", of, maxItems, req, min });
+const list = (of: Fields | ((item: unknown) => Fields), maxItems: number, req = false, min?: number, noun?: string): Field => ({ k: "list", of, maxItems, req, min, noun });
 
 const HEADING = 200;
 const LABEL = 80;
@@ -64,6 +70,23 @@ const SECTION_HEAD = { anchor: { k: "anchor" }, eyebrow: text(LABEL), heading: t
 const ICON: Field = { k: "enum", values: ICON_NAMES };
 const ICON_REQ: Field = { k: "enum", values: ICON_NAMES, req: true };
 const LINK: Fields = { label: text(LABEL, true), href: { k: "href", req: true } };
+/** A link to another page on this site — never another site (related links, a hub's map). */
+const INTERNAL_HREF: Field = { k: "href", req: true, internalOnly: true };
+
+/** A header menu (types.ts NavMenu): columns of links with a line each, and an optional link along its foot. */
+const NAV_MENU = {
+  label: text(LABEL, true),
+  columns: list(
+    { title: text(LABEL, true), items: list({ label: text(LABEL, true), href: { k: "href", req: true }, description: text(NAV_LIMITS.description) }, NAV_LIMITS.columnItems, true, undefined, "links in a column") },
+    NAV_LIMITS.columns,
+    true,
+    undefined,
+    "columns in a menu",
+  ),
+  footer: { k: "link" },
+} satisfies Record<keyof NavMenu, Field>;
+/** A header item is a menu when it has columns, else a link — so settings saved before menus existed pass as they are. */
+const navItemSpec = (item: unknown): Fields => (isObj(item) && "columns" in item ? NAV_MENU : LINK);
 
 /** Every block type's props. The mapped type fails to compile when a block or a prop in types.ts is missing here. */
 const BLOCK_SPECS = {
@@ -153,6 +176,19 @@ const BLOCK_SPECS = {
     confirmationBody: text(BODY, true),
   },
   signupForm: { heading: text(HEADING, true), body: text(BODY), bodyInviteOnly: text(BODY), asideHeading: text(HEADING), asideItems: { k: "texts", max: 300, maxItems: 12 } },
+  comparisonTable: {
+    ...SECTION_HEAD,
+    competitor: text(LABEL, true),
+    asOf: { k: "date", req: true },
+    // A cell is "yes", "partial" or "no" (the site shows an icon and a word), or words of the editor's own.
+    rows: list({ feature: text(SHORT, true), us: text(SHORT, true), them: text(SHORT, true), note: text(300), source: { k: "href", webOnly: true } }, 40, true, undefined, "rows"),
+    disclaimer: text(400, true),
+  },
+  relatedLinks: { ...SECTION_HEAD, links: list({ label: text(LABEL, true), href: INTERNAL_HREF, description: text(200) }, 12, true, undefined, "links") },
+  moduleHighlights: {
+    ...SECTION_HEAD,
+    groups: list({ title: text(SHORT, true), items: list({ label: text(LABEL, true), href: INTERNAL_HREF, description: text(200, true) }, 12, true, undefined, "links in a group") }, 6, true, undefined, "groups"),
+  },
 } satisfies { [K in BlockType]: Record<keyof BlockPropsMap[K], Field> };
 
 const SEO_SPEC: Fields = {
@@ -175,10 +211,14 @@ const SETTINGS_SPEC: Fields = {
   tagline: keep(160),
   displayDomain: keep(100),
   salesEmail: { k: "text", max: 254, keep: true, email: true },
-  nav: list(LINK, 8, true, 0),
+  nav: list(navItemSpec, NAV_LIMITS.items, true, 0, "items in the header"),
   signinLink: { k: "link", req: true },
   signupCta: { k: "object", req: true, of: { open: { k: "link", req: true }, inviteOnly: { k: "link", req: true } } },
-  footer: { k: "object", req: true, of: { columns: list({ title: text(LABEL, true), links: list(LINK, 10, true, 0) }, 5, true, 0), note: text(300) } },
+  footer: {
+    k: "object",
+    req: true,
+    of: { columns: list({ title: text(LABEL, true), links: list(LINK, NAV_LIMITS.footerLinks, true, 0, "links in a column") }, NAV_LIMITS.footerColumns, true, 0, "footer columns"), note: text(300) },
+  },
   social: list({ network: { k: "enum", values: SOCIAL_NETWORKS, req: true }, href: { k: "href", req: true, webOnly: true }, label: text(LABEL) }, 10, true, 0),
   seo: { k: "object", req: true, of: { titleTemplate: text(SHORT, true), defaultTitle: text(SHORT, true), description: keep(300), ogImage: { k: "image" } } },
   notFound: { k: "object", req: true, of: { heading: text(HEADING, true), body: text(BODY, true), links: list(LINK, 6, true, 0) } },
@@ -212,6 +252,21 @@ export function isAllowedHref(raw: string, webOnly = false): boolean {
   }
 }
 
+/** A path on this site ("/pricing", "/product/crm#invoices") — the only links an internal-links block may hold. */
+export function isSitePath(raw: string): boolean {
+  const href = raw.trim();
+  return href.startsWith("/") && isAllowedHref(href);
+}
+
+/** "yyyy-mm-dd", and a day the calendar has (not 2026-02-30). */
+export function isCalendarDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const at = new Date(Date.UTC(year, month - 1, day));
+  return year >= 1900 && at.getUTCFullYear() === year && at.getUTCMonth() === month - 1 && at.getUTCDate() === day;
+}
+
 function decodeURIComponentSafe(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -228,6 +283,34 @@ export function mediaIdOf(src: unknown): string | null {
 
 /** Page slugs: lower-case words and hyphens, "/" between levels (src/lib/platform/site-content.ts SLUG_PATTERN). */
 export const PAGE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
+/** A page's address has at most three levels: "compare", "product/crm", "resources/guides/gst". */
+export const PAGE_SLUG_MAX_DEPTH = 3;
+export const PAGE_SLUG_MAX_LENGTH = 120;
+
+/**
+ * Why a new page may not have this address, or null when it may — the rules that need no database
+ * (the CMS's dialogs check them as they are typed; src/lib/cms/content.ts checks them again, and
+ * then whether another page has it):
+ *
+ *   · lower-case words and hyphens, "/" between at most three levels, at most 120 characters;
+ *   · not under the site's own routes and machinery (`RESERVED_PAGE_SEGMENTS`: blog, media, preview,
+ *     partners…, and anything platform-*);
+ *   · not a built-in page's address, nor under one: "pricing/x" or "signup/x" would sit beneath a
+ *     route the redirect manager can never redirect from (and robots.txt keeps /signup/… out of
+ *     search), and "home/x" beneath an address the site shows as "/".
+ */
+export function pageSlugProblem(slug: string): string | null {
+  if (!slug) return "Give the page an address.";
+  if (slug.length > PAGE_SLUG_MAX_LENGTH) return `Keep the address to ${PAGE_SLUG_MAX_LENGTH} characters.`;
+  if (!PAGE_SLUG.test(slug)) return "Use lower-case words and hyphens, with / between levels — for example about or solutions/retail.";
+  const segments = slug.split("/");
+  if (segments.length > PAGE_SLUG_MAX_DEPTH) return `An address has at most ${PAGE_SLUG_MAX_DEPTH} levels, like product/crm or resources/guides/gst.`;
+  const first = segments[0]!;
+  if ((RESERVED_PAGE_SEGMENTS as readonly string[]).includes(first) || first.startsWith("platform-")) return "That address is used by the site itself. Choose another.";
+  if ((BUILTIN_PAGE_SLUGS as readonly string[]).includes(slug)) return "That address belongs to one of the site's own pages.";
+  if ((BUILTIN_PAGE_SLUGS as readonly string[]).includes(first)) return `Pages can't go under /${first}, one of the site's own pages. Start the address with another word.`;
+  return null;
+}
 /** Post slugs: one level. */
 export const POST_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -320,6 +403,7 @@ function checkField(field: Field, value: unknown, path: string, ctx: Ctx): unkno
       case "text":
       case "href":
       case "image":
+      case "date":
         return "";
       case "enum":
         return field.values[0];
@@ -363,11 +447,31 @@ function checkField(field: Field, value: unknown, path: string, ctx: Ctx): unkno
         if (required && publish) issue(ctx, path, "Add a link.");
         return required ? "" : undefined;
       }
-      if (!isAllowedHref(h, field.webOnly)) {
-        issue(ctx, path, field.webOnly ? "Use an http(s) address." : "Links must be a page on this site (/pricing), an #anchor, an http(s) address or mailto:.");
+      if (!isAllowedHref(h, field.webOnly) || (field.internalOnly && !isSitePath(h))) {
+        issue(
+          ctx,
+          path,
+          field.internalOnly ? "Link to a page on this site, like /pricing." : field.webOnly ? "Use an http(s) address." : "Links must be a page on this site (/pricing), an #anchor, an http(s) address or mailto:.",
+        );
         return undefined;
       }
       return h;
+    }
+    case "date": {
+      if (typeof value !== "string") {
+        issue(ctx, path, "A date is written yyyy-mm-dd.");
+        return undefined;
+      }
+      const d = value.trim();
+      if (!d) {
+        if (required && publish) issue(ctx, path, "Fill this in.");
+        return required ? "" : undefined;
+      }
+      if (!isCalendarDate(d)) {
+        issue(ctx, path, "Use a real date, written yyyy-mm-dd (2026-09-29).");
+        return undefined;
+      }
+      return d;
     }
     case "image": {
       if (typeof value !== "string") {
@@ -484,9 +588,10 @@ function checkField(field: Field, value: unknown, path: string, ctx: Ctx): unkno
         issue(ctx, path, "This must be a list.");
         return undefined;
       }
-      if (value.length > field.maxItems) issue(ctx, path, `At most ${field.maxItems}.`);
+      if (value.length > field.maxItems) issue(ctx, path, field.noun ? `At most ${field.maxItems} ${field.noun}.` : `At most ${field.maxItems}.`);
       if (publish && value.length < (field.min ?? (required ? 1 : 0))) issue(ctx, path, "Add at least one.");
-      const items = value.slice(0, field.maxItems).map((item, i) => checkObject(field.of, item, `${path}[${i}]`, ctx));
+      const spec = field.of;
+      const items = value.slice(0, field.maxItems).map((item, i) => checkObject(typeof spec === "function" ? spec(item) : spec, item, `${path}[${i}]`, ctx));
       if (!required && items.length === 0) return undefined;
       return items;
     }

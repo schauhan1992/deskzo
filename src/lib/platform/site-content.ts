@@ -108,7 +108,11 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 
 // ─── Settings ────────────────────────────────────────────────────────────────────────────────────
 
-/** Stored settings laid over the defaults, a level deep: a field the stored copy lacks keeps its default. */
+/**
+ * Stored settings laid over the defaults, a level deep: a field the stored copy lacks keeps its default.
+ * The header's `nav` is a list of links and menus; settings saved before menus existed hold links
+ * only, which are items as they are (src/components/site/nav.ts reads either).
+ */
 export function mergeSiteSettings(stored: unknown): SiteSettings {
   if (!isObj(stored)) return DEFAULT_SITE_SETTINGS;
   const s = stored as Partial<SiteSettings>;
@@ -116,6 +120,7 @@ export function mergeSiteSettings(stored: unknown): SiteSettings {
   return {
     ...d,
     ...s,
+    nav: Array.isArray(s.nav) ? s.nav : d.nav,
     signupCta: { ...d.signupCta, ...(isObj(s.signupCta) ? s.signupCta : {}) },
     footer: { ...d.footer, ...(isObj(s.footer) ? s.footer : {}) },
     seo: { ...d.seo, ...(isObj(s.seo) ? s.seo : {}) },

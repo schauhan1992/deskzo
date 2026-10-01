@@ -181,9 +181,13 @@ export function jsonLdFor(input: Omit<SeoInput, "jsonLd">): JsonLd[] {
     case "home":
       out.push(organizationLd({ siteName: site.siteName, origin, social: site.social }), webSiteLd({ siteName: site.siteName, description: site.description }, origin), faq);
       break;
-    case "page":
-      out.push(webPageLd({ path: input.path, name, description: input.meta.description }, origin), breadcrumbLd([{ name: "Home", path: "/" }, { name, path: input.path }], origin), faq);
+    case "page": {
+      // A nested page's trail is the breadcrumb it shows (Home › Product › CRM), itself by its title as
+      // shown there; any other page's is Home › the page, by its H1.
+      const trail = content.breadcrumbs.length ? [...content.breadcrumbs, { name: input.name || name, path: input.path }] : [{ name: "Home", path: "/" }, { name, path: input.path }];
+      out.push(webPageLd({ path: input.path, name, description: input.meta.description }, origin), breadcrumbLd(trail, origin), faq);
       break;
+    }
     case "post": {
       const e = input.editorial;
       out.push(

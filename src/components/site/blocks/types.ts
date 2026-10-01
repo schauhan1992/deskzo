@@ -193,6 +193,33 @@ export type TestimonialProps = { anchor?: string; quote: string; name: string; r
 
 export type ProductPreviewsProps = SectionHead & { items: { preview: PreviewKind; title: string; body: string }[] };
 
+/**
+ * One cell of a comparison: "yes", "partial" or "no" (shown as an icon and "Yes", "Partly", "No"),
+ * or words of the editor's own, shown as written ("From ₹999 a month", "With an add-on").
+ */
+export type ComparisonMark = string;
+export const COMPARISON_MARKS = ["yes", "partial", "no"] as const;
+
+/**
+ * This product beside another, feature by feature — for the comparison pages. `competitor` is the
+ * other product's name as the page states it; `asOf` ("yyyy-mm-dd") is the day its public website
+ * was read, shown as "Information about {competitor} from its public website as of {asOf}". Each
+ * row may carry the page of the competitor's site it was read from (`source`, an http(s) address,
+ * linked `nofollow`); `disclaimer` is shown under the table.
+ */
+export type ComparisonTableProps = SectionHead & {
+  competitor: string;
+  asOf: string;
+  rows: { feature: string; us: ComparisonMark; them: ComparisonMark; note?: string; source?: Href }[];
+  disclaimer: string;
+};
+
+/** Cards linking to other pages on this site (never elsewhere) — "Related", "Read next". */
+export type RelatedLinksProps = SectionHead & { links: { label: string; href: Href; description?: string }[] };
+
+/** A hub page's map of the pages under it: groups of links, each with a line on what it covers. */
+export type ModuleHighlightsProps = SectionHead & { groups: { title: string; items: { label: string; href: Href; description: string }[] }[] };
+
 /** Signing in: to a workspace by its name, or "find my workspaces" by email. */
 export type WorkspaceSigninProps = {
   anchor?: string;
@@ -232,6 +259,9 @@ export type BlockPropsMap = {
   productPreviews: ProductPreviewsProps;
   workspaceSignin: WorkspaceSigninProps;
   signupForm: SignupFormProps;
+  comparisonTable: ComparisonTableProps;
+  relatedLinks: RelatedLinksProps;
+  moduleHighlights: ModuleHighlightsProps;
 };
 
 export type BlockType = keyof BlockPropsMap;
@@ -255,6 +285,9 @@ export const BLOCK_TYPES = [
   "productPreviews",
   "workspaceSignin",
   "signupForm",
+  "comparisonTable",
+  "relatedLinks",
+  "moduleHighlights",
 ] as const satisfies readonly BlockType[];
 // Every block type is in the list: this fails to compile if one is added to BlockPropsMap and not here.
 type Assert<T extends true> = T;
@@ -294,6 +327,22 @@ export type SitePage = { slug: string; title: string; seo: SiteSeo; blocks: Site
 
 export type SocialNetwork = "linkedin" | "x" | "youtube" | "facebook" | "instagram" | "github" | "other";
 
+/** A link in a header menu's column: its words, where it goes, and a line on what is there. */
+export type NavMenuItem = { label: string; href: Href; description?: string };
+
+/**
+ * A header item that opens a panel of links (a "mega-menu"): columns, each a title and its links,
+ * and optionally one link along the panel's foot ("See every feature"). Told apart from a plain
+ * link by its `columns`.
+ */
+export type NavMenu = { label: string; columns: { title: string; items: NavMenuItem[] }[]; footer?: SiteLink };
+
+/** One item across the header: a link, or a menu. Settings saved before menus existed hold links only — still valid. */
+export type NavItem = SiteLink | NavMenu;
+
+/** The header's and footer's limits, which the CMS's validator and editor hold too. */
+export const NAV_LIMITS = { items: 8, columns: 5, columnItems: 10, description: 80, footerColumns: 6, footerLinks: 10 } as const;
+
 export type SiteSettings = {
   siteName: string;
   tagline: string;
@@ -301,7 +350,7 @@ export type SiteSettings = {
   displayDomain: string;
   /** Shown on the site. Contact requests are mailed to PLATFORM_SALES_EMAIL, not here. */
   salesEmail: string;
-  nav: SiteLink[];
+  nav: NavItem[];
   signinLink: SiteLink;
   signupCta: { open: SiteLink; inviteOnly: SiteLink };
   footer: { columns: { title: string; links: SiteLink[] }[]; note?: string };
@@ -323,4 +372,9 @@ export type SiteRenderContext = {
   searchParams: Record<string, string | undefined>;
   /** ".<PLATFORM_DOMAIN>[:port]" — what follows a workspace's name in its address. */
   workspaceSuffix: string;
+  /**
+   * Pages of the site switched off for now — the partner programme's, by its settings. Links to them
+   * are left out of the header, footer and link blocks rather than sent to the not-found page.
+   */
+  hiddenPaths?: readonly string[];
 };

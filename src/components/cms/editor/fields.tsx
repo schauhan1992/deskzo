@@ -9,7 +9,7 @@ import { insertItem, moveItem, removeItem, replaceItem } from "@/components/cms/
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { isAllowedHref, mediaIdOf } from "@/lib/cms/validate";
+import { isAllowedHref, isCalendarDate, isSitePath, mediaIdOf } from "@/lib/cms/validate";
 import { cn } from "@/lib/utils";
 
 /**
@@ -456,6 +456,7 @@ export function HrefField({
   onChange,
   required = false,
   webOnly = false,
+  internalOnly = false,
 }: {
   label?: string;
   name: string;
@@ -463,12 +464,14 @@ export function HrefField({
   onChange: (next: string) => void;
   required?: boolean;
   webOnly?: boolean;
+  /** A page on this site only ("/pricing") — the related-links and page-map blocks. */
+  internalOnly?: boolean;
 }) {
   const id = useId();
   const { sitePaths } = useEditorEnv();
   const messages = useIssuesAt(name);
   const text = value ?? "";
-  const bad = !!text.trim() && !isAllowedHref(text, webOnly);
+  const bad = !!text.trim() && (!isAllowedHref(text, webOnly) || (internalOnly && !isSitePath(text)));
   const mailto = /^mailto:/i.test(text.trim());
   return (
     <div className="min-w-0 space-y-1.5">
@@ -480,7 +483,7 @@ export function HrefField({
         id={id}
         value={text}
         list={webOnly ? undefined : `${id}-paths`}
-        placeholder={webOnly ? "https://…" : "/pricing"}
+        placeholder={webOnly ? "https://…" : internalOnly ? "/product/crm" : "/pricing"}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
         autoCapitalize="off"
@@ -496,9 +499,70 @@ export function HrefField({
         </datalist>
       )}
       <p id={`${id}-hint`} className={cn("text-xs", bad ? "text-danger" : "text-subtle")}>
-        {bad ? (webOnly ? "Use an http(s) address." : `Not a link the site can use. ${LINK_HINT}.`) : mailto ? "Opens the visitor's email app, addressed to this one address." : webOnly ? "An http(s) address." : LINK_HINT}
+        {bad
+          ? webOnly
+            ? "Use an http(s) address."
+            : internalOnly
+              ? "Link to a page on this site, like /pricing — this block never links elsewhere."
+              : `Not a link the site can use. ${LINK_HINT}.`
+          : internalOnly
+            ? "A page on this site, like /pricing or /product/crm."
+            : mailto
+              ? "Opens the visitor's email app, addressed to this one address."
+              : webOnly
+                ? "An http(s) address."
+                : LINK_HINT}
       </p>
       <Messages id={`${id}-err`} messages={messages} />
+    </div>
+  );
+}
+
+/** A calendar date, stored as "yyyy-mm-dd" — the browser's own date picker. */
+export function DateField({ label, name, value, onChange, required = false, hint }: { label: string; name: string; value: string | undefined; onChange: (next: string) => void; required?: boolean; hint?: string }) {
+  const id = useId();
+  const messages = useIssuesAt(name);
+  const text = value ?? "";
+  const bad = !!text && !isCalendarDate(text);
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <Label htmlFor={id}>
+        {label}
+        {!required && <Optional />}
+      </Label>
+      <Input id={id} type="date" value={text} onChange={(e) => onChange(e.target.value)} aria-invalid={bad || messages.length ? true : undefined} aria-describedby={hint ? `${id}-hint` : undefined} className="w-auto" />
+      {hint && (
+        <p id={`${id}-hint`} className="text-xs text-subtle">
+          {hint}
+        </p>
+      )}
+      <Messages id={`${id}-err`} messages={messages} />
+    </div>
+  );
+}
+
+type MarkKind = "yes" | "partial" | "no" | "words";
+const MARK_KINDS: readonly MarkKind[] = ["yes", "partial", "no"];
+
+/** A comparison cell: yes, partly or no (the site shows a mark and the word), or words of one's own. */
+export function MarkField({ label, name, value, onChange }: { label: string; name: string; value: string | undefined; onChange: (next: string) => void }) {
+  const text = value ?? "";
+  const kind: MarkKind = (MARK_KINDS as readonly string[]).includes(text.trim().toLowerCase()) ? (text.trim().toLowerCase() as MarkKind) : "words";
+  return (
+    <div className="min-w-0 space-y-2">
+      <ChoiceField
+        label={label}
+        name={`${name}.kind`}
+        value={kind}
+        onChange={(next) => onChange(next === "words" ? "" : next)}
+        options={[
+          { value: "yes", label: "Yes" },
+          { value: "partial", label: "Partly" },
+          { value: "no", label: "No" },
+          { value: "words", label: "In words" },
+        ]}
+      />
+      {kind === "words" && <TextField label={`${label}, in words`} name={name} value={text} onChange={onChange} max={120} required placeholder="From ₹999 a month" />}
     </div>
   );
 }

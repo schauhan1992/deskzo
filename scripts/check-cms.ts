@@ -19,6 +19,11 @@
  *     passing their checks, rich text surviving a round trip, an issue shown at its field;
  *   · drafts are not public; publishing is, unpublishing is not; versions restore; the validator
  *     refuses unknown blocks, unsafe links and missing images; posts appear when their time comes;
+ *   · nested addresses (product/crm, three levels at most), never under the site's own routes or a
+ *     built-in page; the comparison table (sources http(s) only, a real date), related links and the
+ *     page map (pages on this site only), related links in posts too;
+ *   · the header's menus and the footer's six columns: the validator's limits and refusals, where
+ *     each is; links-only settings from before menus still accepted; the navigation editor;
  *   · media: PNG/JPEG/GIF/WebP accepted with their size, SVG/HTML and over 5 MB refused, an image in
  *     use cannot be deleted; the public route serves it with its stored type;
  *   · leads come from the contact form with its honeypot and limits intact;
@@ -32,7 +37,10 @@
  *     switched-off one ignored, hits written in batches, the 301 a live post's new address leaves,
  *     CSV in and out, and the proxy applying them on the public site's hosts only — and the CMS's
  *     screens and activity log showing all of it in words;
- *   · the activity log holds no document bodies, and no action result a hash, secret or token.
+ *   · the activity log holds no document bodies, and no action result a hash, secret or token;
+ *   · the website seed (scripts/site-seed-pages.ts) publishes through these same functions as "script":
+ *     a dry run writes nothing, a second run changes nothing, changed content is published again, a
+ *     person's edit or move is never overwritten, and the site's own content passes the validator.
  *
  * No mail leaves: the platform mailer is replaced. No password is typed anywhere: the check makes its
  * own accounts and generates their passwords.
@@ -495,7 +503,10 @@ async function main() {
     ok("a viewer reads the same settings with nothing to press, and no Security tab", viewerSettings.includes("You can read the site") && !viewerSettings.includes("Save draft") && !viewerSettings.includes("Publish…") && !viewerSettings.includes("Choose image") && !viewerSettings.includes('href="/settings/security"'));
     await actAs(editorMade.id);
     const navHtml = keep(await renderPage(NavigationScreen));
-    ok("navigation: the header menu, its buttons, the footer, and a preview", navHtml.includes("Menu links") && navHtml.includes("While sign-up is open") && navHtml.includes("Add a column") && navHtml.includes("Preview") && navHtml.includes("Pricing"));
+    ok(
+      "navigation: the header's items (add a link or a menu), its buttons, the footer, and a preview",
+      navHtml.includes("Header menu") && navHtml.includes("Add a link") && navHtml.includes("Add a menu") && navHtml.includes("While sign-up is open") && navHtml.includes("Add a column") && navHtml.includes("Preview") && navHtml.includes("Pricing"),
+    );
     await actAs(screenViewer.id);
     const viewerNav = keep(await renderPage(NavigationScreen));
     ok("  read-only for a viewer", !viewerNav.includes("Add a link") && !viewerNav.includes("Add a column") && viewerNav.includes("You can read the site"));
@@ -649,6 +660,29 @@ async function main() {
     ok("the site's own routes, built-in pages, bad formats and taken addresses are refused", slugResults.every((r) => !r.ok), slugs.filter((_, i) => slugResults[i].ok).join(", "));
     const nested = await act(pageActions.cmsCreatePage({ slug: "solutions/zz-retail", title: "Zz Retail" }));
     ok("  a nested address is fine", nested.ok);
+    const nestedFine = ["product/zz-crm", "compare/zz-one", "resources/zz-glossary", "resources/zz-guides/zz-gst"];
+    const nestedFineResults = await Promise.all(nestedFine.map((slug) => act(pageActions.cmsCreatePage({ slug, title: "Zz nested" }))));
+    ok("  product/…, compare/…, resources/… and three levels deep are all fine", nestedFineResults.every((r) => r.ok), nestedFine.filter((_, i) => !nestedFineResults[i].ok).join(", "));
+    const nestedRefused = ["blog/zz-post", "partners/zz-one", "preview/zz", "pricing/zz-plans", "signup/zz-step", "home/zz-about", "zz-a/zz-b/zz-c/zz-d", "product/Zz-CRM", "product//zz"];
+    const nestedRefusedResults = await Promise.all(nestedRefused.map((slug) => act(pageActions.cmsCreatePage({ slug, title: "Zz" }))));
+    ok(
+      "  but not under the site's own routes, nor under a built-in page, nor four levels deep, nor badly formed",
+      nestedRefusedResults.every((r) => !r.ok),
+      nestedRefused.filter((_, i) => nestedRefusedResults[i].ok).join(", "),
+    );
+    ok(
+      "  each refusal says why, in words the dialog shows as it is typed (the same rules, client-safe)",
+      /three levels|3 levels/.test(validate.pageSlugProblem("zz-a/zz-b/zz-c/zz-d") ?? "") &&
+        /under \/pricing/.test(validate.pageSlugProblem("pricing/zz-plans") ?? "") &&
+        /used by the site itself/.test(validate.pageSlugProblem("partners/zz-one") ?? "") &&
+        validate.pageSlugProblem("compare/zz-one") === null &&
+        !nestedRefusedResults[4]!.ok &&
+        /under \/signup/.test(nestedRefusedResults[4]!.error),
+      nestedRefusedResults.map((r) => (r.ok ? "ok" : r.error)).join(" | "),
+    );
+    const movedNested = nested.ok ? await act(pageActions.cmsChangePageSlug(nested.data.id, "solutions/zz-retail-shops")) : null;
+    const movedBad = nested.ok ? await act(pageActions.cmsChangePageSlug(nested.data.id, "security/zz-retail")) : null;
+    ok("  a page moves to another nested address, and not to one under a built-in page", !!movedNested?.ok && movedNested.data.slug === "solutions/zz-retail-shops" && !!movedBad && !movedBad.ok);
     ok("an added page is deleted only once archived", !(await act(pageActions.cmsDeletePage(pageId))).ok && (await act(pageActions.cmsArchivePage(pageId))).ok && (await act(pageActions.cmsDeletePage(pageId))).ok);
 
     section("The validator");
@@ -668,6 +702,45 @@ async function main() {
     const draftMissing = check([{ id: "p", type: "pageHeader", props: {} }]);
     const publishMissing = check([{ id: "p", type: "pageHeader", props: {} }], "publish");
     ok("a draft may leave a required field empty; publishing may not", draftMissing.ok && !publishMissing.ok);
+    // The comparison table, related links and the page map.
+    const { BLOCK_TYPES: BLOCK_TYPES_FOR_CHECK } = require("../src/components/site/blocks/types") as typeof import("../src/components/site/blocks/types");
+    const { POST_BLOCK_TYPES: POST_BLOCK_TYPES_FOR_CHECK } = require("../src/lib/cms/types") as typeof import("../src/lib/cms/types");
+    const catalogForCheck = require("../src/components/cms/editor/catalog") as typeof import("../src/components/cms/editor/catalog");
+    const issuesOf = (r: ReturnType<typeof check>) => (r.ok ? [] : r.issues.map((i) => `${i.path}: ${i.message}`));
+    const has = (r: ReturnType<typeof check>, path: string, message?: RegExp) => !r.ok && r.issues.some((i) => i.path === path && (!message || message.test(i.message)));
+    const row = (extra: object = {}) => ({ feature: "Zz GST", us: "yes", them: "partial", ...extra });
+    const table = (props: object) => ({ id: "t", type: "comparisonTable", props: { heading: "Zz compared", competitor: "Zz Rival", asOf: "2026-09-29", rows: [row()], disclaimer: "Zz trademarks belong to their owners.", ...props } });
+    const goodTable = check([table({ rows: [row({ source: "https://www.zz-rival.example/gst", note: "Zz a note." }), row({ us: "From ₹999 a month", them: "no" })] })], "publish");
+    ok("a comparison table with sources, notes and words of its own passes to publish", goodTable.ok, issuesOf(goodTable).join(" | "));
+    const tableSources = check([table({ rows: [row({ source: "javascript:alert(1)" }), row({ source: "/pricing" }), row({ source: "mailto:a@zz.example" })] })]);
+    ok("  a source is an http(s) address only: javascript:, a site path and mailto: are refused, each at its row", ["rows[0].source", "rows[1].source", "rows[2].source"].every((p) => has(tableSources, `blocks[0].props.${p}`, /http\(s\)/)), issuesOf(tableSources).join(" | "));
+    const tableDates = [check([table({ asOf: "2026-02-30" })]), check([table({ asOf: "29/09/2026" })]), check([table({ asOf: "" })], "publish"), check([table({ asOf: "" })])];
+    ok("  its date is a real yyyy-mm-dd day, needed to publish (a draft may leave it empty)", has(tableDates[0], "blocks[0].props.asOf", /real date/) && has(tableDates[1], "blocks[0].props.asOf") && has(tableDates[2], "blocks[0].props.asOf", /Fill this in/) && tableDates[3].ok);
+    const tableLimits = check([table({ rows: Array.from({ length: 41 }, () => row()), disclaimer: "z".repeat(401) })]);
+    ok("  at most 40 rows, and a disclaimer of at most 400 characters", has(tableLimits, "blocks[0].props.rows", /At most 40 rows/) && has(tableLimits, "blocks[0].props.disclaimer", /400 characters/), issuesOf(tableLimits).join(" | "));
+    const tableBare = check([{ id: "t", type: "comparisonTable", props: { heading: "Zz compared", rows: [{ feature: "", us: "", them: "" }] } }], "publish");
+    ok("  publishing asks for the competitor, the date, the disclaimer and every cell", ["competitor", "asOf", "disclaimer", "rows[0].feature", "rows[0].us", "rows[0].them"].every((p) => has(tableBare, `blocks[0].props.${p}`)), issuesOf(tableBare).join(" | "));
+    const related = (links: object[]) => check([{ id: "r", type: "relatedLinks", props: { heading: "Zz related", links } }], "publish");
+    ok("related links: pages on this site pass; another site, //host, #anchor and javascript: are refused", related([{ label: "Zz pricing", href: "/pricing" }, { label: "Zz CRM", href: "/product/crm", description: "Zz a line." }]).ok && ["https://example.com", "//evil.example", "#top", "javascript:alert(1)"].every((href) => has(related([{ label: "Zz", href }]), "blocks[0].props.links[0].href")), issuesOf(related([{ label: "Zz", href: "https://example.com" }])).join(" | "));
+    ok("  at most 12", has(related(Array.from({ length: 13 }, () => ({ label: "Zz", href: "/pricing" }))), "blocks[0].props.links", /At most 12 links/));
+    const pageMap = (groups: object[]) => check([{ id: "m", type: "moduleHighlights", props: { heading: "Zz map", groups } }], "publish");
+    const mapItem = (extra: object = {}) => ({ label: "Zz CRM", href: "/product/crm", description: "Zz companies and contacts.", ...extra });
+    ok("the page map: groups of links to pages on this site, each with its line", pageMap([{ title: "Zz Sell", items: [mapItem(), mapItem({ href: "/product/helpdesk" })] }]).ok);
+    ok(
+      "  at most 6 groups of 12; a line is needed to publish; another site is refused",
+      has(pageMap(Array.from({ length: 7 }, () => ({ title: "Zz", items: [mapItem()] }))), "blocks[0].props.groups", /At most 6 groups/) &&
+        has(pageMap([{ title: "Zz", items: Array.from({ length: 13 }, () => mapItem()) }]), "blocks[0].props.groups[0].items", /At most 12/) &&
+        has(pageMap([{ title: "Zz", items: [mapItem({ description: "" })] }]), "blocks[0].props.groups[0].items[0].description", /Fill this in/) &&
+        has(pageMap([{ title: "Zz", items: [mapItem({ href: "https://example.com/x" })] }]), "blocks[0].props.groups[0].items[0].href", /page on this site/),
+    );
+    const postBlocks = (type: string, props: object) => validate.checkPostBody([{ id: "x", type, props }], "publish", POST_BLOCK_TYPES_FOR_CHECK);
+    ok(
+      "a post may have related links (a guide's “read next”), not a comparison table or a page map",
+      postBlocks("relatedLinks", { heading: "Zz read next", links: [{ label: "Zz pricing", href: "/pricing" }] }).ok &&
+        !postBlocks("comparisonTable", table({}).props).ok &&
+        !postBlocks("moduleHighlights", { heading: "Zz", groups: [{ title: "Zz", items: [mapItem()] }] }).ok,
+    );
+    ok("every block the site has may go on a CMS page — the hero, header, features, image and text, FAQ, figures, call to action, logos, quote, text and the three new ones", BLOCK_TYPES_FOR_CHECK.every((t) => catalogForCheck.BLOCK_INFO[t]) && check(BLOCK_TYPES_FOR_CHECK.map((t) => catalogForCheck.newBlock(t))).ok);
     await actAs(editorId);
     const missingMedia = await act(pageActions.cmsCreatePage({ slug: "zz-media", title: "Zz Media" }));
     const missingSave = missingMedia.ok
@@ -895,6 +968,72 @@ async function main() {
     const pubSettings = await act(settingsActions.cmsPublishSettings({}));
     const liveSettings = await site.getSiteSettings();
     ok("published, the site uses them — the rest keep their defaults", pubSettings.ok && liveSettings.tagline === "Zz tagline" && liveSettings.nav[0]?.label === "Zz Blog" && liveSettings.siteName === "Wroffy ERP");
+
+    section("Site settings: the header's menus and the footer's columns");
+    const menuItem = (extra: object = {}) => ({ label: "Zz CRM", href: "/product/zz-crm", description: "Zz companies, contacts and leads", ...extra });
+    const megaNav = [
+      { label: "Zz Product", columns: [{ title: "Zz Core", items: [menuItem(), menuItem({ label: "Zz Helpdesk", href: "/product/zz-helpdesk", description: undefined })] }], footer: { label: "Zz Every feature", href: "/product" } },
+      { label: "Zz Pricing", href: "/pricing" },
+    ];
+    const navCheck = (nav: unknown, mode: "draft" | "publish" = "publish", footerColumns?: unknown) =>
+      validate.checkSiteSettings({ ...DEFAULT_SITE_SETTINGS, nav, ...(footerColumns ? { footer: { ...DEFAULT_SITE_SETTINGS.footer, columns: footerColumns } } : {}) }, mode);
+    const navHas = (r: ReturnType<typeof navCheck>, path: string, message?: RegExp) => !r.ok && r.issues.some((i) => i.path === path && (!message || message.test(i.message)));
+    const navIssueList = (r: ReturnType<typeof navCheck>) => (r.ok ? "" : r.issues.map((i) => `${i.path}: ${i.message}`).join(" | "));
+    const megaChecked = navCheck(megaNav);
+    ok(
+      "a menu (columns of links with their lines, a link along its foot) beside a plain link: accepted, stored as sent",
+      megaChecked.ok && validate.stableJson(megaChecked.value.nav) === validate.stableJson([{ ...megaNav[0], columns: [{ title: "Zz Core", items: [menuItem(), { label: "Zz Helpdesk", href: "/product/zz-helpdesk" }] }] }, megaNav[1]]),
+      navIssueList(megaChecked),
+    );
+    ok("  links only, as settings saved before menus hold them, are accepted too", navCheck([{ label: "Zz Blog", href: "/blog" }]).ok);
+    const tooMany = navCheck(Array.from({ length: 9 }, () => ({ label: "Zz", href: "/pricing" })));
+    const tooWide = navCheck([{ label: "Zz", columns: Array.from({ length: 6 }, () => ({ title: "Zz", items: [menuItem()] })) }]);
+    const tooManyLinks = navCheck([{ label: "Zz", columns: [{ title: "Zz", items: Array.from({ length: 11 }, () => menuItem()) }] }]);
+    const wordy = navCheck([{ label: "Zz", columns: [{ title: "Zz", items: [menuItem({ description: "z".repeat(81) })] }] }]);
+    ok(
+      "  the limits, each where it is: 8 items, 5 columns a menu, 10 links a column, 80 characters a line",
+      navHas(tooMany, "nav", /At most 8 items in the header/) && navHas(tooWide, "nav[0].columns", /At most 5 columns/) && navHas(tooManyLinks, "nav[0].columns[0].items", /At most 10 links/) && navHas(wordy, "nav[0].columns[0].items[0].description", /80 characters/),
+      [tooMany, tooWide, tooManyLinks, wordy].map(navIssueList).join(" /// "),
+    );
+    const hostileMenu = navCheck([{ label: "Zz", columns: [{ title: "Zz", items: [menuItem({ href: "javascript:alert(1)" }), menuItem({ href: "//evil.example" })] }], footer: { label: "Zz", href: "data:text/html,x" } }]);
+    ok(
+      "  javascript:, //host and data: are refused in a menu's links and its foot, at each",
+      navHas(hostileMenu, "nav[0].columns[0].items[0].href") && navHas(hostileMenu, "nav[0].columns[0].items[1].href") && navHas(hostileMenu, "nav[0].footer.href"),
+      navIssueList(hostileMenu),
+    );
+    const emptyMenu = [{ label: "Zz", columns: [] }, { label: "Zz two", columns: [{ title: "", items: [] }] }];
+    ok(
+      "  a draft may hold a menu half-written; publishing needs a column, a title and a link in each",
+      navCheck(emptyMenu, "draft").ok && navHas(navCheck(emptyMenu), "nav[0].columns", /Add at least one/) && navHas(navCheck(emptyMenu), "nav[1].columns[0].title", /Fill this in/) && navHas(navCheck(emptyMenu), "nav[1].columns[0].items", /Add at least one/),
+    );
+    const extras = navCheck([{ label: "Zz", href: "/stray", onclick: "x", columns: [{ title: "Zz", items: [menuItem({ style: "x" })] }] }]);
+    ok("  an item with columns is a menu (a stray address and unknown fields are dropped)", extras.ok && validate.stableJson(extras.value.nav[0]) === validate.stableJson({ label: "Zz", columns: [{ title: "Zz", items: [menuItem()] }] }));
+    const six = Array.from({ length: 6 }, (_, i) => ({ title: `Zz ${i + 1}`, links: [{ label: "Zz", href: "/pricing" }] }));
+    ok("the footer takes 6 columns, not 7", navCheck([], "publish", six).ok && navHas(navCheck([], "publish", [...six, six[0]]), "footer.columns", /At most 6 footer columns/));
+    const settingsBefore = await act(settingsActions.cmsGetSettings());
+    const hostileSave = await act(settingsActions.cmsSaveSettingsDraft({ settings: { nav: [{ label: "Zz", columns: [{ title: "Zz", items: [menuItem({ href: "javascript:alert(1)" })] }] }] as never }, version: settingsBefore.ok ? settingsBefore.data.version : "" }));
+    ok("  the action refuses the same, at the same place", !hostileSave.ok && !!hostileSave.issues?.some((i) => i.path === "nav[0].columns[0].items[0].href"));
+    const megaSaved = await act(settingsActions.cmsSaveSettingsDraft({ settings: { nav: megaNav as never, footer: { ...DEFAULT_SITE_SETTINGS.footer, columns: six } }, version: settingsBefore.ok ? settingsBefore.data.version : "" }));
+    const megaPublished = megaSaved.ok ? await act(settingsActions.cmsPublishSettings({ version: megaSaved.data.version })) : megaSaved;
+    const liveMega = await site.getSiteSettings();
+    const liveMenu = liveMega.nav[0] as { columns?: { items: { description?: string }[] }[] };
+    ok("an editor saves and publishes the menus; the site reads them", megaPublished.ok && liveMenu.columns?.[0]?.items[0]?.description === "Zz companies, contacts and leads" && liveMega.footer.columns.length === 6, megaPublished.ok ? "" : megaPublished.error);
+    await actAs(editorId);
+    const navEditorHtml = keep(await renderPage(NavigationScreen));
+    ok(
+      "the navigation editor: each item a link or a menu, a menu's columns and links with their lines, its foot, and the preview's menu",
+      ["Zz Core", "Add a column to Zz Product", "Add a link to Zz Core", "Along the foot of Zz Product", "Zz companies, contacts and leads", "Zz Every feature", "Open a menu in the preview", "6 of 6"].every((s) => navEditorHtml.includes(s)) &&
+        navEditorHtml.includes(">Menu<") &&
+        navEditorHtml.includes(">Link<"),
+      ["Zz Core", "Add a column to Zz Product", "Add a link to Zz Core", "Along the foot of Zz Product", "Open a menu in the preview", "6 of 6"].filter((s) => !navEditorHtml.includes(s)).join(", "),
+    );
+    const labelledInputs = [...navEditorHtml.matchAll(/<input[^>]*id="([^"]+)"/g)].map((m) => m[1]);
+    ok("  every field in it labelled", labelledInputs.length > 20 && labelledInputs.every((id) => navEditorHtml.includes(`for="${id}"`)), labelledInputs.filter((id) => !navEditorHtml.includes(`for="${id}"`)).join(", "));
+    ok("  moving, removing and adding, by buttons named for what they act on", ["Move Zz Product down", "Remove Zz Product and its links", "Move Zz CRM down", "Remove Zz Core and its links", "Add a menu"].every((s) => navEditorHtml.includes(s)));
+    await actAs(screenViewer.id);
+    const viewerMenus = keep(await renderPage(NavigationScreen));
+    ok("  a viewer reads the menus and changes nothing", viewerMenus.includes("Zz Core") && !viewerMenus.includes("Add a column to") && !viewerMenus.includes("Add a menu") && !viewerMenus.includes("Remove Zz Product"));
+    await actAs(editorId);
 
     // ─── Leads ────────────────────────────────────────────────────────────────────────────────
     section("Leads from the contact form");
@@ -2127,6 +2266,209 @@ async function main() {
     const leaked = secrets.filter((s) => dump.includes(s));
     ok("no action result carries a hash, a secret or a session token", leaked.length === 0 && !/\$2[aby]\$/.test(dump) && !/"k1\./.test(dump), `${leaked.length} found`);
     ok("  (the only links handed out are setup links, to admins, as designed)", (dump.match(/setup\?t=/g) ?? []).length === 2, (dump.match(/setup\?t=/g) ?? []).length);
+
+    // ─── The website seed (scripts/site-seed-pages.ts), after the activity checks: it writes as "script" ──
+    section("The website seed: published through the CMS as a script, idempotent, never over a person's edit");
+    {
+      const seedLib = require("./lib/site-seed") as typeof import("./lib/site-seed");
+      const seedContent = require("./site-content") as typeof import("./site-content");
+      const { siteNav } = require("./site-content/nav") as typeof import("./site-content/nav");
+      type SeedSection = import("./site-content/types").SeedSection;
+      type SeedReport = import("./lib/site-seed").SeedReport;
+      const seedDoc = (name: string, extra = "") => ({
+        title: `Zz Seed ${name}`,
+        seo: { title: `Zz seed ${name} page for check:cms`, description: `A page the website seed publishes, for check:cms. ${extra}`.trim(), keywords: ["zz seed page"] },
+        blocks: [
+          { id: "zz-seed-head", type: "pageHeader" as const, props: { heading: `Zz Seed ${name}`, intro: "What the page is about." } },
+          { id: "zz-seed-text", type: "richText" as const, props: { heading: "Zz what it covers", content: [{ type: "paragraph" as const, text: `Zz seed text. ${extra}`.trim() }] } },
+        ],
+      });
+      const fixture = (version: string): SeedSection[] => [
+        {
+          name: "Zz Seed",
+          pages: [
+            { slug: "zz-seed/alpha", document: seedDoc("Alpha", version) },
+            { slug: "zz-seed/beta", document: seedDoc("Beta") },
+          ],
+          categories: [{ slug: "zz-seed-guides", name: "Zz Seed Guides", description: "The category the seed files its posts under." }],
+          posts: [
+            {
+              slug: "zz-seed-post",
+              title: "Zz Seed post",
+              excerpt: "A guide the seed publishes.",
+              seo: { title: "Zz seed post", description: "A seeded post, for check:cms.", keywords: ["zz seed post"] },
+              body: [{ id: "zz-seed-body", type: "richText", props: { content: [{ type: "paragraph", text: `The post's text. ${version}` }] } }],
+              categories: ["zz-seed-guides"],
+            },
+          ],
+        },
+      ];
+      const seedNav = {
+        nav: [{ label: "Zz Product", columns: [{ title: "Zz Column", items: [{ label: "Zz Alpha", href: "/zz-seed/alpha", description: "The alpha page" }] }] }, { label: "Pricing", href: "/pricing" }],
+        footer: { columns: [{ title: "Zz Product", links: [{ label: "Zz Alpha", href: "/zz-seed/alpha" }] }], note: "{tagline}" },
+      };
+      const tally = async () =>
+        JSON.stringify({
+          pages: await control.sitePage.count(),
+          versions: await control.sitePageVersion.count(),
+          posts: await control.sitePost.count(),
+          categories: await control.siteCategory.count(),
+          audit: await control.cmsAuditLog.count(),
+          settings: (await control.siteSettings.findUnique({ where: { key: "site" }, select: { updatedAt: true } }))?.updatedAt.toISOString() ?? null,
+        });
+      const outcome = (r: SeedReport, kind: string, key: string) => r.results.find((x) => x.kind === kind && x.key === key)?.outcome ?? "none";
+      const reason = (r: SeedReport, kind: string, key: string) => r.results.find((x) => x.kind === kind && x.key === key)?.reason ?? "";
+      const run = (sections: SeedSection[], options: { dryRun?: boolean; nav?: typeof seedNav | null } = {}) =>
+        seedLib.runSiteSeed({ sections, nav: options.nav === undefined ? seedNav : options.nav, dryRun: options.dryRun, scores: false });
+
+      // A dry run: reads and checks, writes nothing.
+      const beforeDry = await tally();
+      const dry = await run(fixture("v1"), { dryRun: true });
+      ok("--dry-run writes nothing: no page, version, post, category, settings change or activity", (await tally()) === beforeDry);
+      ok(
+        "  and says what it would do: create the pages, the category and the post",
+        outcome(dry, "page", "zz-seed/alpha") === "created" && outcome(dry, "page", "zz-seed/beta") === "created" && outcome(dry, "category", "zz-seed-guides") === "created" && outcome(dry, "post", "zz-seed-post") === "created",
+        dry.results.map((x) => `${x.key}:${x.outcome}`).join(" "),
+      );
+
+      // The first run: created, saved, published — as "script", by the CMS's own functions.
+      const first = await run(fixture("v1"));
+      const alpha = await control.sitePage.findUniqueOrThrow({ where: { slug: "zz-seed/alpha" } });
+      const alphaVersions = await control.sitePageVersion.findMany({ where: { pageId: alpha.id } });
+      ok(
+        "the first run publishes each page, written as \"script\" throughout, with one version carrying the seed's note",
+        ["zz-seed/alpha", "zz-seed/beta"].every((s) => outcome(first, "page", s) === "created") &&
+          alpha.status === "PUBLISHED" &&
+          [alpha.createdBy, alpha.updatedBy, alpha.publishedBy].every((by) => by === seedLib.SEED_ACTOR) &&
+          alphaVersions.length === 1 &&
+          (alphaVersions[0]?.note ?? "").includes("website seed"),
+        `${alpha.status} ${alpha.createdBy}/${alpha.updatedBy}/${alpha.publishedBy} ${alphaVersions.length} version(s)`,
+      );
+      ok("  and the site shows it at its nested address", (await site.getSitePage("zz-seed/alpha"))?.title === "Zz Seed Alpha");
+      const firstAdmin = await control.cmsUser.findFirst({ where: { role: "ADMIN", active: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
+      const seededPost = await control.sitePost.findUniqueOrThrow({ where: { slug: "zz-seed-post" }, include: { categories: { include: { category: true } } } });
+      ok(
+        "  the post: live, written as \"script\", by the CMS's first admin, in the category the seed made through taxonomy",
+        outcome(first, "post", "zz-seed-post") === "created" &&
+          seededPost.status === "PUBLISHED" &&
+          seededPost.updatedBy === seedLib.SEED_ACTOR &&
+          seededPost.authorId === firstAdmin?.id &&
+          first.author?.id === firstAdmin?.id &&
+          seededPost.categories.map((c) => c.category.slug).join() === "zz-seed-guides" &&
+          seededPost.categories[0]?.category.updatedBy === seedLib.SEED_ACTOR,
+        `${seededPost.status} ${seededPost.updatedBy} ${seededPost.categories.map((c) => c.category.slug).join()}`,
+      );
+      const seedIds = [alpha.id, seededPost.id, seededPost.categories[0]?.category.id ?? ""];
+      const seedAudit = await control.cmsAuditLog.findMany({ where: { entityId: { in: seedIds } } });
+      const seedActions = new Set(seedAudit.map((a) => a.action));
+      ok(
+        "  the activity log has every step, each by \"script\" with no CMS account",
+        ["page.create", "page.save", "page.publish", "post.create", "post.save", "post.publish", "category.create"].every((a) => seedActions.has(a)) && seedAudit.every((a) => a.actorLabel === "script" && a.actorId === null),
+        [...seedActions].join(" "),
+      );
+      ok(
+        "  settings a person published are left alone, and the proposed navigation is handed back",
+        outcome(first, "settings", "nav") === "skipped" && reason(first, "settings", "nav").includes("Zz Editor") && JSON.stringify(first.proposedNav) === JSON.stringify(seedNav),
+        reason(first, "settings", "nav"),
+      );
+
+      // The same content again: nothing to do, nothing written.
+      const beforeSecond = await tally();
+      const second = await run(fixture("v1"));
+      ok(
+        "a second run with the same content changes nothing: every item unchanged, no new version, no activity",
+        ["page:zz-seed/alpha", "page:zz-seed/beta", "category:zz-seed-guides", "post:zz-seed-post"].every((k) => outcome(second, k.split(":")[0], k.split(":")[1]) === "unchanged") && (await tally()) === beforeSecond,
+        second.results.map((x) => `${x.key}:${x.outcome}`).join(" "),
+      );
+
+      // Changed content: saved and published again, the rest untouched.
+      const third = await run(fixture("v2"));
+      const alphaAfter = await control.sitePage.findUniqueOrThrow({ where: { slug: "zz-seed/alpha" } });
+      ok(
+        "changed content is saved as the draft and published again: a second version; the unchanged page is left as it is",
+        outcome(third, "page", "zz-seed/alpha") === "updated" &&
+          outcome(third, "page", "zz-seed/beta") === "unchanged" &&
+          outcome(third, "post", "zz-seed-post") === "updated" &&
+          (await control.sitePageVersion.count({ where: { pageId: alpha.id } })) === 2 &&
+          JSON.stringify(alphaAfter.published).includes("v2"),
+        third.results.map((x) => `${x.key}:${x.outcome}`).join(" "),
+      );
+
+      // A person's work: an edit, an edited post, a moved page — none of it is overwritten or undone.
+      const editorRow = await control.cmsUser.findFirstOrThrow({ where: { role: "EDITOR", active: true }, orderBy: { createdAt: "asc" } });
+      const editorMe = { id: editorRow.id, email: editorRow.email, name: editorRow.name, role: editorRow.role };
+      const alphaNow = await content.getPage(alpha.id);
+      await content.savePageDraft(alpha.id, { document: { ...alphaNow.draft, title: "Zz Seed Alpha, edited" }, version: alphaNow.version }, editorMe);
+      const postNow = await content.getPost(seededPost.id);
+      await content.savePost(
+        seededPost.id,
+        { post: { title: `${postNow.title}, edited`, slug: postNow.slug, excerpt: postNow.excerpt, coverMediaId: null, tags: [], categories: postNow.categories.map((c) => c.id), body: postNow.body, seo: postNow.seo }, version: postNow.version },
+        editorMe,
+      );
+      const beta = await control.sitePage.findUniqueOrThrow({ where: { slug: "zz-seed/beta" } });
+      await content.changePageSlug(beta.id, "zz-seed/beta-moved", editorMe);
+      const fourth = await run(fixture("v3"));
+      ok(
+        "a person's edit is never overwritten: the edited page and post are left alone, and the run says who changed them",
+        outcome(fourth, "page", "zz-seed/alpha") === "skipped" &&
+          reason(fourth, "page", "zz-seed/alpha").includes(editorRow.name) &&
+          outcome(fourth, "post", "zz-seed-post") === "skipped" &&
+          (await control.sitePage.findUniqueOrThrow({ where: { id: alpha.id } })).title === "Zz Seed Alpha, edited" &&
+          (await control.sitePost.findUniqueOrThrow({ where: { id: seededPost.id } })).title === "Zz Seed post, edited",
+        `${reason(fourth, "page", "zz-seed/alpha")} | ${outcome(fourth, "post", "zz-seed-post")}`,
+      );
+      ok(
+        "  a page a person moved is not made again at its old address",
+        outcome(fourth, "page", "zz-seed/beta") === "skipped" && reason(fourth, "page", "zz-seed/beta").includes("zz-seed/beta-moved") && !(await control.sitePage.findUnique({ where: { slug: "zz-seed/beta" } })),
+        reason(fourth, "page", "zz-seed/beta"),
+      );
+
+      // What the CMS refuses, the seed reports; it writes none of it.
+      const badDoc = { ...seedDoc("Bad"), blocks: [...seedDoc("Bad").blocks, { id: "zz-seed-cta", type: "cta" as const, props: { heading: "Zz go", primary: { kind: "link" as const, label: "Go", href: "javascript:alert(1)" } } }] };
+      const refused = await run([{ name: "Zz Refused", pages: [{ slug: "zz-seed/bad", document: badDoc }, { slug: "partners/zz-seed", document: seedDoc("Partner") }] }], { nav: null });
+      ok(
+        "a document the validator refuses is reported with its issues, and an address the site keeps for itself is refused; neither is written",
+        outcome(refused, "page", "zz-seed/bad") === "failed" &&
+          (refused.results.find((x) => x.key === "zz-seed/bad")?.issues?.length ?? 0) > 0 &&
+          outcome(refused, "page", "partners/zz-seed") === "failed" &&
+          !(await control.sitePage.findUnique({ where: { slug: "zz-seed/bad" } })) &&
+          !(await control.sitePage.findUnique({ where: { slug: "partners/zz-seed" } })),
+        refused.results.map((x) => `${x.key}:${x.outcome}:${x.reason ?? ""}`).join(" | "),
+      );
+
+      // Settings still at their defaults are the seed's to publish; then they are its own.
+      await control.siteSettings.deleteMany({ where: { key: "site" } });
+      const fresh = await run([], { nav: seedNav });
+      const settingsRow = await control.siteSettings.findUniqueOrThrow({ where: { key: "site" } });
+      const publishedNav = (settingsRow.published as { nav?: unknown } | null)?.nav;
+      const liveNav = (await site.getSiteSettings()).nav;
+      ok(
+        "settings still at their defaults: the navigation and footer are saved as a draft, then published, as \"script\"",
+        outcome(fresh, "settings", "nav") === "created" && settingsRow.updatedBy === seedLib.SEED_ACTOR && validate.stableJson(publishedNav) === validate.stableJson(seedNav.nav) && liveNav.length === 2,
+        `${outcome(fresh, "settings", "nav")} ${settingsRow.updatedBy} ${JSON.stringify(publishedNav)} live ${liveNav.length}`,
+      );
+      ok("  and a second run leaves them unchanged", outcome(await run([], { nav: seedNav }), "settings", "nav") === "unchanged");
+
+      // The site's own content: every section, published on this scratch plane, then run again.
+      const sections = await seedContent.loadSections();
+      const realNav = siteNav({ partnerPortal: "https://partners.example.com/" });
+      const realDry = await seedLib.runSiteSeed({ sections, nav: realNav, dryRun: true, scores: false });
+      const realRefused = realDry.results.filter((x) => x.outcome === "failed");
+      ok(
+        `the site's own content (${sections.map((s) => s.name).join(", ")}): the validator takes every page, post and the navigation`,
+        realRefused.length === 0 && realDry.results.filter((x) => x.kind === "page").length >= 42 && realDry.results.filter((x) => x.kind === "post").length === 6,
+        realRefused.map((x) => `${x.key}: ${x.reason ?? ""} ${JSON.stringify(x.issues?.slice(0, 2) ?? [])}`).join(" | "),
+      );
+      const realFirst = await seedLib.runSiteSeed({ sections, nav: realNav, scores: false });
+      const realBefore = await tally();
+      const realSecond = await seedLib.runSiteSeed({ sections, nav: realNav, scores: false });
+      const notUnchanged = realSecond.results.filter((x) => x.outcome !== "unchanged");
+      ok(
+        "  published once, a second run finds every page, post, category and the navigation unchanged, and writes nothing",
+        realFirst.results.every((x) => x.outcome === "created" || x.outcome === "updated" || (x.kind === "category" && x.outcome === "skipped")) && notUnchanged.every((x) => x.kind === "category" && x.outcome === "skipped") && (await tally()) === realBefore,
+        notUnchanged.map((x) => `${x.kind}:${x.key}:${x.outcome}`).join(" "),
+      );
+    }
   } finally {
     mailerReset();
     if (cleanup) await cleanup().catch(() => {});

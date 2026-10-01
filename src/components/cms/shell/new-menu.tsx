@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/input";
 import { CMS_ROUTES } from "@/lib/cms/nav";
-import { BUILTIN_PAGE_SLUGS, RESERVED_PAGE_SEGMENTS, type PageDetail, type PostDetail } from "@/lib/cms/types";
-import { PAGE_SLUG, slugify } from "@/lib/cms/validate";
+import type { PageDetail, PostDetail } from "@/lib/cms/types";
+import { pageSlugProblem, slugify } from "@/lib/cms/validate";
 import { cn } from "@/lib/utils";
 import { ShellMenu } from "./menu";
 
@@ -93,15 +93,7 @@ export function NewItemButton({ kind, siteHost, className }: { kind: "page" | "p
 }
 
 /** The server's rules for a new page's address, checked as it is typed (createPage checks them again). */
-function slugProblem(slug: string): string | null {
-  if (!slug) return "Give the page an address.";
-  if (slug.length > 120) return "Keep the address to 120 characters.";
-  if (!PAGE_SLUG.test(slug)) return "Lower-case words and hyphens, with / between levels — about, or solutions/retail.";
-  const first = slug.split("/")[0]!;
-  if ((RESERVED_PAGE_SEGMENTS as readonly string[]).includes(first) || first.startsWith("platform-")) return "That address is used by the site itself.";
-  if ((BUILTIN_PAGE_SLUGS as readonly string[]).includes(slug)) return "That address belongs to one of the site's own pages.";
-  return null;
-}
+const slugProblem = pageSlugProblem;
 
 /** Puts focus in the first field a frame after the dialog has put it on its close button. */
 function useFocusFirst() {

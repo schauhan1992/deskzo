@@ -7,9 +7,11 @@ import { SiteBlocks } from "@/components/site/blocks/render";
 import { SiteFooter } from "@/components/site/footer";
 import { SiteHeader } from "@/components/site/header";
 import { fill, resolveAction } from "@/components/site/links";
-import { ButtonLink, Container } from "@/components/site/ui";
+import { fillNav } from "@/components/site/nav";
+import { applicationsShown, directoryShown } from "@/components/site/partners/programme";
+import { Breadcrumbs, ButtonLink, Container } from "@/components/site/ui";
 import { istDateParts } from "@/lib/india-time";
-import { getSitePage, getSiteSettings, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
+import { getSitePage, getSiteSettings, sitePath, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
 import { aiSearchCrawlersAllowed } from "@/lib/seo/crawlers";
 import { inputFromPage, siteContextFrom } from "@/lib/seo/extract";
 import { buildLayoutMetadata, buildPageMetadata } from "@/lib/seo/metadata";
@@ -34,8 +36,10 @@ function firstValues(query: Query): Record<string, string | undefined> {
 }
 
 async function renderContext(query: Query = {}): Promise<SiteRenderContext> {
-  const [settings, status] = await Promise.all([getSiteSettings(), siteStatus()]);
-  return { settings, signupOpen: status.signupOpen, trialDays: status.trialDays, searchParams: firstValues(query), workspaceSuffix: workspaceSuffix() };
+  const [settings, status, applying, directory] = await Promise.all([getSiteSettings(), siteStatus(), applicationsShown(), directoryShown()]);
+  // The partner programme's pages answer "not found" while their switch is off; nothing links there.
+  const hiddenPaths = [...(applying ? [] : ["/partners"]), ...(directory ? [] : ["/partners/find"])];
+  return { settings, signupOpen: status.signupOpen, trialDays: status.trialDays, searchParams: firstValues(query), workspaceSuffix: workspaceSuffix(), hiddenPaths };
 }
 
 /** The year in India, on the server — never a client's clock. */
@@ -55,7 +59,7 @@ export async function SiteShell({ children }: { children: ReactNode }) {
       </a>
       <SiteHeader
         siteName={settings.siteName}
-        nav={settings.nav.map((l) => ({ label: fill(l.label, ctx), href: l.href }))}
+        nav={fillNav(settings.nav, ctx)}
         signin={{ label: fill(settings.signinLink.label, ctx), href: settings.signinLink.href }}
         cta={cta}
       />
@@ -81,14 +85,35 @@ const REFERRAL_KEYS = ["ref", "refVia", "refName"] as const;
  */
 export async function SitePageView({ slug, searchParams, trustedReferral = false }: { slug: string; searchParams?: Query; trustedReferral?: boolean }) {
   const query = trustedReferral || !searchParams ? searchParams : Object.fromEntries(Object.entries(searchParams).filter(([key]) => !(REFERRAL_KEYS as readonly string[]).includes(key)));
-  const [page, ctx, origin] = await Promise.all([getSitePage(slug), renderContext(query), requestOrigin()]);
+  const [page, ctx, origin, parents] = await Promise.all([getSitePage(slug), renderContext(query), requestOrigin(), pageParents(slug)]);
   if (!page) notFound();
+  const nested = slug.includes("/");
   return (
     <>
-      <JsonLdScript data={jsonLdOf(() => inputFromPage(page, seoSiteContext(ctx, origin), new Date()))} />
+      <JsonLdScript data={jsonLdOf(() => inputFromPage({ ...page, parents }, seoSiteContext(ctx, origin), new Date()))} />
+      {nested && (
+        <div className="border-b border-line">
+          <Container className="py-3">
+            <Breadcrumbs trail={[{ name: "Home", href: "/" }, ...parents.map((p) => ({ name: p.name, href: p.path }))]} current={fill(page.title, ctx)} />
+          </Container>
+        </div>
+      )}
       <SiteBlocks blocks={page.blocks} ctx={ctx} />
     </>
   );
+}
+
+/**
+ * The pages above a nested page — for "product/crm", the page at "product" — each by its title,
+ * tokens filled. A level the site has no page for is left out: a breadcrumb never links to a
+ * not-found. Read from the same cached pages as the page itself, so it costs no query.
+ */
+export async function pageParents(slug: string): Promise<{ name: string; path: string }[]> {
+  const segments = slug.split("/");
+  if (segments.length < 2) return [];
+  const [settings, status] = await Promise.all([getSiteSettings(), siteStatus()]);
+  const found = await Promise.all(segments.slice(0, -1).map((_, i) => getSitePage(segments.slice(0, i + 1).join("/"))));
+  return found.flatMap((page) => (page && page.slug !== "home" ? [{ name: fill(page.title, { settings, trialDays: status.trialDays }), path: sitePath(page.slug) }] : []));
 }
 
 /** The not-found page's words, from the site's settings. */

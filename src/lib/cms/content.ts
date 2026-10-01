@@ -1,7 +1,7 @@
 import { Prisma, type SitePage as PageRowModel, type SitePost as PostRowModel } from "@wroffy/control-client";
 import type { SiteSettings } from "@/components/site/blocks/types";
 import { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } from "@/components/site/defaults";
-import { actorRef, cmsAudit, listCmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
+import { actorOfMe, actorRef, cmsAudit, listCmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { missingMediaIds, mediaWithoutAlt } from "@/lib/cms/media";
 import { mintPreviewToken, previewUrl, PREVIEW_TTL_MS } from "@/lib/cms/preview";
 import { autoRedirect, checkRedirect, releasePath, saveRedirectFrom } from "@/lib/cms/redirects";
@@ -12,7 +12,6 @@ import {
   CmsRefused,
   POST_BLOCK_TYPES,
   REQUIRED_BLOCKS,
-  RESERVED_PAGE_SEGMENTS,
   type BuiltinPageSlug,
   type CmsDashboard,
   type CmsIssue,
@@ -41,6 +40,9 @@ import {
   isReservedPostSlug,
   mediaIssues,
   PAGE_SLUG,
+  PAGE_SLUG_MAX_DEPTH,
+  PAGE_SLUG_MAX_LENGTH,
+  pageSlugProblem,
   POST_SLUG,
   slugify,
   stableJson,
@@ -71,7 +73,7 @@ import { invalidateSiteContent, mergeSiteSettings, sitePath } from "@/lib/platfo
  * deleted — are checked here.
  */
 
-const actorOf = (me: CmsMe): CmsActor => ({ kind: "cms", id: me.id, name: me.name, email: me.email });
+const actorOf = (me: CmsMe): CmsActor => actorOfMe(me);
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const SAVE_AUDIT_WINDOW_MS = 10 * 60_000;
 const MEDIA_ID = /^[a-z0-9]{20,40}$/;
@@ -227,17 +229,18 @@ export async function listPages(filters: { q?: string; status?: PageStatus; arch
   );
 }
 
-/** A new page's address, checked: the format, the site's own routes, the built-in pages, and every page there is. */
+/**
+ * A new page's address, checked: the format and depth, the site's own routes, the built-in pages
+ * (validate.ts `pageSlugProblem`, which the CMS's dialogs run as they are typed), and every page there is.
+ */
 async function checkNewPageSlug(raw: unknown, exceptId?: string): Promise<string> {
   const slug = String(raw ?? "").trim().toLowerCase().replace(/^\/+|\/+$/g, "");
-  if (!slug || slug.length > 120 || !PAGE_SLUG.test(slug)) {
-    throw new CmsRefused("Use lower-case words and hyphens, with / between levels — for example about or solutions/retail.", { issues: [{ path: "slug", message: "Not a valid address." }] });
+  const problem = pageSlugProblem(slug);
+  if (problem) {
+    const reserved = PAGE_SLUG.test(slug) && slug.length <= PAGE_SLUG_MAX_LENGTH && slug.split("/").length <= PAGE_SLUG_MAX_DEPTH;
+    const taken = reserved && isBuiltin(slug);
+    throw new CmsRefused(problem, { issues: [{ path: "slug", message: taken ? "Taken." : reserved ? "Reserved." : "Not a valid address." }] });
   }
-  const first = slug.split("/")[0];
-  if ((RESERVED_PAGE_SEGMENTS as readonly string[]).includes(first) || first.startsWith("platform-")) {
-    throw new CmsRefused("That address is used by the site itself. Choose another.", { issues: [{ path: "slug", message: "Reserved." }] });
-  }
-  if (isBuiltin(slug)) throw new CmsRefused("That address belongs to one of the site's own pages.", { issues: [{ path: "slug", message: "Taken." }] });
   const existing = await controlDb().sitePage.findUnique({ where: { slug }, select: { id: true, archivedAt: true } });
   if (existing && existing.id !== exceptId) {
     throw new CmsRefused(existing.archivedAt ? "An archived page has that address. Restore or delete it first." : "A page already has that address.", { issues: [{ path: "slug", message: "Taken." }] });
