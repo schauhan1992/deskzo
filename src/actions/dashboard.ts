@@ -28,6 +28,7 @@ import {
 import { accountScopeIds, viaCompanyScope } from "@/lib/authz/company-scope";
 import { measure } from "@/lib/targets/measure";
 import { progressOf, METRICS } from "@/lib/targets/metrics";
+import { releaseDueOrders } from "@/lib/orders/handoff";
 import { scopeUserIds } from "@/lib/authz/scope";
 import { vendorRelationshipTypeValues } from "@/lib/validation/company";
 import type { ActionResult } from "@/actions/company";
@@ -373,10 +374,13 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
   let orders: DashboardSummary["orders"] = null;
   if (ordersEnabled) {
+    // A scheduled order whose day has come is purchase's now, whether or not the daily job has run.
+    await releaseDueOrders();
     const [awaitingApproval, awaitingSourcing] = await Promise.all([
       db.companyProduct.count({ where: { orderStatus: "PENDING_APPROVAL" } }),
-      // Approved and waiting on purchasing to place it with a vendor.
-      db.companyProduct.count({ where: { orderStatus: "APPROVED" } }),
+      // Approved, released by sales, and waiting on purchasing to place it with a vendor — an in-hand
+      // order sales is still holding isn't purchase's to source yet.
+      db.companyProduct.count({ where: { orderStatus: "APPROVED", purchaseRelease: "RELEASED" } }),
     ]);
     orders = { awaitingApproval, awaitingSourcing };
   }

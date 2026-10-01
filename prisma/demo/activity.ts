@@ -243,6 +243,8 @@ export async function seedActivity(
           accountsApprovedByUserId: chance(0.85) ? pick(accounts).id : null,
           accountsApprovedAt: soldOn,
           createdAt: soldOn,
+          // Sent straight to purchase, so booked when punched — what targets and wins count by.
+          bookedAt: soldOn,
           fulfilledAt: soldOn,
           poNumber: `PO/${int(1000, 9999)}`,
         },

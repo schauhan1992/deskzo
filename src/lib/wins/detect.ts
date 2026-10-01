@@ -158,12 +158,19 @@ async function dealsWon(s: WinsSettings, now: Date): Promise<NewWin[]> {
 
 // ─── First orders ────────────────────────────────────────────────────────────
 
+/**
+ * A company's first order, celebrated once it is both approved and booked — whichever came second.
+ * Booked is `bookedAt` (when punched; for an in-hand order, its first payment or its hand-off to
+ * purchase — O-D2), so an in-hand order approved weeks before anybody paid for it is celebrated when it
+ * is paid for, not when accounts looked at it.
+ */
 async function firstOrders(s: WinsSettings, now: Date): Promise<NewWin[]> {
   const since = new Date(now.getTime() - RECENT_MS);
   const recent = await db.companyProduct.findMany({
     where: {
       orderStatus: { in: [...BOOKED] },
-      OR: [{ accountsApprovedAt: { gte: since } }, { accountsApprovedAt: null, createdAt: { gte: since } }],
+      bookedAt: { not: null },
+      OR: [{ accountsApprovedAt: { gte: since } }, { bookedAt: { gte: since } }],
       company: { relationshipType: { in: ["CLIENT", "RESELLER"] } },
     },
     select: { companyId: true },
@@ -179,7 +186,8 @@ async function firstOrders(s: WinsSettings, now: Date): Promise<NewWin[]> {
     where: {
       companyId: { in: candidates },
       orderStatus: { in: [...BOOKED] },
-      OR: [{ accountsApprovedAt: { lt: since } }, { accountsApprovedAt: null, createdAt: { lt: since } }],
+      bookedAt: { lt: since },
+      OR: [{ accountsApprovedAt: { lt: since } }, { accountsApprovedAt: null }],
     },
     distinct: ["companyId"],
     select: { companyId: true },
@@ -189,8 +197,8 @@ async function firstOrders(s: WinsSettings, now: Date): Promise<NewWin[]> {
   if (fresh.length === 0) return [];
 
   const orders = await db.companyProduct.findMany({
-    where: { companyId: { in: fresh }, orderStatus: { in: [...BOOKED] } },
-    orderBy: { createdAt: "asc" },
+    where: { companyId: { in: fresh }, orderStatus: { in: [...BOOKED] }, bookedAt: { not: null } },
+    orderBy: { bookedAt: "asc" },
     select: { companyId: true, quantity: true, unitPrice: true, addedBy: { select: { id: true, name: true } }, company: { select: { name: true } } },
   });
   return fresh.flatMap((companyId) => {
@@ -267,18 +275,18 @@ async function targetsHit(s: WinsSettings, now: Date): Promise<NewWin[]> {
 
 // ─── Top performer ───────────────────────────────────────────────────────────
 
-/** Booked order value per person over a window, at the price charged — the order value metric. */
+/** Booked order value per person over a window, at the price charged — the order value metric, by `bookedAt` as it counts. */
 export async function bookingsByPerson(from: Date, to: Date): Promise<{ userId: string; name: string; value: number }[]> {
   const orders = await db.companyProduct.groupBy({
     by: ["addedByUserId"],
-    where: { createdAt: { gte: from, lt: to }, orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] } },
+    where: { bookedAt: { gte: from, lt: to }, orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] } },
     _count: { _all: true },
   });
   const ids = orders.map((o) => o.addedByUserId);
   if (ids.length === 0) return [];
   const [rows, users] = await Promise.all([
     db.companyProduct.findMany({
-      where: { addedByUserId: { in: ids }, createdAt: { gte: from, lt: to }, orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] } },
+      where: { addedByUserId: { in: ids }, bookedAt: { gte: from, lt: to }, orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] } },
       select: { addedByUserId: true, quantity: true, unitPrice: true },
     }),
     db.user.findMany({ where: { id: { in: ids }, active: true }, select: { id: true, name: true } }),

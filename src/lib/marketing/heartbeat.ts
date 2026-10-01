@@ -5,6 +5,7 @@ import { detectSalesWins } from "@/lib/wins/detect";
 import { announceActivityAwards } from "@/lib/performance/announce";
 import { announcePrizes } from "@/lib/wins/prize-announce";
 import { runRevenueAndClose } from "@/lib/close/nightly";
+import { runOrderReleases } from "@/lib/orders/handoff";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -69,6 +70,14 @@ export async function runHeartbeat() {
     console.error("revenue & close nightly failed", err);
     return { ran: false };
   });
+  /**
+   * Orders scheduled to go to purchase today, released once a day — its own claim row decides who runs
+   * it. Purchase's screens release due orders as they load too, so this is the guarantee, not the only way.
+   */
+  const orderReleases = await runOrderReleases().catch((err) => {
+    console.error("order release failed", err);
+    return { ran: false, released: 0 };
+  });
   return {
     ...result,
     leadScoresRefreshed,
@@ -77,5 +86,6 @@ export async function runHeartbeat() {
     activityAwardAnnounced: activityAward.announced,
     prizesAnnounced: prizes.announced,
     revenueAndCloseRan: revenueAndClose.ran,
+    ordersReleased: orderReleases.released,
   };
 }

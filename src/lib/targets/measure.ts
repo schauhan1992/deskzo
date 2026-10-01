@@ -20,17 +20,43 @@
  * about. The split is only sound where a row belongs to exactly one person; the one metric where it
  * does not is handled separately and says so.
  */
-import type { PrismaClient, TargetMetric, TargetScope } from "@prisma/client";
+import type { PrismaClient, TargetScope } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { toBase } from "@/lib/currency";
+import { istCalendarDate, istMidnight } from "@/lib/india-time";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
+import type { MetricKey } from "@/lib/targets/metrics";
 
 export type MeasureWindow = { from: Date; to: Date; userIds: string[] };
 
 /** One measurement in a batch: a metric, a window, and the people it is measured across. */
-export type MeasureRequest = { metric: TargetMetric } & MeasureWindow;
+export type MeasureRequest = { metric: MetricKey } & MeasureWindow;
 
-type Range = { gte: Date; lte: Date };
+/**
+ * The instants a target's window covers: from 00:00 India time on its first day up to, not including,
+ * 00:00 on the day after its last. A target's `fromDate`/`toDate` are calendar dates (midnight UTC), and
+ * comparing instants against them directly dropped everything booked on the last day after 05:30 IST —
+ * a month's target missed that day's orders, and a target reached on the 30th wasn't celebrated.
+ * Right for `@db.Date` columns too: a date is its midnight UTC, inside the same bounds.
+ */
+type Range = { gte: Date; lt: Date };
+
+function rangeOf(from: Date, to: Date): Range {
+  const day = (d: Date) => [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()] as const;
+  const [fy, fm, fd] = day(from);
+  const [ty, tm, td] = day(to);
+  return { gte: istMidnight(fy, fm, fd), lt: istMidnight(ty, tm, td + 1) };
+}
+
+/**
+ * The same window as calendar days, for a `@db.Date` column: its first day up to, not including, the day
+ * after its last — each as midnight UTC, the way the column holds a day. Prisma sends a date column's
+ * bound as the bound's UTC *date*, so the IST-midnight instants above would read as the day before
+ * each end: the period's own last day dropped and the day before its first let in.
+ */
+function calendarRangeOf(range: Range): Range {
+  return { gte: istCalendarDate(range.gte), lt: istCalendarDate(range.lt) };
+}
 
 /**
  * A metric measured across everybody in a batch, ready to be asked about any subset of them.
@@ -64,7 +90,13 @@ function bumpMoney(byUser: Map<string, Prisma.Decimal>, id: string, amount: Pris
   byUser.set(id, dec(byUser.get(id)).add(amount));
 }
 
-/** Orders punched in the window, at the price actually charged. Shared by ORDER_VALUE and ADDON_VALUE. */
+/**
+ * Orders booked in the window, at the price actually charged. Shared by ORDER_VALUE and ADDON_VALUE.
+ *
+ * Booked is `bookedAt`: when the order was punched, for one sent straight to purchase (every order
+ * before in-hand orders existed, and every renewal and add-on); for an in-hand order, its first payment
+ * or its hand-off to purchase, whichever came first (O-D2). An in-hand order with neither counts nowhere.
+ */
 async function orderValueByUser(
   db: PrismaClient,
   range: Range,
@@ -75,7 +107,7 @@ async function orderValueByUser(
     where: {
       addedByUserId: { in: userIds },
       businessType,
-      createdAt: range,
+      bookedAt: range,
       orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] },
     },
     select: { quantity: true, unitPrice: true, addedByUserId: true },
@@ -93,7 +125,7 @@ async function orderValueByUser(
  */
 async function splitByUser(
   db: PrismaClient,
-  metric: TargetMetric,
+  metric: MetricKey,
   range: Range,
   userIds: string[],
 ): Promise<Split | null> {
@@ -161,7 +193,8 @@ async function splitByUser(
       const orders = await db.companyProduct.findMany({
         where: {
           addedByUserId: { in: userIds },
-          createdAt: range,
+          // Booked in the window, as ORDER_VALUE counts it.
+          bookedAt: range,
           orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] },
           // Without a purchase price the margin isn't known, and guessing it would flatter the number.
           purchasePrice: { not: null },
@@ -306,20 +339,34 @@ async function splitByUser(
         select: {
           ownerUserId: true,
           products: {
-            where: { orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] } },
-            orderBy: { createdAt: "asc" },
+            // Its first *booked* order: an in-hand order nobody has paid for or released isn't one yet.
+            where: { orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] }, bookedAt: { not: null } },
+            orderBy: { bookedAt: "asc" },
             take: 1,
-            select: { createdAt: true },
+            select: { bookedAt: true },
           },
         },
       });
       const byUser = new Map<string, number>();
       for (const c of owned) {
-        const first = c.products[0]?.createdAt;
-        if (!c.ownerUserId || !first || first < range.gte || first > range.lte) continue;
+        const first = c.products[0]?.bookedAt;
+        if (!c.ownerUserId || !first || first < range.gte || first >= range.lt) continue;
         byUser.set(c.ownerUserId, (byUser.get(c.ownerUserId) ?? 0) + 1);
       }
       return addUp(byUser);
+    }
+
+    case "PURCHASE_SAVINGS": {
+      // What each purchaser saved against the salesperson's distributor price, on the day in India it
+      // was recorded — negative where sales accepted a higher price. A cancelled order's never counts.
+      const rows = await db.purchaseSaving.groupBy({
+        by: ["purchaserId"],
+        where: { purchaserId: { in: userIds }, cancelledAt: null, recordedOn: calendarRangeOf(range) },
+        _sum: { amount: true },
+      });
+      const byUser = new Map<string, Prisma.Decimal>();
+      for (const r of rows) byUser.set(r.purchaserId, dec(r._sum.amount));
+      return addUpMoney(byUser);
     }
 
     case "TICKETS_RESOLVED": {
@@ -341,7 +388,7 @@ async function splitByUser(
  */
 async function measureWholeSet(
   db: PrismaClient,
-  metric: TargetMetric,
+  metric: MetricKey,
   range: Range,
   userIds: string[],
 ): Promise<number> {
@@ -354,8 +401,8 @@ async function measureWholeSet(
 }
 
 /** One target's achievement. */
-export async function measure(db: PrismaClient, metric: TargetMetric, w: MeasureWindow): Promise<number> {
-  const range = { gte: w.from, lte: w.to };
+export async function measure(db: PrismaClient, metric: MetricKey, w: MeasureWindow): Promise<number> {
+  const range = rangeOf(w.from, w.to);
   const split = await splitByUser(db, metric, range, w.userIds);
   return split ? split(w.userIds) : measureWholeSet(db, metric, range, w.userIds);
 }
@@ -385,7 +432,7 @@ export async function measureMany(db: PrismaClient, requests: MeasureRequest[]):
   await Promise.all(
     [...groups.values()].map(async (indexes) => {
       const first = requests[indexes[0]];
-      const range = { gte: first.from, lte: first.to };
+      const range = rangeOf(first.from, first.to);
       // Everybody any target in this group is measured across, asked about once.
       const everyone = [...new Set(indexes.flatMap((i) => requests[i].userIds))];
       if (everyone.length === 0) return; // Nobody to measure: every answer in the group is zero.

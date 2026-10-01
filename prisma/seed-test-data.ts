@@ -535,7 +535,9 @@ async function main() {
           accountsApprovedAt: status !== "PENDING_APPROVAL" ? daysFromNow(-int(2, 210)) : null,
           accountsNotes: status === "REJECTED" ? "Payment terms not acceptable." : null,
           addedByUserId: pick(sales).id,
-          createdAt: daysFromNow(-int(1, 300)),
+          // Booked when punched (sent straight to purchase): `bookedAt` is what targets and wins count by.
+          // Worked out in place, so the random sequence the rest of the seed draws from is unchanged.
+          ...((at) => ({ createdAt: at, bookedAt: at }))(daysFromNow(-int(1, 300))),
           watchers: chance(0.25) ? { connect: some(users, int(1, 2)).map((u) => ({ id: u.id })) } : undefined,
         },
         select: { id: true },

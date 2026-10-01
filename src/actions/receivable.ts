@@ -14,6 +14,7 @@ import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { firstOpenDate } from "@/lib/ledger/period";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import { syncBillingMilestones } from "@/lib/projects/billing-sync";
+import { bookOnFirstPayment } from "@/lib/orders/handoff";
 import {
   settleInvoice,
   settledStatus,
@@ -137,6 +138,9 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
     await tx.paymentAllocation.create({
       data: { paymentId: created.id, documentId: invoiceId, amount: new Prisma.Decimal(amount), allocatedByUserId: user.id },
     });
+    // Money against an invoice raised for an in-hand order is money against that order: it counts as
+    // booked from this first payment (O-D2).
+    await bookOnFirstPayment(tx, { documentLines: { some: { documentId: invoiceId } } }, new Date());
     // Posted in the same transaction, so cash in the ledger can't disagree with the payment record.
     await postPaymentToLedger(tx, created.id, user.id);
     // And the exchange difference, if the invoice was raised at a different rate to the one the
@@ -284,6 +288,8 @@ export async function applyPaymentToInvoice(
         allocatedByUserId: user.id,
       },
     });
+    // An invoice raised for an in-hand order: the order counts as booked from its first payment (O-D2).
+    await bookOnFirstPayment(tx, { documentLines: { some: { documentId: invoiceId } } }, new Date());
     // The difference only exists once you know which invoice the money is against — the same
     // $1,000 settling an invoice raised at ₹83 and one raised at ₹86 are different gains.
     await postExchangeDifferenceToLedger(tx, {

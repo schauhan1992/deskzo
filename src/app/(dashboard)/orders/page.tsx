@@ -17,6 +17,13 @@ import { ColumnPicker } from "@/components/ui/table-columns";
 import { orderStatusValues, orderBusinessTypeValues, orderBusinessTypeLabels } from "@/lib/validation/order";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 
+const HANDOFF_FLAGS = [
+  { value: "held", label: "In hand" },
+  { value: "ready", label: "Ready for purchase" },
+  { value: "review", label: "Price to approve" },
+  { value: "vendorPo", label: "Vendor PO to cancel" },
+] as const;
+
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -24,6 +31,7 @@ export default async function OrdersPage({
     status?: string;
     businessType?: string;
     channel?: string;
+    flag?: string;
     q?: string;
     page?: string;
     pageSize?: string;
@@ -45,11 +53,12 @@ export default async function OrdersPage({
     ? (params.businessType as OrderBusinessType)
     : undefined;
   const viaReseller = params.channel === "reseller" ? true : params.channel === "direct" ? false : undefined;
+  const flag = HANDOFF_FLAGS.find((f) => f.value === params.flag)?.value;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
   const [viewMode, result] = await Promise.all([
     getViewMode("orders"),
-    listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize }),
+    listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize, flag }),
   ]);
   const pendingCount = result.pendingApproval;
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
@@ -70,6 +79,7 @@ export default async function OrdersPage({
       q: params.q,
       businessType: params.businessType,
       channel: params.channel,
+      flag: params.flag,
       ...overrides,
     };
     return Object.fromEntries(Object.entries(next).filter(([, v]) => v)) as Record<string, string>;
@@ -114,11 +124,23 @@ export default async function OrdersPage({
         {stageFilters.map((f) => (
           <Link
             key={f.label}
-            href={{ pathname: "/orders", query: queryFor({ status: f.value }) }}
+            href={{ pathname: "/orders", query: queryFor({ status: f.value, flag: undefined }) }}
             className={`rounded-full px-3 py-1 text-sm ${
-              params.status === f.value || (!params.status && !f.value)
+              !flag && (params.status === f.value || (!params.status && !f.value))
                 ? "bg-brand text-brand-contrast"
                 : "bg-surface text-muted border border-line-strong"
+            }`}
+          >
+            {f.label}
+          </Link>
+        ))}
+        {/* The hand-off views: sales's in-hand orders, purchase's queue, and what each is waiting on. */}
+        {HANDOFF_FLAGS.map((f) => (
+          <Link
+            key={f.value}
+            href={{ pathname: "/orders", query: queryFor({ flag: f.value, status: undefined }) }}
+            className={`rounded-full px-3 py-1 text-sm ${
+              flag === f.value ? "bg-brand text-brand-contrast" : "bg-surface text-muted border border-dashed border-line-strong"
             }`}
           >
             {f.label}

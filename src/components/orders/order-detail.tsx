@@ -9,6 +9,7 @@ import { currentUser } from "@/lib/session";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { OrderActionsPanel } from "@/components/orders/order-actions-panel";
+import { OrderHandoffPanel, OrderPriceReview, OrderQuoteEditor, VendorPoSettle } from "@/components/orders/order-handoff-controls";
 import { CallButton } from "@/components/calls/call-button";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
 import { canAnnounceFulfilment } from "@/lib/marketing/customer-notices";
@@ -16,6 +17,8 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
 import { calculateOrderAmount, calculateOrderMargin, getPaymentStatus, paymentTermsLabels } from "@/lib/gst";
 import { orderExpenseTypeLabels, orderBusinessTypeLabels } from "@/lib/validation/order";
+import { handoffBadge, impliedMargin, priceCeiling, priceEventLabels, vendorPoLabels } from "@/lib/orders/handoff-rules";
+import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 import { CategoryChip } from "@/components/customers/category-chip";
 
@@ -107,6 +110,38 @@ export async function OrderDetail({
 
   const viaReseller = order.company.relationshipType === "RESELLER";
 
+  // ── The hand-off to purchase, the distributor price, and any price waiting for sales ──────────────
+  const now = new Date();
+  const closed = order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED";
+  const handoffNote = closed ? null : handoffBadge(order, now);
+  /** The salesperson who punched it, or an approver: who decides when it goes and what it may cost. */
+  const speaksForSales = order.addedBy.id === userId || canApprove;
+  const quotePrice = order.quotedPurchasePrice;
+  const ceiling = priceCeiling(
+    { quotedPurchasePrice: quotePrice, quotedById: order.quotedBy?.id ?? null, orderStatus: order.orderStatus, purchasePrice: order.purchasePrice },
+    userId,
+  );
+  const pending =
+    order.pendingPurchasePrice !== null
+      ? {
+          price: order.pendingPurchasePrice,
+          ceiling: priceCeiling(
+            { quotedPurchasePrice: quotePrice, quotedById: order.quotedBy?.id ?? null, orderStatus: order.orderStatus, purchasePrice: order.purchasePrice },
+            order.priceReviewRequestedBy?.id ?? "",
+          ),
+          quantity: order.quantity,
+          vendorName: order.pendingVendor?.name ?? null,
+          reason: order.priceIncreaseReason ?? "",
+          requestedBy: order.priceReviewRequestedBy?.name ?? null,
+          requestedAt: order.priceReviewRequestedAt ?? now,
+        }
+      : null;
+  const quoteEditable =
+    speaksForSales && (order.orderStatus === "PENDING_APPROVAL" || order.orderStatus === "APPROVED") && !pending;
+  const salePrice = Number(order.unitPrice ?? order.item.sellingPrice);
+  const quoteMargin = quotePrice !== null ? impliedMargin(salePrice, quotePrice, order.quantity) : null;
+  const saving = order.purchaseSaving;
+
   return (
     <div className="@container space-y-6">
       {viaReseller && (
@@ -137,6 +172,9 @@ export async function OrderDetail({
             {viaReseller && <Badge tone="blue">Via reseller</Badge>}
             <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>{order.orderStatus.replaceAll("_", " ")}</Badge>
             <Badge tone={BUSINESS_TYPE_TONE[order.businessType]}>{orderBusinessTypeLabels[order.businessType]}</Badge>
+            {handoffNote && <Badge tone="amber">{handoffNote}</Badge>}
+            {pending && <Badge tone="amber">Waiting for sales approval</Badge>}
+            {order.vendorPoCancel && <Badge tone={order.vendorPoCancel === "PENDING" ? "red" : "default"}>{vendorPoLabels[order.vendorPoCancel]}</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted">
             <Link href={`/companies/${order.company.id}`} className="hover:underline">
@@ -226,8 +264,129 @@ export async function OrderDetail({
                 <span className="text-muted">Purchased by</span>
                 <span className="text-text">{order.purchasedBy?.name ?? "—"}</span>
               </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="text-muted">Hand-off</span>
+                <span className="text-text">
+                  {order.purchaseRelease === "RELEASED"
+                    ? order.releasedAt
+                      ? `With purchase since ${formatIstDate(order.releasedAt)}`
+                      : "With purchase"
+                    : (handoffNote ?? "Never sent to purchase")}
+                </span>
+              </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
+              <span>Distributor price</span>
+              {quoteEditable && (
+                <OrderQuoteEditor
+                  orderId={order.id}
+                  vendors={vendorOptions.map((v) => ({ id: v.id, name: v.name }))}
+                  quote={{
+                    price: quotePrice,
+                    vendorId: order.quoteVendor?.id ?? null,
+                    vendorName: order.quoteVendorName,
+                    contact: order.quoteContact,
+                    quotedOn: order.quotedOn,
+                    remarks: order.quoteRemarks,
+                  }}
+                />
+              )}
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {quotePrice === null ? (
+                <p className="text-subtle">
+                  No price from sales. Purchase buys as usual, and no saving is recorded against this order.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-2 @lg:grid-cols-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Price / unit</span>
+                      <span className="font-medium text-text">{formatCurrency(String(quotePrice))}</span>
+                    </div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Distributor</span>
+                      <span className="text-text">
+                        {order.quoteVendor ? (
+                          <Link href={`/companies/${order.quoteVendor.id}`} className="hover:underline">
+                            {order.quoteVendor.name}
+                          </Link>
+                        ) : (
+                          (order.quoteVendorName ?? "—")
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Contact there</span>
+                      <span className="text-text">{order.quoteContact ?? "—"}</span>
+                    </div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Quoted on</span>
+                      <span className="text-text">{order.quotedOn ? formatIstDate(order.quotedOn) : "—"}</span>
+                    </div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">Entered by</span>
+                      <span className="text-text">{order.quotedBy?.name ?? "—"}</span>
+                    </div>
+                    {quoteMargin && (
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                        <span className="text-muted">Margin at this price</span>
+                        <span className={quoteMargin.margin >= 0 ? "text-success" : "text-danger"}>
+                          {formatCurrency(String(quoteMargin.margin))}
+                          {quoteMargin.percent !== null ? ` (${quoteMargin.percent}%)` : ""}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {order.quoteRemarks && <p className="border-t border-line pt-2 text-text">{order.quoteRemarks}</p>}
+                </>
+              )}
+              {saving && (
+                <div
+                  className={`flex flex-wrap items-baseline justify-between gap-x-3 border-t border-line pt-2 ${saving.cancelledAt ? "text-subtle line-through" : ""}`}
+                >
+                  <span className="text-muted">{saving.amount >= 0 ? "Purchase saving" : "Accepted increase"}</span>
+                  <span className={saving.cancelledAt ? "" : saving.amount >= 0 ? "font-medium text-success" : "font-medium text-danger"}>
+                    {formatCurrency(String(saving.amount))} · {saving.purchaser.name} · {formatIstDate(saving.recordedOn)}
+                  </span>
+                </div>
+              )}
+              {saving?.cancelledAt && <p className="text-xs text-subtle">The order was cancelled, so this doesn&apos;t count.</p>}
+            </CardContent>
+          </Card>
+
+          {order.priceChanges.length > 0 && (
+            <Card>
+              <CardHeader className="text-sm font-medium text-text">Price history</CardHeader>
+              <CardContent>
+                <ol className="space-y-3 text-sm">
+                  {order.priceChanges.map((c) => (
+                    <li key={c.id} className="border-l-2 border-line pl-3">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                        <span className="font-medium text-text">{priceEventLabels[c.event]}</span>
+                        <span className="text-xs text-muted">{formatIstDateTime(c.at)}</span>
+                      </div>
+                      <p className="text-muted">
+                        {c.fromPrice !== null && c.toPrice !== null
+                          ? `${formatCurrency(String(c.fromPrice))} → ${formatCurrency(String(c.toPrice))}`
+                          : c.toPrice !== null
+                            ? formatCurrency(String(c.toPrice))
+                            : c.fromPrice !== null
+                              ? `${formatCurrency(String(c.fromPrice))} removed`
+                              : ""}
+                        {c.vendorName ? ` · ${c.vendorName}` : ""}
+                        {c.byUser ? ` · by ${c.byUser.name}` : ""}
+                      </p>
+                      {c.reason && <p className="text-text">&ldquo;{c.reason}&rdquo;</p>}
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="text-sm font-medium text-text">Financials</CardHeader>
@@ -318,7 +477,18 @@ export async function OrderDetail({
                 )}
               </span>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {speaksForSales && !closed && order.purchaseRelease !== "RELEASED" && (
+                <OrderHandoffPanel orderId={order.id} purchaseRelease={order.purchaseRelease} releaseOn={order.releaseOn} />
+              )}
+              {pending && !closed && (
+                <OrderPriceReview
+                  orderId={order.id}
+                  pending={pending}
+                  canDecide={speaksForSales && order.priceReviewRequestedBy?.id !== userId}
+                />
+              )}
+              {order.vendorPoCancel === "PENDING" && canProcess && <VendorPoSettle orderId={order.id} />}
               <OrderActionsPanel
                 order={{
                   id: order.id,
@@ -342,6 +512,15 @@ export async function OrderDetail({
                 companyId={order.company.id}
                 companyName={order.company.name}
                 credit={credit}
+                purchase={{
+                  purchaseRelease: order.purchaseRelease,
+                  releaseOn: order.releaseOn,
+                  priceCeiling: ceiling,
+                  quotePrice,
+                  pendingIncrease: !!pending,
+                  paid,
+                  vendorName: order.vendor?.name ?? null,
+                }}
               />
             </CardContent>
           </Card>
@@ -365,11 +544,41 @@ export async function OrderDetail({
                   </span>
                 </div>
               )}
-              {order.accountsNotes && <p className="border-t border-line pt-2 text-text">{order.accountsNotes}</p>}
+              {order.accountsNotes && !order.cancelledAt && <p className="border-t border-line pt-2 text-text">{order.accountsNotes}</p>}
+              {order.releasedAt && (
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="text-muted">Sent to purchase</span>
+                  <span className="text-text">
+                    {order.releasedBy ? `${order.releasedBy.name} · ` : "On its scheduled day · "}
+                    {formatIstDate(order.releasedAt)}
+                  </span>
+                </div>
+              )}
               {order.fulfilledAt && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Fulfilled on</span>
                   <span className="text-text">{formatDate(order.fulfilledAt)}</span>
+                </div>
+              )}
+              {order.cancelledAt && (
+                <div className="space-y-1 border-t border-line pt-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span className="text-muted">Cancelled</span>
+                    <span className="text-text">
+                      {order.cancelledBy?.name ?? "—"} · {formatIstDateTime(order.cancelledAt)}
+                    </span>
+                  </div>
+                  {order.cancelReason && <p className="text-text">&ldquo;{order.cancelReason}&rdquo;</p>}
+                  {order.vendorPoCancel && (
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="text-muted">{vendorPoLabels[order.vendorPoCancel]}</span>
+                      <span className="text-text">
+                        {order.vendorPoSettledAt
+                          ? `${order.vendorPoSettledBy?.name ?? "—"} · ${formatIstDate(order.vendorPoSettledAt)}`
+                          : "Waiting for purchase"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

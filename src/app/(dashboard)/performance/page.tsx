@@ -3,6 +3,7 @@ import { Trophy } from "lucide-react";
 import { getUserPerformance, canViewPerformance } from "@/actions/performance";
 import { Card, Badge } from "@/components/ui/card";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { formatCurrency } from "@/lib/utils";
 
 function formatActiveTime(seconds: number) {
   const hours = Math.floor(seconds / 3600);
@@ -32,6 +33,8 @@ export default async function PerformancePage({
 
   const params = await searchParams;
   const rows = await getUserPerformance({ from: params.from, to: params.to });
+  // Shown where the workspace has orders: what each purchaser saved against sales's distributor prices.
+  const showSavings = rows.some((r) => r.purchaseSavings !== null);
 
   return (
     <div>
@@ -67,6 +70,13 @@ export default async function PerformancePage({
               <th className="px-4 py-2.5">Tickets resolved</th>
               <th className="px-4 py-2.5">Avg resolution</th>
               <th className="px-4 py-2.5">SLA met</th>
+              {showSavings && (
+                <th className="px-4 py-2.5">
+                  <Link href="/orders/savings" className="hover:underline">
+                    Purchase savings
+                  </Link>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -99,11 +109,16 @@ export default async function PerformancePage({
                     <span className="text-subtle">—</span>
                   )}
                 </td>
+                {showSavings && (
+                  <td className={`px-4 py-2.5 ${(r.purchaseSavings ?? 0) < 0 ? "text-danger" : "text-muted"}`}>
+                    {r.purchaseSavings ? formatCurrency(r.purchaseSavings) : "—"}
+                  </td>
+                )}
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-subtle">
+                <td colSpan={showSavings ? 11 : 10} className="px-4 py-8 text-center text-subtle">
                   No users found.
                 </td>
               </tr>

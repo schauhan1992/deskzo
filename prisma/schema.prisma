@@ -577,6 +577,13 @@ model User {
   journalEntriesCreated      JournalEntry[]           @relation("JournalCreatedBy")
   ordersAccountsApproved     CompanyProduct[]         @relation("OrderAccountsApprovedBy")
   ordersPurchased            CompanyProduct[]         @relation("OrderPurchasedBy")
+  ordersReleased             CompanyProduct[]         @relation("OrderReleasedBy")
+  ordersQuoted               CompanyProduct[]         @relation("OrderQuotedBy")
+  orderPriceReviewsRequested CompanyProduct[]         @relation("OrderPriceReviewRequestedBy")
+  ordersCancelled            CompanyProduct[]         @relation("OrderCancelledBy")
+  orderVendorPosSettled      CompanyProduct[]         @relation("OrderVendorPoSettledBy")
+  orderPriceChanges          OrderPriceChange[]       @relation("OrderPriceChangeBy")
+  purchaseSavings            PurchaseSaving[]         @relation("PurchaseSavingPurchaser")
   renewalStagesSet           CompanyProduct[]         @relation("RenewalStageSetBy")
   documentsSubmitted         TradeDocument[]          @relation("DocumentSubmittedBy")
   documentsApproved          TradeDocument[]          @relation("DocumentApprovedBy")
@@ -892,6 +899,8 @@ model Company {
   formInvites            FormInvite[]            @relation("FormInviteCompany")
   products               CompanyProduct[]
   vendorOrders           CompanyProduct[]        @relation("CompanyProductVendor")
+  quotedOrders           CompanyProduct[]        @relation("OrderQuoteVendor")
+  pendingVendorOrders    CompanyProduct[]        @relation("OrderPendingVendor")
   vendorStatements       VendorStatement[]       @relation("VendorStatementVendor")
   vendorStatementMapping VendorStatementMapping? @relation("VendorStatementMappingVendor")
   reconcileMatches       VendorStatementLine[]   @relation("ReconcileMatchedCompany")
@@ -2509,6 +2518,59 @@ model CompanyProduct {
   purchasedBy       User?     @relation("OrderPurchasedBy", fields: [purchasedByUserId], references: [id])
   fulfilledAt       DateTime?
 
+  // ── Hand-off to purchase, the salesperson's distributor price, price reviews, cancellation ──────
+  /**
+   * Whether purchase may process this order yet: RELEASED unless the salesperson punched it as an
+   * in-hand order (HELD) or scheduled the go-ahead (SCHEDULED, released on `releaseOn`).
+   */
+  purchaseRelease PurchaseRelease @default(RELEASED)
+  releaseOn       DateTime?       @db.Date
+  releasedAt      DateTime?
+  releasedById    String?
+  releasedBy      User?           @relation("OrderReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  /**
+   * When the order starts counting as booked (targets, order-value reports): when it was punched, for
+   * one sent straight to purchase; for an in-hand order, its first payment or its hand-off, whichever
+   * comes first. Null while an in-hand order has neither. Defaults to the moment of creation, so every
+   * path that makes an order (renewals, add-ons, imports) counts it as before; only a hold clears it.
+   */
+  bookedAt        DateTime?       @default(now())
+
+  /** The purchase price per unit a salesperson got from a distributor, and where it came from. */
+  quotedPurchasePrice Decimal?  @db.Decimal(12, 2)
+  quoteVendorId       String?
+  quoteVendor         Company?  @relation("OrderQuoteVendor", fields: [quoteVendorId], references: [id], onDelete: SetNull)
+  /** The distributor's name when it isn't a company in the CRM. */
+  quoteVendorName     String?
+  /** The person at the distributor who gave the price. */
+  quoteContact        String?
+  quotedOn            DateTime? @db.Date
+  quoteRemarks        String?
+  quotedById          String?
+  quotedBy            User?     @relation("OrderQuotedBy", fields: [quotedById], references: [id], onDelete: SetNull)
+
+  /** A purchase price above the salesperson's quote, waiting for them to accept it. */
+  pendingPurchasePrice     Decimal?  @db.Decimal(12, 2)
+  pendingVendorId          String?
+  pendingVendor            Company?  @relation("OrderPendingVendor", fields: [pendingVendorId], references: [id], onDelete: SetNull)
+  priceIncreaseReason      String?
+  priceReviewRequestedAt   DateTime?
+  priceReviewRequestedById String?
+  priceReviewRequestedBy   User?     @relation("OrderPriceReviewRequestedBy", fields: [priceReviewRequestedById], references: [id], onDelete: SetNull)
+
+  /** Cancellation: who, when, why — and, for an order purchase had processed, what became of our vendor PO. */
+  cancelledAt         DateTime?
+  cancelledById       String?
+  cancelledBy         User?           @relation("OrderCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelReason        String?
+  vendorPoCancel      VendorPoCancel?
+  vendorPoSettledAt   DateTime?
+  vendorPoSettledById String?
+  vendorPoSettledBy   User?           @relation("OrderVendorPoSettledBy", fields: [vendorPoSettledById], references: [id], onDelete: SetNull)
+
+  priceChanges   OrderPriceChange[]
+  purchaseSaving PurchaseSaving?
+
   /**
    * Internal stakeholders (e.g. Tech Support, HR) who should have visibility into this order for installation/demo/delivery coordination — notified when added.
    */
@@ -2540,7 +2602,84 @@ model CompanyProduct {
   @@index([createdAt])
   /// "Starts on" is a Dated-on option; `createdAt` and `endDate` are already covered above.
   @@index([startDate])
+  @@index([purchaseRelease, releaseOn])
+  @@index([bookedAt])
   @@map("company_products")
+}
+
+/// Whether purchase may process an order yet (the salesperson's hand-off).
+enum PurchaseRelease {
+  /// An in-hand order: punched and visible, not yet for purchase.
+  HELD
+  /// Goes to purchase on `releaseOn`.
+  SCHEDULED
+  /// With purchase.
+  RELEASED
+}
+
+/// What became of our vendor PO when a processed order was cancelled.
+enum VendorPoCancel {
+  PENDING
+  CANCELLED
+  NOT_NEEDED
+}
+
+/// A step in an order's purchase-price history.
+enum OrderPriceEvent {
+  /// The salesperson entered a distributor's price.
+  QUOTED
+  /// Purchase processed the order at a price at or below the quote (or with no quote).
+  PURCHASED
+  /// Purchase can only get it above the quote, with a reason; waiting for the salesperson.
+  INCREASE_REQUESTED
+  INCREASE_ACCEPTED
+  /// The salesperson sent it back to purchase to find a better price.
+  SENT_BACK
+}
+
+/// An order's purchase-price history: every quote, purchase, increase, acceptance and send-back.
+model OrderPriceChange {
+  id               String          @id @default(cuid())
+  companyProductId String
+  companyProduct   CompanyProduct  @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
+  event            OrderPriceEvent
+  fromPrice        Decimal?        @db.Decimal(12, 2)
+  toPrice          Decimal?        @db.Decimal(12, 2)
+  /** The vendor at that step, kept as history (no relation: a vendor deleted later mustn't erase it). */
+  vendorId         String?
+  reason           String?
+  byUserId         String?
+  byUser           User?           @relation("OrderPriceChangeBy", fields: [byUserId], references: [id], onDelete: SetNull)
+  at               DateTime        @default(now())
+
+  @@index([companyProductId, at])
+  @@map("order_price_changes")
+}
+
+/**
+ * What purchase saved (or, when an increase was accepted, lost) against the price the salesperson got
+ * from a distributor — the purchase person's performance (target metric PURCHASE_SAVINGS). One per
+ * order line that had a quote; none without one. A cancelled order's saving never counts.
+ */
+model PurchaseSaving {
+  id               String         @id @default(cuid())
+  companyProductId String         @unique
+  companyProduct   CompanyProduct @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
+  purchaserId      String
+  purchaser        User           @relation("PurchaseSavingPurchaser", fields: [purchaserId], references: [id], onDelete: Restrict)
+  quotedPrice      Decimal        @db.Decimal(12, 2)
+  actualPrice      Decimal        @db.Decimal(12, 2)
+  quantity         Int
+  /** (quoted − actual) × quantity, in rupees: negative when an increase was accepted. */
+  amount           Decimal        @db.Decimal(14, 2)
+  recordedAt       DateTime       @default(now())
+  /** The day in India it was recorded — what a target's period counts by. */
+  recordedOn       DateTime       @db.Date
+  /** Set when the order is cancelled: the saving never materialised, and no longer counts. */
+  cancelledAt      DateTime?
+
+  @@index([purchaserId, recordedOn])
+  @@map("purchase_savings")
 }
 
 /**
@@ -5657,6 +5796,11 @@ enum TargetMetric {
    * Seats added to subscriptions already running, at what was charged for them.
    */
   ADDON_VALUE
+  /**
+   * What purchase saved against the salesperson's distributor price, less the increases sales accepted.
+   * One row per processed order line that had a quote (PurchaseSaving); a cancelled order's never counts.
+   */
+  PURCHASE_SAVINGS
 }
 
 enum TargetPeriod {

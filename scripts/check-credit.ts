@@ -92,7 +92,10 @@ async function cleanup() {
   await db.celebration.deleteMany({ where: { OR: [{ occasionKey: { in: companyIds.map((id) => `first-order:${id}`) } }, { title: { contains: TAG } }] } });
   await db.creditDecision.deleteMany({ where: { OR: [{ companyId: { in: companyIds } }, { decidedById: { in: userIds } }] } });
   await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: userIds } }, { entityId: { in: companyIds } }] } });
-  await db.notification.deleteMany({ where: { userId: { in: userIds } } });
+  // Approving an order sent to purchase tells everyone who processes orders — real people here — so
+  // what the probe's orders caused goes by its link as well as by the probe users.
+  const orderLinks = (await db.companyProduct.findMany({ where: { companyId: { in: companyIds } }, select: { id: true } })).map((o) => `/orders/${o.id}`);
+  await db.notification.deleteMany({ where: { OR: [{ userId: { in: userIds } }, { link: { in: orderLinks } }] } });
   await db.tradeDocument.deleteMany({ where: { companyId: { in: companyIds } } });
   await db.payment.deleteMany({ where: { companyId: { in: companyIds } } });
   await db.companyProduct.deleteMany({ where: { companyId: { in: companyIds } } });

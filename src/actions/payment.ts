@@ -7,6 +7,7 @@ import { reverseAllocationExchange, reversePaymentPosting } from "@/lib/ledger/j
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import { isBaseCurrency } from "@/lib/currency";
 import { requireModuleUser } from "@/lib/modules-access";
+import { bookOnFirstPayment } from "@/lib/orders/handoff";
 import {
   canSeeCompany,
   paymentScope,
@@ -115,6 +116,10 @@ export async function recordPayment(
         error: "That order does not belong to the selected company.",
       };
     }
+    // Its payments were moved on account when it was cancelled; new money doesn't land on it either.
+    if (order.orderStatus === "CANCELLED") {
+      return { ok: false, error: "That order is cancelled — record the payment on account instead." };
+    }
   }
 
   // An order payment names no document, so it is the recorder's branch (spec §5.7) — resolved before
@@ -148,6 +153,8 @@ export async function recordPayment(
       },
     });
     await postPaymentToLedger(tx, created.id, user.id);
+    // An in-hand order counts as booked from its first payment (O-D2).
+    if (order) await bookOnFirstPayment(tx, { id: order.id }, new Date());
     return created;
   });
 
@@ -212,6 +219,9 @@ export async function allocatePayment(
       error: "That order does not belong to this payment's company.",
     };
   }
+  if (order.orderStatus === "CANCELLED") {
+    return { ok: false, error: "That order is cancelled — apply the money to another order, or refund it." };
+  }
 
   // What each earlier allocation took out of this payment — an allocation across currencies records
   // the rupees separately from the figure it settled (`takenFromPayment`).
@@ -242,8 +252,13 @@ export async function allocatePayment(
     };
   }
 
-  const allocation = await db.paymentAllocation.create({
-    data: { paymentId, companyProductId, amount, allocatedByUserId: user.id },
+  const allocation = await db.$transaction(async (tx) => {
+    const row = await tx.paymentAllocation.create({
+      data: { paymentId, companyProductId, amount, allocatedByUserId: user.id },
+    });
+    // An in-hand order counts as booked from its first payment (O-D2).
+    await bookOnFirstPayment(tx, { id: companyProductId }, new Date());
+    return row;
   });
 
   revalidatePath(`/companies/${payment.companyId}`);

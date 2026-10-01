@@ -1,4 +1,10 @@
-import { listCompanyOptions, listAssignableUsers, listCommissionPartyOptions, listEndCustomers } from "@/actions/company";
+import {
+  listCompanyOptions,
+  listAssignableUsers,
+  listCommissionPartyOptions,
+  listEndCustomers,
+  listVendorOptions,
+} from "@/actions/company";
 import { listItemOptions } from "@/actions/item";
 import { listCompanyLocationOptions } from "@/actions/company-location";
 import { listProposalOptions } from "@/actions/order";
@@ -42,7 +48,7 @@ export default async function NewOrderPage({
     : null;
   const prefillId = owner && (await canSeeCompany(user.id, owner.ownerUserId)) ? companyId : undefined;
 
-  const [companies, items, users, commissionParties, initialLocations, initialProposals, initialEndCustomers] =
+  const [companies, items, users, commissionParties, initialLocations, initialProposals, initialEndCustomers, vendors] =
     await Promise.all([
       listCompanyOptions({ relationshipTypes: [...customerRelationshipTypeValues] }),
       listItemOptions(),
@@ -51,14 +57,16 @@ export default async function NewOrderPage({
       prefillId ? listCompanyLocationOptions(prefillId) : Promise.resolve([]),
       prefillId ? listProposalOptions(prefillId) : Promise.resolve([]),
       prefillId ? listEndCustomers(prefillId) : Promise.resolve([]),
+      // The distributors a salesperson may have a price from — the purchase side's vendors.
+      listVendorOptions(),
     ]);
 
   return (
     <div>
       <h1 className="text-xl font-semibold text-text">Punch order</h1>
       <p className="mt-1 text-sm text-muted">
-        Log an order you received today — it goes to Accounts for payment-terms approval, then to Purchasing before
-        it&apos;s fulfilled.
+        Log an order you received — it goes to Accounts for payment-terms approval, then to Purchasing before
+        it&apos;s fulfilled. An in-hand order can be held back from Purchasing until you say, or scheduled for a day.
       </p>
       <div className="mt-6">
         <NewOrderForm
@@ -66,6 +74,7 @@ export default async function NewOrderPage({
           items={items}
           users={users}
           commissionParties={commissionParties}
+          vendors={vendors.map((v) => ({ id: v.id, name: v.name }))}
           initialCompanyId={prefillId}
           initialLocations={initialLocations}
           initialProposals={initialProposals}

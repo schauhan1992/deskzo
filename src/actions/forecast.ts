@@ -361,24 +361,24 @@ async function loadTargets(periods: Period[], grain: Grain, userIds: string[] | 
   );
 }
 
-/** Orders booked in each period — at the selling price, past approval, as the order value target counts them. */
+/** Orders booked in each period — at the selling price, past approval, by `bookedAt`, as the order value target counts them. */
 async function bookings(periods: Pick<Period, "key" | "from" | "to">[], who: { ids: string[] | null; ownerId: string | null }, until: Date | null) {
   const from = periods[0]!.from;
   const to = until && until.getTime() < periods[periods.length - 1]!.to.getTime() ? until : periods[periods.length - 1]!.to;
   const orders = await db.companyProduct.findMany({
     where: {
-      createdAt: { gte: from, lt: to },
+      bookedAt: { gte: from, lt: to },
       orderStatus: { notIn: ["PENDING_APPROVAL", "CANCELLED"] },
       ...(who.ownerId ? { addedByUserId: who.ownerId } : who.ids ? { OR: [{ addedByUserId: { in: who.ids } }, { company: { ownerUserId: { in: who.ids } } }] } : {}),
     },
-    select: { createdAt: true, quantity: true, unitPrice: true },
+    select: { bookedAt: true, quantity: true, unitPrice: true },
   });
   return Object.fromEntries(
     periods.map((p) => [
       p.key,
       Math.round(
         orders
-          .filter((o) => o.createdAt.getTime() >= p.from.getTime() && o.createdAt.getTime() < p.to.getTime())
+          .filter((o) => o.bookedAt !== null && o.bookedAt.getTime() >= p.from.getTime() && o.bookedAt.getTime() < p.to.getTime())
           .reduce((t, o) => t + money(o.unitPrice) * o.quantity, 0) * 100,
       ) / 100,
     ]),

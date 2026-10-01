@@ -6,10 +6,14 @@
  * reverse. The pace calculation in particular is the whole value of the page: "60% achieved" says
  * almost nothing without knowing how much of the month is left.
  *
+ * The last section measures probe orders against the real database — a target's window is India's
+ * days, and only the real query can show an order at 23:00 IST on the 30th counting — and removes them.
+ *
  *   npm run check:targets
  */
-import type { TargetMetric } from "@prisma/client";
+import "dotenv/config";
 import {
+  type MetricKey,
   METRICS,
   financialYearLabel,
   formatMetric,
@@ -157,7 +161,7 @@ ok("Nothing achieved is finite too", Number.isFinite(nothingYet.currentPerDay) &
 
 console.log("\n— Metrics —\n");
 
-ok("Every metric has a definition", METRICS.length === 15, `${METRICS.length}`);
+ok("Every metric has a definition", METRICS.length === 16, `${METRICS.length}`);
 ok(
   "  and every one says what it counts",
   METRICS.every((m) => m.counts.length > 20),
@@ -165,10 +169,10 @@ ok(
 );
 ok(
   "  the contentious ones say what they exclude",
-  ["INVOICED_VALUE", "CALLS_CONNECTED", "ORDER_MARGIN", "VISITS_COMPLETED", "NEW_CUSTOMERS", "ADDON_VALUE"].every(
-    (k) => !!metricByKey[k as TargetMetric].excludes,
+  ["INVOICED_VALUE", "CALLS_CONNECTED", "ORDER_MARGIN", "VISITS_COMPLETED", "NEW_CUSTOMERS", "ADDON_VALUE", "PURCHASE_SAVINGS"].every(
+    (k) => !!metricByKey[k as MetricKey].excludes,
   ),
-  "cancelled invoices, unanswered calls, unknown margin, planned visits, repeat orders, the original subscription",
+  "cancelled invoices, unanswered calls, unknown margin, planned visits, repeat orders, the original subscription, orders with no distributor price",
 );
 // A new customer is not a directory entry. Confusing the two would have the profiling team and the
 // sales team paid for the same act.
@@ -199,5 +203,64 @@ ok("Counts are plain", formatMetric(1450, "COUNT") === "1,450", formatMetric(145
 ok("Minutes become hours", formatMetric(150, "MINUTES") === "2h 30m", formatMetric(150, "MINUTES"));
 ok("  and stay minutes under an hour", formatMetric(45, "MINUTES") === "45m", formatMetric(45, "MINUTES"));
 
-console.log(failures === 0 ? "\nAll target checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
-process.exit(failures === 0 ? 0 : 1);
+/**
+ * A target's window is India's days: from 00:00 IST on its first day up to, not including, 00:00 IST on
+ * the day after its last (src/lib/targets/measure.ts, `rangeOf`). Before that, a month's target compared
+ * booking instants with its calendar dates as midnight UTC, and missed everything booked on the last day
+ * after 05:30 IST. Three probe orders with the instants spelled out in +05:30, measured by the real code
+ * against the real database, and removed again.
+ */
+async function windowBoundaries() {
+  console.log("\n— A target's window is India's days —\n");
+  const { directClient } = await import("../src/lib/tenancy/direct-client");
+  const { measure } = await import("../src/lib/targets/measure");
+  const db = directClient();
+  const TAG = "ZZPROBE_TGTWIN";
+  const clean = async () => {
+    const users = await db.user.findMany({ where: { email: { endsWith: "@zzprobe-tgtwin.invalid" } }, select: { id: true } });
+    const ids = users.map((u) => u.id);
+    await db.companyProduct.deleteMany({ where: { OR: [{ addedByUserId: { in: ids } }, { item: { sku: { startsWith: TAG } } }] } });
+    await db.companyLocation.deleteMany({ where: { company: { name: { startsWith: TAG } } } });
+    await db.company.deleteMany({ where: { OR: [{ name: { startsWith: TAG } }, { createdById: { in: ids } }] } });
+    await db.item.deleteMany({ where: { sku: { startsWith: TAG } } });
+    await db.user.deleteMany({ where: { id: { in: ids } } });
+  };
+  await clean();
+  try {
+    const user = await db.user.create({ data: { name: "Zzprobe Targets", email: "seller@zzprobe-tgtwin.invalid", role: "PROFILE", passwordHash: "x".repeat(60) } });
+    const company = await db.company.create({
+      data: { name: `${TAG} Customer`, normalizedName: `${TAG} customer`.toLowerCase(), createdById: user.id, ownerUserId: user.id, relationshipType: "CLIENT" },
+    });
+    const location = await db.companyLocation.create({ data: { companyId: company.id, label: "Head Office", isPrimary: true } });
+    const item = await db.item.create({ data: { name: `${TAG} Item`, sku: `${TAG}-1`, type: "SERVICE", sellingPrice: 1, createdById: user.id } });
+    const order = (at: string, unitPrice: number) => {
+      const when = new Date(at);
+      return db.companyProduct.create({
+        data: { companyId: company.id, locationId: location.id, itemId: item.id, quantity: 1, unitPrice, orderStatus: "APPROVED", addedByUserId: user.id, createdAt: when, bookedAt: when },
+      });
+    };
+    await order("2026-09-30T23:00:00+05:30", 1000); // 17:30 UTC on the 30th — the one the old window missed
+    await order("2026-09-01T00:10:00+05:30", 200); // 18:40 UTC on 31 August
+    await order("2026-10-01T00:10:00+05:30", 30); // 18:40 UTC on 30 September — October's
+    const september = await measure(db as never, "ORDER_VALUE", { from: d(SEP.fromDate), to: d(SEP.toDate), userIds: [user.id] });
+    eq("An order at 23:00 IST on 30 Sep and one at 00:10 IST on 1 Sep count toward September; one at 00:10 IST on 1 Oct doesn't", september, 1200, "₹1,000 + ₹200, not the ₹30");
+    const october = await measure(db as never, "ORDER_VALUE", { from: d("2026-10-01"), to: d("2026-10-31"), userIds: [user.id] });
+    eq("  and October takes the 00:10 IST one", october, 30);
+  } finally {
+    await clean().catch((err) => {
+      failures += 1;
+      console.error("cleanup failed", err);
+    });
+    await db.$disconnect();
+  }
+}
+
+windowBoundaries()
+  .catch((err) => {
+    failures += 1;
+    console.error(err);
+  })
+  .finally(() => {
+    console.log(failures === 0 ? "\nAll target checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
+    process.exit(failures === 0 ? 0 : 1);
+  });

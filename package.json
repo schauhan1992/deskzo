@@ -151,6 +151,7 @@
     "check:automation-user": "tsx scripts/check-automation-user.ts",
     "check:ledger-close": "tsx scripts/check-ledger-close.ts",
     "check:payments-fx": "tsx scripts/check-payments-fx.ts",
+    "check:order-handoff": "tsx scripts/check-order-handoff.ts",
     "check:close": "tsx scripts/check-close.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts"

@@ -25,6 +25,8 @@ import { getCreditSnapshot } from "@/actions/credit";
 import { CreditBadge } from "@/components/credit/credit-badge";
 import { creditConcerns, termsExceed, type TermsKey } from "@/lib/credit/engine";
 import { formatCurrency } from "@/lib/utils";
+import { handoffValues } from "@/lib/validation/order";
+import { handoffLabels, impliedMargin, istTodayKey } from "@/lib/orders/handoff-rules";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +47,7 @@ export function NewOrderForm({
   items,
   users,
   commissionParties = [],
+  vendors = [],
   initialCompanyId,
   initialLocations = [],
   initialProposals = [],
@@ -52,6 +55,8 @@ export function NewOrderForm({
   creditInPlan = true,
   resellersInPlan = true,
 }: {
+  /** The vendors a distributor price can name — or it is typed, for one not in the CRM. */
+  vendors?: { id: string; name: string }[];
   /** Receivables are in the workspace's plan: the customer's credit is shown as they are chosen. */
   creditInPlan?: boolean;
   /** Resellers are: a reseller's own price is filled in for them. */
@@ -91,6 +96,15 @@ export function NewOrderForm({
       businessType: "NEW",
       watcherUserIds: [],
       expenses: [],
+      // Sent now is what every order always did, so it stays the default.
+      handoff: "NOW",
+      releaseOn: "",
+      quotedPurchasePrice: "",
+      quoteVendorId: "",
+      quoteVendorName: "",
+      quoteContact: "",
+      quotedOn: "",
+      quoteRemarks: "",
     },
   });
   const { fields: expenseFields, append: appendExpense, remove: removeExpense } = useFieldArray({ control, name: "expenses" });
@@ -133,6 +147,19 @@ export function NewOrderForm({
   // Terms chosen on the order that are longer than suggested — the one case that needs an override now, not at approval.
   const overridingTerms =
     !!credit && !!chosenTerms && chosenTerms !== credit.defaultTerms && termsExceed(chosenTerms, credit.recommendedTerms);
+
+  // The hand-off and the distributor's price.
+  const handoff = watch("handoff") ?? "NOW";
+  const today = istTodayKey(new Date());
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const quoteRaw = watch("quotedPurchasePrice");
+  const quotePrice = quoteRaw === "" || quoteRaw === undefined || quoteRaw === null ? null : Number(quoteRaw);
+  const salePrice = Number(watch("unitPrice") || selectedItem?.sellingPrice || 0);
+  const quoteMargin =
+    quotePrice !== null && Number.isFinite(quotePrice) && salePrice > 0
+      ? impliedMargin(salePrice, quotePrice, Number(watch("quantity")) || 1)
+      : null;
+  const quoteVendorId = watch("quoteVendorId") ?? "";
 
   function loadCompanyDetails(companyId: string) {
     setValue("locationId", "");
@@ -430,6 +457,92 @@ export function NewOrderForm({
             <Textarea id="notes" {...register("notes")} />
           </div>
 
+          <fieldset className="space-y-2 rounded-md border border-line p-3">
+            <legend className="px-1 text-sm font-medium text-text">Purchase hand-off</legend>
+            <p className="text-xs text-muted">
+              When purchase may start on it. An in-hand order (an advance PO) stays on the books and visible, but out of
+              purchase&apos;s queue until you send it.
+            </p>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              {handoffValues.map((h) => (
+                <label key={h} className="flex items-center gap-1.5 text-sm text-text">
+                  <input type="radio" value={h} {...register("handoff")} className="h-3.5 w-3.5" />
+                  {h === "HOLD" ? "Hold (in-hand order)" : h === "SCHEDULE" ? "Schedule on a date" : handoffLabels.NOW}
+                </label>
+              ))}
+            </div>
+            {handoff === "SCHEDULE" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="releaseOn">Goes to purchase on</Label>
+                <Input id="releaseOn" type="date" min={tomorrow} className="w-48" {...register("releaseOn")} />
+                {errors.releaseOn && <p className="text-xs text-danger">{errors.releaseOn.message}</p>}
+              </div>
+            )}
+            {handoff !== "NOW" && (
+              <p className="text-xs text-subtle">
+                It counts toward targets once a payment comes in against it, or when it goes to purchase — whichever is
+                first.
+              </p>
+            )}
+          </fieldset>
+
+          <fieldset className="space-y-3 rounded-md border border-line p-3">
+            <legend className="px-1 text-sm font-medium text-text">Distributor price (optional)</legend>
+            <p className="text-xs text-muted">
+              A purchase price you already have from a distributor. Purchase can buy for less — that&apos;s recorded as their
+              saving — but paying more needs their reason and your agreement.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="quotedPurchasePrice">Price per unit</Label>
+                <Input id="quotedPurchasePrice" type="number" step="0.01" min={0} {...register("quotedPurchasePrice")} />
+                {errors.quotedPurchasePrice && <p className="text-xs text-danger">{errors.quotedPurchasePrice.message}</p>}
+                {quoteMargin && (
+                  <p className={`text-xs ${quoteMargin.margin >= 0 ? "text-success" : "text-danger"}`}>
+                    Margin at this price: {formatCurrency(quoteMargin.margin)}
+                    {quoteMargin.percent !== null ? ` (${quoteMargin.percent}%)` : ""}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="quotedOn">Date quoted</Label>
+                <Input id="quotedOn" type="date" max={today} {...register("quotedOn")} />
+                <p className="text-xs text-subtle">Blank is today.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="quoteVendorId">Distributor</Label>
+                <CompanyCombobox
+                  id="quoteVendorId"
+                  companies={vendors}
+                  value={quoteVendorId}
+                  onSelect={(vendor) => {
+                    setValue("quoteVendorId", vendor?.id ?? "");
+                    if (vendor) setValue("quoteVendorName", "");
+                  }}
+                  placeholder="Search vendors…"
+                />
+                {!quoteVendorId && (
+                  <Input
+                    aria-label="Distributor's name, if not in the CRM"
+                    placeholder="…or type their name"
+                    {...register("quoteVendorName")}
+                  />
+                )}
+                {errors.quoteVendorName && <p className="text-xs text-danger">{errors.quoteVendorName.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="quoteContact">Contact at the distributor</Label>
+                <Input id="quoteContact" placeholder="Who gave you the price" {...register("quoteContact")} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="quoteRemarks">Remarks</Label>
+              <Textarea id="quoteRemarks" placeholder="Validity, stock, terms…" {...register("quoteRemarks")} />
+            </div>
+          </fieldset>
+
           <div className="space-y-2 rounded-md border border-line p-3">
             <div className="flex items-center justify-between">
               <Label className="text-sm">Expenses (commission, freight, etc.)</Label>
@@ -541,8 +654,8 @@ export function NewOrderForm({
           </div>
 
           <p className="text-xs text-subtle">
-            An Order ID is generated automatically once punched. The vendor and purchase price are set later by the
-            purchase team, after Accounts approves.
+            An Order ID is generated automatically once punched. The vendor and the price actually paid are set later by
+            the purchase team, after Accounts approves and once the order is with them.
           </p>
 
           <div className="flex justify-end gap-3 pt-2">

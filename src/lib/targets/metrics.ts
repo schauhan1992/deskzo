@@ -17,8 +17,16 @@ import type { TargetMetric, TargetPeriod, TargetScope } from "@prisma/client";
 
 export type MetricUnit = "CURRENCY" | "COUNT" | "MINUTES";
 
+/**
+ * Every metric this code can measure. `PURCHASE_SAVINGS` is defined and measured here ahead of the
+ * database: it joins Prisma's `TargetMetric` enum in its own migration (see the ORD-HANDOFF report), and
+ * until that is applied a target can't be *stored* on it. Once the client is regenerated this union is
+ * exactly `TargetMetric`, and nothing here needs to change.
+ */
+export type MetricKey = TargetMetric | "PURCHASE_SAVINGS";
+
 export type MetricDefinition = {
-  key: TargetMetric;
+  key: MetricKey;
   label: string;
   unit: MetricUnit;
   /** Which team this is usually for — used to group the picker, not to restrict it. */
@@ -53,16 +61,27 @@ export const METRICS: MetricDefinition[] = [
     label: "Order value",
     unit: "CURRENCY",
     team: "Sales",
-    counts: "Orders you punched in the period, at the selling price, once they are past approval.",
-    excludes: "Orders still awaiting approval, and cancelled ones.",
+    counts:
+      "Orders you punched, at the selling price, once they are past approval — counted on the day they were booked: when punched, or for an in-hand order, its first payment or the day it went to purchase.",
+    excludes: "Orders still awaiting approval, cancelled ones, and in-hand orders with no payment that sales hasn't sent to purchase yet.",
   },
   {
     key: "ORDER_MARGIN",
     label: "Order margin",
     unit: "CURRENCY",
     team: "Sales",
-    counts: "Selling price less the purchase price and any order expenses, on the orders you punched.",
-    excludes: "Orders where the purchase price hasn't been filled in yet — the margin isn't known.",
+    counts: "Selling price less the purchase price and any order expenses, on the orders you punched — counted on the day each was booked.",
+    excludes: "Orders where the purchase price hasn't been filled in yet — the margin isn't known — and in-hand orders not yet booked.",
+  },
+  {
+    key: "PURCHASE_SAVINGS",
+    label: "Purchase savings",
+    unit: "CURRENCY",
+    team: "Purchase",
+    counts:
+      "What you bought for below the salesperson's distributor price, times the quantity, on the orders you processed in the period — less what it cost where sales accepted a higher price.",
+    excludes:
+      "Orders with no distributor price from sales (there is nothing to have saved against), prices you entered yourself, and cancelled orders.",
   },
   {
     key: "LEADS_WON",
@@ -152,7 +171,7 @@ export const METRICS: MetricDefinition[] = [
 ];
 
 export const metricByKey = Object.fromEntries(METRICS.map((m) => [m.key, m])) as Record<
-  TargetMetric,
+  MetricKey,
   MetricDefinition
 >;
 

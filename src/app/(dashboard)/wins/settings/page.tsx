@@ -7,6 +7,7 @@ import { AwardSettings } from "@/components/wins/award-settings";
 import { PrizesManager } from "@/components/wins/prizes-manager";
 import { awardSettings } from "@/lib/performance/award-settings";
 import { METRICS } from "@/lib/targets/metrics";
+import type { TargetMetric } from "@prisma/client";
 import { RACE_LABEL, SLOTS } from "@/lib/wins/prizes";
 
 export const metadata = { title: "Prizes & settings" };
@@ -61,7 +62,8 @@ export default async function WinsSettingsPage() {
         />
       </div>
 
-      <WinsSettings initial={settings} metrics={METRICS.map((m) => ({ key: m.key, label: m.label }))} />
+      {/* `as TargetMetric`: PURCHASE_SAVINGS is in METRICS ahead of the enum (see MetricKey in src/lib/targets/metrics.ts). */}
+      <WinsSettings initial={settings} metrics={METRICS.map((m) => ({ key: m.key as TargetMetric, label: m.label }))} />
 
       <div>
         <h2 className="mb-2 text-sm font-semibold text-text">Most active of the fortnight</h2>

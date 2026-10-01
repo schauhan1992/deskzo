@@ -729,4 +729,15 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   CloseTaskTemplate: { disposition: "specification", reason: "Configuration rather than records. The month-end checklist's tasks are described in the workflow specification, to be rebuilt in the target." },
   RevenueCloseSettings: { disposition: "specification", reason: "Configuration rather than records: automatic posting on or off, how revenue is spread, and the thresholds for explaining a month's movements." },
   DailyJobRun: { disposition: "excluded", reason: "Which once-a-day job ran on which day, so it runs only once. Operational bookkeeping of this installation, not a record." },
+  // ─── Orders: the hand-off to purchase and the distributor price ────────────────────────────────
+  OrderPriceChange: {
+    disposition: "archive",
+    reason:
+      "Immutable history — every distributor price, purchase, higher price proposed, accepted or sent back on an order, with who and why. The order's final vendor and price export with the order; this is the argument behind them, which no target CRM has a place for.",
+  },
+  PurchaseSaving: {
+    disposition: "archive",
+    reason:
+      "Immutable history — what each purchaser saved (or, where an increase was accepted, gave up) against the salesperson's distributor price. A performance record rather than a trading one, kept for the reviews it was used in; a cancelled order's stays, marked cancelled.",
+  },
 };

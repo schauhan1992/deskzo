@@ -59,6 +59,56 @@ const orderExpenseInputSchema = z
     payeeAccountId: val.type === "COMMISSION" ? val.payeeAccountId : "",
   }));
 
+/** An optional money field: blank is "not given", anything else must be a number of rupees. */
+const optionalMoney = z.preprocess(
+  (v) => (v === "" || v === undefined || v === null ? undefined : Number(v)),
+  z.number({ error: "Enter the price as a number of rupees" }).nonnegative("A price can't be negative").optional(),
+);
+
+/**
+ * The price a salesperson got from a distributor, and where from — optional on an order, and all of a
+ * piece: details without a price say nothing, and a price without its distributor can't be checked.
+ * `quoteVendorId` is a vendor in the CRM; `quoteVendorName` is free text for one that isn't.
+ */
+const quoteFields = {
+  quotedPurchasePrice: optionalMoney,
+  quoteVendorId: z.string().optional().or(z.literal("")),
+  quoteVendorName: z.string().trim().max(200).optional().or(z.literal("")),
+  quoteContact: z.string().trim().max(200).optional().or(z.literal("")),
+  /** `yyyy-mm-dd`; blank is today (in India). */
+  quotedOn: z.string().trim().optional().or(z.literal("")),
+  quoteRemarks: z.string().trim().max(1000).optional().or(z.literal("")),
+};
+
+type QuoteInput = {
+  quotedPurchasePrice?: number;
+  quoteVendorId?: string;
+  quoteVendorName?: string;
+  quoteContact?: string;
+  quotedOn?: string;
+  quoteRemarks?: string;
+};
+
+function refineQuote(val: QuoteInput, ctx: z.RefinementCtx) {
+  const hasDetails = !!(val.quoteVendorId || val.quoteVendorName || val.quoteContact || val.quoteRemarks || val.quotedOn);
+  if (val.quotedPurchasePrice === undefined) {
+    if (hasDetails) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the distributor's price per unit, or clear the distributor details",
+        path: ["quotedPurchasePrice"],
+      });
+    }
+    return;
+  }
+  if (!val.quoteVendorId && !val.quoteVendorName) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Say which distributor gave this price", path: ["quoteVendorName"] });
+  }
+}
+
+/** How the salesperson hands the order to purchase: now (the default, as every order always went), held, or on a day. */
+export const handoffValues = ["NOW", "HOLD", "SCHEDULE"] as const;
+
 export const createOrderSchema = z.object({
   companyId: z.string().min(1, "Select a customer"),
   locationId: z.string().min(1, "Select a location"),
@@ -81,6 +131,15 @@ export const createOrderSchema = z.object({
   notes: z.string().trim().optional().or(z.literal("")),
   watcherUserIds: z.array(z.string()).default([]),
   expenses: z.array(orderExpenseInputSchema).default([]),
+  handoff: z.enum(handoffValues).default("NOW"),
+  /** The go-ahead day, `yyyy-mm-dd`, for SCHEDULE — checked against India's today in the action. */
+  releaseOn: z.string().trim().optional().or(z.literal("")),
+  ...quoteFields,
+}).superRefine((val, ctx) => {
+  if (val.handoff === "SCHEDULE" && !val.releaseOn) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Choose the day it goes to purchase", path: ["releaseOn"] });
+  }
+  refineQuote(val, ctx);
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
@@ -98,4 +157,11 @@ export const processOrderSchema = z.object({
   vendorId: z.string().min(1, "Select which vendor this was purchased from"),
   purchasePrice: z.preprocess((v) => (v === "" || v === undefined ? undefined : Number(v)), z.number().positive("Purchase price must be greater than 0")),
   ourPoNumber: z.string().trim().optional().or(z.literal("")),
+  /** Why purchase is paying more than the salesperson's distributor price — required when it is. */
+  increaseReason: z.string().trim().max(1000).optional().or(z.literal("")),
 });
+
+/** Adding, changing or removing the distributor price after the order was punched. A blank price removes it. */
+export const orderQuoteSchema = z
+  .object({ orderId: z.string().min(1), ...quoteFields })
+  .superRefine((val, ctx) => refineQuote(val, ctx));

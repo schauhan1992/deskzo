@@ -1,4 +1,5 @@
 import type { SplashScope, TargetMetric } from "@prisma/client";
+import type { MetricKey } from "@/lib/targets/metrics";
 
 /**
  * The words on a sales celebration — pure, so every one of them can be read in a test before anybody
@@ -16,7 +17,7 @@ export function inrSpoken(n: number): string {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
-export const METRIC_WORDS: Partial<Record<TargetMetric, { noun: string; money: boolean }>> = {
+export const METRIC_WORDS: Partial<Record<MetricKey, { noun: string; money: boolean }>> = {
   INVOICED_VALUE: { noun: "invoicing", money: true },
   COLLECTED_VALUE: { noun: "collections", money: true },
   ORDER_VALUE: { noun: "order value", money: true },
@@ -25,6 +26,7 @@ export const METRIC_WORDS: Partial<Record<TargetMetric, { noun: string; money: b
   LEADS_WON: { noun: "deals won", money: false },
   LEAD_VALUE_WON: { noun: "value won", money: true },
   NEW_CUSTOMERS: { noun: "new customers", money: false },
+  PURCHASE_SAVINGS: { noun: "purchase savings", money: true },
 };
 
 export type WinCopy = { title: string; message: string };

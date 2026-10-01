@@ -238,7 +238,7 @@ async function main() {
 
     const now = new Date();
     await db.companyProduct.create({ data: { companyId: company.id, locationId: location.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "APPROVED", accountsApprovedAt: now, quantity: 8, unitPrice: 1000 } as never });
-    await db.companyProduct.create({ data: { companyId: returning.id, locationId: oldLocation.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "FULFILLED", accountsApprovedAt: new Date(now.getTime() - 60 * DAY), createdAt: new Date(now.getTime() - 60 * DAY), quantity: 1, unitPrice: 1000 } as never });
+    await db.companyProduct.create({ data: { companyId: returning.id, locationId: oldLocation.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "FULFILLED", accountsApprovedAt: new Date(now.getTime() - 60 * DAY), createdAt: new Date(now.getTime() - 60 * DAY), bookedAt: new Date(now.getTime() - 60 * DAY), quantity: 1, unitPrice: 1000 } as never });
     await db.companyProduct.create({ data: { companyId: returning.id, locationId: oldLocation.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "APPROVED", accountsApprovedAt: now, quantity: 5, unitPrice: 1000 } as never });
 
     const { year, month } = istDateParts(now);

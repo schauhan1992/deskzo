@@ -12,7 +12,19 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatOrderId } from "@/lib/order-id";
-import { createOrderSchema, approveOrderSchema, processOrderSchema } from "@/lib/validation/order";
+import { createOrderSchema, approveOrderSchema, processOrderSchema, orderQuoteSchema } from "@/lib/validation/order";
+import {
+  MIN_INCREASE_REASON,
+  calendarDay,
+  checkReleaseDate,
+  istTodayKey,
+  needsSalesApproval,
+  priceCeiling,
+  savingAmount,
+  shortDay,
+} from "@/lib/orders/handoff-rules";
+import { peopleHolding, releaseDueOrders, tellPurchase } from "@/lib/orders/handoff";
+import { istCalendarDate } from "@/lib/india-time";
 import { isCustomerRelationshipType, isVendorRelationshipType } from "@/lib/validation/company";
 import { canResellerTrade, resellerStatusLabels } from "@/lib/reseller-onboarding";
 import { toPlain } from "@/lib/serialize";
@@ -52,6 +64,67 @@ async function validateExpensePayees(
     }
   }
   return null;
+}
+
+const num = (v: Prisma.Decimal | number | null | undefined) => (v === null || v === undefined ? null : Number(v));
+const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+/**
+ * An order the caller may see, or null — the account scope every order action goes through, so an
+ * order on somebody else's account answers exactly as a made-up id does.
+ */
+async function visibleOrder(userId: string, id: string) {
+  const order = await db.companyProduct.findUnique({
+    where: { id },
+    include: { company: { select: { id: true, name: true, ownerUserId: true } } },
+  });
+  if (!order || !(await canSeeCompany(userId, order.company.ownerUserId))) return null;
+  return order;
+}
+
+/** The salesperson who punched the order, or anyone who approves orders: who decides on its hand-off and its price. */
+async function speaksForSales(userId: string, order: { addedByUserId: string }) {
+  return order.addedByUserId === userId || (await hasEffectivePermission(userId, "orders.approve"));
+}
+
+type QuoteData = {
+  quotedPurchasePrice?: number;
+  quoteVendorId?: string;
+  quoteVendorName?: string;
+  quoteContact?: string;
+  quotedOn?: string;
+  quoteRemarks?: string;
+};
+
+/**
+ * The distributor price as it will be stored, checked: the distributor a vendor in the CRM (or a name
+ * typed for one that isn't), the date a real one no later than today in India — blank is today.
+ */
+async function resolveQuote(data: QuoteData, now: Date) {
+  if (data.quotedPurchasePrice === undefined) return { ok: true as const, quote: null };
+  const quoteVendorId = data.quoteVendorId || null;
+  if (quoteVendorId) {
+    const vendor = await db.company.findUnique({ where: { id: quoteVendorId }, select: { relationshipType: true } });
+    if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) {
+      return { ok: false as const, error: "That distributor isn't a vendor in the CRM — pick one, or type their name." };
+    }
+  }
+  const today = istTodayKey(now);
+  const onKey = data.quotedOn || today;
+  const quotedOn = calendarDay(onKey);
+  if (!quotedOn) return { ok: false as const, error: "The date quoted isn't a date." };
+  if (onKey > today) return { ok: false as const, error: "The date quoted can't be in the future." };
+  return {
+    ok: true as const,
+    quote: {
+      quotedPurchasePrice: new Prisma.Decimal(data.quotedPurchasePrice),
+      quoteVendorId,
+      quoteVendorName: quoteVendorId ? null : data.quoteVendorName || null,
+      quoteContact: data.quoteContact || null,
+      quotedOn,
+      quoteRemarks: data.quoteRemarks || null,
+    },
+  };
 }
 
 /** The order-punching form (sales). Vendor/purchase price aren't collected here — that's the purchase team's job once accounts approves. */
@@ -122,8 +195,44 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
     }
   }
 
+  /**
+   * The hand-off. Sent now is what every order always did. Held or scheduled, it stays out of
+   * purchase's queue and counts as booked only once a payment arrives or it is released (O-D2), so
+   * `bookedAt` starts empty.
+   */
+  const now = new Date();
+  let handoff: Pick<Prisma.CompanyProductUncheckedCreateInput, "purchaseRelease" | "releaseOn" | "releasedAt" | "releasedById" | "bookedAt">;
+  if (data.handoff === "SCHEDULE") {
+    const day = checkReleaseDate(data.releaseOn, now);
+    if (!day.ok) return { ok: false, error: day.error };
+    handoff = { purchaseRelease: "SCHEDULED", releaseOn: day.day, bookedAt: null };
+  } else if (data.handoff === "HOLD") {
+    handoff = { purchaseRelease: "HELD", bookedAt: null };
+  } else {
+    handoff = { purchaseRelease: "RELEASED", releasedAt: now, releasedById: user.id };
+  }
+  const quoted = await resolveQuote(data, now);
+  if (!quoted.ok) return { ok: false, error: quoted.error };
+  const quote = quoted.quote;
+
   const order = await db.companyProduct.create({
     data: {
+      ...handoff,
+      ...(quote
+        ? {
+            ...quote,
+            quotedById: user.id,
+            priceChanges: {
+              create: {
+                event: "QUOTED",
+                toPrice: quote.quotedPurchasePrice,
+                vendorId: quote.quoteVendorId,
+                reason: quote.quoteRemarks,
+                byUserId: user.id,
+              },
+            },
+          }
+        : {}),
       companyId: data.companyId,
       locationId: data.locationId,
       itemId: data.itemId,
@@ -155,7 +264,19 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
     },
   });
 
-  await recordAudit({ userId: user.id, action: "CREATE", entityType: "Order", entityId: order.id, entityLabel: `Order for ${company.name}` });
+  const held =
+    handoff.purchaseRelease === "HELD"
+      ? " — held, not yet sent to purchase"
+      : handoff.purchaseRelease === "SCHEDULED"
+        ? ` — goes to purchase on ${shortDay(handoff.releaseOn as Date, now)}`
+        : "";
+  await recordAudit({
+    userId: user.id,
+    action: "CREATE",
+    entityType: "Order",
+    entityId: order.id,
+    entityLabel: `Order for ${company.name}${held}${quote ? ` · distributor price ${rupees(Number(quote.quotedPurchasePrice))}` : ""}`,
+  });
   if (termsCheck.decision) {
     await recordDecision({
       userId: user.id,
@@ -275,6 +396,18 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
     });
   }
 
+  /**
+   * Purchase hears about an order the moment it can act on it: approved and released. An order punched
+   * to go now reaches them here; a held one only when sales lets it go (`releaseOrder`), and one whose
+   * scheduled day has already come is released now and announced by that.
+   */
+  if (approved) {
+    const releasedNow = await releaseDueOrders(new Date(), [orderId]);
+    if (releasedNow.length === 0 && order.purchaseRelease === "RELEASED") {
+      await tellPurchase({ id: orderId, orderSeq: order.orderSeq, companyName: order.company.name }, "approved by accounts.", user.id);
+    }
+  }
+
   // Booked now: a new customer's first order, or the order that tips somebody past target.
   if (approved) await detectSalesWins().catch((err) => console.error("sales wins could not be detected", err));
   revalidatePath("/orders");
@@ -283,8 +416,30 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
   return { ok: true, data: { id: orderId } };
 }
 
-/** Purchase team sets the vendor, cost price, and our PO once an order is approved. */
-export async function processOrder(input: unknown): Promise<ActionResult<{ id: string }>> {
+/** Clears a price increase waiting for sales — every field of it, as the database insists (all or none). */
+const NO_PENDING_INCREASE = {
+  pendingPurchasePrice: null,
+  pendingVendorId: null,
+  priceIncreaseReason: null,
+  priceReviewRequestedAt: null,
+  priceReviewRequestedById: null,
+} as const;
+
+/**
+ * Purchase team sets the vendor, cost price, and our PO once an order is approved — and released: an
+ * order sales is still holding (or has scheduled for a later day) isn't theirs yet.
+ *
+ * Against the salesperson's distributor price, when there is one:
+ *
+ *   · at or below it, the order is processed as it always was, and the difference × quantity is
+ *     recorded as this purchaser's saving (`PurchaseSaving`);
+ *   · above it, a reason is required and the order is **not** processed: the price waits for the
+ *     salesperson to accept it (`acceptPriceIncrease`) or send it back (`sendBackPriceIncrease`).
+ *
+ * No distributor price, or one the purchaser entered themselves, is processed as always, with no
+ * saving (owner decision O-D1).
+ */
+export async function processOrder(input: unknown): Promise<ActionResult<{ id: string; awaitingSales: boolean }>> {
   const user = await requireModuleUser("orders");
   if (!(await hasEffectivePermission(user.id, "orders.process"))) {
     return { ok: false, error: "You don't have permission to process orders." };
@@ -293,36 +448,436 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { orderId, vendorId, purchasePrice, ourPoNumber } = parsed.data;
+  const { orderId, vendorId, purchasePrice, ourPoNumber, increaseReason } = parsed.data;
 
-  const order = await db.companyProduct.findUnique({ where: { id: orderId } });
+  // Purchase's queue releases a scheduled order whose day has come, whether or not the job has run yet.
+  const now = new Date();
+  await releaseDueOrders(now, [orderId]);
+  const order = await visibleOrder(user.id, orderId);
   if (!order) {
     return { ok: false, error: "Order not found." };
   }
   if (order.orderStatus !== "APPROVED" && order.orderStatus !== "PROCESSING") {
     return { ok: false, error: "This order isn't ready for purchasing yet — it needs accounts approval first." };
   }
+  if (order.purchaseRelease !== "RELEASED") {
+    return {
+      ok: false,
+      error:
+        order.purchaseRelease === "HELD"
+          ? "Sales is holding this order — it hasn't been sent to purchase yet."
+          : `This order goes to purchase on ${order.releaseOn ? shortDay(order.releaseOn, now) : "its scheduled day"} — it can't be processed before then.`,
+    };
+  }
   const vendor = await db.company.findUnique({ where: { id: vendorId } });
   if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) {
     return { ok: false, error: "That's not a valid vendor." };
   }
 
-  await db.companyProduct.update({
-    where: { id: orderId },
-    data: {
-      vendorId,
-      purchasePrice,
-      ourPoNumber: ourPoNumber || null,
-      purchasedByUserId: user.id,
-      orderStatus: "PROCESSING",
-    },
+  const quote = num(order.quotedPurchasePrice);
+  const ceiling = priceCeiling(
+    { quotedPurchasePrice: quote, quotedById: order.quotedById, orderStatus: order.orderStatus, purchasePrice: num(order.purchasePrice) },
+    user.id,
+  );
+  const label = formatOrderId(order.orderSeq);
+
+  if (needsSalesApproval(ceiling, purchasePrice)) {
+    const reason = (increaseReason ?? "").trim();
+    const over = Math.round((purchasePrice - ceiling!) * 100) / 100;
+    const against = ceiling === quote ? "the salesperson's distributor price" : "the price sales accepted";
+    if (reason.length < MIN_INCREASE_REASON) {
+      return {
+        ok: false,
+        error: `That's ${rupees(over)} above ${against} (${rupees(ceiling!)}). Say why — at least ${MIN_INCREASE_REASON} characters — and sales will be asked to accept it.`,
+      };
+    }
+    await db.$transaction(async (tx) => {
+      await tx.companyProduct.update({
+        where: { id: orderId },
+        data: {
+          pendingPurchasePrice: new Prisma.Decimal(purchasePrice),
+          pendingVendorId: vendorId,
+          priceIncreaseReason: reason,
+          priceReviewRequestedAt: now,
+          priceReviewRequestedById: user.id,
+        },
+      });
+      await tx.orderPriceChange.create({
+        data: {
+          companyProductId: orderId,
+          event: "INCREASE_REQUESTED",
+          fromPrice: new Prisma.Decimal(ceiling!),
+          toPrice: new Prisma.Decimal(purchasePrice),
+          vendorId,
+          reason,
+          byUserId: user.id,
+          at: now,
+        },
+      });
+    });
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Order",
+      entityId: orderId,
+      entityLabel: `${label} — asked sales to accept ${rupees(purchasePrice)} from ${vendor.name}, ${rupees(over)} above ${rupees(ceiling!)}`,
+    });
+    if (order.addedByUserId !== user.id) {
+      await notifyUser({
+        userId: order.addedByUserId,
+        type: "ORDER_STATUS_CHANGED",
+        title: `${label}: purchase needs a higher price`,
+        message: `Purchase can get this at ${rupees(purchasePrice)}, ${rupees(over)} above ${ceiling === quote ? "your distributor's price" : "the price you accepted"}: ${reason}`,
+        link: `/orders/${orderId}`,
+      });
+    }
+    revalidatePath("/orders");
+    revalidatePath(`/orders/${orderId}`);
+    return { ok: true, data: { id: orderId, awaitingSales: true } };
+  }
+
+  // A re-save that only adds the PO number is not a new purchase: the price's history and the saving
+  // (and the period it counts in) stay as they were.
+  const priceChanged =
+    order.orderStatus !== "PROCESSING" || order.vendorId !== vendorId || num(order.purchasePrice) !== purchasePrice;
+  const benchmark = ceiling === null ? null : quote;
+  await db.$transaction(async (tx) => {
+    await tx.companyProduct.update({
+      where: { id: orderId },
+      data: {
+        vendorId,
+        purchasePrice,
+        ourPoNumber: ourPoNumber || null,
+        purchasedByUserId: user.id,
+        orderStatus: "PROCESSING",
+        // Found it at or under the price after all: whatever was waiting for sales is overtaken.
+        ...NO_PENDING_INCREASE,
+      },
+    });
+    if (priceChanged) {
+      await tx.orderPriceChange.create({
+        data: {
+          companyProductId: orderId,
+          event: "PURCHASED",
+          fromPrice: benchmark === null ? null : new Prisma.Decimal(benchmark),
+          toPrice: new Prisma.Decimal(purchasePrice),
+          vendorId,
+          byUserId: user.id,
+          at: now,
+        },
+      });
+      if (benchmark !== null) {
+        const saving = {
+          purchaserId: user.id,
+          quotedPrice: new Prisma.Decimal(benchmark),
+          actualPrice: new Prisma.Decimal(purchasePrice),
+          quantity: order.quantity,
+          amount: new Prisma.Decimal(savingAmount(benchmark, purchasePrice, order.quantity)),
+          recordedAt: now,
+          recordedOn: istCalendarDate(now),
+          cancelledAt: null,
+        };
+        await tx.purchaseSaving.upsert({ where: { companyProductId: orderId }, create: { companyProductId: orderId, ...saving }, update: saving });
+      }
+    }
   });
 
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: formatOrderId(order.orderSeq) });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: orderId,
+    entityLabel:
+      benchmark !== null && priceChanged
+        ? `${label} — purchased at ${rupees(purchasePrice)} against a distributor price of ${rupees(benchmark)}`
+        : label,
+  });
 
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/companies/${order.companyId}`);
+  return { ok: true, data: { id: orderId, awaitingSales: false } };
+}
+
+/**
+ * The salesperson (or an approver) agrees to purchase's higher price: the order is processed at it, as
+ * `processOrder` would have, and the difference is recorded against the purchaser as a negative saving —
+ * so the performance view shows what the increase cost rather than nothing at all.
+ */
+export async function acceptPriceIncrease(orderId: string): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const order = await visibleOrder(user.id, orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  if (!(await speaksForSales(user.id, order))) {
+    return { ok: false, error: "Only the salesperson who punched this order, or someone who approves orders, can accept a higher price." };
+  }
+  if (order.pendingPurchasePrice === null) return { ok: false, error: "There's no higher price waiting on this order." };
+  if (order.priceReviewRequestedById === user.id) {
+    return { ok: false, error: "You proposed this price — the salesperson, or another approver, decides on it." };
+  }
+  if (order.orderStatus !== "APPROVED" && order.orderStatus !== "PROCESSING") {
+    return { ok: false, error: "This order can't be processed any more." };
+  }
+  if (!order.pendingVendorId || !order.priceReviewRequestedById) {
+    return { ok: false, error: "The vendor or the purchaser behind this price is no longer in the CRM — send it back to purchase." };
+  }
+  const quote = num(order.quotedPurchasePrice);
+  const price = Number(order.pendingPurchasePrice);
+  const purchaserId = order.priceReviewRequestedById;
+  const vendorId = order.pendingVendorId;
+  const now = new Date();
+
+  await db.$transaction(async (tx) => {
+    await tx.companyProduct.update({
+      where: { id: orderId },
+      data: {
+        vendorId,
+        purchasePrice: new Prisma.Decimal(price),
+        purchasedByUserId: purchaserId,
+        orderStatus: "PROCESSING",
+        ...NO_PENDING_INCREASE,
+      },
+    });
+    await tx.orderPriceChange.create({
+      data: {
+        companyProductId: orderId,
+        event: "INCREASE_ACCEPTED",
+        fromPrice: quote === null ? null : new Prisma.Decimal(quote),
+        toPrice: new Prisma.Decimal(price),
+        vendorId,
+        reason: order.priceIncreaseReason,
+        byUserId: user.id,
+        at: now,
+      },
+    });
+    if (quote !== null) {
+      const saving = {
+        purchaserId,
+        quotedPrice: new Prisma.Decimal(quote),
+        actualPrice: new Prisma.Decimal(price),
+        quantity: order.quantity,
+        amount: new Prisma.Decimal(savingAmount(quote, price, order.quantity)),
+        recordedAt: now,
+        recordedOn: istCalendarDate(now),
+        cancelledAt: null,
+      };
+      await tx.purchaseSaving.upsert({ where: { companyProductId: orderId }, create: { companyProductId: orderId, ...saving }, update: saving });
+    }
+  });
+
+  const label = formatOrderId(order.orderSeq);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: `${label} — accepted purchase's price of ${rupees(price)}` });
+  await notifyUser({
+    userId: purchaserId,
+    type: "ORDER_STATUS_CHANGED",
+    title: `${label}: higher price accepted`,
+    message: `${rupees(price)} was accepted — go ahead with the purchase.`,
+    link: `/orders/${orderId}`,
+  });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/companies/${order.companyId}`);
+  return { ok: true, data: { id: orderId } };
+}
+
+/** The salesperson (or an approver) turns purchase's higher price down, with a note: purchase looks again. */
+export async function sendBackPriceIncrease(orderId: string, note: string): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const order = await visibleOrder(user.id, orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  if (!(await speaksForSales(user.id, order))) {
+    return { ok: false, error: "Only the salesperson who punched this order, or someone who approves orders, can send a price back." };
+  }
+  if (order.pendingPurchasePrice === null) return { ok: false, error: "There's no higher price waiting on this order." };
+  if (order.priceReviewRequestedById === user.id) {
+    return { ok: false, error: "You proposed this price — the salesperson, or another approver, decides on it." };
+  }
+  const why = (note ?? "").trim();
+  if (why.length < 3) return { ok: false, error: "Tell purchase what to do instead — a better price, another distributor…" };
+  const price = Number(order.pendingPurchasePrice);
+  const requesterId = order.priceReviewRequestedById;
+
+  await db.$transaction(async (tx) => {
+    await tx.companyProduct.update({ where: { id: orderId }, data: { ...NO_PENDING_INCREASE } });
+    await tx.orderPriceChange.create({
+      data: {
+        companyProductId: orderId,
+        event: "SENT_BACK",
+        fromPrice: order.quotedPurchasePrice,
+        toPrice: new Prisma.Decimal(price),
+        vendorId: order.pendingVendorId,
+        reason: why.slice(0, 1000),
+        byUserId: user.id,
+      },
+    });
+  });
+
+  const label = formatOrderId(order.orderSeq);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: `${label} — sent purchase's price of ${rupees(price)} back` });
+  if (requesterId) {
+    await notifyUser({
+      userId: requesterId,
+      type: "ORDER_STATUS_CHANGED",
+      title: `${label}: ${rupees(price)} sent back`,
+      message: why,
+      link: `/orders/${orderId}`,
+    });
+  }
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, data: { id: orderId } };
+}
+
+/**
+ * Adds, changes or removes the salesperson's distributor price after punching — until purchase has
+ * processed the order. After that it is the benchmark a saving was measured against, and moving it
+ * would rewrite somebody's performance.
+ */
+export async function setOrderQuote(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const parsed = orderQuoteSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const order = await visibleOrder(user.id, parsed.data.orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  if (!(await speaksForSales(user.id, order))) {
+    return { ok: false, error: "Only the salesperson who punched this order, or someone who approves orders, can set its distributor price." };
+  }
+  if (order.orderStatus !== "PENDING_APPROVAL" && order.orderStatus !== "APPROVED") {
+    return { ok: false, error: "The distributor price can't change once purchase has processed the order." };
+  }
+  if (order.pendingPurchasePrice !== null) {
+    return { ok: false, error: "Purchase is waiting on a decision about a higher price — accept it or send it back first." };
+  }
+  const resolved = await resolveQuote(parsed.data, new Date());
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const quote = resolved.quote;
+  const cleared = {
+    quotedPurchasePrice: null,
+    quoteVendorId: null,
+    quoteVendorName: null,
+    quoteContact: null,
+    quotedOn: null,
+    quoteRemarks: null,
+    quotedById: null,
+  };
+  if (!quote && order.quotedPurchasePrice === null) return { ok: true, data: { id: order.id } };
+
+  await db.$transaction(async (tx) => {
+    await tx.companyProduct.update({ where: { id: order.id }, data: quote ? { ...quote, quotedById: user.id } : cleared });
+    await tx.orderPriceChange.create({
+      data: {
+        companyProductId: order.id,
+        event: "QUOTED",
+        fromPrice: order.quotedPurchasePrice,
+        toPrice: quote ? quote.quotedPurchasePrice : null,
+        vendorId: quote ? quote.quoteVendorId : null,
+        reason: quote ? quote.quoteRemarks : "Distributor price removed",
+        byUserId: user.id,
+      },
+    });
+  });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: order.id,
+    entityLabel: `${formatOrderId(order.orderSeq)} — distributor price ${quote ? `set to ${rupees(Number(quote.quotedPurchasePrice))}` : "removed"}`,
+  });
+  revalidatePath(`/orders/${order.id}`);
+  return { ok: true, data: { id: order.id } };
+}
+
+/** Who may move an order's hand-off, and whether it can still move: the checks the three actions below share. */
+async function handOffAccess(userId: string, orderId: string) {
+  const order = await visibleOrder(userId, orderId);
+  if (!order) return { ok: false as const, error: "Order not found." };
+  if (!(await speaksForSales(userId, order))) {
+    return { ok: false as const, error: "Only the salesperson who punched this order, or someone who approves orders, can decide when it goes to purchase." };
+  }
+  if (order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED") {
+    return { ok: false as const, error: `This order is ${order.orderStatus.toLowerCase()}.` };
+  }
+  if (order.purchaseRelease === "RELEASED") return { ok: false as const, error: "This order is already with purchase." };
+  return { ok: true as const, order };
+}
+
+/**
+ * Sends a held or scheduled order to purchase now. With no payment against it yet, it counts as booked
+ * from this moment (O-D2); purchase is told if accounts has already approved it.
+ */
+export async function releaseOrder(orderId: string): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const access = await handOffAccess(user.id, orderId);
+  if (!access.ok) return { ok: false, error: access.error };
+  const { order } = access;
+  const now = new Date();
+
+  const claim = await db.companyProduct.updateMany({
+    where: { id: orderId, purchaseRelease: { in: ["HELD", "SCHEDULED"] } },
+    data: { purchaseRelease: "RELEASED", releaseOn: null, releasedAt: now, releasedById: user.id },
+  });
+  if (claim.count !== 1) return { ok: false, error: "This order is already with purchase." };
+  const booked = await db.companyProduct.updateMany({ where: { id: orderId, bookedAt: null }, data: { bookedAt: now } });
+
+  const label = formatOrderId(order.orderSeq);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: `${label} — sent to purchase` });
+  if (order.orderStatus === "APPROVED") {
+    await tellPurchase({ id: orderId, orderSeq: order.orderSeq, companyName: order.company.name }, "sales has sent it to purchase.", user.id);
+  }
+  if (booked.count > 0) await detectSalesWins().catch((err) => console.error("sales wins could not be detected", err));
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/companies/${order.companyId}`);
+  return { ok: true, data: { id: orderId } };
+}
+
+/** Schedules a held (or already scheduled) order to go to purchase on a day after today, in India. */
+export async function scheduleRelease(orderId: string, date: string): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const access = await handOffAccess(user.id, orderId);
+  if (!access.ok) return { ok: false, error: access.error };
+  const now = new Date();
+  const day = checkReleaseDate(date, now);
+  if (!day.ok) return { ok: false, error: day.error };
+
+  const moved = await db.companyProduct.updateMany({
+    where: { id: orderId, purchaseRelease: { in: ["HELD", "SCHEDULED"] } },
+    data: { purchaseRelease: "SCHEDULED", releaseOn: day.day },
+  });
+  if (moved.count !== 1) return { ok: false, error: "This order is already with purchase." };
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: orderId,
+    entityLabel: `${formatOrderId(access.order.orderSeq)} — goes to purchase on ${shortDay(day.day, now)}`,
+  });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, data: { id: orderId } };
+}
+
+/** Takes a scheduled order off its schedule: held, until sales decides. */
+export async function holdOrder(orderId: string): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  const access = await handOffAccess(user.id, orderId);
+  if (!access.ok) return { ok: false, error: access.error };
+  if (access.order.purchaseRelease === "HELD") return { ok: false, error: "This order is already held." };
+
+  const moved = await db.companyProduct.updateMany({
+    where: { id: orderId, purchaseRelease: "SCHEDULED" },
+    data: { purchaseRelease: "HELD", releaseOn: null },
+  });
+  if (moved.count !== 1) return { ok: false, error: "This order is already with purchase." };
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: orderId,
+    entityLabel: `${formatOrderId(access.order.orderSeq)} — held; its scheduled day was dropped`,
+  });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
   return { ok: true, data: { id: orderId } };
 }
 
@@ -344,6 +899,12 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
   }
   if (order.orderStatus !== "PROCESSING" && order.orderStatus !== "APPROVED") {
     return { ok: false, error: "Only an approved or in-progress order can be marked fulfilled." };
+  }
+  if (order.purchaseRelease !== "RELEASED") {
+    return { ok: false, error: "Sales hasn't sent this order to purchase yet." };
+  }
+  if (order.pendingPurchasePrice !== null) {
+    return { ok: false, error: "A higher price is waiting for sales to accept — settle that first." };
   }
 
   await db.companyProduct.update({
@@ -375,13 +936,32 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
   return { ok: true, data: null };
 }
 
-export async function cancelOrder(orderId: string, reason?: string): Promise<ActionResult<null>> {
+/**
+ * Cancels an order, by where it had got to:
+ *
+ *   · **Held or scheduled** — cancels cleanly: the scheduled day is dropped and purchase never hears of it.
+ *   · **With purchase, not yet processed** — a reason is required; it leaves purchase's queue, and if it
+ *     was in that queue (approved), everyone who processes orders is told.
+ *   · **Processing** (a vendor chosen, our PO issued) — a reason is required, the purchaser is told, and
+ *     the order shows "Vendor PO to cancel" until they say what became of it (`settleVendorPo`).
+ *   · **Fulfilled** — can't be: a return goes through a credit note.
+ *
+ * In every case, in one transaction: a price increase waiting for sales is cleared; the purchase saving
+ * is marked cancelled (kept, struck through, and never counted — see `PurchaseSaving.cancelledAt`); and
+ * any payment against the order moves on account (O-D3): its allocations are released, so the money is
+ * the customer's unapplied balance, and accounts is told to refund it or apply it to another order. No
+ * ledger entry — the receipt already sits in receivables as received; only its application changes.
+ */
+export async function cancelOrder(orderId: string, reason?: string): Promise<ActionResult<{ movedOnAccount: number }>> {
   const user = await requireModuleUser("orders");
-  const order = await db.companyProduct.findUnique({ where: { id: orderId } });
+  const order = await visibleOrder(user.id, orderId);
   if (!order) {
     return { ok: false, error: "Order not found." };
   }
-  if (order.orderStatus === "FULFILLED" || order.orderStatus === "CANCELLED") {
+  if (order.orderStatus === "FULFILLED") {
+    return { ok: false, error: "A fulfilled order can't be cancelled — a return goes through a credit note." };
+  }
+  if (order.orderStatus === "CANCELLED") {
     return { ok: false, error: "This order can no longer be cancelled." };
   }
   const [canApprove, canProcess] = await Promise.all([
@@ -392,18 +972,128 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
     return { ok: false, error: "You don't have permission to cancel this order." };
   }
 
-  await db.companyProduct.update({
-    where: { id: orderId },
-    data: {
-      orderStatus: "CANCELLED",
-      accountsNotes: reason ? `Cancelled: ${reason}` : order.accountsNotes,
-    },
+  const why = (reason ?? "").trim();
+  const withPurchase = order.purchaseRelease === "RELEASED";
+  const processing = order.orderStatus === "PROCESSING";
+  if (withPurchase && why.length < 3) {
+    return {
+      ok: false,
+      error: processing
+        ? "Say why it's being cancelled — the purchaser is told, and has a vendor PO to cancel."
+        : "Say why it's being cancelled — it's already with purchase.",
+    };
+  }
+
+  const now = new Date();
+  let moved: number;
+  try {
+    moved = await db.$transaction(async (tx) => {
+      const changed = await tx.companyProduct.updateMany({
+        where: { id: orderId, orderStatus: { notIn: ["CANCELLED", "FULFILLED"] } },
+        data: {
+          orderStatus: "CANCELLED",
+          accountsNotes: why ? `Cancelled: ${why}` : order.accountsNotes,
+          cancelledAt: now,
+          cancelledById: user.id,
+          cancelReason: why || null,
+          vendorPoCancel: processing ? "PENDING" : null,
+          // The scheduled go-ahead is dropped: it never went to purchase, and now never will.
+          ...(order.purchaseRelease === "SCHEDULED" ? { purchaseRelease: "HELD" as const, releaseOn: null } : {}),
+          ...NO_PENDING_INCREASE,
+        },
+      });
+      if (changed.count !== 1) throw new Error("ORDER_MOVED_ON");
+      const allocations = await tx.paymentAllocation.findMany({ where: { companyProductId: orderId }, select: { id: true, amount: true } });
+      if (allocations.length > 0) await tx.paymentAllocation.deleteMany({ where: { id: { in: allocations.map((a) => a.id) } } });
+      await tx.purchaseSaving.updateMany({ where: { companyProductId: orderId, cancelledAt: null }, data: { cancelledAt: now } });
+      return Math.round(allocations.reduce((t, a) => t + Number(a.amount), 0) * 100) / 100;
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "ORDER_MOVED_ON") return { ok: false, error: "This order can no longer be cancelled." };
+    throw err;
+  }
+
+  const label = formatOrderId(order.orderSeq);
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: orderId,
+    entityLabel: `${label} cancelled${why ? `: ${why}` : ""}${moved > 0 ? ` · ${rupees(moved)} moved on account` : ""}`,
   });
+
+  const said = why ? `: ${why}` : ".";
+  if (processing && order.purchasedByUserId && order.purchasedByUserId !== user.id) {
+    await notifyUser({
+      userId: order.purchasedByUserId,
+      type: "ORDER_STATUS_CHANGED",
+      title: `${label} was cancelled — cancel our vendor PO`,
+      message: `${order.company.name}${said} Mark on the order what became of the PO.`,
+      link: `/orders/${orderId}`,
+    });
+  } else if (withPurchase && order.orderStatus === "APPROVED") {
+    const holders = await peopleHolding("orders.process", [user.id]);
+    await Promise.all(
+      holders.map((userId) =>
+        notifyUser({ userId, type: "ORDER_STATUS_CHANGED", title: `${label} was cancelled`, message: `${order.company.name}${said}`, link: `/orders/${orderId}` }),
+      ),
+    );
+  }
+  if (order.addedByUserId !== user.id) {
+    await notifyUser({
+      userId: order.addedByUserId,
+      type: "ORDER_STATUS_CHANGED",
+      title: "Your order was cancelled",
+      message: `${label} — ${order.company.name}${said}`,
+      link: `/orders/${orderId}`,
+    });
+  }
+  if (moved > 0) {
+    const accounts = await peopleHolding("payments.record", [user.id]);
+    await Promise.all(
+      accounts.map((userId) =>
+        notifyUser({
+          userId,
+          type: "ORDER_STATUS_CHANGED",
+          title: `${rupees(moved)} is on account for ${order.company.name}`,
+          message: `${label} was cancelled with payment against it. Refund it, or apply it to another order.`,
+          link: `/companies/${order.companyId}?tab=payments`,
+        }),
+      ),
+    );
+  }
 
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/companies/${order.companyId}`);
-  return { ok: true, data: null };
+  revalidatePath("/payments");
+  return { ok: true, data: { movedOnAccount: moved } };
+}
+
+/** The purchaser says what became of our vendor PO on a cancelled order: cancelled with the vendor, or never needed. */
+export async function settleVendorPo(orderId: string, outcome: "CANCELLED" | "NOT_NEEDED"): Promise<ActionResult<{ id: string }>> {
+  const user = await requireModuleUser("orders");
+  if (!(await hasEffectivePermission(user.id, "orders.process"))) {
+    return { ok: false, error: "Only purchase can settle a vendor PO." };
+  }
+  if (outcome !== "CANCELLED" && outcome !== "NOT_NEEDED") return { ok: false, error: "Say whether the PO was cancelled or wasn't needed." };
+  const order = await visibleOrder(user.id, orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  const settled = await db.companyProduct.updateMany({
+    where: { id: orderId, vendorPoCancel: "PENDING" },
+    data: { vendorPoCancel: outcome, vendorPoSettledAt: new Date(), vendorPoSettledById: user.id },
+  });
+  if (settled.count !== 1) return { ok: false, error: "There's no vendor PO waiting to be cancelled on this order." };
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: orderId,
+    entityLabel: `${formatOrderId(order.orderSeq)} — vendor PO ${outcome === "CANCELLED" ? "cancelled" : "cancellation not needed"}`,
+  });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, data: { id: orderId } };
 }
 
 type OrderListParams = {
@@ -415,6 +1105,22 @@ type OrderListParams = {
   /** True = only orders placed by a reseller, false = only direct orders. */
   viaReseller?: boolean;
   search?: string;
+  /**
+   * The hand-off views: sales's in-hand orders (held or scheduled), purchase's queue (approved and
+   * released), orders waiting on sales to accept a higher price, and cancelled orders whose vendor PO
+   * purchase still has to deal with.
+   */
+  flag?: OrderListFlag;
+};
+
+const ORDER_LIST_FLAGS = ["held", "ready", "review", "vendorPo"] as const;
+type OrderListFlag = (typeof ORDER_LIST_FLAGS)[number];
+
+const flagWhere: Record<OrderListFlag, Prisma.CompanyProductWhereInput> = {
+  held: { purchaseRelease: { in: ["HELD", "SCHEDULED"] }, orderStatus: { notIn: ["CANCELLED", "REJECTED", "FULFILLED"] } },
+  ready: { orderStatus: "APPROVED", purchaseRelease: "RELEASED", pendingPurchasePrice: null },
+  review: { pendingPurchasePrice: { not: null } },
+  vendorPo: { vendorPoCancel: "PENDING" },
 };
 
 async function orderListWhere(
@@ -445,6 +1151,7 @@ async function orderListWhere(
     ...(params?.companyId ? { companyId: params.companyId } : {}),
     ...(params?.endCustomerId ? { endCustomerId: params.endCustomerId } : {}),
     ...(Object.keys(companyFilter).length > 0 ? { company: companyFilter } : {}),
+    ...(params?.flag && ORDER_LIST_FLAGS.includes(params.flag) ? flagWhere[params.flag] : {}),
   };
 }
 
@@ -470,6 +1177,9 @@ export async function listOrders(params?: OrderListParams) {
 export async function listOrdersPaged(params: OrderListParams & { page: number; pageSize: number }) {
   const user = await requireModuleUser("orders");
   if (!(await viewerHas("orders.view"))) return { rows: [], total: 0, pendingApproval: 0 };
+  // Purchase's queue releases scheduled orders whose day has come as it loads, so a missed tick of the
+  // daily job never holds one back. The schedule does the releasing, not whoever opened the list.
+  await releaseDueOrders();
   // All three queries below take this same `where`, scope included — the page, the total the pager
   // counts against, and the badge. A scoped page with an unscoped total is a pager that walks off
   // the end of the list; a scoped page with an unscoped badge is a queue that never empties.
@@ -492,6 +1202,8 @@ export async function listOrdersPaged(params: OrderListParams & { page: number; 
 export async function getOrder(id: string) {
   const user = await requireModuleUser("orders");
   if (!(await viewerHas("orders.view"))) return null;
+  // A scheduled order whose day has come is released before anybody reads it as still waiting.
+  await releaseDueOrders(new Date(), [id]);
   // Scoped in the `where` so the include stays exactly as the detail page expects it, and so an
   // order on somebody else's account answers the same way a made-up id does. This page carries the
   // purchase price and the vendor as well as the sale, which is more than the list ever shows.
@@ -520,9 +1232,32 @@ export async function getOrder(id: string) {
           allocatedBy: { select: { id: true, name: true } },
         },
       },
+      releasedBy: { select: { id: true, name: true } },
+      quoteVendor: { select: { id: true, name: true } },
+      quotedBy: { select: { id: true, name: true } },
+      pendingVendor: { select: { id: true, name: true } },
+      priceReviewRequestedBy: { select: { id: true, name: true } },
+      cancelledBy: { select: { id: true, name: true } },
+      vendorPoSettledBy: { select: { id: true, name: true } },
+      priceChanges: { orderBy: { at: "asc" }, include: { byUser: { select: { id: true, name: true } } } },
+      purchaseSaving: { include: { purchaser: { select: { id: true, name: true } } } },
     },
   });
-  return order ? toPlain(order) : null;
+  if (!order) return null;
+  // The price history keeps a vendor as a bare id (a vendor deleted later mustn't erase the step), so
+  // the names are looked up for display — and a gone one reads as such rather than as nothing.
+  const vendorIds = [...new Set(order.priceChanges.map((c) => c.vendorId).filter((v): v is string => !!v))];
+  const vendors = vendorIds.length
+    ? await db.company.findMany({ where: { id: { in: vendorIds } }, select: { id: true, name: true } })
+    : [];
+  const vendorName = new Map(vendors.map((v) => [v.id, v.name]));
+  return toPlain({
+    ...order,
+    priceChanges: order.priceChanges.map((c) => ({
+      ...c,
+      vendorName: c.vendorId ? (vendorName.get(c.vendorId) ?? "a vendor no longer in the CRM") : null,
+    })),
+  });
 }
 
 /** Proposals belonging to leads of this company, for the order-punch "link to proposal" picker. */
@@ -554,4 +1289,93 @@ export async function hasExistingOrderForItem(companyId: string, itemId: string)
     select: { id: true },
   });
   return !!existing;
+}
+
+/**
+ * What purchase saved against salespeople's distributor prices, by person and month — the "Purchase
+ * savings" report. Savings and accepted increases are added up separately, because a net figure hides
+ * a purchaser who saves on most orders and gives it all back on one.
+ *
+ * Everyone's to anybody who can see team performance or approves orders; a purchaser sees their own.
+ * `from`/`to` are Indian calendar days (`yyyy-mm-dd`), matched against the day each saving was recorded
+ * on — a `@db.Date`, so compared by calendar day, both ends included; either left out is open, as the
+ * date-range picker's "All time" is. A saving on a cancelled order is listed, struck through, and
+ * counted nowhere.
+ */
+export async function purchaseSavingsReport(params: { from?: string; to?: string }) {
+  const user = await requireModuleUser("orders");
+  if (!(await viewerHas("orders.view"))) return null;
+  const [seesPerformance, approves, purchases] = await Promise.all([
+    viewerHas("performance.view"),
+    viewerHas("orders.approve"),
+    viewerHas("orders.process"),
+  ]);
+  const everyone = seesPerformance || approves;
+  if (!everyone && !purchases) return null;
+
+  const from = params.from ? calendarDay(params.from) : null;
+  const to = params.to ? calendarDay(params.to) : null;
+  const scope = await viaCompanyScope(user.id);
+
+  const rows = await db.purchaseSaving.findMany({
+    where: {
+      ...(from || to ? { recordedOn: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+      ...(everyone ? {} : { purchaserId: user.id }),
+      ...(Object.keys(scope).length ? { companyProduct: scope as Prisma.CompanyProductWhereInput } : {}),
+    },
+    orderBy: [{ recordedOn: "desc" }, { recordedAt: "desc" }],
+    include: {
+      purchaser: { select: { id: true, name: true } },
+      companyProduct: {
+        select: {
+          id: true,
+          orderSeq: true,
+          orderStatus: true,
+          company: { select: { name: true } },
+          item: { select: { name: true } },
+          addedBy: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  type Bucket = { purchaserId: string; purchaser: string; month: string; savings: number; increases: number; lines: number };
+  const buckets = new Map<string, Bucket>();
+  for (const r of rows) {
+    if (r.cancelledAt) continue;
+    const month = r.recordedOn.toISOString().slice(0, 7);
+    const key = `${r.purchaserId}|${month}`;
+    const b = buckets.get(key) ?? { purchaserId: r.purchaserId, purchaser: r.purchaser.name, month, savings: 0, increases: 0, lines: 0 };
+    const amount = Number(r.amount);
+    if (amount >= 0) b.savings += amount;
+    else b.increases += amount;
+    b.lines += 1;
+    buckets.set(key, b);
+  }
+  const summary = [...buckets.values()]
+    .map((b) => ({ ...b, savings: Math.round(b.savings * 100) / 100, increases: Math.round(b.increases * 100) / 100, net: Math.round((b.savings + b.increases) * 100) / 100 }))
+    .sort((a, b) => b.month.localeCompare(a.month) || a.purchaser.localeCompare(b.purchaser));
+
+  return {
+    /** The days asked for, as `yyyy-mm-dd`, or null where the range is open. */
+    from: from ? from.toISOString().slice(0, 10) : null,
+    to: to ? to.toISOString().slice(0, 10) : null,
+    everyone,
+    summary,
+    lines: rows.map((r) => ({
+      id: r.id,
+      recordedOn: r.recordedOn.toISOString().slice(0, 10),
+      purchaser: r.purchaser.name,
+      orderId: r.companyProduct.id,
+      orderSeq: r.companyProduct.orderSeq,
+      customer: r.companyProduct.company.name,
+      item: r.companyProduct.item.name,
+      salesperson: r.companyProduct.addedBy.name,
+      quotedPrice: Number(r.quotedPrice),
+      actualPrice: Number(r.actualPrice),
+      quantity: r.quantity,
+      amount: Number(r.amount),
+      cancelled: !!r.cancelledAt,
+    })),
+  };
 }

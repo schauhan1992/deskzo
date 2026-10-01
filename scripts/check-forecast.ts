@@ -267,8 +267,12 @@ async function main() {
       data: { docType: "PROPOSAL", direction: "SALES", status: "ISSUED", companyId: company.id, leadId: proposed.id, docNumber: `${TAG}-P1`, taxableValue: 80_000, total: 94_400, createdById: rep.id } as never,
     });
 
+    // Booked when punched, as every order sent straight to purchase is: a backdated `createdAt` backdates
+    // `bookedAt` with it, which is what bookings count by (the migration backfilled them the same way).
     const order = (data: Record<string, unknown>) =>
-      db.companyProduct.create({ data: { companyId: company.id, locationId: location.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "FULFILLED", paymentTerms: "NET_30", ...data } as never });
+      db.companyProduct.create({
+        data: { companyId: company.id, locationId: location.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "FULFILLED", paymentTerms: "NET_30", ...data, ...(data.createdAt ? { bookedAt: data.createdAt } : {}) } as never,
+      });
     const open = await order({ quantity: 10, unitPrice: 1000, fullTermUnitPrice: 1000, endDate: inNextMonth });
     const renewedOld = await order({ quantity: 5, unitPrice: 2000, fullTermUnitPrice: 2000, endDate: inNextMonth });
     await order({ quantity: 1, unitPrice: 12_000, renewedFromId: renewedOld.id, endDate: new Date(inNextMonth.getTime() + 365 * DAY) });

@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { SLA_HOURS } from "@/lib/tickets";
 import { dateRangeFilter } from "@/lib/utils";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 export async function canViewPerformance(): Promise<boolean> {
   const user = await requireUser();
@@ -24,7 +25,29 @@ export type UserPerformanceRow = {
   avgResolutionHours: number | null;
   slaMetPercent: number | null;
   leadsWon: number;
+  /**
+   * What they saved as a purchaser against sales's distributor prices, net of increases sales accepted
+   * (the PURCHASE_SAVINGS metric). Null when the workspace has no Orders module.
+   */
+  purchaseSavings: number | null;
 };
+
+/**
+ * Purchase savings per purchaser over the page's range, by the Indian day each was recorded on — a
+ * `@db.Date`, so the `yyyy-mm-dd` bounds are compared as calendar days. A cancelled order's never counts.
+ */
+async function purchaseSavingsByUser(from?: string, to?: string): Promise<Map<string, number> | null> {
+  if (!(await moduleAvailableForTenant("orders"))) return null;
+  const day = (key: string | undefined) => (key && /^\d{4}-\d{2}-\d{2}$/.test(key) ? new Date(`${key}T00:00:00Z`) : undefined);
+  const gte = day(from);
+  const lte = day(to);
+  const rows = await db.purchaseSaving.groupBy({
+    by: ["purchaserId"],
+    where: { cancelledAt: null, ...(gte || lte ? { recordedOn: { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) } } : {}) },
+    _sum: { amount: true },
+  });
+  return new Map(rows.map((r) => [r.purchaserId, Math.round(Number(r._sum.amount ?? 0) * 100) / 100]));
+}
 
 /**
  * Per-user activity/performance rollup for the `/performance` page. `from`/`to` scope the
@@ -40,7 +63,7 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
 
   const createdAtRange = dateRangeFilter(params?.from, params?.to);
 
-  const [users, activityRows, auditRows, assignedTickets, wonLeads] = await Promise.all([
+  const [users, activityRows, auditRows, assignedTickets, wonLeads, savings] = await Promise.all([
     db.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, role: true, active: true } }),
     db.userDailyActivity.findMany({
       where: createdAtRange ? { date: createdAtRange } : undefined,
@@ -64,6 +87,7 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
       where: { status: "WON", ownerUserId: { not: null }, ...(createdAtRange ? { updatedAt: createdAtRange } : {}) },
       select: { ownerUserId: true },
     }),
+    purchaseSavingsByUser(params?.from, params?.to),
   ]);
 
   return users.map((u) => {
@@ -106,6 +130,7 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
       avgResolutionHours,
       slaMetPercent,
       leadsWon,
+      purchaseSavings: savings ? (savings.get(u.id) ?? 0) : null,
     };
   });
 }

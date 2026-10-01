@@ -9,6 +9,8 @@ import { calculateOrderAmount } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
 import { formatCurrency } from "@/lib/utils";
 import { orderBusinessTypeLabels } from "@/lib/validation/order";
+import { orderFlags } from "@/components/orders/orders-table";
+import type { ReleaseState } from "@/lib/orders/handoff-rules";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -29,6 +31,10 @@ type OrderRow = {
   company: { id: string; name: string; relationshipType: CompanyRelationshipType };
   endCustomer: { id: string; name: string } | null;
   item: { id: string; name: string; unit: string | null; sellingPrice: number; taxRatePercent: number | null };
+  purchaseRelease: ReleaseState;
+  releaseOn: Date | string | null;
+  pendingPurchasePrice: number | null;
+  vendorPoCancel: "PENDING" | "CANCELLED" | "NOT_NEEDED" | null;
 };
 
 /**
@@ -75,6 +81,11 @@ export function OrderSplitList({ orders, selectedId }: { orders: OrderRow[]; sel
                   {order.orderStatus.replaceAll("_", " ")}
                 </Badge>
                 <span className="text-xs text-subtle">{orderBusinessTypeLabels[order.businessType]}</span>
+                {orderFlags(order).map((flag) => (
+                  <Badge key={flag} tone="amber">
+                    {flag}
+                  </Badge>
+                ))}
               </>
             }
           />

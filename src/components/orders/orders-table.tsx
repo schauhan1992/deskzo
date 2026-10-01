@@ -10,6 +10,7 @@ import { canAnnounceFulfilment } from "@/lib/marketing/customer-notices";
 import { formatCurrency } from "@/lib/utils";
 import { Badge, Card } from "@/components/ui/card";
 import { useColumns } from "@/components/ui/table-columns";
+import { handoffBadge, vendorPoLabels, type ReleaseState } from "@/lib/orders/handoff-rules";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -39,7 +40,25 @@ type OrderRow = {
   item: { id: string; name: string; unit: string | null; sellingPrice: number; taxRatePercent: number | null };
   vendor: { id: string; name: string } | null;
   addedBy: { id: string; name: string };
+  purchaseRelease: ReleaseState;
+  releaseOn: Date | string | null;
+  pendingPurchasePrice: number | null;
+  vendorPoCancel: "PENDING" | "CANCELLED" | "NOT_NEEDED" | null;
 };
+
+/**
+ * What an order is waiting on besides its status: sales holding it back from purchase, a higher price
+ * waiting for sales, or a cancelled order's vendor PO. Shared with the split list.
+ */
+export function orderFlags(o: Pick<OrderRow, "orderStatus" | "purchaseRelease" | "releaseOn" | "pendingPurchasePrice" | "vendorPoCancel">): string[] {
+  const flags: string[] = [];
+  const open = o.orderStatus !== "CANCELLED" && o.orderStatus !== "REJECTED" && o.orderStatus !== "FULFILLED";
+  const handoff = open ? handoffBadge(o) : null;
+  if (handoff) flags.push(handoff);
+  if (open && o.pendingPurchasePrice !== null) flags.push("Waiting for sales approval");
+  if (o.vendorPoCancel === "PENDING") flags.push(vendorPoLabels.PENDING);
+  return flags;
+}
 
 /**
  * Deliberately has no row selection or bulk actions. An order moves through approval one at a time
@@ -85,6 +104,11 @@ export function OrdersTable({ orders }: { orders: OrderRow[] }) {
                 {cols.show("status") && (
                   <td className="px-4 py-2.5">
                     <Badge tone={ORDER_STATUS_TONE[o.orderStatus]}>{o.orderStatus.replaceAll("_", " ")}</Badge>
+                    {orderFlags(o).map((flag) => (
+                      <div key={flag} className="mt-1">
+                        <Badge tone={flag === vendorPoLabels.PENDING ? "red" : "amber"}>{flag}</Badge>
+                      </div>
+                    ))}
                   </td>
                 )}
                 {cols.show("type") && (
