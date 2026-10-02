@@ -62,6 +62,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // The workspace's own fields on its records (src/lib/custom-fields) — settings, in every plan.
   "custom-fields.ts": "core",
   "pipeline.ts": "core",
+  "wording.ts": "core",
   "dashboard.ts": "core",
   "data-export.ts": "core",
   "data-import.ts": "core",

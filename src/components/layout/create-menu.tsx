@@ -20,6 +20,8 @@ import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { Button } from "@/components/ui/button";
 import { MenuLabel, MenuSeparator } from "@/components/ui/menu";
 import { NoteDialog } from "@/components/notes/note-dialog";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot, type TermKey } from "@/lib/terms/dictionary";
 
 /**
  * The header's "Create" button: one place to start any of the records somebody makes several times
@@ -38,6 +40,8 @@ import { NoteDialog } from "@/components/notes/note-dialog";
 
 type CreateEntry = {
   label: string;
+  /** The word the label is built from, for a workspace with its own (src/lib/terms). */
+  term?: { key: TermKey; template: string };
   icon: LucideIcon;
   /** Module key from src/lib/modules.ts that owns the destination route. */
   module: string;
@@ -50,25 +54,25 @@ const SECTIONS: { group: string; entries: CreateEntry[] }[] = [
   {
     group: "Sales",
     entries: [
-      { label: "New lead", icon: Target, module: "companies", href: "/leads/new" },
+      { label: "New lead", term: { key: "lead", template: "New {one:lower}" }, icon: Target, module: "companies", href: "/leads/new" },
       // One entry, not two. There is no separate "customer" record to create: /customers lists
       // CLIENT companies that have bought something (`customerListWhere` in src/actions/company.ts
       // filters on `products: { some: {} }`), and a company becomes one by ordering, not by being
       // typed in differently. /companies/new takes no `stage` — it hardcodes the CLIENT track — so
       // a second "Add customer" row pointing at it with a query string appended would open the
       // identical blank form and quietly ignore the parameter.
-      { label: "Add company", icon: Building2, module: "companies", href: "/companies/new" },
+      { label: "Add company", term: { key: "company", template: "Add {one:lower}" }, icon: Building2, module: "companies", href: "/companies/new" },
       // Proposals live under Sales Documents, which owns every trade document type; the blank form
       // is the shared /documents/new page narrowed by ?type=.
       { label: "New proposal", icon: FileText, module: "sales_documents", href: "/documents/new?type=PROPOSAL" },
-      { label: "New order", icon: ShoppingCart, module: "orders", href: "/orders/new" },
+      { label: "New order", term: { key: "order", template: "New {one:lower}" }, icon: ShoppingCart, module: "orders", href: "/orders/new" },
     ],
   },
   {
     group: "Support & field",
     entries: [
-      { label: "New ticket", icon: Ticket, module: "helpdesk", permission: "tickets.create", href: "/tickets/new" },
-      { label: "New visit", icon: MapPin, module: "visits", href: "/visits/new" },
+      { label: "New ticket", term: { key: "ticket", template: "New {one:lower}" }, icon: Ticket, module: "helpdesk", permission: "tickets.create", href: "/tickets/new" },
+      { label: "New visit", term: { key: "visit", template: "New {one:lower}" }, icon: MapPin, module: "visits", href: "/visits/new" },
     ],
   },
   {
@@ -93,6 +97,8 @@ export function CreateMenu({
   permissions: string[];
   canBroadcastNotes: boolean;
 }) {
+  const wording = useWording();
+  const labelOf = (entry: CreateEntry) => (entry.term ? slot(wording, entry.label, entry.term.key, entry.term.template) : entry.label);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
@@ -164,7 +170,7 @@ export function CreateMenu({
                 return entry.href ? (
                   <Link key={entry.label} href={entry.href} role="menuitem" className={itemClass} onClick={() => setOpen(false)}>
                     <Icon className="h-4 w-4 shrink-0 text-subtle" />
-                    {entry.label}
+                    {labelOf(entry)}
                   </Link>
                 ) : (
                   <button
@@ -178,7 +184,7 @@ export function CreateMenu({
                     }}
                   >
                     <Icon className="h-4 w-4 shrink-0 text-subtle" />
-                    {entry.label}
+                    {labelOf(entry)}
                   </button>
                 );
               })}

@@ -1,5 +1,7 @@
 "use client";
 
+import { useWording } from "@/components/terms/wording-provider";
+import { statusSlot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import type { OrderStatus, OrderBusinessType, CompanyRelationshipType } from "@prisma/client";
 import { orderBusinessTypeLabels } from "@/lib/validation/order";
@@ -85,6 +87,8 @@ export function OrdersTable({
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const cols = useColumns("orders");
+  // The workspace's own names for the statuses (Settings → Wording).
+  const wording = useWording();
   // The fields this person shows, worked out once: the header and every row draw this one list.
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   // The Step column counts as shown by the picker even where there are no steps to show in it.
@@ -127,7 +131,7 @@ export function OrdersTable({
                 )}
                 {cols.show("status") && (
                   <td className="px-4 py-2.5">
-                    <Badge tone={ORDER_STATUS_TONE[o.orderStatus]}>{o.orderStatus.replaceAll("_", " ")}</Badge>
+                    <Badge tone={ORDER_STATUS_TONE[o.orderStatus]}>{statusSlot(wording, o.orderStatus, o.orderStatus.replaceAll("_", " "))}</Badge>
                     {orderFlags(o).map((flag) => (
                       <div key={flag} className="mt-1">
                         <Badge tone={flag === vendorPoLabels.PENDING ? "red" : "amber"}>{flag}</Badge>

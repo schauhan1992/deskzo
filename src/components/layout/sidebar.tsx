@@ -8,6 +8,8 @@ import { Menu, X, ChevronRight, LayoutDashboard, BarChart3, Search, Settings as 
 import { MODULE_REGISTRY, navGroupRank , navPermissionKeys } from "@/lib/modules";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { openSupport } from "@/components/support/open-support";
 
 /** Every module link, for working out which one is the most specific match for the current page. */
@@ -138,6 +140,7 @@ export function Sidebar({
   support?: boolean;
 }) {
   const pathname = usePathname();
+  const wording = useWording();
   const [mobileOpen, setMobileOpen] = useState(false);
   /**
    * Deliberately not persisted, unlike the collapse state and the open sections.
@@ -217,7 +220,8 @@ export function Sidebar({
     );
   }
 
-  const sections: { group: string; items: { href: string; label: string; Icon: typeof LayoutDashboard }[] }[] = [
+  // `canonical` is the app's own label: a renamed page is still found by its old name.
+  const sections: { group: string; items: { href: string; label: string; canonical?: string; Icon: typeof LayoutDashboard }[] }[] = [
     // Explicit order rather than the order the registry happens to declare them in.
     // See NAV_GROUP_ORDER in src/lib/modules.ts.
     ...Array.from(groups.entries())
@@ -232,7 +236,7 @@ export function Sidebar({
             const keys = navPermissionKeys(i);
             return keys.length === 0 || keys.some((k) => permissions.includes(k));
           })
-          .map((i) => ({ href: i.href, label: i.label, Icon: i.icon })),
+          .map((i) => ({ href: i.href, label: i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label, canonical: i.label, Icon: i.icon })),
       })),
     {
       group: "Reports",
@@ -341,7 +345,7 @@ export function Sidebar({
           .map(({ group, items }) => ({
             group,
             items: items.filter(
-              (i) => i.label.toLowerCase().includes(query) || group.toLowerCase().includes(query),
+              (i) => i.label.toLowerCase().includes(query) || (i.canonical ?? "").toLowerCase().includes(query) || group.toLowerCase().includes(query),
             ),
           }))
           .filter((section) => section.items.length > 0)

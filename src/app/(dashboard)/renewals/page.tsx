@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { listRenewalsPaged, type RenewalWindow } from "@/actions/renewal";
 import { isModuleEnabled } from "@/actions/module";
 import { SearchParamInput } from "@/components/ui/search-param-input";
@@ -54,7 +56,7 @@ export default async function RenewalsPage({
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Renewals</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Renewals", "renewal")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} subscription(s) with an expiry date{expiredCount > 0 && ` · ${expiredCount} expired`}
           </p>

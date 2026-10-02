@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import type { VisitStatus, VisitPurpose } from "@prisma/client";
 import { listVisitsPaged, listVisitAssignees } from "@/actions/visit";
@@ -55,14 +57,14 @@ export default async function VisitsPage({
     <div className="animate-fade-rise">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-text">Field visits</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Field visits", "visit")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} visit(s)
             {result.openCount > 0 && ` · ${result.openCount} still open`}
           </p>
         </div>
         <Link href="/visits/new">
-          <Button>Plan visit</Button>
+          <Button>{slot(await getWording(), "Plan visit", "visit", "Plan {one:lower}")}</Button>
         </Link>
       </div>
 

@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listItems } from "@/actions/item";
 import { listBrands } from "@/actions/brand";
@@ -77,7 +79,7 @@ export default async function ItemsPage({
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Items & Inventory</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Items & Inventory", "item", "{many} & Inventory")}</h1>
           <p className="mt-1 text-sm text-muted">{result.total} item(s) in the catalog</p>
         </div>
         <div className="flex items-center gap-2">
@@ -87,7 +89,7 @@ export default async function ItemsPage({
           <ImportItemsDialog />
           <ExportItemsButton />
           <Link href="/items/new">
-            <Button>New item</Button>
+            <Button>{slot(await getWording(), "New item", "item", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>

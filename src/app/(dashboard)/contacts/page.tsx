@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { listAllContactsPaged } from "@/actions/contact";
 import { listIndustries } from "@/actions/industry";
 import { isModuleEnabled } from "@/actions/module";
@@ -59,7 +61,7 @@ export default async function ContactsLibraryPage({
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Contacts</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Contacts", "contact")}</h1>
           <p className="mt-1 text-sm text-muted">{result.total} contact(s) across every company</p>
         </div>
       </div>

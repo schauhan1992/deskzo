@@ -25,6 +25,8 @@ import { getTablePreferences } from "@/actions/table-preference";
 import { pendingSplash } from "@/actions/survey";
 import { SurveySplash } from "@/components/engagement/survey-splash";
 import { TableColumnsProvider } from "@/components/ui/table-columns";
+import { WordingProvider } from "@/components/terms/wording-provider";
+import { getWording } from "@/lib/terms/server";
 import { viewAsContext } from "@/lib/session";
 import { clearViewAsCookie } from "@/lib/impersonation";
 import { listViewAsTargets } from "@/actions/impersonation";
@@ -58,7 +60,7 @@ import { wizardAutoOpens, wizardMounted } from "@/lib/help/onboarding";
 const NO_UNREAD = { deskzo: 0, company: 0 };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
+  const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy, wording] = await Promise.all([
     auth(),
     getModuleStates(),
     headers(),
@@ -66,6 +68,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     getBranding(),
     viewAsContext(),
     getSecurityPolicy(),
+    // The workspace's own words (Settings → Wording, src/lib/terms) — the menu's, and every client
+    // component's through WordingProvider. Never throws.
+    getWording(),
   ]);
   const enabledKeys = modules.filter((m) => m.enabled).map((m) => m.key);
 
@@ -177,6 +182,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <TableColumnsProvider initial={tablePreferences}>
+    <WordingProvider initial={wording}>
     <div className="flex min-h-screen bg-bg">
       {/* Not while impersonating: the heartbeat accrues "time spent on the CRM" against whoever the
           request resolves as, and an admin reading somebody's screen is not that person working. */}
@@ -336,6 +342,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* The Contact Support dialog; its button is on the tool rail from xl, and at the foot of the sidebar below it. */}
       {supportLauncher && <SupportLauncher state={supportLauncher} />}
     </div>
+    </WordingProvider>
     </TableColumnsProvider>
   );
 }

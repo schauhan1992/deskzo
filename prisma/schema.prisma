@@ -1433,6 +1433,22 @@ model SecuritySettings {
  * URLs rather than files so a deployment needs no writable disk or object store — the upload action
  * caps them at a size where that stays sane.
  */
+/**
+ * The workspace's own words (Settings → Wording, src/lib/terms): what it calls a lead, a customer, an
+ * order, and its names for an order's statuses. Only what it changed is stored — `{ terms: { lead:
+ * { one, many, a } }, orderStatus: { FULFILLED: "Installed" } }` — and everything else stays the app's
+ * word. A table of its own rather than a column on a settings row every page reads, so a workspace
+ * still waiting for the migration reads the app's words and nothing else notices.
+ */
+model TerminologySettings {
+  id          String   @id @default("global")
+  overrides   Json     @default("{}")
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("terminology_settings")
+}
+
 model BrandingSettings {
   id             String   @id @default("global")
   appName        String   @default("Deskzo One")

@@ -585,6 +585,11 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   BiometricDevice: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   BiometricPunch: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   BrandingSettings: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  TerminologySettings: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: the workspace's own words for the app's nouns and its names for an order's statuses (Settings → Wording). Described in the workflow specification, so the target can be set up to speak the same way.",
+  },
   Celebration: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   CelebrationSeen: { disposition: "excluded", reason: "Whether somebody dismissed a birthday banner." },
   ContactVerification: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },

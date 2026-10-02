@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listCompaniesPaged, listAssignableUsers } from "@/actions/company";
 import { listIndustries } from "@/actions/industry";
@@ -109,11 +111,11 @@ export default async function CompaniesPage({
   return (
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text">Companies</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Companies", "company")}</h1>
         <div className="flex items-center gap-2">
           <ViewModeToggle viewKey="companies" mode={viewMode} />
           <Link href="/companies/new">
-            <Button>New company</Button>
+            <Button>{slot(await getWording(), "New company", "company", "New {one:lower}")}</Button>
           </Link>
       </div>
       </div>

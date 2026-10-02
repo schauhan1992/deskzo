@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
+import type { TermKey } from "@/lib/terms/dictionary";
 
 /**
  * The keys a nav item is gated on, as a list.
@@ -27,6 +28,12 @@ export type NavItem = {
    * gets a wall when they click — an invitation to a locked door.
    */
   permission?: string | readonly string[];
+  /**
+   * The word the label is built from, for a workspace that has its own (Settings → Wording,
+   * src/lib/terms): "Leads" becomes "Enquiries". `label` stays the app's — the console, the pricing
+   * page and billing share it — and is what shows until the word is renamed.
+   */
+  term?: { key: TermKey; template?: string };
 };
 
 export type ModuleDefinition = {
@@ -80,11 +87,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     core: true,
     navGroup: "Sales",
     navItems: [
-      { href: "/companies", label: "Companies", icon: Building2 },
-      { href: "/leads", label: "Leads", icon: Target, permission: "leads.view" },
-      { href: "/customers", label: "Customer", icon: Handshake },
+      { href: "/companies", label: "Companies", term: { key: "company" }, icon: Building2 },
+      { href: "/leads", label: "Leads", term: { key: "lead" }, icon: Target, permission: "leads.view" },
+      { href: "/customers", label: "Customer", term: { key: "customer" }, icon: Handshake },
       // One company entered twice, and the merge that folds it into the real one — src/lib/companies/merge.ts.
-      { href: "/companies/duplicates", label: "Duplicate companies", icon: Combine, permission: "companies.merge" },
+      { href: "/companies/duplicates", label: "Duplicate companies", term: { key: "company", template: "Duplicate {many:lower}" }, icon: Combine, permission: "companies.merge" },
       // Every email the ERP sent a customer — src/actions/mail-log.ts.
       { href: "/mail-log", label: "Mail log", icon: Mail, permission: "emails.view" },
     ],
@@ -95,7 +102,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     description: "Catalog of goods, services, and subscriptions, with stock tracking for goods.",
     navGroup: "Catalog & Stock",
     navItems: [
-      { href: "/items", label: "Items & Inventory", icon: Package },
+      { href: "/items", label: "Items & Inventory", term: { key: "item", template: "{many} & Inventory" }, icon: Package },
       // The catalogue behind the item pickers — moved here from Settings → Lists, since a reseller's
       // thousand brands are catalogue work rather than configuration.
       { href: "/items/brands", label: "Brands & families", icon: Tags },
@@ -110,7 +117,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       "Order punching: sales punches an order, accounts approves payment terms, purchasing sources the vendor — with margin, PO, and fulfillment tracking end to end.",
     navGroup: "Orders & Renewals",
     navItems: [
-      { href: "/orders", label: "Orders", icon: ShoppingCart },
+      { href: "/orders", label: "Orders", term: { key: "order" }, icon: ShoppingCart },
       // What purchase saved against sales's distributor prices: for purchase, approvers and performance viewers.
       { href: "/orders/savings", label: "Purchase savings", icon: PiggyBank, permission: ["orders.process", "orders.approve", "performance.view"] },
       // What OEMs and distributors are to pay back, and what has come in — rebates.view only (owner, 1 Oct 2026).
@@ -157,7 +164,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     description:
       "Track subscription start/expiry dates across every customer and manage upcoming renewals in one place.",
     navGroup: "Orders & Renewals",
-    navItems: [{ href: "/renewals", label: "Renewals", icon: CalendarClockIcon }],
+    navItems: [{ href: "/renewals", label: "Renewals", term: { key: "renewal" }, icon: CalendarClockIcon }],
   },
   {
     key: "payments",
@@ -365,14 +372,14 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Contacts Library",
     description: "Every contact across every company — clients, vendors, OEMs — in one searchable, filterable list.",
     navGroup: "Directory",
-    navItems: [{ href: "/contacts", label: "Contacts", icon: Users }],
+    navItems: [{ href: "/contacts", label: "Contacts", term: { key: "contact" }, icon: Users }],
   },
   {
     key: "vendors",
     label: "Vendors",
     description: "Every vendor, OEM, distributor, and partner company — separate from the client-facing Companies list.",
     navGroup: "Directory",
-    navItems: [{ href: "/vendors", label: "Vendors", icon: Truck }],
+    navItems: [{ href: "/vendors", label: "Vendors", term: { key: "vendor" }, icon: Truck }],
   },
   {
     key: "resellers",
@@ -396,7 +403,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     description:
       "Client meetings and field visits: plan them with a purpose and agenda, check in and out on the day, write up the outcome, and claim the travel against them.",
     navGroup: "Field & Expenses",
-    navItems: [{ href: "/visits", label: "Field Visits", icon: MapPin }],
+    navItems: [{ href: "/visits", label: "Field Visits", term: { key: "visit" }, icon: MapPin }],
   },
   {
     key: "expenses",
@@ -525,7 +532,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       "Support tickets linked to a company and contact, with priority, an SLA target, agent assignment, and a comment thread.",
     navGroup: "Support",
     navItems: [
-      { href: "/tickets", label: "Tickets", icon: Ticket },
+      { href: "/tickets", label: "Tickets", term: { key: "ticket" }, icon: Ticket },
       // Which customers take the most support against what they pay — src/lib/support/load.ts.
       { href: "/tickets/load", label: "Support load", icon: Gauge },
     ],

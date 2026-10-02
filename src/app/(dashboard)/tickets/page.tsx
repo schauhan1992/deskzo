@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listTicketsPaged, countOpenTickets, listSupportAgents } from "@/actions/ticket";
 import { isModuleEnabled } from "@/actions/module";
@@ -64,7 +66,7 @@ export default async function TicketsPage({
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Tickets</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Tickets", "ticket")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} total · {openCount} open
           </p>
@@ -73,7 +75,7 @@ export default async function TicketsPage({
           <ViewModeToggle viewKey="tickets" mode={viewMode} />
           {canCreate && (
             <Link href="/tickets/new">
-              <Button>New ticket</Button>
+              <Button>{slot(await getWording(), "New ticket", "ticket", "New {one:lower}")}</Button>
             </Link>
           )}
         </div>

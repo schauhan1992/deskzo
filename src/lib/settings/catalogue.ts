@@ -23,6 +23,7 @@ import {
   MailPlus,
   Megaphone,
   Palette,
+  Languages,
   ReceiptText,
   ScrollText,
   Shapes,
@@ -141,6 +142,14 @@ export const SETTINGS: SettingsSection[] = [
             description: "The app's own name, logo, colour and default theme.",
             href: "/settings/branding",
             icon: Palette,
+            permission: "settings.manage",
+          },
+          {
+            key: "wording",
+            label: "Wording",
+            description: "Your own words for leads, customers, orders and more — an Enquiry, a Booking, a Student — and for an order's statuses.",
+            href: "/settings/wording",
+            icon: Languages,
             permission: "settings.manage",
           },
           {

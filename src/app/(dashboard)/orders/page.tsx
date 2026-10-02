@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot, statusSlot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listOrdersPaged } from "@/actions/order";
 import { isModuleEnabled } from "@/actions/module";
@@ -83,14 +85,17 @@ export default async function OrdersPage({
   const activeSteps = allSteps.filter((s) => !s.archived);
   const stepsOn = activeSteps.length > 0;
 
+  // The tabs, in the workspace's own names for the statuses where it has them (Settings → Wording).
+  const wording = await getWording();
+  const tab = (status: OrderStatus, canonical: string) => ({ label: statusSlot(wording, status, canonical), value: status });
   const stageFilters: { label: string; value?: OrderStatus }[] = [
     { label: "All" },
-    { label: "Pending Approval", value: "PENDING_APPROVAL" },
-    { label: "Approved", value: "APPROVED" },
-    { label: "Processing", value: "PROCESSING" },
-    { label: "Fulfilled", value: "FULFILLED" },
-    { label: "Rejected", value: "REJECTED" },
-    { label: "Cancelled", value: "CANCELLED" },
+    tab("PENDING_APPROVAL", "Pending Approval"),
+    tab("APPROVED", "Approved"),
+    tab("PROCESSING", "Processing"),
+    tab("FULFILLED", "Fulfilled"),
+    tab("REJECTED", "Rejected"),
+    tab("CANCELLED", "Cancelled"),
   ];
 
   function queryFor(overrides: Record<string, string | undefined>) {
@@ -112,7 +117,7 @@ export default async function OrdersPage({
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Orders</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Orders", "order")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} total{pendingCount > 0 && ` · ${pendingCount} awaiting accounts approval`}
           </p>
@@ -120,7 +125,7 @@ export default async function OrdersPage({
         <div className="flex items-center gap-2">
           <ViewModeToggle viewKey="orders" mode={viewMode} />
           <Link href="/orders/new">
-            <Button>Punch order</Button>
+            <Button>{slot(await getWording(), "Punch order", "order", "Punch {one:lower}")}</Button>
           </Link>
         </div>
       </div>

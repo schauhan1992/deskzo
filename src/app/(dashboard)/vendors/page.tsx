@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listVendorsPaged, countVendorsOnboarding, listAssignableUsers } from "@/actions/company";
 import { listIndustries } from "@/actions/industry";
@@ -103,7 +105,7 @@ export default async function VendorsPage({
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Vendors</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Vendors", "vendor")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} vendor, OEM, distributor, and partner companies
             {onboardingCount > 0 && ` · ${onboardingCount} still onboarding`}
@@ -112,7 +114,7 @@ export default async function VendorsPage({
         <div className="flex items-center gap-2">
           <ViewModeToggle viewKey="vendors" mode={viewMode} />
           <Link href="/vendors/new">
-            <Button>New vendor</Button>
+            <Button>{slot(await getWording(), "New vendor", "vendor", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>

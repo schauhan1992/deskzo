@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listLeads, listLeadsPaged } from "@/actions/lead";
 import { listAssignableUsers } from "@/actions/company";
@@ -101,7 +103,7 @@ export default async function LeadsPage({
     <SplitListPage active={view === "list" && viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Lead pipeline</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Lead pipeline", "lead", "{one} pipeline")}</h1>
           <p className="mt-1 text-sm text-muted">{result.total} total leads</p>
         </div>
         <div className="flex items-center gap-2">
@@ -123,7 +125,7 @@ export default async function LeadsPage({
           />
           <ExportLeadsButton />
           <Link href="/leads/new">
-            <Button>New lead</Button>
+            <Button>{slot(await getWording(), "New lead", "lead", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>

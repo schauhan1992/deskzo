@@ -1,4 +1,5 @@
 import type { PermissionKey } from "@/lib/permissions";
+import type { TermKey } from "@/lib/terms/dictionary";
 
 /**
  * What the search box in the header can search, one list at a time.
@@ -40,21 +41,23 @@ export type SearchScope = {
    * "Open LEAD-000123" shortcut. Only where the detail page resolves refs — see src/lib/record-url.ts.
    */
   ref?: { prefix: string; path: string };
+  /** The word the label is, for a workspace with its own (Settings → Wording): "Leads" becomes "Enquiries". */
+  term?: TermKey;
 };
 
 export const SEARCH_SCOPES: SearchScope[] = [
-  { key: "customers", label: "Customers", listPath: "/customers", module: "companies", ref: { prefix: "COM", path: "/companies" } },
-  { key: "companies", label: "Companies", listPath: "/companies", module: "companies", ref: { prefix: "COM", path: "/companies" } },
-  { key: "leads", label: "Leads", listPath: "/leads", module: "companies", permission: "leads.view", ref: { prefix: "LEAD", path: "/leads" } },
-  { key: "contacts", label: "Contacts", listPath: "/contacts", module: "contacts_library" },
-  { key: "vendors", label: "Vendors", listPath: "/vendors", module: "vendors", ref: { prefix: "COM", path: "/companies" } },
-  { key: "orders", label: "Orders", listPath: "/orders", module: "orders", ref: { prefix: "ORD", path: "/orders" } },
-  { key: "renewals", label: "Renewals", listPath: "/renewals", module: "renewals" },
+  { key: "customers", label: "Customers", term: "customer", listPath: "/customers", module: "companies", ref: { prefix: "COM", path: "/companies" } },
+  { key: "companies", label: "Companies", term: "company", listPath: "/companies", module: "companies", ref: { prefix: "COM", path: "/companies" } },
+  { key: "leads", label: "Leads", term: "lead", listPath: "/leads", module: "companies", permission: "leads.view", ref: { prefix: "LEAD", path: "/leads" } },
+  { key: "contacts", label: "Contacts", term: "contact", listPath: "/contacts", module: "contacts_library" },
+  { key: "vendors", label: "Vendors", term: "vendor", listPath: "/vendors", module: "vendors", ref: { prefix: "COM", path: "/companies" } },
+  { key: "orders", label: "Orders", term: "order", listPath: "/orders", module: "orders", ref: { prefix: "ORD", path: "/orders" } },
+  { key: "renewals", label: "Renewals", term: "renewal", listPath: "/renewals", module: "renewals" },
   { key: "proposals", label: "Proposals", listPath: "/sales/proposals", module: "sales_documents" },
   { key: "invoices", label: "Invoices", listPath: "/sales/invoices", module: "sales_documents" },
-  { key: "tickets", label: "Tickets", listPath: "/tickets", module: "helpdesk", ref: { prefix: "TCK", path: "/tickets" } },
+  { key: "tickets", label: "Tickets", term: "ticket", listPath: "/tickets", module: "helpdesk", ref: { prefix: "TCK", path: "/tickets" } },
   { key: "projects", label: "Projects", listPath: "/projects", module: "projects" },
-  { key: "items", label: "Items", listPath: "/items", module: "items", ref: { prefix: "ITM", path: "/items" } },
+  { key: "items", label: "Items", term: "item", listPath: "/items", module: "items", ref: { prefix: "ITM", path: "/items" } },
 ];
 
 export function searchScope(key: string): SearchScope | undefined {

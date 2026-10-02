@@ -26,6 +26,8 @@ import {
   type SearchScope,
   type SearchScopeKey,
 } from "@/lib/search/scopes";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * The header's search box — see src/lib/search/scopes.ts.
@@ -44,8 +46,9 @@ async function mayUse(userId: string, scope: SearchScope): Promise<boolean> {
 /** The scopes this person can search, in the order the dropdown shows them. */
 export async function searchScopesForMe(): Promise<{ key: SearchScopeKey; label: string; listPath: string }[]> {
   const user = await requireUser();
-  const allowed = await Promise.all(SEARCH_SCOPES.map((s) => mayUse(user.id, s)));
-  return SEARCH_SCOPES.filter((_, i) => allowed[i]).map((s) => ({ key: s.key, label: s.label, listPath: s.listPath }));
+  const [allowed, wording] = await Promise.all([Promise.all(SEARCH_SCOPES.map((s) => mayUse(user.id, s))), getWording()]);
+  // In the workspace's own words (Settings → Wording): "Search in Enquiries".
+  return SEARCH_SCOPES.filter((_, i) => allowed[i]).map((s) => ({ key: s.key, label: s.term ? slot(wording, s.label, s.term) : s.label, listPath: s.listPath }));
 }
 
 export type SearchResult = { ok: true; hits: SearchHit[]; more: boolean } | { ok: false; error: string };

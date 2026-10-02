@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { statusSlot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOrder, updateOrderCustomFields } from "@/actions/order";
@@ -226,7 +228,7 @@ export async function OrderDetail({
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-semibold text-text">{formatOrderId(order.orderSeq)}</h1>
             {viaReseller && <Badge tone="blue">Via reseller</Badge>}
-            <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>{order.orderStatus.replaceAll("_", " ")}</Badge>
+            <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>{statusSlot(await getWording(), order.orderStatus, order.orderStatus.replaceAll("_", " "))}</Badge>
             <Badge tone={BUSINESS_TYPE_TONE[order.businessType]}>{orderBusinessTypeLabels[order.businessType]}</Badge>
             {handoffNote && <Badge tone="amber">{handoffNote}</Badge>}
             {pending && <Badge tone="amber">Waiting for sales approval</Badge>}

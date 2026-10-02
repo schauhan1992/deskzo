@@ -1,5 +1,7 @@
 "use client";
 
+import { useWording } from "@/components/terms/wording-provider";
+import { statusSlot } from "@/lib/terms/dictionary";
 import { useId, useState, useTransition } from "react";
 import type { z } from "zod";
 import type { PaymentTerms, OrderStatus, OrderBusinessType } from "@prisma/client";
@@ -212,6 +214,8 @@ export function CompanyProductsList({
   canDeletePayments: boolean;
 }) {
   const router = useRouter();
+  // The workspace's own names for the statuses (Settings → Wording).
+  const wording = useWording();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [paymentsTargetId, setPaymentsTargetId] = useState<string | null>(null);
@@ -281,7 +285,7 @@ export function CompanyProductsList({
                     </Link>
                   </td>
                   <td className="px-3 py-2.5">
-                    <Badge tone={ORDER_STATUS_TONE[p.orderStatus]}>{p.orderStatus.replaceAll("_", " ")}</Badge>
+                    <Badge tone={ORDER_STATUS_TONE[p.orderStatus]}>{statusSlot(wording, p.orderStatus, p.orderStatus.replaceAll("_", " "))}</Badge>
                     <div className="mt-1">
                       <Badge tone={BUSINESS_TYPE_TONE[p.businessType]}>{orderBusinessTypeLabels[p.businessType]}</Badge>
                     </div>

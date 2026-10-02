@@ -1,5 +1,7 @@
 "use client";
 
+import { useWording } from "@/components/terms/wording-provider";
+import { statusSlot } from "@/lib/terms/dictionary";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { OrderStatus, OrderBusinessType, CompanyRelationshipType } from "@prisma/client";
 import { Badge } from "@/components/ui/card";
@@ -47,6 +49,8 @@ type OrderRow = {
 export function OrderSplitList({ orders, selectedId }: { orders: OrderRow[]; selectedId: string | null }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // The workspace's own names for the statuses (Settings → Wording).
+  const wording = useWording();
 
   function hrefFor(id: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -78,7 +82,7 @@ export function OrderSplitList({ orders, selectedId }: { orders: OrderRow[]; sel
               <>
                 <span className="font-mono text-xs text-subtle">{formatOrderId(order.orderSeq)}</span>
                 <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>
-                  {order.orderStatus.replaceAll("_", " ")}
+                  {statusSlot(wording, order.orderStatus, order.orderStatus.replaceAll("_", " "))}
                 </Badge>
                 <span className="text-xs text-subtle">{orderBusinessTypeLabels[order.businessType]}</span>
                 {orderFlags(order).map((flag) => (

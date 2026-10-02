@@ -1,3 +1,5 @@
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { listCustomersPaged, listAssignableUsers } from "@/actions/company";
 import { portalStateFor } from "@/lib/portal/state";
 import { listIndustries } from "@/actions/industry";
@@ -84,7 +86,7 @@ export default async function CustomersPage({
   return (
     <SplitListPage active={viewMode === "split"}>
       <div>
-        <h1 className="text-xl font-semibold text-text">Customer</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Customer", "customer")}</h1>
         <p className="mt-1 text-sm text-muted">
           {result.total} {result.total === 1 ? "company has" : "companies have"} actually purchased from us — at least one order
           on file, active or expired.
