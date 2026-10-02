@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrder } from "@/actions/order";
+import { getOrder, updateOrderCustomFields } from "@/actions/order";
 import { listVendorOptions } from "@/actions/company";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { orderCreditPosition } from "@/lib/credit/order";
@@ -26,6 +26,9 @@ import { getOrderRebates } from "@/actions/rebate";
 import { OrderDealEditor, OrderLossApproval, OrderRebatesPanel } from "@/components/orders/order-rebates";
 import { COST_SOURCE_LABELS, DEAL_REG_LABELS, needsLossApproval, unitCostOf, type DealRegStatusKey } from "@/lib/rebates/rules";
 import { FollowUpPanel } from "@/components/collections/follow-up-panel";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
+import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
+import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -168,6 +171,16 @@ export async function OrderDetail({
   const dealEditable = !closed && (speaksForSales || canProcess);
   const hasDeal = !!order.dealRegStatus || order.dealPrice !== null;
 
+  // ── The workspace's own fields (src/lib/custom-fields), as this person may see them ───────────────
+  // Changed by whoever may change the deal registration — `updateOrderCustomFields` applies
+  // `setOrderDeal`'s rule — so the Edit button is offered on exactly those terms.
+  const fieldsEditable = dealEditable;
+  const customValues = await valuesFor("ORDER", order.id);
+  const [customShown, customForm] = await Promise.all([
+    displayFields("ORDER", userId, customValues),
+    fieldsEditable ? formSetup("ORDER", userId, customValues) : null,
+  ]);
+
   // Collections: what has been said to the customer about paying for this order, and any promise —
   // Receivables' own, so only where it is on for this viewer (and null outside the account's money).
   const followUps = (await isModuleEnabled("receivables")) ? await followUpPanel({ companyProductId: order.id }) : null;
@@ -266,6 +279,21 @@ export async function OrderDetail({
               )}
             </CardContent>
           </Card>
+
+          <CustomFieldsCard
+            groups={customShown}
+            action={
+              customForm && (
+                <EditCustomFields
+                  title={`More details — ${formatOrderId(order.orderSeq)}`}
+                  fields={customForm.fields}
+                  initial={customForm.values}
+                  people={customForm.people}
+                  save={updateOrderCustomFields.bind(null, order.id)}
+                />
+              )
+            }
+          />
 
           <Card>
             <CardHeader className="text-sm font-medium text-text">Vendor & purchasing</CardHeader>

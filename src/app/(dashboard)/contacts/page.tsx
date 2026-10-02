@@ -7,8 +7,10 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { ContactsTable } from "@/components/contacts/contacts-table";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
-import { contactDesignationValues, relationshipTypeValues, relationshipTypeLabels } from "@/lib/validation/company";
+import { contactDesignationValues, relationshipTypeValues, relationshipTypeLabels, isContactDetailField } from "@/lib/validation/company";
 import type { ContactDesignation, CompanyRelationshipType } from "@prisma/client";
+import { requireUser } from "@/lib/session";
+import { fieldsFor, listColumns } from "@/lib/custom-fields/server";
 
 export default async function ContactsLibraryPage({
   searchParams,
@@ -43,6 +45,8 @@ export default async function ContactsLibraryPage({
     }),
     listIndustries(),
   ]);
+  const user = await requireUser();
+  const customColumns = await contactColumns(user.id, result.rows);
 
   return (
     <div>
@@ -79,7 +83,7 @@ export default async function ContactsLibraryPage({
       </div>
 
       <div className="mt-6">
-        <ContactsTable contacts={result.rows} />
+        <ContactsTable contacts={result.rows} customColumns={customColumns} />
       </div>
 
       <Pagination
@@ -91,4 +95,21 @@ export default async function ContactsLibraryPage({
       />
     </div>
   );
+}
+
+/**
+ * The workspace's own fields shown as list columns (src/lib/custom-fields). On a reseller's end
+ * customer the contact-detail ones (`isContactDetailField`) stay blank, as its email and phone do
+ * (src/lib/reseller.ts) — left out here, so they never reach the browser.
+ */
+async function contactColumns(userId: string, rows: { id: string; detailsRedacted: boolean }[]) {
+  const [columns, { visible }] = await Promise.all([listColumns("CONTACT", userId, rows.map((r) => r.id)), fieldsFor("CONTACT", userId)]);
+  const hidden = new Set(visible.filter((d) => isContactDetailField(d.type)).map((d) => d.key));
+  if (hidden.size === 0 || !rows.some((r) => r.detailsRedacted)) return columns;
+  const texts: Record<string, Record<string, string>> = {};
+  for (const r of rows) {
+    const own = columns.texts[r.id] ?? {};
+    texts[r.id] = r.detailsRedacted ? Object.fromEntries(Object.entries(own).filter(([key]) => !hidden.has(key))) : own;
+  }
+  return { columns: columns.columns, texts };
 }

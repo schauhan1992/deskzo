@@ -63,6 +63,8 @@ export const createLeadSchema = z.object({
   source: z.enum(LEAD_SOURCE_VALUES).default("OTHER"),
   sourceDetail: z.string().trim().max(300, "Keep the source detail under 300 characters").optional().or(z.literal("")),
   requirements: z.array(leadRequirementInputSchema).default([]),
+  /** The workspace's own fields (src/lib/custom-fields) — checked by the action against its definitions. */
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;

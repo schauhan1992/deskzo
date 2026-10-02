@@ -1,10 +1,10 @@
 "use server";
 
+import { customSearchWhere } from "@/lib/custom-fields/server";
 import { Prisma, type ContactDesignation, type CompanyRelationshipType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-import { contactScope, contactIdsInScope, NO_CONTACTS } from "@/lib/authz/contact-access";
-import { hasEffectivePermission } from "@/actions/permission";
+import { contactScope, contactIdsInScope, NO_CONTACTS, seesResellerContactDetails } from "@/lib/authz/contact-access";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { pageSlice } from "@/lib/pagination";
 import { noteRecordsRead } from "@/lib/security/bulk-read";
@@ -21,7 +21,7 @@ type ContactListParams = {
   primaryOnly?: boolean;
 };
 
-function contactListWhere(params?: ContactListParams): Prisma.ContactWhereInput {
+function contactListWhere(params?: ContactListParams, custom: Prisma.ContactWhereInput[] = []): Prisma.ContactWhereInput {
   return {
     ...(params?.designation ? { designation: params.designation } : {}),
     ...(params?.primaryOnly ? { isPrimary: true } : {}),
@@ -32,6 +32,8 @@ function contactListWhere(params?: ContactListParams): Prisma.ContactWhereInput 
             { email: { contains: params.search, mode: "insensitive" as const } },
             { phone: { contains: params.search, mode: "insensitive" as const } },
             { company: { name: { contains: params.search, mode: "insensitive" as const } } },
+            // The workspace's own contact fields this person may see (src/lib/custom-fields).
+            ...custom,
           ],
         }
       : {}),
@@ -56,7 +58,8 @@ function contactListWhere(params?: ContactListParams): Prisma.ContactWhereInput 
  * back shows its email and phone. A reseller-managed contact out of scope is caught by both.
  */
 async function scopedContactWhere(userId: string, params?: ContactListParams): Promise<Prisma.ContactWhereInput> {
-  return { AND: [contactListWhere(params), await contactScope(userId)] };
+  const custom = (await customSearchWhere("CONTACT", userId, params?.search)) as Prisma.ContactWhereInput[];
+  return { AND: [contactListWhere(params, custom), await contactScope(userId)] };
 }
 
 const contactListInclude = {
@@ -81,7 +84,7 @@ type RawContact = Prisma.ContactGetPayload<{ include: typeof contactListInclude 
  */
 async function redactList(userId: string, contacts: RawContact[]) {
   const hasRestricted = contacts.some((c) => isResellerManaged(c.company));
-  const canViewRestricted = hasRestricted ? await hasEffectivePermission(userId, "contacts.viewRestricted") : true;
+  const canViewRestricted = hasRestricted ? await seesResellerContactDetails(userId) : true;
   return contacts.map((c) =>
     redactContactDetails(c, { restricted: isResellerManaged(c.company), canViewRestricted }),
   );

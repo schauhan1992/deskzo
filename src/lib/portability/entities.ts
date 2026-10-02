@@ -746,6 +746,12 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Immutable history — every follow-up on money a client owed: who chased it, how, what the client said, and any promise to pay with whether it was kept or broken. The invoices and payments it is about export on their own; this is the conversation around them, which no target CRM loads as receivables, and which is kept as the record of how each debt was pursued.",
   },
+  // ─── Custom fields ─────────────────────────────────────────────────────────────────────────────
+  CustomFieldDefinition: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: which fields of its own the workspace added to companies, contacts, leads, orders and products, their options and who sees them. Described in the workflow specification to be rebuilt in the target; each record's values travel with the record.",
+  },
   // ─── Backend rebates and vendor credits ────────────────────────────────────────────────────────
   RebateProgramme: {
     disposition: "specification",

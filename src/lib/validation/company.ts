@@ -105,7 +105,18 @@ export const contactInputSchema = z.object({
   isPrimary: z.boolean().default(false),
   /** Pre-selected when a document for this company is emailed — see src/actions/document-mail.ts. */
   receivesDocuments: z.boolean().default(false),
+  /** The workspace's own fields (src/lib/custom-fields) — checked by the action against its definitions. */
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
+
+/**
+ * The workspace's own contact fields that are contact details in their own right — a second phone,
+ * another email. On a reseller's end customer they are hidden as the email and phone are
+ * (src/lib/reseller.ts `redactContactDetails`), and a save that couldn't show them keeps them.
+ */
+export function isContactDetailField(type: string): boolean {
+  return type === "EMAIL" || type === "PHONE";
+}
 
 /**
  * A company's size, as a band from `EMPLOYEE_BANDS` — or blank.
@@ -159,7 +170,10 @@ export const createCompanySchema = z.object({
     isBilling: true,
     isShipping: true,
   }),
-  contacts: z.array(contactInputSchema).default([]),
+  // Created without the workspace's own fields: those are filled in on each contact afterwards.
+  contacts: z.array(contactInputSchema.omit({ customFields: true })).default([]),
+  /** The workspace's own fields (src/lib/custom-fields) — checked by the action against its definitions. */
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const updateCompanySchema = z.object({

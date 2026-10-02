@@ -16,6 +16,7 @@ import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { useColumns } from "@/components/ui/table-columns";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
 import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
+import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 
 type LeadRow = {
   id: string;
@@ -40,11 +41,14 @@ export function LeadsListTable({
   leads,
   assignableUsers,
   reassign,
+  customColumns = { columns: [], texts: {} },
 }: {
   leads: LeadRow[];
   assignableUsers: { id: string; name: string; role: string }[];
   /** Whether this person may change lead owners at all — see src/lib/authz/reassign.ts. */
   reassign: { show: boolean; canUnassign: boolean };
+  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const cols = useColumns("leads");
   const router = useRouter();
@@ -138,6 +142,7 @@ export function LeadsListTable({
                 {cols.show("value") && <th className="px-4 py-2.5">Value</th>}
                 {cols.show("expectedClose") && <th className="px-4 py-2.5">Expected close</th>}
                 {cols.show("updated") && <th className="px-4 py-2.5">Updated</th>}
+                <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -198,11 +203,12 @@ export function LeadsListTable({
                   {cols.show("updated") && (
                     <td className="px-4 py-2.5 text-muted">{formatDate(lead.updatedAt)}</td>
                   )}
+                  <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[lead.id]} className="px-4 py-2.5 text-muted" />
                 </tr>
               ))}
               {leads.length === 0 && (
                 <tr>
-                  <td colSpan={cols.count} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={cols.count + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
                     No leads yet.
                   </td>
                 </tr>

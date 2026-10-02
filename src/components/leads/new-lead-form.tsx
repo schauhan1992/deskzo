@@ -9,7 +9,14 @@ import { createLeadSchema, type CreateLeadInput } from "@/lib/validation/lead";
 import { createLead } from "@/actions/lead";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { CompanyCombobox, type CompanyComboOption } from "@/components/ui/company-combobox";
 import { QuickCreateCompanyDialog, type QuickCreatedCompany } from "@/components/companies/quick-create-company-dialog";
 import { NewContactDialog, type CreatedContact } from "@/components/companies/new-contact-dialog";
@@ -40,6 +47,7 @@ export function NewLeadForm({
   canAssign,
   canAddContact = true,
   people,
+  customFields = { fields: [], values: {}, people: [] },
 }: {
   companies: CompanyComboOption[];
   initialCompanyId?: string;
@@ -52,9 +60,13 @@ export function NewLeadForm({
   /** `contacts.view` — may add a person at the company from here. */
   canAddContact?: boolean;
   people: PersonOption[];
+  /** The workspace's own lead fields (src/lib/custom-fields/server.ts `formSetup`). */
+  customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const [localCompanies, setLocalCompanies] = useState<CompanyComboOption[]>(companies);
   const [createDialog, setCreateDialog] = useState<{ open: boolean; initialName: string }>({
     open: false,
@@ -102,7 +114,10 @@ export function NewLeadForm({
 
   async function onSubmit(values: CreateLeadInput) {
     setServerError(null);
-    const result = await createLead(values);
+    const missing = missingRequired(customFields.fields, custom);
+    setCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
+    const result = await createLead({ ...values, customFields: custom });
     if (!result.ok) {
       setServerError(result.error);
       return;
@@ -324,6 +339,21 @@ export function NewLeadForm({
                 );
               })}
             </div>
+          )}
+
+          {customFields.fields.length > 0 && (
+            <Card>
+              <CardHeader className="text-sm font-medium text-text">More details</CardHeader>
+              <CardContent>
+                <CustomFieldInputs
+                  fields={customFields.fields}
+                  values={custom}
+                  people={customFields.people}
+                  errors={customErrors}
+                  onChange={(key, value) => setCustom((c) => ({ ...c, [key]: value }))}
+                />
+              </CardContent>
+            </Card>
           )}
 
           <div className="flex justify-end gap-3 pt-2">

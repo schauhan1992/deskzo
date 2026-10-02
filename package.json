@@ -124,6 +124,7 @@
     "check:activity-awards": "tsx scripts/check-activity-awards.ts",
     "check:prizes": "tsx scripts/check-prizes.ts",
     "check:customer-categories": "tsx scripts/check-customer-categories.ts",
+    "check:custom-fields": "tsx scripts/check-custom-fields.ts",
     "check:mass-mail": "tsx scripts/check-mass-mail.ts",
     "check:company-merge": "tsx scripts/check-company-merge.ts",
     "check:data-reset": "tsx scripts/check-data-reset.ts",

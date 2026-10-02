@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { EmailAddress, type VerifiableContact } from "@/components/contacts/email-address";
 import { OutboundLink, whatsappHref } from "@/components/ui/outbound-link";
+import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 
 type ContactRow = VerifiableContact & {
   name: string;
@@ -29,7 +30,14 @@ type ContactRow = VerifiableContact & {
   };
 };
 
-export function ContactsTable({ contacts }: { contacts: ContactRow[] }) {
+export function ContactsTable({
+  contacts,
+  customColumns = { columns: [], texts: {} },
+}: {
+  contacts: ContactRow[];
+  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
+}) {
   const router = useRouter();
   const selection = useRowSelection(contacts);
   const [isPending, startTransition] = useTransition();
@@ -138,6 +146,7 @@ export function ContactsTable({ contacts }: { contacts: ContactRow[] }) {
                 <th className="px-4 py-2.5">Relationship</th>
                 <th className="px-4 py-2.5">Email</th>
                 <th className="px-4 py-2.5">Phone</th>
+                <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
                 <th className="px-4 py-2.5">Actions</th>
               </tr>
             </thead>
@@ -171,6 +180,7 @@ export function ContactsTable({ contacts }: { contacts: ContactRow[] }) {
                     <EmailAddress contact={c} className="max-w-[16rem]" />
                   </td>
                   <td className="px-4 py-2.5 text-muted">{c.phone ?? "—"}</td>
+                  <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[c.id]} className="px-4 py-2.5 text-muted" />
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-3">
                       {c.phone && (
@@ -197,7 +207,7 @@ export function ContactsTable({ contacts }: { contacts: ContactRow[] }) {
               ))}
               {contacts.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={8 + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
                     No contacts match this filter.
                   </td>
                 </tr>

@@ -194,6 +194,8 @@ export const createOrderSchema = z.object({
   ...dealFields,
   /** Backend rebates — only from somebody holding `rebates.view`. */
   rebates: z.array(orderRebateInputSchema).max(5, "Five rebates on one order at most").default([]),
+  /** The workspace's own fields (src/lib/custom-fields) — checked by the action against its definitions. */
+  customFields: z.record(z.string(), z.unknown()).optional(),
 }).superRefine((val, ctx) => {
   if (val.handoff === "SCHEDULE" && !val.releaseOn) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Choose the day it goes to purchase", path: ["releaseOn"] });

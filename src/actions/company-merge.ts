@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
-import { canViewContacts } from "@/lib/authz/contact-access";
+import { canViewContacts, seesResellerContactDetails } from "@/lib/authz/contact-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -67,7 +67,7 @@ export async function getMergeScreen(keepRef: string, dropRef: string): Promise<
     can(user.id, "accounts.reassign"),
     hasEffectivePermission(user.id, "credit.override"),
     canViewContacts(user.id),
-    hasEffectivePermission(user.id, "contacts.viewRestricted"),
+    seesResellerContactDetails(user.id),
   ]);
   // The same rule as the company page: without contacts.view nobody's details show, and a reseller's
   // end customer's show only with contacts.viewRestricted. The pairs are still listed, by name.

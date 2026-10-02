@@ -117,6 +117,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "performance.view",
       "notes.broadcast",
       "people.handover",
+      "fields.seeRestricted",
     ],
   },
   // ─── Calling / profiling ────────────────────────────────────────────────────────────────────
@@ -245,6 +246,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "close.manage",
       "rebates.view",
       "rebates.manage",
+      "fields.seeRestricted",
     ],
   },
   // ─── Purchase ───────────────────────────────────────────────────────────────────────────────
@@ -310,6 +312,9 @@ export const ROLE_PRESETS: RolePreset[] = [
       "rebates.view",
       "rebates.manage",
       "orders.approveLoss",
+      // The workspace's own fields, and the restricted ones among them (owner, 2 Oct 2026).
+      "fields.manage",
+      "fields.seeRestricted",
     ],
   },
   {

@@ -12,6 +12,13 @@ import { formatOrderId } from "@/lib/order-id";
 import { Card } from "@/components/ui/card";
 import type { CompanyComboOption } from "@/components/ui/company-combobox";
 import type { ItemComboOption } from "@/components/items/item-combobox";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { CustomerSection } from "./punch/customer-section";
 import { ProductSection } from "./punch/product-section";
 import { TermsSection } from "./punch/terms-section";
@@ -20,9 +27,11 @@ import { RebateFold } from "./punch/rebate-fold";
 import { ExtrasFold } from "./punch/extras-fold";
 import { NotesFold } from "./punch/notes-fold";
 import { OrderSummary, PunchBar } from "./punch/order-summary";
+import { Section } from "./punch/parts";
 import {
   firstErrorField,
   foldsWithErrors,
+  inFold,
   type CommissionPartyOption,
   type CustomerContext,
   type EndCustomerOption,
@@ -36,6 +45,10 @@ import {
 /** A lookup's answer with what it was asked for, so an answer to an earlier question is never shown for the current one. */
 type Loaded<T> = { key: string; value: T | null; failed: boolean };
 const NOTHING_LOADED: Loaded<never> = { key: "", value: null, failed: false };
+
+/** The workspace's own order fields as `formSetup` sends them (src/lib/custom-fields/server.ts). */
+type CustomFieldsSetup = { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
+const NO_CUSTOM_FIELDS: CustomFieldsSetup = { fields: [], values: {}, people: [] };
 
 /** Every field blank, as a new order starts. */
 function blankValues(): PunchFormValues {
@@ -101,9 +114,10 @@ function primaryLocationOf(context: CustomerContext): string {
 /**
  * The order-punching form.
  *
- * Sections on the left — customer, product and price, terms and hand-off, then the optional parts
- * folded — and the order summary on the right, sticky on a wide screen. Each section subscribes only to
- * the fields it shows (`useWatch`), so typing a price re-renders the figures and not the whole form.
+ * Sections on the left — customer, product and price, terms and hand-off, the workspace's own fields when
+ * it has any, then the optional parts folded — and the order summary on the right, sticky on a wide
+ * screen. Each section subscribes only to the fields it shows (`useWatch`), so typing a price re-renders
+ * the figures and not the whole form.
  *
  * Choosing a customer asks the server one question (`punchCustomerContext`: offices, proposals, end
  * customers, linked commission parties, credit), and choosing a product another (`punchItemContext`:
@@ -124,6 +138,7 @@ export function NewOrderForm({
   creditInPlan = false,
   resellersInPlan = false,
   canSeeRebates = false,
+  customFields = NO_CUSTOM_FIELDS,
   initialLocations,
   initialProposals,
   initialEndCustomers,
@@ -150,6 +165,8 @@ export function NewOrderForm({
   resellersInPlan?: boolean;
   /** Holds `rebates.view`: the backend rebate can be entered (owner: managers see rebates, executives don't). */
   canSeeRebates?: boolean;
+  /** The workspace's own order fields this person fills in, empty for a new order. */
+  customFields?: CustomFieldsSetup;
   /** The prefilled customer's offices, from before `initialContext` — still taken from a caller that sends them. */
   initialLocations?: LocationOption[];
   initialProposals?: ProposalOption[];
@@ -333,6 +350,44 @@ export function NewOrderForm({
     dropAutoPrice();
   }
 
+  // ── The workspace's own fields ──────────────────────────────────────────────────────────────────
+
+  // Kept beside the form rather than in it, as every record's form keeps them: which are asked for, and
+  // which must be answered, is the workspace's to say rather than the order schema's.
+  const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
+  const customRef = useRef<HTMLDivElement>(null);
+
+  function changeCustom(key: string, value: string | boolean | string[]) {
+    setCustom((prev) => ({ ...prev, [key]: value }));
+    // Answered, its error goes — as a field of the form's does once it is right again.
+    setCustomErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  /**
+   * Marks the required ones left empty, and says whether there are any — on every punch, refused or not,
+   * so one try shows all that is missing. Synchronously, so the first can be focused at once. The
+   * server checks them again.
+   */
+  function markMissingCustom(): boolean {
+    if (customFields.fields.length === 0) return false;
+    const missing = missingRequired(customFields.fields, custom);
+    flushSync(() => setCustomErrors(missing));
+    return Object.keys(missing).length > 0;
+  }
+
+  /** Focuses the first of them marked missing, in page order. A multi-select is marked on its group, whose first box takes it. */
+  function focusMissingCustom() {
+    const marked = customRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    const target = marked && !marked.matches("input, select, textarea") ? marked.querySelector<HTMLElement>("input") : marked;
+    target?.focus();
+  }
+
   // ── Folded sections ─────────────────────────────────────────────────────────────────────────────
 
   // Open or shut as the person left each one; until they touch it, a section opens when it holds something.
@@ -341,6 +396,7 @@ export function NewOrderForm({
   const failing = new Set(foldsWithErrors(errors));
 
   function onInvalid(found: PunchErrors) {
+    const customMissing = markMissingCustom();
     const keys = foldsWithErrors(found);
     // A field inside a closed <details> can't take focus, so the sections holding errors open first,
     // synchronously, before the first error on the page is focused.
@@ -348,7 +404,10 @@ export function NewOrderForm({
       flushSync(() => setFolds((prev) => ({ ...prev, ...Object.fromEntries(keys.map((key) => [key, true])) })));
     }
     const first = firstErrorField(found);
-    if (first) setFocus(first);
+    // The workspace's own fields come after the sections and before the folds: one left empty is focused
+    // ahead of an error in a fold, and after an error above it.
+    if (customMissing && (first === null || inFold(first))) focusMissingCustom();
+    else if (first) setFocus(first);
   }
 
   // ── Punching ────────────────────────────────────────────────────────────────────────────────────
@@ -365,7 +424,7 @@ export function NewOrderForm({
     setJustPunched(null);
     let result: Awaited<ReturnType<typeof createOrder>>;
     try {
-      result = await createOrder(values);
+      result = await createOrder({ ...values, customFields: custom });
     } catch {
       setServerError("The order didn't reach the server — check the connection and try again.");
       return;
@@ -385,6 +444,9 @@ export function NewOrderForm({
     setTypeChosen(false);
     autoPriceRef.current = null;
     setFolds({});
+    // The workspace's own fields describe the order just punched: the next one starts them empty.
+    setCustom(customFields.values);
+    setCustomErrors({});
     setJustPunched(ref);
   }
 
@@ -398,7 +460,7 @@ export function NewOrderForm({
     // Which button sent the form. Enter in a field sends it as the first one — the plain "Punch order".
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const another = submitter?.dataset.then === "another";
-    void handleSubmit((values) => punch(values, another), onInvalid)(event);
+    void handleSubmit((values) => (markMissingCustom() ? focusMissingCustom() : punch(values, another)), onInvalid)(event);
   }
 
   return (
@@ -430,6 +492,20 @@ export function NewOrderForm({
           onTypeChosen={() => setTypeChosen(true)}
         />
         <TermsSection form={form} errors={errors} credit={credit} selectedItem={selectedItem} />
+        {/* The workspace's own fields: never folded, since a required one has to be in sight to be answered. */}
+        {customFields.fields.length > 0 && (
+          <Section title="More details" className="sm:grid-cols-1">
+            <div ref={customRef}>
+              <CustomFieldInputs
+                fields={customFields.fields}
+                values={custom}
+                people={customFields.people}
+                errors={customErrors}
+                onChange={changeCustom}
+              />
+            </div>
+          </Section>
+        )}
         <Card className="divide-y divide-line overflow-hidden">
           <CostFold
             form={form}

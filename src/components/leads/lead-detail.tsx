@@ -5,7 +5,7 @@ import { CallButton } from "@/components/calls/call-button";
 import { DomainPanel } from "@/components/domains/domain-panel";
 import { getDomainBriefing } from "@/actions/domain";
 import { isModuleEnabled } from "@/actions/module";
-import { getLead } from "@/actions/lead";
+import { getLead, updateLeadCustomFields } from "@/actions/lead";
 import { listLeadDocuments } from "@/actions/trade-document";
 import { listLeadVisits } from "@/actions/visit";
 import { listItemOptions } from "@/actions/item";
@@ -29,6 +29,9 @@ import { LeadScoreBadge, LeadScoreCard } from "@/components/leads/lead-score";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
 import { CategoryChip } from "@/components/customers/category-chip";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
+import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
+import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 
 /**
  * A lead's full detail — the requirement, its timeline, and the controls that move it along.
@@ -71,6 +74,11 @@ export async function LeadDetail({ id }: { id: string }) {
 
   // Fetched after the lead, because the briefing is keyed on the company the lead belongs to.
   const domainBriefing = domainsEnabled ? await getDomainBriefing(lead.company.id) : null;
+
+  // The workspace's own fields (src/lib/custom-fields) — whoever may open the lead may edit them, as
+  // `updateLeadCustomFields` decides it.
+  const customValues = await valuesFor("LEAD", lead.id);
+  const [customShown, customForm] = await Promise.all([displayFields("LEAD", userId, customValues), formSetup("LEAD", userId, customValues)]);
 
   const company = lead.company;
   // The address the deal belongs to: the location tied to the lead if there ever is one, otherwise
@@ -268,6 +276,19 @@ export async function LeadDetail({ id }: { id: string }) {
               )}
             </CardContent>
           </Card>
+
+          <CustomFieldsCard
+            groups={customShown}
+            action={
+              <EditCustomFields
+                title={`More details — ${lead.title}`}
+                fields={customForm.fields}
+                initial={customForm.values}
+                people={customForm.people}
+                save={updateLeadCustomFields.bind(null, lead.id)}
+              />
+            }
+          />
         </div>
       </div>
     </div>

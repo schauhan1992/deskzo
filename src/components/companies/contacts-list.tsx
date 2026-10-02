@@ -12,10 +12,18 @@ import {
   contactInputSchema,
   updateContactSchema,
   contactDesignationValues,
+  isContactDetailField,
   type ContactInput,
   type UpdateContactInput,
 } from "@/lib/validation/company";
 import { addContact, updateContact, deleteContact } from "@/actions/company";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { verifyCompanyEmails } from "@/actions/email-verification";
 import { Button } from "@/components/ui/button";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
@@ -38,12 +46,62 @@ export type Contact = VerifiableContact & {
   detailsRedacted?: boolean;
 };
 
+/**
+ * The workspace's own contact fields (src/lib/custom-fields), as the company page prepares them: the
+ * inputs, and for each contact by id the values its edit form starts with and the ones its row shows.
+ */
+export type ContactCustomFields = {
+  fields: CustomFieldDef[];
+  people: CustomFieldPerson[];
+  values: Record<string, CustomFieldFormValues>;
+  shown: Record<string, { key: string; label: string; text: string }[]>;
+};
+
+const NO_CUSTOM_FIELDS: ContactCustomFields = { fields: [], people: [], values: {}, shown: {} };
+
+/**
+ * The fields one contact's form offers. A reseller's end customer leaves out the contact-detail ones,
+ * hidden like its email and phone — the server sent no values for them, and keeps them on a save.
+ */
+function formFields(contact: Contact, fields: CustomFieldDef[]): CustomFieldDef[] {
+  return contact.detailsRedacted ? fields.filter((f) => !isContactDetailField(f.type)) : fields;
+}
+
+/** A contact's own fields that are filled in — compact, under who they are. */
+function FilledFields({ shown }: { shown?: ContactCustomFields["shown"][string] }) {
+  if (!shown || shown.length === 0) return null;
+  return (
+    <dl className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+      {shown.map((f) => (
+        <div key={f.key} className="flex min-w-0 gap-1">
+          <dt className="shrink-0 text-subtle">{f.label}:</dt>
+          <dd className="min-w-0 break-words text-muted">{f.text}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** An error list without one field's — once that field has been changed. */
+function withoutError(errors: Record<string, string>, key: string): Record<string, string> {
+  if (!errors[key]) return errors;
+  const next = { ...errors };
+  delete next[key];
+  return next;
+}
+
 function ContactFields({
   register,
   errors,
+  detailsHidden = false,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
+  /**
+   * A reseller's end customer, for somebody who may not see its email and phone: the inputs would
+   * only show blanks, so they are left out — and the save keeps both as stored (`updateContact`).
+   */
+  detailsHidden?: boolean;
 }) {
   // Per-instance ids rather than per-field: an edit form and the add form can be on screen together,
   // and a repeated id would point both forms' labels at the first one's fields.
@@ -69,24 +127,34 @@ function ContactFields({
           ))}
         </Select>
       </div>
-      <div className="space-y-1">
-        <Label className="text-xs" htmlFor={`${id}-email`}>
-          Email
-        </Label>
-        <Input id={`${id}-email`} type="email" {...register("email")} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs" htmlFor={`${id}-phone`}>
-          Phone
-        </Label>
-        <Input id={`${id}-phone`} {...register("phone")} />
-      </div>
+      {!detailsHidden && (
+        <>
+          <div className="space-y-1">
+            <Label className="text-xs" htmlFor={`${id}-email`}>
+              Email
+            </Label>
+            <Input id={`${id}-email`} type="email" {...register("email")} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs" htmlFor={`${id}-phone`}>
+              Phone
+            </Label>
+            <Input id={`${id}-phone`} {...register("phone")} />
+          </div>
+        </>
+      )}
       <div className="space-y-1">
         <Label className="text-xs" htmlFor={`${id}-linkedin`}>
           LinkedIn URL
         </Label>
         <Input id={`${id}-linkedin`} {...register("linkedinUrl")} />
       </div>
+      {detailsHidden && (
+        <p className="col-span-2 flex items-center gap-1.5 text-xs text-warning">
+          <Lock className="h-3 w-3 shrink-0" />
+          Email and phone are hidden on a reseller&apos;s customer — saving keeps them as they are.
+        </p>
+      )}
       <div className="col-span-2">
         <label className="flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" {...register("isPrimary")} />
@@ -101,9 +169,14 @@ function ContactFields({
   );
 }
 
-function EditContactForm({ contact, onClose }: { contact: Contact; onClose: () => void }) {
+function EditContactForm({ contact, custom, onClose }: { contact: Contact; custom: ContactCustomFields; onClose: () => void }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const fields = formFields(contact, custom.fields);
+  const [customValues, setCustomValues] = useState<CustomFieldFormValues>(custom.values[contact.id] ?? {});
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
+  // Per instance, like ContactFields' own: the add form can be open beside this one.
+  const customId = useId();
   type FormValues = z.input<typeof updateContactSchema>;
   const {
     register,
@@ -125,7 +198,11 @@ function EditContactForm({ contact, onClose }: { contact: Contact; onClose: () =
 
   async function onSubmit(values: UpdateContactInput) {
     setServerError(null);
-    const result = await updateContact(values);
+    const missing = missingRequired(fields, customValues);
+    setCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
+    // The workspace's own fields only when the form had some: without them, the save leaves them be.
+    const result = await updateContact(fields.length > 0 ? { ...values, customFields: customValues } : values);
     if (!result.ok) {
       setServerError(result.error);
       return;
@@ -137,7 +214,23 @@ function EditContactForm({ contact, onClose }: { contact: Contact; onClose: () =
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-2 rounded-md border border-line bg-surface-sunken p-3">
       {serverError && <p className="text-xs text-danger">{serverError}</p>}
-      <ContactFields register={register as unknown as UseFormRegister<FieldValues>} errors={errors} />
+      <ContactFields register={register as unknown as UseFormRegister<FieldValues>} errors={errors} detailsHidden={contact.detailsRedacted} />
+      {fields.length > 0 && (
+        <div className="pt-1">
+          <CustomFieldInputs
+            fields={fields}
+            values={customValues}
+            people={custom.people}
+            errors={customErrors}
+            idPrefix={`${customId}-cf`}
+            disabled={isSubmitting}
+            onChange={(key, value) => {
+              setCustomValues((v) => ({ ...v, [key]: value }));
+              setCustomErrors((e) => withoutError(e, key));
+            }}
+          />
+        </div>
+      )}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Cancel
@@ -154,14 +247,21 @@ export function ContactsList({
   companyId,
   companyName,
   contacts,
+  customFields = NO_CUSTOM_FIELDS,
 }: {
   companyId: string;
   companyName: string;
   contacts: Contact[];
+  /** The workspace's own contact fields — none when it has none this person sees. */
+  customFields?: ContactCustomFields;
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addCustom, setAddCustom] = useState<CustomFieldFormValues>({});
+  const [addCustomErrors, setAddCustomErrors] = useState<Record<string, string>>({});
+  const addId = useId();
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const deleteTarget = contacts.find((c) => c.id === deleteTargetId) ?? null;
   const [isPending, setIsPending] = useState(false);
@@ -197,11 +297,18 @@ export function ContactsList({
   });
 
   async function onAddSubmit(values: ContactInput) {
-    const result = await addContact(companyId, values);
+    setAddError(null);
+    const missing = missingRequired(customFields.fields, addCustom);
+    setAddCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
+    const result = await addContact(companyId, { ...values, customFields: addCustom });
     if (!result.ok) {
+      // Said rather than swallowed: a field of the workspace's own can be refused here too.
+      setAddError(result.error);
       return;
     }
     reset({ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: false, receivesDocuments: false });
+    setAddCustom({});
     setAddOpen(false);
     router.refresh();
   }
@@ -225,16 +332,17 @@ export function ContactsList({
     <div className="space-y-3">
       {contacts.map((c) =>
         editingId === c.id ? (
-          <EditContactForm key={c.id} contact={c} onClose={() => setEditingId(null)} />
+          <EditContactForm key={c.id} contact={c} custom={customFields} onClose={() => setEditingId(null)} />
         ) : (
           <div key={c.id} className="flex items-start justify-between text-sm">
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-text">{c.name}</span>
                 {c.isPrimary && <Badge tone="blue">Primary</Badge>}
                 {c.receivesDocuments && <Badge tone="green">Invoices</Badge>}
               </div>
               <div className="text-muted">{c.designation.replaceAll("_", " ")}</div>
+              <FilledFields shown={customFields.shown[c.id]} />
               <div className="mt-1 flex flex-wrap items-center gap-3">
                 {c.detailsRedacted && (
                   <span className="flex items-center gap-1 rounded bg-warning-bg px-1.5 py-0.5 text-xs text-warning">
@@ -297,7 +405,24 @@ export function ContactsList({
           </>
         ) : (
           <form onSubmit={handleSubmit(onAddSubmit)} className="space-y-2 rounded-md border border-line p-3">
+            {addError && <p className="text-xs text-danger">{addError}</p>}
             <ContactFields register={register as unknown as UseFormRegister<FieldValues>} errors={errors} />
+            {customFields.fields.length > 0 && (
+              <div className="pt-1">
+                <CustomFieldInputs
+                  fields={customFields.fields}
+                  values={addCustom}
+                  people={customFields.people}
+                  errors={addCustomErrors}
+                  idPrefix={`${addId}-cf`}
+                  disabled={isSubmitting}
+                  onChange={(key, value) => {
+                    setAddCustom((v) => ({ ...v, [key]: value }));
+                    setAddCustomErrors((e) => withoutError(e, key));
+                  }}
+                />
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
                 Cancel

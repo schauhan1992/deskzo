@@ -7,6 +7,8 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { resellerRelationshipTypeValues } from "@/lib/validation/company";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { requireUser } from "@/lib/session";
+import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewResellerPage() {
   const enabled = await isModuleEnabled("resellers");
@@ -14,7 +16,8 @@ export default async function NewResellerPage() {
     return <ModuleDisabledNotice moduleKey="resellers" />;
   }
 
-  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories()]);
+  const user = await requireUser();
+  const [industries, canAddContacts, termsAdvice, categories, customFields] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories(), formSetup("COMPANY", user.id)]);
 
   return (
     <div>
@@ -28,6 +31,7 @@ export default async function NewResellerPage() {
         categories={categories}
         canAddContacts={canAddContacts}
         termsAdvice={termsAdvice}
+        customFields={customFields}
         defaultRelationshipType="RESELLER"
         relationshipTypeOptions={resellerRelationshipTypeValues}
       />

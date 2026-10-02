@@ -1,14 +1,24 @@
 "use client";
 
-import { useState } from "react";
-import { addContact } from "@/actions/company";
+import { useEffect, useState } from "react";
+import { addContact, contactFieldSetup } from "@/actions/company";
 import { contactDesignationValues } from "@/lib/validation/company";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 
 type Designation = (typeof contactDesignationValues)[number];
 const EMPTY = { name: "", designation: "OTHER" as Designation, email: "", phone: "" };
+
+type FieldSetup = { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
+const NO_FIELDS: FieldSetup = { fields: [], values: {}, people: [] };
 
 export type CreatedContact = { id: string; name: string; designation: string };
 
@@ -39,6 +49,13 @@ export function NewContactDialog({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
+  /**
+   * The workspace's own contact fields (src/lib/custom-fields) — asked for the first time the dialog
+   * opens, because the forms that open it know nothing about contacts. Null until they arrive.
+   */
+  const [setup, setSetup] = useState<FieldSetup | null>(null);
+  const [custom, setCustom] = useState<CustomFieldFormValues>({});
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
 
   // Fresh each time it opens — adjusted during render, as the quick-create dialog does.
   if (open !== wasOpen) {
@@ -46,8 +63,27 @@ export function NewContactDialog({
     if (open) {
       setForm(EMPTY);
       setError(null);
+      setCustom(setup?.values ?? {});
+      setCustomErrors({});
     }
   }
+
+  useEffect(() => {
+    if (!open || setup) return;
+    let live = true;
+    contactFieldSetup().then(
+      (loaded) => {
+        if (live) setSetup(loaded);
+      },
+      // Without them the person is still added — and a field the server insists on says so.
+      () => {
+        if (live) setSetup(NO_FIELDS);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, setup]);
 
   const set = (key: keyof typeof EMPTY) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
@@ -62,6 +98,9 @@ export function NewContactDialog({
       setError("Their name is needed.");
       return;
     }
+    const missing = missingRequired(setup?.fields ?? [], custom);
+    setCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
     setSaving(true);
     setError(null);
     const result = await addContact(companyId, {
@@ -70,6 +109,7 @@ export function NewContactDialog({
       email: form.email.trim(),
       phone: form.phone.trim(),
       isPrimary: false,
+      customFields: custom,
     });
     setSaving(false);
     if (!result.ok) {
@@ -107,12 +147,32 @@ export function NewContactDialog({
             <Input id="nc-phone" value={form.phone} onChange={set("phone")} autoComplete="off" />
           </div>
         </div>
+        {setup && setup.fields.length > 0 && (
+          <CustomFieldInputs
+            fields={setup.fields}
+            values={custom}
+            people={setup.people}
+            errors={customErrors}
+            idPrefix="nc-cf"
+            disabled={saving}
+            onChange={(key, value) => {
+              setCustom((prev) => ({ ...prev, [key]: value }));
+              setCustomErrors((prev) => {
+                if (!prev[key]) return prev;
+                const next = { ...prev };
+                delete next[key];
+                return next;
+              });
+            }}
+          />
+        )}
         <p className="text-xs text-subtle">Added to the company&apos;s contacts, and picked for this lead.</p>
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={saving}>
+          {/* Not before the workspace's own fields are known: a required one would only be refused. */}
+          <Button type="submit" size="sm" disabled={saving || !setup}>
             {saving ? "Adding…" : "Add contact"}
           </Button>
         </div>

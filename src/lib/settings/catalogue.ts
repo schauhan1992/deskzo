@@ -41,6 +41,7 @@ import {
   Lock,
   CalendarCheck,
   ListChecks,
+  ListPlus,
 } from "lucide-react";
 
 /**
@@ -370,6 +371,14 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/customer-categories",
             icon: Shapes,
             permission: "companies.manageCategories",
+          },
+          {
+            key: "custom-fields",
+            label: "Custom fields",
+            description: "Your own fields on companies, contacts, leads, orders and products — where they appear, which are required, and who sees them.",
+            href: "/settings/custom-fields",
+            icon: ListPlus,
+            permission: "fields.manage",
           },
           {
             key: "pin-directory",

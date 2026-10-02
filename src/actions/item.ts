@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
-import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
+import { desanitizeCsvCell, sanitizeCsvCell, csvFilename } from "@/lib/csv";
 import {
   createItemSchema,
   updateItemSchema,
@@ -18,6 +18,8 @@ import {
 import { parseSeqQuery, formatItemId } from "@/lib/order-id";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { recordAudit } from "@/lib/audit";
+import { changedLabel, customFieldsForCreate, customSearchWhere, fieldsFor, saveCustomFields, valuesFor } from "@/lib/custom-fields/server";
+import { customSheetFor, exportCells } from "@/lib/custom-fields/sheets";
 import { hasEffectivePermission } from "@/actions/permission";
 import { canonicalColumn, cleanName, nameKey } from "@/lib/items/catalogue-import";
 import type { ActionResult } from "@/actions/company";
@@ -63,6 +65,8 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
   if (familyError) {
     return { ok: false, error: familyError };
   }
+  const custom = await customFieldsForCreate("ITEM", user.id, parsed.data.customFields);
+  if (!custom.ok) return { ok: false, error: custom.error };
   // The revenue pattern is Revenue & Close's: without it the field isn't on the form, and is ignored.
   const revenueCapture = await isModuleEnabled("revenue_close");
 
@@ -90,6 +94,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
           createdById: user.id,
           stockQuantity: trackInventory && openingStock ? openingStock : 0,
           revenuePattern: revenueCapture ? rest.revenuePattern || null : null,
+          ...custom.data,
         },
       });
 
@@ -172,6 +177,26 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
   }
 }
 
+/**
+ * The item's own fields (src/lib/custom-fields), from the "More details" card on its page — bound to
+ * the item there. Whoever may edit the item may change them, as `updateItem` decides it.
+ */
+export async function updateItemCustomFields(itemId: string, input: unknown): Promise<ActionResult<null>> {
+  const user = await requireModuleUser("items");
+  const moduleError = await requireItemsModule();
+  if (moduleError) return { ok: false, error: moduleError };
+  const item = await db.item.findUnique({ where: { id: itemId }, select: { id: true, name: true } });
+  if (!item) return { ok: false, error: "That item no longer exists." };
+  const saved = await saveCustomFields("ITEM", item.id, user.id, input);
+  if (!saved.ok) return saved;
+  if (saved.changed.length > 0) {
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Item", entityId: item.id, entityLabel: `${item.name}${changedLabel(saved.changed)}` });
+    revalidatePath("/items");
+    revalidatePath(`/items/${item.id}`);
+  }
+  return { ok: true, data: null };
+}
+
 export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQuantity: number }>> {
   const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
@@ -218,9 +243,11 @@ export async function listItems(params?: {
   page?: number;
   pageSize?: number;
 }) {
-  await requireModuleUser("items");
+  const user = await requireModuleUser("items");
 
   const seq = params?.search ? parseSeqQuery(params.search) : null;
+  // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts).
+  const customBranches = await customSearchWhere("ITEM", user.id, params?.search);
   const where = {
     ...(params?.type ? { type: params.type } : {}),
     ...(params?.brandId ? { brandId: params.brandId } : {}),
@@ -232,6 +259,7 @@ export async function listItems(params?: {
             { sku: { contains: params.search, mode: "insensitive" as const } },
             // "ITM-000012" or plain "12" finds that catalog number.
             ...(seq !== null ? [{ itemSeq: seq }] : []),
+            ...(customBranches as Prisma.ItemWhereInput[]),
           ],
         }
       : {}),
@@ -384,8 +412,17 @@ export async function getItem(id: string) {
   return item ? toPlain(item) : null;
 }
 
+/**
+ * The custom-field labels the items CSV would read as one of its own columns ("Price" is the selling
+ * price there) — their columns are headed "… (custom)" instead, in the export and the import alike.
+ */
+async function csvBuiltIns(userId: string): Promise<string[]> {
+  const { visible } = await fieldsFor("ITEM", userId);
+  return visible.map((d) => d.label).filter((label) => canonicalColumn(label) !== label.trim());
+}
+
 export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; filename: string }>> {
-  await requireModuleUser("items");
+  const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
 
@@ -414,8 +451,12 @@ export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; file
     reorderLevel: item.reorderLevel?.toString() ?? "",
     active: item.active ? "true" : "false",
   }));
+  // The workspace's own fields this person may see, after the built-in columns — headed by label, as
+  // the import reads them back (src/lib/custom-fields/sheets.ts).
+  const custom = await exportCells("ITEM", user.id, items.map((item) => item.id), await csvBuiltIns(user.id), { sanitize: sanitizeCsvCell });
+  const withCustom = rows.map((row, n) => Object.assign(row, custom(items[n]!.id)));
 
-  const csv = Papa.unparse(rows);
+  const csv = Papa.unparse(withCustom);
   return { ok: true, data: { csv, filename: csvFilename("items-export") } };
 }
 
@@ -560,6 +601,9 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
 
   const result: ImportItemsResult = { created: 0, updated: 0, errors: [], brandsCreated: [], familiesCreated: [] };
   const catalogue = await catalogueResolver(await hasEffectivePermission(user.id, "catalog.manage"), result);
+  // The workspace's own fields, read from their columns by label. A blank cell leaves a value alone —
+  // unlike the built-in columns here — so a file made before a field existed never clears it.
+  const customSheet = await customSheetFor("ITEM", user.id, await csvBuiltIns(user.id));
 
   // Every SKU the file names, in one query rather than one per row.
   const skus = [...new Set(parsed.data.map((r) => String(r.sku ?? "").trim()).filter(Boolean))];
@@ -622,6 +666,14 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
       }
     }
     const hsnCode = hasHsn ? data.hsnCode || null : undefined;
+    // Read back without the formula guard the export put on its text cells (src/lib/csv.ts).
+    const cells = Object.fromEntries(Object.entries(parsed.data[i]!).map(([k, v]) => [k, desanitizeCsvCell(String(v ?? ""))]));
+    const custom = customSheet ? await customSheet.merge(existing ? await valuesFor("ITEM", existing.id) : {}, cells) : null;
+    if (custom && !custom.ok) {
+      result.errors.push({ row: rowNumber, message: custom.error });
+      continue;
+    }
+    const customData = custom?.ok && custom.changes.length > 0 ? { customFields: custom.values as Prisma.InputJsonValue } : {};
 
     try {
       if (existing) {
@@ -646,6 +698,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
             trackInventory,
             reorderLevel: data.reorderLevel ?? null,
             active: data.active,
+            ...customData,
           },
         });
         known.set(data.sku, { ...existing, brandId, productFamilyId });
@@ -673,6 +726,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
               active: data.active,
               createdById: user.id,
               stockQuantity: trackInventory && data.openingStock ? data.openingStock : 0,
+              ...customData,
             },
           });
 

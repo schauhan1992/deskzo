@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import ExcelJS from "exceljs";
 import { desanitizeCsvCell } from "@/lib/csv";
+import { customSheetFor } from "@/lib/custom-fields/sheets";
 import { getImporter, IMPLEMENTED_IMPORTS } from "./importers";
 import type { PlannedRow } from "./importers/types";
 
@@ -50,6 +51,8 @@ export type ImportPlan = {
   rows: PlannedRow[];
   /** Columns in the file that no field matched. Usually a wrong template or a renamed heading. */
   unknownColumns: string[];
+  /** The rows' notices (`PlannedRow.notice`), one per wording, with the lines each applies to. */
+  notices: { text: string; lines: number[] }[];
 };
 
 /** Parses CSV or XLSX into plain rows keyed by header. */
@@ -118,6 +121,19 @@ export const TEMPLATE_COLUMNS: Record<string, string[]> = Object.fromEntries(
   IMPLEMENTED_IMPORTS.map((area) => [area, getImporter(area)!.templateColumns]),
 );
 
+/** The custom-field columns an importer carries for this person (src/lib/custom-fields/sheets.ts), or null. */
+async function customFor(importer: NonNullable<ReturnType<typeof getImporter>>, actorUserId: string) {
+  return importer.customEntity ? customSheetFor(importer.customEntity, actorUserId, importer.templateColumns) : null;
+}
+
+/** An area's template for this person: the built-in columns, then the workspace's own fields they may import. */
+export async function templateColumnsFor(area: string, actorUserId: string): Promise<string[]> {
+  const importer = getImporter(area);
+  if (!importer) return [];
+  const custom = await customFor(importer, actorUserId);
+  return [...importer.templateColumns, ...(custom?.headers ?? [])];
+}
+
 /**
  * The actor is required rather than optional, because some rows can only be judged against who is
  * asking. A role a person may not grant is not an unusable row in general — it is unusable *by
@@ -134,7 +150,8 @@ export async function plan(
   // Grown as the file is read, so a row may reference a key an earlier row will create. See the
   // note on ImportContext — without it an exported chart of accounts cannot be loaded back in one
   // pass, because every child is refused for a parent that is two rows above it in the same file.
-  const ctx = { actorUserId, area, pendingKeys: new Set<string>() };
+  const custom = await customFor(importer, actorUserId);
+  const ctx = { actorUserId, area, pendingKeys: new Set<string>(), custom };
   const planned: PlannedRow[] = [];
   for (const [i, row] of rows.entries()) {
     const result = await importer.plan(row, i + 2, ctx);
@@ -142,9 +159,11 @@ export async function plan(
     planned.push(result);
   }
 
-  const known = new Set(importer.templateColumns);
+  const known = new Set([...importer.templateColumns, ...(custom?.headers ?? [])]);
   const present = new Set(rows.flatMap((r) => Object.keys(r)));
   const unknownColumns = [...present].filter((c) => c && !known.has(c));
+  const notices = new Map<string, number[]>();
+  for (const r of planned) if (r.notice) notices.set(r.notice, [...(notices.get(r.notice) ?? []), r.line]);
 
   return {
     area,
@@ -155,6 +174,7 @@ export async function plan(
     errors: planned.filter((r) => r.action === "error").length,
     rows: planned,
     unknownColumns,
+    notices: [...notices].map(([text, lines]) => ({ text, lines })),
   };
 }
 
@@ -174,7 +194,7 @@ export async function apply(
   const importer = getImporter(area);
   if (!importer) throw new Error(`No importer for ${area}`);
 
-  const ctx = { actorUserId, area, pendingKeys: new Set<string>() };
+  const ctx = { actorUserId, area, pendingKeys: new Set<string>(), custom: await customFor(importer, actorUserId) };
   const planned = await plan(area, rows, actorUserId);
   let created = 0;
   let updated = 0;

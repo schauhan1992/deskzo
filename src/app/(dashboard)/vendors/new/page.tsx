@@ -4,6 +4,8 @@ import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { vendorRelationshipTypeValues } from "@/lib/validation/company";
+import { requireUser } from "@/lib/session";
+import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewVendorPage() {
   const enabled = await isModuleEnabled("vendors");
@@ -11,7 +13,8 @@ export default async function NewVendorPage() {
     return <ModuleDisabledNotice moduleKey="vendors" />;
   }
 
-  const [industries, canAddContacts] = await Promise.all([listIndustries(), viewerHas("contacts.view")]);
+  const user = await requireUser();
+  const [industries, canAddContacts, customFields] = await Promise.all([listIndustries(), viewerHas("contacts.view"), formSetup("COMPANY", user.id)]);
 
   return (
     <div>
@@ -22,6 +25,7 @@ export default async function NewVendorPage() {
       <NewCompanyForm
         industries={industries}
         canAddContacts={canAddContacts}
+        customFields={customFields}
         defaultRelationshipType="VENDOR"
         relationshipTypeOptions={vendorRelationshipTypeValues}
       />

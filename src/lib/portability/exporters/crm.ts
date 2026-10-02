@@ -1,5 +1,8 @@
 import { db } from "@/lib/db";
 import { formatContactId } from "@/lib/order-id";
+import { contactDetailFieldKeys, seesResellerContactDetails } from "@/lib/authz/contact-access";
+import { exportCells } from "@/lib/custom-fields/sheets";
+import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { ownScope, viaCompany, type Exporter, type ExportScope } from "./types";
 
 /**
@@ -38,7 +41,7 @@ function partyExporter(area: string): Exporter {
       orderBy: { name: "asc" },
     });
 
-    return rows.map((c) => ({
+    const base = rows.map((c) => ({
       Key: c.normalizedName,
       Name: c.name,
       Type: c.relationshipType,
@@ -54,6 +57,9 @@ function partyExporter(area: string): Exporter {
       Orders: c._count.products,
       "Added on": c.createdAt,
     }));
+    // The workspace's own fields this person may see, after the built-in columns (src/lib/custom-fields/sheets.ts).
+    const custom = await exportCells("COMPANY", scope.userId, rows.map((c) => c.id), Object.keys(base[0] ?? {}));
+    return base.map((b, i) => ({ ...b, ...custom(rows[i]!.id) }));
   };
 }
 
@@ -63,13 +69,21 @@ export const vendorsExporter = partyExporter("vendors");
 export const resellersExporter = partyExporter("resellers");
 export const commissionPartiesExporter = partyExporter("commission-parties");
 
+/**
+ * A reseller's end customer's contact details leave only with somebody who may see them
+ * (src/lib/authz/contact-access.ts) — redacted here as the screens redact them, so export never widens
+ * what this person sees. Their cells go out blank, the email's check status with them, and blank is
+ * "leave alone" when the file comes back.
+ */
 export const contactsExporter: Exporter = async (scope) => {
-  const rows = await db.contact.findMany({
+  const stored = await db.contact.findMany({
     where: viaCompany(scope),
-    include: { company: { select: { name: true } } },
+    include: { company: { select: { name: true, managedByResellerId: true } } },
     orderBy: { contactSeq: "asc" },
   });
-  return rows.map((c) => ({
+  const canViewRestricted = stored.some((c) => isResellerManaged(c.company)) ? await seesResellerContactDetails(scope.userId) : true;
+  const rows = stored.map((c) => redactContactDetails(c, { restricted: isResellerManaged(c.company), canViewRestricted }));
+  const base = rows.map((c) => ({
     Key: formatContactId(c.contactSeq),
     Name: c.name,
     Company: c.company.name,
@@ -77,8 +91,14 @@ export const contactsExporter: Exporter = async (scope) => {
     Email: c.email ?? "",
     Phone: c.phone ?? "",
     Primary: c.isPrimary,
-    "Email status": c.emailStatus,
+    "Email status": c.detailsRedacted ? "" : c.emailStatus,
   }));
+  const hidden = new Set(rows.filter((c) => c.detailsRedacted).map((c) => c.id));
+  const hiddenKeys = new Set(hidden.size > 0 ? await contactDetailFieldKeys() : []);
+  const custom = await exportCells("CONTACT", scope.userId, rows.map((c) => c.id), Object.keys(base[0] ?? {}), {
+    hiddenFor: (id) => (hidden.has(id) ? hiddenKeys : undefined),
+  });
+  return base.map((b, i) => ({ ...b, ...custom(rows[i]!.id) }));
 };
 
 export const ticketsExporter: Exporter = async (scope) => {

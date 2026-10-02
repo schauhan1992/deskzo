@@ -1,5 +1,6 @@
-import { CompanyStage, CompanySource } from "@prisma/client";
+import { CompanyStage, CompanySource, type Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { valuesFor } from "@/lib/custom-fields/server";
 import { normalizeCompanyName } from "@/lib/validation/company";
 import { optionalUserRef } from "./lookups";
 import {
@@ -67,8 +68,9 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCo
 
 export const companiesImporter: Importer = {
   templateColumns: ["Name", "Stage", "Source", "Industry", "Website", "Account manager"],
+  customEntity: "COMPANY",
 
-  async plan(row, line) {
+  async plan(row, line, ctx) {
     const resolved = await resolve(row);
     if ("error" in resolved) return errorRow(line, row.Name ?? "", resolved.error);
     const c = resolved.value;
@@ -77,6 +79,9 @@ export const companiesImporter: Importer = {
       where: { normalizedName: c.normalizedName },
       include: { owner: { select: { name: true } }, industry: { select: { name: true } } },
     });
+    // The workspace's own fields in this row, checked against what the company holds (sheets.ts).
+    const custom = ctx.custom ? await ctx.custom.merge(existing ? await valuesFor("COMPANY", existing.id) : {}, row) : null;
+    if (custom && !custom.ok) return errorRow(line, c.name, custom.error);
 
     if (!existing) {
       return createRow(line, c.normalizedName, c.name, {
@@ -86,6 +91,7 @@ export const companiesImporter: Importer = {
         Industry: c.industryName,
         Website: c.website,
         "Account manager": c.ownerName,
+        ...(custom?.ok ? Object.fromEntries(custom.changes.map((ch) => [ch.field, ch.to])) : {}),
       });
     }
 
@@ -96,6 +102,7 @@ export const companiesImporter: Importer = {
       c.industryName ? diff("Industry", existing.industry?.name, c.industryName) : null,
       c.website ? diff("Website", existing.website, c.website) : null,
       c.ownerName ? diff("Account manager", existing.owner?.name, c.ownerName) : null,
+      ...(custom?.ok ? custom.changes : []),
     ]);
   },
 
@@ -110,8 +117,13 @@ export const companiesImporter: Importer = {
       ? await db.industry.upsert({ where: { name: c.industryName }, update: {}, create: { name: c.industryName } })
       : null;
 
+    const existing = await db.company.findUnique({ where: { normalizedName: c.normalizedName }, select: { id: true } });
+    const custom = ctx.custom ? await ctx.custom.merge(existing ? await valuesFor("COMPANY", existing.id) : {}, row) : null;
+    if (custom && !custom.ok) throw new Error(custom.error);
+
     const data = {
       name: c.name,
+      ...(custom?.ok && custom.changes.length > 0 ? { customFields: custom.values as Prisma.InputJsonValue } : {}),
       ...(c.stage ? { stage: c.stage } : {}),
       ...(c.source ? { source: c.source } : {}),
       ...(c.website ? { website: c.website } : {}),

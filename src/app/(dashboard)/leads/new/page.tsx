@@ -6,6 +6,7 @@ import { listIndustries } from "@/actions/industry";
 import { isModuleEnabled } from "@/actions/module";
 import { NewLeadForm } from "@/components/leads/new-lead-form";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewLeadPage({
   searchParams,
@@ -18,7 +19,7 @@ export default async function NewLeadPage({
     hasEffectivePermission(user.id, "contacts.view"),
   ]);
   if (!canViewLeads) return <NoAccessNotice title="New lead" permission="leads.view" />;
-  const [{ companyId }, companies, items, industries, canAssign, people] = await Promise.all([
+  const [{ companyId }, companies, items, industries, canAssign, people, customFields] = await Promise.all([
     searchParams,
     listCompanyOptions(),
     itemsEnabled ? listItemOptions() : Promise.resolve([]),
@@ -28,6 +29,8 @@ export default async function NewLeadPage({
       ([assign, reassign]) => assign || reassign,
     ),
     listAssignableUsers(),
+    // The workspace's own lead fields (src/lib/custom-fields).
+    formSetup("LEAD", user.id),
   ]);
 
   return (
@@ -47,6 +50,7 @@ export default async function NewLeadPage({
           canAssign={canAssign}
           canAddContact={canAddContact}
           people={people.map((p) => ({ id: p.id, name: p.name, email: p.email, hint: p.role }))}
+          customFields={customFields}
         />
       </div>
     </div>

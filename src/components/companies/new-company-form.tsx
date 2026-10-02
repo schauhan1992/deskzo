@@ -22,6 +22,13 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CompanyDetailFields, type TermsAdvice } from "@/components/companies/company-fields";
 import { ExistingCompanyMatches } from "@/components/companies/existing-company-matches";
 import { gstTreatmentValues, gstTreatmentLabels, treatmentForCountryChange } from "@/lib/gst";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 
 type FormValues = z.input<typeof createCompanySchema>;
 type IndustryOption = { id: string; name: string };
@@ -34,6 +41,7 @@ export function NewCompanyForm({
   managedByResellerId,
   canAddContacts = true,
   termsAdvice = null,
+  customFields = { fields: [], values: {}, people: [] },
 }: {
   industries: IndustryOption[];
   categories?: CategoryTree<FlatCategory>[];
@@ -45,9 +53,13 @@ export function NewCompanyForm({
   canAddContacts?: boolean;
   /** For a customer: what a new customer's (empty) credit record supports. */
   termsAdvice?: TermsAdvice | null;
+  /** The workspace's own company fields (src/lib/custom-fields/server.ts `formSetup`). */
+  customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const {
     register,
     control,
@@ -83,7 +95,10 @@ export function NewCompanyForm({
 
   async function onSubmit(values: CreateCompanyInput) {
     setServerError(null);
-    const result = await createCompany(values);
+    const missing = missingRequired(customFields.fields, custom);
+    setCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
+    const result = await createCompany({ ...values, customFields: custom });
     if (!result.ok) {
       setServerError(result.error);
       return;
@@ -105,6 +120,29 @@ export function NewCompanyForm({
         termsAdvice={termsAdvice}
         selectedTerms={String(watch("paymentTerms") ?? "")}
       />
+
+      {customFields.fields.length > 0 && (
+        <Card>
+          <CardHeader className="text-sm font-medium text-text">More details</CardHeader>
+          <CardContent>
+            <CustomFieldInputs
+              fields={customFields.fields}
+              values={custom}
+              people={customFields.people}
+              errors={customErrors}
+              onChange={(key, value) => {
+                setCustom((c) => ({ ...c, [key]: value }));
+                setCustomErrors((e) => {
+                  if (!e[key]) return e;
+                  const next = { ...e };
+                  delete next[key];
+                  return next;
+                });
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="text-sm font-medium text-text">Primary location</CardHeader>

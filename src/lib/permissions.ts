@@ -904,6 +904,33 @@ export const PERMISSION_REGISTRY = [
   },
   {
     /**
+     * The workspace's own fields on companies, contacts, leads, orders and products — see
+     * src/lib/custom-fields. Adding a required field changes every form those records are entered
+     * through, so it is an administrator's decision, not anybody's who can edit a record.
+     */
+    key: "fields.manage",
+    label: "Manage custom fields",
+    description:
+      "Add the workspace's own fields to companies, contacts, leads, orders and products — text, numbers, dates, dropdowns and more — choose where they appear, which are required, and which are restricted; rename, reorder and retire them.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Administration",
+  },
+  {
+    /**
+     * A custom field marked restricted — a cost price, a commission rate — is seen and changed only
+     * with this. Everyone else never receives its value: the server leaves it out of pages, lists and
+     * exports, and a form they save keeps whatever the record already holds.
+     */
+    key: "fields.seeRestricted",
+    label: "See restricted custom fields",
+    description:
+      "See and change the custom fields marked restricted, wherever they appear — on records, in lists and filters, and in exports. Without it, those fields are not shown at all and saving a record leaves them as they are.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Administration",
+    tier: "sensitive",
+  },
+  {
+    /**
      * Folding a duplicate company into the one that stays — see src/lib/companies/merge.ts.
      *
      * Not undoable: the duplicate is removed and everything under it now belongs to the other. So it

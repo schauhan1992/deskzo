@@ -1,3 +1,6 @@
+import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
+import type { CustomSheet } from "@/lib/custom-fields/sheets";
+
 /**
  * The contract every importer satisfies, and the helpers that keep them consistent.
  *
@@ -32,6 +35,12 @@ export type PlannedRow = {
   /** For an update: which fields change, old → new. The reason a dry run is worth reading. */
   changes: FieldChange[];
   error?: string;
+  /**
+   * Something in the row that is left as it is, and why — neither a change nor a reason to refuse the
+   * row (cells naming details hidden from this person). The preview gathers these by wording, with the
+   * rows each applies to, so nothing in the file is dropped without a word.
+   */
+  notice?: string;
 };
 
 /**
@@ -51,6 +60,11 @@ export type PlannedRow = {
 export type ImportContext = {
   actorUserId: string;
   area: string;
+  /**
+   * The workspace's own fields this person may import, for an importer with a `customEntity` —
+   * src/lib/custom-fields/sheets.ts. Null when there are none.
+   */
+  custom?: CustomSheet | null;
   /** Natural keys that rows before this one in the file will create. */
   pendingKeys: Set<string>;
 };
@@ -61,6 +75,11 @@ export type Resolved<T> = { error: string } | { value: T };
 export type Importer = {
   /** Columns the template offers, and what the unknown-column warning is checked against. */
   templateColumns: string[];
+  /**
+   * The record type whose custom fields (src/lib/custom-fields) this import also carries — their
+   * columns join the template, and `ctx.custom` reads them.
+   */
+  customEntity?: CustomFieldEntityKey;
   /**
    * What this row would do. **Must not write.** A preview somebody abandons has to leave the
    * database exactly as it found it, including lookup tables like industries and brands.

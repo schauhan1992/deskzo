@@ -33,9 +33,23 @@ import {
 } from "@/lib/validation/company";
 import { addCompanyProductSchema, updateCompanyProductSchema } from "@/lib/validation/company-product";
 import { countForBand } from "@/lib/company-size";
-import { mayWorkWithContactsOf, canViewContacts, NO_CONTACTS } from "@/lib/authz/contact-access";
+import {
+  mayWorkWithContactsOf,
+  canViewContacts,
+  NO_CONTACTS,
+  contactDetailFieldKeys,
+  contactDetailsHiddenAt,
+  seesResellerContactDetails,
+} from "@/lib/authz/contact-access";
 import { checkTerms, recordDecision } from "@/lib/credit/guard";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
+import {
+  changedLabel,
+  customFieldsForCreate,
+  customSearchWhere,
+  formSetup,
+  saveCustomFields,
+} from "@/lib/custom-fields/server";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -170,7 +184,7 @@ export async function createCompany(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
 
-  const { contacts, location, managedByResellerId, ...companyInput } = parsed.data;
+  const { contacts, location, managedByResellerId, customFields, ...companyInput } = parsed.data;
   if (!(await categoryExists(companyInput.customerCategoryId))) return { ok: false, error: "That customer category isn't there any more — pick another." };
   // The form leaves the contacts section out for someone without `contacts.view`; this is the same
   // rule for a caller that sends them anyway.
@@ -203,6 +217,10 @@ export async function createCompany(
       return { ok: false, error: "That's not a reseller." };
     }
   }
+  // The workspace's own fields (src/lib/custom-fields), the required ones answered. The contacts
+  // created with the company are created without theirs: those are filled in on each contact.
+  const custom = await customFieldsForCreate("COMPANY", user.id, customFields, { checkRequired: true });
+  if (!custom.ok) return { ok: false, error: custom.error };
 
   try {
     const company = await db.company.create({
@@ -228,6 +246,7 @@ export async function createCompany(
          * rather than a decision.
          */
         ownerUserId: user.id,
+        ...custom.data,
         contacts: {
           create: contacts.map((c) => ({
             name: c.name.trim(),
@@ -368,6 +387,55 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
   }
 }
 
+/**
+ * The company's own fields (src/lib/custom-fields), from the "More details" card on its page — bound
+ * to the company there. Whoever may edit the company may change them, as `updateCompany` decides it.
+ */
+export async function updateCompanyCustomFields(companyId: string, input: unknown): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true } });
+  // Scoped like `updateCompany`: out of scope and missing answer the same.
+  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+    return { ok: false, error: "Company not found." };
+  }
+  const saved = await saveCustomFields("COMPANY", company.id, user.id, input);
+  if (!saved.ok) return saved;
+  if (saved.changed.length > 0) {
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Company",
+      entityId: company.id,
+      entityLabel: `${company.name}${changedLabel(saved.changed)}`,
+    });
+    revalidatePath("/companies");
+    revalidatePath(`/companies/${company.id}`);
+    revalidatePath("/vendors");
+    revalidatePath("/commission-parties");
+  }
+  return { ok: true, data: null };
+}
+
+/**
+ * The workspace's own company fields for the quick-create dialog on the lead form, whose page knows
+ * nothing of companies — it asks only the required ones, the rest are filled in on the company's page.
+ */
+export async function companyFieldSetup(): Promise<Awaited<ReturnType<typeof formSetup>>> {
+  const user = await requireUser();
+  return formSetup("COMPANY", user.id);
+}
+
+/**
+ * The workspace's own contact fields for a form that adds somebody from another record's page — the
+ * new-contact dialog on the lead form, whose page knows nothing of contacts. None for somebody without
+ * `contacts.view`, who can't add one.
+ */
+export async function contactFieldSetup(): Promise<Awaited<ReturnType<typeof formSetup>>> {
+  const user = await requireUser();
+  if (!(await canViewContacts(user.id))) return { fields: [], values: {}, people: [] };
+  return formSetup("CONTACT", user.id);
+}
+
 export async function addContact(
   companyId: string,
   input: unknown,
@@ -390,6 +458,9 @@ export async function addContact(
   if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  // The workspace's own fields (src/lib/custom-fields), the required ones answered.
+  const custom = await customFieldsForCreate("CONTACT", user.id, c.customFields, { checkRequired: true });
+  if (!custom.ok) return { ok: false, error: custom.error };
 
   const contact = await db.contact.create({
     data: {
@@ -402,6 +473,7 @@ export async function addContact(
       isPrimary: c.isPrimary,
       receivesDocuments: c.receivesDocuments,
       createdByUserId: user.id,
+      ...custom.data,
     },
   });
 
@@ -417,7 +489,7 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { id, ...c } = parsed.data;
+  const { id, customFields, ...c } = parsed.data;
 
   const contact = await db.contact.findUnique({ where: { id } });
   // Scoped like `addContact`: this edited any contact by id, on any account. Out of scope and
@@ -426,23 +498,63 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
     return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
   }
 
+  // A reseller's end customer, edited by somebody who sees its email and phone hidden: both stay as
+  // stored, whatever the form sent — it sends them blank, as it shows them.
+  const detailsHidden = await contactDetailsHiddenAt(user.id, contact.companyId);
+
+  // The workspace's own fields (src/lib/custom-fields), when the form had them — saved first, so a
+  // refusal leaves the contact exactly as it was.
+  let changed: string[] = [];
+  if (customFields !== undefined) {
+    const saved = await saveCustomFields("CONTACT", id, user.id, customFields, { skip: detailsHidden ? await contactDetailFieldKeys() : [] });
+    if (!saved.ok) return saved;
+    changed = saved.changed;
+  }
+
   await db.contact.update({
     where: { id },
     data: {
       name: c.name.trim(),
       designation: c.designation,
-      email: c.email || null,
-      phone: c.phone || null,
+      ...(detailsHidden ? {} : { email: c.email || null, phone: c.phone || null }),
       linkedinUrl: c.linkedinUrl || null,
       isPrimary: c.isPrimary,
       receivesDocuments: c.receivesDocuments,
     },
   });
 
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Contact", entityId: id, entityLabel: c.name.trim() });
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Contact", entityId: id, entityLabel: `${c.name.trim()}${changedLabel(changed)}` });
 
   revalidatePath(`/companies/${contact.companyId}`);
   return { ok: true, data: { id } };
+}
+
+/**
+ * A contact's own fields (src/lib/custom-fields) by themselves — bound to the contact where they are
+ * edited. Whoever may edit the contact may change them, as `updateContact` decides it.
+ */
+export async function updateContactCustomFields(contactId: string, input: unknown): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  const contact = await db.contact.findUnique({ where: { id: contactId }, select: { id: true, name: true, companyId: true } });
+  // Scoped like `updateContact`: out of scope and missing answer the same.
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
+  }
+  // A reseller's end customer's contact-detail fields, for somebody who sees them hidden: kept as stored.
+  const skip = (await contactDetailsHiddenAt(user.id, contact.companyId)) ? await contactDetailFieldKeys() : [];
+  const saved = await saveCustomFields("CONTACT", contact.id, user.id, input, { skip });
+  if (!saved.ok) return saved;
+  if (saved.changed.length > 0) {
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Contact",
+      entityId: contact.id,
+      entityLabel: `${contact.name}${changedLabel(saved.changed)}`,
+    });
+    revalidatePath(`/companies/${contact.companyId}`);
+  }
+  return { ok: true, data: null };
 }
 
 export async function deleteContact(id: string): Promise<ActionResult<null>> {
@@ -759,7 +871,23 @@ type CompanyListParams = {
   createdTo?: string;
 };
 
-function companyListWhere(params?: CompanyListParams): Prisma.CompanyWhereInput {
+/**
+ * The search box on the company lists: the name, or one of the workspace's own fields this person may
+ * see (src/lib/custom-fields/server.ts `customSearchWhere`, passed in by the list action). In `AND`
+ * rather than spread as `OR`: `categoryFilter` writes an `OR` of its own, and two would keep only
+ * whichever came last.
+ */
+function companySearch(search: string, custom: Prisma.CompanyWhereInput[]): Prisma.CompanyWhereInput {
+  const byName = { normalizedName: { contains: normalizeCompanyName(search) } };
+  return custom.length > 0 ? { AND: [{ OR: [byName, ...custom] }] } : byName;
+}
+
+/** `customSearchWhere` for companies, typed for the list builders. */
+async function companyCustomSearch(userId: string, search: string | undefined): Promise<Prisma.CompanyWhereInput[]> {
+  return (await customSearchWhere("COMPANY", userId, search)) as Prisma.CompanyWhereInput[];
+}
+
+function companyListWhere(params?: CompanyListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: params?.relationshipType ?? "CLIENT",
@@ -768,7 +896,7 @@ function companyListWhere(params?: CompanyListParams): Prisma.CompanyWhereInput 
     ...(params?.stage ? { stage: params.stage } : {}),
     ...(params?.hasOrders === true ? { products: { some: {} } } : {}),
     ...(params?.hasOrders === false ? { products: { none: {} } } : {}),
-    ...(params?.search ? { normalizedName: { contains: normalizeCompanyName(params.search) } } : {}),
+    ...(params?.search ? companySearch(params.search, custom) : {}),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -808,7 +936,7 @@ const companyListInclude = {
 export async function listCompanies(params?: CompanyListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...companyListWhere(params), ...(await companyScope(user.id)) },
+    where: { ...companyListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -819,7 +947,7 @@ export async function listCompaniesPaged(params: CompanyListParams & { page: num
   const user = await requireUser();
   // One `where` for both queries below: a pager whose count outran its rows would offer page 9 of
   // a list that ends at page 2.
-  const where = { ...companyListWhere(params), ...(await companyScope(user.id)) };
+  const where = { ...companyListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -851,7 +979,7 @@ type CustomerListParams = {
   createdTo?: string;
 };
 
-function customerListWhere(params?: CustomerListParams): Prisma.CompanyWhereInput {
+function customerListWhere(params?: CustomerListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: "CLIENT",
@@ -859,7 +987,7 @@ function customerListWhere(params?: CustomerListParams): Prisma.CompanyWhereInpu
     // reseller is who bought from us.
     managedByResellerId: null,
     products: { some: {} },
-    ...(params?.search ? { normalizedName: { contains: normalizeCompanyName(params.search) } } : {}),
+    ...(params?.search ? companySearch(params.search, custom) : {}),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -875,7 +1003,7 @@ function customerListWhere(params?: CustomerListParams): Prisma.CompanyWhereInpu
 export async function listCustomers(params?: CustomerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...customerListWhere(params), ...(await companyScope(user.id)) },
+    where: { ...customerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -883,7 +1011,7 @@ export async function listCustomers(params?: CustomerListParams) {
 
 export async function listCustomersPaged(params: CustomerListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...customerListWhere(params), ...(await companyScope(user.id)) };
+  const where = { ...customerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -913,12 +1041,12 @@ type VendorListParams = {
   createdTo?: string;
 };
 
-function vendorListWhere(params?: VendorListParams): Prisma.CompanyWhereInput {
+function vendorListWhere(params?: VendorListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: params?.relationshipType ?? { in: vendorRelationshipTypeValues },
     ...(params?.vendorStatus ? { vendorStatus: params.vendorStatus } : {}),
-    ...(params?.search ? { normalizedName: { contains: normalizeCompanyName(params.search) } } : {}),
+    ...(params?.search ? companySearch(params.search, custom) : {}),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -960,7 +1088,7 @@ const vendorListInclude = {
 export async function listVendors(params?: VendorListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...vendorListWhere(params), ...(await companyScope(user.id)) },
+    where: { ...vendorListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: vendorListInclude,
   });
@@ -969,7 +1097,7 @@ export async function listVendors(params?: VendorListParams) {
 /** One page of the Vendors / Commission Parties lists. */
 export async function listVendorsPaged(params: VendorListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...vendorListWhere(params), ...(await companyScope(user.id)) };
+  const where = { ...vendorListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1090,11 +1218,11 @@ type ResellerListParams = {
   createdTo?: string;
 };
 
-function resellerListWhere(params?: ResellerListParams): Prisma.CompanyWhereInput {
+function resellerListWhere(params?: ResellerListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: "RESELLER",
-    ...(params?.search ? { normalizedName: { contains: normalizeCompanyName(params.search) } } : {}),
+    ...(params?.search ? companySearch(params.search, custom) : {}),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -1123,7 +1251,7 @@ const resellerListInclude = {
 export async function listResellers(params?: ResellerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...resellerListWhere(params), ...(await companyScope(user.id)) },
+    where: { ...resellerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: resellerListInclude,
   });
@@ -1133,7 +1261,7 @@ export async function listResellersPaged(params: ResellerListParams & { page: nu
   const user = await requireUser();
   // The end-customer tally below is built from this same `where`, so the scope reaches it for free —
   // it counts end customers of the resellers on screen rather than of every reseller in the business.
-  const where = { ...resellerListWhere(params), ...(await companyScope(user.id)) };
+  const where = { ...resellerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
   const [rows, total, endCustomerTotal] = await Promise.all([
     db.company.findMany({
       where,
@@ -1355,7 +1483,7 @@ export async function getCompany(id: string) {
   // Redact here rather than in the page: masking in the component would still ship the real email
   // and phone to the browser for anyone who opens devtools.
   const restricted = isResellerManaged(company);
-  const canViewRestricted = restricted ? await hasEffectivePermission(user.id, "contacts.viewRestricted") : true;
+  const canViewRestricted = restricted ? await seesResellerContactDetails(user.id) : true;
   /**
    * The same rule for the view permissions: a part of the account this person may not see is left
    * out here, not hidden by the page. `getCompany` is an endpoint in its own right, and the customer
@@ -1628,6 +1756,6 @@ export async function countVendorsOnboarding(params?: VendorListParams) {
   // Scoped to match `listVendorsPaged`, or the badge would advertise a number of vendors larger
   // than the list underneath it can account for.
   return db.company.count({
-    where: { ...vendorListWhere(params), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
+    where: { ...vendorListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
   });
 }

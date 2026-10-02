@@ -9,6 +9,7 @@ import { itemTypeValues, itemTypeLabels } from "@/lib/validation/item";
 import { formatItemId } from "@/lib/order-id";
 import { formatCurrency } from "@/lib/utils";
 import { Badge, Card } from "@/components/ui/card";
+import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
@@ -38,7 +39,16 @@ export type ItemRow = {
   productFamily: { id: string; name: string } | null;
 };
 
-export function ItemsTable({ items, brands }: { items: ItemRow[]; brands: BrandOption[] }) {
+export function ItemsTable({
+  items,
+  brands,
+  customColumns = { columns: [], texts: {} },
+}: {
+  items: ItemRow[];
+  brands: BrandOption[];
+  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
+}) {
   const router = useRouter();
   const selection = useRowSelection(items);
   const [isPending, startTransition] = useTransition();
@@ -168,6 +178,7 @@ export function ItemsTable({ items, brands }: { items: ItemRow[]; brands: BrandO
                 <th className="px-4 py-2.5">Selling price</th>
                 <th className="px-4 py-2.5">Stock</th>
                 <th className="px-4 py-2.5">Status</th>
+                <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -218,12 +229,13 @@ export function ItemsTable({ items, brands }: { items: ItemRow[]; brands: BrandO
                     <td className="px-4 py-2.5">
                       {item.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}
                     </td>
+                    <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[item.id]} className="px-4 py-2.5 text-muted" />
                   </tr>
                 );
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={10 + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
                     No items found.
                   </td>
                 </tr>

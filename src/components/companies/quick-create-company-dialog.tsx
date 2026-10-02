@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,7 +10,7 @@ import {
   companySourceValues,
   contactDesignationValues,
 } from "@/lib/validation/company";
-import { createCompany } from "@/actions/company";
+import { companyFieldSetup, createCompany } from "@/actions/company";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -18,6 +18,17 @@ import { AddressFields } from "@/components/ui/address-fields";
 import { isIndia } from "@/lib/geo/countries";
 import { treatmentForCountryChange } from "@/lib/gst";
 import { ExistingCompanyMatches } from "@/components/companies/existing-company-matches";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
+
+/** The workspace's required company fields — the only ones a quick create asks for. */
+type RequiredFields = { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
+const NO_FIELDS: RequiredFields = { fields: [], values: {}, people: [] };
 
 type FormValues = z.input<typeof createCompanySchema>;
 
@@ -57,6 +68,14 @@ export function QuickCreateCompanyDialog({
    * included, so nothing weaker gets through than the full form allows.
    */
   const [contact, setContact] = useState(EMPTY_CONTACT);
+  /**
+   * The workspace's own company fields that must be answered (src/lib/custom-fields), loaded the first
+   * time the dialog opens: without them a required one would refuse the save with nothing to fill in.
+   * The rest wait for the company's page.
+   */
+  const [required, setRequired] = useState<RequiredFields | null>(null);
+  const [custom, setCustom] = useState<CustomFieldFormValues>({});
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const setContactField = (key: keyof typeof EMPTY_CONTACT) => (e: { target: { value: string } }) =>
     setContact((prev) => ({ ...prev, [key]: e.target.value }));
   const {
@@ -78,12 +97,38 @@ export function QuickCreateCompanyDialog({
     if (open) {
       setServerError(null);
       setContact(EMPTY_CONTACT);
+      setCustom(required?.values ?? {});
+      setCustomErrors({});
       reset({ name: initialName, source: "LINKEDIN", location: { label: "Head Office", country: "India", gstTreatment: "UNREGISTERED" } });
     }
   }
 
+  useEffect(() => {
+    if (!open || required) return;
+    let live = true;
+    companyFieldSetup().then(
+      (setup) => {
+        if (!live) return;
+        const fields = setup.fields.filter((f) => f.required);
+        const values = Object.fromEntries(fields.map((f) => [f.key, setup.values[f.key]!]));
+        setRequired({ fields, values, people: setup.people });
+        setCustom(values);
+      },
+      // Without them the company is still created — and a field the server insists on says so.
+      () => {
+        if (live) setRequired(NO_FIELDS);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, required]);
+
   async function onSubmit(values: CreateCompanyInput) {
     setServerError(null);
+    const missing = missingRequired(required?.fields ?? [], custom);
+    setCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
     const named = contact.name.trim();
     // An email or phone with nobody to attach it to is a contact half-entered, not a choice to skip
     // one — dropping it silently would lose exactly what somebody just typed.
@@ -93,6 +138,7 @@ export function QuickCreateCompanyDialog({
     }
     const result = await createCompany({
       ...values,
+      customFields: custom,
       contacts: named
         ? [{ name: named, designation: contact.designation, email: contact.email.trim(), phone: contact.phone.trim(), isPrimary: true }]
         : [],
@@ -165,6 +211,20 @@ export function QuickCreateCompanyDialog({
             />
           </div>
         </div>
+
+        {required && required.fields.length > 0 && (
+          <fieldset className="space-y-3 rounded-md border border-line p-3">
+            <legend className="px-1 text-xs font-medium text-muted">Required by your workspace</legend>
+            <CustomFieldInputs
+              fields={required.fields}
+              values={custom}
+              people={required.people}
+              errors={customErrors}
+              idPrefix="qc-cf"
+              onChange={(key, value) => setCustom((c) => ({ ...c, [key]: value }))}
+            />
+          </fieldset>
+        )}
 
         {canAddContact && (
           <fieldset className="space-y-3 rounded-md border border-line p-3">

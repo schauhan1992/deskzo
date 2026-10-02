@@ -25,6 +25,8 @@ import type { CompanySource, VendorStatus } from "@prisma/client";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { viewerReassignControls } from "@/lib/authz/reassign";
+import { requireUser } from "@/lib/session";
+import { listColumns } from "@/lib/custom-fields/server";
 
 // Search params reach Prisma's enum filters directly, so anything outside the allowed set is
 // dropped rather than passed through: an unknown value would 500 the query, and a relationship
@@ -86,6 +88,9 @@ export default async function VendorsPage({
   ]);
 
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
+  // The workspace's own fields shown as list columns (src/lib/custom-fields) — for the table; the split view has none.
+  const user = await requireUser();
+  const customColumns = viewMode === "split" ? undefined : await listColumns("COMPANY", user.id, result.rows.map((c) => c.id));
 
   return (
     <SplitListPage active={viewMode === "split"}>
@@ -155,7 +160,13 @@ export default async function VendorsPage({
         </SplitListShell>
       ) : (
         <div className="mt-6">
-          <CompaniesTable companies={result.rows} assignableUsers={assignableUsers} mode="vendors" reassign={await viewerReassignControls()} />
+          <CompaniesTable
+            companies={result.rows}
+            assignableUsers={assignableUsers}
+            mode="vendors"
+            reassign={await viewerReassignControls()}
+            customColumns={customColumns}
+          />
           <Pagination
             page={page}
             pageSize={pageSize}

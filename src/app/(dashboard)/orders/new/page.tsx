@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
+import { formSetup } from "@/lib/custom-fields/server";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewOrderForm } from "@/components/orders/new-order-form";
 import { customerRelationshipTypeValues, isCustomerRelationshipType } from "@/lib/validation/company";
@@ -82,7 +83,7 @@ export default async function NewOrderPage({
   }
 
   // The prefill's lookups run beside the lists rather than before them.
-  const [customerRows, itemRows, users, commissionParties, vendors, prefill] = await Promise.all([
+  const [customerRows, itemRows, users, commissionParties, vendors, prefill, customFields] = await Promise.all([
     listCompanyOptions({ relationshipTypes: [...customerRelationshipTypeValues], withContacts: false, take: CUSTOMERS_SENT + 1 }),
     listItemOptions({ take: ITEMS_SENT + 1 }),
     listAssignableUsers(),
@@ -91,6 +92,8 @@ export default async function NewOrderPage({
     // The distributors a salesperson may have a price from — the purchase side's vendors.
     listVendorOptions(),
     prefillFor(user.id, companyId),
+    // The workspace's own order fields (src/lib/custom-fields) this person fills in, empty to start.
+    formSetup("ORDER", user.id),
   ]);
 
   const customerSearch = customerRows.length > CUSTOMERS_SENT;
@@ -125,6 +128,7 @@ export default async function NewOrderPage({
         creditInPlan={creditInPlan}
         resellersInPlan={resellersInPlan}
         canSeeRebates={canSeeRebates}
+        customFields={customFields}
       />
     </div>
   );

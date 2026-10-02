@@ -15,6 +15,7 @@ import { formatCompanyId } from "@/lib/order-id";
 import { PORTAL_STATE_LABEL, type PortalState } from "@/lib/portal/state-labels";
 import { CategoryIcon } from "@/components/customers/category-chip";
 import type { CategoryWithParent } from "@/lib/customers/categories";
+import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 
 const STAGE_TONE: Record<CompanyStage, "default" | "green" | "blue" | "red" | "amber"> = {
   PROSPECT: "default",
@@ -70,12 +71,18 @@ export function CompaniesTable({
   assignableUsers,
   mode = "companies",
   reassign,
+  customColumns = { columns: [], texts: {} },
 }: {
   companies: CompanyRow[];
   assignableUsers: AssignableUser[];
   /** Whether this person may change callers at all, and leave them with nobody — see src/lib/authz/reassign.ts. */
   reassign: { show: boolean; canUnassign: boolean };
   mode?: "companies" | "vendors" | "customers" | "commission-parties";
+  /**
+   * The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts
+   * `listColumns`) — after the registered columns, always shown: the picker doesn't know them.
+   */
+  customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const router = useRouter();
   const selection = useRowSelection(companies);
@@ -228,6 +235,7 @@ export function CompaniesTable({
                 {cols.show("portal") && hasPortalData && <th className="px-4 py-2.5">Portal</th>}
                 {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
                 {cols.show("addedOn") && <th className="px-4 py-2.5">Added on</th>}
+                <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -303,11 +311,12 @@ export function CompaniesTable({
                       {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(c.createdAt))}
                     </td>
                   )}
+                  <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[c.id]} className="px-4 py-2.5 text-muted" />
                 </tr>
               ))}
               {companies.length === 0 && (
                 <tr>
-                  <td colSpan={columnCount} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={columnCount + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
                     {emptyText}
                   </td>
                 </tr>

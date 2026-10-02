@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getCompany, listAssignableUsers, listVendorOptions, listClientCompanyNameOptions, listEndCustomers } from "@/actions/company";
+import {
+  getCompany,
+  listAssignableUsers,
+  listVendorOptions,
+  listClientCompanyNameOptions,
+  listEndCustomers,
+  updateCompanyCustomFields,
+} from "@/actions/company";
 import {
   listLinkedCompanies,
   listCommissionPartyAccounts,
@@ -48,7 +55,11 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { CompanyPortalPanel } from "@/components/portal/company-portal-panel";
 import { portalLogins, portalStatusFor } from "@/actions/portal";
 import { formatDate, formatCurrency } from "@/lib/utils";
-import { ContactsList } from "@/components/companies/contacts-list";
+import { ContactsList, type ContactCustomFields } from "@/components/companies/contacts-list";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
+import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
+import { displayFields, formatMany, formSetup, valuesFor, valuesOf } from "@/lib/custom-fields/server";
+import { formValues } from "@/lib/custom-fields/rules";
 import { ActivityPanelButton } from "@/components/companies/activity-panel-button";
 import { CompanyProductsList } from "@/components/companies/company-products-list";
 import { LocationsManager } from "@/components/companies/locations-manager";
@@ -86,7 +97,7 @@ import { TaskList } from "@/components/tasks/task-list";
 import { getRenewalStatus } from "@/lib/renewals";
 import { formatOrderId } from "@/lib/order-id";
 import { paymentTermsLabels } from "@/lib/gst";
-import { relationshipTypeLabels, vendorStatusLabels } from "@/lib/validation/company";
+import { relationshipTypeLabels, vendorStatusLabels, isContactDetailField } from "@/lib/validation/company";
 import { headcountLabel } from "@/lib/company-size";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { customerRevenue } from "@/actions/revenue";
@@ -340,6 +351,10 @@ export async function CompanyDetail({
   const activeTab = tabs.some((t) => t.key === tab) ? tab! : "details";
   // The rows only when the tab is open; the counts above are cheap and always there.
   const recentMail = activeTab === "emails" && mailSummary ? await listMailLog({ companyId: company.id, page: 1, pageSize: 50 }) : null;
+  // The workspace's own fields (src/lib/custom-fields), on the tabs that show them. Whoever may open
+  // the company may edit its fields, as with the company itself.
+  const companyFields = activeTab === "details" ? await companyCustomFields(company.id, userId) : null;
+  const contactFields = activeTab === "contacts" && canSeeContacts ? await contactCustomFields(company.contacts, userId) : undefined;
 
   // Renewals follow the subscription, so an end customer sees the expiries bought for them too.
   //
@@ -845,6 +860,21 @@ export async function CompanyDetail({
               </CardContent>
             </Card>
 
+            {companyFields && (
+              <CustomFieldsCard
+                groups={companyFields.shown}
+                action={
+                  <EditCustomFields
+                    title={`More details — ${company.name}`}
+                    fields={companyFields.form.fields}
+                    initial={companyFields.form.values}
+                    people={companyFields.form.people}
+                    save={updateCompanyCustomFields.bind(null, company.id)}
+                  />
+                }
+              />
+            )}
+
             <Card>
               <CardHeader className="text-sm font-medium text-text">Record info</CardHeader>
               <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
@@ -1130,7 +1160,7 @@ export async function CompanyDetail({
             <Card>
               <CardHeader className="text-sm font-medium text-text">Contacts</CardHeader>
               <CardContent>
-                <ContactsList companyId={company.id} companyName={company.name} contacts={company.contacts} />
+                <ContactsList companyId={company.id} companyName={company.name} contacts={company.contacts} customFields={contactFields} />
               </CardContent>
             </Card>
           )}
@@ -1259,4 +1289,43 @@ async function CompanyPortalTab({
       contacts={contacts.map((c) => ({ id: c.id, name: c.name, email: c.email ?? null }))}
     />
   );
+}
+
+/**
+ * The company's own fields (src/lib/custom-fields) for its Details tab: in words for the card, and as
+ * the Edit dialog starts with them.
+ */
+async function companyCustomFields(companyId: string, userId: string) {
+  const values = await valuesFor("COMPANY", companyId);
+  const [shown, form] = await Promise.all([displayFields("COMPANY", userId, values), formSetup("COMPANY", userId, values)]);
+  return { shown, form };
+}
+
+/**
+ * The workspace's own contact fields for the Contacts tab: the inputs, and each contact's values — as
+ * its edit form starts with them, and in words for its row (only those with a value). Nothing when
+ * there are no fields this person sees.
+ *
+ * On a reseller's end customer the contact-detail ones (`isContactDetailField`) stay hidden like the
+ * email and phone do — left out here, so they never reach the browser — unless this person may see
+ * those (`getCompany` already decided it: `detailsRedacted`).
+ */
+async function contactCustomFields(
+  contacts: { id: string; detailsRedacted: boolean }[],
+  userId: string,
+): Promise<ContactCustomFields | undefined> {
+  const { fields, people } = await formSetup("CONTACT", userId);
+  if (fields.length === 0) return undefined;
+  const stored = await valuesOf("CONTACT", contacts.map((c) => c.id));
+  const texts = await formatMany(fields, stored);
+  const out: ContactCustomFields = { fields, people, values: {}, shown: {} };
+  for (const c of contacts) {
+    const own = c.detailsRedacted ? fields.filter((f) => !isContactDetailField(f.type)) : fields;
+    out.values[c.id] = formValues(own, stored.get(c.id) ?? {});
+    out.shown[c.id] = own.flatMap((f) => {
+      const text = texts.get(c.id)?.[f.key];
+      return text ? [{ key: f.key, label: f.label, text }] : [];
+    });
+  }
+  return out;
 }

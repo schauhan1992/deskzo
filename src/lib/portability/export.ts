@@ -2,7 +2,9 @@ import ExcelJS from "exceljs";
 import { formatContactId, formatLeadId } from "@/lib/order-id";
 import { db } from "@/lib/db";
 import { accountScopeIds } from "@/lib/authz/company-scope";
+import { seesResellerContactDetails } from "@/lib/authz/contact-access";
 import { sanitizeCsvCell } from "@/lib/csv";
+import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { getExporter } from "./exporters";
 
 /**
@@ -144,6 +146,11 @@ export async function accountBundle(userId: string, companyId: string) {
   // Null covers both "no such company" and "not yours" on purpose: telling somebody a record exists
   // but is not theirs is itself a disclosure.
   if (!company) return null;
+  // A reseller's end customer's contact details leave only with somebody who may see them
+  // (src/lib/authz/contact-access.ts), as on the screens.
+  const restricted = isResellerManaged(company);
+  const canViewRestricted = restricted ? await seesResellerContactDetails(userId) : true;
+  const contacts = company.contacts.map((c) => redactContactDetails(c, { restricted, canViewRestricted }));
 
   const [orders, payments, tickets, visits, documents, leads] = await Promise.all([
     db.companyProduct.findMany({
@@ -194,14 +201,14 @@ export async function accountBundle(userId: string, companyId: string) {
       },
       {
         name: "Contacts",
-        rows: company.contacts.map((c) => ({
+        rows: contacts.map((c) => ({
           Key: formatContactId(c.contactSeq),
           Name: c.name,
           Designation: c.designation,
           Email: c.email ?? "",
           Phone: c.phone ?? "",
           Primary: c.isPrimary,
-          "Email status": c.emailStatus,
+          "Email status": c.detailsRedacted ? "" : c.emailStatus,
         })),
       },
       {

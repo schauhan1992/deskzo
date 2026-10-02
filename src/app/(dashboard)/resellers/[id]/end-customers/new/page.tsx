@@ -12,6 +12,7 @@ import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { clientRelationshipTypeValues } from "@/lib/validation/company";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewEndCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const enabled = await isModuleEnabled("resellers");
@@ -33,6 +34,8 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
   // already loaded. Refused the same way a non-reseller is, so the URL tells nobody which resellers
   // exist or whose book they sit in.
   if (!(await canSeeCompany(user.id, reseller.ownerUserId))) notFound();
+  // The workspace's own company fields (src/lib/custom-fields), as on any new company.
+  const customFields = await formSetup("COMPANY", user.id);
 
   return (
     <div>
@@ -55,6 +58,7 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
         defaultRelationshipType="CLIENT"
         relationshipTypeOptions={clientRelationshipTypeValues}
         managedByResellerId={reseller.id}
+        customFields={customFields}
       />
     </div>
   );

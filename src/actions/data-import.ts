@@ -6,7 +6,8 @@ import { can } from "@/lib/authz/resolve";
 import { logActivity } from "@/lib/activity";
 import { recordAudit } from "@/lib/audit";
 import { getArea } from "@/lib/portability/areas";
-import { parseFile, plan, apply, IMPLEMENTED_IMPORTS, TEMPLATE_COLUMNS, type ImportPlan } from "@/lib/portability/import";
+import { parseFile, plan, apply, IMPLEMENTED_IMPORTS, templateColumnsFor, type ImportPlan } from "@/lib/portability/import";
+import { csvRow } from "@/lib/csv";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -124,8 +125,10 @@ export async function commitImport(input: {
 
 /** A CSV with the right headings and nothing else — the fastest way to get the columns right. */
 export async function importTemplate(areaKey: string): Promise<ActionResult<{ filename: string; csv: string }>> {
-  const { area, error } = await gate(areaKey);
+  const { user, area, error } = await gate(areaKey);
   if (error || !area) return { ok: false, error: error ?? "Unknown area." };
-  const columns = TEMPLATE_COLUMNS[areaKey] ?? [];
-  return { ok: true, data: { filename: `${areaKey}-import-template.csv`, csv: columns.join(",") + "\n" } };
+  // The workspace's own fields this person may import join the built-in columns (src/lib/custom-fields/sheets.ts).
+  const columns = await templateColumnsFor(areaKey, user.id);
+  // Quoted: a field's label may hold a comma, which would otherwise split it into two columns.
+  return { ok: true, data: { filename: `${areaKey}-import-template.csv`, csv: csvRow(columns) + "\n" } };
 }

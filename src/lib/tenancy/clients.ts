@@ -246,6 +246,13 @@ type BatchedRequest = { transaction?: { id?: string | number } };
 const NOT_YET_EVERYWHERE = {
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
   user: { deskzoUpdatesSeenAt: true },
+  // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through
+  // src/lib/custom-fields/server.ts, which treats a workspace without the column as having no values.
+  company: { customFields: true },
+  contact: { customFields: true },
+  lead: { customFields: true },
+  item: { customFields: true },
+  companyProduct: { customFields: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

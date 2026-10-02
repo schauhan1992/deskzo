@@ -13,6 +13,8 @@ import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
+import { changedLabel, customFieldsForCreate, customSearchWhere, saveCustomFields } from "@/lib/custom-fields/server";
+import { exportCells } from "@/lib/custom-fields/sheets";
 import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
 import { dateRangeFilter } from "@/lib/utils";
 import { pageSlice } from "@/lib/pagination";
@@ -142,6 +144,11 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
   if (!owner.ok) return { ok: false, error: owner.error };
   const resolvedOwnerId = owner.userId;
 
+  // The workspace's own fields (src/lib/custom-fields), required ones included — nothing to write
+  // when it has none.
+  const custom = await customFieldsForCreate("LEAD", user.id, data.customFields, { checkRequired: true });
+  if (!custom.ok) return { ok: false, error: custom.error };
+
   const lead = await db.$transaction(async (tx) => {
     const created = await tx.lead.create({
       data: {
@@ -157,6 +164,7 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
         source: data.source,
         sourceDetail: data.sourceDetail || null,
         createdByUserId: user.id,
+        ...custom.data,
         requirements: {
           create: requirements.map((r) => ({
             itemId: r.itemId,
@@ -314,6 +322,8 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   // all come back empty from the one place rather than each needing to remember.
   if (!(await canViewLeads(userId))) return { id: { in: [] } };
   const expectedCloseDate = dateRangeFilter(params?.closeFrom, params?.closeTo);
+  // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts).
+  const customBranches = (await customSearchWhere("LEAD", userId, params?.search)) as Prisma.LeadWhereInput[];
   return {
     ...(await viaCompanyScope(userId)),
     ...(params?.status ? { status: params.status } : {}),
@@ -322,6 +332,7 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
           OR: [
             { title: { contains: params.search, mode: "insensitive" as const } },
             { company: { name: { contains: params.search, mode: "insensitive" as const } } },
+            ...customBranches,
           ],
         }
       : {}),
@@ -522,6 +533,34 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
   return { ok: true, data: { id: leadId } };
 }
 
+/**
+ * The lead's own fields (src/lib/custom-fields), from the "More details" card on its page — bound to
+ * the lead there. A lead has no general edit, so the line is the one every change to it draws
+ * (`updateLeadStatus`, `logActivity`, `addLeadRequirement`): `leads.view`, and the lead's account in
+ * this person's scope (`leadInScope`). Those are the two checks that open the lead page, so whoever
+ * sees the card may use its Edit.
+ */
+export async function updateLeadCustomFields(leadId: string, input: unknown): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
+  if (typeof leadId !== "string" || !leadId) return { ok: false, error: "Lead not found." };
+
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, title: true } });
+  // Scoped like the lead page; out of scope and missing answer the same.
+  if (!lead || !(await leadInScope(user.id, lead.id))) {
+    return { ok: false, error: "Lead not found." };
+  }
+
+  const saved = await saveCustomFields("LEAD", lead.id, user.id, input);
+  if (!saved.ok) return saved;
+  if (saved.changed.length > 0) {
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: lead.id, entityLabel: `${lead.title}${changedLabel(saved.changed)}` });
+    revalidatePath("/leads");
+    revalidatePath(`/leads/${lead.id}`);
+  }
+  return { ok: true, data: null };
+}
+
 export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; filename: string }>> {
   const user = await requireUser();
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
@@ -559,7 +598,10 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
     createdAt: lead.createdAt.toISOString().slice(0, 10),
   }));
 
-  const csv = Papa.unparse(rows);
+  // The workspace's own lead fields this person may see, as the last columns — every row carries every
+  // one, since the file's header is its first row's keys (src/lib/custom-fields/sheets.ts).
+  const custom = await exportCells("LEAD", user.id, leads.map((l) => l.id), Object.keys(rows[0] ?? {}), { sanitize: sanitizeCsvCell });
+  const csv = Papa.unparse(rows.map((row, i) => ({ ...row, ...custom(leads[i]!.id) })));
   return { ok: true, data: { csv, filename: csvFilename("leads-export") } };
 }
 

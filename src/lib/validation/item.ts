@@ -81,6 +81,8 @@ const itemDetailShape = {
 export const createItemSchema = z.object({
   ...itemDetailShape,
   openingStock: optionalNonNegativeInt,
+  /** The workspace's own fields (src/lib/custom-fields) — checked by the action against its definitions. */
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const updateItemSchema = z.object({

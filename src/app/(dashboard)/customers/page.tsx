@@ -18,6 +18,8 @@ import type { CompanySource } from "@prisma/client";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { viewerReassignControls } from "@/lib/authz/reassign";
+import { requireUser } from "@/lib/session";
+import { listColumns } from "@/lib/custom-fields/server";
 
 export default async function CustomersPage({
   searchParams,
@@ -67,6 +69,9 @@ export default async function CustomersPage({
   const rows = result.rows.map((c) => ({ ...c, portal: portal.get(c.id) ?? null }));
 
   const selected = viewMode === "split" ? resolveSelected(rows, params.sel) : null;
+  // The workspace's own fields shown as list columns (src/lib/custom-fields) — for the table; the split view has none.
+  const user = await requireUser();
+  const customColumns = viewMode === "split" ? undefined : await listColumns("COMPANY", user.id, rows.map((c) => c.id));
 
   return (
     <SplitListPage active={viewMode === "split"}>
@@ -114,7 +119,13 @@ export default async function CustomersPage({
         </SplitListShell>
       ) : (
         <div className="mt-6">
-          <CompaniesTable companies={rows} assignableUsers={assignableUsers} mode="customers" reassign={await viewerReassignControls()} />
+          <CompaniesTable
+            companies={rows}
+            assignableUsers={assignableUsers}
+            mode="customers"
+            reassign={await viewerReassignControls()}
+            customColumns={customColumns}
+          />
           <Pagination
             page={page}
             pageSize={pageSize}

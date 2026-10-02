@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getItem } from "@/actions/item";
+import { getItem, updateItemCustomFields } from "@/actions/item";
 import { isModuleEnabled } from "@/actions/module";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,10 @@ import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { db } from "@/lib/db";
 import { AdjustStockForm } from "@/components/items/adjust-stock-form";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
+import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
+import { requireUser } from "@/lib/session";
+import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 
 const TYPE_TONE = { GOOD: "default", SERVICE: "blue", SUBSCRIPTION: "green", PERPETUAL: "amber" } as const;
 
@@ -37,6 +41,12 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
 
   // After the check, never before — see `canonicalise`.
   canonicalise(id, "/items", formatItemId(item.itemSeq), query);
+
+  // The workspace's own fields (src/lib/custom-fields) — whoever may open the item may edit them, as
+  // with the item itself.
+  const user = await requireUser();
+  const customValues = await valuesFor("ITEM", item.id);
+  const [customShown, customForm] = await Promise.all([displayFields("ITEM", user.id, customValues), formSetup("ITEM", user.id, customValues)]);
 
   const lowStock =
     item.trackInventory && item.reorderLevel !== null && item.stockQuantity <= item.reorderLevel;
@@ -154,6 +164,19 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
         </div>
 
         <div className="space-y-6">
+          <CustomFieldsCard
+            groups={customShown}
+            action={
+              <EditCustomFields
+                title={`More details — ${item.name}`}
+                fields={customForm.fields}
+                initial={customForm.values}
+                people={customForm.people}
+                save={updateItemCustomFields.bind(null, item.id)}
+              />
+            }
+          />
+
           {item.trackInventory && (
             <Card>
               <CardHeader className="text-sm font-medium text-text">Stock on hand</CardHeader>

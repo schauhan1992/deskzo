@@ -1,4 +1,5 @@
-import { BillingCycle, ItemType } from "@prisma/client";
+import { BillingCycle, ItemType, type Prisma } from "@prisma/client";
+import { valuesFor } from "@/lib/custom-fields/server";
 import { db } from "@/lib/db";
 import {
   createRow,
@@ -170,11 +171,15 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
 
 export const itemsImporter: Importer = {
   templateColumns: ["Key", "Name", "SKU", "Type", "Brand", "Family", "Billing cycle", "Unit", "Price", "Tax %"],
+  customEntity: "ITEM",
 
-  async plan(row, line) {
+  async plan(row, line, ctx) {
     const resolved = await resolve(row);
     if ("error" in resolved) return errorRow(line, row.Name || row.SKU || "", resolved.error);
     const i = resolved.value;
+    // The workspace's own fields in this row, checked against what the item holds (sheets.ts).
+    const custom = ctx.custom ? await ctx.custom.merge(i.existingId ? await valuesFor("ITEM", i.existingId) : {}, row) : null;
+    if (custom && !custom.ok) return errorRow(line, i.name ?? i.sku ?? "", custom.error);
 
     if (!i.existingId) {
       return createRow(line, i.sku!, i.name!, {
@@ -187,6 +192,7 @@ export const itemsImporter: Importer = {
         Unit: i.unit,
         Price: i.price,
         "Tax %": i.taxRatePercent,
+        ...(custom?.ok ? Object.fromEntries(custom.changes.map((ch) => [ch.field, ch.to])) : {}),
       });
     }
 
@@ -210,6 +216,7 @@ export const itemsImporter: Importer = {
       i.taxRatePercent !== undefined
         ? diff("Tax %", existing.taxRatePercent === null ? null : Number(existing.taxRatePercent), i.taxRatePercent)
         : null,
+      ...(custom?.ok ? custom.changes : []),
     ]);
   },
 
@@ -232,7 +239,11 @@ export const itemsImporter: Importer = {
           })
         : null;
 
+    const custom = ctx.custom ? await ctx.custom.merge(i.existingId ? await valuesFor("ITEM", i.existingId) : {}, row) : null;
+    if (custom && !custom.ok) throw new Error(custom.error);
+
     const data = {
+      ...(custom?.ok && custom.changes.length > 0 ? { customFields: custom.values as Prisma.InputJsonValue } : {}),
       ...(i.name ? { name: i.name } : {}),
       ...(i.sku ? { sku: i.sku } : {}),
       ...(i.type ? { type: i.type } : {}),

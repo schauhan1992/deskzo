@@ -11,6 +11,8 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { ExportItemsButton } from "@/components/items/export-items-button";
 import { ImportItemsDialog } from "@/components/items/import-items-dialog";
 import { ItemsTable } from "@/components/items/items-table";
+import { requireUser } from "@/lib/session";
+import { listColumns } from "@/lib/custom-fields/server";
 import type { ItemType } from "@prisma/client";
 
 export default async function ItemsPage({
@@ -35,6 +37,8 @@ export default async function ItemsPage({
     }),
     listBrands(),
   ]);
+  const user = await requireUser();
+  const customColumns = await listColumns("ITEM", user.id, result.items.map((i) => i.id));
 
   const typeFilters: { label: string; value?: ItemType }[] = [
     { label: "All" },
@@ -122,7 +126,7 @@ export default async function ItemsPage({
       </div>
 
       <div className="mt-6">
-        <ItemsTable items={result.items} brands={brands} />
+        <ItemsTable items={result.items} brands={brands} customColumns={customColumns} />
         <Pagination
           page={result.page}
           pageSize={result.pageSize}

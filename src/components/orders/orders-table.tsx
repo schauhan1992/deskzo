@@ -10,6 +10,7 @@ import { canAnnounceFulfilment } from "@/lib/marketing/customer-notices";
 import { formatCurrency } from "@/lib/utils";
 import { Badge, Card } from "@/components/ui/card";
 import { useColumns } from "@/components/ui/table-columns";
+import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { handoffBadge, vendorPoLabels, type ReleaseState } from "@/lib/orders/handoff-rules";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
@@ -66,7 +67,14 @@ export function orderFlags(o: Pick<OrderRow, "orderStatus" | "purchaseRelease" |
  * purchasing sources its vendor and cost. Approving a screenful at once would turn a review into a
  * rubber stamp, so the workflow stays on the order's own page.
  */
-export function OrdersTable({ orders }: { orders: OrderRow[] }) {
+export function OrdersTable({
+  orders,
+  customColumns = { columns: [], texts: {} },
+}: {
+  orders: OrderRow[];
+  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
+}) {
   const cols = useColumns("orders");
   return (
     <Card className="overflow-x-auto p-0">
@@ -83,6 +91,7 @@ export function OrdersTable({ orders }: { orders: OrderRow[] }) {
             {cols.show("vendor") && <th className="px-4 py-2.5">Vendor</th>}
             {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
             {cols.show("actions") && <th className="px-4 py-2.5 text-right">Tell them</th>}
+            <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
           </tr>
         </thead>
         <tbody>
@@ -163,12 +172,13 @@ export function OrdersTable({ orders }: { orders: OrderRow[] }) {
                     </div>
                   </td>
                 )}
+                <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[o.id]} className="px-4 py-2.5 text-muted" />
               </tr>
             );
           })}
           {orders.length === 0 && (
             <tr>
-              <td colSpan={cols.count} className="px-4 py-8 text-center text-subtle">
+              <td colSpan={cols.count + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
                 No orders found.
               </td>
             </tr>

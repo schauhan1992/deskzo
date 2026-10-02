@@ -25,6 +25,12 @@ const ACTION_TONE = {
   error: "red",
 } as const;
 
+/** The rows a notice applies to — the first ten, and how many more. */
+function rowList(lines: number[]): string {
+  const more = lines.length > 10 ? ` and ${lines.length - 10} more` : "";
+  return `${lines.length === 1 ? "Row" : "Rows"} ${lines.slice(0, 10).join(", ")}${more}.`;
+}
+
 export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabel: string }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -182,6 +188,16 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
                   </span>
                 </p>
               )}
+
+              {/* What some rows held that is left as it is, and why — said rather than dropped. */}
+              {plan.notices.map((n) => (
+                <p key={n.text} className="flex items-start gap-1.5 rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {n.text} {rowList(n.lines)}
+                  </span>
+                </p>
+              ))}
 
               {changed.length === 0 ? (
                 <p className="rounded-md bg-surface-sunken px-3 py-4 text-center text-sm text-subtle">

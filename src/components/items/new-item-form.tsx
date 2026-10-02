@@ -9,12 +9,31 @@ import { createItemSchema, type CreateItemInput } from "@/lib/validation/item";
 import { createItem } from "@/actions/item";
 import { Button } from "@/components/ui/button";
 import { ItemDetailFields, type BrandOption } from "@/components/items/item-fields";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  CustomFieldInputs,
+  missingRequired,
+  type CustomFieldFormValues,
+  type CustomFieldPerson,
+} from "@/components/custom-fields/custom-field-inputs";
+import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 
 type FormValues = z.input<typeof createItemSchema>;
 
-export function NewItemForm({ brands, showRevenuePattern = false }: { brands: BrandOption[]; showRevenuePattern?: boolean }) {
+export function NewItemForm({
+  brands,
+  showRevenuePattern = false,
+  customFields = { fields: [], values: {}, people: [] },
+}: {
+  brands: BrandOption[];
+  showRevenuePattern?: boolean;
+  /** The workspace's own product fields (src/lib/custom-fields/server.ts `formSetup`). */
+  customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
+}) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const {
     register,
     handleSubmit,
@@ -41,7 +60,10 @@ export function NewItemForm({ brands, showRevenuePattern = false }: { brands: Br
 
   async function onSubmit(values: CreateItemInput) {
     setServerError(null);
-    const result = await createItem(values);
+    const missing = missingRequired(customFields.fields, custom);
+    setCustomErrors(missing);
+    if (Object.keys(missing).length > 0) return;
+    const result = await createItem({ ...values, customFields: custom });
     if (!result.ok) {
       setServerError(result.error);
       return;
@@ -64,6 +86,21 @@ export function NewItemForm({ brands, showRevenuePattern = false }: { brands: Br
         showOpeningStock
         showRevenuePattern={showRevenuePattern}
       />
+
+      {customFields.fields.length > 0 && (
+        <Card>
+          <CardHeader className="text-sm font-medium text-text">More details</CardHeader>
+          <CardContent>
+            <CustomFieldInputs
+              fields={customFields.fields}
+              values={custom}
+              people={customFields.people}
+              errors={customErrors}
+              onChange={(key, value) => setCustom((c) => ({ ...c, [key]: value }))}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex justify-end gap-3">
         <Button type="button" variant="secondary" onClick={() => router.back()}>

@@ -2,6 +2,8 @@ import { isModuleEnabled } from "@/actions/module";
 import { listBrands } from "@/actions/brand";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewItemForm } from "@/components/items/new-item-form";
+import { requireUser } from "@/lib/session";
+import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewItemPage() {
   const enabled = await isModuleEnabled("items");
@@ -10,7 +12,8 @@ export default async function NewItemPage() {
   }
 
   // How revenue is recognised is asked only where Revenue & Close is available.
-  const [brands, revenueCapture] = await Promise.all([listBrands(), isModuleEnabled("revenue_close")]);
+  const user = await requireUser();
+  const [brands, revenueCapture, customFields] = await Promise.all([listBrands(), isModuleEnabled("revenue_close"), formSetup("ITEM", user.id)]);
 
   return (
     <div>
@@ -19,7 +22,7 @@ export default async function NewItemPage() {
         SKU must be unique. Goods, services, subscriptions, and perpetual licences share this catalog — only goods
         track stock, and only subscriptions ever come up for renewal.
       </p>
-      <NewItemForm brands={brands} showRevenuePattern={revenueCapture} />
+      <NewItemForm brands={brands} showRevenuePattern={revenueCapture} customFields={customFields} />
     </div>
   );
 }

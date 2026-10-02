@@ -11,6 +11,7 @@ import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
+import { changedLabel, customFieldsForCreate, customSearchWhere, saveCustomFields } from "@/lib/custom-fields/server";
 import { formatOrderId } from "@/lib/order-id";
 import { createOrderSchema, approveOrderSchema, processOrderSchema, orderQuoteSchema, orderDealSchema, approveLossSchema } from "@/lib/validation/order";
 import { COST_SOURCE_LABELS, needsLossApproval, unitCostOf, type CostSource } from "@/lib/rebates/rules";
@@ -283,6 +284,10 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
   for (const r of rebateRows) if (!r.ok) return { ok: false, error: r.error };
   const rebateData = rebateRows.flatMap((r) => (r.ok ? [r.data] : []));
   const dealRegValidTo = data.dealRegValidTo ? calendarDay(data.dealRegValidTo) : null;
+  // The workspace's own fields (src/lib/custom-fields), every required one answered. Add-ons and
+  // renewals are raised from an order already punched, and start without them.
+  const custom = await customFieldsForCreate("ORDER", user.id, data.customFields, { checkRequired: true });
+  if (!custom.ok) return { ok: false, error: custom.error };
 
   const order = await db.companyProduct.create({
     data: {
@@ -336,6 +341,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
               })),
             }
           : undefined,
+      ...custom.data,
     },
   });
 
@@ -1248,13 +1254,22 @@ async function orderListWhere(
   userId: string,
   params?: OrderListParams,
 ): Promise<Prisma.CompanyProductWhereInput> {
-  // Both the reseller filter and the search narrow the related company, so they're merged into one
-  // `company` clause — spreading them separately would silently drop whichever came first.
+  // The reseller filter narrows the related company. The search is its own clause: the customer's
+  // name, or one of the workspace's own order fields this person may see (src/lib/custom-fields).
   const companyFilter = {
     ...(params?.viaReseller === true ? { relationshipType: "RESELLER" as const } : {}),
     ...(params?.viaReseller === false ? { relationshipType: { not: "RESELLER" as const } } : {}),
-    ...(params?.search ? { name: { contains: params.search, mode: "insensitive" as const } } : {}),
   };
+  const search: Prisma.CompanyProductWhereInput[] = params?.search
+    ? [
+        {
+          OR: [
+            { company: { name: { contains: params.search, mode: "insensitive" as const } } },
+            ...((await customSearchWhere("ORDER", userId, params.search)) as Prisma.CompanyProductWhereInput[]),
+          ],
+        },
+      ]
+    : [];
   return {
     /**
      * An order reaches its account directly — `CompanyProduct.companyId` is the customer we
@@ -1266,7 +1281,7 @@ async function orderListWhere(
      * losing this one loses the scope. `viaCompanyScope` yields `{}` for an unrestricted viewer,
      * and `AND: [{}]` is no condition at all.
      */
-    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput],
+    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput, ...search],
     ...(params?.status ? { orderStatus: params.status } : {}),
     ...(params?.businessType ? { businessType: params.businessType } : {}),
     ...(params?.companyId ? { companyId: params.companyId } : {}),
@@ -1429,6 +1444,39 @@ export async function setOrderDeal(input: unknown): Promise<ActionResult<{ id: s
   });
   revalidatePath(`/orders/${order.id}`);
   return { ok: true, data: { id: order.id } };
+}
+
+/**
+ * The order's own fields (src/lib/custom-fields), from the "More details" card on its page — bound to
+ * the order there. Whoever may change its deal registration may change them, as `setOrderDeal` decides
+ * it: the salesperson who punched it or an approver, or purchase, until it is fulfilled.
+ */
+export async function updateOrderCustomFields(orderId: string, input: unknown): Promise<ActionResult<null>> {
+  const user = await requireModuleUser("orders");
+  // Bound on the order's page, but an action can be called with anything: the id is checked like any input.
+  if (typeof orderId !== "string" || !orderId) return { ok: false, error: "Order not found." };
+  const order = await visibleOrder(user.id, orderId);
+  if (!order) return { ok: false, error: "Order not found." };
+  if (!(await speaksForSales(user.id, order)) && !(await hasEffectivePermission(user.id, "orders.process"))) {
+    return { ok: false, error: "Only the salesperson, an approver or purchase can change this order's details." };
+  }
+  if (order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED") {
+    return { ok: false, error: "This order can't be changed any more." };
+  }
+  const saved = await saveCustomFields("ORDER", order.id, user.id, input);
+  if (!saved.ok) return saved;
+  if (saved.changed.length > 0) {
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Order",
+      entityId: order.id,
+      entityLabel: `${formatOrderId(order.orderSeq)}${changedLabel(saved.changed)}`,
+    });
+    revalidatePath("/orders");
+    revalidatePath(`/orders/${order.id}`);
+  }
+  return { ok: true, data: null };
 }
 
 export async function getOrder(id: string) {

@@ -806,6 +806,8 @@ model User {
   fluxNotesWritten           FluxNote[]             @relation("FluxNoteBy")
   revenueCloseSettings       RevenueCloseSettings[] @relation("RevenueCloseSettingsBy")
 
+  customFieldDefinitionsCreated CustomFieldDefinition[] @relation("CustomFieldDefinitionCreatedBy")
+  customFieldDefinitionsUpdated CustomFieldDefinition[] @relation("CustomFieldDefinitionUpdatedBy")
   @@index([departmentId])
   @@index([managerId])
   @@map("users")
@@ -924,6 +926,11 @@ model Company {
   assignedAt          DateTime?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
+  /**
+   * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
+   * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  customFields Json @default("{}")
 
   contacts               Contact[]
   leads                  Lead[]
@@ -1229,6 +1236,11 @@ model Contact {
   createdBy            User?             @relation("ContactCreatedBy", fields: [createdByUserId], references: [id])
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
+  /**
+   * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
+   * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  customFields Json @default("{}")
 
   leads             Lead[]
   tickets           Ticket[]
@@ -1286,6 +1298,11 @@ model Lead {
   createdBy         User?      @relation("LeadCreatedBy", fields: [createdByUserId], references: [id])
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
+  /**
+   * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
+   * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  customFields Json @default("{}")
 
   /// Where the enquiry came from. Distinct from Company.source, which is how the *account* was found.
   source         LeadSource      @default(OTHER)
@@ -2394,6 +2411,11 @@ model Item {
   createdBy       User           @relation(fields: [createdById], references: [id])
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+  /**
+   * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
+   * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  customFields Json @default("{}")
 
   /**
    * How revenue from this item is earned (Ind AS 115). Null means derived rather than chosen: a
@@ -2524,6 +2546,11 @@ model CompanyProduct {
   reconcileLines VendorStatementLine[] @relation("ReconcileMatchedOrder")
   portalRequests PortalRequest[]       @relation("PortalRequestOrder")
   createdAt      DateTime              @default(now())
+  /**
+   * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
+   * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  customFields Json @default("{}")
 
   /**
    * The order-punching workflow stage. See the `OrderStatus` doc-comment for the full lifecycle.
@@ -10757,6 +10784,89 @@ model CustomerCategory {
 
   @@index([parentId])
   @@map("customer_categories")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Custom fields — src/lib/custom-fields
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The record types a workspace can add its own fields to.
+ */
+enum CustomFieldEntity {
+  COMPANY
+  CONTACT
+  LEAD
+  ORDER
+  ITEM
+}
+
+/**
+ * What a custom field holds — src/lib/custom-fields/rules.ts says how each is checked and stored.
+ */
+enum CustomFieldType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  MONEY
+  DATE
+  SELECT
+  MULTI_SELECT
+  CHECKBOX
+  EMAIL
+  PHONE
+  URL
+  USER
+}
+
+/**
+ * A field this workspace added to one record type (owner, 2 Oct 2026) — "Batch no." on a product,
+ * "Tower / floor" on an order. The values live on the records themselves, in their `customFields`
+ * JSON keyed by `key`; this row says what the key means, how it is entered and who sees it.
+ */
+model CustomFieldDefinition {
+  id          String            @id @default(cuid())
+  entity      CustomFieldEntity
+  /**
+   * Made from the first label and never changed, so renaming a field touches no record.
+   */
+  key         String
+  label       String
+  type        CustomFieldType
+  /**
+   * For SELECT and MULTI_SELECT: [{ value, label, archived? }]. Records hold the values, so an option
+   * can be renamed; a retired one stays on the records that have it.
+   */
+  options     Json              @default("[]")
+  required    Boolean           @default(false)
+  helpText    String?
+  /**
+   * The heading the field sits under in forms and on the record — "Compliance", "Delivery".
+   */
+  group       String?
+  /**
+   * Seen and changed only by holders of `fields.seeRestricted`.
+   */
+  restricted  Boolean           @default(false)
+  /**
+   * A column in the record type's list unless somebody hides it.
+   */
+  showInList  Boolean           @default(false)
+  sortOrder   Int               @default(0)
+  /**
+   * Retired: off every form, page and list; the records keep their values until it is restored.
+   */
+  archivedAt  DateTime?
+  createdById String?
+  createdBy   User?             @relation("CustomFieldDefinitionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?             @relation("CustomFieldDefinitionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([entity, key])
+  @@index([entity, archivedAt, sortOrder])
+  @@map("custom_field_definitions")
 }
 
 // ---------------------------------------------------------------------------------------------

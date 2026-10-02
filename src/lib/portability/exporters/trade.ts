@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { exportCells } from "@/lib/custom-fields/sheets";
 import { viaCompany, type Exporter } from "./types";
 
 /**
@@ -10,12 +11,12 @@ import { viaCompany, type Exporter } from "./types";
  */
 
 /** The catalog belongs to the business rather than to an account, so it is not company-scoped. */
-export const itemsExporter: Exporter = async () => {
+export const itemsExporter: Exporter = async (scope) => {
   const rows = await db.item.findMany({
     include: { brand: { select: { name: true } }, productFamily: { select: { name: true } } },
     orderBy: { itemSeq: "asc" },
   });
-  return rows.map((i) => ({
+  const base = rows.map((i) => ({
     Key: `ITM-${String(i.itemSeq).padStart(6, "0")}`,
     Name: i.name,
     SKU: i.sku ?? "",
@@ -27,6 +28,9 @@ export const itemsExporter: Exporter = async () => {
     Price: i.sellingPrice ? Number(i.sellingPrice) : null,
     "Tax %": i.taxRatePercent ? Number(i.taxRatePercent) : null,
   }));
+  // The workspace's own fields this person may see, after the built-in columns (src/lib/custom-fields/sheets.ts).
+  const custom = await exportCells("ITEM", scope.userId, rows.map((i) => i.id), Object.keys(base[0] ?? {}));
+  return base.map((b, n) => ({ ...b, ...custom(rows[n]!.id) }));
 };
 
 function orderExporter(renewalsOnly: boolean): Exporter {
@@ -42,7 +46,7 @@ function orderExporter(renewalsOnly: boolean): Exporter {
       },
       orderBy: { orderSeq: "asc" },
     });
-    return rows.map((o) => ({
+    const base = rows.map((o) => ({
       Order: `ORD-${String(o.orderSeq).padStart(6, "0")}`,
       Company: o.company.name,
       Item: o.item.name,
@@ -55,6 +59,8 @@ function orderExporter(renewalsOnly: boolean): Exporter {
       Starts: o.startDate,
       Expires: o.endDate,
     }));
+    const custom = await exportCells("ORDER", scope.userId, rows.map((o) => o.id), Object.keys(base[0] ?? {}));
+    return base.map((b, n) => ({ ...b, ...custom(rows[n]!.id) }));
   };
 }
 

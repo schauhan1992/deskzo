@@ -15,6 +15,8 @@ import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { ColumnPicker } from "@/components/ui/table-columns";
 import { orderStatusValues, orderBusinessTypeValues, orderBusinessTypeLabels } from "@/lib/validation/order";
+import { requireUser } from "@/lib/session";
+import { listColumns } from "@/lib/custom-fields/server";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 
 const HANDOFF_FLAGS = [
@@ -56,12 +58,16 @@ export default async function OrdersPage({
   const flag = HANDOFF_FLAGS.find((f) => f.value === params.flag)?.value;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
-  const [viewMode, result] = await Promise.all([
+  const [viewMode, result, user] = await Promise.all([
     getViewMode("orders"),
     listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize, flag }),
+    requireUser(),
   ]);
   const pendingCount = result.pendingApproval;
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
+  // The workspace's own fields marked "a column in the list" (src/lib/custom-fields) — the table's alone,
+  // so the split view asks for none.
+  const customColumns = viewMode === "split" ? undefined : await listColumns("ORDER", user.id, result.rows.map((o) => o.id));
 
   const stageFilters: { label: string; value?: OrderStatus }[] = [
     { label: "All" },
@@ -158,7 +164,7 @@ export default async function OrdersPage({
       ) : (
         <>
           <div className="mt-6">
-            <OrdersTable orders={result.rows} />
+            <OrdersTable orders={result.rows} customColumns={customColumns} />
           </div>
 
           <Pagination

@@ -23,6 +23,7 @@ import { viewerReassignControls } from "@/lib/authz/reassign";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { listColumns } from "@/lib/custom-fields/server";
 
 export default async function LeadsPage({
   searchParams,
@@ -77,6 +78,10 @@ export default async function LeadsPage({
   }));
 
   const selected = view === "list" && viewMode === "split" ? resolveSelected(leads, params.sel) : null;
+
+  // The workspace's own fields marked "a column in the list" (src/lib/custom-fields) — only the table
+  // shows them, so neither the board nor the split list asks.
+  const customColumns = view === "list" && viewMode !== "split" ? await listColumns("LEAD", user.id, leads.map((l) => l.id)) : undefined;
 
   return (
     <SplitListPage active={view === "list" && viewMode === "split"}>
@@ -156,7 +161,12 @@ export default async function LeadsPage({
         <div className="mt-6">
           {view === "list" ? (
             <>
-              <LeadsListTable leads={leads} assignableUsers={assignableUsers} reassign={await viewerReassignControls()} />
+              <LeadsListTable
+                leads={leads}
+                assignableUsers={assignableUsers}
+                reassign={await viewerReassignControls()}
+                customColumns={customColumns}
+              />
               <Pagination
                 page={page}
                 pageSize={pageSize}

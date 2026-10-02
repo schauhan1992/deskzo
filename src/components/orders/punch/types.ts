@@ -72,6 +72,12 @@ export function foldsWithErrors(errors: PunchErrors): FoldKey[] {
   return (Object.keys(FOLD_FIELDS) as FoldKey[]).filter((key) => FOLD_FIELDS[key].some((name) => errors[name] !== undefined));
 }
 
+/** Whether a field — or a field of one of its rows, `expenses.2.amount` — sits in a folded section. */
+export function inFold(path: string): boolean {
+  const name = path.split(".")[0] as keyof PunchFormValues;
+  return (Object.keys(FOLD_FIELDS) as FoldKey[]).some((key) => FOLD_FIELDS[key].includes(name));
+}
+
 /**
  * The form's fields in the order they appear on the page, and those of one rebate or expense row. A failed
  * submit focuses the first of these with an error. react-hook-form's own focusing goes by the order the
@@ -108,6 +114,10 @@ const PAGE_ORDER = [
   "watcherUserIds",
   "notes",
   "proposalId",
+  // The workspace's own fields (src/lib/custom-fields) sit between the hand-off and the folded sections,
+  // but they are kept beside the form rather than in it: checked by `missingRequired` and focused by the
+  // form itself (new-order-form.tsx), so react-hook-form never reports an error here. Placed, all the same.
+  "customFields",
 ] as const satisfies readonly (keyof PunchFormValues)[];
 // Every field has its place: this fails to compile if one is added to the schema and not here.
 type Assert<T extends true> = T;

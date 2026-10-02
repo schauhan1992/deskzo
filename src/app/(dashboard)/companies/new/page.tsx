@@ -5,9 +5,12 @@ import { newCustomerTermsAdvice } from "@/actions/credit";
 import { NewCompanyForm } from "@/components/companies/new-company-form";
 import { clientRelationshipTypeValues } from "@/lib/validation/company";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { requireUser } from "@/lib/session";
+import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewCompanyPage() {
-  const [industries, canAddContacts, termsAdvice, categories] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories()]);
+  const user = await requireUser();
+  const [industries, canAddContacts, termsAdvice, categories, customFields] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories(), formSetup("COMPANY", user.id)]);
 
   return (
     <div>
@@ -21,6 +24,7 @@ export default async function NewCompanyPage() {
         categories={categories}
         canAddContacts={canAddContacts}
         termsAdvice={termsAdvice}
+        customFields={customFields}
         defaultRelationshipType="CLIENT" relationshipTypeOptions={clientRelationshipTypeValues} />
     </div>
   );

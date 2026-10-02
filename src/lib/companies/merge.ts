@@ -4,6 +4,8 @@ import { normalizeCompanyName } from "@/lib/company-name";
 import { companyFamily, FAMILY_LABELS, phoneKey } from "@/lib/companies/duplicates";
 import { formatCompanyId } from "@/lib/order-id";
 import { paymentTermsLabels } from "@/lib/gst";
+import { valuesOf } from "@/lib/custom-fields/server";
+import { isEmptyValue, type CustomFieldValues } from "@/lib/custom-fields/rules";
 
 /**
  * Folding a duplicate company into the one that stays.
@@ -50,6 +52,9 @@ import { paymentTermsLabels } from "@/lib/gst";
  *   · A "new customer" celebration follows too, so the customer isn't celebrated a second time.
  *   · The cached credit rating is cleared: the payment history just changed, and it is worked out
  *     again straight after the merge.
+ *   · The workspace's own fields (src/lib/custom-fields) are combined like blanks are: the staying
+ *     company's answer wins, the duplicate's fills what it left empty — and the same for a person in
+ *     both. The duplicate's own answers stay in the merge record's snapshot.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -640,12 +645,57 @@ export class MergeRefused extends Error {}
 
 type FullContact = Prisma.ContactGetPayload<object>;
 
+/** The workspace's own fields on the records a merge touches, by id — see `customFieldsOf`. */
+type MergeFields = { companies: Map<string, CustomFieldValues>; contacts: Map<string, CustomFieldValues> };
+
+/**
+ * The workspace's own fields (src/lib/custom-fields) on both companies, on the duplicate's people and
+ * on the people who may be combined — read before the transaction, by the reader that copes with a
+ * workspace still waiting for the column.
+ *
+ * Not inside it: a workspace's pool has two connections, the transaction holds one, and a second
+ * merge waiting on the same row lock holds the other — a read on `db` from in there would wait for a
+ * connection that only frees once it has given up. What that costs: a field saved on either company
+ * in the moment between this read and the lock is not seen by the merge.
+ */
+async function customFieldsOf(input: MergeInput): Promise<MergeFields> {
+  const dropContacts = await db.contact.findMany({ where: { companyId: input.dropId }, select: { id: true } });
+  const [companies, contacts] = await Promise.all([
+    valuesOf("COMPANY", [input.keepId, input.dropId]),
+    valuesOf("CONTACT", [...dropContacts.map((c) => c.id), ...input.combine.flatMap((p) => p.split(":"))]),
+  ]);
+  return { companies, contacts };
+}
+
+/**
+ * Two records' own fields as the one that stays keeps them: its answer wherever it has one, the
+ * other's wherever it has none. Null when that changes nothing — nothing is written then, so a
+ * workspace still waiting for the column is never asked to store one.
+ */
+function mergedCustomFields(ours: CustomFieldValues = {}, theirs: CustomFieldValues = {}): Prisma.InputJsonValue | null {
+  const merged: CustomFieldValues = { ...ours };
+  let filled = false;
+  for (const [key, value] of Object.entries(theirs)) {
+    if (!isEmptyValue(merged[key]) || isEmptyValue(value)) continue;
+    merged[key] = value;
+    filled = true;
+  }
+  return filled ? (merged as Prisma.InputJsonValue) : null;
+}
+
 /**
  * One person, two records: the one under the staying company absorbs the other. Everything pointing
  * at the second — calls, visits, tickets, leads, consent, list places — moves to the first, blanks on
  * the first are filled from the second, and the second is removed.
  */
-async function combineContacts(tx: Tx, contact: Link[], ours: FullContact, theirs: FullContact, companyHadPrimary: boolean): Promise<string[]> {
+async function combineContacts(
+  tx: Tx,
+  contact: Link[],
+  ours: FullContact,
+  theirs: FullContact,
+  companyHadPrimary: boolean,
+  fields: MergeFields["contacts"],
+): Promise<string[]> {
   const notes = await settleClashes(tx, contact, theirs.id, ours.id);
   await moveSuppression(tx, "CONTACT", theirs.id, ours.id);
   await repoint(tx, contact, theirs.id, ours.id);
@@ -667,6 +717,9 @@ async function combineContacts(tx: Tx, contact: Link[], ours: FullContact, their
   if (!ours.linkedinUrl && theirs.linkedinUrl) data.linkedinUrl = theirs.linkedinUrl;
   if (ours.designation === "OTHER" && theirs.designation !== "OTHER") data.designation = theirs.designation;
   if (!companyHadPrimary && theirs.isPrimary) data.isPrimary = true;
+  // The workspace's own fields, the same way: the staying contact's answers, then the other's.
+  const customFields = mergedCustomFields(fields.get(ours.id), fields.get(theirs.id));
+  if (customFields) data.customFields = customFields;
 
   // Mail already sent to the other record carries its preference link, and it has to keep working.
   const former = new Set([...ours.formerPreferenceTokens, ...theirs.formerPreferenceTokens]);
@@ -709,11 +762,13 @@ async function moveFirstOrderWin(tx: Tx, fromId: string, intoId: string) {
   await tx.celebrationSeen.updateMany({ where: { occasionKey: from }, data: { occasionKey: into } });
 }
 
-function snapshotOf(c: Loaded, contacts: FullContact[]) {
+function snapshotOf(c: Loaded, contacts: FullContact[], fields: MergeFields) {
   const plain = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
   const { industry, customerCategory, owner, assignedTo, managedByReseller, locations, ...row } = c;
   return plain({
-    company: row,
+    // Its own fields too: where both companies had an answer only the staying one's is kept, and this
+    // is where the duplicate's still is.
+    company: { ...row, customFields: fields.companies.get(c.id) ?? {} },
     names: {
       industry: industry?.name ?? null,
       customerCategory: customerCategory?.name ?? null,
@@ -722,7 +777,16 @@ function snapshotOf(c: Loaded, contacts: FullContact[]) {
       reseller: managedByReseller?.name ?? null,
     },
     locations,
-    contacts: contacts.map((x) => ({ id: x.id, contactSeq: x.contactSeq, name: x.name, email: x.email, phone: x.phone, designation: x.designation, isPrimary: x.isPrimary })),
+    contacts: contacts.map((x) => ({
+      id: x.id,
+      contactSeq: x.contactSeq,
+      name: x.name,
+      email: x.email,
+      phone: x.phone,
+      designation: x.designation,
+      isPrimary: x.isPrimary,
+      customFields: fields.contacts.get(x.id) ?? {},
+    })),
   });
 }
 
@@ -736,6 +800,7 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
   const unsettled = unsettledClashes(all);
   if (unsettled.length) throw new MergeRefused(`These links can clash and have no rule: ${unsettled.join(", ")}.`);
   const { company: companyLinks, contact: contactLinks } = all;
+  const fields = await customFieldsOf(input);
 
   return db.$transaction(
     async (tx) => {
@@ -752,7 +817,7 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
         tx.contact.findMany({ where: { companyId: keep.id }, orderBy: { createdAt: "asc" } }),
         tx.contact.findMany({ where: { companyId: drop.id }, orderBy: { createdAt: "asc" } }),
       ]);
-      const snapshot = snapshotOf(drop, dropContacts);
+      const snapshot = snapshotOf(drop, dropContacts, fields);
       const notes: string[] = [];
 
       // People in both, as the preview showed them and only those still paired the same way.
@@ -762,7 +827,7 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
       for (const p of pairs) {
         const ours = keepContacts.find((c) => c.id === p.keepId)!;
         const theirs = dropContacts.find((c) => c.id === p.dropId)!;
-        notes.push(...(await combineContacts(tx, contactLinks, ours, theirs, keepHadPrimaryContact)));
+        notes.push(...(await combineContacts(tx, contactLinks, ours, theirs, keepHadPrimaryContact, fields.contacts)));
       }
       if (keepHadPrimaryContact) await tx.contact.updateMany({ where: { companyId: drop.id, isPrimary: true }, data: { isPrimary: false } });
 
@@ -805,6 +870,9 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
       if (typeof data.name === "string") data.normalizedName = normalizeCompanyName(data.name);
       data.tags = [...new Set([...keep.tags, ...drop.tags])];
       if (!keep.category && drop.category) data.category = drop.category;
+      // The workspace's own fields: the staying company's answers, then the duplicate's.
+      const customFields = mergedCustomFields(fields.companies.get(keep.id), fields.companies.get(drop.id));
+      if (customFields) data.customFields = customFields;
       // Worked out again straight after — the payment history it came from just changed.
       Object.assign(data, { creditRating: null, creditScore: null, creditScoredAt: null });
       await tx.company.update({ where: { id: keep.id }, data: data as Prisma.CompanyUncheckedUpdateInput });
