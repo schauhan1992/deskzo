@@ -50,6 +50,7 @@ model Role {
 
   users        User[]
   permissions  RolePermission[]
+  signInRule   SignInRule?      @relation("RoleSignInRule")
   candidates   Candidate[]
   formGrants   FormAccessGrant[]
   accessPolicy RoleAccessPolicy?
@@ -674,6 +675,7 @@ model User {
   companyLocks             CompanyLock[]              @relation("CompanyLockedBy")
   helpDeskChanges          HelpDesk[]                 @relation("HelpDeskUpdatedBy")
   mailConnection           MailConnection?            @relation("UserMailConnection")
+  signInRule               SignInRule?                @relation("UserSignInRule")
   documentEmailTemplates   DocumentEmailTemplate[]    @relation("DocumentEmailTemplateBy")
   documentRenderGrants     DocumentRenderGrant[]      @relation("DocumentRenderGrantUser")
   helpLinks                HelpLink[]                 @relation("HelpLinkCreatedBy")
@@ -7644,6 +7646,11 @@ model ScreenshotAllowance {
  * The deterrents are worth having anyway: most leakage is careless rather than determined, and the
  * log they produce is what makes the determined kind attributable afterwards.
  */
+enum WatermarkScope {
+  CUSTOMER_DATA
+  EVERY_PAGE
+}
+
 model SecurityPolicy {
   id String @id @default("global")
 
@@ -7672,6 +7679,12 @@ model SecurityPolicy {
    */
   watermarkEnabled Boolean @default(false)
   watermarkOpacity Int     @default(7)
+  /**
+   * Where the watermark goes: only the pages that show customers' details (src/lib/security/
+   * watermark-pages.ts) — the default, owner 2 Oct 2026: elsewhere it is only in the way — or every
+   * page. A screenshot can't be waited for: no browser is told one is being taken.
+   */
+  watermarkScope   WatermarkScope @default(CUSTOMER_DATA)
 
   // --- Enforced server side ---
   exportRowLimit       Int     @default(1000)
@@ -11373,13 +11386,16 @@ model Announcement {
 
 enum MailConnectionProvider {
   MICROSOFT
+  GOOGLE
+  ZOHO
 }
 
 /**
- * A person's own mailbox, connected so the ERP can send as them — an invoice goes out from their
- * address and lands in their Sent Items. See src/lib/mail/microsoft.ts.
+ * A person's own mailbox — Microsoft 365, Google Workspace or Zoho — connected so the ERP can send as
+ * them: an invoice goes out from their address and lands in their Sent folder. See src/lib/mail
+ * (mailbox.ts, and microsoft.ts, google.ts, zoho.ts for each provider).
  *
- * One per person, and only ever their own: the mailbox Microsoft reports has to be the address on
+ * One per person, and only ever their own: the mailbox the provider reports has to be the address on
  * their account here, or the connection is refused. The refresh token is encrypted with
  * encryptSecret and never leaves the server.
  */
@@ -11394,19 +11410,94 @@ model MailConnection {
   refreshTokenCipher   String
   accessTokenCipher    String?
   accessTokenExpiresAt DateTime?
-  /** What Microsoft granted, as it said so. */
+  /** What the provider granted, as it said so. */
   scopes               String
+  /**
+   * Zoho only: the accounts server of the person's data centre (https://accounts.zoho.in …), which
+   * every token call goes to, and their Zoho Mail account. Read by name through src/lib/mail/zoho.ts.
+   */
+  zohoAccountsServer   String?
+  zohoMailAccountId    String?
   connectedAt          DateTime               @default(now())
   lastUsedAt           DateTime?
   /**
-   * Set when Microsoft refuses the stored token — a changed password, a revoked consent, an account
-   * disabled. Nothing is sent until the person connects again.
+   * Set when the provider refuses the stored token — a changed password, a revoked consent, an
+   * account disabled. Nothing is sent until the person connects again.
    */
   brokenAt             DateTime?
   lastError            String?
   updatedAt            DateTime               @updatedAt
 
   @@map("mail_connections")
+}
+
+/**
+ * Microsoft 365, Google Workspace and Zoho — which of them the company uses, and for what: signing in,
+ * and the mailboxes people connect (Settings → Security, src/actions/workplace.ts,
+ * src/lib/workplace/settings.ts). Microsoft's app itself is in SecuritySettings, where it has always
+ * been, with its sign-in switch (`ssoEnabled`); Google's and Zoho's are the company's own, registered in
+ * its own Google Cloud project and Zoho API console — an Internal Google app needs no review by Google.
+ * Secrets encrypted, never shown back.
+ *
+ * Its own table, not columns on SecuritySettings: sign-in reads that row on every request, and a
+ * workspace still waiting for this migration must go on signing in exactly as before.
+ */
+model WorkplaceSettings {
+  id                       String   @id @default("global")
+  /** Offer "Connect Outlook" on My profile — on while the Microsoft app is set up, as before. */
+  microsoftMail            Boolean  @default(true)
+  googleClientId           String?
+  googleClientSecretCipher String?
+  /** "Sign in with Google" on the sign-in page. */
+  googleSso                Boolean  @default(false)
+  /**
+   * Only Google accounts of this Google Workspace domain may sign in (the ID token's `hd`) — null for
+   * any account whose verified address is a person's here.
+   */
+  googleDomain             String?
+  googleMail               Boolean  @default(true)
+  zohoClientId             String?
+  zohoClientSecretCipher   String?
+  /** The Zoho data centre the company's accounts are in: com, eu, in, com.au, jp, ca, sa, uk. */
+  zohoRegion               String   @default("in")
+  /** "Sign in with Zoho" on the sign-in page. */
+  zohoSso                  Boolean  @default(false)
+  zohoMail                 Boolean  @default(true)
+  updatedById              String?
+  updatedAt                DateTime @updatedAt
+
+  @@map("workplace_settings")
+}
+
+enum SignInMethod {
+  /** Any single sign-on the company offers. */
+  SSO
+  MICROSOFT
+  GOOGLE
+  ZOHO
+  /** The password (and two-factor code) only. */
+  PASSWORD
+}
+
+/**
+ * How one person — or everybody in a role — may sign in (owner, 2 Oct 2026): "Microsoft only", single
+ * sign-on, password only. src/lib/workplace/sign-in-rules.ts decides what a rule means; sign-in reads
+ * it wherever a way in is decided (src/lib/workplace/sign-in-rules-server.ts). The person's own rule
+ * wins over their role's, the role's over the company's; the super admin is never bound by one.
+ *
+ * Exactly one of userId and roleKey. Goes with the person or the role it is about.
+ */
+model SignInRule {
+  id          String       @id @default(cuid())
+  userId      String?      @unique
+  user        User?        @relation("UserSignInRule", fields: [userId], references: [id], onDelete: Cascade)
+  roleKey     String?      @unique
+  role        Role?        @relation("RoleSignInRule", fields: [roleKey], references: [key], onDelete: Cascade)
+  method      SignInMethod
+  updatedById String?
+  updatedAt   DateTime     @updatedAt
+
+  @@map("sign_in_rules")
 }
 
 /**

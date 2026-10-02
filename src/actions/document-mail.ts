@@ -21,7 +21,9 @@ import { canSend } from "@/lib/marketing/suppression";
 import { mintRenderGrant } from "@/lib/documents/render-grant";
 import { RENDER_PARAM } from "@/lib/documents/render-token";
 import { PDF_MAX_BYTES, PdfError, renderPdf } from "@/lib/documents/pdf";
-import { microsoftApp, sendAsUser, CONNECT_PATH } from "@/lib/mail/microsoft";
+import { mailboxState, sendAsUser } from "@/lib/mail/mailbox";
+import { mailProviders } from "@/lib/workplace/settings";
+import { MAIL_NAMES, SIGN_IN_NAMES, sayEither } from "@/lib/workplace/providers";
 import {
   DEFAULT_TEMPLATES,
   EMAILABLE_TYPES,
@@ -40,7 +42,8 @@ import { renderTarget } from "@/lib/tenancy/render-target";
  * Emailing a document to the customer — the Mail button on a proposal, proforma, tax invoice or
  * credit note.
  *
- * It goes out from the sender's own Outlook (src/lib/mail/microsoft.ts), with the document as a PDF
+ * It goes out from the sender's own mailbox — Outlook, Gmail or Zoho Mail, whichever they connected
+ * (src/lib/mail/mailbox.ts) — with the document as a PDF
  * made from its own print page (src/lib/documents/pdf.ts), to the customer's contacts the sender
  * ticks. Every recipient is logged against the document, and the whole send is audited.
  */
@@ -157,19 +160,7 @@ async function recipientsFor(companyId: string) {
 
 // ─── The dialog ──────────────────────────────────────────────────────────────────────────────────
 
-export type MailboxState =
-  | { state: "connected"; mailbox: string }
-  | { state: "broken"; mailbox: string; error: string | null }
-  | { state: "not-connected" }
-  | { state: "app-missing" };
-
-async function mailboxState(userId: string): Promise<MailboxState> {
-  const [connection, app] = await Promise.all([db.mailConnection.findUnique({ where: { userId } }), microsoftApp()]);
-  if (!app) return { state: "app-missing" };
-  if (!connection) return { state: "not-connected" };
-  if (connection.brokenAt) return { state: "broken", mailbox: connection.mailbox, error: connection.lastError };
-  return { state: "connected", mailbox: connection.mailbox };
-}
+export type { MailboxState } from "@/lib/mail/mailbox";
 
 export async function prepareDocumentEmail(documentId: string) {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
@@ -203,14 +194,13 @@ export async function prepareDocumentEmail(documentId: string) {
     template,
     values,
     mailbox,
-    connectHref: `${CONNECT_PATH}?next=${encodeURIComponent(`/documents/${doc.id}`)}`,
     viewingAs: !!(await viewAsContext()),
   });
 }
 
 export type SendDocumentInput = { documentId: string; contactIds: string[]; subject: string; body: string };
 
-export async function sendDocumentEmail(input: SendDocumentInput): Promise<ActionResult<{ sentTo: string[]; from: string }>> {
+export async function sendDocumentEmail(input: SendDocumentInput): Promise<ActionResult<{ sentTo: string[]; from: string; mailName: string }>> {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const blockedWhileViewing = await refuseWhileViewingAs();
   if (blockedWhileViewing) return { ok: false, error: blockedWhileViewing };
@@ -252,8 +242,10 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
       ok: false,
       error:
         mailbox.state === "app-missing"
-          ? "Microsoft 365 isn't set up for this company yet (Settings → Security). Ask an admin."
-          : "Connect your Outlook first — it's what the email is sent from.",
+          ? "Your company hasn't set up Microsoft 365, Google Workspace or Zoho for mail yet (Settings → Security). Ask an admin."
+          : mailbox.state === "broken"
+            ? `${SIGN_IN_NAMES[mailbox.provider]} stopped accepting your ${MAIL_NAMES[mailbox.provider]} connection. Connect it again from My profile.`
+            : `Connect your ${sayEither(mailbox.providers.map((p) => MAIL_NAMES[p]))} first — it's what the email is sent from.`,
     };
   }
 
@@ -312,7 +304,7 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
     entityLabel: `${tradeDocumentLabels[doc.docType]} ${doc.docNumber ?? ""} emailed to ${to.join(", ")} from ${outcome.mailbox}`.slice(0, 500),
   });
   revalidatePath(`/documents/${doc.id}`);
-  return { ok: true, data: { sentTo: to, from: outcome.mailbox } };
+  return { ok: true, data: { sentTo: to, from: outcome.mailbox, mailName: MAIL_NAMES[outcome.provider] } };
 }
 
 
@@ -347,23 +339,24 @@ export async function getMailConnection() {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   // Viewing as somebody shows nothing: whose mailbox is connected is theirs to see.
   if (await viewAsContext()) return null;
-  const [connection, app] = await Promise.all([
+  const [connection, providers] = await Promise.all([
     db.mailConnection.findUnique({
       where: { userId: user.id },
-      select: { mailbox: true, displayName: true, connectedAt: true, lastUsedAt: true, brokenAt: true, lastError: true },
+      select: { provider: true, mailbox: true, displayName: true, connectedAt: true, lastUsedAt: true, brokenAt: true, lastError: true },
     }),
-    microsoftApp(),
+    mailProviders(),
   ]);
-  return toPlain({ appReady: !!app, connection, connectHref: `${CONNECT_PATH}?next=${encodeURIComponent("/profile")}` });
+  return toPlain({ providers, connection });
 }
 
 export async function disconnectMailbox(): Promise<ActionResult<null>> {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const blockedWhileViewing = await refuseWhileViewingAs();
   if (blockedWhileViewing) return { ok: false, error: blockedWhileViewing };
+  const had = await db.mailConnection.findUnique({ where: { userId: user.id }, select: { provider: true, mailbox: true } });
   const removed = await db.mailConnection.deleteMany({ where: { userId: user.id } });
-  if (removed.count > 0) {
-    await recordAudit({ userId: user.id, action: "DELETE", entityType: "MailConnection", entityId: user.id, entityLabel: "Outlook disconnected" });
+  if (removed.count > 0 && had) {
+    await recordAudit({ userId: user.id, action: "DELETE", entityType: "MailConnection", entityId: user.id, entityLabel: `${MAIL_NAMES[had.provider]} disconnected: ${had.mailbox}` });
   }
   revalidatePath("/profile");
   return { ok: true, data: null };

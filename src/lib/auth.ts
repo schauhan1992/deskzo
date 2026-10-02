@@ -15,6 +15,11 @@ import { handoffAccount } from "@/lib/platform/handoff-sign-in";
 import { linkedAccount } from "@/lib/platform/linked/switch";
 import { isAutomationKind } from "@/lib/people";
 import type { Provider } from "@auth/core/providers";
+import { workplaceSignInProviders } from "@/lib/workplace/auth-providers";
+import { accountAddress, ssoVerdict } from "@/lib/workplace/sign-in";
+import { SIGN_IN_NAMES, providerOfSignIn } from "@/lib/workplace/providers";
+import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
+import { waysIn } from "@/lib/workplace/sign-in-rules";
 
 declare module "next-auth" {
   interface Session {
@@ -87,10 +92,12 @@ async function buildConfig(req?: Request) {
         const validPassword = await bcrypt.compare(password, user.passwordHash);
         if (!validPassword) return refuse("wrong password", user);
 
-        // When SSO is enforced, password sign-in is switched off for everyone except admins —
-        // admins keep it as a break-glass path in case the SSO setup itself is ever broken.
-        if (security?.enforceSso && user.role !== "ADMIN") {
-          return refuse("password sign-in is off while Microsoft sign-in is enforced", user);
+        // Whether a password is enough for this person: their own sign-in rule, their role's, or the
+        // company's setting (src/lib/workplace/sign-in-rules.ts) — under which admins keep it as a
+        // break-glass path in case the SSO setup itself is ever broken, and the super admin always does.
+        const policy = await signInPolicyFor(user);
+        if (!policy.password) {
+          return refuse(`password sign-in is off for this account — it signs in with ${waysIn(policy) || "nothing switched on"}`, user);
         }
 
         if (user.twoFactorEnabledAt) {
@@ -178,36 +185,45 @@ async function buildConfig(req?: Request) {
     );
   }
 
+  // Google and Zoho, each with the company's own app (src/lib/workplace/auth-providers.ts).
+  providers.push(...(await workplaceSignInProviders()));
+
   return {
     ...options,
     pages: { signIn: "/login" },
     providers,
     callbacks: {
-      signIn: async ({ user, account }: { user: { email?: string | null }; account?: { provider?: string } | null }) => {
-        if (account?.provider === "microsoft-entra-id") {
-          if (!user.email) return false;
-          // SSO signs people into accounts an admin already provisioned — it's not a self-signup path.
-          const existing = await db.user.findUnique({ where: { email: user.email } });
-          if (!existing || !existing.active || isAutomationKind(existing.kind)) return false;
-          const held = await doorCheck(existing);
-          if (held) {
-            await logActivity({
-              kind: "LOGIN_FAILED",
-              userId: existing.id,
-              userName: existing.name,
-              userEmail: existing.email,
-              summary: `Microsoft sign-in refused for ${existing.name}: ${held === "NETWORK_BLOCKED" ? "the network is blocked" : "their role only allows approved networks"}`,
-              metadata: { reason: held },
-            });
-            return false;
-          }
-        }
-        return true;
+      signIn: async ({
+        user,
+        account,
+        profile,
+      }: {
+        user: { email?: string | null };
+        account?: { provider?: string } | null;
+        profile?: Record<string, unknown>;
+      }) => {
+        // A password, a handoff or a linked switch was decided in its own `authorize`.
+        const provider = providerOfSignIn(account?.provider);
+        if (!provider) return true;
+        // SSO signs people into accounts an admin already provisioned — it's not a self-signup path.
+        const verdict = await ssoVerdict(provider, user.email, profile);
+        if (verdict.ok) return true;
+        const name = SIGN_IN_NAMES[provider];
+        await logActivity({
+          kind: "LOGIN_FAILED",
+          userId: verdict.user?.id ?? null,
+          userName: verdict.user?.name ?? null,
+          userEmail: verdict.user?.email ?? (accountAddress(user.email) || null),
+          summary: verdict.user ? `${name} sign-in refused for ${verdict.user.name}: ${verdict.reason}` : `${name} sign-in refused: ${verdict.reason}`,
+          metadata: { reason: verdict.reason, provider: account?.provider },
+        });
+        // Refused by a sign-in rule: back to the sign-in page, which says which way this account uses.
+        return verdict.use ? `/login?use=${verdict.use.join(",")}` : false;
       },
       jwt: async ({ token, user, account }: { token: unknown; user?: { email?: string | null }; account?: { provider?: string } | null }) => {
         const t = token as AppJWT;
         if (user?.email) {
-          const dbUser = await db.user.findUnique({ where: { email: user.email } });
+          const dbUser = await db.user.findUnique({ where: { email: accountAddress(user.email) } });
           // Never a session for the Automation account, whichever provider named its address.
           if (dbUser && !isAutomationKind(dbUser.kind)) {
             t.id = dbUser.id;
@@ -239,7 +255,7 @@ async function buildConfig(req?: Request) {
           userId: user.id ?? null,
           userName: user.name ?? null,
           userEmail: user.email ?? null,
-          summary: `${user.name ?? user.email ?? "Somebody"} signed in${account?.provider === "microsoft-entra-id" ? " with Microsoft" : account?.provider === "linked" ? " from a linked workspace" : ""}`,
+          summary: `${user.name ?? user.email ?? "Somebody"} signed in${signedInWith(account?.provider)}`,
           metadata: { provider: account?.provider ?? "credentials" },
         });
       },
@@ -258,6 +274,13 @@ async function buildConfig(req?: Request) {
       },
     },
   };
+}
+
+/** How a sign-in came, said after "signed in": " with Google", " from a linked workspace", or nothing for a password. */
+function signedInWith(provider: string | undefined): string {
+  const via = providerOfSignIn(provider);
+  if (via) return ` with ${SIGN_IN_NAMES[via]}`;
+  return provider === "linked" ? " from a linked workspace" : "";
 }
 
 const nextAuth = NextAuth(buildConfig);

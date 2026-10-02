@@ -255,6 +255,12 @@ const NOT_YET_EVERYWHERE = {
   item: { customFields: true },
   // 20261016100000_order_steps. Read by name through src/lib/pipeline/order-steps-server.ts.
   companyProduct: { customFields: true, stepId: true, stepChangedAt: true },
+  // 20261018100000_workplace_sign_in_and_mail. A Zoho mailbox's details are read by name in
+  // src/lib/mail/mailbox.ts.
+  mailConnection: { zohoAccountsServer: true, zohoMailAccountId: true },
+  // 20261019100000_watermark_scope. The DLP policy is read on every page; read by name in
+  // src/lib/security/store.ts.
+  securityPolicy: { watermarkScope: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

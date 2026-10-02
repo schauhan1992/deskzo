@@ -322,6 +322,7 @@ async function main() {
     const lockout = require("../src/lib/security/lockout") as typeof import("../src/lib/security/lockout");
     const { invalidateSecuritySettingsCache } = require("../src/lib/security-settings") as typeof import("../src/lib/security-settings");
     const { encryptSecret } = require("../src/lib/crypto") as typeof import("../src/lib/crypto");
+    const { invalidateWorkplaceSettingsCache } = require("../src/lib/workplace/settings") as typeof import("../src/lib/workplace/settings");
     const { generateTotpSecret } = require("../src/lib/totp") as typeof import("../src/lib/totp");
     const finder = require("../src/lib/platform/find-workspaces") as typeof import("../src/lib/platform/find-workspaces");
     const emailIndex = require("../src/lib/platform/email-index") as typeof import("../src/lib/platform/email-index");
@@ -620,6 +621,21 @@ async function main() {
     await setSecurity(A, { enforceSso: true });
     ok("A enforcing Microsoft sign-in: a password from a non-admin → reauth-sso", (await refusal(() => askAs(a3, sid3))) === "reauth-sso");
     await setSecurity(A, { enforceSso: false });
+
+    // A sign-in rule (Settings → Security, Staff & roles) names the ways that prove the person.
+    finder.resetSiteAllowances();
+    const googleSecret = await inT(A, () => encryptSecret("zz-linkcheck-google-secret"));
+    const googleApp = { googleClientId: "123456-zzlinkcheck.apps.googleusercontent.com", googleClientSecretCipher: googleSecret, googleSso: true };
+    await inT(A, () => db.workplaceSettings.upsert({ where: { id: "global" }, create: { id: "global", ...googleApp }, update: googleApp }));
+    invalidateWorkplaceSettingsCache();
+    await inT(A, () => db.signInRule.create({ data: { userId: a3.id, method: "GOOGLE" } }));
+    ok("a sign-in rule tying Ravi to Google: their fresh Microsoft sign-in doesn't count → reauth-sso", (await refusal(() => askAs(a3, sidMs, { password: undefined, sso: true }))) === "reauth-sso");
+    ok("  nor their password → reauth-sso", (await refusal(() => askAs(a3, sid3))) === "reauth-sso");
+    const sidGoogle = await signInAt(A, a3, null, "google");
+    ok("  a fresh Google sign-in of theirs → the request is made", (await refusal(() => askAs(a3, sidGoogle, { password: undefined, sso: true }))) === "ok");
+    await inT(A, () => db.signInRule.deleteMany({ where: { userId: a3.id } }));
+    await inT(A, () => db.workplaceSettings.deleteMany({}));
+    invalidateWorkplaceSettingsCache();
     finder.resetSiteAllowances();
 
     const bViewing = browser("A: the owner, viewing as Ravi");
@@ -973,6 +989,10 @@ async function main() {
     const ssoSecret = s.state === "sso" ? keep(s.presentSecret) : "";
     ok("    its address for the login hint — for that browser's secret, at B only", (await S.ssoEmailFor(B, ssoSecret)) === bT.email && (await S.ssoEmailFor(B, keys.newBrowserSecret().secret)) === null && (await S.ssoEmailFor(C, ssoSecret)) === null);
     ok("    audited link.switch-sso", !!(await control.platformAuditLog.findFirst({ where: { action: "link.switch-sso", tenantId: B.id } })));
+    await inT(B, () => db.signInRule.create({ data: { userId: bT.id, method: "SSO" } }));
+    s = await arrive(pair.memberId);
+    await inT(B, () => db.signInRule.deleteMany({ where: { userId: bT.id } }));
+    ok("    as for a sign-in rule at B that says single sign-on, with B not requiring it → sso", s.state === "sso", s);
     await setSecurity(B, { enforceTwoFactor: true });
     s = await arrive(pair.memberId);
     await setSecurity(B, { enforceTwoFactor: false });

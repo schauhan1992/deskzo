@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useId } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -11,7 +11,10 @@ import { formatIstDateTime } from "@/lib/india-time";
  * The super admin letting Deskzo's support staff in (src/actions/support-access.ts): read-only, or an
  * administrator's access, for a few hours, with a reason. Ending it signs them out at once.
  */
-export function SupportAccessCard({ state }: { state: SupportAccessState }) {
+/** `compact`: stacked, for the right rail's panel (src/components/layout/rail-support-access.tsx). */
+export function SupportAccessCard({ state, compact = false }: { state: SupportAccessState; compact?: boolean }) {
+  // Its own ids wherever it is drawn: the Security page and the rail can both show it at once.
+  const uid = useId();
   const router = useRouter();
   const [level, setLevel] = useState<"READONLY" | "ADMIN">("READONLY");
   const [hours, setHours] = useState("24");
@@ -57,22 +60,22 @@ export function SupportAccessCard({ state }: { state: SupportAccessState }) {
       <p className="text-sm text-muted">
         Deskzo&apos;s support staff cannot see inside this workspace unless you let them. Access ends on its own after the time you choose, or when you end it.
       </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className={compact ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-3 sm:grid-cols-2"}>
         <div>
-          <Label htmlFor="support-level">What they can do</Label>
-          <Select id="support-level" value={level} onChange={(e) => setLevel(e.target.value === "ADMIN" ? "ADMIN" : "READONLY")}>
+          <Label htmlFor={`${uid}-level`}>What they can do</Label>
+          <Select id={`${uid}-level`} value={level} onChange={(e) => setLevel(e.target.value === "ADMIN" ? "ADMIN" : "READONLY")}>
             <option value="READONLY">Look only — read-only</option>
             <option value="ADMIN">Change things — an administrator&apos;s access</option>
           </Select>
         </div>
         <div>
-          <Label htmlFor="support-hours">For how many hours (up to {state.maxHours})</Label>
-          <Input id="support-hours" type="number" min={1} max={state.maxHours} value={hours} onChange={(e) => setHours(e.target.value)} />
+          <Label htmlFor={`${uid}-hours`}>For how many hours (up to {state.maxHours})</Label>
+          <Input id={`${uid}-hours`} type="number" min={1} max={state.maxHours} value={hours} onChange={(e) => setHours(e.target.value)} />
         </div>
       </div>
       <div>
-        <Label htmlFor="support-reason">What it is for</Label>
-        <Textarea id="support-reason" rows={2} maxLength={500} required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="The payroll run for March shows the wrong totals" />
+        <Label htmlFor={`${uid}-reason`}>What it is for</Label>
+        <Textarea id={`${uid}-reason`} rows={2} maxLength={500} required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="The payroll run for March shows the wrong totals" />
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
       <Button type="submit" size="sm" disabled={pending || reason.trim().length < 5}>

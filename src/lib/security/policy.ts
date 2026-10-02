@@ -20,6 +20,8 @@ export type SecurityPolicyShape = {
   screenshotNotifyAdmins: boolean;
   watermarkEnabled: boolean;
   watermarkOpacity: number;
+  /** Only the pages with customers' details (src/lib/security/watermark-pages.ts), or every page. */
+  watermarkScope: "CUSTOMER_DATA" | "EVERY_PAGE";
   exportRowLimit: number;
   exportRequiresReason: boolean;
   bulkReadThreshold: number;
@@ -54,6 +56,7 @@ export const DEFAULT_SECURITY_POLICY: SecurityPolicyShape = {
   screenshotNotifyAdmins: true,
   watermarkEnabled: false,
   watermarkOpacity: 7,
+  watermarkScope: "CUSTOMER_DATA",
   exportRowLimit: 1000,
   exportRequiresReason: false,
   bulkReadThreshold: 400,

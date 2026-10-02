@@ -171,6 +171,7 @@
     "check:pipeline": "tsx scripts/check-pipeline.ts",
     "check:order-steps": "tsx scripts/check-order-steps.ts",
     "check:wording": "tsx scripts/check-wording.ts",
+    "check:workplace": "tsx scripts/check-workplace.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",
     "check:domains": "tsx scripts/check-domains.ts",

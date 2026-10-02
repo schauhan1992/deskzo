@@ -306,6 +306,7 @@ export function WorkspaceSwitcher({
         onClose={() => setAdding(false)}
         domain={domain}
         reauth={data?.reauth ?? "password"}
+        ssoName={data?.ssoName}
         currentName={here?.name ?? current.name}
       />
     </>

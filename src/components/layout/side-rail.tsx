@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MonitorPlay, Sparkles, StickyNote, X } from "lucide-react";
+import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
 import { COPILOT_OPEN_EVENT, SIDE_RAIL_STORAGE_KEY, UPDATES_SEEN_EVENT, parseTool, type SideRailTool } from "@/lib/side-rail";
 import { RailTasks } from "@/components/layout/rail-tasks";
 import { RailNotes } from "@/components/layout/rail-notes";
@@ -11,6 +11,7 @@ import { RailLookup } from "@/components/layout/rail-lookup";
 import { RailProRata } from "@/components/layout/rail-prorata";
 import { RailHelp, RailUpdates, RailVideos } from "@/components/layout/rail-help";
 import { openSupport } from "@/components/support/open-support";
+import { RailSupportAccess } from "@/components/layout/rail-support-access";
 
 const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group: "work" | "help" }[] = [
   { key: "tasks", label: "My tasks", icon: CheckSquare, group: "work" },
@@ -22,6 +23,7 @@ const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group:
   { key: "updates", label: "What's new", icon: Megaphone, group: "help" },
   { key: "help", label: "Help", icon: CircleHelp, group: "help" },
   { key: "videos", label: "Video walkthroughs", icon: MonitorPlay, group: "help" },
+  { key: "support-access", label: "Deskzo support access", icon: ShieldCheck, group: "help" },
 ];
 
 /**
@@ -45,6 +47,7 @@ export function SideRail({
   proRata = true,
   country = "IN",
   support = false,
+  supportAccess = null,
 }: {
   /** Renewals are in the workspace's plan — the pro-rata tool quotes seats onto a subscription. */
   proRata?: boolean;
@@ -61,6 +64,11 @@ export function SideRail({
   companyName?: string | null;
   /** Offer Contact Support — the layout's answer from `supportLauncherState()`. */
   support?: boolean;
+  /**
+   * The super admin's door for Deskzo support (owner, 2 Oct 2026): null for everybody else, who never
+   * sees the button; `inside` while support can see the workspace, which puts a dot on it.
+   */
+  supportAccess?: { inside: boolean } | null;
 }) {
   const open = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -106,7 +114,9 @@ export function SideRail({
   }, [open, choose]);
 
   // Only the tools this workspace has: nothing here asks for a module outside its plan.
-  const tools = TOOLS.filter((t) => (t.key !== "prorata" || proRata) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN"));
+  const tools = TOOLS.filter(
+    (t) => (t.key !== "prorata" || proRata) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess),
+  );
   const active = tools.find((t) => t.key === open);
 
   return (
@@ -147,6 +157,7 @@ export function SideRail({
             {active.key === "updates" && <RailUpdates canManage={canManageHelp} />}
             {active.key === "help" && <RailHelp canManage={canManageHelp} companyName={companyName} />}
             {active.key === "videos" && <RailVideos canManage={canManageHelp} companyName={companyName} />}
+            {active.key === "support-access" && <RailSupportAccess inside={!!supportAccess?.inside} />}
           </div>
         </aside>
       )}
@@ -160,7 +171,9 @@ export function SideRail({
           const isOpen = open === tool.key;
           // What's new carries two dots, one per source, each saying its own count — never one sum.
           const news = tool.key === "updates" ? unread : null;
-          const label = news ? withNews(tool.label, news) : tool.label;
+          // Support access says so while support is inside: the one thing on this rail that is about who else can see.
+          const supportIn = tool.key === "support-access" && !!supportAccess?.inside;
+          const label = news ? withNews(tool.label, news) : supportIn ? `${tool.label} — support can see your workspace now` : tool.label;
           const startsGroup = index > 0 && tools[index - 1].group !== tool.group;
           return (
             <div key={tool.key} className="flex flex-col items-center">
@@ -178,6 +191,7 @@ export function SideRail({
                 <Icon className="h-[18px] w-[18px]" />
                 {news && news.company > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" aria-hidden="true" />}
                 {news && news.deskzo > 0 && <span className="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-brand ring-2 ring-surface" aria-hidden="true" />}
+                {supportIn && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-warning ring-2 ring-surface" aria-hidden="true" />}
               </button>
             </div>
           );

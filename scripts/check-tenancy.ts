@@ -90,6 +90,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/security/store.ts:cache": PER_WORKSPACE,
   "src/lib/security/throttle.ts:entries": CALLER_KEYED("every throttle() key starts with the workspace"),
   "src/lib/security-settings.ts:cache": PER_WORKSPACE,
+  "src/lib/workplace/settings.ts:cache": PER_WORKSPACE,
   "src/lib/performance/announce.ts:lastLazyRun": PER_WORKSPACE,
   "src/lib/wins/detect.ts:lastLazyRun": PER_WORKSPACE,
   "src/lib/wins/prize-announce.ts:lastLazyRun": PER_WORKSPACE,
@@ -130,6 +131,8 @@ const STATE: Record<string, Allowed> = {
   "src/lib/copilot/settings.ts:testSettings": { reason: "test override, set only by check scripts" },
   "src/lib/documents/pdf.ts:testRenderer": { reason: "test override, set only by check scripts" },
   "src/lib/mail/microsoft.ts:endpoints": { reason: "test override of Microsoft's addresses, set only by check scripts" },
+  "src/lib/mail/google.ts:endpoints": { reason: "test override of Google's addresses, set only by check scripts" },
+  "src/lib/mail/zoho.ts:regions": { reason: "test override of Zoho's data centres, set only by check scripts" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },
   "src/lib/platform/domains.ts:testResolver": { reason: "test override, set only by check scripts — no check asks real DNS" },
 };

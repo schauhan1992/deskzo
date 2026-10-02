@@ -49,6 +49,7 @@ import { isModuleEntitled } from "@/lib/modules-access";
 import { activeAnnouncementsFor } from "@/lib/platform/announcements";
 import { PlatformAnnouncements } from "@/components/platform/platform-announcements";
 import { supportLauncherState } from "@/actions/support";
+import { getSupportAccess } from "@/actions/support-access";
 import { SupportLauncher } from "@/components/support/support-launcher";
 import { linkedSignInEnabled } from "@/lib/platform/linked/groups";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
@@ -78,7 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // point of the feature is to see their app, and a header still showing the admin's name and role
   // would make it impossible to tell whose permissions a page was rendered with.
   const shownUser = viewAs?.user ?? session?.user;
-  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp, supportLauncher] = await Promise.all([
+  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp, supportLauncher, supportAccess] = await Promise.all([
     listViewAsTargets(),
     // Resolved for whoever the request is acting as, so an admin viewing as a salesperson sees
     // the salesperson's sidebar rather than their own.
@@ -106,6 +107,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // switched off. Never throws, and reads its settings from a minute-long copy with a 1.5 s limit,
     // so a slow control plane costs a page nothing (src/actions/support.ts).
     session?.user && !viewAs ? supportLauncherState() : Promise.resolve(null),
+    // The rail's door for Deskzo support — the super admin's alone, null for everybody else
+    // (src/actions/support-access.ts). A control plane out of reach only hides the button.
+    session?.user && !viewAs ? getSupportAccess().catch(() => null) : Promise.resolve(null),
 ]);
 
   // Not while viewing as somebody else: an admin borrowing an account should not be wished a happy
@@ -216,6 +220,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               // useless at exactly the moment it is needed.
               label={`${shownUser.name} · ${shownUser.email}`}
               opacity={securityPolicy.watermarkOpacity}
+              scope={securityPolicy.watermarkScope}
             />
           )}
         </>
@@ -336,6 +341,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           proRata={await isModuleEntitled("renewals")}
           country={(await currentTenant()).country}
           support={!!supportLauncher}
+          supportAccess={supportAccess ? { inside: !!supportAccess.grant } : null}
         />
       </div>
 

@@ -147,6 +147,7 @@ section("What the rail will open");
 eq("A known tool opens", parseTool("calculator"), "calculator");
 eq("An unknown one does not", parseTool("nonsense"), null, "a stale value must not render a panel that does not exist");
 eq("  nor does nothing at all", parseTool(null), null);
+eq("Support access, the super admin's, is remembered like any other", parseTool("support-access"), "support-access");
 
 console.log(failures === 0 ? "\nAll side rail checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
 process.exit(failures === 0 ? 0 : 1);

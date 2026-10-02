@@ -169,6 +169,7 @@ export function LinkedWorkspacesCard({
           onClose={() => setAdding(false)}
           domain={domain}
           reauth={initial.reauth}
+          ssoName={initial.ssoName}
           initialWorkspace={openWith?.workspace}
           sso={openWith?.sso}
           currentName={hereName}

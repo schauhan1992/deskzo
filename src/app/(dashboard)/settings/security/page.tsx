@@ -3,20 +3,26 @@ import { Fingerprint, ScrollText } from "lucide-react";
 import { currentUser } from "@/lib/session";
 import { getSecurityPolicyForAdmin } from "@/actions/security-policy";
 import { getSecuritySettings } from "@/actions/security";
+import { getWorkplaceSettings } from "@/actions/workplace";
 import { getSupportAccess } from "@/actions/support-access";
 import { getLinkedSignInAdmin } from "@/actions/linked-sign-in-admin";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { LinkedSignInCard } from "@/components/settings/linked-sign-in-card";
 import { SecurityPolicyForm } from "@/components/settings/security-policy-form";
-import { SecuritySettingsForm } from "@/components/settings/security-settings-form";
+import { SignInPolicyForm } from "@/components/settings/security-settings-form";
+import { WorkplaceProviderPicker } from "@/components/settings/workplace-provider-picker";
 import { SupportAccessCard } from "@/components/settings/support-access-card";
 import { can } from "@/lib/authz/resolve";
 import { protocolFor } from "@/lib/tenancy/host";
 import { currentTenant } from "@/lib/tenancy/resolve";
+import { signInProviders } from "@/lib/workplace/settings";
+import { SIGN_IN_NAMES } from "@/lib/workplace/providers";
+import { getRoleSignInRules } from "@/actions/sign-in-rules";
+import { RoleSignInRules } from "@/components/settings/role-sign-in-rules";
 
 /**
  * Every address the workspace answers at now — its own subdomain, then each live custom (or kept)
- * address — as origins. Microsoft needs a redirect address for each one people sign in at.
+ * address — as origins. Microsoft, Google and Zoho need a redirect address for each one people sign in at.
  */
 async function workspaceOrigins(): Promise<string[]> {
   const tenant = await currentTenant();
@@ -35,9 +41,14 @@ export default async function SecuritySettingsPage() {
     );
   }
 
-  const [policy, loginSettings, origins, support, linked] = await Promise.all([
+  const [policy, loginSettings, workplace, signIn, roleRules, origins, support, linked] = await Promise.all([
     getSecurityPolicyForAdmin(),
     getSecuritySettings(),
+    // Null in a workspace still waiting for its migration: no Google or Zoho cards until it has the table.
+    getWorkplaceSettings(),
+    signInProviders(),
+    // Null in a workspace still waiting for its migration: no rules by role until it has the table.
+    getRoleSignInRules(),
     workspaceOrigins(),
     getSupportAccess(),
     // One card, never a reason for the page to fail: a control plane out of reach just hides it.
@@ -53,8 +64,30 @@ export default async function SecuritySettingsPage() {
 
       <Card className="mt-6">
         <CardHeader className="text-sm font-medium text-text">Sign-in</CardHeader>
-        <CardContent>{loginSettings && <SecuritySettingsForm settings={loginSettings} origins={origins} />}</CardContent>
+        <CardContent>
+          {loginSettings && (
+            <SignInPolicyForm
+              settings={{ enforceTwoFactor: loginSettings.enforceTwoFactor, enforceSso: loginSettings.enforceSso }}
+              signInWith={signIn.map((p) => SIGN_IN_NAMES[p])}
+            />
+          )}
+          {roleRules && (
+            <div className="mt-6 border-t border-line pt-5">
+              <RoleSignInRules roles={roleRules.roles} choices={roleRules.choices} />
+            </div>
+          )}
+        </CardContent>
       </Card>
+
+      {/* The suite the company uses — for signing in, and for people's own mailboxes. */}
+      {loginSettings && (
+        <Card className="mt-6">
+          <CardHeader className="text-sm font-medium text-text">Email &amp; sign-in: Microsoft 365, Google Workspace or Zoho</CardHeader>
+          <CardContent>
+            <WorkplaceProviderPicker microsoft={loginSettings.microsoft} google={workplace?.google ?? null} zoho={workplace?.zoho ?? null} origins={origins} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Linked sign-in (spec §2.5) — null while viewing as somebody and in a workspace outside the control plane. */}
       {linked && (

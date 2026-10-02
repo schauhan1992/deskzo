@@ -12,15 +12,20 @@ import { DEVICE_KIND_LABEL } from "@/lib/access/device";
 import { placeText } from "@/lib/access/geo";
 import { formatIstDateTime } from "@/lib/india-time";
 import { getMailConnection } from "@/actions/document-mail";
-import { OutlookConnection } from "@/components/profile/outlook-connection";
+import { MailboxConnection } from "@/components/profile/mailbox-connection";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { myLinkedWorkspaces } from "@/actions/linked-sign-in";
 import { LinkedWorkspacesCard } from "@/components/linked/linked-workspaces-card";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
-export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ outlook?: string; link?: string }> }) {
-  const [profile, security, access, mail, linked, { outlook, link }] = await Promise.all([
+export default async function ProfilePage({
+  searchParams,
+}: {
+  /** `mailbox` and `via`: how connecting a mailbox went, and with which provider. `outlook` is the same, from before Gmail and Zoho. */
+  searchParams: Promise<{ mailbox?: string; via?: string; outlook?: string; link?: string }>;
+}) {
+  const [profile, security, access, mail, linked, { mailbox, via, outlook, link }] = await Promise.all([
     getOwnProfile(),
     getCachedSecuritySettings(),
     myAccess(),
@@ -139,10 +144,15 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
 
         {/* Not shown while viewing as somebody: whose mailbox is connected is theirs alone. */}
         {mail && (
-          <Card>
-            <CardHeader className="text-sm font-medium text-text">Outlook mailbox</CardHeader>
+          <Card id="mailbox" className="scroll-mt-20">
+            <CardHeader className="text-sm font-medium text-text">Your mailbox</CardHeader>
             <CardContent>
-              <OutlookConnection appReady={mail.appReady} connection={mail.connection} connectHref={mail.connectHref} outcome={outlook ?? null} />
+              <MailboxConnection
+                providers={mail.providers}
+                connection={mail.connection}
+                outcome={mailbox ?? outlook ?? null}
+                via={mailbox ? (via ?? null) : outlook ? "microsoft" : null}
+              />
             </CardContent>
           </Card>
         )}

@@ -333,7 +333,7 @@ const PUBLIC_EXPORTS: Record<string, string> = {
   // needs the `deskzo.switch` cookie, a MAC-bound secret held only by the browser that presented the
   // ticket, and acts only on that ticket. check:linked-signin holds them.
   "src/actions/linked-sign-in.ts:submitSwitchCode": "the two-factor step of a switch-in",
-  "src/actions/linked-sign-in.ts:continueSwitchWithMicrosoft": "the Microsoft step of a switch-in",
+  "src/actions/linked-sign-in.ts:continueSwitchWithSso": "the single sign-on step of a switch-in (Microsoft, Google or Zoho)",
 };
 
 const actionsDir = join(process.cwd(), "src", "actions");

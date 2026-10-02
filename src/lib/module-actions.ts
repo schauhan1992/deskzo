@@ -63,6 +63,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "custom-fields.ts": "core",
   "pipeline.ts": "core",
   "wording.ts": "core",
+  "workplace.ts": "core",
+  "sign-in-rules.ts": "core",
   "dashboard.ts": "core",
   "data-export.ts": "core",
   "data-import.ts": "core",

@@ -23,6 +23,8 @@ export const updateSecurityPolicySchema = z.object({
    * underneath stops being readable and somebody turns the whole thing off.
    */
   watermarkOpacity: z.number().int().min(3).max(25),
+  /** Where it goes: the pages with customers' details, or every page. */
+  watermarkScope: z.enum(["CUSTOMER_DATA", "EVERY_PAGE"]),
 
   /** 0 disables the cap. */
   exportRowLimit: z.number().int().min(0).max(1_000_000),

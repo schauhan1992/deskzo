@@ -13,12 +13,15 @@ import { LinkRefused, linkedSignInEnabled, linkedWorkspacesFor, memberOf, revoke
 import { LinkNeedsCode, cancelLinkIntent, completeLinkIntent, createLinkIntent, presentLinkIntent, proveLinkIntent } from "@/lib/platform/linked/intents";
 import { LINK_COOKIE_MAX_AGE, MAX_LINKED_WORKSPACES, linkCookieName, type LinkCookie } from "@/lib/platform/linked/keys";
 import { SwitchRefused, issueSwitchTicket, presentSwitchTicket, ssoEmailFor, verifySwitchCode, type SwitchRefusal, type SwitchState } from "@/lib/platform/linked/switch";
-import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { UnauthorizedError, currentUser, requireUser, viewAsContext } from "@/lib/session";
 import { HOST_MISMATCH, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { currentTenant, currentTenantOrNull, tenantOrigin } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
 import { isSystemAddress } from "@/lib/people";
+import { signInProviders } from "@/lib/workplace/settings";
+import { ssoProviderFor } from "@/lib/workplace/sign-in";
+import { SIGN_IN_IDS, SIGN_IN_NAMES, providerOfSignIn } from "@/lib/workplace/providers";
+import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 
 /**
  * Linked sign-in, for the person (spec §8.4): linking their own accounts in other workspaces, switching
@@ -33,7 +36,7 @@ import { isSystemAddress } from "@/lib/people";
  *
  * Some steps run with nobody signed in here, by design, and never ask `requireUser`: `/link/start`
  * (openLinkRequest), `/link/complete` (finishLinkRequest, whose token is spent before any session is
- * looked at) and `/switch` (arriveBySwitch, submitSwitchCode, continueSwitchWithMicrosoft). Each of them
+ * looked at) and `/switch` (arriveBySwitch, submitSwitchCode, continueSwitchWithSso). Each of them
  * holds a one-time token, or the cookie secret of the browser that presented one.
  *
  * Nothing here returns a token, a secret or a hash — only the URLs the library builds from the registry.
@@ -46,10 +49,16 @@ export type LinkedWorkspaceView = Omit<LinkedWorkspace, "linkedAt" | "lastSwitch
   markUrl: string;
 };
 /** What `myLinkedWorkspaces` answers: the switcher's and Profile's list, and how "Add a workspace" asks to confirm it's you. */
-export type MyLinkedWorkspaces = { enabled: boolean; items: LinkedWorkspaceView[]; reauth: "password" | "password+code" | "sso" };
+export type MyLinkedWorkspaces = {
+  enabled: boolean;
+  items: LinkedWorkspaceView[];
+  reauth: "password" | "password+code" | "sso";
+  /** With `reauth: "sso"`: the sign-in it asks for again — "Google". */
+  ssoName?: string;
+};
 export type SwitchView =
   | { state: "code"; workspace: string; email: string; triesLeft: number; error?: string }
-  | { state: "sso"; workspace: string }
+  | { state: "sso"; workspace: string; providers: { id: string; name: string }[] }
   | { state: "refused"; message: string };
 
 // ─── Messages (spec §2.7) ────────────────────────────────────────────────────────────────────────
@@ -66,7 +75,7 @@ const MESSAGES: Record<Refusal, (w: { name: string; Name: string }, n?: number) 
   "not-member": () => "Linked workspaces are only for your own account.",
   "view-as": () => "Linked workspaces are only for your own account. Switch back to yourself first.",
   reauth: () => "That password or code isn't right.",
-  "reauth-sso": () => "Sign in with Microsoft again to continue.",
+  "reauth-sso": () => "Sign in again with your company account to continue.",
   "rate-limited": () => "Too many tries. Wait a few minutes and try again.",
   "unknown-workspace": () => "There's no workspace at that address.",
   "same-workspace": () => "That's the workspace you're in.",
@@ -172,7 +181,7 @@ function viewOf(w: LinkedWorkspace): LinkedWorkspaceView {
 /**
  * The person's own linked workspaces — this one first — for the switcher and Profile, and how "Add a
  * workspace" asks them to confirm it's them: a password, a password and a code, or (their workspace
- * enforcing Microsoft sign-in, and they not an admin) a fresh Microsoft sign-in. Not enabled while
+ * requiring single sign-on, and they not an admin) a fresh sign-in with Microsoft, Google or Zoho. Not enabled while
  * viewing as, for platform support, for a workspace outside the control plane, or while paused.
  *
  * While paused the links are still listed (`enabled: false`), so Profile can show them and let the
@@ -186,11 +195,15 @@ export async function myLinkedWorkspaces(): Promise<MyLinkedWorkspaces> {
   const tenant = await currentTenant();
   if (tenant.source !== "control") return off;
   const paused = !(await linkedSignInEnabled());
-  const account = await db.user.findUnique({ where: { id: me.userId }, select: { kind: true, email: true, role: true, twoFactorEnabledAt: true } });
+  const account = await db.user.findUnique({ where: { id: me.userId }, select: { kind: true, email: true, role: true, isSuperAdmin: true, twoFactorEnabledAt: true } });
   if (!account || account.kind !== "MEMBER" || isSupportAddress(account.email)) return off;
-  const [linked, security] = await Promise.all([linkedWorkspacesFor(tenant.id, me.userId), getCachedSecuritySettings()]);
-  const reauth = security?.enforceSso && account.role !== "ADMIN" ? "sso" : account.twoFactorEnabledAt ? "password+code" : "password";
-  return { enabled: !paused, items: linked.map(viewOf), reauth };
+  const [linked, policy] = await Promise.all([
+    linkedWorkspacesFor(tenant.id, me.userId),
+    signInPolicyFor({ id: me.userId, role: account.role, isSuperAdmin: account.isSuperAdmin }),
+  ]);
+  const reauth = !policy.password ? "sso" : account.twoFactorEnabledAt ? "password+code" : "password";
+  const sso = reauth === "sso" ? await ssoProviderFor(me.userId, policy.providers) : null;
+  return { enabled: !paused, items: linked.map(viewOf), reauth, ...(sso ? { ssoName: SIGN_IN_NAMES[sso] } : {}) };
 }
 
 // ─── Linking (spec §4.2) ─────────────────────────────────────────────────────────────────────────
@@ -200,7 +213,7 @@ export async function myLinkedWorkspaces(): Promise<MyLinkedWorkspaces> {
  * minutes old with `sso`), then sends the browser to the target's `/link/start`. This browser keeps
  * the `link` cookie, which alone can finish the link (L4). `needs: "code"` comes back only after a
  * right password, so the dialog can ask for the code; `needs: "sso"` when a Microsoft sign-in is the
- * way to confirm it (`reauthWithMicrosoft`).
+ * way to confirm it (`reauthWithSso`).
  */
 export async function startLinkingWorkspace(input: {
   workspace: string;
@@ -237,20 +250,32 @@ export async function startLinkingWorkspace(input: {
 }
 
 /**
- * A fresh Microsoft sign-in, to confirm it's the person before linking — back to Profile with the
- * dialog open on the address they typed. Throws the redirect.
+ * A fresh single sign-on, to confirm it's the person before linking — with the provider they last
+ * signed in here with, or the first this workspace offers — back to Profile with the dialog open on
+ * the address they typed. Throws the redirect.
  */
-export async function reauthWithMicrosoft(workspace: string): Promise<void> {
+export async function reauthWithSso(workspace: string): Promise<void> {
   const me = await person();
   if (me.viewingAs) return;
+  const account = await db.user.findUnique({ where: { id: me.userId }, select: { role: true, isSuperAdmin: true } });
+  const policy = account ? await signInPolicyFor({ id: me.userId, ...account }) : null;
+  const provider = policy ? await ssoProviderFor(me.userId, policy.providers) : null;
+  if (!provider) return;
   const typed = text(workspace).trim().slice(0, 300);
   try {
-    await signIn("microsoft-entra-id", { redirectTo: `/profile?link=${encodeURIComponent(typed)}#linked-workspaces` });
+    await signIn(SIGN_IN_IDS[provider], { redirectTo: `/profile?link=${encodeURIComponent(typed)}#linked-workspaces` });
   } catch (err) {
-    // Microsoft sign-in could not start: the dialog stays as it was. Anything else — the redirect itself — goes on.
+    // The sign-in could not start: the dialog stays as it was. Anything else — the redirect itself — goes on.
     if (err instanceof AuthError) return;
     throw err;
   }
+}
+
+/** The sign-ins this person may use here, for a switch's single sign-on step — their rule's, else all this workspace offers. */
+async function ssoChoicesFor(email: string | null | undefined): Promise<{ id: string; name: string }[]> {
+  const account = email ? await db.user.findUnique({ where: { email: email.trim().toLowerCase() }, select: { id: true, role: true, isSuperAdmin: true } }) : null;
+  const providers = account ? (await signInPolicyFor(account)).providers : await signInProviders();
+  return providers.map((p) => ({ id: SIGN_IN_IDS[p], name: SIGN_IN_NAMES[p] }));
 }
 
 /**
@@ -394,7 +419,7 @@ export async function arriveBySwitch(token: string): Promise<SwitchView> {
       return { state: "code", workspace: state.workspace, email: state.email, triesLeft: state.triesLeft };
     case "sso":
       await setCookie("switch", at.secure, state.presentSecret);
-      return { state: "sso", workspace: state.workspace };
+      return { state: "sso", workspace: state.workspace, providers: await ssoChoicesFor(state.email) };
     case "refused":
       await clearCookie("switch", at.secure);
       return refusedView(state);
@@ -420,7 +445,7 @@ export async function submitSwitchCode(code: string): Promise<SwitchView> {
     case "code":
       return { state: "code", workspace: state.workspace, email: state.email, triesLeft: state.triesLeft, error: messageFor("code", state.workspace, state.triesLeft) };
     case "sso":
-      return { state: "sso", workspace: state.workspace };
+      return { state: "sso", workspace: state.workspace, providers: await ssoChoicesFor(state.email) };
     case "refused":
       await clearCookie("switch", at.secure);
       return refusedView(state);
@@ -428,16 +453,19 @@ export async function submitSwitchCode(code: string): Promise<SwitchView> {
 }
 
 /**
- * The Microsoft step of a switch into a workspace that signs in with Microsoft: an ordinary Microsoft
- * sign-in, the account's address as its hint, back to `/dashboard`. Throws the redirect.
+ * The single sign-on step of a switch into a workspace that requires it: an ordinary sign-in with the
+ * provider chosen — one this workspace offers — the account's address as its hint, back to
+ * `/dashboard`. Throws the redirect.
  */
-export async function continueSwitchWithMicrosoft(): Promise<void> {
+export async function continueSwitchWithSso(providerId: string): Promise<void> {
   const at = await here();
   if (!at) return;
   const email = await ssoEmailFor(at.tenant, await readCookie("switch", at.secure));
+  const provider = providerOfSignIn(text(providerId));
+  if (!provider || !(await ssoChoicesFor(email)).some((c) => c.id === SIGN_IN_IDS[provider])) return;
   await clearCookie("switch", at.secure);
   try {
-    await signIn("microsoft-entra-id", { redirectTo: "/dashboard" }, email ? { login_hint: email } : undefined);
+    await signIn(SIGN_IN_IDS[provider], { redirectTo: "/dashboard" }, email ? { login_hint: email } : undefined);
   } catch (err) {
     if (err instanceof AuthError) return;
     throw err;

@@ -26,6 +26,7 @@ import { tenantById } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
 import { verifyTotpCode } from "@/lib/totp";
+import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 
 /**
  * Switching between linked workspaces (spec §4.3, §4.5): a ticket from the workspace the person is in,
@@ -273,8 +274,9 @@ type Next = { next: "sso" } | { next: "code" } | { next: "ready" } | { next: "re
 /** Rules 9–11 of §4.5: the target's sign-in policy for this account. Inside runAsTenant(target). */
 async function policyFor(user: Account): Promise<Next> {
   const security = await getCachedSecuritySettings();
-  // 9. Microsoft-only for everyone but admins, as at the sign-in page: a ticket makes no session then.
-  if (security?.enforceSso && user.role !== "ADMIN") return { next: "sso" };
+  // 9. Where a password isn't enough here — the person's sign-in rule, their role's, or the company's
+  //    single sign-on for everyone but admins — a ticket makes no session: the sign-in page does.
+  if (!(await signInPolicyFor(user)).password) return { next: "sso" };
   // 11. Every new session here asks the account's own code.
   if (user.twoFactorEnabledAt) return { next: "code" };
   // 10.

@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { logActivity } from "@/lib/activity";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { SECURITY_POLICY_ID, getSecurityPolicy, invalidateSecurityPolicyCache } from "@/lib/security/store";
 import { DEFAULT_SECURITY_POLICY, type SecurityPolicyShape } from "@/lib/security/policy";
 import { updateSecurityPolicySchema } from "@/lib/validation/security-policy";
@@ -38,11 +39,21 @@ export async function updateSecurityPolicy(input: unknown): Promise<ActionResult
 
   const before = await getSecurityPolicy();
 
+  // Where the watermark goes is written on its own: a workspace still waiting for its column
+  // (20261019100000_watermark_scope) keeps everything else it was given.
+  const { watermarkScope, ...rest } = data;
   await db.securityPolicy.upsert({
     where: { id: SECURITY_POLICY_ID },
-    create: { id: SECURITY_POLICY_ID, ...data, exemptRoles },
-    update: { ...data, exemptRoles },
+    create: { id: SECURITY_POLICY_ID, ...rest, exemptRoles },
+    update: { ...rest, exemptRoles },
   });
+  let scopeSaved = true;
+  try {
+    await db.securityPolicy.update({ where: { id: SECURITY_POLICY_ID }, data: { watermarkScope } });
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+    scopeSaved = watermarkScope === DEFAULT_SECURITY_POLICY.watermarkScope;
+  }
   invalidateSecurityPolicyCache();
 
   // Which settings moved, so the log row says what changed rather than that something did. This is
@@ -81,5 +92,6 @@ export async function updateSecurityPolicy(input: unknown): Promise<ActionResult
   revalidatePath("/settings/security");
   // Every page reads the policy in the dashboard layout, so the whole tree is stale.
   revalidatePath("/", "layout");
+  if (!scopeSaved) return { ok: false, error: "Saved — except where the watermark goes, which can be set once this workspace's update has finished. Try again in a few minutes." };
   return { ok: true, data: null };
 }

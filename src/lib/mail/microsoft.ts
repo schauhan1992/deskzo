@@ -1,15 +1,20 @@
 import { createHash, randomBytes } from "crypto";
-import { db } from "@/lib/db";
-import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { decryptSecret } from "@/lib/crypto";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
+import { saveMailbox } from "@/lib/mail/store";
+import type { OutgoingMail, ProviderSend, TokenOutcome, TokenSet } from "@/lib/mail/types";
+
+export type { OutgoingMail, SendOutcome } from "@/lib/mail/types";
 
 /**
  * Sending as a person, from their own Microsoft 365 mailbox — Microsoft Graph, delegated.
  *
- * Each person connects once (My profile → Outlook), approving `Mail.Send` for themselves. What comes
- * back is a refresh token for *their* mailbox only; it is stored encrypted and used to send the
- * documents they email from here, which then sit in their Sent Items like any mail they wrote. The
- * ERP can never send as anybody who has not connected, and never as anybody but the person connected.
+ * Each person connects once (My profile → Email), approving `Mail.Send` for themselves. What comes
+ * back is a refresh token for *their* mailbox only; it is stored encrypted (src/lib/mail/store.ts) and
+ * used to send the documents they email from here, which then sit in their Sent Items like any mail
+ * they wrote. The ERP can never send as anybody who has not connected, and never as anybody but the
+ * person connected. Gmail and Zoho Mail work the same way (google.ts, zoho.ts); mailbox.ts sends
+ * through whichever a person connected.
  *
  * The Microsoft app is the one already set up for sign-in (Settings → Security): same tenant, same
  * client id and secret. IT adds the delegated `Mail.Send` permission to it and the redirect address
@@ -66,10 +71,7 @@ export function authorizeUrl(app: MicrosoftApp, p: { redirectUri: string; state:
   return url.toString();
 }
 
-type TokenSet = { accessToken: string; refreshToken: string | null; expiresAt: Date; scope: string };
-type TokenFailure = { ok: false; error: string; revoked: boolean };
-
-async function tokenRequest(app: MicrosoftApp, form: Record<string, string>): Promise<{ ok: true; tokens: TokenSet } | TokenFailure> {
+async function tokenRequest(app: MicrosoftApp, form: Record<string, string>): Promise<TokenOutcome> {
   let res: Response;
   try {
     res = await fetch(`${endpoints.login}/${encodeURIComponent(app.tenantId)}/oauth2/v2.0/token`, {
@@ -105,6 +107,10 @@ export function exchangeCode(app: MicrosoftApp, p: { code: string; verifier: str
   return tokenRequest(app, { grant_type: "authorization_code", code: p.code, code_verifier: p.verifier, redirect_uri: p.redirectUri });
 }
 
+export function microsoftRefresh(app: MicrosoftApp, refreshToken: string) {
+  return tokenRequest(app, { grant_type: "refresh_token", refresh_token: refreshToken });
+}
+
 export type GraphMe = { mail: string | null; userPrincipalName: string | null; displayName: string | null };
 
 export async function fetchMe(accessToken: string): Promise<GraphMe | null> {
@@ -134,84 +140,13 @@ export function mailboxFor(userEmail: string, me: GraphMe): string | null {
 }
 
 export async function saveConnection(userId: string, mailbox: string, displayName: string | null, tokens: TokenSet & { refreshToken: string }) {
-  const data = {
-    mailbox,
-    displayName,
-    refreshTokenCipher: await encryptSecret(tokens.refreshToken),
-    accessTokenCipher: await encryptSecret(tokens.accessToken),
-    accessTokenExpiresAt: tokens.expiresAt,
-    scopes: tokens.scope,
-    brokenAt: null,
-    lastError: null,
-  };
-  await db.mailConnection.upsert({
-    where: { userId },
-    create: { userId, ...data },
-    update: { ...data, connectedAt: new Date() },
-  });
+  await saveMailbox(userId, "MICROSOFT", { mailbox, displayName, tokens });
 }
 
 // ─── Sending ─────────────────────────────────────────────────────────────────────────────────────
 
-export type OutgoingMail = {
-  subject: string;
-  html: string;
-  to: { name: string | null; email: string }[];
-  attachments: { name: string; contentType: string; bytes: Buffer }[];
-};
-
-export type SendOutcome = { ok: true; mailbox: string } | { ok: false; error: string; reconnect: boolean };
-
-async function markBroken(userId: string, error: string) {
-  await db.mailConnection.update({ where: { userId }, data: { brokenAt: new Date(), lastError: error.slice(0, 300) } });
-}
-
-/** A usable access token, refreshing — and storing the new refresh token Microsoft rotates in — when due. */
-async function accessTokenFor(userId: string, force = false): Promise<{ ok: true; token: string; mailbox: string } | { ok: false; error: string; reconnect: boolean }> {
-  const connection = await db.mailConnection.findUnique({ where: { userId } });
-  if (!connection) return { ok: false, error: "Connect your Outlook first — My profile → Outlook mailbox.", reconnect: true };
-  if (connection.brokenAt) return { ok: false, error: "Microsoft stopped accepting your Outlook connection. Connect it again from My profile.", reconnect: true };
-
-  const fresh = connection.accessTokenCipher && connection.accessTokenExpiresAt && connection.accessTokenExpiresAt.getTime() > Date.now() + 60_000;
-  if (fresh && !force) {
-    try {
-      return { ok: true, token: await decryptSecret(connection.accessTokenCipher!), mailbox: connection.mailbox };
-    } catch {
-      /* fall through to a refresh */
-    }
-  }
-
-  const app = await microsoftApp();
-  if (!app) return { ok: false, error: "The Microsoft app isn't set up any more (Settings → Security). Ask an admin.", reconnect: false };
-  let refreshToken: string;
-  try {
-    refreshToken = await decryptSecret(connection.refreshTokenCipher);
-  } catch {
-    await markBroken(userId, "The stored token could not be read.");
-    return { ok: false, error: "Your Outlook connection can't be read any more. Connect it again from My profile.", reconnect: true };
-  }
-  const refreshed = await tokenRequest(app, { grant_type: "refresh_token", refresh_token: refreshToken });
-  if (!refreshed.ok) {
-    if (refreshed.revoked) {
-      await markBroken(userId, refreshed.error);
-      return { ok: false, error: "Microsoft stopped accepting your Outlook connection. Connect it again from My profile.", reconnect: true };
-    }
-    return { ok: false, error: refreshed.error, reconnect: false };
-  }
-  await db.mailConnection.update({
-    where: { userId },
-    data: {
-      accessTokenCipher: await encryptSecret(refreshed.tokens.accessToken),
-      accessTokenExpiresAt: refreshed.tokens.expiresAt,
-      // Microsoft usually hands back a new refresh token; the old one keeps working for a while, but
-      // the newest is the one to keep.
-      ...(refreshed.tokens.refreshToken ? { refreshTokenCipher: await encryptSecret(refreshed.tokens.refreshToken) } : {}),
-    },
-  });
-  return { ok: true, token: refreshed.tokens.accessToken, mailbox: connection.mailbox };
-}
-
-export async function sendAsUser(userId: string, mail: OutgoingMail): Promise<SendOutcome> {
+/** One send through Graph, saved to Sent Items. A 401 is the caller's to retry with a fresh token. */
+export async function sendWithGraph(accessToken: string, mail: OutgoingMail): Promise<ProviderSend> {
   const payload = JSON.stringify({
     message: {
       subject: mail.subject,
@@ -226,31 +161,18 @@ export async function sendAsUser(userId: string, mail: OutgoingMail): Promise<Se
     },
     saveToSentItems: true,
   });
-
-  for (const force of [false, true]) {
-    const access = await accessTokenFor(userId, force);
-    if (!access.ok) return access;
-    let res: Response;
-    try {
-      res = await fetch(`${endpoints.graph}/v1.0/me/sendMail`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${access.token}`, "content-type": "application/json" },
-        body: payload,
-        signal: AbortSignal.timeout(60_000),
-      });
-    } catch {
-      return { ok: false, error: "Outlook didn't answer. Nothing was sent — try again in a minute.", reconnect: false };
-    }
-    if (res.status === 202 || res.ok) {
-      await db.mailConnection.update({ where: { userId }, data: { lastUsedAt: new Date(), lastError: null } });
-      return { ok: true, mailbox: access.mailbox };
-    }
-    // An access token Microsoft has stopped honouring early: one fresh token, one more try.
-    if (res.status === 401 && !force) continue;
-    const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
-    const said = body.error?.message?.slice(0, 200) ?? `Outlook refused the message (${res.status}).`;
-    await db.mailConnection.update({ where: { userId }, data: { lastError: said } });
-    return { ok: false, error: said, reconnect: res.status === 401 || res.status === 403 };
+  let res: Response;
+  try {
+    res = await fetch(`${endpoints.graph}/v1.0/me/sendMail`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: payload,
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    return { ok: false, status: 0, error: "Outlook didn't answer. Nothing was sent — try again in a minute." };
   }
-  return { ok: false, error: "Outlook kept refusing the connection. Connect it again from My profile.", reconnect: true };
+  if (res.status === 202 || res.ok) return { ok: true };
+  const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
+  return { ok: false, status: res.status, error: body.error?.message?.slice(0, 200) ?? `Outlook refused the message (${res.status}).` };
 }

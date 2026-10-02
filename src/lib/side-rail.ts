@@ -11,7 +11,7 @@
  * recognise them by shape.
  */
 
-export type SideRailTool = "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos";
+export type SideRailTool = "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos" | "support-access";
 
 export const SIDE_RAIL_TOOLS: SideRailTool[] = [
   "tasks",
@@ -25,6 +25,8 @@ export const SIDE_RAIL_TOOLS: SideRailTool[] = [
   "updates",
   "help",
   "videos",
+  // The super admin's alone: letting Deskzo support in, and seeing at a glance whether it is in now.
+  "support-access",
 ];
 
 /** Fired by the rail's copilot button; the header's copilot listens and opens its drawer. */

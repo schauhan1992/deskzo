@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent } from "react";
 import Link from "next/link";
-import { arriveBySwitch, continueSwitchWithMicrosoft, submitSwitchCode, type SwitchView } from "@/actions/linked-sign-in";
+import { arriveBySwitch, continueSwitchWithSso, submitSwitchCode, type SwitchView } from "@/actions/linked-sign-in";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { FlowMessage, INCOMPLETE, Progress, takeFragment } from "@/components/linked/link-steps";
@@ -48,11 +48,11 @@ export function SwitchArrival({ workspace }: { workspace: string }) {
     });
   }
 
-  function continueWithMicrosoft() {
+  function continueWith(provider: { id: string; name: string }) {
     startTransition(async () => {
-      await continueSwitchWithMicrosoft();
-      // Reached only when the Microsoft sign-in could not start; otherwise the action has redirected.
-      setView({ state: "refused", message: "Couldn't start the Microsoft sign-in. Sign in directly instead." });
+      await continueSwitchWithSso(provider.id);
+      // Reached only when the sign-in could not start; otherwise the action has redirected.
+      setView({ state: "refused", message: `Couldn't start the ${provider.name} sign-in. Sign in directly instead.` });
     });
   }
 
@@ -63,10 +63,14 @@ export function SwitchArrival({ workspace }: { workspace: string }) {
   if (view.state === "sso") {
     return (
       <div className="space-y-4">
-        <h2 className="text-base font-semibold text-text">{view.workspace} signs in with Microsoft.</h2>
-        <Button type="button" variant="secondary" className="w-full" onClick={continueWithMicrosoft} disabled={pending}>
-          {pending ? "Opening Microsoft sign-in…" : "Continue with Microsoft"}
-        </Button>
+        <h2 className="text-base font-semibold text-text">
+          {view.workspace} signs in with {view.providers.length > 0 ? view.providers.map((p) => p.name).join(" or ") : "single sign-on"}.
+        </h2>
+        {view.providers.map((provider) => (
+          <Button key={provider.id} type="button" variant="secondary" className="w-full" onClick={() => continueWith(provider)} disabled={pending}>
+            {pending ? "Opening the sign-in…" : `Continue with ${provider.name}`}
+          </Button>
+        ))}
       </div>
     );
   }

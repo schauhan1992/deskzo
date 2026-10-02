@@ -627,7 +627,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   CopilotUsage: { disposition: "excluded", reason: "How many AI tokens each person used per day, for this installation's allowance. Billing state, not a record." },
   CopilotProposal: { disposition: "excluded", reason: "Tasks and notes the copilot drafted; the ones confirmed exist as ordinary tasks and notes, which travel as themselves." },
   CompanyLock: { disposition: "excluded", reason: "Whether this installation's CRM is locked for everybody but the super admin, and the notice shown. A switch, not a record." },
-  MailConnection: { disposition: "excluded", reason: "A person's connection to their own Outlook: a Microsoft token encrypted under this installation's secret. Useless anywhere else — each person connects again." },
+  MailConnection: { disposition: "excluded", reason: "A person's connection to their own mailbox — Outlook, Gmail or Zoho Mail: a provider token encrypted under this installation's secret. Useless anywhere else — each person connects again." },
   DocumentRenderGrant: { disposition: "excluded", reason: "Two-minute passes for the server to print a document it is emailing. Spent or expired within minutes; nothing to carry." },
   DocumentEmailTemplate: { disposition: "specification", reason: "The wording sent with an emailed document, per type. Configuration rather than records." },
   HelpDesk: { disposition: "specification", reason: "The helpline number, hours and support address shown on the dashboard. Configuration rather than records — set again in a new system." },
@@ -689,6 +689,8 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   ScreenshotAllowance: { disposition: "excluded", reason: "A per-day counter. The evidence it counts lives in ActivityLog." },
   SecurityPolicy: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   SecuritySettings: { disposition: "specification", reason: "Sign-in policy, including the SSO client secret. The policy is specified; the secret never leaves." },
+  SignInRule: { disposition: "specification", reason: "How a person or everybody in a role may sign in — Microsoft only, single sign-on, password only. The rules are specified; they name people and roles by key." },
+  WorkplaceSettings: { disposition: "specification", reason: "Which of Microsoft 365, Google Workspace and Zoho the company uses, for signing in and for mailboxes, with their app IDs. The choices are specified; the client secrets never leave." },
   StickyNote: {
     disposition: "archive",
     reason:

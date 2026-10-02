@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { showsCustomerData } from "@/lib/security/watermark-pages";
 
 /**
  * The viewer's identity, printed faintly across everything.
@@ -14,7 +16,19 @@ import { useEffect, useState } from "react";
  * Note what it does *not* do: it does not prevent the capture. It makes the capture attributable,
  * which is what actually changes behaviour, because the risk stops being abstract.
  */
-export function Watermark({ label, opacity }: { label: string; opacity: number }) {
+export function Watermark({
+  label,
+  opacity,
+  scope = "EVERY_PAGE",
+}: {
+  label: string;
+  opacity: number;
+  /** Only the pages with customers' details (src/lib/security/watermark-pages.ts), or every page. */
+  scope?: "CUSTOMER_DATA" | "EVERY_PAGE";
+}) {
+  // Read here, in the browser: the dashboard layout that mounts this stays put as people move
+  // between pages, so only the page itself knows where it is now.
+  const pathname = usePathname();
   // The clock is deliberately not read during render — the React compiler's purity rule forbids it,
   // and a value that changes every render would defeat memoisation anyway.
   const [stamp, setStamp] = useState("");
@@ -41,6 +55,7 @@ export function Watermark({ label, opacity }: { label: string; opacity: number }
   }, []);
 
   const text = stamp ? `${label} · ${stamp}` : label;
+  if (scope === "CUSTOMER_DATA" && !showsCustomerData(pathname)) return null;
 
   return (
     <div

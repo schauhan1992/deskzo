@@ -24,6 +24,9 @@ import {
 import { throttle, resetThrottle } from "../src/lib/security/throttle";
 import { noteReads, resetBulkRead } from "../src/lib/security/bulk-read";
 import { ACTIVITY_KINDS, activityKind, kindsInGroup, severitiesAtLeast, SEVERITY_TONE } from "../src/lib/security/activity-kinds";
+import { CUSTOMER_DATA_PATHS, showsCustomerData } from "../src/lib/security/watermark-pages";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: string | number | null = "") {
@@ -157,6 +160,17 @@ ok(
   "so the guard is not rendered at all",
 );
 ok("A watermark alone is enough to mount", hasAnyDeterrent(policy({ screenshotLimitPerDay: -1, watermarkEnabled: true })));
+ok("The watermark is kept to the pages with customer details unless a workspace says otherwise", DEFAULT_SECURITY_POLICY.watermarkScope === "CUSTOMER_DATA");
+ok(
+  "  a list and its records count",
+  showsCustomerData("/companies") && showsCustomerData("/companies/cmp_1") && showsCustomerData("/documents/doc_1") && showsCustomerData("/orders"),
+);
+ok(
+  "  the dashboard, settings and a person's own notes don't — nor a path that only starts the same",
+  !showsCustomerData("/dashboard") && !showsCustomerData("/settings/security") && !showsCustomerData("/notes") && !showsCustomerData("/companiesx") && !showsCustomerData(null),
+);
+const missingPages = CUSTOMER_DATA_PATHS.filter((p) => !existsSync(join(process.cwd(), "src", "app", "(dashboard)", p.slice(1))));
+ok("  every page named is a page there is", missingPages.length === 0, missingPages.join(", "));
 
 console.log("\n— Exports and read volume —\n");
 

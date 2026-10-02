@@ -387,6 +387,10 @@ async function main() {
     const formControl = await inWs(async () => await checkCredentials(rep.email, password));
     ok("  and passes a person (the control)", formControl.ok, formControl);
 
+    // Microsoft sign-in switched on here — nobody arrives through a sign-in the company hasn't.
+    const microsoftApp = { ssoEnabled: true, microsoftTenantId: "zz-tenant", microsoftClientId: "zz-client", microsoftClientSecretCipher: "zz-not-read-here" };
+    await scratch.securitySettings.upsert({ where: { id: "global" }, create: { id: "global", ...microsoftApp }, update: microsoftApp });
+    (require("../src/lib/security-settings") as typeof import("../src/lib/security-settings")).invalidateSecuritySettingsCache();
     const microsoft = { provider: "microsoft-entra-id" };
     ok("Microsoft sign-in refuses it", (await inWs(async () => await config.callbacks.signIn({ user: { email: A.AUTOMATION_EMAIL }, account: microsoft }))) === false);
     ok("  and lets a person in (the control)", (await inWs(async () => await config.callbacks.signIn({ user: { email: rep.email }, account: microsoft }))) === true);
@@ -549,7 +553,9 @@ async function main() {
 
     const src = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
     const refusals: [string, number][] = [
-      ["src/lib/auth.ts", 3],
+      // A password and the session token; single sign-on (Microsoft, Google, Zoho) in the one rule they share.
+      ["src/lib/auth.ts", 2],
+      ["src/lib/workplace/sign-in.ts", 1],
       ["src/actions/auth.ts", 1],
       ["src/lib/access/gate.ts", 1],
       ["src/lib/platform/handoff-sign-in.ts", 1],

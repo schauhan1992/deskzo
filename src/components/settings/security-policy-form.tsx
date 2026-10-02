@@ -7,7 +7,7 @@ import type { Role } from "@/lib/roles";
 import { updateSecurityPolicy } from "@/actions/security-policy";
 import type { SecurityPolicyShape } from "@/lib/security/policy";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 /**
@@ -301,11 +301,29 @@ export function SecurityPolicyForm({ policy }: { policy: SecurityPolicyShape }) 
             <Toggle
               checked={form.watermarkEnabled}
               onChange={(v) => set("watermarkEnabled", v)}
-              title="Watermark every screen with the viewer's name"
+              title="Watermark the screen with the viewer's name"
             >
               The only measure here that survives a photograph of the monitor — it does not stop the capture, it makes
-              the capture name its own source. If you switch on one thing on this page, this is a good candidate.
+              the capture name its own source. If you switch on one thing on this page, this is a good candidate. It
+              can&apos;t wait for a screenshot: no browser is told one is being taken, so it shows while the page is open.
             </Toggle>
+            <div>
+              <Label htmlFor="sp-watermark-scope">Where it shows</Label>
+              <Select
+                id="sp-watermark-scope"
+                value={form.watermarkScope}
+                disabled={!form.watermarkEnabled}
+                onChange={(e) => set("watermarkScope", e.target.value === "EVERY_PAGE" ? "EVERY_PAGE" : "CUSTOMER_DATA")}
+                className="mt-1.5 sm:max-w-72"
+              >
+                <option value="CUSTOMER_DATA">Pages with customer details</option>
+                <option value="EVERY_PAGE">Every page</option>
+              </Select>
+              <p className="mt-1 text-sm text-muted">
+                Customer details: companies, leads, contacts, orders, documents, tickets, visits, renewals, vendors, payments and
+                reports. Left off the dashboard, settings and your own tasks and notes.
+              </p>
+            </div>
             <div>
               <Label htmlFor="sp-opacity">Watermark strength (%)</Label>
               <Input

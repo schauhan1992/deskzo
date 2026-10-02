@@ -7,6 +7,13 @@ import { endSession } from "@/actions/access-control";
 import { Badge, Card } from "@/components/ui/card";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { SIGN_IN_NAMES, providerOfSignIn } from "@/lib/workplace/providers";
+
+/** " · Google" after the device, for a sign-in that came through one of the suites. */
+function signedInWith(provider: string | null | undefined): string {
+  const via = providerOfSignIn(provider);
+  return via ? ` · ${SIGN_IN_NAMES[via]}` : "";
+}
 
 export type SignInRow = {
   id: string;
@@ -99,7 +106,7 @@ export function SignInTable({ rows, canEnd }: { rows: SignInRow[]; canEnd: boole
                   <div className="text-text">{row.deviceLabel ?? "—"}</div>
                   <div className="text-subtle">
                     {row.deviceKindLabel}
-                    {row.provider === "microsoft-entra-id" ? " · Microsoft" : ""}
+                    {signedInWith(row.provider)}
                   </div>
                 </td>
                 <td className="px-2 py-2.5 text-right">

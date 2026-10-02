@@ -5,13 +5,14 @@ import { AuthError } from "next-auth";
 import { db } from "@/lib/db";
 import { signIn } from "@/lib/auth";
 import { headers } from "next/headers";
-import { getCachedSecuritySettings } from "@/lib/security-settings";
+import { SIGN_IN_NAMES, sayEither } from "@/lib/workplace/providers";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { throttle } from "@/lib/security/throttle";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { logActivity } from "@/lib/activity";
 import { clientIpFrom } from "@/lib/client-ip";
 import { isAutomationKind } from "@/lib/people";
+import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 
 /**
  * Who is asking, as well as it can be known behind a proxy.
@@ -102,9 +103,17 @@ export async function checkCredentials(email: string, password: string): Promise
 
   clearFailures(keys);
 
-  const security = await getCachedSecuritySettings();
-  if (security?.enforceSso && user.role !== "ADMIN") {
-    return { ok: false, error: "Password sign-in is disabled by your administrator. Use Sign in with Microsoft." };
+  // A password is enough only where this person's sign-in rule, their role's or the company's says so.
+  const policy = await signInPolicyFor(user);
+  if (!policy.password) {
+    const ways = policy.providers.map((p) => SIGN_IN_NAMES[p]);
+    return {
+      ok: false,
+      error:
+        ways.length > 0
+          ? `Your account signs in with ${sayEither(ways)} — use that button above.`
+          : "Your account can't sign in right now: the sign-in it uses is switched off. Ask your administrator.",
+    };
   }
 
   return { ok: true, needsTotp: !!user.twoFactorEnabledAt };

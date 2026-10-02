@@ -6,16 +6,33 @@ import { LoginForm } from "@/components/auth/login-form";
 import { currentMaintenance } from "@/lib/maintenance";
 import { formatIstDateTime } from "@/lib/india-time";
 import { getBranding } from "@/actions/branding";
+import { signInProviders } from "@/lib/workplace/settings";
+import { SIGN_IN_IDS, SIGN_IN_NAMES, providerOfSignIn, sayEither } from "@/lib/workplace/providers";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string }>;
+  /** `use`: a sign-in rule refused the way just tried — the ways this account does use (MICROSOFT,GOOGLE,ZOHO,PASSWORD). */
+  searchParams: Promise<{ callbackUrl?: string; use?: string }>;
 }) {
-  const [params, security, maintenance, branding] = await Promise.all([searchParams, getCachedSecuritySettings(), currentMaintenance(), getBranding()]);
+  const [params, security, maintenance, branding, providers] = await Promise.all([
+    searchParams,
+    getCachedSecuritySettings(),
+    currentMaintenance(),
+    getBranding(),
+    // Microsoft, Google and Zoho — whichever the company switched on (Settings → Security).
+    signInProviders(),
+  ]);
   const callbackUrl = params.callbackUrl || "/dashboard";
-  const ssoEnabled = !!security?.ssoEnabled;
+  const ssoEnabled = providers.length > 0;
   const enforceSso = !!security?.enforceSso;
+  // Only names this page knows: the parameter is anybody's to write.
+  const usesInstead = sayEither(
+    (params.use ?? "")
+      .split(",")
+      .map((w) => (w === "PASSWORD" ? "your password" : w in SIGN_IN_NAMES ? SIGN_IN_NAMES[w as keyof typeof SIGN_IN_NAMES] : null))
+      .filter((w): w is string => !!w),
+  );
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
@@ -34,18 +51,29 @@ export default async function LoginPage({
             </p>
           )}
 
+          {usesInstead && (
+            <p role="status" className="mt-4 rounded-base border border-line bg-surface-sunken px-3 py-2 text-sm text-text">
+              This account signs in with {usesInstead}.
+            </p>
+          )}
+
           {ssoEnabled && (
             <>
               <form
-                className="mt-6"
-                action={async () => {
+                className="mt-6 space-y-2"
+                action={async (form: FormData) => {
                   "use server";
-                  await signIn("microsoft-entra-id", { redirectTo: callbackUrl });
+                  // Only a sign-in the company has switched on — the button pressed is the browser's to say.
+                  const provider = providerOfSignIn(String(form.get("provider") ?? ""));
+                  if (!provider || !(await signInProviders()).includes(provider)) return;
+                  await signIn(SIGN_IN_IDS[provider], { redirectTo: callbackUrl });
                 }}
               >
-                <Button type="submit" variant="secondary" className="w-full">
-                  Sign in with Microsoft
-                </Button>
+                {providers.map((provider) => (
+                  <Button key={provider} type="submit" name="provider" value={SIGN_IN_IDS[provider]} variant="secondary" className="w-full">
+                    Sign in with {SIGN_IN_NAMES[provider]}
+                  </Button>
+                ))}
               </form>
               <div className="my-4 flex items-center gap-2 text-xs text-subtle">
                 <div className="h-px flex-1 bg-line" />

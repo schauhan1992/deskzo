@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, useSyncExternalStore, useTransition, type FormEvent } from "react";
-import { reauthWithMicrosoft, startLinkingWorkspace } from "@/actions/linked-sign-in";
+import { reauthWithSso, startLinkingWorkspace } from "@/actions/linked-sign-in";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
@@ -15,7 +15,7 @@ type Reauth = "password" | "password+code" | "sso";
 
 /**
  * "Add a workspace" (spec §2.2, steps 1–3): which workspace, then proof that it's the person here —
- * their password (and code), or a fresh Microsoft sign-in — then the browser goes to that workspace's
+ * their password (and code), or a fresh single sign-on — then the browser goes to that workspace's
  * `/link/start` to sign in there. Opened from the header switcher and from Profile.
  *
  * A dialog and never a field inside the switcher's popover, whose mousedown handling keeps focus on its
@@ -27,6 +27,7 @@ export function AddWorkspaceDialog({
   onClose,
   domain,
   reauth,
+  ssoName,
   initialWorkspace,
   sso,
   currentName,
@@ -37,9 +38,11 @@ export function AddWorkspaceDialog({
   domain: string;
   /** How this account confirms it's them — `myLinkedWorkspaces().reauth`. */
   reauth: Reauth;
-  /** The address to start with: Profile's `?link=`, after a Microsoft sign-in. */
+  /** With `reauth: "sso"`, the sign-in it asks for again — "Google" (`myLinkedWorkspaces().ssoName`). */
+  ssoName?: string;
+  /** The address to start with: Profile's `?link=`, after a single sign-on. */
   initialWorkspace?: string;
-  /** True when that Microsoft sign-in has just happened, so Continue uses it instead of asking again. */
+  /** True when that sign-in has just happened, so Continue uses it instead of asking again. */
   sso?: boolean;
   /** This workspace's name, for "confirm your password for <name>". "this workspace" when absent. */
   currentName?: string;
@@ -61,6 +64,7 @@ export function AddWorkspaceDialog({
       <AddWorkspaceForm
         domain={domain}
         reauth={reauth}
+        ssoName={ssoName ?? "your company account"}
         initialWorkspace={initialWorkspace ?? ""}
         freshSso={reauth === "sso" && sso === true}
         currentName={currentName?.trim() || "this workspace"}
@@ -77,6 +81,7 @@ export function AddWorkspaceDialog({
 function AddWorkspaceForm({
   domain,
   reauth,
+  ssoName,
   initialWorkspace,
   freshSso,
   currentName,
@@ -87,6 +92,7 @@ function AddWorkspaceForm({
 }: {
   domain: string;
   reauth: Reauth;
+  ssoName: string;
   initialWorkspace: string;
   freshSso: boolean;
   currentName: string;
@@ -109,7 +115,7 @@ function AddWorkspaceForm({
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The action can ask for more than the dialog opened with: a code after a right password, or a
-  // Microsoft sign-in (the workspace began enforcing it, or the last one is too old to count).
+  // single sign-on (the workspace began requiring it, or the last one is too old to count).
   const [askCode, setAskCode] = useState(reauth === "password+code");
   const [microsoft, setMicrosoft] = useState(reauth === "sso" && !freshSso);
 
@@ -125,9 +131,9 @@ function AddWorkspaceForm({
 
     if (microsoft) {
       start(async () => {
-        // It ends in a redirect to Microsoft, which is left to reach Next's boundary — never caught
+        // It ends in a redirect to the provider, which is left to reach Next's boundary — never caught
         // here. Returning at all means the sign-in could not start.
-        await reauthWithMicrosoft(workspace);
+        await reauthWithSso(workspace);
         setError(FAILED);
       });
       return;
@@ -193,7 +199,7 @@ function AddWorkspaceForm({
       </div>
 
       {microsoft ? (
-        <p className="text-sm text-muted">Sign in with Microsoft again to continue.</p>
+        <p className="text-sm text-muted">Sign in with {ssoName} again to continue.</p>
       ) : (
         !freshSso && (
           <fieldset className="space-y-3">
@@ -242,7 +248,7 @@ function AddWorkspaceForm({
             Cancel
           </Button>
           <Button type="submit" disabled={busy}>
-            {microsoft ? "Sign in with Microsoft again" : "Continue"}
+            {microsoft ? `Sign in with ${ssoName} again` : "Continue"}
           </Button>
         </div>
         <p className="text-xs text-subtle">

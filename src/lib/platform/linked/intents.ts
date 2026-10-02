@@ -27,6 +27,8 @@ import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { isSystemAddress } from "@/lib/people";
+import { isSsoSignIn, providerOfSignIn } from "@/lib/workplace/providers";
+import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 import { SLUG_PATTERN, normaliseHost, protocolFor } from "@/lib/tenancy/host";
 import { tenantById, tenantBySlug, tenantForHost } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
@@ -73,6 +75,7 @@ const ACCOUNT = {
   kind: true,
   active: true,
   role: true,
+  isSuperAdmin: true,
   mustChangePassword: true,
   twoFactorEnabledAt: true,
   twoFactorSecretCipher: true,
@@ -99,8 +102,8 @@ function mustBeMember(user: Account | null): asserts user is Account {
   if (user.kind !== "MEMBER" || isSupportAddress(user.email)) throw new LinkRefused("support");
 }
 
-/** A sign-in counts as a fresh proof only when it was a password or Microsoft — not a handoff, not a switch. */
-const FRESH_PROVIDERS = new Set(["credentials", "microsoft-entra-id"]);
+/** A sign-in counts as a fresh proof only when it was a password or single sign-on — not a handoff, not a switch. */
+const FRESH_PROVIDERS = new Set(["credentials", "microsoft-entra-id", "google", "zoho"]);
 
 /** §4.8: L2, L3 and L4 share one budget per caller; unknown callers are not pooled into one. */
 const openLimits = (ip: string | null) => (ip ? [{ key: `platform|link-open-caller:${ip}`, max: 60 }] : []);
@@ -189,20 +192,22 @@ async function failed(row: LinkIntent, code: LinkRefusal, workspace?: string): P
 
 /**
  * L1.2: the person proves again that they are this account — its password (and code), counted on
- * the sign-in lockout keys exactly as `checkCredentials` counts them; or, asked for, a Microsoft
- * sign-in on this very session under 10 minutes old.
+ * the sign-in lockout keys exactly as `checkCredentials` counts them; or, asked for, a single sign-on
+ * (Microsoft, Google or Zoho) on this very session under 10 minutes old.
  */
 async function reauthenticate(source: Tenant, user: Account, input: { sid: string; password?: string; totpCode?: string; sso?: boolean; ip: string | null }): Promise<void> {
+  // As at sign-in: the person's sign-in rule, their role's, or the company's setting says what proves them.
+  const policy = await runAsTenant(source, async () => await signInPolicyFor(user));
   if (input.sso) {
     const signIn = await signInOf(source, input.sid);
-    const fresh = !!signIn && signIn.userId === user.id && signIn.provider === "microsoft-entra-id" && Date.now() - signIn.at.getTime() <= SSO_FRESH_MS;
+    // A rule names the ways that count; without one, any single sign-on does, as it always has.
+    const via = providerOfSignIn(signIn?.provider);
+    const allowedVia = policy.method ? !!via && policy.providers.includes(via) : isSsoSignIn(signIn?.provider);
+    const fresh = !!signIn && signIn.userId === user.id && allowedVia && Date.now() - signIn.at.getTime() <= SSO_FRESH_MS;
     if (!fresh) throw new LinkRefused("reauth-sso");
     return;
   }
-
-  // As at sign-in: while Microsoft sign-in is enforced, a password proves only an admin.
-  const security = await runAsTenant(source, async () => await getCachedSecuritySettings());
-  if (security?.enforceSso && user.role !== "ADMIN") throw new LinkRefused("reauth-sso");
+  if (!policy.password) throw new LinkRefused("reauth-sso");
 
   const workspace = await runAsTenant(source, async () => await tenantKey());
   const keys = [`${workspace}|account:${user.email.trim().toLowerCase()}`, ...(input.ip ? [`${workspace}|caller:${input.ip}`] : [])];

@@ -13,6 +13,7 @@ import { Label, Select } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { SetupLinkOnce } from "@/components/settings/setup-link-once";
 import type { DepartmentChoice, RoleChoice, StaffRow, WorkBranch } from "@/components/settings/staff/types";
+import { PersonSignInRule } from "@/components/settings/staff/person-sign-in-rule";
 
 /**
  * The pencil on a Staff row: what the old team table edited in a row of its own — role, department,
@@ -223,6 +224,9 @@ export function EditStaffDialog({
             </div>
           )}
         </div>
+
+        {/* Only for whoever may change how people sign in — it renders nothing for anybody else. */}
+        <PersonSignInRule userId={row.id} name={row.name} />
 
         <div className="space-y-3 rounded-base border border-line px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">

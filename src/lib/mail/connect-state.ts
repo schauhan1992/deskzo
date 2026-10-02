@@ -3,16 +3,18 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 
 /**
- * The half of an Outlook connection that has to survive the trip to Microsoft and back: who
- * started it, the PKCE verifier, the state Microsoft must return, and where to land afterwards.
- * Kept in an encrypted, short-lived cookie scoped to the two routes that use it.
+ * The half of a mailbox connection that has to survive the trip to the provider and back: who
+ * started it, with which provider, the PKCE verifier, the state the provider must return, and where
+ * to land afterwards. Kept in an encrypted, short-lived cookie scoped to the routes that use it
+ * (src/app/api/mail/[provider]).
  */
 
 export const CONNECT_COOKIE = "deskzo.mail-connect";
-export const CONNECT_COOKIE_PATH = "/api/mail/microsoft";
+export const CONNECT_COOKIE_PATH = "/api/mail";
 export const CONNECT_TTL_SECONDS = 600;
 
-export type ConnectState = { state: string; verifier: string; userId: string; expires: number; next: string };
+/** `provider`: the URL segment it was started for — absent on one started before Gmail and Zoho, which was Outlook. */
+export type ConnectState = { state: string; verifier: string; userId: string; expires: number; next: string; provider?: string };
 
 export function newState(): string {
   return randomBytes(24).toString("base64url");

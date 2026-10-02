@@ -10,13 +10,14 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { attachmentName, mergeTemplate, recipientNames } from "@/lib/documents/email-template";
 import { formatIstDateTime } from "@/lib/india-time";
+import { MAIL_NAMES, SIGN_IN_NAMES, mailConnectPath } from "@/lib/workplace/providers";
 import { cn } from "@/lib/utils";
 
 type Prepared = Extract<Awaited<ReturnType<typeof prepareDocumentEmail>>, { ok: true }>;
 
 /**
  * The Mail button on a document, and the dialog it opens: who it goes to, what it says, and what is
- * attached — sent from the person's own Outlook. See src/actions/document-mail.ts.
+ * attached — sent from the person's own mailbox: Outlook, Gmail or Zoho Mail. See src/actions/document-mail.ts.
  *
  * The message is merged as recipients are ticked ("Dear Rahul and Priya"), until somebody edits it
  * by hand; from then on it is theirs, and ticking changes nothing they wrote.
@@ -76,7 +77,7 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
         setNotice({ tone: "error", text: r.error });
         return;
       }
-      setNotice({ tone: "success", text: `Sent to ${r.data.sentTo.join(", ")} from ${r.data.from}. It's in your Outlook Sent Items.` });
+      setNotice({ tone: "success", text: `Sent to ${r.data.sentTo.join(", ")} from ${r.data.from}. It's in your ${r.data.mailName} Sent folder.` });
       router.refresh();
     });
   }
@@ -106,12 +107,12 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
                 <p className="text-text">
                   <span className="text-muted">From </span>
                   <span className="font-medium">{prepared.mailbox.mailbox}</span>
-                  <span className="text-muted"> — your Outlook. A copy lands in your Sent Items.</span>
+                  <span className="text-muted"> — your {MAIL_NAMES[prepared.mailbox.provider]}. A copy lands in your Sent folder.</span>
                 </p>
               ) : prepared.mailbox.state === "app-missing" ? (
                 <p className="flex items-start gap-2 text-muted">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-                  Microsoft 365 isn&apos;t set up for this company yet. An admin adds it under Settings → Security.
+                  Your company hasn&apos;t set up Microsoft 365, Google Workspace or Zoho for mail yet. An admin does it under Settings → Security.
                 </p>
               ) : prepared.viewingAs ? (
                 <p className="text-muted">You&apos;re viewing as somebody else — mail can only be sent from your own account.</p>
@@ -119,14 +120,22 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-muted">
                     {prepared.mailbox.state === "broken"
-                      ? `Microsoft stopped accepting your Outlook connection (${prepared.mailbox.mailbox}). Connect it again to send.`
-                      : "Connect your Outlook once, and documents go out from your own mailbox."}
+                      ? `${SIGN_IN_NAMES[prepared.mailbox.provider]} stopped accepting your ${MAIL_NAMES[prepared.mailbox.provider]} connection (${prepared.mailbox.mailbox}). Connect it again to send.`
+                      : "Connect your mailbox once, and documents go out from your own address."}
                   </p>
-                  {/* A full navigation: Microsoft's sign-in page is not something to open in a fetch. */}
-                  <a href={prepared.connectHref} className="inline-flex items-center gap-1.5 rounded-base bg-brand px-3 py-1.5 text-sm font-medium text-brand-contrast hover:brightness-110">
-                    <Plug className="h-3.5 w-3.5" />
-                    {prepared.mailbox.state === "broken" ? "Reconnect Outlook" : "Connect Outlook"}
-                  </a>
+                  {/* A full navigation: the provider's sign-in page is not something to open in a fetch. */}
+                  <div className="flex flex-wrap gap-2">
+                    {(prepared.mailbox.state === "broken" ? [prepared.mailbox.provider] : prepared.mailbox.providers).map((provider) => (
+                      <a
+                        key={provider}
+                        href={mailConnectPath(provider, `/documents/${documentId}`)}
+                        className="inline-flex items-center gap-1.5 rounded-base bg-brand px-3 py-1.5 text-sm font-medium text-brand-contrast hover:brightness-110"
+                      >
+                        <Plug className="h-3.5 w-3.5" />
+                        {prepared.mailbox.state === "broken" ? "Reconnect" : "Connect"} {MAIL_NAMES[provider]}
+                      </a>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
