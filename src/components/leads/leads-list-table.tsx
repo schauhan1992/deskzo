@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { LeadSource, LeadStatus } from "@prisma/client";
 import { bulkUpdateLeads } from "@/actions/lead";
-import { leadStatusValues } from "@/lib/validation/lead";
+import type { LeadStageDef } from "@/lib/pipeline/rules";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -24,6 +24,8 @@ type LeadRow = {
   leadSeq: number;
   title: string;
   status: LeadStatus;
+  /** The workspace's own stage it is at (`stageOfLead`, src/lib/pipeline). */
+  stage: LeadStageDef;
   /** Why a lost or disqualified deal died — shown on hover, never set for an open one. */
   lostReason: string | null;
   estimatedValue: string | null;
@@ -39,41 +41,50 @@ type LeadRow = {
 
 export function LeadsListTable({
   leads,
+  stages,
   assignableUsers,
   reassign,
   customColumns = { columns: [], texts: {} },
 }: {
   leads: LeadRow[];
+  /** The workspace's stages still in use (Settings → Pipeline) — what the bulk bar can move leads to. */
+  stages: LeadStageDef[];
   assignableUsers: { id: string; name: string; role: string }[];
   /** Whether this person may change lead owners at all — see src/lib/authz/reassign.ts. */
   reassign: { show: boolean; canUnassign: boolean };
-  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  /**
+   * The workspace's own fields this person may see (src/lib/custom-fields/server.ts `listColumns`):
+   * the ones they show in the column picker, or each field's default.
+   */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const cols = useColumns("leads");
+  // The fields this person shows, worked out once: the header and every row draw this one list.
+  const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   const router = useRouter();
   const selection = useRowSelection(leads);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [ownerUserId, setOwnerUserId] = useState("");
-  const [status, setStatus] = useState("");
+  const [stageId, setStageId] = useState("");
   const [lostReason, setLostReason] = useState("");
 
-  const needsReason = status === "LOST" || status === "DISQUALIFIED";
+  const chosenStage = stages.find((s) => s.id === stageId);
+  const needsReason = chosenStage?.status === "LOST" || chosenStage?.status === "DISQUALIFIED";
 
   function apply() {
     setError(null);
     setNotice(null);
     startTransition(async () => {
-      const result = await bulkUpdateLeads({ leadIds: selection.ids, ownerUserId, status, lostReason });
+      const result = await bulkUpdateLeads({ leadIds: selection.ids, ownerUserId, stageId, lostReason });
       if (!result.ok) {
         setError(result.error);
         return;
       }
       setNotice(`Updated ${result.data.count} lead(s).`);
       setOwnerUserId("");
-      setStatus("");
+      setStageId("");
       setLostReason("");
       selection.clear();
       router.refresh();
@@ -100,11 +111,11 @@ export function LeadsListTable({
             ))}
           </Select>
         )}
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 w-48" aria-label="Status">
-          <option value="">Status — no change</option>
-          {leadStatusValues.map((s) => (
-            <option key={s} value={s}>
-              {s.replaceAll("_", " ")}
+        <Select value={stageId} onChange={(e) => setStageId(e.target.value)} className="h-9 w-48" aria-label="Stage">
+          <option value="">Stage — no change</option>
+          {stages.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
             </option>
           ))}
         </Select>
@@ -117,7 +128,7 @@ export function LeadsListTable({
             aria-label="Reason"
           />
         )}
-        <Button size="sm" disabled={isPending || (!ownerUserId && !status)} onClick={apply}>
+        <Button size="sm" disabled={isPending || (!ownerUserId && !stageId)} onClick={apply}>
           {isPending ? "Applying…" : "Apply"}
         </Button>
       </BulkBar>
@@ -142,7 +153,7 @@ export function LeadsListTable({
                 {cols.show("value") && <th className="px-4 py-2.5">Value</th>}
                 {cols.show("expectedClose") && <th className="px-4 py-2.5">Expected close</th>}
                 {cols.show("updated") && <th className="px-4 py-2.5">Updated</th>}
-                <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
+                <CustomFieldHeaderCells columns={fieldColumns} className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -178,7 +189,7 @@ export function LeadsListTable({
                   )}
                   {cols.show("status") && (
                     <td className="px-4 py-2.5">
-                      <LeadStatusBadge status={lead.status} lostReason={lead.lostReason} />
+                      <LeadStatusBadge status={lead.status} stage={lead.stage} lostReason={lead.lostReason} />
                     </td>
                   )}
                   {cols.show("score") && (
@@ -203,12 +214,12 @@ export function LeadsListTable({
                   {cols.show("updated") && (
                     <td className="px-4 py-2.5 text-muted">{formatDate(lead.updatedAt)}</td>
                   )}
-                  <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[lead.id]} className="px-4 py-2.5 text-muted" />
+                  <CustomFieldBodyCells columns={fieldColumns} texts={customColumns.texts[lead.id]} className="px-4 py-2.5 text-muted" />
                 </tr>
               ))}
               {leads.length === 0 && (
                 <tr>
-                  <td colSpan={cols.count + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={cols.count + fieldColumns.length} className="px-4 py-8 text-center text-subtle">
                     No leads yet.
                   </td>
                 </tr>

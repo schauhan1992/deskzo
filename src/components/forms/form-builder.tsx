@@ -1,17 +1,20 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Copy, Eye, Lock, PencilLine, Plus, Trash2 } from "lucide-react";
 import type { FormCategory, FormFillMode, MarketingTopic } from "@prisma/client";
-import { saveForm } from "@/actions/forms";
+import { formFieldTargets, saveForm } from "@/actions/forms";
 import {
   FIELD_TYPES,
   MANDATORY_KEYS,
   cleanOptions,
   isChoice,
+  isReserved,
   keyFromLabel,
   parseFields,
+  targetId,
+  type FieldTarget,
   type FieldType,
   type FormField,
 } from "@/lib/marketing/form-fields";
@@ -66,7 +69,16 @@ function toDrafts(fields: FormField[]): Draft[] {
 function withKeys(drafts: Draft[]): FormField[] {
   const taken = new Set(drafts.filter((d) => !d.fresh).map((d) => d.key));
   return drafts.map((d) => {
-    const field: FormField = { key: d.key, label: d.label, type: d.type, required: d.required, options: d.options, placeholder: d.placeholder, help: d.help };
+    const field: FormField = {
+      key: d.key,
+      label: d.label,
+      type: d.type,
+      required: d.required,
+      options: d.options,
+      placeholder: d.placeholder,
+      help: d.help,
+      ...(d.saveTo ? { saveTo: d.saveTo } : {}),
+    };
     if (!d.fresh) return field;
     const key = keyFromLabel(field.label || (field.type === "HEADING" ? "section" : "question"), taken);
     taken.add(key);
@@ -74,11 +86,18 @@ function withKeys(drafts: Draft[]): FormField[] {
   });
 }
 
+/** A choice's options as they are saved: a field's are the field's already, typed ones are tidied. */
+const savedOptions = (f: FormField) => (f.saveTo ? f.options : cleanOptions(f.options));
+
 /**
  * Building a form: what it is, who can fill it in, what happens to the answers, and the questions.
  *
  * The preview is the public page itself — the same component a customer sees, with sending switched
  * off — so what is previewed is what is published, not an approximation of it.
+ *
+ * A question can save its answer to one of the workspace's own fields as well. The fields on offer
+ * are loaded once the builder is open (`formFieldTargets`), and the server checks every choice again
+ * when the form is saved.
  */
 export function FormBuilder({
   formId,
@@ -100,6 +119,25 @@ export function FormBuilder({
   const [slugTouched, setSlugTouched] = useState(Boolean(formId));
   const [previewing, setPreviewing] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  // Null until loaded. Somebody who can't have them gets none, and the choice isn't offered.
+  const [targets, setTargets] = useState<FieldTarget[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void formFieldTargets()
+      .then((found) => {
+        if (live) setTargets(found);
+      })
+      .catch(() => {
+        if (live) setTargets([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Each field takes one question's answer; the others see it as taken.
+  const taken = useMemo(() => new Set(drafts.flatMap((d) => (d.saveTo ? [targetId(d.saveTo)] : []))), [drafts]);
 
   const event = settings.category === "EVENT";
   const set = <K extends keyof BuilderSettings>(key: K, value: BuilderSettings[K]) => setSettings((s) => ({ ...s, [key]: value }));
@@ -143,7 +181,7 @@ export function FormBuilder({
       eventEndsAt: parseIstDateTime(settings.eventEndsAt),
       venue: settings.venue || null,
       eventWhen: starts ? formatIstDateTime(starts) : null,
-      fields: parseFields(withKeys(drafts).map((f) => ({ ...f, options: cleanOptions(f.options) }))),
+      fields: parseFields(withKeys(drafts).map((f) => ({ ...f, options: savedOptions(f) }))),
       ourName: "",
       closedMessage: null,
       full: false,
@@ -156,7 +194,7 @@ export function FormBuilder({
       const result = await saveForm({
         id: formId,
         ...settings,
-        fields: withKeys(drafts).map((f) => ({ ...f, options: cleanOptions(f.options) })),
+        fields: withKeys(drafts).map((f) => ({ ...f, options: savedOptions(f) })),
       });
       if (!result.ok) {
         setNotice({ tone: "error", text: result.error });
@@ -426,10 +464,14 @@ export function FormBuilder({
                   draft={draft}
                   first={index === 0}
                   last={index === drafts.length - 1}
+                  targets={targets}
+                  taken={taken}
+                  makesLeads={settings.createsLead}
                   onChange={(patch) => update(draft.uid, patch)}
                   onMove={(by) => move(index, by)}
+                  // A copy saves nowhere: one question per field.
                   onCopy={() =>
-                    setDrafts((all) => [...all.slice(0, index + 1), { ...draft, uid: nextUid(), fresh: true, key: "" }, ...all.slice(index + 1)])
+                    setDrafts((all) => [...all.slice(0, index + 1), { ...draft, uid: nextUid(), fresh: true, key: "", saveTo: null }, ...all.slice(index + 1)])
                   }
                   onRemove={() => setDrafts((all) => all.filter((d) => d.uid !== draft.uid))}
                 />
@@ -480,10 +522,28 @@ function Section({ title, note, children }: { title: string; note?: string; chil
   );
 }
 
+/** Where an answer can be saved, in the order the builder offers them. */
+const RECORDS: { entity: FieldTarget["entity"]; label: string; note: string }[] = [
+  { entity: "LEAD", label: "The lead", note: "Saved on the lead the answer makes." },
+  {
+    entity: "COMPANY",
+    label: "The company, when the answer creates it",
+    note: "Saved on the company only when this answer creates it — a customer already on file is never changed from a form.",
+  },
+  {
+    entity: "CONTACT",
+    label: "The contact, when the answer creates it",
+    note: "Saved on the contact only when this answer creates it — somebody already on file is never changed from a form.",
+  },
+];
+
 function QuestionCard({
   draft,
   first,
   last,
+  targets,
+  taken,
+  makesLeads,
   onChange,
   onMove,
   onCopy,
@@ -492,6 +552,12 @@ function QuestionCard({
   draft: Draft;
   first: boolean;
   last: boolean;
+  /** The fields an answer can be saved to; null while they load. */
+  targets: FieldTarget[] | null;
+  /** The fields questions already save to. */
+  taken: Set<string>;
+  /** Whether the form makes a lead — without one, an answer saved to a lead field has nowhere to go. */
+  makesLeads: boolean;
   onChange: (patch: Partial<Draft>) => void;
   onMove: (by: number) => void;
   onCopy: () => void;
@@ -501,6 +567,26 @@ function QuestionCard({
   const heading = draft.type === "HEADING";
   const id = `qc-${draft.uid}`;
   const textual = ["TEXT", "TEXTAREA", "EMAIL", "PHONE", "NUMBER"].includes(draft.type);
+
+  // The name, email, phone and company questions fill in the contact and company already.
+  const canSave = !heading && !(!draft.fresh && isReserved(draft.key));
+  const current = draft.saveTo ? targetId(draft.saveTo) : "";
+  const target = targets?.find((t) => targetId(t) === current) ?? null;
+  // A link the list doesn't have: still loading, or a field retired since the form was built.
+  const lost = Boolean(draft.saveTo) && !target;
+  const link = (value: string) => {
+    if (!value) return onChange({ saveTo: null });
+    const chosen = targets?.find((t) => targetId(t) === value);
+    if (!chosen) return;
+    // Asked as the field is: its type, its options, and required if it is.
+    onChange({
+      saveTo: { entity: chosen.entity, key: chosen.key },
+      type: chosen.type,
+      options: chosen.options,
+      required: chosen.required,
+      ...(draft.label.trim() ? {} : { label: chosen.label }),
+    });
+  };
 
   return (
     <div className={cn("rounded-lg border border-line p-3", heading && "bg-surface-sunken")}>
@@ -525,8 +611,9 @@ function QuestionCard({
               <Select
                 id={`${id}-type`}
                 value={draft.type}
-                // The address question is validated as an address whatever it is set to, so it is not offered a choice.
-                disabled={mandatory && draft.key === "email"}
+                // The address question is validated as an address whatever it is set to, so it is not offered a
+                // choice; a question saved to a field is asked as the field is.
+                disabled={(mandatory && draft.key === "email") || Boolean(target)}
                 onChange={(e) => {
                   const type = e.target.value as FieldType;
                   onChange({
@@ -545,7 +632,12 @@ function QuestionCard({
             </div>
           </div>
 
-          {isChoice(draft.type) && (
+          {isChoice(draft.type) && target && (
+            <p className="text-xs text-muted">
+              Options come from {target.label}: {target.options.join(", ")}.
+            </p>
+          )}
+          {isChoice(draft.type) && !target && (
             <div className="space-y-1">
               <Label htmlFor={`${id}-options`} className="text-xs">
                 Options, one per line
@@ -556,6 +648,47 @@ function QuestionCard({
                 value={draft.options.join("\n")}
                 onChange={(e) => onChange({ options: e.target.value.split("\n") })}
               />
+            </div>
+          )}
+
+          {canSave && (draft.saveTo || (targets?.length ?? 0) > 0) && (
+            <div className="space-y-1">
+              <Label htmlFor={`${id}-save`} className="text-xs">
+                Save the answer to
+              </Label>
+              <Select id={`${id}-save`} value={current} onChange={(e) => link(e.target.value)}>
+                <option value="">Nothing — keep it with the answers</option>
+                {lost && <option value={current}>{targets === null ? "Loading…" : "A field that can't be filled from a form any more"}</option>}
+                {RECORDS.map((record) => {
+                  const offered = (targets ?? []).filter((t) => t.entity === record.entity);
+                  if (offered.length === 0) return null;
+                  return (
+                    <optgroup key={record.entity} label={record.label}>
+                      {offered.map((t) => {
+                        const other = taken.has(targetId(t)) && targetId(t) !== current;
+                        return (
+                          <option key={targetId(t)} value={targetId(t)} disabled={other}>
+                            {other ? `${t.label} — another question saves to it` : t.label}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  );
+                })}
+              </Select>
+              {target && <p className="text-xs text-subtle">{RECORDS.find((r) => r.entity === target.entity)?.note} Asked as the field is.</p>}
+              {target?.entity === "LEAD" && !makesLeads && (
+                <p className="text-xs text-warning">
+                  This form doesn&apos;t make leads, so the answer is only kept with the form. Tick &ldquo;Make a lead from each
+                  new answer&rdquo; for it to be saved.
+                </p>
+              )}
+              {lost && targets !== null && (
+                <p className="text-xs text-warning">
+                  That field was retired, restricted or deleted after this question was linked to it, so answers now stay with
+                  the form. Choose another field, or Nothing, before saving.
+                </p>
+              )}
             </div>
           )}
 

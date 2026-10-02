@@ -1303,6 +1303,20 @@ model Lead {
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
   customFields Json @default("{}")
+  /**
+   * The workspace's own stage the lead is at (Settings → Pipeline, src/lib/pipeline) — what it shows and
+   * moves through. `status` is that stage's meaning, written with it, and is what the rest of the app acts
+   * on. Null only for a lead written before the workspace had stages, which then shows the first stage
+   * with its status's meaning. Left out of select-less reads until every workspace has the column
+   * (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  stageId        String?
+  stage          LeadStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  /**
+   * When the lead last moved stage. `updatedAt` is not that: the score is rewritten on every view and by
+   * the periodic tick, which moves it. Backfilled from the stage-change history.
+   */
+  stageChangedAt DateTime?
 
   /// Where the enquiry came from. Distinct from Company.source, which is how the *account* was found.
   source         LeadSource      @default(OTHER)
@@ -1341,6 +1355,7 @@ model Lead {
   @@unique([captureKeyId, externalId])
   @@index([companyId])
   @@index([status])
+  @@index([stageId])
   // Same reason as Company.ownerUserId above.
   @@index([ownerUserId])
   /// Every Leads report windows on this. See the note on Ticket.
@@ -10867,6 +10882,32 @@ model CustomFieldDefinition {
   @@unique([entity, key])
   @@index([entity, archivedAt, sortOrder])
   @@map("custom_field_definitions")
+}
+
+/**
+ * One stage of the workspace's own lead pipeline (Settings → Pipeline, src/lib/pipeline): its name,
+ * colour and place, and the fixed meaning it stands for. The meaning (`status`) is what the rest of the
+ * app acts on — won leads count towards targets, the forecast weighs open ones — so two stages may share
+ * one. Seeded with the stages every workspace started with, under ids `lstg_<key>`.
+ */
+model LeadStage {
+  id         String     @id @default(cuid())
+  /// Fixed once made: what a link or a saved filter names. The label is free to change.
+  key        String     @unique
+  label      String
+  status     LeadStatus
+  /// A badge tone from STAGE_COLORS (src/lib/pipeline/rules.ts).
+  color      String     @default("default")
+  sortOrder  Int        @default(0)
+  /// Retired: no longer offered or shown as a column. Its leads were moved on when it was retired.
+  archivedAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  leads Lead[]
+
+  @@index([archivedAt, sortOrder])
+  @@map("lead_stages")
 }
 
 // ---------------------------------------------------------------------------------------------

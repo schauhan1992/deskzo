@@ -14,7 +14,10 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { changedLabel, customFieldsForCreate, customSearchWhere, saveCustomFields } from "@/lib/custom-fields/server";
+import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { exportCells } from "@/lib/custom-fields/sheets";
+import { inStageWhere, leadStages, newLeadStage, stageWrite, stagesOfLeads } from "@/lib/pipeline/server";
+import { stageChangeNote, stageForStatus } from "@/lib/pipeline/rules";
 import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
 import { dateRangeFilter } from "@/lib/utils";
 import { pageSlice } from "@/lib/pagination";
@@ -149,9 +152,12 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
   const custom = await customFieldsForCreate("LEAD", user.id, data.customFields, { checkRequired: true });
   if (!custom.ok) return { ok: false, error: custom.error };
 
+  // Where it starts: the workspace's first stage that means new (src/lib/pipeline).
+  const entry = await newLeadStage();
   const lead = await db.$transaction(async (tx) => {
     const created = await tx.lead.create({
       data: {
+        ...entry,
         companyId: data.companyId,
         contactId: data.contactId || null,
         title: data.title,
@@ -282,6 +288,10 @@ type LeadListParams = {
   /** Hot, warm or cold — ranges of the stored score, the same cut-offs as `gradeFor`. */
   grade?: "HOT" | "WARM" | "COLD";
   sort?: "score";
+  /** The workspace's own lead fields filtered on, as the page read them (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
+  /** A stage of the workspace's own pipeline, by its key (Settings → Pipeline). `status` filters by meaning. */
+  stage?: string;
 };
 
 const GRADE_RANGES = {
@@ -322,8 +332,17 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   // all come back empty from the one place rather than each needing to remember.
   if (!(await canViewLeads(userId))) return { id: { in: [] } };
   const expectedCloseDate = dateRangeFilter(params?.closeFrom, params?.closeTo);
-  // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts).
-  const customBranches = (await customSearchWhere("LEAD", userId, params?.search)) as Prisma.LeadWhereInput[];
+  // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts),
+  // and filtered on — a clause each, in an `AND` of their own beside the search's `OR`.
+  const [customBranches, fieldFilters] = await Promise.all([
+    customSearchWhere("LEAD", userId, params?.search) as Promise<Prisma.LeadWhereInput[]>,
+    customFilterWhere("LEAD", userId, params?.customFilters) as Promise<Prisma.LeadWhereInput[]>,
+  ]);
+  // The leads a stage shows (`inStageWhere`): an `OR` of its own, so it joins the `AND` rather than
+  // meeting the search's. A key the pipeline doesn't have narrows nothing.
+  const pipeline = params?.stage ? await leadStages() : null;
+  const stage = pipeline?.stages.find((s) => s.key === params?.stage);
+  const narrowing = [...fieldFilters, ...(pipeline && stage ? [inStageWhere(pipeline, stage) as Prisma.LeadWhereInput] : [])];
   return {
     ...(await viaCompanyScope(userId)),
     ...(params?.status ? { status: params.status } : {}),
@@ -344,6 +363,7 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
     ...(expectedCloseDate ? { expectedCloseDate } : {}),
     ...(params?.source ? { source: params.source } : {}),
     ...(params?.grade && GRADE_RANGES[params.grade] ? { score: GRADE_RANGES[params.grade] } : {}),
+    ...(narrowing.length > 0 ? { AND: narrowing } : {}),
   };
 }
 
@@ -474,7 +494,15 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { leadId, status, lostReason } = parsed.data;
+  const { leadId, stageId, status: named, lostReason } = parsed.data;
+
+  // The stage it moves to (Settings → Pipeline, src/lib/pipeline) — or, from a caller that still names
+  // a status, the first stage in use with that meaning. Its status is always the stage's meaning.
+  const pipeline = await leadStages();
+  const inUse = pipeline.stages.filter((s) => !s.archived);
+  const target = stageId ? inUse.find((s) => s.id === stageId) : named ? stageForStatus(inUse, named) : null;
+  if (!target) return { ok: false, error: "That stage is no longer in use. Refresh the page and choose another." };
+  const status = target.status;
 
   if ((status === "LOST" || status === "DISQUALIFIED") && !lostReason) {
     return { ok: false, error: "A reason is required when marking a lead lost or disqualified." };
@@ -485,12 +513,20 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
   if (!lead || !(await leadInScope(user.id, leadId))) {
     return { ok: false, error: "Lead not found." };
   }
+  // Where it is now, as the board shows it. Already there, nothing is recorded — a bulk change used to
+  // log "from WON to WON" — unless it is a lost lead being given a new reason.
+  const from = (await stagesOfLeads([{ id: leadId, status: lead.status }])).get(leadId)!;
+  if (from.id === target.id && lead.status === status && !(lostReason && lostReason !== lead.lostReason)) {
+    return { ok: true, data: { id: leadId } };
+  }
 
+  const now = new Date();
   await db.$transaction(async (tx) => {
     await tx.lead.update({
       where: { id: leadId },
       data: {
         status,
+        ...stageWrite(pipeline, target, now),
         lostReason: status === "LOST" || status === "DISQUALIFIED" ? lostReason : null,
         qualifiedByUserId:
           status === "QUALIFIED" && !lead.qualifiedByUserId ? user.id : lead.qualifiedByUserId,
@@ -502,7 +538,8 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
         leadId,
         userId: user.id,
         type: "STAGE_CHANGE",
-        notes: `Status changed from ${lead.status} to ${status}${lostReason ? `: ${lostReason}` : ""}`,
+        // The forecast and wins read this note; the timeline shows it in the stages' names (`readStageNote`).
+        notes: stageChangeNote(from, target, lostReason),
       },
     });
 
@@ -516,7 +553,7 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
       userId: lead.ownerUserId,
       type: "LEAD_STATUS_CHANGED",
       title: "Your lead's status changed",
-      message: `${lead.title} — now ${status.replaceAll("_", " ")}`,
+      message: `${lead.title} — now ${target.label}`,
       link: `/leads/${leadId}`,
     });
   }
@@ -652,9 +689,9 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { leadIds, ownerUserId, status, lostReason } = parsed.data;
-  if (!ownerUserId && !status) {
-    return { ok: false, error: "Pick an owner or a status to apply." };
+  const { leadIds, ownerUserId, status, stageId, lostReason } = parsed.data;
+  if (!ownerUserId && !status && !stageId) {
+    return { ok: false, error: "Pick an owner or a stage to apply." };
   }
   if ((status === "LOST" || status === "DISQUALIFIED") && !lostReason) {
     return { ok: false, error: "A reason is required when marking leads lost or disqualified." };
@@ -712,9 +749,9 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
     }
   }
 
-  if (status) {
+  if (stageId || status) {
     for (const leadId of leadIds) {
-      const result = await updateLeadStatus({ leadId, status, lostReason });
+      const result = await updateLeadStatus({ leadId, ...(stageId ? { stageId } : { status }), lostReason });
       if (!result.ok) return { ok: false, error: result.error };
     }
   }

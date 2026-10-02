@@ -16,7 +16,7 @@ import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
-import { leadStatusValues } from "@/lib/validation/lead";
+import { leadStages, stagesOfLeads } from "@/lib/pipeline/server";
 import type { LeadSource, LeadStatus } from "@prisma/client";
 import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
 import { viewerReassignControls } from "@/lib/authz/reassign";
@@ -24,6 +24,8 @@ import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { listColumns } from "@/lib/custom-fields/server";
+import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 
 export default async function LeadsPage({
   searchParams,
@@ -32,6 +34,7 @@ export default async function LeadsPage({
     view?: string;
     sel?: string;
     status?: string;
+    stage?: string;
     q?: string;
     owner?: string;
     closeFrom?: string;
@@ -41,7 +44,7 @@ export default async function LeadsPage({
     sort?: string;
     page?: string;
     pageSize?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const user = await requireUser();
   if (!(await hasEffectivePermission(user.id, "leads.view"))) return <NoAccessNotice title="Lead pipeline" permission="leads.view" />;
@@ -53,6 +56,7 @@ export default async function LeadsPage({
   const pageSize = resolvePageSize(params.pageSize);
   const filters = {
     status: params.status as LeadStatus | undefined,
+    stage: params.stage || undefined,
     search: params.q,
     ownerUserId: params.owner,
     closeFrom: params.closeFrom,
@@ -60,6 +64,7 @@ export default async function LeadsPage({
     source: (LEAD_SOURCE_VALUES as readonly string[]).includes(params.source ?? "") ? (params.source as LeadSource) : undefined,
     grade: (["HOT", "WARM", "COLD"] as const).find((g) => g === params.grade),
     sort: params.sort === "score" ? ("score" as const) : undefined,
+    customFilters: parseCustomFilters(params),
   };
 
   // The board shows the whole pipeline — a kanban with a hidden page 2 would misrepresent it — so
@@ -72,16 +77,25 @@ export default async function LeadsPage({
 
   // Prisma's Decimal is a class instance, not plain data — it can't cross the
   // Server → Client Component boundary as a prop, so serialize it to a string here.
+  // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): the board's columns, the filter's
+  // choices, and the one each lead shows.
+  const [{ stages }, stageOf] = await Promise.all([leadStages(), stagesOfLeads(result.rows)]);
+  const activeStages = stages.filter((s) => !s.archived);
   const leads = result.rows.map((lead) => ({
     ...lead,
     estimatedValue: lead.estimatedValue?.toString() ?? null,
+    stage: stageOf.get(lead.id)!,
   }));
 
   const selected = view === "list" && viewMode === "split" ? resolveSelected(leads, params.sel) : null;
 
-  // The workspace's own fields marked "a column in the list" (src/lib/custom-fields) — only the table
-  // shows them, so neither the board nor the split list asks.
-  const customColumns = view === "list" && viewMode !== "split" ? await listColumns("LEAD", user.id, leads.map((l) => l.id)) : undefined;
+  // The workspace's own fields (src/lib/custom-fields): the columns the table can show — only the table
+  // shows them, so neither the board nor the split list asks for values, though the picker still offers
+  // them — and the filter panel, which narrows the board as well.
+  const [customColumns, fieldFilters] = await Promise.all([
+    listColumns("LEAD", user.id, view === "list" && viewMode !== "split" ? leads.map((l) => l.id) : []),
+    customFilterSetup("LEAD", user.id, filters.customFilters),
+  ]);
 
   return (
     <SplitListPage active={view === "list" && viewMode === "split"}>
@@ -95,7 +109,9 @@ export default async function LeadsPage({
             view={view}
             mode={viewMode}
             otherParams={{
+              ...customFilterParams(params),
               status: params.status,
+              stage: params.stage,
               q: params.q,
               owner: params.owner,
               closeFrom: params.closeFrom,
@@ -114,11 +130,7 @@ export default async function LeadsPage({
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <SearchParamInput paramName="q" placeholder="Search title or company…" />
-        <SelectParamFilter
-          paramName="status"
-          label="Status"
-          options={leadStatusValues.map((s) => ({ value: s, label: s.replaceAll("_", " ") }))}
-        />
+        <SelectParamFilter paramName="stage" label="Stage" options={activeStages.map((s) => ({ value: s.key, label: s.label }))} />
         <SelectParamFilter
           paramName="owner"
           label="Owner"
@@ -147,7 +159,8 @@ export default async function LeadsPage({
           options={[{ value: "score", label: "Highest score" }]}
         />
         <DateRangePicker fromParam="closeFrom" toParam="closeTo" label="Expected close" />
-        <ColumnPicker tableKey="leads" className="ml-auto" />
+        <CustomFieldFilters setup={fieldFilters} />
+        <ColumnPicker tableKey="leads" className="ml-auto" customColumns={customColumns.columns} />
       </div>
 
       {view === "list" && viewMode === "split" ? (
@@ -163,6 +176,7 @@ export default async function LeadsPage({
             <>
               <LeadsListTable
                 leads={leads}
+                stages={activeStages}
                 assignableUsers={assignableUsers}
                 reassign={await viewerReassignControls()}
                 customColumns={customColumns}
@@ -176,7 +190,7 @@ export default async function LeadsPage({
               />
             </>
           ) : (
-            <LeadsBoard leads={leads} />
+            <LeadsBoard leads={leads} stages={activeStages} />
           )}
         </div>
       )}

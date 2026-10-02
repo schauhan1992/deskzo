@@ -1,4 +1,6 @@
 import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
+import { CUSTOM_FIELD_LIMITS, type CustomFieldDef, type CustomFieldTypeKey } from "@/lib/custom-fields/rules";
+import type { OutsideEntity } from "@/lib/custom-fields/outside";
 
 /**
  * The lead capture API, described once.
@@ -12,6 +14,8 @@ import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
 export const API_PATH = "/api/v1/leads";
 export const RATE_LIMIT_PER_MINUTE = 60;
 export const MAX_BODY_BYTES = 64 * 1024;
+/** Keys in each of `custom_fields`, `company_fields` and `contact_fields` — as many as a record type can have. */
+export const MAX_OWN_FIELDS = CUSTOM_FIELD_LIMITS.fieldsPerEntity;
 
 export type FieldSpec = { name: string; type: string; required: boolean | string; description: string; example: string };
 
@@ -36,10 +40,85 @@ export const LEAD_FIELDS: FieldSpec[] = [
   { name: "utm_medium", type: "string", required: false, description: "Campaign tracking.", example: "cpc" },
   { name: "utm_campaign", type: "string", required: false, description: "Campaign tracking.", example: "m365-sept" },
   { name: "external_id", type: "string, up to 100", required: false, description: "Your own id for this enquiry. Send it and a retried request returns the same lead instead of creating a second — use it whenever your site can.", example: "enq-2026-000481" },
+  {
+    name: "custom_fields",
+    type: "object, field key → value",
+    required: false,
+    description:
+      "The fields your workspace has added to its leads, by key (see “Your own fields”). A key never changes when its field is renamed. A value that can't be used never turns the lead away — it is listed in not_saved and noted on the lead.",
+    example: '{"tower": "B", "floor": 3}',
+  },
+  {
+    name: "company_fields",
+    type: "object, field key → value",
+    required: false,
+    description:
+      "The company's own fields, the same way. Used only when the enquiry creates the company: a company already on file is never changed from a website, and what was sent for it is noted on the lead instead.",
+    example: '{"industry": "pharma"}',
+  },
+  {
+    name: "contact_fields",
+    type: "object, field key → value",
+    required: false,
+    description: "The contact's own fields, the same way — used only when the enquiry creates the contact.",
+    example: '{"birthday": "1990-05-01"}',
+  },
 ];
 
+/** The three objects a request carries the workspace's own fields in, and the record each one fills. */
+export const OWN_FIELD_GROUPS = [
+  { name: "custom_fields", entity: "LEAD", record: "the lead" },
+  { name: "company_fields", entity: "COMPANY", record: "the company, when the enquiry creates it" },
+  { name: "contact_fields", entity: "CONTACT", record: "the contact, when the enquiry creates it" },
+] as const satisfies readonly { name: string; entity: OutsideEntity; record: string }[];
+
+export type OwnFieldGroupName = (typeof OWN_FIELD_GROUPS)[number]["name"];
+
+/** What a value of each type is sent as. A person field is never filled from outside, so never listed. */
+export const OWN_FIELD_VALUES: Record<CustomFieldTypeKey, string> = {
+  TEXT: `text, up to ${CUSTOM_FIELD_LIMITS.text} characters`,
+  LONG_TEXT: `text, up to ${CUSTOM_FIELD_LIMITS.longText.toLocaleString("en-IN")} characters`,
+  NUMBER: "a number",
+  MONEY: "an amount in rupees",
+  DATE: "a date, yyyy-mm-dd",
+  SELECT: "one option, by its value or its label",
+  MULTI_SELECT: 'options, as a list or as "a; b"',
+  CHECKBOX: "true or false (yes or no)",
+  EMAIL: "an email address",
+  PHONE: "a phone number",
+  URL: "a web address",
+  USER: "a person in the workspace",
+};
+
+/** One of the workspace's own fields as the documentation lists it — its options only the ones on offer. */
+export type OwnFieldDoc = {
+  key: string;
+  label: string;
+  type: CustomFieldTypeKey;
+  required: boolean;
+  options: { value: string; label: string }[];
+  help: string | null;
+};
+
+export type OwnFieldGroup = { name: OwnFieldGroupName; record: string; fields: OwnFieldDoc[] };
+
+export function ownFieldDoc(def: CustomFieldDef): OwnFieldDoc {
+  return {
+    key: def.key,
+    label: def.label,
+    type: def.type,
+    required: def.required,
+    options: def.options.filter((o) => !o.archived).map(({ value, label }) => ({ value, label })),
+    help: def.helpText,
+  };
+}
+
 export const RESPONSES: { status: string; meaning: string }[] = [
-  { status: "201 Created", meaning: "The lead was created. The body has its id and reference (LEAD-000123) and whether it was assigned." },
+  {
+    status: "201 Created",
+    meaning:
+      "The lead was created. The body has its id and reference (LEAD-000123), whether it was assigned, and not_saved — any of your own fields' values that couldn't be used, each with the reason (empty when every one was).",
+  },
   { status: "200 OK", meaning: "A request with the same external_id was already received — the body names the existing lead, and nothing new was created." },
   { status: "202 Accepted", meaning: "Received, but the company is managed by one of our resellers, so no lead was created here; our team is notified to route it." },
   { status: "400 Bad Request", meaning: "Something is missing or malformed. `error` says what, and `fields` says which." },
@@ -114,8 +193,40 @@ export function nodeExample(baseUrl: string): string {
 
 const SOURCE_LIST = LEAD_SOURCE_VALUES.map((v) => `\`${v.toLowerCase()}\` (${LEAD_SOURCE_LABELS[v]})`).join(", ");
 
-/** The whole documentation as Markdown — what the download button saves. */
-export function renderMarkdown(baseUrl: string): string {
+/** How the workspace's own fields are sent, and what happens to a value that can't be used. */
+export const OWN_FIELDS_INTRO = [
+  "Send the fields your workspace has added in `custom_fields` (the lead), `company_fields` and `contact_fields`, keyed by each field's key. From a plain HTML form, name the inputs `custom_fields[tower]`; several options go as `custom_fields[regions][]` more than once, or as one value, `north; south`.",
+  "Each value is checked on its own. One that can't be used — a key no field here has, a field a website can't fill, a value the field doesn't take — never turns the lead away: it comes back in `not_saved` with the reason, and is noted on the lead. A field marked required in the CRM isn't required here; the lead says what is still to fill in.",
+];
+
+/** A table cell: a pipe would end it. */
+const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\s*[\r\n]+\s*/g, " ");
+
+function ownFieldsMarkdown(groups: OwnFieldGroup[]): string[] {
+  const lines = ["### Your own fields", "", ...OWN_FIELDS_INTRO.flatMap((p) => [p, ""])];
+  lines.push("```json", JSON.stringify({ name: "Priya Sharma", email: "priya@acme.in", custom_fields: { tower: "B", floor: 3 } }, null, 2), "```", "");
+  if (groups.every((g) => g.fields.length === 0)) {
+    lines.push("This workspace has no fields of its own that a website can fill yet.", "");
+    return lines;
+  }
+  for (const group of groups) {
+    if (group.fields.length === 0) continue;
+    lines.push(`#### \`${group.name}\` — ${group.record}`, "", "| Key | Field | Value | Options |", "|---|---|---|---|");
+    for (const f of group.fields) {
+      const options = f.options.map((o) => `\`${o.value}\` (${cell(o.label)})`).join(", ");
+      const about = [cell(f.label), f.help ? `— ${cell(f.help)}` : null, f.required ? "(required in the CRM)" : null].filter(Boolean).join(" ");
+      lines.push(`| \`${f.key}\` | ${about} | ${OWN_FIELD_VALUES[f.type]} | ${options} |`);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+
+/**
+ * The whole documentation as Markdown — what the download button saves. With the workspace's own
+ * fields when they are given, so the developer has the keys without a login here.
+ */
+export function renderMarkdown(baseUrl: string, ownFields: OwnFieldGroup[] = []): string {
   const req = (r: FieldSpec["required"]) => (r === true ? "Yes" : r === false ? "No" : r);
   return [
     "# Deskzo One — Lead capture API",
@@ -136,7 +247,7 @@ export function renderMarkdown(baseUrl: string): string {
     "",
     "## Request",
     "",
-    "`Content-Type: application/json` (or `application/x-www-form-urlencoded`, with `products` as a comma-separated list).",
+    "`Content-Type: application/json` (or `application/x-www-form-urlencoded`, with `products` as a comma-separated list and your own fields as `custom_fields[key]=value`).",
     "",
     "| Field | Type | Required | What it does |",
     "|---|---|---|---|",
@@ -144,6 +255,7 @@ export function renderMarkdown(baseUrl: string): string {
     "",
     `Sources: ${SOURCE_LIST}.`,
     "",
+    ...ownFieldsMarkdown(ownFields),
     "### Example",
     "",
     "```json",
@@ -159,7 +271,13 @@ export function renderMarkdown(baseUrl: string): string {
     "A created lead:",
     "",
     "```json",
-    JSON.stringify({ ok: true, lead: { id: "cm…", reference: "LEAD-000481" }, duplicate: false, assigned: true }, null, 2),
+    JSON.stringify({ ok: true, lead: { id: "cm…", reference: "LEAD-000481" }, duplicate: false, assigned: true, not_saved: [] }, null, 2),
+    "```",
+    "",
+    "One of your own fields' values that couldn't be used, in `not_saved`:",
+    "",
+    "```json",
+    JSON.stringify([{ field: "custom_fields.floor", reason: "Floor should be a number." }], null, 2),
     "```",
     "",
     "## Examples",

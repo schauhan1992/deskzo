@@ -8,6 +8,8 @@ import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { renewalOrderDraft } from "@/lib/subscriptions/renewal-order";
 import { formatOrderId } from "@/lib/order-id";
@@ -33,7 +35,12 @@ async function access() {
   return { user, allowed };
 }
 
-async function loadForRenewal(id: string) {
+/**
+ * The subscription and everything co-terminating with it — null when it doesn't exist or its account
+ * is not this person's to see (`canSeeCompany`, as punching an order is scoped): the same answer for
+ * both, so an id can't be used to find out which subscriptions are real.
+ */
+async function loadForRenewal(id: string, userId: string) {
   const product = await db.companyProduct.findUnique({
     where: { id },
     include: {
@@ -48,7 +55,7 @@ async function loadForRenewal(id: string) {
       },
     },
   });
-  if (!product) return null;
+  if (!product || !(await canSeeCompany(userId, product.company.ownerUserId))) return null;
 
   const group = renewalGroup([
     {
@@ -74,10 +81,10 @@ async function loadForRenewal(id: string) {
 
 /** What the renewal would look like, before anybody commits to it. */
 export async function renewalDraft(companyProductId: string) {
-  const { allowed } = await access();
+  const { user, allowed } = await access();
   if (!allowed) return null;
 
-  const loaded = await loadForRenewal(companyProductId);
+  const loaded = await loadForRenewal(companyProductId, user.id);
   if (!loaded) return null;
   const { product, group } = loaded;
 
@@ -124,9 +131,11 @@ export async function createRenewalOrder(input: {
   const { user, allowed } = await access();
   if (!allowed) return { ok: false, error: "You can't punch orders." };
 
-  const loaded = await loadForRenewal(input.companyProductId);
+  const loaded = await loadForRenewal(input.companyProductId, user.id);
   if (!loaded) return { ok: false, error: "That subscription no longer exists." };
   const { product, group } = loaded;
+  const resellerRefusal = await resellerOrderRefusal(product.company);
+  if (resellerRefusal) return { ok: false, error: resellerRefusal };
 
   // One renewal per subscription. A second would double-bill the same term, and the unique index
   // would refuse it anyway — better to say why.
@@ -207,7 +216,8 @@ export async function createRenewalOrder(input: {
   await recordAudit({
     userId: user.id,
     action: "CREATE",
-    entityType: "CompanyProduct",
+    // An order like any other in the trail, so the history of orders includes renewals.
+    entityType: "Order",
     entityId: created.id,
     entityLabel: `${formatOrderId(created.orderSeq)} — renewal of ${formatOrderId(product.orderSeq)}, ${quantity} × ${product.item.name}`,
   });

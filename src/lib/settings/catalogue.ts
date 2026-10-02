@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  SquareKanban,
   CreditCard,
   Banknote,
   BadgePercent,
@@ -334,6 +335,14 @@ export const SETTINGS: SettingsSection[] = [
         key: "leads",
         label: "Leads",
         items: [
+          {
+            key: "pipeline",
+            label: "Pipeline",
+            description: "The stages a lead moves through — your own names, order and colours, and what each counts as.",
+            href: "/settings/pipeline",
+            icon: SquareKanban,
+            permission: "pipeline.manage",
+          },
           {
             key: "lead-assignment",
             label: "Lead assignment",

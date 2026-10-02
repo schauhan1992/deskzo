@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { accountScopeIds } from "@/lib/authz/company-scope";
 import { scopeUserIds } from "@/lib/authz/scope";
+import { notMigratedYet } from "@/lib/custom-fields/server";
+import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import { buildWhere, countActiveFilters } from "@/lib/workspace/filters";
 import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
 
@@ -8,7 +10,10 @@ import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
  * The fact tables, and everything each one can be sliced by.
  *
  * One entry per kind of record. A dimension listed here is a dimension the explorer offers, so this
- * file is the answer to "what can I break this down by" — there is nowhere else to look.
+ * file is the answer to "what can I break this down by" — there is nowhere else to look. The one
+ * exception is the workspace's own fields, which no file can list because each workspace makes its
+ * own: each source names the records its rows reach (`customFields`), and src/lib/analytics/custom.ts
+ * adds the fields on them that the person asking may see.
  *
  * Every `load` applies the same account scoping the screens use. That is the whole security surface
  * of this module: a report is a way to read thousands of rows at once, so if scoping were wrong
@@ -96,45 +101,84 @@ function withAccountFilters(ctx: SourceContext, note: string): string {
 /** A company's tags, or a single "untagged" bucket. Multi-valued — see `Dimension.of`. */
 const tagsOf = (tags: string[]): string | string[] => (tags.length === 0 ? NONE : tags);
 
+type Wanted = ReadonlySet<CustomFieldEntityKey>;
+const NO_FIELDS: Wanted = new Set();
+
+/**
+ * A load, carrying the workspace's own fields it was asked for (`ctx.customFields`) — or, in a
+ * workspace whose records don't have the column yet, the same load without them.
+ *
+ * A release serves before `tenants:migrate` has reached every workspace (NOT_YET_EVERYWHERE in
+ * src/lib/tenancy/clients.ts), and a query naming a column that isn't there fails outright. A report
+ * that fails because one of its optional breakdowns can't be read yet is worse than one that reads
+ * those breakdowns as empty, so the query is made again without them. In practice a workspace that
+ * far behind has no field definitions either (`definitionsFor` reads none), so it is never asked.
+ *
+ * Asked for nothing, the query names none of those columns: the same SQL the load always sent.
+ */
+async function withOwnFields<T>(ctx: SourceContext, query: (want: Wanted) => Promise<T>): Promise<T> {
+  const want = ctx.customFields ?? NO_FIELDS;
+  if (want.size === 0) return query(NO_FIELDS);
+  try {
+    return await query(want);
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+    return query(NO_FIELDS);
+  }
+}
+
+/**
+ * The record's own `customFields`, when wanted. It is left out of every query that doesn't name it
+ * (NOT_YET_EVERYWHERE), so `false` here is how it is named — and `true` is what it already was.
+ */
+const ownFields = (want: Wanted, entity: CustomFieldEntityKey) => ({ customFields: !want.has(entity) });
+
 // ─── Orders ─────────────────────────────────────────────────────────────────────────────────────
 
-const orderInclude = {
-  company: {
-    select: {
-      name: true,
-      tags: true,
-      source: true,
-      industry: { select: { name: true } },
-      owner: { select: { name: true } },
-      locations: { select: { city: true, state: true, isPrimary: true } },
+const orderInclude = (want: Wanted) =>
+  ({
+    company: {
+      select: {
+        name: true,
+        tags: true,
+        source: true,
+        industry: { select: { name: true } },
+        owner: { select: { name: true } },
+        locations: { select: { city: true, state: true, isPrimary: true } },
+        customFields: want.has("COMPANY"),
+      },
     },
-  },
-  item: {
-    select: {
-      name: true,
-      sku: true,
-      type: true,
-      category: true,
-      brand: { select: { name: true } },
-      productFamily: { select: { name: true } },
+    item: {
+      select: {
+        name: true,
+        sku: true,
+        type: true,
+        category: true,
+        brand: { select: { name: true } },
+        productFamily: { select: { name: true } },
+        customFields: want.has("ITEM"),
+      },
     },
-  },
-  vendor: { select: { name: true } },
-  addedBy: { select: { name: true, department: { select: { name: true } } } },
-} as const;
+    vendor: { select: { name: true } },
+    addedBy: { select: { name: true, department: { select: { name: true } } } },
+  }) as const;
 
 type OrderRow = Awaited<ReturnType<typeof loadOrders>>[number];
 
 async function loadOrders(ctx: SourceContext) {
-  return db.companyProduct.findMany({
-    where: {
-      ...(await companyWhere(ctx)),
-      ...dateWindow(ctx),
-    },
-    include: orderInclude,
-    take: ROW_CAP,
-    orderBy: { createdAt: "asc" },
-  });
+  const scope = await companyWhere(ctx);
+  return withOwnFields(ctx, (want) =>
+    db.companyProduct.findMany({
+      where: {
+        ...scope,
+        ...dateWindow(ctx),
+      },
+      include: orderInclude(want),
+      omit: ownFields(want, "ORDER"),
+      take: ROW_CAP,
+      orderBy: { createdAt: "asc" },
+    }),
+  );
 }
 
 /** The primary location's city/state, falling back to the first one on file. */
@@ -199,6 +243,11 @@ const ordersSource: FactSource<OrderRow> = {
     { key: "orderStatus", label: "Order status", of: (r) => r.orderStatus.replaceAll("_", " ") },
     { key: "vendor", label: "Vendor", of: (r) => r.vendor?.name ?? NONE },
   ],
+  customFields: [
+    { entity: "ORDER", noun: "Order", own: true, values: (r) => r.customFields },
+    { entity: "COMPANY", noun: "Customer", values: (r) => r.company.customFields },
+    { entity: "ITEM", noun: "Product", values: (r) => r.item.customFields },
+  ],
 };
 
 // ─── Leads ──────────────────────────────────────────────────────────────────────────────────────
@@ -228,23 +277,33 @@ async function loadLeads(ctx: SourceContext) {
    * The failure was invisible in the ordinary way: `scopeNote` truthfully said "Every lead in the
    * company", and nobody queries a report for returning too much.
    */
-  return db.lead.findMany({
-    where: {
-      // `companyWhere`, the same helper every other source uses — which is the point. Leads had
-      // their own hand-rolled predicate, and that is where the divergence lived.
-      ...(await companyWhere(ctx)),
-      ...dateWindow(ctx),
-    },
-    include: {
-      company: {
-        select: { name: true, tags: true, source: true, industry: { select: { name: true } } },
+  // `companyWhere`, the same helper every other source uses — which is the point. Leads had their
+  // own hand-rolled predicate, and that is where the divergence lived.
+  const scope = await companyWhere(ctx);
+  return withOwnFields(ctx, (want) =>
+    db.lead.findMany({
+      where: {
+        ...scope,
+        ...dateWindow(ctx),
       },
-      owner: { select: { name: true, department: { select: { name: true } } } },
-      sourcedBy: { select: { name: true } },
-    },
-    take: ROW_CAP,
-    orderBy: { createdAt: "asc" },
-  });
+      include: {
+        company: {
+          select: {
+            name: true,
+            tags: true,
+            source: true,
+            industry: { select: { name: true } },
+            customFields: want.has("COMPANY"),
+          },
+        },
+        owner: { select: { name: true, department: { select: { name: true } } } },
+        sourcedBy: { select: { name: true } },
+      },
+      omit: ownFields(want, "LEAD"),
+      take: ROW_CAP,
+      orderBy: { createdAt: "asc" },
+    }),
+  );
 }
 
 const leadsSource: FactSource<LeadRow> = {
@@ -291,6 +350,10 @@ const leadsSource: FactSource<LeadRow> = {
     { key: "tag", label: "Company tag", of: (r) => tagsOf(r.company.tags), multi: true },
     { key: "lostReason", label: "Lost reason", of: (r) => r.lostReason || NONE },
   ],
+  customFields: [
+    { entity: "LEAD", noun: "Lead", own: true, values: (r) => r.customFields },
+    { entity: "COMPANY", noun: "Company", values: (r) => r.company.customFields },
+  ],
 };
 
 // ─── Tickets ────────────────────────────────────────────────────────────────────────────────────
@@ -298,18 +361,23 @@ const leadsSource: FactSource<LeadRow> = {
 type TicketRow = Awaited<ReturnType<typeof loadTickets>>[number];
 
 async function loadTickets(ctx: SourceContext) {
-  return db.ticket.findMany({
-    where: {
-      ...(await companyWhere(ctx)),
-      ...dateWindow(ctx),
-    },
-    include: {
-      company: { select: { name: true, tags: true, industry: { select: { name: true } } } },
-      assignedTo: { select: { name: true, department: { select: { name: true } } } },
-    },
-    take: ROW_CAP,
-    orderBy: { createdAt: "asc" },
-  });
+  const scope = await companyWhere(ctx);
+  return withOwnFields(ctx, (want) =>
+    db.ticket.findMany({
+      where: {
+        ...scope,
+        ...dateWindow(ctx),
+      },
+      include: {
+        company: {
+          select: { name: true, tags: true, industry: { select: { name: true } }, customFields: want.has("COMPANY") },
+        },
+        assignedTo: { select: { name: true, department: { select: { name: true } } } },
+      },
+      take: ROW_CAP,
+      orderBy: { createdAt: "asc" },
+    }),
+  );
 }
 
 const DAY = 86_400_000;
@@ -355,6 +423,7 @@ const ticketsSource: FactSource<TicketRow> = {
     { key: "industry", label: "Industry", of: (r) => r.company.industry?.name ?? NONE },
     { key: "tag", label: "Customer tag", of: (r) => tagsOf(r.company.tags), multi: true },
   ],
+  customFields: [{ entity: "COMPANY", noun: "Customer", values: (r) => r.company.customFields }],
 };
 
 // ─── Invoices ───────────────────────────────────────────────────────────────────────────────────
@@ -362,22 +431,32 @@ const ticketsSource: FactSource<TicketRow> = {
 type InvoiceRow = Awaited<ReturnType<typeof loadInvoices>>[number];
 
 async function loadInvoices(ctx: SourceContext) {
-  return db.tradeDocument.findMany({
-    where: {
-      direction: "SALES",
-      docType: { in: ["INVOICE", "CREDIT_NOTE"] },
-      status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] },
-      ...(await companyWhere(ctx)),
-      ...dateWindow(ctx),
-    },
-    include: {
-      company: {
-        select: { name: true, tags: true, source: true, industry: { select: { name: true } }, owner: { select: { name: true } } },
+  const scope = await companyWhere(ctx);
+  return withOwnFields(ctx, (want) =>
+    db.tradeDocument.findMany({
+      where: {
+        direction: "SALES",
+        docType: { in: ["INVOICE", "CREDIT_NOTE"] },
+        status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] },
+        ...scope,
+        ...dateWindow(ctx),
       },
-    },
-    take: ROW_CAP,
-    orderBy: { issueDate: "asc" },
-  });
+      include: {
+        company: {
+          select: {
+            name: true,
+            tags: true,
+            source: true,
+            industry: { select: { name: true } },
+            owner: { select: { name: true } },
+            customFields: want.has("COMPANY"),
+          },
+        },
+      },
+      take: ROW_CAP,
+      orderBy: { issueDate: "asc" },
+    }),
+  );
 }
 
 const invoicesSource: FactSource<InvoiceRow> = {
@@ -419,6 +498,7 @@ const invoicesSource: FactSource<InvoiceRow> = {
     { key: "status", label: "Status", of: (r) => r.status.replaceAll("_", " ") },
     { key: "placeOfSupply", label: "Place of supply", of: (r) => r.placeOfSupplyCode || NONE },
   ],
+  customFields: [{ entity: "COMPANY", noun: "Customer", values: (r) => r.company.customFields }],
 };
 
 // ─── Payments ───────────────────────────────────────────────────────────────────────────────────
@@ -426,18 +506,29 @@ const invoicesSource: FactSource<InvoiceRow> = {
 type PaymentRow = Awaited<ReturnType<typeof loadPayments>>[number];
 
 async function loadPayments(ctx: SourceContext) {
-  return db.payment.findMany({
-    where: {
-      ...(await companyWhere(ctx)),
-      ...dateWindow(ctx),
-    },
-    include: {
-      company: { select: { name: true, tags: true, industry: { select: { name: true } }, owner: { select: { name: true } } } },
-      recordedBy: { select: { name: true } },
-    },
-    take: ROW_CAP,
-    orderBy: { paidOn: "asc" },
-  });
+  const scope = await companyWhere(ctx);
+  return withOwnFields(ctx, (want) =>
+    db.payment.findMany({
+      where: {
+        ...scope,
+        ...dateWindow(ctx),
+      },
+      include: {
+        company: {
+          select: {
+            name: true,
+            tags: true,
+            industry: { select: { name: true } },
+            owner: { select: { name: true } },
+            customFields: want.has("COMPANY"),
+          },
+        },
+        recordedBy: { select: { name: true } },
+      },
+      take: ROW_CAP,
+      orderBy: { paidOn: "asc" },
+    }),
+  );
 }
 
 const paymentsSource: FactSource<PaymentRow> = {
@@ -467,6 +558,8 @@ const paymentsSource: FactSource<PaymentRow> = {
     { key: "method", label: "Method", of: (r) => r.method?.replaceAll("_", " ") ?? NONE },
     { key: "recordedBy", label: "Recorded by", of: (r) => r.recordedBy?.name ?? NONE },
   ],
+  // Through `?.`, as the dimensions above read the company: a payment without one reads as no value.
+  customFields: [{ entity: "COMPANY", noun: "Customer", values: (r) => r.company?.customFields }],
 };
 
 // ─── Visits ─────────────────────────────────────────────────────────────────────────────────────
@@ -477,19 +570,24 @@ async function loadVisits(ctx: SourceContext) {
   // Two gates, both applied: the account has to be visible, and so does the person — a visit log is
   // a record of where somebody spent their day, which the visits screen scopes by user as well.
   const people = await scopeUserIds(ctx.userId, "visits.viewAll");
-  return db.visit.findMany({
-    where: {
-      ...(await companyWhere(ctx)),
-      ...(people === null ? {} : { userId: { in: people } }),
-      ...dateWindow(ctx),
-    },
-    include: {
-      company: { select: { name: true, tags: true, industry: { select: { name: true } } } },
-      user: { select: { name: true, department: { select: { name: true } } } },
-    },
-    take: ROW_CAP,
-    orderBy: { scheduledFor: "asc" },
-  });
+  const scope = await companyWhere(ctx);
+  return withOwnFields(ctx, (want) =>
+    db.visit.findMany({
+      where: {
+        ...scope,
+        ...(people === null ? {} : { userId: { in: people } }),
+        ...dateWindow(ctx),
+      },
+      include: {
+        company: {
+          select: { name: true, tags: true, industry: { select: { name: true } }, customFields: want.has("COMPANY") },
+        },
+        user: { select: { name: true, department: { select: { name: true } } } },
+      },
+      take: ROW_CAP,
+      orderBy: { scheduledFor: "asc" },
+    }),
+  );
 }
 
 const visitsSource: FactSource<VisitRow> = {
@@ -542,6 +640,7 @@ const visitsSource: FactSource<VisitRow> = {
     { key: "industry", label: "Industry", of: (r) => r.company.industry?.name ?? NONE },
     { key: "tag", label: "Customer tag", of: (r) => tagsOf(r.company.tags), multi: true },
   ],
+  customFields: [{ entity: "COMPANY", noun: "Customer", values: (r) => r.company.customFields }],
 };
 
 // ─── The registry ───────────────────────────────────────────────────────────────────────────────

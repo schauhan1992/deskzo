@@ -5,6 +5,7 @@ import type { LeadStatus } from "@prisma/client";
 import { Badge } from "@/components/ui/card";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { cn } from "@/lib/utils";
+import type { StageColor } from "@/lib/pipeline/rules";
 
 /**
  * The one definition of what a lead's status looks like.
@@ -43,24 +44,31 @@ export function leadStatusLabel(status: LeadStatus) {
  */
 export function LeadStatusBadge({
   status,
+  stage,
   lostReason,
   className,
 }: {
   status: LeadStatus;
+  /**
+   * The workspace's own stage the lead is at (Settings → Pipeline, src/lib/pipeline) — its name and
+   * colour. Without it, the status as the app always showed it.
+   */
+  stage?: { label: string; color: StageColor } | null;
   lostReason?: string | null;
   className?: string;
 }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
 
-  const label = leadStatusLabel(status);
+  const label = stage?.label ?? leadStatusLabel(status);
+  const tone = stage?.color ?? leadStatusTone[status];
   const closed = status === "LOST" || status === "DISQUALIFIED";
   const reason = closed ? lostReason?.trim() || null : null;
 
   // Nothing to explain: stay a plain badge rather than a control that does nothing when hovered.
   if (!reason) {
     return (
-      <Badge tone={leadStatusTone[status]} className={className}>
+      <Badge tone={tone} className={className}>
         {label}
       </Badge>
     );
@@ -80,7 +88,7 @@ export function LeadStatusBadge({
         aria-label={`${label} — ${reason}`}
         className={cn("inline-flex cursor-help rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus", className)}
       >
-        <Badge tone={leadStatusTone[status]} className="underline decoration-dotted underline-offset-2">
+        <Badge tone={tone} className="underline decoration-dotted underline-offset-2">
           {label}
         </Badge>
       </span>

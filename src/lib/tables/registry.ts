@@ -1,4 +1,5 @@
 import type { TradeDocumentType } from "@prisma/client";
+import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 
 /**
  * Which columns each records table has, and which of them somebody may turn off.
@@ -21,6 +22,16 @@ import type { TradeDocumentType } from "@prisma/client";
  * order number is a list of anonymous rows — and for the actions cell, which is the way out of any
  * mess the rest of the choices create. Everything else should be hideable; people's screens and
  * jobs differ more than we can predict.
+ *
+ * ## The workspace's own fields
+ *
+ * A table that names `customFields` also offers the workspace's own fields of that record type
+ * (src/lib/custom-fields) as columns, after its own. They aren't listed here — each workspace has its
+ * own, and a person sees only the ones they may — so a person's choice about one is stored beside the
+ * column keys as `cf.<key>` (shown) or `-cf.<key>` (hidden), and a field with no choice stored is
+ * shown as the field itself says: a column by default when it is marked "a column in the list". Only
+ * the choices are stored, never the defaults, for the reason `resolveColumns` gives about `null`: a
+ * field added after somebody customised a table still arrives as its own default, not as hidden.
  */
 
 export type ColumnDefinition = {
@@ -39,12 +50,15 @@ export type TableDefinition = {
   /** Shown as the picker's heading. */
   label: string;
   columns: ColumnDefinition[];
+  /** The record type whose workspace fields the table can also show as columns, after these — see above. */
+  customFields?: CustomFieldEntityKey;
 };
 
 export const TABLE_REGISTRY: TableDefinition[] = [
   {
     key: "orders",
     label: "Orders",
+    customFields: "ORDER",
     columns: [
       { key: "order", label: "Order", default: true, required: true, hint: "The order number. Without it a row cannot be identified or linked to." },
       { key: "status", label: "Status", default: true },
@@ -61,6 +75,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   {
     key: "companies",
     label: "Companies",
+    customFields: "COMPANY",
     columns: [
       { key: "select", label: "Selection", default: true, required: true, hint: "The tick box for bulk actions." },
       { key: "id", label: "ID", default: true, hint: "The short reference — COM-000123. Shared across customers, vendors and commission parties, so two of them can never carry the same number." },
@@ -79,6 +94,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   {
     key: "customers",
     label: "Customers",
+    customFields: "COMPANY",
     columns: [
       { key: "select", label: "Selection", default: true, required: true, hint: "The tick box for bulk actions." },
       { key: "id", label: "ID", default: true, hint: "The short reference — COM-000123. Shared across customers, vendors and commission parties, so two of them can never carry the same number." },
@@ -96,6 +112,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   {
     key: "vendors",
     label: "Vendors",
+    customFields: "COMPANY",
     columns: [
       { key: "select", label: "Selection", default: true, required: true, hint: "The tick box for bulk actions." },
       { key: "id", label: "ID", default: true, hint: "The short reference — COM-000123. Shared across customers, vendors and commission parties, so two of them can never carry the same number." },
@@ -112,6 +129,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   {
     key: "commission-parties",
     label: "Commission parties",
+    customFields: "COMPANY",
     columns: [
       { key: "select", label: "Selection", default: true, required: true, hint: "The tick box for bulk actions." },
       { key: "id", label: "ID", default: true, hint: "The short reference — COM-000123. Shared across customers, vendors and commission parties, so two of them can never carry the same number." },
@@ -128,6 +146,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   {
     key: "leads",
     label: "Leads",
+    customFields: "LEAD",
     columns: [
       { key: "select", label: "Selection", default: true, required: true, hint: "The tick box for bulk actions." },
       { key: "id", label: "ID", default: true, hint: "The short reference — LEAD-000123." },
@@ -436,37 +455,85 @@ export function documentTableKey(docType: TradeDocumentType) {
   return `documents:${docType}`;
 }
 
-/** The columns somebody sees, given what they have stored. Registry order, always. */
-export function resolveColumns(tableKey: string, stored: string[] | null): string[] {
+/** One of the workspace's own fields as a column: its key, and whether it is one by default. */
+export type FieldColumn = { key: string; default: boolean };
+
+/** A stored choice about a field: `cf.` and a field key (src/lib/custom-fields/rules.ts `FIELD_KEY_PATTERN`), `-` when hidden. */
+const FIELD_CHOICE = /^-?cf\.[a-z][a-z0-9_]{0,39}$/;
+
+export function isFieldChoice(entry: unknown): entry is string {
+  return typeof entry === "string" && FIELD_CHOICE.test(entry);
+}
+
+/** The field a stored choice is about. */
+export function fieldOfChoice(entry: string): string {
+  return entry.replace(/^-?cf\./, "");
+}
+
+/** The stored choice that shows or hides one field. */
+export function fieldChoice(fieldKey: string, shown: boolean): string {
+  return `${shown ? "" : "-"}cf.${fieldKey}`;
+}
+
+/**
+ * Whether one of the workspace's own fields is a column for somebody: the choice they made — the
+ * later one, should a stored row ever hold both — or, with none, the field's own default.
+ */
+export function showsField(stored: string[] | null, fieldKey: string, byDefault: boolean): boolean {
+  if (stored === null) return byDefault;
+  for (let i = stored.length - 1; i >= 0; i -= 1) {
+    if (stored[i] === `cf.${fieldKey}`) return true;
+    if (stored[i] === `-cf.${fieldKey}`) return false;
+  }
+  return byDefault;
+}
+
+/**
+ * The columns somebody sees, given what they have stored. Registry order, always — then, given the
+ * fields they may see (in the workspace's order), the ones they show, as `cf.<key>`.
+ */
+export function resolveColumns(tableKey: string, stored: string[] | null, fields: FieldColumn[] = []): string[] {
   const def = BY_KEY.get(tableKey);
   if (!def) return [];
+  const shownFields = def.customFields ? fields.filter((f) => showsField(stored, f.key, f.default)).map((f) => fieldChoice(f.key, true)) : [];
 
   // Never customised: the defaults. Distinct from "customised to nothing", which is a real choice
   // and must survive — hence null rather than an empty array meaning "untouched".
-  if (stored === null) return def.columns.filter((c) => c.default).map((c) => c.key);
+  if (stored === null) return [...def.columns.filter((c) => c.default).map((c) => c.key), ...shownFields];
 
   const chosen = new Set(stored);
-  return def.columns
-    // A required column is always present regardless of what is stored, so a preference saved
-    // before a column became required cannot strand somebody with an unusable table.
-    .filter((c) => c.required || chosen.has(c.key))
-    .map((c) => c.key);
+  return [
+    ...def.columns
+      // A required column is always present regardless of what is stored, so a preference saved
+      // before a column became required cannot strand somebody with an unusable table.
+      .filter((c) => c.required || chosen.has(c.key))
+      .map((c) => c.key),
+    ...shownFields,
+  ];
 }
 
-/** What gets stored when somebody picks. Required columns are implied, so they are not written. */
+/**
+ * What gets stored when somebody picks. Required columns are implied, so they are not written. On a
+ * table that shows the workspace's fields, a choice about one is kept too — one per field, the later
+ * where two disagree; which fields exist is the server's to check (`setTableColumns`).
+ */
 export function normaliseSelection(tableKey: string, selected: string[]): string[] {
   const def = BY_KEY.get(tableKey);
   if (!def) return [];
   const chosen = new Set(selected);
-  return def.columns.filter((c) => !c.required && chosen.has(c.key)).map((c) => c.key);
+  const columns = def.columns.filter((c) => !c.required && chosen.has(c.key)).map((c) => c.key);
+  if (!def.customFields) return columns;
+  const fields = new Map<string, string>();
+  for (const entry of selected) if (isFieldChoice(entry)) fields.set(fieldOfChoice(entry), entry);
+  return [...columns, ...fields.values()];
 }
 
 /** Whether a stored preference still matches the defaults — drives the "Reset" affordance. */
-export function isDefaultSelection(tableKey: string, stored: string[] | null): boolean {
+export function isDefaultSelection(tableKey: string, stored: string[] | null, fields: FieldColumn[] = []): boolean {
   if (stored === null) return true;
   const def = BY_KEY.get(tableKey);
   if (!def) return true;
-  const a = resolveColumns(tableKey, stored).join(",");
-  const b = resolveColumns(tableKey, null).join(",");
+  const a = resolveColumns(tableKey, stored, fields).join(",");
+  const b = resolveColumns(tableKey, null, fields).join(",");
   return a === b;
 }

@@ -26,6 +26,7 @@ import { toBase } from "@/lib/currency";
 import { istCalendarDate, istMidnight } from "@/lib/india-time";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import type { MetricKey } from "@/lib/targets/metrics";
+import { byStageDate } from "@/lib/pipeline/server";
 
 export type MeasureWindow = { from: Date; to: Date; userIds: string[] };
 
@@ -245,23 +246,28 @@ async function splitByUser(
 
     case "LEADS_WON": {
       // Dated by when it was won, not when it was created — a lead opened in March and won in
-      // September belongs to September.
-      const rows = await db.lead.groupBy({
-        by: ["ownerUserId"],
-        where: { status: "WON", ownerUserId: { in: userIds }, updatedAt: range },
-        _count: { _all: true },
-      });
+      // September belongs to September. When it moved to won (`byStageDate`), not when it last changed:
+      // opening a lead rewrites its score, which used to move an old win to today.
+      const rows = await byStageDate((moved) =>
+        db.lead.groupBy({
+          by: ["ownerUserId"],
+          where: { status: "WON", ownerUserId: { in: userIds }, ...moved(range) },
+          _count: { _all: true },
+        }),
+      );
       const byUser = new Map<string, number>();
       for (const r of rows) if (r.ownerUserId) byUser.set(r.ownerUserId, r._count._all);
       return addUp(byUser);
     }
 
     case "LEAD_VALUE_WON": {
-      const rows = await db.lead.groupBy({
-        by: ["ownerUserId"],
-        where: { status: "WON", ownerUserId: { in: userIds }, updatedAt: range },
-        _sum: { estimatedValue: true },
-      });
+      const rows = await byStageDate((moved) =>
+        db.lead.groupBy({
+          by: ["ownerUserId"],
+          where: { status: "WON", ownerUserId: { in: userIds }, ...moved(range) },
+          _sum: { estimatedValue: true },
+        }),
+      );
       const byUser = new Map<string, Prisma.Decimal>();
       for (const r of rows) if (r.ownerUserId) byUser.set(r.ownerUserId, dec(r._sum.estimatedValue));
       // Unrounded, as it always has been — an estimate carries its own precision.

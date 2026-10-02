@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { parseBasicAuth, secretMatches } from "@/lib/lead-capture/credentials";
-import { intakeLead, leadPayloadSchema } from "@/lib/lead-capture/intake";
+import { intakeLead, leadPayloadSchema, readFormBody } from "@/lib/lead-capture/intake";
 import { MAX_BODY_BYTES, RATE_LIMIT_PER_MINUTE } from "@/lib/lead-capture/spec";
 
 /**
@@ -19,6 +19,9 @@ import { MAX_BODY_BYTES, RATE_LIMIT_PER_MINUTE } from "@/lib/lead-capture/spec";
  *   · Over 64 KB, or not JSON or a form: 413 / 415, before anything is parsed.
  *   · More than 60 leads a minute from one key: 429 with Retry-After. A form being spammed, or a
  *     loop in somebody's code, is stopped at one key without affecting the other websites.
+ *
+ * Never refused for one of the workspace's own fields: a value that can't be used is set aside and
+ * listed in the 201's `not_saved` (src/lib/lead-capture/intake.ts).
  *
  * No CORS headers are sent, on purpose: a browser will not make this call, so a secret pasted into
  * page JavaScript fails straight away instead of being quietly exposed to every visitor.
@@ -79,9 +82,9 @@ export async function POST(request: Request) {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
       body = parsed as Record<string, unknown>;
     } else if (type.includes("application/x-www-form-urlencoded")) {
-      body = Object.fromEntries(new URLSearchParams(raw));
-      // A form cannot send an array; products come as "SKU1,SKU2".
-      if (typeof body.products === "string") body.products = body.products.split(",").map((s) => s.trim()).filter(Boolean);
+      // A form cannot send an array or an object: products come as "SKU1,SKU2", the workspace's own
+      // fields as custom_fields[tower]=B.
+      body = readFormBody(raw);
     } else {
       return NextResponse.json({ ok: false, error: "Send application/json or application/x-www-form-urlencoded." }, { status: 415 });
     }
@@ -110,8 +113,9 @@ export async function POST(request: Request) {
     if (result.status === "duplicate") {
       return NextResponse.json({ ok: true, lead: { id: result.leadId, reference: result.reference }, duplicate: true }, { status: 200 });
     }
+    // `not_saved` always, empty or not, so a website's code can read it without checking it is there.
     return NextResponse.json(
-      { ok: true, lead: { id: result.leadId, reference: result.reference }, duplicate: false, assigned: result.assigned },
+      { ok: true, lead: { id: result.leadId, reference: result.reference }, duplicate: false, assigned: result.assigned, not_saved: result.notSaved },
       { status: 201 },
     );
   } catch (error) {

@@ -382,7 +382,12 @@ export function CustomFieldsManager({ entities }: { entities: { entity: CustomFi
                 <input type="checkbox" className="mt-0.5" checked={draft.showInList} onChange={(e) => set("showInList", e.target.checked)} />
                 <span>
                   A column in the list
-                  <span className="block text-xs text-subtle">Shown in the {CUSTOM_FIELD_ENTITY_LABELS[draft.entity].toLowerCase()} list unless somebody hides it.</span>
+                  <span className="block text-xs text-subtle">
+                    {/* Products and contacts have no column picker, so their columns can't be hidden one person at a time. */}
+                    {draft.entity === "ITEM" || draft.entity === "CONTACT"
+                      ? `Shown in the ${CUSTOM_FIELD_ENTITY_LABELS[draft.entity].toLowerCase()} list.`
+                      : `Shown in the ${CUSTOM_FIELD_ENTITY_LABELS[draft.entity].toLowerCase()} list unless somebody hides it with the column picker; anyone can show the others there.`}
+                  </span>
                 </span>
               </label>
             </div>

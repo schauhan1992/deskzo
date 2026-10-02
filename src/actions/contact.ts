@@ -1,6 +1,7 @@
 "use server";
 
 import { customSearchWhere } from "@/lib/custom-fields/server";
+import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { Prisma, type ContactDesignation, type CompanyRelationshipType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -10,7 +11,7 @@ import { pageSlice } from "@/lib/pagination";
 import { noteRecordsRead } from "@/lib/security/bulk-read";
 import { revalidatePath } from "next/cache";
 import { recordAudit } from "@/lib/audit";
-import { bulkUpdateContactsSchema } from "@/lib/validation/company";
+import { bulkUpdateContactsSchema, isContactDetailField } from "@/lib/validation/company";
 import type { ActionResult } from "@/actions/company";
 
 type ContactListParams = {
@@ -19,6 +20,8 @@ type ContactListParams = {
   relationshipType?: CompanyRelationshipType;
   industryId?: string;
   primaryOnly?: boolean;
+  /** The workspace's own contact fields filtered on, as the page read them (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 };
 
 function contactListWhere(params?: ContactListParams, custom: Prisma.ContactWhereInput[] = []): Prisma.ContactWhereInput {
@@ -56,10 +59,29 @@ function contactListWhere(params?: ContactListParams, custom: Prisma.ContactWher
  * This is a different axis from `contacts.viewRestricted` below and neither replaces the other:
  * the scope decides which rows come back at all, redaction decides whether a row that did come
  * back shows its email and phone. A reseller-managed contact out of scope is caught by both.
+ *
+ * The field filters join the same `AND`, a clause each, for the same reason: one can be an `OR`.
  */
 async function scopedContactWhere(userId: string, params?: ContactListParams): Promise<Prisma.ContactWhereInput> {
-  const custom = (await customSearchWhere("CONTACT", userId, params?.search)) as Prisma.ContactWhereInput[];
-  return { AND: [contactListWhere(params, custom), await contactScope(userId)] };
+  const [custom, filters] = await Promise.all([
+    customSearchWhere("CONTACT", userId, params?.search),
+    contactFieldFilters(userId, params?.customFilters),
+  ]);
+  return { AND: [contactListWhere(params, custom as Prisma.ContactWhereInput[]), await contactScope(userId), ...filters] };
+}
+
+/**
+ * The field filters for the contacts list. On a reseller's end customer the contact-detail fields —
+ * another email, a second phone — are hidden from somebody without `contacts.viewRestricted`, as its
+ * email and phone are (src/lib/reseller.ts); a filter on one of them therefore never matches there
+ * for that person, or which rows came back would say what the hidden value is.
+ */
+async function contactFieldFilters(userId: string, filters: CustomFilterInputs | undefined): Promise<Prisma.ContactWhereInput[]> {
+  if (!filters || Object.keys(filters).length === 0) return [];
+  const hidesDetails = !(await seesResellerContactDetails(userId));
+  return (await customFilterWhere("CONTACT", userId, filters, {
+    guard: (def) => (hidesDetails && isContactDetailField(def.type) ? { company: { managedByResellerId: null } } : null),
+  })) as Prisma.ContactWhereInput[];
 }
 
 const contactListInclude = {

@@ -50,6 +50,7 @@ import {
   formSetup,
   saveCustomFields,
 } from "@/lib/custom-fields/server";
+import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -869,25 +870,43 @@ type CompanyListParams = {
   relationshipType?: CompanyRelationshipType;
   createdFrom?: string;
   createdTo?: string;
+  /** The workspace's own fields filtered on, as the page read them from its URL (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 };
+
+/** What the workspace's own fields add to a company list: the search box's branches, and the field filters. */
+type CompanyCustom = { search: Prisma.CompanyWhereInput[]; filters: Prisma.CompanyWhereInput[] };
+const NO_CUSTOM: CompanyCustom = { search: [], filters: [] };
 
 /**
  * The search box on the company lists: the name, or one of the workspace's own fields this person may
- * see (src/lib/custom-fields/server.ts `customSearchWhere`, passed in by the list action). In `AND`
- * rather than spread as `OR`: `categoryFilter` writes an `OR` of its own, and two would keep only
- * whichever came last.
+ * see (src/lib/custom-fields/server.ts `customSearchWhere`, passed in by the list action).
  */
 function companySearch(search: string, custom: Prisma.CompanyWhereInput[]): Prisma.CompanyWhereInput {
   const byName = { normalizedName: { contains: normalizeCompanyName(search) } };
-  return custom.length > 0 ? { AND: [{ OR: [byName, ...custom] }] } : byName;
+  return custom.length > 0 ? { OR: [byName, ...custom] } : byName;
 }
 
-/** `customSearchWhere` for companies, typed for the list builders. */
-async function companyCustomSearch(userId: string, search: string | undefined): Promise<Prisma.CompanyWhereInput[]> {
-  return (await customSearchWhere("COMPANY", userId, search)) as Prisma.CompanyWhereInput[];
+/**
+ * The search and the field filters, as one `AND` of clauses — never spread side by side: the search is
+ * an `OR`, `categoryFilter` writes an `OR` of its own, and so does a field filter now and then ("No" on
+ * a yes-or-no field); two in one object keep only whichever came last.
+ */
+function companyNarrowing(search: string | undefined, custom: CompanyCustom): Prisma.CompanyWhereInput {
+  const clauses = [...(search ? [companySearch(search, custom.search)] : []), ...custom.filters];
+  return clauses.length > 0 ? { AND: clauses } : {};
 }
 
-function companyListWhere(params?: CompanyListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
+/** `customSearchWhere` and `customFilterWhere` for companies, typed for the list builders. */
+async function companyCustom(userId: string, params?: { search?: string; customFilters?: CustomFilterInputs }): Promise<CompanyCustom> {
+  const [search, filters] = await Promise.all([
+    customSearchWhere("COMPANY", userId, params?.search),
+    customFilterWhere("COMPANY", userId, params?.customFilters),
+  ]);
+  return { search: search as Prisma.CompanyWhereInput[], filters: filters as Prisma.CompanyWhereInput[] };
+}
+
+function companyListWhere(params?: CompanyListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: params?.relationshipType ?? "CLIENT",
@@ -896,7 +915,7 @@ function companyListWhere(params?: CompanyListParams, custom: Prisma.CompanyWher
     ...(params?.stage ? { stage: params.stage } : {}),
     ...(params?.hasOrders === true ? { products: { some: {} } } : {}),
     ...(params?.hasOrders === false ? { products: { none: {} } } : {}),
-    ...(params?.search ? companySearch(params.search, custom) : {}),
+    ...companyNarrowing(params?.search, custom),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -936,7 +955,7 @@ const companyListInclude = {
 export async function listCompanies(params?: CompanyListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...companyListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
+    where: { ...companyListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -947,7 +966,7 @@ export async function listCompaniesPaged(params: CompanyListParams & { page: num
   const user = await requireUser();
   // One `where` for both queries below: a pager whose count outran its rows would offer page 9 of
   // a list that ends at page 2.
-  const where = { ...companyListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
+  const where = { ...companyListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -977,9 +996,11 @@ type CustomerListParams = {
   categoryId?: string;
   createdFrom?: string;
   createdTo?: string;
+  /** The workspace's own fields filtered on (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 };
 
-function customerListWhere(params?: CustomerListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
+function customerListWhere(params?: CustomerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: "CLIENT",
@@ -987,7 +1008,7 @@ function customerListWhere(params?: CustomerListParams, custom: Prisma.CompanyWh
     // reseller is who bought from us.
     managedByResellerId: null,
     products: { some: {} },
-    ...(params?.search ? companySearch(params.search, custom) : {}),
+    ...companyNarrowing(params?.search, custom),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -1003,7 +1024,7 @@ function customerListWhere(params?: CustomerListParams, custom: Prisma.CompanyWh
 export async function listCustomers(params?: CustomerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...customerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
+    where: { ...customerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -1011,7 +1032,7 @@ export async function listCustomers(params?: CustomerListParams) {
 
 export async function listCustomersPaged(params: CustomerListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...customerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
+  const where = { ...customerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1039,14 +1060,16 @@ type VendorListParams = {
   vendorStatus?: VendorStatus;
   createdFrom?: string;
   createdTo?: string;
+  /** The workspace's own fields filtered on (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 };
 
-function vendorListWhere(params?: VendorListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
+function vendorListWhere(params?: VendorListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: params?.relationshipType ?? { in: vendorRelationshipTypeValues },
     ...(params?.vendorStatus ? { vendorStatus: params.vendorStatus } : {}),
-    ...(params?.search ? companySearch(params.search, custom) : {}),
+    ...companyNarrowing(params?.search, custom),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -1088,7 +1111,7 @@ const vendorListInclude = {
 export async function listVendors(params?: VendorListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...vendorListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
+    where: { ...vendorListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: vendorListInclude,
   });
@@ -1097,7 +1120,7 @@ export async function listVendors(params?: VendorListParams) {
 /** One page of the Vendors / Commission Parties lists. */
 export async function listVendorsPaged(params: VendorListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...vendorListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
+  const where = { ...vendorListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1216,13 +1239,15 @@ type ResellerListParams = {
   industryId?: string;
   createdFrom?: string;
   createdTo?: string;
+  /** The workspace's own fields filtered on (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 };
 
-function resellerListWhere(params?: ResellerListParams, custom: Prisma.CompanyWhereInput[] = []): Prisma.CompanyWhereInput {
+function resellerListWhere(params?: ResellerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: "RESELLER",
-    ...(params?.search ? companySearch(params.search, custom) : {}),
+    ...companyNarrowing(params?.search, custom),
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -1251,7 +1276,7 @@ const resellerListInclude = {
 export async function listResellers(params?: ResellerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...resellerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) },
+    where: { ...resellerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: resellerListInclude,
   });
@@ -1261,7 +1286,7 @@ export async function listResellersPaged(params: ResellerListParams & { page: nu
   const user = await requireUser();
   // The end-customer tally below is built from this same `where`, so the scope reaches it for free —
   // it counts end customers of the resellers on screen rather than of every reseller in the business.
-  const where = { ...resellerListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)) };
+  const where = { ...resellerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total, endCustomerTotal] = await Promise.all([
     db.company.findMany({
       where,
@@ -1756,6 +1781,6 @@ export async function countVendorsOnboarding(params?: VendorListParams) {
   // Scoped to match `listVendorsPaged`, or the badge would advertise a number of vendors larger
   // than the list underneath it can account for.
   return db.company.count({
-    where: { ...vendorListWhere(params, await companyCustomSearch(user.id, params?.search)), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
+    where: { ...vendorListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
   });
 }

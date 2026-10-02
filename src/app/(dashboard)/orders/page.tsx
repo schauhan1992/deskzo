@@ -17,6 +17,8 @@ import { ColumnPicker } from "@/components/ui/table-columns";
 import { orderStatusValues, orderBusinessTypeValues, orderBusinessTypeLabels } from "@/lib/validation/order";
 import { requireUser } from "@/lib/session";
 import { listColumns } from "@/lib/custom-fields/server";
+import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 
 const HANDOFF_FLAGS = [
@@ -38,7 +40,7 @@ export default async function OrdersPage({
     page?: string;
     pageSize?: string;
     sel?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("orders");
   if (!enabled) {
@@ -58,16 +60,20 @@ export default async function OrdersPage({
   const flag = HANDOFF_FLAGS.find((f) => f.value === params.flag)?.value;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  const customFilters = parseCustomFilters(params);
   const [viewMode, result, user] = await Promise.all([
     getViewMode("orders"),
-    listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize, flag }),
+    listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize, flag, customFilters }),
     requireUser(),
   ]);
   const pendingCount = result.pendingApproval;
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
-  // The workspace's own fields marked "a column in the list" (src/lib/custom-fields) — the table's alone,
-  // so the split view asks for none.
-  const customColumns = viewMode === "split" ? undefined : await listColumns("ORDER", user.id, result.rows.map((o) => o.id));
+  // The workspace's own fields (src/lib/custom-fields): the columns the table can show — the table's
+  // alone, so the split view asks for no values, though the picker still offers them — and the filter panel.
+  const [customColumns, fieldFilters] = await Promise.all([
+    listColumns("ORDER", user.id, viewMode === "split" ? [] : result.rows.map((o) => o.id)),
+    customFilterSetup("ORDER", user.id, customFilters),
+  ]);
 
   const stageFilters: { label: string; value?: OrderStatus }[] = [
     { label: "All" },
@@ -81,6 +87,8 @@ export default async function OrdersPage({
 
   function queryFor(overrides: Record<string, string | undefined>) {
     const next = {
+      // The field filters too, or a status chip would quietly drop them.
+      ...customFilterParams(params),
       status: params.status,
       q: params.q,
       businessType: params.businessType,
@@ -123,7 +131,8 @@ export default async function OrdersPage({
             { value: "reseller", label: "Via reseller" },
           ]}
         />
-        <ColumnPicker tableKey="orders" className="ml-auto" />
+        <CustomFieldFilters setup={fieldFilters} />
+        <ColumnPicker tableKey="orders" className="ml-auto" customColumns={customColumns.columns} />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">

@@ -21,8 +21,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
  *   · the built-in roles, which every user row needs.
  *
  * Everything else is emptied — other users, every record, and the settings too — and then the rows
- * a fresh install gets from its migrations are put back (the starter customer categories). Numbering
- * restarts: the next company is COM-000001 again.
+ * a fresh install gets from its migrations are put back (the starter customer categories, the pipeline
+ * stages every workspace starts with). Numbering restarts: the next company is COM-000001 again.
  *
  * ## How it stays in order
  *
@@ -64,6 +64,14 @@ export const INSTALL_ROWS = [
     // The statement's own ending — its values contain semicolons, so it can't be split on one.
     from: 'INSERT INTO "customer_categories"',
     to: 'ON CONFLICT ("id") DO NOTHING;',
+  },
+  {
+    // The stages every pipeline starts with (src/lib/pipeline) — a workspace with none could take no leads.
+    table: "lead_stages",
+    migration: "20261015100000_lead_pipeline",
+    from: 'INSERT INTO "lead_stages"',
+    // The last row's ending; the ones before it end in a comma.
+    to: "CURRENT_TIMESTAMP);",
   },
 ] as const;
 

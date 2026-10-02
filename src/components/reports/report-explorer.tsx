@@ -12,7 +12,7 @@ import { FilterBuilder } from "@/components/workspace/filter-builder";
 import { ReportChart, type ChartType } from "@/components/reports/report-chart";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
 import { countActiveFilters, describeFilters } from "@/lib/workspace/filters";
-import { DimensionFilters } from "@/components/reports/dimension-filters";
+import { DimensionFilters, GroupedOptions } from "@/components/reports/dimension-filters";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { formatCurrency, cn } from "@/lib/utils";
 
@@ -391,18 +391,14 @@ export function ReportExplorer({
 
             <Field label="Measure">
               <Select aria-label="Measure" value={measure} onChange={(e) => setMeasure(e.target.value)}>
-                {source.measures.map((m) => (
-                  <option key={m.key} value={m.key}>{m.label}</option>
-                ))}
+                <GroupedOptions items={source.measures} />
               </Select>
             </Field>
 
             <Field label="Break down by">
               <Select aria-label="Break down by" value={dimension} onChange={(e) => chooseDimension(e.target.value)}>
                 <option value={TIME}>Time</option>
-                {source.dimensions.map((d) => (
-                  <option key={d.key} value={d.key}>{d.label}</option>
-                ))}
+                <GroupedOptions items={source.dimensions} />
               </Select>
             </Field>
 
@@ -410,11 +406,7 @@ export function ReportExplorer({
               <Select aria-label="Across (optional)" value={column} onChange={(e) => setColumn(e.target.value)}>
                 <option value="">—</option>
                 {dimension !== TIME && <option value={TIME}>Time</option>}
-                {source.dimensions
-                  .filter((d) => d.key !== dimension)
-                  .map((d) => (
-                    <option key={d.key} value={d.key}>{d.label}</option>
-                  ))}
+                <GroupedOptions items={source.dimensions.filter((d) => d.key !== dimension)} />
               </Select>
             </Field>
 
@@ -489,7 +481,7 @@ export function ReportExplorer({
                 </CardHeader>
                 <CardContent>
                   <DimensionFilters
-                    dimensions={source.dimensions.map((d) => ({ key: d.key, label: d.label }))}
+                    dimensions={source.dimensions.map((d) => ({ key: d.key, label: d.label, custom: d.custom }))}
                     values={options.values}
                     counts={options.counts}
                     filters={filters}

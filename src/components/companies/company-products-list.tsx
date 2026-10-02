@@ -198,7 +198,7 @@ export function CompanyProductsList({
   canDeletePayments,
   canAddSeats = true,
 }: {
-  /** Renewals are in the workspace's plan — seats added mid-term are quoted and raised there. */
+  /** Renewals are in the workspace's plan and this person may raise seats (`orders.process`), as `createAddon` decides it. */
   canAddSeats?: boolean;
   companyId: string;
   companyName: string;

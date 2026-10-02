@@ -11,11 +11,14 @@ import { Input, Label } from "@/components/ui/input";
 import {
   API_PATH,
   LEAD_FIELDS,
+  OWN_FIELDS_INTRO,
+  OWN_FIELD_VALUES,
   RESPONSES,
   curlExample,
   nodeExample,
   phpExample,
   renderMarkdown,
+  type OwnFieldGroup,
 } from "@/lib/lead-capture/spec";
 
 type Key = {
@@ -63,7 +66,87 @@ function Code({ children }: { children: string }) {
   );
 }
 
-export function LeadCaptureManager({ keys, baseUrl }: { keys: Key[]; baseUrl: string }) {
+/** Text with the request's own words — `custom_fields` — set as code, as the Markdown has them. */
+function WithCode({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("`").map((part, i) =>
+        i % 2 === 1 ? (
+          <code key={i} className="font-mono text-xs text-text">
+            {part}
+          </code>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
+/** The workspace's own fields a website can fill: what a developer maps a form to. */
+function OwnFields({ groups }: { groups: OwnFieldGroup[] }) {
+  const any = groups.some((g) => g.fields.length > 0);
+  return (
+    <div className="space-y-2">
+      <p className="font-medium text-text">Your own fields</p>
+      {OWN_FIELDS_INTRO.map((p) => (
+        <p key={p} className="text-muted">
+          <WithCode text={p} />
+        </p>
+      ))}
+      {!any && (
+        <p className="text-muted">
+          None yet. Fields added in Settings → Custom fields to leads, companies and contacts appear here — all but the
+          restricted ones, the retired ones and the ones that name a person in the workspace.
+        </p>
+      )}
+      {groups
+        .filter((g) => g.fields.length > 0)
+        .map((g) => (
+          <div key={g.name} className="space-y-1">
+            <p className="text-xs text-muted">
+              <code className="font-mono text-text">{g.name}</code> — {g.record}
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="border-b border-line text-left uppercase tracking-wide text-muted">
+                  <tr>
+                    <th className="py-1.5 pr-3">Key</th>
+                    <th className="py-1.5 pr-3">Field</th>
+                    <th className="py-1.5 pr-3">Value</th>
+                    <th className="py-1.5">Options</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.fields.map((f) => (
+                    <tr key={f.key} className="border-b border-line align-top last:border-0">
+                      <td className="py-1.5 pr-3 font-mono text-text">{f.key}</td>
+                      <td className="py-1.5 pr-3 text-muted">
+                        {f.label}
+                        {f.help && <span className="block text-[11px] text-subtle">{f.help}</span>}
+                        {f.required && <span className="block text-[11px] text-subtle">Required in the CRM, not here</span>}
+                      </td>
+                      <td className="py-1.5 pr-3 text-muted">{OWN_FIELD_VALUES[f.type]}</td>
+                      <td className="py-1.5 text-muted">
+                        {f.options.map((o, i) => (
+                          <span key={o.value}>
+                            {i > 0 && ", "}
+                            <code className="font-mono text-text">{o.value}</code> ({o.label})
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+export function LeadCaptureManager({ keys, baseUrl, ownFields }: { keys: Key[]; baseUrl: string; ownFields: OwnFieldGroup[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +173,7 @@ export function LeadCaptureManager({ keys, baseUrl }: { keys: Key[]; baseUrl: st
   }
 
   function download() {
-    const blob = new Blob([renderMarkdown(baseUrl)], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([renderMarkdown(baseUrl, ownFields)], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -211,6 +294,8 @@ export function LeadCaptureManager({ keys, baseUrl }: { keys: Key[]; baseUrl: st
               </table>
             </div>
           </div>
+
+          <OwnFields groups={ownFields} />
 
           <div className="space-y-1.5">
             <p className="font-medium text-text">Responses</p>

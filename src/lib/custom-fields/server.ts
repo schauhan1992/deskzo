@@ -274,13 +274,18 @@ export async function formSetup(entity: CustomFieldEntityKey, userId: string, ex
 }
 
 /**
- * A list's custom-field columns: the fields marked "a column in the list" that this person may see,
- * and each row's values in words. No columns, no query.
+ * A list's custom-field columns: every field this person may see, each saying whether it is a column
+ * by default — the ones marked "a column in the list" — and each row's values in words. Every field
+ * rather than the marked ones because each person may show or hide any of them for themselves, in the
+ * column picker (src/lib/tables/registry.ts); a choice made there shows at once, with nothing to fetch.
+ *
+ * `listedOnly` for a table without a picker: only the marked fields, which it always shows. No
+ * columns, or no rows, no query.
  */
-export async function listColumns(entity: CustomFieldEntityKey, userId: string, ids: string[]) {
+export async function listColumns(entity: CustomFieldEntityKey, userId: string, ids: string[], options: { listedOnly?: boolean } = {}) {
   const { visible } = await fieldsFor(entity, userId);
-  const defs = visible.filter((d) => d.showInList);
-  const columns = defs.map((d) => ({ key: d.key, label: d.label, numeric: d.type === "NUMBER" || d.type === "MONEY" }));
+  const defs = options.listedOnly ? visible.filter((d) => d.showInList) : visible;
+  const columns = defs.map((d) => ({ key: d.key, label: d.label, numeric: d.type === "NUMBER" || d.type === "MONEY", default: d.showInList }));
   // A page with no rows still shows the columns' headings, so the table keeps its shape.
   if (defs.length === 0 || ids.length === 0) return { columns, texts: {} as Record<string, Record<string, string>> };
   const texts = await formatMany(defs, await valuesOf(entity, ids));

@@ -526,8 +526,9 @@ async function run(scratchUrl: string) {
     ok("  for the administrator: the cost too, in rupees", labels(adminShown).includes("Landed cost=₹1,250.50"), labels(adminShown));
 
     section("Products: list columns and the item page");
-    const execCols = await server.listColumns("ITEM", exec.id, [a1, a2]);
-    const adminCols = await server.listColumns("ITEM", admin.id, [a1, a2]);
+    // The products list has no column picker, so it asks for the marked fields only (`listedOnly`).
+    const execCols = await server.listColumns("ITEM", exec.id, [a1, a2], { listedOnly: true });
+    const adminCols = await server.listColumns("ITEM", admin.id, [a1, a2], { listedOnly: true });
     ok(
       "the list's columns are the fields marked for it, restricted ones only for those who may see them",
       execCols.columns.map((c) => c.label).join(",") === "Batch no.,Quality grade" &&
@@ -535,6 +536,13 @@ async function run(scratchUrl: string) {
         adminCols.texts[a1]?.landed_cost === "₹1,250.50" &&
         execCols.texts[a2]?.batch_no === "B-2",
       `${execCols.columns.map((c) => c.label)} / ${adminCols.columns.map((c) => c.label)}`,
+    );
+    // A list with a picker is offered every field, each with its default (check:custom-field-filters).
+    const choosable = await server.listColumns("ITEM", exec.id, [a1, a2]);
+    ok(
+      "  for a list with a column picker, every field the person sees, the marked ones on by default",
+      choosable.columns.map((c) => `${c.label}:${c.default}`).join(",") === "Batch no.:true,Quality grade:true,Licence expiry:false,Price:false",
+      choosable.columns.map((c) => `${c.label}:${c.default}`).join(","),
     );
     const seq = (await db.item.findUniqueOrThrow({ where: { id: a1 }, select: { itemSeq: true } })).itemSeq;
     const page = async (who: typeof exec) => {

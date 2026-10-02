@@ -16,6 +16,9 @@ import { getViewMode } from "@/actions/view-mode";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { companySourceValues } from "@/lib/validation/company";
+import { requireUser } from "@/lib/session";
+import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 import type { CompanySource } from "@prisma/client";
 
 function asCompanySource(value?: string) {
@@ -36,7 +39,7 @@ export default async function ResellersPage({
     pageSize?: string;
     sel?: string;
     tab?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("resellers");
   if (!enabled) {
@@ -46,6 +49,7 @@ export default async function ResellersPage({
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  const customFilters = parseCustomFilters(params);
   const [viewMode, result, assignableUsers, industries] = await Promise.all([
     getViewMode("resellers"),
     listResellersPaged({
@@ -57,12 +61,15 @@ export default async function ResellersPage({
       industryId: params.industryId,
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
+      customFilters,
     }),
     listAssignableUsers(),
     listIndustries(),
   ]);
 
   const endCustomerTotal = result.endCustomerTotal;
+  // The workspace's own company fields, for the filter panel (src/lib/custom-fields/filters.ts).
+  const fieldFilters = await customFilterSetup("COMPANY", (await requireUser()).id, customFilters);
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
 
   return (
@@ -101,6 +108,7 @@ export default async function ResellersPage({
           options={[{ value: "unassigned", label: "Unassigned" }, ...assignableUsers.map((u) => ({ value: u.id, label: u.name }))]}
         />
         <DateRangePicker fromParam="createdFrom" toParam="createdTo" label="Added on" />
+        <CustomFieldFilters setup={fieldFilters} />
       </div>
 
       {viewMode === "split" ? (

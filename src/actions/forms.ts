@@ -11,7 +11,19 @@ import { isModuleEnabled } from "@/actions/module";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { contactScope } from "@/lib/authz/contact-access";
 import { cleanGrants, formAccessFor, formsWhere, type FormAccess, type FormViewer } from "@/lib/forms/access";
-import { checkFieldsForSave, formatAnswer, isReserved, parseFields, questionsOf } from "@/lib/marketing/form-fields";
+import {
+  FIELD_TYPES,
+  checkFieldsForSave,
+  formatAnswer,
+  isReserved,
+  parseFields,
+  questionsOf,
+  targetFor,
+  type FieldTarget,
+  type FormField,
+} from "@/lib/marketing/form-fields";
+import { OUTSIDE_ENTITIES } from "@/lib/custom-fields/outside";
+import { outsideDefinitions } from "@/lib/custom-fields/outside-server";
 import { checkFormSettings, type FormSettingsInput } from "@/lib/forms/settings";
 import { allowsInvites, CATEGORY_KEYS, categoryOf } from "@/lib/forms/categories";
 import { eventFunnel, formOpenState, hasSeat, inviteLink, inviteStatus } from "@/lib/forms/invites";
@@ -227,6 +239,51 @@ export async function formEditorOptions() {
   return { users };
 }
 
+/**
+ * The workspace's own fields a question can save its answer to — the builder's "Save the answer to".
+ * Only fields a form may fill (src/lib/custom-fields/outside.ts): never a restricted one, whose name
+ * the builder has no business showing to everybody who builds forms.
+ */
+export async function formFieldTargets(): Promise<FieldTarget[]> {
+  const user = await requireModuleUser("forms");
+  if (!(await viewerFor(user))) return [];
+  const defs = await outsideDefinitions();
+  return OUTSIDE_ENTITIES.flatMap((entity) => defs[entity].map((d) => targetFor(entity, d)).filter((t): t is FieldTarget => t !== null));
+}
+
+/**
+ * Every question that saves its answer to a field, checked against the fields as they are now: still
+ * there, still one a form may fill, and asked as that field is. Refused rather than repaired, like the
+ * rest of the builder's save — a field retired since the builder opened is the builder's to unlink. A
+ * choice's options are the field's, written in fresh.
+ */
+async function checkLinks(fields: FormField[]): Promise<{ ok: true; fields: FormField[] } | { ok: false; error: string }> {
+  if (!fields.some((f) => f.saveTo)) return { ok: true, fields };
+  const defs = await outsideDefinitions();
+  const out: FormField[] = [];
+  for (const field of fields) {
+    const saveTo = field.saveTo;
+    if (!saveTo) {
+      out.push(field);
+      continue;
+    }
+    const def = defs[saveTo.entity].find((d) => d.key === saveTo.key);
+    const target = def ? targetFor(saveTo.entity, def) : null;
+    if (!target) {
+      return {
+        ok: false,
+        error: `"${field.label}" saves its answer to a field a form can't fill — one retired, deleted or restricted, or one that names a person in the workspace. Choose another field, or none.`,
+      };
+    }
+    if (field.type !== target.type) {
+      const asked = FIELD_TYPES.find((t) => t.type === target.type)?.label.toLowerCase() ?? target.type;
+      return { ok: false, error: `"${field.label}" has to be asked as ${asked} to save to ${target.label}.` };
+    }
+    out.push({ ...field, options: target.options });
+  }
+  return { ok: true, fields: out };
+}
+
 /** The questions and settings, for the builder. Edit access only. */
 export async function getFormForEdit(formId: string) {
   const user = await requireModuleUser("forms");
@@ -276,7 +333,9 @@ export async function saveForm(
 
   const checked = checkFormSettings(input);
   if (!checked.ok) return checked;
-  const fields = checkFieldsForSave(input.fields);
+  const shaped = checkFieldsForSave(input.fields);
+  if (!shaped.ok) return shaped;
+  const fields = await checkLinks(shaped.fields);
   if (!fields.ok) return fields;
   const settings = checked.settings;
 

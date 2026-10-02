@@ -20,6 +20,8 @@ import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagi
 import { viewerReassignControls } from "@/lib/authz/reassign";
 import { requireUser } from "@/lib/session";
 import { listColumns } from "@/lib/custom-fields/server";
+import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 
 export default async function CustomersPage({
   searchParams,
@@ -36,11 +38,12 @@ export default async function CustomersPage({
     pageSize?: string;
     sel?: string;
     tab?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  const customFilters = parseCustomFilters(params);
   const [viewMode, result, assignableUsers, industries, categories] = await Promise.all([
     getViewMode("customers"),
     listCustomersPaged({
@@ -53,6 +56,7 @@ export default async function CustomersPage({
       categoryId: params.category,
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
+      customFilters,
     }),
     listAssignableUsers(),
     listIndustries(),
@@ -69,9 +73,13 @@ export default async function CustomersPage({
   const rows = result.rows.map((c) => ({ ...c, portal: portal.get(c.id) ?? null }));
 
   const selected = viewMode === "split" ? resolveSelected(rows, params.sel) : null;
-  // The workspace's own fields shown as list columns (src/lib/custom-fields) — for the table; the split view has none.
+  // The workspace's own fields (src/lib/custom-fields): the columns the table can show — the split view
+  // has none, so it asks for no values, but the picker still offers them — and the filter panel.
   const user = await requireUser();
-  const customColumns = viewMode === "split" ? undefined : await listColumns("COMPANY", user.id, rows.map((c) => c.id));
+  const [customColumns, fieldFilters] = await Promise.all([
+    listColumns("COMPANY", user.id, viewMode === "split" ? [] : rows.map((c) => c.id)),
+    customFilterSetup("COMPANY", user.id, customFilters),
+  ]);
 
   return (
     <SplitListPage active={viewMode === "split"}>
@@ -103,7 +111,8 @@ export default async function CustomersPage({
           ]}
         />
         <DateRangePicker fromParam="createdFrom" toParam="createdTo" label="Added on" />
-        <ColumnPicker tableKey="customers" className="ml-auto" />
+        <CustomFieldFilters setup={fieldFilters} />
+        <ColumnPicker tableKey="customers" className="ml-auto" customColumns={customColumns.columns} />
       </div>
 
       {viewMode === "split" ? (

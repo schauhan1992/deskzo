@@ -13,12 +13,14 @@ import { ImportItemsDialog } from "@/components/items/import-items-dialog";
 import { ItemsTable } from "@/components/items/items-table";
 import { requireUser } from "@/lib/session";
 import { listColumns } from "@/lib/custom-fields/server";
+import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 import type { ItemType } from "@prisma/client";
 
 export default async function ItemsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; brandId?: string; q?: string; page?: string; pageSize?: string }>;
+  searchParams: Promise<{ type?: string; brandId?: string; q?: string; page?: string; pageSize?: string } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("items");
   if (!enabled) {
@@ -27,6 +29,9 @@ export default async function ItemsPage({
 
   const params = await searchParams;
   const type = itemTypeValues.includes(params.type as ItemType) ? (params.type as ItemType) : undefined;
+  const customFilters = parseCustomFilters(params);
+  // Carried by the search form and the type chips, which rebuild the query from the page's own parameters.
+  const fieldParams = customFilterParams(params);
   const [result, brands] = await Promise.all([
     listItems({
       type,
@@ -34,11 +39,17 @@ export default async function ItemsPage({
       search: params.q,
       page: resolvePage(params.page),
       pageSize: resolvePageSize(params.pageSize),
+      customFilters,
     }),
     listBrands(),
   ]);
   const user = await requireUser();
-  const customColumns = await listColumns("ITEM", user.id, result.items.map((i) => i.id));
+  // The workspace's own fields: the ones marked "a column in the list" (this table has no column
+  // picker), and the filter panel.
+  const [customColumns, fieldFilters] = await Promise.all([
+    listColumns("ITEM", user.id, result.items.map((i) => i.id), { listedOnly: true }),
+    customFilterSetup("ITEM", user.id, customFilters),
+  ]);
 
   const typeFilters: { label: string; value?: ItemType }[] = [
     { label: "All" },
@@ -52,6 +63,7 @@ export default async function ItemsPage({
   // out-of-range page for the new result set.
   function filterQuery(overrides: Record<string, string | undefined>) {
     const next = {
+      ...fieldParams,
       type: params.type,
       q: params.q,
       brandId: params.brandId,
@@ -97,6 +109,9 @@ export default async function ItemsPage({
         {params.type && <input type="hidden" name="type" value={params.type} />}
         {params.brandId && <input type="hidden" name="brandId" value={params.brandId} />}
         {params.pageSize && <input type="hidden" name="pageSize" value={params.pageSize} />}
+        {Object.entries(fieldParams).map(([name, value]) => (
+          <input key={name} type="hidden" name={name} value={value} />
+        ))}
       </form>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -107,6 +122,7 @@ export default async function ItemsPage({
           options={brands.map((b) => ({ id: b.id, name: b.name }))}
           placeholder="All brands — type to search"
         />
+        <CustomFieldFilters setup={fieldFilters} />
       </div>
 
       <div className="mt-4 flex gap-2">

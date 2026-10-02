@@ -182,7 +182,15 @@ async function main() {
     const categories = await scratch.customerCategory.findMany({ orderBy: { id: "asc" }, select: { id: true, name: true, guidance: true } });
     ok("the starter categories are back exactly as the migration wrote them", JSON.stringify(categories) === JSON.stringify(starter) && categories.length > 20, categories.length);
 
-    const keptNames = new Set([...reset.keptTables().map((k) => k.table), "_prisma_migrations", "customer_categories"]);
+    const stages = await scratch.leadStage.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true } });
+    ok(
+      "  and so are the pipeline stages every workspace starts with",
+      stages.map((s) => s.id).join() === "lstg_new,lstg_contacted,lstg_qualifying,lstg_qualified,lstg_proposal_sent,lstg_negotiation,lstg_won,lstg_lost,lstg_disqualified",
+      stages.length,
+    );
+
+    // Kept, and the rows a fresh install gets from its migrations, which are put back.
+    const keptNames = new Set([...reset.keptTables().map((k) => k.table), "_prisma_migrations", ...reset.INSTALL_ROWS.map((r) => r.table)]);
     const tables = await scratch.$queryRaw<{ tablename: string }[]>`SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = current_schema()`;
     const notEmpty: string[] = [];
     for (const { tablename } of tables) {

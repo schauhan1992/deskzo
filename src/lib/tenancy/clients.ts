@@ -250,7 +250,8 @@ const NOT_YET_EVERYWHERE = {
   // src/lib/custom-fields/server.ts, which treats a workspace without the column as having no values.
   company: { customFields: true },
   contact: { customFields: true },
-  lead: { customFields: true },
+  // 20261015100000_lead_pipeline. Read by name through src/lib/pipeline/server.ts and the lead actions.
+  lead: { customFields: true, stageId: true, stageChangedAt: true },
   item: { customFields: true },
   companyProduct: { customFields: true },
 } satisfies Prisma.GlobalOmitConfig;

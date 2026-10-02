@@ -2,7 +2,8 @@
 
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-import { getTableDefinition, normaliseSelection, TABLE_KEYS } from "@/lib/tables/registry";
+import { fieldOfChoice, getTableDefinition, isFieldChoice, normaliseSelection, TABLE_KEYS } from "@/lib/tables/registry";
+import { definitionsFor } from "@/lib/custom-fields/server";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -40,7 +41,13 @@ export async function setTableColumns(tableKey: string, columns: string[]): Prom
   // Filtered through the registry rather than stored as sent: a key that no longer exists would
   // otherwise sit in the row forever, and a hand-crafted request could fill the column with
   // anything at all.
-  const clean = normaliseSelection(tableKey, columns);
+  let clean = normaliseSelection(tableKey, columns);
+  // The same for a choice about one of the workspace's own fields, which the registry can't know:
+  // kept for a field the workspace has. A retired one counts — restoring it brings the choice back.
+  if (def.customFields && clean.some(isFieldChoice)) {
+    const known = new Set((await definitionsFor(def.customFields)).map((d) => d.key));
+    clean = clean.filter((entry) => !isFieldChoice(entry) || known.has(fieldOfChoice(entry)));
+  }
 
   await db.tablePreference.upsert({
     where: { user_table: { userId: user.id, tableKey } },

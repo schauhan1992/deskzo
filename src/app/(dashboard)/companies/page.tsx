@@ -21,6 +21,8 @@ import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagi
 import { viewerReassignControls } from "@/lib/authz/reassign";
 import { requireUser } from "@/lib/session";
 import { listColumns } from "@/lib/custom-fields/server";
+import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 
 export default async function CompaniesPage({
   searchParams,
@@ -38,11 +40,12 @@ export default async function CompaniesPage({
     pageSize?: string;
     sel?: string;
     tab?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  const customFilters = parseCustomFilters(params);
   // This is the raw CLIENT-track sourcing pool, not the customer list (see /customers) — every
   // company here has `hasOrders: false` by definition, so a `stage: "CUSTOMER"` row within it is
   // always a won deal that's still waiting on its first order, never a real paying customer.
@@ -62,6 +65,7 @@ export default async function CompaniesPage({
       categoryId: params.category,
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
+      customFilters,
     }),
     listAssignableUsers(),
     listIndustries(),
@@ -69,9 +73,13 @@ export default async function CompaniesPage({
   ]);
 
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
-  // The workspace's own fields shown as list columns (src/lib/custom-fields) — for the table; the split view has none.
+  // The workspace's own fields (src/lib/custom-fields): the columns the table can show — the split view
+  // has none, so it asks for no values, but the picker still offers them — and the filter panel.
   const user = await requireUser();
-  const customColumns = viewMode === "split" ? undefined : await listColumns("COMPANY", user.id, result.rows.map((c) => c.id));
+  const [customColumns, fieldFilters] = await Promise.all([
+    listColumns("COMPANY", user.id, viewMode === "split" ? [] : result.rows.map((c) => c.id)),
+    customFilterSetup("COMPANY", user.id, customFilters),
+  ]);
 
   const stageFilters: { label: string; value?: CompanyStage }[] = [
     { label: "All" },
@@ -83,6 +91,8 @@ export default async function CompaniesPage({
 
   function queryFor(overrides: Record<string, string | undefined>) {
     const next = {
+      // The field filters too, or a stage chip would quietly drop them.
+      ...customFilterParams(params),
       stage: params.stage,
       q: params.q,
       assignedTo: params.assignedTo,
@@ -128,7 +138,8 @@ export default async function CompaniesPage({
           options={[{ value: "unassigned", label: "Unassigned" }, ...assignableUsers.map((u) => ({ value: u.id, label: u.name }))]}
         />
         <DateRangePicker fromParam="createdFrom" toParam="createdTo" label="Added on" />
-        <ColumnPicker tableKey="companies" className="ml-auto" />
+        <CustomFieldFilters setup={fieldFilters} />
+        <ColumnPicker tableKey="companies" className="ml-auto" customColumns={customColumns.columns} />
       </div>
 
       <div className="mt-4 flex gap-2">

@@ -752,6 +752,11 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Configuration rather than records: which fields of its own the workspace added to companies, contacts, leads, orders and products, their options and who sees them. Described in the workflow specification to be rebuilt in the target; each record's values travel with the record.",
   },
+  LeadStage: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: the stages the workspace's leads move through (Settings → Pipeline), their names, order and colours, and what each counts as. Described in the workflow specification to be rebuilt in the target; each lead exports with its status, which is what its stage means.",
+  },
   // ─── Backend rebates and vendor credits ────────────────────────────────────────────────────────
   RebateProgramme: {
     disposition: "specification",

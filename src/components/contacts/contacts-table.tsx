@@ -35,7 +35,7 @@ export function ContactsTable({
   customColumns = { columns: [], texts: {} },
 }: {
   contacts: ContactRow[];
-  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`, `listedOnly`): no column picker here. */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const router = useRouter();

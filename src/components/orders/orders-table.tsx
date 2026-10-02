@@ -72,10 +72,15 @@ export function OrdersTable({
   customColumns = { columns: [], texts: {} },
 }: {
   orders: OrderRow[];
-  /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`). */
+  /**
+   * The workspace's own fields this person may see (src/lib/custom-fields/server.ts `listColumns`):
+   * the ones they show in the column picker, or each field's default.
+   */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const cols = useColumns("orders");
+  // The fields this person shows, worked out once: the header and every row draw this one list.
+  const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   return (
     <Card className="overflow-x-auto p-0">
       <table className="w-full text-sm">
@@ -91,7 +96,7 @@ export function OrdersTable({
             {cols.show("vendor") && <th className="px-4 py-2.5">Vendor</th>}
             {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
             {cols.show("actions") && <th className="px-4 py-2.5 text-right">Tell them</th>}
-            <CustomFieldHeaderCells columns={customColumns.columns} className="px-4 py-2.5" />
+            <CustomFieldHeaderCells columns={fieldColumns} className="px-4 py-2.5" />
           </tr>
         </thead>
         <tbody>
@@ -172,13 +177,13 @@ export function OrdersTable({
                     </div>
                   </td>
                 )}
-                <CustomFieldBodyCells columns={customColumns.columns} texts={customColumns.texts[o.id]} className="px-4 py-2.5 text-muted" />
+                <CustomFieldBodyCells columns={fieldColumns} texts={customColumns.texts[o.id]} className="px-4 py-2.5 text-muted" />
               </tr>
             );
           })}
           {orders.length === 0 && (
             <tr>
-              <td colSpan={cols.count + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
+              <td colSpan={cols.count + fieldColumns.length} className="px-4 py-8 text-center text-subtle">
                 No orders found.
               </td>
             </tr>

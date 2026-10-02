@@ -6,11 +6,14 @@ import { SplitRow } from "@/components/ui/split-list";
 import { SELECTED_PARAM } from "@/lib/view-mode";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
+import type { LeadStageDef } from "@/lib/pipeline/rules";
 
 type LeadRow = {
   id: string;
   title: string;
   status: LeadStatus;
+  /** The workspace's own stage it is at (src/lib/pipeline), where the page has it. */
+  stage?: LeadStageDef;
   /** Why a lost or disqualified deal died — shown on hover, never set for an open one. */
   lostReason: string | null;
   estimatedValue: string | null;
@@ -45,7 +48,7 @@ export function LeadSplitList({ leads, selectedId }: { leads: LeadRow[]; selecte
           subtitle={lead.company.name}
           badges={
             <>
-              <LeadStatusBadge status={lead.status} lostReason={lead.lostReason} />
+              <LeadStatusBadge status={lead.status} stage={lead.stage} lostReason={lead.lostReason} />
               {lead.expectedCloseDate && (
                 <span className="text-xs text-subtle">Closes {formatDate(lead.expectedCloseDate)}</span>
               )}

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { istTodayKey } from "@/lib/orders/handoff-rules";
 
 type Quote = NonNullable<Awaited<ReturnType<typeof quoteAddon>>>;
 
@@ -33,7 +34,8 @@ export function AddSeatsDialog({
   const [error, setError] = useState<string | null>(null);
 
   const [quantity, setQuantity] = useState("1");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  // Today in India: before 05:30 IST the UTC day is still yesterday.
+  const [startDate, setStartDate] = useState(() => istTodayKey(new Date()));
   const [annualOverride, setAnnualOverride] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [poNumber, setPoNumber] = useState("");

@@ -27,6 +27,7 @@ import {
   type RenewalItem,
 } from "@/lib/forecast/compute";
 import type { ActionResult } from "@/actions/company";
+import { byStageDate } from "@/lib/pipeline/server";
 
 /**
  * The forecast: sales, renewals, collections and AMC opportunities, period by period.
@@ -63,13 +64,16 @@ function ownerFilter(scope: string[] | null, ownerId: string | undefined): { ids
 async function stageWeights() {
   const since = new Date(Date.now() - 365 * DAY);
   const [closed, overrides] = await Promise.all([
-    db.lead.findMany({
-      where: { status: { in: CLOSED_STAGES }, updatedAt: { gte: since } },
-      select: {
-        status: true,
-        activities: { where: { type: "STAGE_CHANGE" }, orderBy: { occurredAt: "asc" }, select: { notes: true } },
-      },
-    }),
+    // Closed in the last year — when they were closed (src/lib/pipeline `byStageDate`), not last opened.
+    byStageDate((moved) =>
+      db.lead.findMany({
+        where: { status: { in: CLOSED_STAGES }, ...moved({ gte: since }) },
+        select: {
+          status: true,
+          activities: { where: { type: "STAGE_CHANGE" }, orderBy: { occurredAt: "asc" }, select: { notes: true } },
+        },
+      }),
+    ),
     db.forecastStageWeight.findMany(),
   ]);
   const history = closed.map((lead) => {

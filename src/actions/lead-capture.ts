@@ -8,6 +8,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { digestSecret } from "@/lib/crypto";
 import { newCredentials } from "@/lib/lead-capture/credentials";
+import { OWN_FIELD_GROUPS, ownFieldDoc, type OwnFieldGroup } from "@/lib/lead-capture/spec";
+import { fillableFields } from "@/lib/custom-fields/outside-server";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -50,6 +52,17 @@ export async function listCaptureKeys() {
     leads: k._count.leads,
     createdBy: creators.find((c) => c.id === k.createdById)?.name ?? null,
   }));
+}
+
+/**
+ * The workspace's own fields a website can fill, for the documentation: each one's key, type and
+ * options, so a developer can map their form to them. Restricted, retired and person fields are not
+ * listed — a website can't fill them, and a restricted field's name is not for every developer.
+ */
+export async function captureFieldGuide(): Promise<OwnFieldGroup[]> {
+  if (!(await requireAdmin())) return [];
+  const fields = await fillableFields();
+  return OWN_FIELD_GROUPS.map((g) => ({ name: g.name, record: g.record, fields: fields[g.entity].map(ownFieldDoc) }));
 }
 
 const createSchema = z.object({

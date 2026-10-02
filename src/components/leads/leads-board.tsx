@@ -9,17 +9,7 @@ import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { updateLeadStatus } from "@/actions/lead";
 import type { LeadStatus } from "@prisma/client";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
-
-const COLUMNS: { status: LeadStatus; label: string }[] = [
-  { status: "NEW", label: "New" },
-  { status: "CONTACTED", label: "Contacted" },
-  { status: "QUALIFYING", label: "Qualifying" },
-  { status: "QUALIFIED", label: "Qualified" },
-  { status: "PROPOSAL_SENT", label: "Proposal sent" },
-  { status: "NEGOTIATION", label: "Negotiation" },
-  { status: "WON", label: "Won" },
-  { status: "LOST", label: "Lost" },
-];
+import type { LeadStageDef } from "@/lib/pipeline/rules";
 
 const NEEDS_REASON: LeadStatus[] = ["LOST", "DISQUALIFIED"];
 
@@ -27,6 +17,8 @@ type BoardLead = {
   id: string;
   title: string;
   status: LeadStatus;
+  /** The workspace's own stage it is at (`stageOfLead`): which column it sits in. */
+  stage: LeadStageDef;
   /** Why a lost or disqualified deal died — shown on hover, never set for an open one. */
   lostReason: string | null;
   estimatedValue: string | null;
@@ -35,12 +27,17 @@ type BoardLead = {
   score: number | null;
 };
 
-export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
+/**
+ * The pipeline as columns — the workspace's own stages in its order (Settings → Pipeline), each lead in
+ * the one it is at. Dropping a lead on a column moves it there; a stage that counts as lost or
+ * disqualified asks why first.
+ */
+export function LeadsBoard({ leads, stages }: { leads: BoardLead[]; stages: LeadStageDef[] }) {
   const router = useRouter();
   const [items, setItems] = useState(leads);
   const [syncedLeads, setSyncedLeads] = useState(leads);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverStatus, setDragOverStatus] = useState<LeadStatus | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -52,28 +49,28 @@ export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
     setItems(leads);
   }
 
-  function handleDrop(newStatus: LeadStatus) {
+  function handleDrop(target: LeadStageDef) {
     const id = draggedId;
     setDraggedId(null);
-    setDragOverStatus(null);
+    setDragOverStage(null);
     if (!id) return;
 
     const lead = items.find((l) => l.id === id);
-    if (!lead || lead.status === newStatus) return;
+    if (!lead || lead.stage.id === target.id) return;
 
     let lostReason: string | undefined;
-    if (NEEDS_REASON.includes(newStatus)) {
-      const input = window.prompt(`Reason for marking this lead "${newStatus}":`);
+    if (NEEDS_REASON.includes(target.status)) {
+      const input = window.prompt(`Reason for moving this lead to "${target.label}":`);
       if (!input) return;
       lostReason = input;
     }
 
     setError(null);
     const previousItems = items;
-    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, status: newStatus } : l)));
+    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, status: target.status, stage: target, lostReason: lostReason ?? null } : l)));
 
     startTransition(async () => {
-      const result = await updateLeadStatus({ leadId: id, status: newStatus, lostReason });
+      const result = await updateLeadStatus({ leadId: id, stageId: target.id, lostReason });
       if (!result.ok) {
         setItems(previousItems);
         setError(result.error);
@@ -89,21 +86,21 @@ export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
         <div className="mb-3 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</div>
       )}
       <div className="flex gap-4 overflow-x-auto pb-4">
-        {COLUMNS.map((col) => {
-          const columnLeads = items.filter((l) => l.status === col.status);
-          const isDragOver = dragOverStatus === col.status;
+        {stages.map((col) => {
+          const columnLeads = items.filter((l) => l.stage.id === col.id);
+          const isDragOver = dragOverStage === col.id;
           return (
             <div
-              key={col.status}
+              key={col.id}
               className="w-64 flex-shrink-0"
               onDragOver={(e) => {
                 e.preventDefault();
-                if (dragOverStatus !== col.status) setDragOverStatus(col.status);
+                if (dragOverStage !== col.id) setDragOverStage(col.id);
               }}
-              onDragLeave={() => setDragOverStatus((prev) => (prev === col.status ? null : prev))}
+              onDragLeave={() => setDragOverStage((prev) => (prev === col.id ? null : prev))}
               onDrop={(e) => {
                 e.preventDefault();
-                handleDrop(col.status);
+                handleDrop(col);
               }}
             >
               <div className="mb-2 flex items-center justify-between px-1">
@@ -126,7 +123,7 @@ export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
                     }}
                     onDragEnd={() => {
                       setDraggedId(null);
-                      setDragOverStatus(null);
+                      setDragOverStage(null);
                     }}
                   >
                     <Link href={`/leads/${lead.id}`}>
@@ -144,7 +141,7 @@ export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
                             space on a dead deal — where it carries the reason on hover. */}
                         {lead.lostReason && (
                           <div className="mt-1.5">
-                            <LeadStatusBadge status={lead.status} lostReason={lead.lostReason} />
+                            <LeadStatusBadge status={lead.status} stage={lead.stage} lostReason={lead.lostReason} />
                           </div>
                         )}
                         <div className="mt-2 flex items-center justify-between text-xs text-muted">

@@ -8,6 +8,7 @@ import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
+import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { canAddTo, proRata, renewalGroup } from "@/lib/subscriptions/proration";
 import type { ActionResult } from "@/actions/company";
 
@@ -102,10 +103,16 @@ export async function createAddon(input: {
       startDate: true, endDate: true, orderStatus: true, parentId: true, unitPrice: true,
       fullTermUnitPrice: true, paymentTerms: true,
       item: { select: { type: true, name: true } },
-      company: { select: { name: true } },
+      company: { select: { id: true, name: true, relationshipType: true, ownerUserId: true } },
     },
   });
-  if (!parent) return { ok: false, error: "That subscription no longer exists." };
+  // Scoped like punching an order: seats only on an account this person could open. Out of scope and
+  // missing answer the same, so an id can't be used to find out which subscriptions are real.
+  if (!parent || !(await canSeeCompany(user.id, parent.company.ownerUserId))) {
+    return { ok: false, error: "That subscription no longer exists." };
+  }
+  const resellerRefusal = await resellerOrderRefusal(parent.company);
+  if (resellerRefusal) return { ok: false, error: resellerRefusal };
 
   const problems = canAddTo({
     parent: {
@@ -180,7 +187,8 @@ export async function createAddon(input: {
   await recordAudit({
     userId: user.id,
     action: "CREATE",
-    entityType: "CompanyProduct",
+    // An order like any other in the trail, so the history of orders includes the seats added.
+    entityType: "Order",
     entityId: created.id,
     entityLabel: `${input.quantity} × ${parent.item.name} added to ${parent.company.name}'s subscription — ${quote.workings}`,
   });
@@ -197,11 +205,11 @@ export async function createAddon(input: {
  * and, separately, 5 seats".
  */
 export async function subscriptionWithAddons(id: string) {
-  await requireModuleUser("renewals");
+  const user = await requireModuleUser("renewals");
   const parent = await db.companyProduct.findUnique({
     where: { id },
     include: {
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, name: true, ownerUserId: true } },
       endCustomer: { select: { id: true, name: true } },
       item: { select: { id: true, name: true, sku: true, unit: true, type: true, billingCycle: true } },
       addedBy: { select: { id: true, name: true } },
@@ -211,7 +219,8 @@ export async function subscriptionWithAddons(id: string) {
       },
     },
   });
-  if (!parent) return null;
+  // Out of scope answers as missing does: what a customer pays is the account's own business.
+  if (!parent || !(await canSeeCompany(user.id, parent.company.ownerUserId))) return null;
 
   const live = parent.addons.filter((a) => a.orderStatus !== "CANCELLED");
   const group = renewalGroup([

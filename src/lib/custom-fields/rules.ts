@@ -412,7 +412,8 @@ const DAY_LABEL = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "nume
 const NUMBER_LABEL = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 6 });
 const MONEY_LABEL = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
 
-function optionLabel(def: CustomFieldDef, value: string): string {
+/** An option's label by its stored value — a retired option's too; a value no option has reads as itself. */
+export function optionLabel(def: CustomFieldDef, value: string): string {
   return def.options.find((o) => o.value === value)?.label ?? value;
 }
 

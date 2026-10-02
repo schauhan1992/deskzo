@@ -12,6 +12,7 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { changedLabel, customFieldsForCreate, customSearchWhere, saveCustomFields } from "@/lib/custom-fields/server";
+import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { formatOrderId } from "@/lib/order-id";
 import { createOrderSchema, approveOrderSchema, processOrderSchema, orderQuoteSchema, orderDealSchema, approveLossSchema } from "@/lib/validation/order";
 import { COST_SOURCE_LABELS, needsLossApproval, unitCostOf, type CostSource } from "@/lib/rebates/rules";
@@ -29,7 +30,7 @@ import {
 import { peopleHolding, releaseDueOrders, tellPurchase } from "@/lib/orders/handoff";
 import { istCalendarDate } from "@/lib/india-time";
 import { isCustomerRelationshipType, isVendorRelationshipType } from "@/lib/validation/company";
-import { canResellerTrade, resellerStatusLabels } from "@/lib/reseller-onboarding";
+import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import type { ActionResult } from "@/actions/company";
@@ -229,17 +230,9 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
       return { ok: false, error: "That proposal does not belong to this company." };
     }
   }
-  // A reseller can only trade once onboarding is signed off — that gate is the whole point of it.
-  if (company.relationshipType === "RESELLER") {
-    const profile = await db.resellerProfile.findUnique({ where: { companyId: company.id } });
-    if (!profile || !canResellerTrade(profile.status)) {
-      const status = profile ? resellerStatusLabels[profile.status] : "not onboarded";
-      return {
-        ok: false,
-        error: `${company.name} can't be ordered for yet — their reseller onboarding is ${status.toLowerCase()}. Finish it on their company page first.`,
-      };
-    }
-  }
+  // A reseller can only trade once onboarding is signed off — the same gate for seats and renewals.
+  const resellerRefusal = await resellerOrderRefusal(company);
+  if (resellerRefusal) return { ok: false, error: resellerRefusal };
   const payeeError = await validateExpensePayees(data.expenses);
   if (payeeError) {
     return { ok: false, error: payeeError };
@@ -1238,6 +1231,8 @@ type OrderListParams = {
    * purchase still has to deal with.
    */
   flag?: OrderListFlag;
+  /** The workspace's own order fields filtered on, as the page read them (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 };
 
 const ORDER_LIST_FLAGS = ["held", "ready", "review", "vendorPo"] as const;
@@ -1270,6 +1265,8 @@ async function orderListWhere(
         },
       ]
     : [];
+  // The field filters, a clause each in the same `AND` — one can be an `OR` of its own.
+  const fieldFilters = (await customFilterWhere("ORDER", userId, params?.customFilters)) as Prisma.CompanyProductWhereInput[];
   return {
     /**
      * An order reaches its account directly — `CompanyProduct.companyId` is the customer we
@@ -1281,7 +1278,7 @@ async function orderListWhere(
      * losing this one loses the scope. `viaCompanyScope` yields `{}` for an unrestricted viewer,
      * and `AND: [{}]` is no condition at all.
      */
-    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput, ...search],
+    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput, ...search, ...fieldFilters],
     ...(params?.status ? { orderStatus: params.status } : {}),
     ...(params?.businessType ? { businessType: params.businessType } : {}),
     ...(params?.companyId ? { companyId: params.companyId } : {}),

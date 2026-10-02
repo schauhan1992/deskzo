@@ -93,17 +93,23 @@ export function renewalDateToStore(value: string | undefined): Date | null {
 
 export type UpdateLeadRequirementInput = z.infer<typeof updateLeadRequirementSchema>;
 
-export const updateLeadStatusSchema = z.object({
-  leadId: z.string().min(1),
-  status: z.enum(leadStatusValues),
-  lostReason: z.string().trim().optional().or(z.literal("")),
-});
+export const updateLeadStatusSchema = z
+  .object({
+    leadId: z.string().min(1),
+    /** The workspace's own stage to move to (Settings → Pipeline, src/lib/pipeline). */
+    stageId: z.string().min(1).optional(),
+    /** Instead of a stage, for a caller that still names a status: the first stage with that meaning. */
+    status: z.enum(leadStatusValues).optional(),
+    lostReason: z.string().trim().optional().or(z.literal("")),
+  })
+  .refine((v) => v.stageId || v.status, { message: "Choose a stage." });
 
 export type UpdateLeadStatusInput = z.infer<typeof updateLeadStatusSchema>;
 
 export const logActivitySchema = z.object({
   leadId: z.string().min(1),
-  type: z.enum(activityTypeValues),
+  // Not a stage change: those are written by a move alone, and the forecast and wins read them as fact.
+  type: z.enum(activityTypeValues).refine((t) => t !== "STAGE_CHANGE", { message: "Move the lead to change its stage." }),
   notes: z.string().trim().min(1, "Notes are required"),
 });
 
@@ -114,5 +120,7 @@ export const bulkUpdateLeadsSchema = z.object({
   /** "" leaves the field alone; "unassign" clears the owner. */
   ownerUserId: z.string().optional().or(z.literal("")),
   status: z.enum(leadStatusValues).optional().or(z.literal("")),
+  /** The workspace's own stage to move them to — what the bulk bar sends now; `status` is the older form. */
+  stageId: z.string().optional().or(z.literal("")),
   lostReason: z.string().trim().optional().or(z.literal("")),
 });

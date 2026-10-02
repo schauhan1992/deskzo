@@ -5,6 +5,7 @@ const NEW_DOUBLE_SENTENCE =
   "A record can fall in more than one row, so the rows and the column totals add up to more than the total.";
 import { runAnalyticsReport, type ReportRequest } from "@/actions/analytics";
 import { getSource } from "@/lib/analytics/sources";
+import { effectiveSource } from "@/lib/analytics/custom";
 import { countActiveFilters, describeFilters, type WorkbookFilters } from "@/lib/workspace/filters";
 import { workbookFilterOptions } from "@/actions/workspace";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
@@ -43,7 +44,10 @@ export default async function ReportPrintPage({
     return <p className="p-8 text-sm text-danger">{result.error}</p>;
   }
 
-  const source = getSource(request!.source);
+  // Labelled from the source as this reader reports on it: the workspace's own fields included, and
+  // only the ones they may see — the report itself has already refused a link naming any other.
+  const base = getSource(request!.source);
+  const source = base && viewer ? await effectiveSource(base, viewer.id) : base;
   const data = result.data;
   const crossTab = data.columns.length > 1 || data.columns[0]?.key !== "__all__";
   const dimensionLabel =

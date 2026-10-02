@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { newLeadStage } from "@/lib/pipeline/server";
 import { Prisma, type ContactDesignation, type LeadCaptureKey, type LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizeCompanyName } from "@/lib/company-name";
@@ -11,6 +12,9 @@ import { refreshLeadScore } from "@/lib/leads/score-store";
 import { LEAD_SOURCE_VALUES } from "@/lib/leads/source";
 import { postalCodeIssue } from "@/lib/geo/postal";
 import { isIndia } from "@/lib/geo/countries";
+import { describeValues, stillToFillLines, type SkippedValue } from "@/lib/custom-fields/outside";
+import { customFieldsFromOutside, type OutsideFields } from "@/lib/custom-fields/outside-server";
+import { MAX_OWN_FIELDS, type OwnFieldGroupName } from "@/lib/lead-capture/spec";
 
 /**
  * A website enquiry, turned into a company, a contact and a lead.
@@ -29,9 +33,24 @@ import { isIndia } from "@/lib/geo/countries";
  *     contact and no lead — the enquiry is passed to whoever manages the reseller, to route.
  *   · **No marketing consent.** An API call proves nothing about who owns the address it carries, so
  *     unlike a signed-up form it records no consent at all.
+ *   · **The workspace's own fields, only into what it creates.** `custom_fields` go on the new lead;
+ *     `company_fields` and `contact_fields` only on a company or contact this enquiry creates — a
+ *     website never changes a customer already on file (src/lib/custom-fields/outside.ts). A value
+ *     that can't be used is set aside, listed in the answer and noted on the lead; it never costs the
+ *     lead itself. Required fields are not required here: the lead says what is still to fill in.
  */
 
 const text = (max: number) => z.string().trim().max(max).optional().or(z.literal(""));
+
+/**
+ * The workspace's own fields, by key. Only the shape is checked here: each value is checked on its
+ * own in `intakeLead`, where one that can't be used is set aside instead of refusing the whole lead.
+ */
+const ownFields = (name: OwnFieldGroupName) =>
+  z
+    .record(z.string(), z.unknown(), { error: `${name} should be an object of field keys and values` })
+    .refine((v) => Object.keys(v).length <= MAX_OWN_FIELDS, `${name} can name at most ${MAX_OWN_FIELDS} fields`)
+    .optional();
 
 export const leadPayloadSchema = z
   .object({
@@ -60,6 +79,9 @@ export const leadPayloadSchema = z
     utm_medium: text(100),
     utm_campaign: text(100),
     external_id: text(100),
+    custom_fields: ownFields("custom_fields"),
+    company_fields: ownFields("company_fields"),
+    contact_fields: ownFields("contact_fields"),
   })
   .superRefine((v, ctx) => {
     if (!v.email && !v.phone) ctx.addIssue({ code: "custom", path: ["email"], message: "email or phone is required" });
@@ -71,6 +93,38 @@ export type LeadPayload = z.infer<typeof leadPayloadSchema>;
 
 /** Every field the validator accepts — `check:leads` compares this with the documentation. */
 export const ACCEPTED_FIELDS = Object.keys(leadPayloadSchema.shape);
+
+const OWN_FIELD_NAME = /^(custom_fields|company_fields|contact_fields)\[([^[\]]+)\](\[\])?$/;
+
+/**
+ * A plain HTML form's body, read into the shape a JSON body has. A form cannot send an array or an
+ * object, so `products` comes as "SKU1,SKU2" and the workspace's own fields as `custom_fields[tower]`;
+ * a field named twice, or as `custom_fields[regions][]`, is a list. Later values of any other name
+ * replace earlier ones, as they always did.
+ */
+export function readFormBody(raw: string): Record<string, unknown> {
+  const plain: [string, string][] = [];
+  const own = new Map<string, Map<string, { values: string[]; list: boolean }>>();
+  for (const [name, value] of new URLSearchParams(raw)) {
+    const match = OWN_FIELD_NAME.exec(name);
+    if (!match) {
+      plain.push([name, value]);
+      continue;
+    }
+    const [, group = "", key = "", brackets] = match;
+    const fields = own.get(group) ?? new Map<string, { values: string[]; list: boolean }>();
+    own.set(group, fields);
+    const field = fields.get(key) ?? { values: [], list: false };
+    fields.set(key, { values: [...field.values, value], list: field.list || brackets === "[]" || field.values.length > 0 });
+  }
+  // Built with fromEntries, so a key like `__proto__` is just a key — reported as one no field has.
+  const body: Record<string, unknown> = Object.fromEntries(plain);
+  for (const [group, fields] of own) {
+    body[group] = Object.fromEntries([...fields].map(([key, f]) => [key, f.list ? f.values : f.values[0]]));
+  }
+  if (typeof body.products === "string") body.products = body.products.split(",").map((s) => s.trim()).filter(Boolean);
+  return body;
+}
 
 /**
  * A job title, as people type it, read into the CRM's designations.
@@ -104,10 +158,35 @@ export function companyNameFor(p: Pick<LeadPayload, "company" | "email" | "name"
   return `${p.name} (individual)`;
 }
 
+/** One of the workspace's own fields' values that was set aside: `custom_fields.floor`, and why. */
+export type NotSaved = { field: string; reason: string };
+
 export type IntakeResult =
-  | { status: "created"; leadId: string; reference: string; assigned: boolean }
+  | { status: "created"; leadId: string; reference: string; assigned: boolean; notSaved: NotSaved[] }
   | { status: "duplicate"; leadId: string; reference: string }
   | { status: "reseller" };
+
+type SetAside = { group: OwnFieldGroupName; skipped: SkippedValue };
+
+const RECORD_OF: Record<OwnFieldGroupName, string> = { custom_fields: "lead", company_fields: "company", contact_fields: "contact" };
+
+/** The values set aside, as the lead's description notes them for whoever picks it up. */
+function setAsideNote(items: SetAside[]): string | null {
+  if (items.length === 0) return null;
+  const lines = items.map(({ group, skipped: s }) => {
+    if (!s.label) return `· ${group}.${s.key} isn't one of the fields a website can fill.`;
+    const whose = group === "custom_fields" ? "" : `For the ${RECORD_OF[group]}: `;
+    const sent = s.value && !s.reason.includes(`“${s.value}”`) ? ` It was “${s.value}”.` : "";
+    return `· ${whose}${s.reason}${sent}`;
+  });
+  return ["Not saved from the website:", ...lines].join("\n");
+}
+
+/** What was sent for a company or contact already on file — not written to it, but not lost either. */
+function onFileNote(record: string, own: OutsideFields): string | null {
+  const given = describeValues(own.defs, own.values);
+  return given.length ? `Sent for the ${record}, which was already on file, so not saved to it: ${given.join(" · ")}` : null;
+}
 
 export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sourceLabel" | "createdById">, p: LeadPayload): Promise<IntakeResult> {
   // A retry of something already received.
@@ -144,6 +223,19 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
     return { status: "reseller" };
   }
 
+  // The workspace's own fields, each value checked on its own. Read now; written only into the
+  // records the transaction below creates.
+  const [leadOwn, companyOwn, contactOwn] = await Promise.all([
+    customFieldsFromOutside("LEAD", p.custom_fields),
+    customFieldsFromOutside("COMPANY", p.company_fields),
+    customFieldsFromOutside("CONTACT", p.contact_fields),
+  ]);
+  const setAside: SetAside[] = [
+    ...leadOwn.skipped.map((skipped) => ({ group: "custom_fields" as const, skipped })),
+    ...companyOwn.skipped.map((skipped) => ({ group: "company_fields" as const, skipped })),
+    ...contactOwn.skipped.map((skipped) => ({ group: "contact_fields" as const, skipped })),
+  ];
+
   // What the assignment rules look at.
   const items = p.products?.length
     ? await db.item.findMany({ where: { sku: { in: p.products, mode: "insensitive" } }, select: { id: true, sku: true, brandId: true, type: true } })
@@ -169,16 +261,29 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
     .join(" · ")
     .slice(0, 300);
 
-  const description = [
-    p.message,
-    p.designation ? `Designation given: ${p.designation}` : null,
-    unknownSkus.length ? `Products asked for that are not in the catalogue: ${unknownSkus.join(", ")}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  // Which of the company and contact are new is known only inside the transaction, and the
+  // description says different things for each.
+  const describe = (made: { company: boolean; contact: boolean }) =>
+    [
+      p.message,
+      p.designation ? `Designation given: ${p.designation}` : null,
+      unknownSkus.length ? `Products asked for that are not in the catalogue: ${unknownSkus.join(", ")}` : null,
+      setAsideNote(setAside),
+      made.company ? null : onFileNote("company", companyOwn),
+      made.contact ? null : onFileNote("contact", contactOwn),
+      ...stillToFillLines({
+        LEAD: leadOwn.missing,
+        COMPANY: made.company ? companyOwn.missing : [],
+        CONTACT: made.contact ? contactOwn.missing : [],
+      }),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
   let created: { id: string; leadSeq: number };
   try {
+    // Where the lead starts (src/lib/pipeline) — read before the transaction, which holds a connection.
+    const entry = await newLeadStage();
     created = await db.$transaction(async (tx) => {
       const company =
         existingCompany ??
@@ -203,13 +308,16 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
                 isShipping: true,
               },
             },
+            ...companyOwn.data,
           },
           select: { id: true },
         }));
 
-      const contact =
+      const matched =
         (p.email ? await tx.contact.findFirst({ where: { companyId: company.id, email: p.email }, select: { id: true } }) : null) ??
-        (p.phone ? await tx.contact.findFirst({ where: { companyId: company.id, phone: p.phone }, select: { id: true } }) : null) ??
+        (p.phone ? await tx.contact.findFirst({ where: { companyId: company.id, phone: p.phone }, select: { id: true } }) : null);
+      const contact =
+        matched ??
         (await tx.contact.create({
           data: {
             companyId: company.id,
@@ -218,17 +326,19 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
             phone: p.phone || null,
             designation,
             createdByUserId: actorId,
+            ...contactOwn.data,
           },
           select: { id: true },
         }));
 
+      const description = describe({ company: !existingCompany, contact: !matched });
       return tx.lead.create({
         data: {
           companyId: company.id,
           contactId: contact.id,
           title: `${p.product_interest || "Website enquiry"} — ${companyName}`.slice(0, 200),
           description: description || null,
-          status: "NEW",
+          ...entry,
           estimatedValue: p.budget ?? null,
           source,
           sourceDetail: sourceDetail || null,
@@ -239,6 +349,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
           captureKeyId: key.id,
           externalId: p.external_id || null,
           requirements: { create: items.map((i) => ({ itemId: i.id, quantity: p.quantity ?? 1 })) },
+          ...leadOwn.data,
         },
         select: { id: true, leadSeq: true },
       });
@@ -274,5 +385,11 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
     entityLabel: `Website lead via “${key.name}”`,
   });
 
-  return { status: "created", leadId: created.id, reference: formatLeadId(created.leadSeq), assigned: Boolean(owner) };
+  return {
+    status: "created",
+    leadId: created.id,
+    reference: formatLeadId(created.leadSeq),
+    assigned: Boolean(owner),
+    notSaved: setAside.map(({ group, skipped }) => ({ field: `${group}.${skipped.key}`, reason: skipped.reason })),
+  };
 }

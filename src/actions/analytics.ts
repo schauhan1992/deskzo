@@ -6,8 +6,9 @@ import { can } from "@/lib/authz/resolve";
 import { isModuleEnabled } from "@/actions/module";
 import { logActivity } from "@/lib/activity";
 import { FACT_SOURCES, getSource } from "@/lib/analytics/sources";
+import { effectiveSource } from "@/lib/analytics/custom";
 import { dimensionOptions, runReport, type ReportResult } from "@/lib/analytics/run";
-import { GRAINS, ROW_CAP, resolveDateColumn, type Grain } from "@/lib/analytics/types";
+import { GRAINS, ROW_CAP, resolveDateColumn, type FactSource, type Grain } from "@/lib/analytics/types";
 import { csvRow } from "@/lib/csv";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
 import type { ActionResult } from "@/actions/company";
@@ -26,18 +27,20 @@ export type SourceOption = {
   label: string;
   description: string;
   companyAnchored: boolean;
-  measures: { key: string; label: string; description?: string; average?: boolean }[];
-  dimensions: { key: string; label: string; multi?: boolean }[];
+  measures: { key: string; label: string; description?: string; average?: boolean; custom?: boolean }[];
+  dimensions: { key: string; label: string; multi?: boolean; custom?: boolean }[];
   dateFields: { key: string; label: string }[];
 };
 
 /** Every source this person can actually run, with everything it can be sliced by. */
 export async function reportOptions(): Promise<{ sources: SourceOption[]; grains: typeof GRAINS }> {
-  await requireModuleUser("reports");
+  const user = await requireModuleUser("reports");
   const enabled = await Promise.all(
     FACT_SOURCES.map(async (s) => (s.moduleKey === null ? true : isModuleEnabled(s.moduleKey))),
   );
-  const sources = FACT_SOURCES.filter((_, i) => enabled[i]).map((s) => ({
+  // Each with the workspace's own fields this person may report by — src/lib/analytics/custom.ts.
+  const effective = await Promise.all(FACT_SOURCES.filter((_, i) => enabled[i]).map((s) => effectiveSource(s, user.id)));
+  const sources = effective.map((s) => ({
     key: s.key,
     label: s.label,
     description: s.description,
@@ -50,11 +53,27 @@ export async function reportOptions(): Promise<{ sources: SourceOption[]; grains
       label: m.label,
       description: m.description,
       average: m.average === true,
+      custom: m.custom,
     })),
-    dimensions: s.dimensions.map((d) => ({ key: d.key, label: d.label, multi: d.multi })),
+    // `custom` so the explorer can put the workspace's own fields under a heading of their own.
+    dimensions: s.dimensions.map((d) => ({ key: d.key, label: d.label, multi: d.multi, custom: d.custom })),
     dateFields: s.dateFields.map((d) => ({ key: d.key, label: d.label })),
   }));
   return { sources, grains: GRAINS };
+}
+
+/**
+ * The source a request names, as this person may report on it: its module on, and the workspace's
+ * own fields theirs to see added to it (src/lib/analytics/custom.ts). Every action below starts here,
+ * so the explorer, the filter panel, the CSV, the printed sheet and the Copilot all see one source.
+ */
+async function sourceFor(key: string, userId: string): Promise<{ ok: true; source: FactSource<never> } | { ok: false; error: string }> {
+  const source = getSource(key);
+  if (!source) return { ok: false, error: "Unknown report." };
+  if (source.moduleKey && !(await isModuleEnabled(source.moduleKey))) {
+    return { ok: false, error: `The ${source.label} module is switched off.` };
+  }
+  return { ok: true, source: await effectiveSource(source, userId) };
 }
 
 /**
@@ -127,11 +146,9 @@ export async function reportFilterOptions(input: {
   }>
 > {
   const user = await requireModuleUser("reports");
-  const source = getSource(input.source);
-  if (!source) return { ok: false, error: "Unknown report." };
-  if (source.moduleKey && !(await isModuleEnabled(source.moduleKey))) {
-    return { ok: false, error: `The ${source.label} module is switched off.` };
-  }
+  const found = await sourceFor(input.source, user.id);
+  if (!found.ok) return found;
+  const { source } = found;
 
   const window = indianWindow(input.from, input.to);
   if ("error" in window) return { ok: false, error: window.error };
@@ -158,13 +175,47 @@ export async function reportFilterOptions(input: {
   };
 }
 
-export async function runAnalyticsReport(input: ReportRequest): Promise<ActionResult<ReportResult>> {
-  const user = await requireModuleUser("reports");
-  const source = getSource(input.source);
-  if (!source) return { ok: false, error: "Unknown report." };
-  if (source.moduleKey && !(await isModuleEnabled(source.moduleKey))) {
-    return { ok: false, error: `The ${source.label} module is switched off.` };
-  }
+/**
+ * The first thing in a request that this source doesn't offer this person, as the sentence to refuse
+ * it with — or null when everything it names is there.
+ *
+ * The engine is lenient by design: an unknown measure falls back to the first one, an unknown
+ * breakdown puts every row in a single "Total", an unknown filter keeps nothing. None of that
+ * depends on the data behind the key, so none of it can leak a field — but each answers a different
+ * question under the heading of the one asked. An old print link naming a restricted amount, opened
+ * by somebody who may not see it, would print the order value as "cf:order:landed_cost by customer".
+ *
+ * So it is refused instead, and in the same words whether the thing never existed, was retired, or
+ * is a field this person may not see — a refusal that told those apart would be a way of finding out
+ * what the restricted fields are called. The key is the request's own, so naming it gives nothing away.
+ */
+function unknownKey(source: FactSource<never>, input: ReportRequest): string | null {
+  const breakdowns = new Set(["time", ...source.dimensions.map((d) => d.key)]);
+  const missing = [
+    ...(source.measures.some((m) => m.key === input.measure) ? [] : [input.measure]),
+    ...[input.dimension, input.column].filter((key): key is string => !!key && !breakdowns.has(key)),
+    // An empty list filters nothing (runReport skips it), so it is not a question about that key.
+    ...Object.entries(input.filters ?? {})
+      .filter(([key, values]) => values.length > 0 && !breakdowns.has(key))
+      .map(([key]) => key),
+  ];
+  if (missing.length === 0) return null;
+  return `“${missing[0]}” isn't something you can report ${source.label.toLowerCase()} by — it may have been removed, or not be open to you.`;
+}
+
+/**
+ * A report, run as this person, with the source it was run against — the export needs that source's
+ * labels, and building it a second time could disagree with the first if a field changed in between.
+ */
+async function runAs(
+  user: { id: string; name: string },
+  input: ReportRequest,
+): Promise<ActionResult<{ result: ReportResult; source: FactSource<never> }>> {
+  const found = await sourceFor(input.source, user.id);
+  if (!found.ok) return found;
+  const { source } = found;
+  const refused = unknownKey(source, input);
+  if (refused) return { ok: false, error: refused };
 
   const window = indianWindow(input.from, input.to);
   if ("error" in window) return { ok: false, error: window.error };
@@ -210,7 +261,13 @@ export async function runAnalyticsReport(input: ReportRequest): Promise<ActionRe
     },
   });
 
-  return { ok: true, data: result };
+  return { ok: true, data: { result, source } };
+}
+
+export async function runAnalyticsReport(input: ReportRequest): Promise<ActionResult<ReportResult>> {
+  const user = await requireModuleUser("reports");
+  const ran = await runAs(user, input);
+  return ran.ok ? { ok: true, data: ran.data.result } : ran;
 }
 
 /** The table as it stands, for somebody who wants it in a spreadsheet. */
@@ -257,11 +314,15 @@ export async function exportReportCsv(input: ReportRequest): Promise<ActionResul
     };
   }
 
-  const result = await runAnalyticsReport(input);
-  if (!result.ok) return result;
+  const ran = await runAs(user, input);
+  if (!ran.ok) return ran;
+  // Labelled from the source the report ran against, the workspace's own fields included — so a
+  // breakdown by one is headed "Customer · Region", not with its key.
+  const { result, source } = ran.data;
+  const labelOf = (key: string) => (key === "time" ? "Period" : (source.dimensions.find((d) => d.key === key)?.label ?? key));
 
-  const { columns, rows } = result.data;
-  const header = [getSource(input.source)?.dimensions.find((d) => d.key === input.dimension)?.label ?? "Group"];
+  const { columns, rows } = result;
+  const header = [labelOf(input.dimension)];
   if (columns.length > 1 || columns[0]?.key !== "__all__") header.push(...columns.map((c) => c.label));
   header.push("Total");
 
@@ -287,25 +348,23 @@ export async function exportReportCsv(input: ReportRequest): Promise<ActionResul
    * contiguous block starting at a header row, which is what anything parsing it needs, and anybody
    * opening it in Excel reads the provenance first.
    */
-  const source = getSource(input.source);
-  const dimensionLabel = source?.dimensions.find((d) => d.key === input.dimension)?.label ?? input.dimension;
   const applied = Object.entries(input.filters ?? {})
     .filter(([, values]) => values.length > 0)
-    .map(([key, values]) => `${source?.dimensions.find((d) => d.key === key)?.label ?? key}: ${values.join(", ")}`);
+    .map(([key, values]) => `${labelOf(key)}: ${values.join(", ")}`);
 
   const context = [
-    line(["Report", `${source?.measures.find((m) => m.key === input.measure)?.label ?? input.measure} by ${dimensionLabel}`]),
-    line(["Records", source?.label ?? input.source]),
-    line(["Dated on", source?.dateFields.find((d) => d.key === input.dateField)?.label ?? input.dateField]),
+    line(["Report", `${source.measures.find((m) => m.key === input.measure)?.label ?? input.measure} by ${labelOf(input.dimension)}`]),
+    line(["Records", source.label]),
+    line(["Dated on", source.dateFields.find((d) => d.key === input.dateField)?.label ?? input.dateField]),
     line(["Window", `${input.from} to ${input.to}`]),
-    line(["Scope", result.data.scopeNote]),
+    line(["Scope", result.scopeNote]),
     line(["Run by", user.name]),
     ...(applied.length > 0 ? [line(["Filtered to", applied.join(" · ")])] : []),
-    ...(result.data.filteredOut > 0 ? [line(["Rows excluded by filters", result.data.filteredOut])] : []),
+    ...(result.filteredOut > 0 ? [line(["Rows excluded by filters", result.filteredOut])] : []),
     // The two caveats that change what the numbers mean. Omitting them from the file while showing
     // them on screen is how a floor gets forwarded as a total.
-    ...(result.data.truncated ? [line(["Warning", "Hit the row ceiling — these are floors, not totals."])] : []),
-    ...(result.data.doubleCounted
+    ...(result.truncated ? [line(["Warning", "Hit the row ceiling — these are floors, not totals."])] : []),
+    ...(result.doubleCounted
       ? [line(["Warning", "A record can fall in more than one row, so the rows and the column totals add up to more than the total."])]
       : []),
     "",
@@ -314,13 +373,13 @@ export async function exportReportCsv(input: ReportRequest): Promise<ActionResul
   await logActivity({
     kind: "EXPORT",
     severity: "WARNING",
-    summary: `${user.name} downloaded a ${input.source} report — ${rows.length} row(s) over ${result.data.rowCount.toLocaleString("en-IN")} records`,
+    summary: `${user.name} downloaded a ${input.source} report — ${rows.length} row(s) over ${result.rowCount.toLocaleString("en-IN")} records`,
     metadata: {
       source: input.source,
       measure: input.measure,
       by: input.dimension,
       rows: rows.length,
-      records: result.data.rowCount,
+      records: result.rowCount,
       from: input.from,
       to: input.to,
     },
@@ -329,7 +388,8 @@ export async function exportReportCsv(input: ReportRequest): Promise<ActionResul
   return {
     ok: true,
     data: {
-      filename: `${input.source}-by-${input.dimension}-${input.from}-to-${input.to}.csv`,
+      // A field's key carries colons ("cf:company:region"), which no file name on Windows may.
+      filename: `${input.source}-by-${input.dimension.replace(/[^a-z0-9_-]+/gi, "-")}-${input.from}-to-${input.to}.csv`,
       csv: [...context, line(header), ...body].join("\n"),
     },
   };

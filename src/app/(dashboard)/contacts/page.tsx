@@ -11,6 +11,8 @@ import { contactDesignationValues, relationshipTypeValues, relationshipTypeLabel
 import type { ContactDesignation, CompanyRelationshipType } from "@prisma/client";
 import { requireUser } from "@/lib/session";
 import { fieldsFor, listColumns } from "@/lib/custom-fields/server";
+import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 
 export default async function ContactsLibraryPage({
   searchParams,
@@ -23,7 +25,7 @@ export default async function ContactsLibraryPage({
     primaryOnly?: string;
     page?: string;
     pageSize?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("contacts_library");
   if (!enabled) {
@@ -33,6 +35,7 @@ export default async function ContactsLibraryPage({
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  const customFilters = parseCustomFilters(params);
   const [result, industries] = await Promise.all([
     listAllContactsPaged({
       page,
@@ -42,11 +45,15 @@ export default async function ContactsLibraryPage({
       relationshipType: params.relationshipType as CompanyRelationshipType | undefined,
       industryId: params.industryId,
       primaryOnly: params.primaryOnly === "yes",
+      customFilters,
     }),
     listIndustries(),
   ]);
   const user = await requireUser();
-  const customColumns = await contactColumns(user.id, result.rows);
+  const [customColumns, fieldFilters] = await Promise.all([
+    contactColumns(user.id, result.rows),
+    customFilterSetup("CONTACT", user.id, customFilters),
+  ]);
 
   return (
     <div>
@@ -80,6 +87,7 @@ export default async function ContactsLibraryPage({
           allLabel="All contacts"
           options={[{ value: "yes", label: "Primary only" }]}
         />
+        <CustomFieldFilters setup={fieldFilters} />
       </div>
 
       <div className="mt-6">
@@ -98,12 +106,13 @@ export default async function ContactsLibraryPage({
 }
 
 /**
- * The workspace's own fields shown as list columns (src/lib/custom-fields). On a reseller's end
- * customer the contact-detail ones (`isContactDetailField`) stay blank, as its email and phone do
- * (src/lib/reseller.ts) — left out here, so they never reach the browser.
+ * The workspace's own fields marked "a column in the list" (src/lib/custom-fields) — this table has no
+ * column picker, so those and only those. On a reseller's end customer the contact-detail ones
+ * (`isContactDetailField`) stay blank, as its email and phone do (src/lib/reseller.ts) — left out
+ * here, so they never reach the browser.
  */
 async function contactColumns(userId: string, rows: { id: string; detailsRedacted: boolean }[]) {
-  const [columns, { visible }] = await Promise.all([listColumns("CONTACT", userId, rows.map((r) => r.id)), fieldsFor("CONTACT", userId)]);
+  const [columns, { visible }] = await Promise.all([listColumns("CONTACT", userId, rows.map((r) => r.id), { listedOnly: true }), fieldsFor("CONTACT", userId)]);
   const hidden = new Set(visible.filter((d) => isContactDetailField(d.type)).map((d) => d.key));
   if (hidden.size === 0 || !rows.some((r) => r.detailsRedacted)) return columns;
   const texts: Record<string, Record<string, string>> = {};

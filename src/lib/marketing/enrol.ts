@@ -19,6 +19,7 @@ import {
 } from "@/lib/marketing/pipeline";
 import { formatDate } from "@/lib/utils";
 import { currentKeys } from "@/lib/tenancy/keys";
+import { byStageDate } from "@/lib/pipeline/server";
 
 /**
  * Finding who should be in a journey, and moving them along it.
@@ -240,34 +241,38 @@ export async function candidatesFor(
     }
 
     case "LEAD_STALLED": {
-      const rows = await db.lead.findMany({
-        where: {
-          company,
-          status: { notIn: ["WON", "LOST", "DISQUALIFIED"] },
-          updatedAt: { lt: daysAgo(days) },
-        },
-        select: { id: true, companyId: true, title: true, contactId: true },
-        take: 1000,
-      });
+      // No movement: not moved stage in that long (src/lib/pipeline `byStageDate`). `updatedAt` moves on
+      // every view and every tick, so a lead never went quiet by it.
+      const rows = await byStageDate((moved) =>
+        db.lead.findMany({
+          where: { company, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] }, ...moved({ lt: daysAgo(days) }) },
+          select: { id: true, companyId: true, title: true, contactId: true },
+          take: 1000,
+        }),
+      );
       return rows.map((r) => ({ companyId: r.companyId, subjectId: r.id, contactId: r.contactId, merge: { productName: r.title } }));
     }
 
     case "PROPOSAL_NO_RESPONSE": {
-      const rows = await db.lead.findMany({
-        where: { company, status: "PROPOSAL_SENT", updatedAt: { lt: daysAgo(days) } },
-        select: { id: true, companyId: true, title: true, contactId: true },
-        take: 1000,
-      });
+      const rows = await byStageDate((moved) =>
+        db.lead.findMany({
+          where: { company, status: "PROPOSAL_SENT", ...moved({ lt: daysAgo(days) }) },
+          select: { id: true, companyId: true, title: true, contactId: true },
+          take: 1000,
+        }),
+      );
       return rows.map((r) => ({ companyId: r.companyId, subjectId: r.id, contactId: r.contactId, merge: { productName: r.title } }));
     }
 
     case "LEAD_LOST_REVISIT": {
-      const rows = await db.lead.findMany({
-        // Lost, not disqualified: lost means somebody else won it and their contract will end.
-        where: { company, status: "LOST", updatedAt: { lt: daysAgo(days) } },
-        select: { id: true, companyId: true, title: true, contactId: true },
-        take: 1000,
-      });
+      const rows = await byStageDate((moved) =>
+        db.lead.findMany({
+          // Lost, not disqualified: lost means somebody else won it and their contract will end.
+          where: { company, status: "LOST", ...moved({ lt: daysAgo(days) }) },
+          select: { id: true, companyId: true, title: true, contactId: true },
+          take: 1000,
+        }),
+      );
       return rows.map((r) => ({ companyId: r.companyId, subjectId: r.id, contactId: r.contactId, merge: { productName: r.title } }));
     }
 
@@ -449,10 +454,13 @@ async function exitSignalsFor(enrolment: { companyId: string; enrolledAt: Date }
   const [orders, tickets, leads] = await Promise.all([
     db.companyProduct.count({ where: { companyId: enrolment.companyId, createdAt: { gte: enrolment.enrolledAt } } }),
     db.ticket.count({ where: { companyId: enrolment.companyId, createdAt: { gte: enrolment.enrolledAt } } }),
-    db.lead.findMany({
-      where: { companyId: enrolment.companyId, updatedAt: { gte: enrolment.enrolledAt } },
-      select: { status: true },
-    }),
+    // Won or lost since they were enrolled — moved there since (src/lib/pipeline `byStageDate`).
+    byStageDate((moved) =>
+      db.lead.findMany({
+        where: { companyId: enrolment.companyId, ...moved({ gte: enrolment.enrolledAt }) },
+        select: { status: true },
+      }),
+    ),
   ]);
   return {
     replied: false, // Inbound reply detection needs a mailbox to read; nothing claims it yet.

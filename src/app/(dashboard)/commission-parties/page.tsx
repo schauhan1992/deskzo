@@ -21,6 +21,8 @@ import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagi
 import { viewerReassignControls } from "@/lib/authz/reassign";
 import { requireUser } from "@/lib/session";
 import { listColumns } from "@/lib/custom-fields/server";
+import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
+import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 
 // Search params reach Prisma's enum filters directly, so anything unrecognised is dropped rather
 // than passed through — an unknown value would otherwise fail the query and 500 the page.
@@ -47,7 +49,7 @@ export default async function CommissionPartiesPage({
     pageSize?: string;
     sel?: string;
     tab?: string;
-  }>;
+  } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("commission_parties");
   if (!enabled) {
@@ -66,6 +68,7 @@ export default async function CommissionPartiesPage({
     vendorStatus: asVendorStatus(params.vendorStatus),
     createdFrom: params.createdFrom,
     createdTo: params.createdTo,
+    customFilters: parseCustomFilters(params),
   };
   const [viewMode, result, assignableUsers, industries, onboardingCount] = await Promise.all([
     getViewMode("commission-parties"),
@@ -76,9 +79,13 @@ export default async function CommissionPartiesPage({
   ]);
 
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
-  // The workspace's own fields shown as list columns (src/lib/custom-fields) — for the table; the split view has none.
+  // The workspace's own fields (src/lib/custom-fields): the columns the table can show — the split view
+  // has none, so it asks for no values, but the picker still offers them — and the filter panel.
   const user = await requireUser();
-  const customColumns = viewMode === "split" ? undefined : await listColumns("COMPANY", user.id, result.rows.map((c) => c.id));
+  const [customColumns, fieldFilters] = await Promise.all([
+    listColumns("COMPANY", user.id, viewMode === "split" ? [] : result.rows.map((c) => c.id)),
+    customFilterSetup("COMPANY", user.id, vendorFilters.customFilters),
+  ]);
 
   return (
     <SplitListPage active={viewMode === "split"}>
@@ -124,7 +131,8 @@ export default async function CommissionPartiesPage({
           ]}
         />
         <DateRangePicker fromParam="createdFrom" toParam="createdTo" label="Added on" />
-        <ColumnPicker tableKey="commission-parties" className="ml-auto" />
+        <CustomFieldFilters setup={fieldFilters} />
+        <ColumnPicker tableKey="commission-parties" className="ml-auto" customColumns={customColumns.columns} />
       </div>
 
       {viewMode === "split" ? (

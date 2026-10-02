@@ -19,6 +19,7 @@ import { parseSeqQuery, formatItemId } from "@/lib/order-id";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { recordAudit } from "@/lib/audit";
 import { changedLabel, customFieldsForCreate, customSearchWhere, fieldsFor, saveCustomFields, valuesFor } from "@/lib/custom-fields/server";
+import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { customSheetFor, exportCells } from "@/lib/custom-fields/sheets";
 import { hasEffectivePermission } from "@/actions/permission";
 import { canonicalColumn, cleanName, nameKey } from "@/lib/items/catalogue-import";
@@ -242,12 +243,16 @@ export async function listItems(params?: {
   activeOnly?: boolean;
   page?: number;
   pageSize?: number;
+  /** The workspace's own product fields filtered on, as the page read them (src/lib/custom-fields/filters.ts). */
+  customFilters?: CustomFilterInputs;
 }) {
   const user = await requireModuleUser("items");
 
   const seq = params?.search ? parseSeqQuery(params.search) : null;
   // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts).
   const customBranches = await customSearchWhere("ITEM", user.id, params?.search);
+  // And filtered on: a clause each, in an `AND` of their own beside the search's `OR`.
+  const fieldFilters = (await customFilterWhere("ITEM", user.id, params?.customFilters)) as Prisma.ItemWhereInput[];
   const where = {
     ...(params?.type ? { type: params.type } : {}),
     ...(params?.brandId ? { brandId: params.brandId } : {}),
@@ -263,6 +268,7 @@ export async function listItems(params?: {
           ],
         }
       : {}),
+    ...(fieldFilters.length > 0 ? { AND: fieldFilters } : {}),
   };
 
   const pageSize = params?.pageSize ?? DEFAULT_PAGE_SIZE;

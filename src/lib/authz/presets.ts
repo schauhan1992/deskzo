@@ -118,6 +118,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "notes.broadcast",
       "people.handover",
       "fields.seeRestricted",
+      // The stages leads move through (owner, 2 Oct 2026).
+      "pipeline.manage",
     ],
   },
   // ─── Calling / profiling ────────────────────────────────────────────────────────────────────
@@ -315,6 +317,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       // The workspace's own fields, and the restricted ones among them (owner, 2 Oct 2026).
       "fields.manage",
       "fields.seeRestricted",
+      "pipeline.manage",
     ],
   },
   {

@@ -26,7 +26,37 @@ import { Input, Select } from "@/components/ui/input";
  * account they cannot see. A list cannot leak what it never contains.
  */
 
-export type DimensionOption = { key: string; label: string };
+/** `custom`: one of the workspace's own fields (src/lib/analytics/custom.ts). */
+export type DimensionOption = { key: string; label: string; custom?: boolean };
+
+/**
+ * A select's options: the source's own first, then the workspace's own fields under a heading of
+ * their own. Listed in one run, a company's "Region" sits among the product's breakdowns as though
+ * it were one of them, and a workspace with thirty fields buries "Salesperson" in the middle.
+ */
+export function GroupedOptions({ items }: { items: { key: string; label: string; custom?: boolean }[] }) {
+  const yours = items.filter((i) => i.custom);
+  return (
+    <>
+      {items
+        .filter((i) => !i.custom)
+        .map((i) => (
+          <option key={i.key} value={i.key}>
+            {i.label}
+          </option>
+        ))}
+      {yours.length > 0 && (
+        <optgroup label="Your fields">
+          {yours.map((i) => (
+            <option key={i.key} value={i.key}>
+              {i.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
+}
 
 export function DimensionFilters({
   dimensions,
@@ -116,11 +146,7 @@ export function DimensionFilters({
             className="h-8 w-56 text-xs"
           >
             <option value="">Narrow by…</option>
-            {addable.map((d) => (
-              <option key={d.key} value={d.key}>
-                {d.label}
-              </option>
-            ))}
+            <GroupedOptions items={addable} />
           </Select>
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-subtle" />}
         </div>

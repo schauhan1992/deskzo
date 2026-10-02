@@ -33,6 +33,7 @@
  */
 
 import { IST_OFFSET_MS, istDateParts, istMidnight } from "@/lib/india-time";
+import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
 
 export type Grain = "day" | "week" | "month" | "quarter" | "year";
@@ -68,6 +69,8 @@ export type Measure<Row> = {
   /** Averaged over the rows that contributed rather than summed — resolution time, say. */
   average?: boolean;
   description?: string;
+  /** One of the workspace's own fields (src/lib/analytics/custom.ts), offered under "Your fields". */
+  custom?: boolean;
 };
 
 export type Dimension<Row> = {
@@ -83,6 +86,32 @@ export type Dimension<Row> = {
    */
   of: (row: Row) => string | string[];
   multi?: boolean;
+  /** One of the workspace's own fields (src/lib/analytics/custom.ts), offered under "Your fields". */
+  custom?: boolean;
+};
+
+/**
+ * A record a source's rows reach whose own fields (src/lib/custom-fields) a report can use — the
+ * order itself, its customer, its product.
+ *
+ * Declared on the source beside the load that fetches them, because the two have to agree: a reach
+ * listed here whose column the load never asks for is a dimension that is always empty, and an
+ * always-empty dimension reads as a business with no regions rather than as a broken report.
+ * src/lib/analytics/custom.ts turns the fields one person may see on each record into dimensions,
+ * and the number fields on the rows' own records into measures.
+ */
+export type CustomFieldReach<Row> = {
+  entity: CustomFieldEntityKey;
+  /** What the record is called in this source's labels: "Customer" makes "Customer · Region". */
+  noun: string;
+  /**
+   * The rows *are* these records, so a number field on them can be added up. Only then: a
+   * customer's credit limit repeats on every order of theirs, and totalled over the orders it would
+   * be counted once per order — a confident number nobody could use.
+   */
+  own?: boolean;
+  /** The record's stored values off a loaded row. Absent when the load was not asked for them. */
+  values: (row: Row) => unknown;
 };
 
 /** A date column a report can be placed on. An order has several and they mean different things. */
@@ -128,6 +157,12 @@ export type SourceContext = {
    * one place that does it.
    */
   dateColumn: string;
+  /**
+   * Which records' own fields the rows should carry, as `customFields` — the record's, its company's,
+   * its product's. Set by src/lib/analytics/custom.ts for the fields this person can report by; absent,
+   * a load names none of those columns, exactly as it did before there were any.
+   */
+  customFields?: ReadonlySet<CustomFieldEntityKey>;
 };
 
 /**
@@ -165,6 +200,8 @@ export type FactSource<Row = never> = {
   measures: Measure<Row>[];
   dimensions: Dimension<Row>[];
   dateFields: DateField<Row>[];
+  /** The records whose own fields this source can be broken down by — see `CustomFieldReach`. */
+  customFields?: CustomFieldReach<Row>[];
 };
 
 // ─── Time buckets ───────────────────────────────────────────────────────────────────────────────

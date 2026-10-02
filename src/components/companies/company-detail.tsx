@@ -74,6 +74,8 @@ import { CategoryChip, CategoryGuidance } from "@/components/customers/category-
 import { CategoryPicker } from "@/components/customers/category-picker";
 import { listCustomerCategories } from "@/actions/customer-category";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
+import { leadStages, stagesOfLeads } from "@/lib/pipeline/server";
+import { readStageNote } from "@/lib/pipeline/rules";
 import { CallList } from "@/components/calls/call-list";
 import { DomainPanel } from "@/components/domains/domain-panel";
 import { getDomainBriefing } from "@/actions/domain";
@@ -382,8 +384,17 @@ export async function CompanyDetail({
   const wonValue = wonLeads.reduce((sum, l) => sum + Number(l.estimatedValue ?? 0), 0);
   const openValue = openLeads.reduce((sum, l) => sum + Number(l.estimatedValue ?? 0), 0);
 
+  // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): each lead's, and its moves in their names.
+  const [{ stages: pipelineStages }, leadStage] = await Promise.all([leadStages(), stagesOfLeads(company.leads)]);
   const timeline = company.leads
-    .flatMap((l) => l.activities.map((a) => ({ ...a, leadId: l.id, leadTitle: l.title })))
+    .flatMap((l) =>
+      l.activities.map((a) => ({
+        ...a,
+        notes: a.type === "STAGE_CHANGE" ? readStageNote(a.notes, pipelineStages) : a.notes,
+        leadId: l.id,
+        leadTitle: l.title,
+      })),
+    )
     .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 
   return (
@@ -941,7 +952,8 @@ export async function CompanyDetail({
                   // Payments against an order are the Payments module's; seats added mid-term, Renewals'.
                   canRecordPayments={canRecordPayments && paymentsEnabled}
                   canDeletePayments={canDeletePayments && paymentsEnabled}
-                  canAddSeats={await isModuleEntitled("renewals")}
+                  // As `createAddon` decides it: Renewals in the plan, and `orders.process`.
+                  canAddSeats={(await isModuleEntitled("renewals")) && (await hasEffectivePermission(userId, "orders.process"))}
                 />
               </CardContent>
             </Card>
@@ -1039,7 +1051,7 @@ export async function CompanyDetail({
                           </Link>
                         </td>
                         <td className="px-4 py-2.5">
-                          <LeadStatusBadge status={l.status} lostReason={l.lostReason} />
+                          <LeadStatusBadge status={l.status} stage={leadStage.get(l.id)} lostReason={l.lostReason} />
                         </td>
                         <td className="px-4 py-2.5 text-muted">{formatCurrency(l.estimatedValue?.toString())}</td>
                         <td className="px-4 py-2.5 text-muted">{l.owner?.name ?? "Unassigned"}</td>

@@ -22,6 +22,8 @@ import { LeadDocuments } from "@/components/leads/lead-documents";
 import { LeadVisits } from "@/components/leads/lead-visits";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { LeadStatusControl } from "@/components/leads/lead-status-control";
+import { leadStages, stagesOfLeads } from "@/lib/pipeline/server";
+import { readStageNote } from "@/lib/pipeline/rules";
 import { ActivityForm } from "@/components/leads/activity-form";
 import { RequirementsList } from "@/components/leads/requirements-list";
 import { TaskList } from "@/components/tasks/task-list";
@@ -74,6 +76,11 @@ export async function LeadDetail({ id }: { id: string }) {
 
   // Fetched after the lead, because the briefing is keyed on the company the lead belongs to.
   const domainBriefing = domainsEnabled ? await getDomainBriefing(lead.company.id) : null;
+
+  // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): where this lead is, where it can go.
+  const [{ stages }, stageOf] = await Promise.all([leadStages(), stagesOfLeads([{ id: lead.id, status: lead.status }])]);
+  const stage = stageOf.get(lead.id)!;
+  const stageChoices = stages.filter((s) => !s.archived).map((s) => ({ id: s.id, label: s.label, status: s.status }));
 
   // The workspace's own fields (src/lib/custom-fields) — whoever may open the lead may edit them, as
   // `updateLeadCustomFields` decides it.
@@ -144,7 +151,7 @@ export async function LeadDetail({ id }: { id: string }) {
               </Button>
             </Link>
           )}
-          <LeadStatusControl leadId={lead.id} status={lead.status} />
+          <LeadStatusControl leadId={lead.id} current={{ id: stage.id, label: stage.label, status: stage.status }} stages={stageChoices} />
         </div>
       </div>
 
@@ -197,7 +204,7 @@ export async function LeadDetail({ id }: { id: string }) {
                         {a.user.name} · {formatDate(a.occurredAt)}
                       </span>
                     </div>
-                    <p className="mt-1 text-text">{a.notes}</p>
+                    <p className="mt-1 text-text">{a.type === "STAGE_CHANGE" ? readStageNote(a.notes, stages) : a.notes}</p>
                   </div>
                 ))}
                 {lead.activities.length === 0 && (
@@ -219,8 +226,8 @@ export async function LeadDetail({ id }: { id: string }) {
             <CardHeader className="text-sm font-medium text-text">Details</CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Lead status</span>
-                <LeadStatusBadge status={lead.status} lostReason={lead.lostReason} />
+                <span className="text-muted">Stage</span>
+                <LeadStatusBadge status={lead.status} stage={stage} lostReason={lead.lostReason} />
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Account status</span>

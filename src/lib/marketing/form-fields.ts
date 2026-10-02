@@ -17,7 +17,18 @@
  * The builder's save goes through `checkFieldsForSave` instead, which refuses rather than repairs:
  * a person building a form should be told "the second question has no label", not have it quietly
  * turned into something else.
+ *
+ * ## Saving an answer to the workspace's own fields
+ *
+ * A question can also save its answer to one of the workspace's own fields (src/lib/custom-fields)
+ * on the lead the form makes, or on the company or contact when the answer is what creates them —
+ * `saveTo`. It is then asked as that field is: its type, and for a choice its options, come from the
+ * field as it stands when the form is shown or answered (`linkQuestions`), never from a copy that has
+ * gone stale. A field since retired, restricted or deleted turns the question back into a plain one.
  */
+
+import { CUSTOM_FIELD_LIMITS, FIELD_KEY_PATTERN, hasOptions, type CustomFieldDef, type CustomFieldTypeKey, type CustomFieldValues } from "@/lib/custom-fields/rules";
+import { applyOutsideInput, fillableFromOutside, isOutsideEntity, type OutsideEntity } from "@/lib/custom-fields/outside";
 
 export type FieldType =
   | "TEXT"
@@ -43,7 +54,15 @@ export type FormField = {
   placeholder: string | null;
   /** A line under the question — "Include add-ons", "Roughly is fine". A heading's paragraph. */
   help: string | null;
+  /**
+   * The workspace's own field the answer is saved to as well. Never on a heading or on one of
+   * RESERVED_KEYS, which fill in the contact and company already. Absent when there is none.
+   */
+  saveTo?: SaveTo | null;
 };
+
+/** One of the workspace's own fields, on one of the records a form's answer makes. */
+export type SaveTo = { entity: OutsideEntity; key: string };
 
 export const FIELD_TYPES: { type: FieldType; label: string; hint: string }[] = [
   { type: "TEXT", label: "Short answer", hint: "One line of text" },
@@ -118,17 +137,29 @@ function str(value: unknown): string | null {
  * The options as a list somebody can pick from: trimmed, one line each, no blanks, no repeats.
  *
  * One line each because a multiple-choice answer is stored as its picks one per line — an option
- * with a line break in it would come back as two answers, neither of which was offered.
+ * with a line break in it would come back as two answers, neither of which was offered. A question
+ * saved to a field may have as many as the field does.
  */
-export function cleanOptions(value: unknown): string[] {
+export function cleanOptions(value: unknown, max: number = MAX_OPTIONS): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const raw of value) {
     const text = str(raw)?.replace(/\s*[\r\n]+\s*/g, " ").slice(0, 200);
     if (text && !out.includes(text)) out.push(text);
   }
-  return out.slice(0, MAX_OPTIONS);
+  return out.slice(0, max);
 }
+
+/** A stored `saveTo`, or null for anything that isn't one. */
+export function readSaveTo(value: unknown): SaveTo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { entity, key } = value as Record<string, unknown>;
+  if (!isOutsideEntity(entity) || typeof key !== "string" || !FIELD_KEY_PATTERN.test(key)) return null;
+  return { entity, key };
+}
+
+/** One string per field a question can save to, for telling two questions apart. */
+export const targetId = (t: SaveTo) => `${t.entity}:${t.key}`;
 
 function readOne(raw: unknown): FormField | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -143,13 +174,15 @@ function readOne(raw: unknown): FormField | null {
   const upper = declared?.toUpperCase();
   const type = (TYPES as string[]).includes(upper ?? "") ? (upper as FieldType) : "TEXT";
 
-  const options = cleanOptions(row.options);
-
   // A heading is words on the page, not a question. It cannot be required, because nothing can
   // answer it — and a required heading would make the form impossible to send.
   if (type === "HEADING") {
     return { key, label: str(row.label) ?? "", type, required: false, options: [], placeholder: null, help: str(row.help) };
   }
+
+  // Nothing to save for the keys that already fill in the contact and company.
+  const saveTo = isReserved(key) ? null : readSaveTo(row.saveTo);
+  const options = cleanOptions(row.options, saveTo ? CUSTOM_FIELD_LIMITS.options : MAX_OPTIONS);
 
   return {
     key,
@@ -161,6 +194,7 @@ function readOne(raw: unknown): FormField | null {
     options: isChoice(type) ? options : [],
     placeholder: str(row.placeholder),
     help: str(row.help),
+    ...(saveTo ? { saveTo } : {}),
   };
 }
 
@@ -170,12 +204,16 @@ export function parseFields(value: unknown): FormField[] {
 
   const out: FormField[] = [];
   const seen = new Set<string>();
+  const targets = new Set<string>();
   for (const raw of rows) {
     const field = readOne(raw);
     // First definition of a key wins. Two fields sharing one key would write over each other's
     // answer, and which of them won would depend on render order.
     if (!field || seen.has(field.key)) continue;
     seen.add(field.key);
+    // The same for two questions saving to one field: the first keeps it, the second is a plain question.
+    if (field.saveTo && targets.has(targetId(field.saveTo))) delete field.saveTo;
+    if (field.saveTo) targets.add(targetId(field.saveTo));
     out.push(field);
   }
 
@@ -314,11 +352,13 @@ export function formatAnswer(field: Pick<FormField, "type">, value: string | nul
  * The custom answers, written out for whoever picks the lead up.
  *
  * Only the questions that are not already a column somewhere: repeating the name and email into the
- * description just makes it longer without making it say more.
+ * description just makes it longer without making it say more. `except` is the same for the answers
+ * saved to the lead's own fields, which its page shows already.
  */
-export function summariseAnswers(fields: FormField[], answers: Answers): string {
+export function summariseAnswers(fields: FormField[], answers: Answers, opts: { except?: Iterable<string> } = {}): string {
+  const except = new Set(opts.except ?? []);
   return questionsOf(fields)
-    .filter((f) => !isReserved(f.key))
+    .filter((f) => !isReserved(f.key) && !except.has(f.key))
     .map((f) => ({ label: f.label, value: formatAnswer(f, answers[f.key]) }))
     .filter((r) => r.value)
     .map((r) => `${r.label}: ${r.value}`)
@@ -361,6 +401,7 @@ export function checkFieldsForSave(value: unknown): { ok: true; fields: FormFiel
 
   const out: FormField[] = [];
   const keys = new Set<string>();
+  const targets = new Map<string, string>();
   for (const [index, raw] of value.entries()) {
     const at = `Question ${index + 1}`;
     if (!raw || typeof raw !== "object") return { ok: false, error: `${at} is empty.` };
@@ -377,9 +418,24 @@ export function checkFieldsForSave(value: unknown): { ok: true; fields: FormFiel
     if (!label && !str(row.help)) return { ok: false, error: `${at} is an empty heading.` };
     if ((label ?? "").length > 300) return { ok: false, error: `${at} is too long — keep the wording under 300 characters.` };
 
-    const options = cleanOptions(row.options);
-    if (isChoice(type) && options.length < 2) {
-      return { ok: false, error: `"${label}" needs at least two options to choose from.` };
+    // Whether the field is still there, and still one a form may fill, is the server's to check
+    // (src/actions/forms.ts `saveForm`); here, only what the questions themselves allow.
+    const saveTo = readSaveTo(row.saveTo);
+    if (row.saveTo !== undefined && row.saveTo !== null && !saveTo) return { ok: false, error: `${at} saves its answer to something that isn't a field.` };
+    if (saveTo) {
+      if (type === "HEADING") return { ok: false, error: `${at} is a heading — it has no answer to save.` };
+      if (isReserved(key)) {
+        return { ok: false, error: `"${label}" already fills in the ${key === "companyName" ? "company" : "contact"}, so it can't save to another field as well.` };
+      }
+      const clash = targets.get(targetId(saveTo));
+      if (clash !== undefined) return { ok: false, error: `"${clash}" and "${label}" both save to the same field — one question per field.` };
+      targets.set(targetId(saveTo), label ?? "");
+    }
+
+    const options = cleanOptions(row.options, saveTo ? CUSTOM_FIELD_LIMITS.options : MAX_OPTIONS);
+    // A field's options are the field's: one it offers is enough. Typed in here, a choice of one is no choice.
+    if (isChoice(type) && options.length < (saveTo ? 1 : 2)) {
+      return { ok: false, error: saveTo ? `"${label}" has no options to choose from.` : `"${label}" needs at least two options to choose from.` };
     }
     if (key === "email" && type !== "EMAIL") return { ok: false, error: "The email question has to be an email address." };
 
@@ -391,6 +447,7 @@ export function checkFieldsForSave(value: unknown): { ok: true; fields: FormFiel
       options: isChoice(type) ? options : [],
       placeholder: type === "HEADING" ? null : str(row.placeholder),
       help: str(row.help)?.slice(0, 1000) ?? null,
+      ...(saveTo ? { saveTo } : {}),
     });
   }
 
@@ -400,4 +457,115 @@ export function checkFieldsForSave(value: unknown): { ok: true; fields: FormFiel
     }
   }
   return { ok: true, fields: out };
+}
+
+// ─── Saving answers to the workspace's own fields ────────────────────────────
+
+/** The question each kind of field is asked as. A person field has none: a stranger can't name somebody in the workspace. */
+export const QUESTION_TYPE_FOR: Record<CustomFieldTypeKey, FieldType | null> = {
+  TEXT: "TEXT",
+  LONG_TEXT: "TEXTAREA",
+  NUMBER: "NUMBER",
+  MONEY: "NUMBER",
+  DATE: "DATE",
+  SELECT: "SELECT",
+  MULTI_SELECT: "MULTISELECT",
+  CHECKBOX: "CHECKBOX",
+  EMAIL: "EMAIL",
+  PHONE: "PHONE",
+  URL: "TEXT",
+  USER: null,
+};
+
+/** A field a question can save its answer to, as the builder offers it and a question is asked. */
+export type FieldTarget = SaveTo & {
+  label: string;
+  /** The question it is asked as. */
+  type: FieldType;
+  /** A choice's options on offer today, by label — what the person filling the form in reads. */
+  options: string[];
+  required: boolean;
+  help: string | null;
+};
+
+/**
+ * The question a field is asked as — or null for one a form can't fill, or a choice with nothing left
+ * to choose. Required as the field is, except a yes-or-no: a tick box that has to be ticked can only
+ * be answered yes, which is not what "required" means for one.
+ */
+export function targetFor(entity: SaveTo["entity"], def: CustomFieldDef): FieldTarget | null {
+  const type = QUESTION_TYPE_FOR[def.type];
+  if (!type || !fillableFromOutside(def)) return null;
+  const options = hasOptions(def.type) ? cleanOptions(def.options.filter((o) => !o.archived).map((o) => o.label), CUSTOM_FIELD_LIMITS.options) : [];
+  if (isChoice(type) && options.length === 0) return null;
+  return { entity, key: def.key, label: def.label, type, options, required: def.required && type !== "CHECKBOX", help: def.helpText };
+}
+
+export type FieldsByRecord = Record<SaveTo["entity"], CustomFieldDef[]>;
+
+/**
+ * The questions as the workspace's fields stand now — read whenever a form is shown or answered.
+ *
+ * A question saved to a field that is still there, and still one a form may fill, is asked as the
+ * field is: its type, and its options as they are today, so an option renamed or retired since the
+ * form was built is offered as it now is. One whose field has been retired, restricted or deleted is
+ * a plain question again — its answer kept on the submission like any other. Whether it is required
+ * stays the form's own choice.
+ */
+export function linkQuestions(fields: FormField[], defs: FieldsByRecord): FormField[] {
+  return fields.map((field) => {
+    const saveTo = field.saveTo;
+    if (!saveTo) return field;
+    const def = defs[saveTo.entity].find((d) => d.key === saveTo.key);
+    const target = def ? targetFor(saveTo.entity, def) : null;
+    if (!target) {
+      const plain = { ...field };
+      delete plain.saveTo;
+      return plain;
+    }
+    return { ...field, type: target.type, options: target.options };
+  });
+}
+
+/** No values for any record — where an answer saves nothing, as somebody declining an event's doesn't. */
+export const noLinkedValues = (): Record<SaveTo["entity"], CustomFieldValues> => ({ LEAD: {}, COMPANY: {}, CONTACT: {} });
+
+/**
+ * The answers to the questions saved to fields, as those fields store them: a multiple choice's picks
+ * as a list, a tick as yes. Checked as the field checks a value (src/lib/custom-fields/outside.ts), in
+ * the question's own words when one can't be used — the person filling the form in is there to put it
+ * right. Unanswered questions set nothing.
+ *
+ * Expects the questions `linkQuestions` returned, so every `saveTo` left is a field that can be filled.
+ */
+export function linkedAnswers(
+  fields: FormField[],
+  answers: Answers,
+  defs: FieldsByRecord,
+): { values: Record<SaveTo["entity"], CustomFieldValues>; errors: Record<string, string> } {
+  const values = noLinkedValues();
+  const errors: Record<string, string> = {};
+  for (const field of questionsOf(fields)) {
+    const answer = (answers[field.key] ?? "").trim();
+    const saveTo = field.saveTo;
+    if (!saveTo || !answer) continue;
+    const def = defs[saveTo.entity].find((d) => d.key === saveTo.key);
+    if (!def) continue;
+    const input = field.type === "MULTISELECT" ? splitPicks(answer) : answer;
+    const applied = applyOutsideInput([{ ...def, label: field.label }], { [def.key]: input });
+    const refused = applied.skipped[0];
+    if (refused) errors[field.key] = refused.reason;
+    else Object.assign(values[saveTo.entity], applied.values);
+  }
+  return { values, errors };
+}
+
+/** The questions whose answers went into the lead's own fields — left out of its description. */
+export function savedToLead(fields: FormField[], leadValues: CustomFieldValues): string[] {
+  return fields
+    .filter((f) => {
+      const to = f.saveTo;
+      return to?.entity === "LEAD" && leadValues[to.key] !== undefined;
+    })
+    .map((f) => f.key);
 }

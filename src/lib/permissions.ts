@@ -931,6 +931,19 @@ export const PERMISSION_REGISTRY = [
   },
   {
     /**
+     * The workspace's own lead stages (Settings → Pipeline, src/lib/pipeline). Everybody who works leads
+     * moves them through the stages; shaping the stages is a manager's call, because what a stage
+     * counts as decides what reaching it does — a won lead counts towards targets.
+     */
+    key: "pipeline.manage",
+    label: "Manage the sales pipeline",
+    description:
+      "Name the stages a lead moves through, set their order and colours, choose what each counts as — new, qualified, won, lost and so on — and retire the ones no longer used.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
+    /**
      * Folding a duplicate company into the one that stays — see src/lib/companies/merge.ts.
      *
      * Not undoable: the duplicate is removed and everything under it now belongs to the other. So it

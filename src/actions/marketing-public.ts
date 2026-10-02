@@ -1,6 +1,7 @@
 "use server";
 
 import { createHash } from "node:crypto";
+import { newLeadStage } from "@/lib/pipeline/server";
 import type { FormCategory, MarketingTopic, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -9,12 +10,19 @@ import { getOrganisation } from "@/lib/organisation";
 import { normalizeCompanyName } from "@/lib/validation/company";
 import {
   firstError,
+  linkQuestions,
+  linkedAnswers,
+  noLinkedValues,
   parseFields,
   questionsOf,
+  savedToLead,
   summariseAnswers,
   validateAnswers,
   type Answers,
+  type FormField,
 } from "@/lib/marketing/form-fields";
+import { stillToFill, stillToFillLines } from "@/lib/custom-fields/outside";
+import { createData, outsideDefinitions } from "@/lib/custom-fields/outside-server";
 import { TOPICS } from "@/lib/marketing/topics";
 // Whichever kind of token arrived — a message's, or the contact's own long-lived one.
 import { contactForToken, unsubscribeByToken } from "@/lib/marketing/unsubscribe";
@@ -134,6 +142,56 @@ export async function unsubscribeAll(token: string): Promise<ActionResult<null>>
 // ─── Inbound forms ────────────────────────────────────────────────────────────
 
 /**
+ * The questions as they are asked today: the stored spec, with every question that saves its answer
+ * to one of the workspace's own fields asked as that field now is (`linkQuestions` in
+ * src/lib/marketing/form-fields.ts). The definitions are read only when some question needs them.
+ */
+async function askedQuestions(raw: unknown) {
+  const parsed = parseFields(raw);
+  if (!parsed.some((f) => f.saveTo)) return parsed;
+  return linkQuestions(parsed, await outsideDefinitions());
+}
+
+/** The questions as the page gets them — where an answer is also saved is no business of the page's. */
+function forThePage(fields: FormField[]): FormField[] {
+  return fields.map((f) => {
+    const shown = { ...f };
+    delete shown.saveTo;
+    return shown;
+  });
+}
+
+type OwnFields = Awaited<ReturnType<typeof outsideDefinitions>>;
+
+/**
+ * What a new lead takes from the workspace's own fields: the values its questions saved to them, and
+ * a description that says what is still to fill in — on the company and contact too, when this
+ * answer is what made them. A company or contact already on file is never changed by what somebody
+ * types into a form (src/lib/custom-fields/outside.ts); their own values are written where they are
+ * created, by the caller.
+ */
+function leadExtras(
+  fields: FormField[],
+  answers: Answers,
+  defs: OwnFields,
+  values: ReturnType<typeof linkedAnswers>["values"],
+  made: { company: boolean; contact: boolean },
+) {
+  const description = [
+    // The answers saved to the lead's own fields are on its page already.
+    summariseAnswers(fields, answers, { except: savedToLead(fields, values.LEAD) }),
+    ...stillToFillLines({
+      LEAD: stillToFill(defs.LEAD, values.LEAD),
+      COMPANY: made.company ? stillToFill(defs.COMPANY, values.COMPANY) : [],
+      CONTACT: made.contact ? stillToFill(defs.CONTACT, values.CONTACT) : [],
+    }),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return { description: description || null, ...createData(values.LEAD) };
+}
+
+/**
  * What the page needs to show a form: the questions, and for an event, when and where.
  *
  * Parsed here rather than in the component: the page and the submit handler have to agree on what
@@ -177,7 +235,7 @@ async function presentForm(form: {
     venue: form.venue,
     /** Written out on the server, in India time, so the page and the browser cannot disagree. */
     eventWhen: form.eventStartsAt ? eventWhenText(form.eventStartsAt, form.eventEndsAt) : null,
-    fields: parseFields(form.fields),
+    fields: forThePage(await askedQuestions(form.fields)),
     ourName: org.tradeName || org.legalName || "us",
     /** Why it isn't taking answers, or null when it is. */
     closedMessage: open.open ? null : open.message,
@@ -340,10 +398,22 @@ export async function submitForm(input: {
    * carrying extra keys is either a stale page or somebody probing, and neither should end up
    * stored as though it had been asked for.
    */
-  const fields = parseFields(form.fields);
+  const defs = await outsideDefinitions();
+  const fields = linkQuestions(parseFields(form.fields), defs);
   const answers: Answers = Object.fromEntries(questionsOf(fields).map((f) => [f.key, (input.values[f.key] ?? "").trim()]));
   const refusal = firstError(validateAnswers(fields, answers, { onlyMandatory: attending === false }));
   if (refusal) return { ok: false, error: refusal };
+
+  /**
+   * The answers saved to the workspace's own fields, checked as those fields check a value — and
+   * refused, in the question's words, when one can't be used: the person is here to put it right.
+   * Checked whatever the company turns out to be, so the answer never says whether it is on file.
+   * Somebody declining an event was asked only who they are.
+   */
+  const own = attending === false ? null : linkedAnswers(fields, answers, defs);
+  const ownRefusal = own ? firstError(own.errors) : null;
+  if (ownRefusal) return { ok: false, error: ownRefusal };
+  const values = own?.values ?? noLinkedValues();
 
   // Present and valid, because `parseFields` guarantees both fields exist and are required.
   const email = answers.email!.toLowerCase();
@@ -377,6 +447,8 @@ export async function submitForm(input: {
   // Rate limiting needs to know how often, never who — so the same hash whichever path is taken.
   const submissionHash = createHash("sha256").update(`${email}:${form.id}`).digest("hex").slice(0, 32);
 
+  // Where a lead from the form starts (src/lib/pipeline) — read before the transaction, which holds a connection.
+  const entry = await newLeadStage();
   const result = await db.$transaction(async (tx) => {
     if (event) {
       await lockSeats(tx, form.id);
@@ -396,8 +468,9 @@ export async function submitForm(input: {
 
     // An existing company is reused rather than duplicated — the global uniqueness rule this whole
     // CRM is built on. A form must not be the one thing that gets round it.
+    const knownCo = await tx.company.findUnique({ where: { normalizedName }, select: { id: true, managedByResellerId: true } });
     const company =
-      (await tx.company.findUnique({ where: { normalizedName }, select: { id: true, managedByResellerId: true } })) ??
+      knownCo ??
       (await tx.company.create({
         data: {
           name: companyName,
@@ -406,6 +479,7 @@ export async function submitForm(input: {
           stage: "LEAD",
           createdById: ownerId,
           ownerUserId: ownerId,
+          ...createData(values.COMPANY),
         },
         select: { id: true, managedByResellerId: true },
       }));
@@ -436,8 +510,9 @@ export async function submitForm(input: {
       return { kind: "reseller" as const };
     }
 
+    const knownContact = await tx.contact.findFirst({ where: { companyId: company.id, email }, select: { id: true } });
     const contact =
-      (await tx.contact.findFirst({ where: { companyId: company.id, email }, select: { id: true } })) ??
+      knownContact ??
       (await tx.contact.create({
         data: {
           companyId: company.id,
@@ -445,6 +520,7 @@ export async function submitForm(input: {
           email,
           phone: answers.phone || null,
           createdByUserId: ownerId,
+          ...createData(values.CONTACT),
         },
         select: { id: true },
       }));
@@ -459,8 +535,10 @@ export async function submitForm(input: {
               title: `${form.name} — ${companyName}`,
               // Everything the form asked that is not already a column of its own, so whoever
               // picks this up reads the answers instead of opening the submission to find them.
-              description: summariseAnswers(fields, answers) || null,
-              status: "NEW",
+              // Answers saved to the lead's own fields go into them; the description says what
+              // is still to fill in.
+              ...leadExtras(fields, answers, defs, values, { company: !knownCo, contact: !knownContact }),
+              ...entry,
               ownerUserId: ownerId,
               sourcedByUserId: ownerId,
               source: "WEBSITE",
@@ -614,7 +692,8 @@ async function submitInvited(input: {
 
   if (input.website?.trim()) return { ok: true, data: { thankYou } };
 
-  const fields = parseFields(form.fields);
+  const defs = await outsideDefinitions();
+  const fields = linkQuestions(parseFields(form.fields), defs);
   const answers: Answers = Object.fromEntries(questionsOf(fields).map((f) => [f.key, (input.values[f.key] ?? "").trim()]));
   // Who they are comes from the invitation. A name they corrected is kept on the answer; the
   // address and company never change — those are what the invitation was to.
@@ -624,9 +703,17 @@ async function submitInvited(input: {
   const refusal = firstError(validateAnswers(fields, answers, { onlyMandatory: attending === false }));
   if (refusal) return { ok: false, error: refusal };
 
+  // Checked as on the public link. The company and contact are on file already, so only a lead this
+  // answer makes takes the values.
+  const own = attending === false ? null : linkedAnswers(fields, answers, defs);
+  const ownRefusal = own ? firstError(own.errors) : null;
+  if (ownRefusal) return { ok: false, error: ownRefusal };
+  const values = own?.values ?? noLinkedValues();
+
   const first = invite.submission === null;
   const reseller = isResellerManaged(invite.company);
 
+  const entry = await newLeadStage();
   const outcome = await db.$transaction(async (tx) => {
     if (event) {
       await lockSeats(tx, form.id);
@@ -645,8 +732,8 @@ async function submitInvited(input: {
               companyId: invite.company.id,
               contactId: invite.contact.id,
               title: `${form.name} — ${invite.company.name}`,
-              description: summariseAnswers(fields, answers) || null,
-              status: "NEW",
+              ...leadExtras(fields, answers, defs, values, { company: false, contact: false }),
+              ...entry,
               ownerUserId: form.assignToUserId ?? invite.company.ownerUserId ?? invite.invitedById ?? form.ownerUserId,
               sourcedByUserId: invite.invitedById ?? form.ownerUserId,
               source: "WEBSITE",

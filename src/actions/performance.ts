@@ -6,6 +6,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { SLA_HOURS } from "@/lib/tickets";
 import { dateRangeFilter } from "@/lib/utils";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { byStageDate } from "@/lib/pipeline/server";
 
 export async function canViewPerformance(): Promise<boolean> {
   const user = await requireUser();
@@ -83,10 +84,13 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
         resolvedAt: true,
       },
     }),
-    db.lead.findMany({
-      where: { status: "WON", ownerUserId: { not: null }, ...(createdAtRange ? { updatedAt: createdAtRange } : {}) },
-      select: { ownerUserId: true },
-    }),
+    // Won within the window: when they moved to won, not when they last changed (src/lib/pipeline).
+    byStageDate((moved) =>
+      db.lead.findMany({
+        where: { status: "WON", ownerUserId: { not: null }, ...(createdAtRange ? moved(createdAtRange) : {}) },
+        select: { ownerUserId: true },
+      }),
+    ),
     purchaseSavingsByUser(params?.from, params?.to),
   ]);
 
