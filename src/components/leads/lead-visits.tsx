@@ -3,7 +3,6 @@ import { MapPin } from "lucide-react";
 import type { listLeadVisits } from "@/actions/visit";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
 import {
   formatDuration,
   formatVisitId,
@@ -12,6 +11,7 @@ import {
   visitStatusLabels,
   visitStatusTone,
 } from "@/lib/visits";
+import { formatIstDate } from "@/lib/india-time";
 
 type Visit = Awaited<ReturnType<typeof listLeadVisits>>[number];
 
@@ -68,7 +68,7 @@ export function LeadVisits({
                 </Link>
                 <Badge tone={visitStatusTone[v.status]}>{visitStatusLabels[v.status]}</Badge>
                 <span className="text-xs text-subtle">
-                  {visitPurposeLabels[v.purpose]} · {formatDate(v.scheduledFor)} · {v.user.name}
+                  {visitPurposeLabels[v.purpose]} · {formatIstDate(v.scheduledFor)} · {v.user.name}
                 </span>
               </div>
               {v.checkInAt && (

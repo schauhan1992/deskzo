@@ -5,11 +5,7 @@ import { getVisit, listVisitAssignees } from "@/actions/visit";
 import { listCompanyOptions } from "@/actions/company";
 import { VisitForm } from "@/components/visits/visit-form";
 import { isVisitOpen } from "@/lib/visits";
-
-const asLocal = (value: Date | string) => {
-  const date = new Date(value);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-};
+import { istDateTimeInput } from "@/lib/india-time";
 
 export default async function EditVisitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -53,7 +49,8 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
           locationId: visit.locationId ?? "",
           purpose: visit.purpose,
           agenda: visit.agenda ?? "",
-          scheduledFor: asLocal(visit.scheduledFor),
+          // The time as it was planned in India, not in the server's own zone.
+          scheduledFor: istDateTimeInput(visit.scheduledFor),
           address: visit.address ?? "",
           distanceKm: visit.distanceKm !== null ? String(visit.distanceKm) : "",
           userId: visit.userId,

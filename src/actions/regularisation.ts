@@ -13,6 +13,7 @@ import { getDownlineUserIds } from "@/lib/org-chart";
 import { dateOnly, toKey } from "@/lib/hr/calendar";
 import { attendanceStatusValues } from "@/lib/validation/hr";
 import type { ActionResult } from "@/actions/company";
+import { parseIstDateTime } from "@/lib/india-time";
 
 /**
  * Asking for a day of your own attendance to be corrected.
@@ -92,6 +93,13 @@ export async function requestRegularisation(input: unknown): Promise<ActionResul
     return { ok: false, error: "That day is approved leave. Withdraw the leave instead, or ask HR to correct it." };
   }
 
+  // The times typed are India times on that day — read as UTC they came back five and a half hours on.
+  const requestedCheckIn = data.checkIn ? parseIstDateTime(`${data.date}T${data.checkIn}`) : null;
+  const requestedCheckOut = data.checkOut ? parseIstDateTime(`${data.date}T${data.checkOut}`) : null;
+  if ((data.checkIn && !requestedCheckIn) || (data.checkOut && !requestedCheckOut)) {
+    return { ok: false, error: "Enter the times as hh:mm." };
+  }
+
   const me = await db.user.findUnique({ where: { id: user.id }, select: { managerId: true, name: true } });
 
   const created = await db.attendanceRegularisation.create({
@@ -99,8 +107,8 @@ export async function requestRegularisation(input: unknown): Promise<ActionResul
       userId: user.id,
       date,
       requestedStatus: data.requestedStatus,
-      requestedCheckIn: data.checkIn ? new Date(`${data.date}T${data.checkIn}:00Z`) : null,
-      requestedCheckOut: data.checkOut ? new Date(`${data.date}T${data.checkOut}:00Z`) : null,
+      requestedCheckIn,
+      requestedCheckOut,
       reason: data.reason,
       approverId: me?.managerId ?? null,
     },

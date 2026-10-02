@@ -10,6 +10,7 @@ import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { callOutcomeValues, isConnected } from "@/lib/calls";
 import type { ActionResult } from "@/actions/company";
 import { viewerHas } from "@/actions/permission";
+import { parseTypedTime } from "@/lib/india-time";
 
 const callSelect = {
   id: true,
@@ -70,11 +71,13 @@ export async function logCall(input: {
   }
 
   const duration = Math.max(0, Math.round(Number(input.durationSeconds) || 0));
-  const startedAt = input.startedAt ? new Date(input.startedAt) : new Date();
-  if (Number.isNaN(startedAt.getTime())) return { ok: false, error: "That start time isn't a valid date." };
+  // A time typed into the dialog is India time, wherever the server is; one a page worked out and sent
+  // with its zone is taken as it says.
+  const startedAt = input.startedAt ? parseTypedTime(input.startedAt) : new Date();
+  if (!startedAt) return { ok: false, error: "That start time isn't a valid date." };
 
-  const followUpAt = input.followUpAt ? new Date(input.followUpAt) : null;
-  if (followUpAt && Number.isNaN(followUpAt.getTime())) {
+  const followUpAt = input.followUpAt ? parseTypedTime(input.followUpAt) : null;
+  if (input.followUpAt && !followUpAt) {
     return { ok: false, error: "That callback time isn't a valid date." };
   }
 

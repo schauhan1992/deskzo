@@ -20,11 +20,10 @@ import {
 import { expenseCategoryLabels, expenseStatusLabels, expenseStatusTone, formatExpenseId } from "@/lib/expenses";
 import { viewerHas } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { formatIstDateTime } from "@/lib/india-time";
 
-const stamp = (value: Date | string | null) =>
-  value
-    ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
-    : "—";
+/** When it was planned, arrived and left — in India time, whatever zone the server renders in. */
+const stamp = (value: Date | string | null) => (value ? formatIstDateTime(value) : "—");
 
 export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);

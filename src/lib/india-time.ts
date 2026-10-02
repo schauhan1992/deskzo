@@ -170,6 +170,33 @@ export function parseIstDateTime(value: string): Date | null {
   return at;
 }
 
+/**
+ * A time sent by a form or a page: a bare `yyyy-mm-ddThh:mm` (what a `datetime-local` input gives) is
+ * a time in India, as above; a full timestamp that says its own zone ("…Z", "…+05:30" — what a page
+ * sends after `toISOString()`) is taken as it says. Anything else is not a time. For the actions that
+ * hear from both kinds of caller.
+ */
+export function parseTypedTime(value: string): Date | null {
+  const inIndia = parseIstDateTime(value);
+  if (inIndia) return inIndia;
+  if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) return null;
+  const at = new Date(value.trim());
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/**
+ * A list's From and To (`yyyy-mm-dd`) as India days, half-open, for a column that holds a moment: a row
+ * at 11:30 pm on the To day is in, one at 12:15 am the day after is not — whatever zone the server runs
+ * in. Null when neither is given. Not for a `@db.Date` column, which holds UTC midnight: see
+ * calendarDateOf.
+ */
+export function istDayRange(from?: string | null, to?: string | null): { gte?: Date; lt?: Date } | null {
+  const gte = from ? startOfIndianDay(from) : null;
+  const lt = to ? endOfIndianDay(to) : null;
+  if (!gte && !lt) return null;
+  return { ...(gte ? { gte } : {}), ...(lt ? { lt } : {}) };
+}
+
 /** The other way: an instant as India wall-clock time, to fill a `datetime-local` input. */
 export function istDateTimeInput(at: Date | string | null | undefined): string {
   if (!at) return "";

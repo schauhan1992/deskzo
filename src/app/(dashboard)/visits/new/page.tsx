@@ -5,13 +5,16 @@ import { listVisitAssignees } from "@/actions/visit";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { VisitForm } from "@/components/visits/visit-form";
+import { istDateTimeInput } from "@/lib/india-time";
 
-/** "now, rounded to the next half hour" — a sensible default for a visit you're planning today. */
+const HALF_HOUR_MS = 30 * 60_000;
+
+/**
+ * "now, rounded to the next half hour" in India — a sensible default for a visit you're planning
+ * today. India's offset is a whole half hour, so a half hour in UTC is a half hour there too.
+ */
 function defaultSlot() {
-  const when = new Date();
-  when.setMinutes(when.getMinutes() < 30 ? 30 : 60, 0, 0);
-  const offset = when.getTimezoneOffset();
-  return new Date(when.getTime() - offset * 60000).toISOString().slice(0, 16);
+  return istDateTimeInput(new Date(Math.ceil((Date.now() + 1) / HALF_HOUR_MS) * HALF_HOUR_MS));
 }
 
 export default async function NewVisitPage({

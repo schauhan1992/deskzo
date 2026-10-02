@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { VisitPurpose, VisitStatus } from "@prisma/client";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { formatIstDate, formatIstTime } from "@/lib/india-time";
 import { formatVisitId, visitPurposeLabels, visitStatusLabels, visitStatusTone, visitDuration, formatDuration } from "@/lib/visits";
 
 type VisitRow = {
@@ -58,12 +58,8 @@ export function VisitsTable({ visits }: { visits: VisitRow[] }) {
                 {v.agenda && <div className="max-w-xs truncate text-xs text-subtle">{v.agenda}</div>}
               </td>
               <td className="px-4 py-2.5 text-muted">
-                {formatDate(v.scheduledFor)}
-                <div className="text-xs text-subtle">
-                  {new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit" }).format(
-                    new Date(v.scheduledFor),
-                  )}
-                </div>
+                {formatIstDate(v.scheduledFor)}
+                <div className="text-xs text-subtle">{formatIstTime(v.scheduledFor)}</div>
               </td>
               <td className="px-4 py-2.5 text-muted">{formatDuration(visitDuration(v.checkInAt, v.checkOutAt))}</td>
               <td className="px-4 py-2.5 text-muted">

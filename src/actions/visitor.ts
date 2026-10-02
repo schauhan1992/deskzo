@@ -13,6 +13,7 @@ import { notifyUser } from "@/lib/notify";
 import { generateCode } from "@/lib/visitors/invite-code";
 import { isUsableCompany, normaliseCompany } from "@/lib/visitors/company-name";
 import type { ActionResult } from "@/actions/company";
+import { formatIstDateTime, parseTypedTime } from "@/lib/india-time";
 
 /**
  * The visitor book, and the tablets that write it.
@@ -227,8 +228,9 @@ export async function createInvite(input: {
   if (!name) return { ok: false, error: "Who are you expecting?" };
   if (!input.expectedAt) return { ok: false, error: "When are they coming?" };
 
-  const expectedAt = new Date(input.expectedAt);
-  if (Number.isNaN(expectedAt.getTime())) return { ok: false, error: "That date doesn't look right." };
+  // The form's time is India time, wherever the server is.
+  const expectedAt = parseTypedTime(input.expectedAt);
+  if (!expectedAt) return { ok: false, error: "That date doesn't look right." };
 
   const hostUserId = input.hostUserId || user.id;
   const host = await db.user.findFirst({ where: { id: hostUserId, active: true }, select: { id: true, name: true } });
@@ -267,7 +269,7 @@ export async function createInvite(input: {
       userId: host.id,
       type: "VISITOR_EXPECTED",
       title: `${user.name} booked a visitor for you`,
-      message: `${name} — ${expectedAt.toDateString()}`,
+      message: `${name} — ${formatIstDateTime(expectedAt)}`,
       link: "/visitors/expected",
     });
   }

@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import type { NotificationType } from "@prisma/client";
 import { syncSystemNotifications } from "@/lib/notify";
 import { NOTIFICATION_CATALOGUE, describeNotification, wants } from "@/lib/notifications/catalogue";
-import { dateRangeFilter } from "@/lib/utils";
+import { istDayRange } from "@/lib/india-time";
 import type { ActionResult } from "@/actions/company";
 
 export async function getNotifications(params?: { unreadOnly?: boolean; limit?: number }) {
@@ -83,12 +83,14 @@ export async function listNotifications(params: {
   await syncSystemNotifications(user.id);
 
   const view = params.view === "archived" ? "archived" : "inbox";
+  // On createdAt, in India days. It used to be spread straight into the query, naming no column at all.
+  const created = istDayRange(params.from, params.to);
   const where = {
     userId: user.id,
     ...(view === "archived" ? { archivedAt: { not: null } } : { archivedAt: null }),
     ...(params.unreadOnly ? { read: false } : {}),
     ...(params.type && params.type !== "all" ? { type: params.type as NotificationType } : {}),
-    ...dateRangeFilter(params.from, params.to),
+    ...(created ? { createdAt: created } : {}),
   };
 
   const [rows, total, unread, archived, present] = await Promise.all([

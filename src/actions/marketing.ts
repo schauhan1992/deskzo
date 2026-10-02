@@ -18,6 +18,7 @@ import { audienceCompanyWhere, parseCompanyFilters, DEFAULT_CONTACT_FILTERS } fr
 import { TRIGGERS } from "@/lib/marketing/triggers";
 import type { ActionResult } from "@/actions/company";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
+import { parseTypedTime } from "@/lib/india-time";
 
 /**
  * Building and sending campaigns.
@@ -459,13 +460,17 @@ export async function saveCampaign(input: {
     return { ok: false, error: "That list isn't there any more." };
   }
 
+  // The campaign editor sends "Not before" as typed — India time; the mass-mail wizard sends a
+  // timestamp with its zone. Both are read for what they are, wherever the server is.
+  const scheduledFor = input.scheduledFor ? parseTypedTime(input.scheduledFor) : null;
+  if (input.scheduledFor && !scheduledFor) return { ok: false, error: "That send time isn't a date." };
   const data = {
     name: input.name.trim(),
     audienceId: input.audienceId || null,
     listId: input.listId || null,
     templateId: input.templateId,
     channel: input.channel,
-    scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
+    scheduledFor,
     windowStartMinute: input.windowStartMinute ?? null,
     windowEndMinute: input.windowEndMinute ?? null,
   };
@@ -733,7 +738,7 @@ export async function sendMassMail(input: {
   if (!manage) return { ok: false, error: "You can't create campaigns." };
   const template = await db.marketingTemplate.findUnique({ where: { id: input.templateId }, select: { channel: true, active: true } });
   if (!template || !template.active) return { ok: false, error: "Pick a template that's in use." };
-  if (input.scheduledFor && Number.isNaN(new Date(input.scheduledFor).getTime())) return { ok: false, error: "That send time isn't a date." };
+  if (input.scheduledFor && !parseTypedTime(input.scheduledFor)) return { ok: false, error: "That send time isn't a date." };
   const saved = await saveCampaign({
     name: input.name,
     templateId: input.templateId,

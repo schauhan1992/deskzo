@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
-import { dateRangeFilter } from "@/lib/utils";
+import { istDayRange, parseIstDateTime, parseTypedTime } from "@/lib/india-time";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
@@ -59,7 +59,8 @@ type VisitListParams = {
  */
 async function visitListWhere(viewerId: string, params?: VisitListParams): Promise<Prisma.VisitWhereInput> {
   const allowed = await visibleUserIds(viewerId);
-  const scheduledFor = dateRangeFilter(params?.from, params?.to);
+  // India days, half-open — whatever zone the server runs in.
+  const scheduledFor = istDayRange(params?.from, params?.to);
   return {
     ...(allowed ? { userId: { in: allowed } } : {}),
     ...(params?.userId ? { userId: params.userId } : {}),
@@ -193,6 +194,10 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
     }
   }
 
+  // The form's "10:00" is 10:00 in India, wherever the server is — not the server's own 10:00.
+  const scheduledFor = parseIstDateTime(data.scheduledFor);
+  if (!scheduledFor) return { ok: false, error: "Pick a date and time." };
+
   const visit = await db.visit.create({
     data: {
       companyId: data.companyId,
@@ -201,7 +206,7 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
       locationId: data.locationId || null,
       purpose: data.purpose,
       agenda: data.agenda || null,
-      scheduledFor: new Date(data.scheduledFor),
+      scheduledFor,
       address: data.address || null,
       distanceKm: data.distanceKm !== undefined ? new Prisma.Decimal(data.distanceKm) : null,
       userId: ownerId,
@@ -245,6 +250,9 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
     return { ok: false, error: "You can only edit your own visits, or your team's." };
   }
 
+  const scheduledFor = parseIstDateTime(data.scheduledFor);
+  if (!scheduledFor) return { ok: false, error: "Pick a date and time." };
+
   await db.visit.update({
     where: { id },
     data: {
@@ -253,7 +261,7 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
       locationId: data.locationId || null,
       purpose: data.purpose,
       agenda: data.agenda || null,
-      scheduledFor: new Date(data.scheduledFor),
+      scheduledFor,
       address: data.address || null,
       distanceKm: data.distanceKm !== undefined ? new Prisma.Decimal(data.distanceKm) : null,
     },
@@ -291,8 +299,11 @@ export async function completeVisit(input: unknown): Promise<ActionResult<{ id: 
   if (!visit) return { ok: false, error: "That visit no longer exists." };
   if (!(await canActFor(user.id, visit.userId))) return { ok: false, error: "That isn't your visit." };
 
-  const resolvedIn = checkInAt ? new Date(checkInAt) : visit.checkInAt;
-  const resolvedOut = checkOutAt ? new Date(checkOutAt) : new Date();
+  // A form's time is India time; a timestamp that says its zone is taken as it says.
+  const resolvedIn = checkInAt ? parseTypedTime(checkInAt) : visit.checkInAt;
+  const resolvedOut = checkOutAt ? parseTypedTime(checkOutAt) : new Date();
+  if (checkInAt && !resolvedIn) return { ok: false, error: "That check-in time isn't a date and time." };
+  if (!resolvedOut) return { ok: false, error: "That check-out time isn't a date and time." };
   if (resolvedIn && resolvedOut < resolvedIn) {
     return { ok: false, error: "Check-out can't be before check-in." };
   }

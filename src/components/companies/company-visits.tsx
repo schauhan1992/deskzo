@@ -2,7 +2,7 @@ import Link from "next/link";
 import { listCompanyVisits } from "@/actions/visit";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import {
   formatVisitId,
   visitPurposeLabels,
@@ -11,6 +11,7 @@ import {
   visitDuration,
   formatDuration,
 } from "@/lib/visits";
+import { formatIstDate } from "@/lib/india-time";
 
 type Visit = Awaited<ReturnType<typeof listCompanyVisits>>[number];
 
@@ -65,7 +66,7 @@ export function CompanyVisits({
                     <Badge tone={visitStatusTone[v.status]}>{visitStatusLabels[v.status]}</Badge>
                   </td>
                   <td className="px-3 py-2 text-muted">{visitPurposeLabels[v.purpose]}</td>
-                  <td className="px-3 py-2 text-muted">{formatDate(v.scheduledFor)}</td>
+                  <td className="px-3 py-2 text-muted">{formatIstDate(v.scheduledFor)}</td>
                   <td className="px-3 py-2 text-muted">{formatDuration(visitDuration(v.checkInAt, v.checkOutAt))}</td>
                   <td className="px-3 py-2 text-muted">{v.user.name}</td>
                 </tr>

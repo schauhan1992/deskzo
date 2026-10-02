@@ -10,6 +10,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { OutboundLink, whatsappHref } from "@/components/ui/outbound-link";
 import { formatDate } from "@/lib/utils";
+import { formatIstDate } from "@/lib/india-time";
 
 type Targets = Awaited<ReturnType<typeof feedbackTargets>>;
 
@@ -202,7 +203,7 @@ export function AskFeedbackDialog({
                   <optgroup label="Site visits">
                     {targets.visits.map((v) => (
                       <option key={v.id} value={`visit:${v.id}`}>
-                        {formatDate(v.scheduledFor)} — {v.purpose.toLowerCase().replaceAll("_", " ")}
+                        {formatIstDate(v.scheduledFor)} — {v.purpose.toLowerCase().replaceAll("_", " ")}
                       </option>
                     ))}
                   </optgroup>
