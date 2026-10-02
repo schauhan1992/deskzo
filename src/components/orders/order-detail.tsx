@@ -29,6 +29,9 @@ import { FollowUpPanel } from "@/components/collections/follow-up-panel";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
+import { OrderProgress } from "@/components/orders/order-progress";
+import { orderSteps, stepHistory, stepsOfOrders } from "@/lib/pipeline/order-steps-server";
+import { stepStatusLabel, stepsOf, takesSteps } from "@/lib/pipeline/order-steps";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -171,6 +174,16 @@ export async function OrderDetail({
   const dealEditable = !closed && (speaksForSales || canProcess);
   const hasDeal = !!order.dealRegStatus || order.dealPrice !== null;
 
+  // ── Where it has got to within its status (Settings → Pipeline → Orders, src/lib/pipeline) ──────
+  // Moved on by whoever works it through — `setOrderStep` applies the same rule.
+  const [{ steps: allSteps }, stepOf, moves] = await Promise.all([
+    orderSteps(),
+    stepsOfOrders([{ id: order.id, orderStatus: order.orderStatus }]),
+    stepHistory(order.id),
+  ]);
+  const statusSteps = stepsOf(allSteps, order.orderStatus);
+  const stepEditable = takesSteps(order.orderStatus) && (speaksForSales || canProcess);
+
   // ── The workspace's own fields (src/lib/custom-fields), as this person may see them ───────────────
   // Changed by whoever may change the deal registration — `updateOrderCustomFields` applies
   // `setOrderDeal`'s rule — so the Edit button is offered on exactly those terms.
@@ -279,6 +292,15 @@ export async function OrderDetail({
               )}
             </CardContent>
           </Card>
+
+          <OrderProgress
+            orderId={order.id}
+            statusLabel={stepStatusLabel(order.orderStatus)}
+            steps={statusSteps.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
+            currentId={stepOf.get(order.id)?.id ?? null}
+            editable={stepEditable}
+            history={moves.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() }))}
+          />
 
           <CustomFieldsCard
             groups={customShown}

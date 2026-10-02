@@ -808,6 +808,7 @@ model User {
 
   customFieldDefinitionsCreated CustomFieldDefinition[] @relation("CustomFieldDefinitionCreatedBy")
   customFieldDefinitionsUpdated CustomFieldDefinition[] @relation("CustomFieldDefinitionUpdatedBy")
+  orderStepChanges              OrderStepChange[]
   @@index([departmentId])
   @@index([managerId])
   @@map("users")
@@ -2566,6 +2567,17 @@ model CompanyProduct {
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
   customFields Json @default("{}")
+  /**
+   * The workspace's own step the order is at within its status (Settings → Pipeline, src/lib/pipeline/
+   * order-steps.ts) — "Material ordered", "Installed". A step of another status, or none, reads as the
+   * first step of the status it is in now, so approving or fulfilling an order needn't touch it. Left out
+   * of select-less reads until every workspace has the column (NOT_YET_EVERYWHERE).
+   */
+  stepId        String?
+  step          OrderStep?        @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  /** When somebody last moved it to a step. */
+  stepChangedAt DateTime?
+  stepChanges   OrderStepChange[]
 
   /**
    * The order-punching workflow stage. See the `OrderStatus` doc-comment for the full lifecycle.
@@ -2729,6 +2741,7 @@ model CompanyProduct {
   @@index([startDate])
   @@index([purchaseRelease, releaseOn])
   @@index([bookedAt])
+  @@index([stepId])
   @@map("company_products")
 }
 
@@ -10908,6 +10921,57 @@ model LeadStage {
 
   @@index([archivedAt, sortOrder])
   @@map("lead_stages")
+}
+
+/**
+ * One of the workspace's own steps within an order status (Settings → Pipeline, src/lib/pipeline/
+ * order-steps.ts): "Material ordered", "Installed", "Handed over". The statuses and the process behind
+ * them — approval, purchase, fulfilment — are the app's and stay fixed; a step says where, within one,
+ * an order has got to. Only Approved, Processing and Fulfilled take steps.
+ */
+model OrderStep {
+  id         String      @id @default(cuid())
+  /// Fixed once made: what a link or a saved filter names. The label is free to change.
+  key        String      @unique
+  label      String
+  status     OrderStatus
+  /// A badge tone from STAGE_COLORS (src/lib/pipeline/rules.ts).
+  color      String      @default("default")
+  sortOrder  Int         @default(0)
+  /// Retired: no longer offered. Its orders were moved on when it was retired.
+  archivedAt DateTime?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  orders      CompanyProduct[]
+  changesFrom OrderStepChange[] @relation("OrderStepChangeFrom")
+  changesTo   OrderStepChange[] @relation("OrderStepChangeTo")
+
+  @@index([status, archivedAt, sortOrder])
+  @@map("order_steps")
+}
+
+/**
+ * An order moved from one step to another, by whom and when — the order page's progress history. The
+ * steps' names are kept as they were, so the history still reads right after a rename or a delete.
+ */
+model OrderStepChange {
+  id         String         @id @default(cuid())
+  orderId    String
+  order      CompanyProduct @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStepId String?
+  fromStep   OrderStep?     @relation("OrderStepChangeFrom", fields: [fromStepId], references: [id], onDelete: SetNull)
+  fromLabel  String?
+  toStepId   String?
+  toStep     OrderStep?     @relation("OrderStepChangeTo", fields: [toStepId], references: [id], onDelete: SetNull)
+  toLabel    String
+  userId     String
+  user       User           @relation(fields: [userId], references: [id])
+  note       String?
+  createdAt  DateTime       @default(now())
+
+  @@index([orderId, createdAt])
+  @@map("order_step_changes")
 }
 
 // ---------------------------------------------------------------------------------------------

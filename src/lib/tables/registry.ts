@@ -62,6 +62,12 @@ export const TABLE_REGISTRY: TableDefinition[] = [
     columns: [
       { key: "order", label: "Order", default: true, required: true, hint: "The order number. Without it a row cannot be identified or linked to." },
       { key: "status", label: "Status", default: true },
+      {
+        key: "step",
+        label: "Step",
+        default: true,
+        hint: "Where it has got to within its status — your own steps (Settings → Pipeline). Offered once you have some.",
+      },
       { key: "type", label: "Type", default: true, hint: "New business, renewal, or an addition to an existing subscription." },
       { key: "customer", label: "Customer", default: true },
       { key: "product", label: "Product", default: true },

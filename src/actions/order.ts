@@ -31,6 +31,7 @@ import { peopleHolding, releaseDueOrders, tellPurchase } from "@/lib/orders/hand
 import { istCalendarDate } from "@/lib/india-time";
 import { isCustomerRelationshipType, isVendorRelationshipType } from "@/lib/validation/company";
 import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
+import { inStepWhere, orderSteps } from "@/lib/pipeline/order-steps-server";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import type { ActionResult } from "@/actions/company";
@@ -1233,6 +1234,8 @@ type OrderListParams = {
   flag?: OrderListFlag;
   /** The workspace's own order fields filtered on, as the page read them (src/lib/custom-fields/filters.ts). */
   customFilters?: CustomFilterInputs;
+  /** A step of the workspace's own within a status, by its key (Settings → Pipeline → Orders). */
+  step?: string;
 };
 
 const ORDER_LIST_FLAGS = ["held", "ready", "review", "vendorPo"] as const;
@@ -1244,6 +1247,14 @@ const flagWhere: Record<OrderListFlag, Prisma.CompanyProductWhereInput> = {
   review: { pendingPurchasePrice: { not: null } },
   vendorPo: { vendorPoCancel: "PENDING" },
 };
+
+/** The orders a step of the workspace's own shows (`inStepWhere`), by its key. A key it doesn't have narrows nothing. */
+async function atStep(key: string | undefined): Promise<Prisma.CompanyProductWhereInput[]> {
+  if (!key) return [];
+  const data = await orderSteps();
+  const step = data.steps.find((s) => s.key === key);
+  return step ? [inStepWhere(data, step)] : [];
+}
 
 async function orderListWhere(
   userId: string,
@@ -1278,7 +1289,7 @@ async function orderListWhere(
      * losing this one loses the scope. `viaCompanyScope` yields `{}` for an unrestricted viewer,
      * and `AND: [{}]` is no condition at all.
      */
-    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput, ...search, ...fieldFilters],
+    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput, ...search, ...fieldFilters, ...(await atStep(params?.step))],
     ...(params?.status ? { orderStatus: params.status } : {}),
     ...(params?.businessType ? { businessType: params.businessType } : {}),
     ...(params?.companyId ? { companyId: params.companyId } : {}),

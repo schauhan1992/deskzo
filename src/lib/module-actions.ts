@@ -115,6 +115,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "note.ts": ["notes"],
   "notification.ts": ["notifications"],
   "order-notice.ts": ["orders", "renewals"],
+  "order-progress.ts": ["orders"],
   // The punch form's lookups — one call when the customer is chosen, one for the product (owner, 2 Oct 2026).
   "order-punch.ts": ["orders"],
   "order.ts": ["orders"],

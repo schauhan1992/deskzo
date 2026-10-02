@@ -20,6 +20,8 @@ import {
   stageKeyFromLabel,
   type LeadStageDef,
 } from "@/lib/pipeline/rules";
+import { inStepWhere, orderSteps } from "@/lib/pipeline/order-steps-server";
+import { STEP_LIMITS, checkStep, stepKeyFromLabel, stepRehomeTargets, stepStatusLabel, stepsOf, type OrderStepDef } from "@/lib/pipeline/order-steps";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -268,5 +270,184 @@ export async function deleteLeadStage(id: string): Promise<ActionResult<null>> {
   await db.leadStage.delete({ where: { id } });
   await recordAudit({ userId: user.id, action: "DELETE", entityType: "LeadStage", entityId: id, entityLabel: `Pipeline stage ${stage.label}` });
   refresh();
+  return { ok: true, data: null };
+}
+
+// ── Order steps (Settings → Pipeline → Orders) ───────────────────────────────────────────────────
+
+/**
+ * A workspace's own steps within an order status (src/lib/pipeline/order-steps.ts). The same
+ * permission as the lead stages: both are how the workspace's work is shaped. Moving an order between
+ * steps is the order's own action (`setOrderStep` in src/actions/order-progress.ts).
+ */
+
+function refreshOrders() {
+  revalidatePath("/settings/pipeline");
+  revalidatePath("/orders");
+}
+
+/**
+ * `orders` is how many orders show at the step (the first also shows those with none); `placed`, how
+ * many were moved to it and are still in its status — an order that has since moved on to another
+ * status still names the step, but is no longer at it.
+ */
+export type ManagedStep = OrderStepDef & { orders: number; placed: number };
+
+/** The steps by status, retired ones too, with how many orders each shows and how many were moved to it. */
+export async function listOrderStepsForManage(): Promise<{ steps: ManagedStep[]; stored: boolean } | null> {
+  if (!(await manager())) return null;
+  const data = await orderSteps();
+  const counts = await Promise.all(
+    data.steps.map((s) => Promise.all([db.companyProduct.count({ where: inStepWhere(data, s) }), db.companyProduct.count({ where: { stepId: s.id, orderStatus: s.status } })])),
+  );
+  return { stored: data.stored, steps: data.steps.map((s, i) => ({ ...s, orders: counts[i]![0], placed: counts[i]![1] })) };
+}
+
+const stepSchema = z.object({
+  id: z.string().min(1).optional(),
+  label: z.string().trim().min(1, "Give the step a name.").max(STEP_LIMITS.label, `Keep the name to ${STEP_LIMITS.label} characters.`),
+  status: z.enum(["APPROVED", "PROCESSING", "FULFILLED"]),
+  color: z.enum(STAGE_COLORS),
+});
+
+/** Renumbers the steps in the order given, in one transaction. */
+async function renumberSteps(ids: string[]) {
+  await db.$transaction(async (tx) => {
+    for (const [i, id] of ids.entries()) await tx.orderStep.update({ where: { id }, data: { sortOrder: i + 1 } });
+  });
+}
+
+/** Adds a step at the end of its status, or renames and recolours one. A step's status is fixed once made. */
+export async function saveOrderStep(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: NOT_ALLOWED };
+  const parsed = stepSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the step." };
+  const data = parsed.data;
+  const current = await orderSteps();
+  if (!current.stored) return { ok: false, error: NOT_READY };
+
+  const existing = data.id ? current.steps.find((s) => s.id === data.id) : undefined;
+  if (data.id && !existing) return { ok: false, error: "That step no longer exists." };
+  // Its orders sit within its status, so the status stays put once orders can be at it.
+  const status = existing ? existing.status : data.status;
+  const problem = checkStep({ ...data, status }, current.steps.filter((s) => s.id !== data.id));
+  if (problem) return { ok: false, error: problem };
+
+  if (!existing) {
+    if (stepsOf(current.steps, status).length >= STEP_LIMITS.perStatus) {
+      return { ok: false, error: `${stepStatusLabel(status)} can have ${STEP_LIMITS.perStatus} steps. Retire one first.` };
+    }
+    const created = await db.orderStep.create({
+      data: { key: stepKeyFromLabel(data.label, current.steps.map((s) => s.key)), label: data.label, status, color: data.color, sortOrder: current.steps.length + 1 },
+      select: { id: true },
+    });
+    await recordAudit({ userId: user.id, action: "CREATE", entityType: "OrderStep", entityId: created.id, entityLabel: `Order step ${data.label} — ${stepStatusLabel(status).toLowerCase()}` });
+    refreshOrders();
+    return { ok: true, data: { id: created.id } };
+  }
+
+  await db.orderStep.update({ where: { id: existing.id }, data: { label: data.label, color: data.color } });
+  const changes = [existing.label !== data.label ? `renamed from ${existing.label}` : null, existing.color !== data.color ? "colour changed" : null].filter(Boolean);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "OrderStep", entityId: existing.id, entityLabel: `Order step ${data.label}${changes.length ? ` — ${changes.join(", ")}` : ""}` });
+  refreshOrders();
+  return { ok: true, data: { id: existing.id } };
+}
+
+/** One place earlier or later among its status's steps. */
+export async function moveOrderStep(id: string, direction: "up" | "down"): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: NOT_ALLOWED };
+  const current = await orderSteps();
+  if (!current.stored) return { ok: false, error: NOT_READY };
+  const step = current.steps.find((s) => s.id === id && !s.archived);
+  if (!step) return { ok: false, error: "That step no longer exists." };
+  const siblings = stepsOf(current.steps, step.status);
+  const at = siblings.findIndex((s) => s.id === id);
+  const to = direction === "up" ? at - 1 : at + 1;
+  if (to < 0 || to >= siblings.length) return { ok: true, data: null };
+  const order = current.steps.filter((s) => !s.archived).map((s) => s.id);
+  const a = order.indexOf(siblings[at]!.id);
+  const b = order.indexOf(siblings[to]!.id);
+  [order[a], order[b]] = [order[b]!, order[a]!];
+  await renumberSteps([...order, ...current.steps.filter((s) => s.archived).map((s) => s.id)]);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "OrderStep", entityId: id, entityLabel: `Order step ${step.label} moved ${direction}` });
+  refreshOrders();
+  return { ok: true, data: null };
+}
+
+/**
+ * Retires a step: no longer offered. The orders moved to it go to `moveToId` — another step of its
+ * status — first; ones only shown at it (it was the first) fall to whichever step is first now.
+ */
+export async function retireOrderStep(id: string, moveToId?: string | null): Promise<ActionResult<{ moved: number }>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: NOT_ALLOWED };
+  const current = await orderSteps();
+  if (!current.stored) return { ok: false, error: NOT_READY };
+  const step = current.steps.find((s) => s.id === id && !s.archived);
+  if (!step) return { ok: false, error: "That step no longer exists." };
+  const placed = await db.companyProduct.findMany({ where: { stepId: step.id, orderStatus: step.status }, select: { id: true } });
+  const target = moveToId ? stepRehomeTargets(step, current.steps).find((s) => s.id === moveToId) : undefined;
+  if (placed.length > 0 && !target) {
+    return { ok: false, error: `Choose where the ${placed.length} order${placed.length === 1 ? "" : "s"} at ${step.label} should go first.` };
+  }
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    if (target && placed.length > 0) {
+      const ids = placed.map((o) => o.id);
+      await tx.companyProduct.updateMany({ where: { id: { in: ids } }, data: { stepId: target.id, stepChangedAt: now } });
+      await tx.orderStepChange.createMany({
+        data: ids.map((orderId) => ({ orderId, fromStepId: step.id, fromLabel: step.label, toStepId: target.id, toLabel: target.label, userId: user.id, note: `${step.label} was retired` })),
+      });
+    }
+    await tx.orderStep.update({ where: { id: step.id }, data: { archivedAt: now } });
+  });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "OrderStep",
+    entityId: step.id,
+    entityLabel: `Order step ${step.label} retired${target && placed.length ? ` — ${placed.length} order${placed.length === 1 ? "" : "s"} moved to ${target.label}` : ""}`,
+  });
+  refreshOrders();
+  return { ok: true, data: { moved: placed.length } };
+}
+
+/** Puts a retired step back, last among its status's steps. */
+export async function restoreOrderStep(id: string): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: NOT_ALLOWED };
+  const current = await orderSteps();
+  if (!current.stored) return { ok: false, error: NOT_READY };
+  const step = current.steps.find((s) => s.id === id && s.archived);
+  if (!step) return { ok: false, error: "That step is not retired." };
+  const problem = checkStep(step, current.steps.filter((s) => s.id !== id));
+  if (problem) return { ok: false, error: `${problem} Rename that one first.` };
+  if (stepsOf(current.steps, step.status).length >= STEP_LIMITS.perStatus) {
+    return { ok: false, error: `${stepStatusLabel(step.status)} can have ${STEP_LIMITS.perStatus} steps. Retire one first.` };
+  }
+  await db.orderStep.update({ where: { id }, data: { archivedAt: null } });
+  const active = current.steps.filter((s) => !s.archived).map((s) => s.id);
+  await renumberSteps([...active, id, ...current.steps.filter((s) => s.archived && s.id !== id).map((s) => s.id)]);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "OrderStep", entityId: id, entityLabel: `Order step ${step.label} restored` });
+  refreshOrders();
+  return { ok: true, data: null };
+}
+
+/** Deletes a step no order is at — a mistake made a minute ago. The history keeps its name. */
+export async function deleteOrderStep(id: string): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: NOT_ALLOWED };
+  const current = await orderSteps();
+  if (!current.stored) return { ok: false, error: NOT_READY };
+  const step = current.steps.find((s) => s.id === id);
+  if (!step) return { ok: false, error: "That step no longer exists." };
+  // Only orders still in its status are at it; one that moved on still names it, and simply lets go.
+  const placed = await db.companyProduct.count({ where: { stepId: step.id, orderStatus: step.status } });
+  if (placed > 0) return { ok: false, error: `${placed} order${placed === 1 ? " is" : "s are"} at ${step.label}. Retire it instead — they are moved on first.` };
+  await db.orderStep.delete({ where: { id } });
+  await recordAudit({ userId: user.id, action: "DELETE", entityType: "OrderStep", entityId: id, entityLabel: `Order step ${step.label}` });
+  refreshOrders();
   return { ok: true, data: null };
 }

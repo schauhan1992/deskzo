@@ -253,7 +253,8 @@ const NOT_YET_EVERYWHERE = {
   // 20261015100000_lead_pipeline. Read by name through src/lib/pipeline/server.ts and the lead actions.
   lead: { customFields: true, stageId: true, stageChangedAt: true },
   item: { customFields: true },
-  companyProduct: { customFields: true },
+  // 20261016100000_order_steps. Read by name through src/lib/pipeline/order-steps-server.ts.
+  companyProduct: { customFields: true, stepId: true, stepChangedAt: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

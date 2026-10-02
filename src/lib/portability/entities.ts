@@ -757,6 +757,16 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Configuration rather than records: the stages the workspace's leads move through (Settings → Pipeline), their names, order and colours, and what each counts as. Described in the workflow specification to be rebuilt in the target; each lead exports with its status, which is what its stage means.",
   },
+  OrderStep: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: the workspace's own steps within an order's statuses (Settings → Pipeline → Orders) — material ordered, installed, handed over. Described in the workflow specification to be rebuilt in the target; each order exports with its status.",
+  },
+  OrderStepChange: {
+    disposition: "archive",
+    reason:
+      "Immutable history — each order moved from one step to the next, by whom, when and with what note, under the steps' names as they were. The order's status exports with the order; this is the progress behind it, which no target CRM has a place for.",
+  },
   // ─── Backend rebates and vendor credits ────────────────────────────────────────────────────────
   RebateProgramme: {
     disposition: "specification",

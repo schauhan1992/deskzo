@@ -12,6 +12,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { useColumns } from "@/components/ui/table-columns";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { handoffBadge, vendorPoLabels, type ReleaseState } from "@/lib/orders/handoff-rules";
+import type { StageColor } from "@/lib/pipeline/rules";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -32,6 +33,8 @@ const BUSINESS_TYPE_TONE: Record<OrderBusinessType, "default" | "green" | "blue"
 type OrderRow = {
   id: string;
   orderSeq: number;
+  /** The workspace's own step it is at within its status (src/lib/pipeline/order-steps.ts), if any. */
+  step?: { label: string; color: StageColor } | null;
   quantity: number;
   unitPrice: number | null;
   orderStatus: OrderStatus;
@@ -69,9 +72,12 @@ export function orderFlags(o: Pick<OrderRow, "orderStatus" | "purchaseRelease" |
  */
 export function OrdersTable({
   orders,
+  stepsOn = false,
   customColumns = { columns: [], texts: {} },
 }: {
   orders: OrderRow[];
+  /** The workspace has order steps (Settings → Pipeline): only then is there a Step column to show. */
+  stepsOn?: boolean;
   /**
    * The workspace's own fields this person may see (src/lib/custom-fields/server.ts `listColumns`):
    * the ones they show in the column picker, or each field's default.
@@ -81,6 +87,9 @@ export function OrdersTable({
   const cols = useColumns("orders");
   // The fields this person shows, worked out once: the header and every row draw this one list.
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
+  // The Step column counts as shown by the picker even where there are no steps to show in it.
+  const hiddenStep = !stepsOn && cols.show("step");
+  const span = cols.count - Number(hiddenStep) + fieldColumns.length;
   return (
     <Card className="overflow-x-auto p-0">
       <table className="w-full text-sm">
@@ -88,6 +97,7 @@ export function OrdersTable({
           <tr>
             {cols.show("order") && <th className="px-4 py-2.5">Order</th>}
             {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
+            {stepsOn && cols.show("step") && <th className="px-4 py-2.5">Step</th>}
             {cols.show("type") && <th className="px-4 py-2.5">Type</th>}
             {cols.show("customer") && <th className="px-4 py-2.5">Customer</th>}
             {cols.show("product") && <th className="px-4 py-2.5">Product</th>}
@@ -124,6 +134,9 @@ export function OrdersTable({
                       </div>
                     ))}
                   </td>
+                )}
+                {stepsOn && cols.show("step") && (
+                  <td className="px-4 py-2.5">{o.step ? <Badge tone={o.step.color}>{o.step.label}</Badge> : <span className="text-subtle">—</span>}</td>
                 )}
                 {cols.show("type") && (
                   <td className="px-4 py-2.5">
@@ -183,7 +196,7 @@ export function OrdersTable({
           })}
           {orders.length === 0 && (
             <tr>
-              <td colSpan={cols.count + fieldColumns.length} className="px-4 py-8 text-center text-subtle">
+              <td colSpan={span} className="px-4 py-8 text-center text-subtle">
                 No orders found.
               </td>
             </tr>

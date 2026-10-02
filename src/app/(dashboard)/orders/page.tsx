@@ -4,6 +4,8 @@ import { isModuleEnabled } from "@/actions/module";
 import { Button } from "@/components/ui/button";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { OrdersTable } from "@/components/orders/orders-table";
+import { orderSteps, stepsOfOrders } from "@/lib/pipeline/order-steps-server";
+import { stepStatusLabel } from "@/lib/pipeline/order-steps";
 import { OrderSplitList } from "@/components/orders/order-split-list";
 import { OrderDetail } from "@/components/orders/order-detail";
 import { SplitListShell, SplitListEmpty, SplitListPage, resolveSelected } from "@/components/ui/split-list";
@@ -33,6 +35,7 @@ export default async function OrdersPage({
 }: {
   searchParams: Promise<{
     status?: string;
+    step?: string;
     businessType?: string;
     channel?: string;
     flag?: string;
@@ -63,17 +66,22 @@ export default async function OrdersPage({
   const customFilters = parseCustomFilters(params);
   const [viewMode, result, user] = await Promise.all([
     getViewMode("orders"),
-    listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize, flag, customFilters }),
+    listOrdersPaged({ status, businessType, viaReseller, search: params.q, page, pageSize, flag, customFilters, step: params.step || undefined }),
     requireUser(),
   ]);
   const pendingCount = result.pendingApproval;
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
   // The workspace's own fields (src/lib/custom-fields): the columns the table can show — the table's
   // alone, so the split view asks for no values, though the picker still offers them — and the filter panel.
-  const [customColumns, fieldFilters] = await Promise.all([
+  const [customColumns, fieldFilters, { steps: allSteps }, stepOf] = await Promise.all([
     listColumns("ORDER", user.id, viewMode === "split" ? [] : result.rows.map((o) => o.id)),
     customFilterSetup("ORDER", user.id, customFilters),
+    // The workspace's own steps within a status (Settings → Pipeline → Orders): the filter, and each row's.
+    orderSteps(),
+    stepsOfOrders(result.rows),
   ]);
+  const activeSteps = allSteps.filter((s) => !s.archived);
+  const stepsOn = activeSteps.length > 0;
 
   const stageFilters: { label: string; value?: OrderStatus }[] = [
     { label: "All" },
@@ -90,6 +98,7 @@ export default async function OrdersPage({
       // The field filters too, or a status chip would quietly drop them.
       ...customFilterParams(params),
       status: params.status,
+      step: params.step,
       q: params.q,
       businessType: params.businessType,
       channel: params.channel,
@@ -131,8 +140,15 @@ export default async function OrdersPage({
             { value: "reseller", label: "Via reseller" },
           ]}
         />
+        {stepsOn && (
+          <SelectParamFilter
+            paramName="step"
+            label="Step"
+            options={activeSteps.map((s) => ({ value: s.key, label: `${stepStatusLabel(s.status)} · ${s.label}` }))}
+          />
+        )}
         <CustomFieldFilters setup={fieldFilters} />
-        <ColumnPicker tableKey="orders" className="ml-auto" customColumns={customColumns.columns} />
+        <ColumnPicker tableKey="orders" className="ml-auto" customColumns={customColumns.columns} omit={stepsOn ? undefined : ["step"]} />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -173,7 +189,7 @@ export default async function OrdersPage({
       ) : (
         <>
           <div className="mt-6">
-            <OrdersTable orders={result.rows} customColumns={customColumns} />
+            <OrdersTable orders={result.rows.map((o) => ({ ...o, step: stepOf.get(o.id) ?? null }))} stepsOn={stepsOn} customColumns={customColumns} />
           </div>
 
           <Pagination
