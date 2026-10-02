@@ -25,8 +25,9 @@ type Draft = { id?: string; title: string; body: string; linkUrl: string; pinned
 const EMPTY: Draft = { title: "", body: "", linkUrl: "", pinned: false, publishAt: "" };
 
 /**
- * Writing What's new posts. A post goes out the moment it is saved unless given a later time, in
- * which case it waits — so an update can be written ahead of the release it describes.
+ * Writing the company's news (Deskzo's own What's new is the console's, shown apart). A post goes out
+ * the moment it is saved unless given a later time, in which case it waits — so an update can be
+ * written ahead of the change it describes.
  */
 export function UpdatesManager({ posts }: { posts: Post[] }) {
   const router = useRouter();
@@ -45,7 +46,7 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
       }
       setNotice({
         tone: "success",
-        text: draft.id ? "Saved." : draft.publishAt ? "Scheduled — it will appear at the time you chose." : "Posted — everybody will see a dot on What's new.",
+        text: draft.id ? "Saved." : draft.publishAt ? "Scheduled — it will appear at the time you chose." : "Posted — everybody will see it under Company news, with a dot on What's new.",
       });
       setDraft(null);
       router.refresh();
@@ -53,7 +54,7 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
   }
 
   function remove(post: Post) {
-    if (!window.confirm(`Remove “${post.title}”? It disappears from everybody's What's new.`)) return;
+    if (!window.confirm(`Remove “${post.title}”? It disappears from everybody's company news.`)) return;
     setNotice(null);
     startTransition(async () => {
       const r = await deleteUpdate(post.id);
@@ -66,11 +67,11 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
     <div className="space-y-4">
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-text">{draft?.id ? "Edit update" : "New update"}</h2>
+          <h2 className="text-sm font-semibold text-text">{draft?.id ? "Edit company news" : "New company news"}</h2>
           {!draft && (
             <Button size="sm" onClick={() => setDraft(EMPTY)}>
               <Plus className="h-3.5 w-3.5" />
-              Write an update
+              Write company news
             </Button>
           )}
         </CardHeader>
@@ -88,7 +89,7 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="update-body">What&apos;s new</Label>
+              <Label htmlFor="update-body">What changed</Label>
               <Textarea
                 id="update-body"
                 rows={5}

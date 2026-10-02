@@ -261,6 +261,8 @@ async function main() {
       announcements: pageAt("announcements/page"),
       announcementNew: pageAt("announcements/new/page"),
       announcement: pageAt("announcements/[id]/page"),
+      help: pageAt("help-content/page"),
+      helpNew: pageAt("help-content/new/page"),
       billing: pageAt("billing/page"),
       plans: pageAt("plans/page"),
       planNew: pageAt("plans/new/page"),
@@ -1517,6 +1519,8 @@ async function main() {
         { name: "/announcements", page: pages.announcements },
         { name: "/announcements/new", page: pages.announcementNew },
         { name: "/announcements/[id]", page: pages.announcement, params: { id: annId } },
+        { name: "/help-content", page: pages.help },
+        { name: "/help-content/new", page: pages.helpNew },
         ...params.BILLING_TABS.map((tab) => ({ name: `/billing?tab=${tab}`, page: pages.billing, sp: { tab } })),
         { name: "/plans", page: pages.plans },
         { name: "/plans/new", page: pages.planNew },
@@ -1554,6 +1558,8 @@ async function main() {
         { name: "/invites?status=all&new=1&note=zz", page: pages.invites, sp: { status: "all", new: "1", note: "zz" } },
         { name: "/announcements?tab=archived", page: pages.announcements, sp: { tab: "archived" } },
         { name: "/announcements/new?from=<id>", page: pages.announcementNew, sp: { from: annId } },
+        { name: "/help-content?tab=updates&show=archived", page: pages.help, sp: { tab: "updates", show: "archived" } },
+        { name: "/help-content/new?kind=post", page: pages.helpNew, sp: { kind: "post" } },
         { name: "/billing?tab=events&state=failed", page: pages.billing, sp: { tab: "events", state: "failed" } },
         { name: "/billing?tab=invoices&tenant=zzplus-b&currency=USD", page: pages.billing, sp: { tab: "invoices", tenant: S("b"), currency: "USD" } },
         { name: "/plans?view=compare&retired=1", page: pages.plans, sp: { view: "compare", retired: "1" } },
@@ -1609,6 +1615,9 @@ async function main() {
         ["/announcements/new", pages.announcementNew, "support", ids.support],
         ["/announcements/new", pages.announcementNew, "billing staff", ids.billing],
         ["/announcements/new", pages.announcementNew, "read-only staff", ids.readonly],
+        ["/help-content/new", pages.helpNew, "support", ids.support],
+        ["/help-content/new", pages.helpNew, "billing staff", ids.billing],
+        ["/help-content/new", pages.helpNew, "read-only staff", ids.readonly],
       ];
       for (const [name, page, role, id] of notFoundFor) {
         await actAs(id);
@@ -1619,7 +1628,7 @@ async function main() {
 
       await actAs(ids.support);
       const supportPages: Visit[] = [
-        ...everyPage.filter((v) => !["/billing", "/settings", "/plans/new", "/announcements/new"].some((p) => v.name.startsWith(p))),
+        ...everyPage.filter((v) => !["/billing", "/settings", "/plans/new", "/announcements/new", "/help-content/new"].some((p) => v.name.startsWith(p))),
         { name: "/workspaces?view=attention", page: pages.workspaces, sp: { view: "attention" } },
         { name: `/workspaces/${S("a")}?do=hold`, page: pages.workspace, params: { slug: S("a") }, sp: { do: "hold" } },
         ...["h", "held", "staffheld", "closed", "fail", "g", "b", "over", "default"].map((k) => ({ name: `/workspaces/${S(k)}`, page: pages.workspace, params: { slug: S(k) } })),
@@ -1647,8 +1656,8 @@ async function main() {
         ok(`${role}: all ${visits.length} pages it may open render, none showing ${phrases.join(", ")}`, bad.length === 0, bad.join(" | "));
       };
       const except = (names: string[]) => everyPage.filter((v) => !names.some((p) => v.name.startsWith(p)));
-      await sweep("read-only staff", ids.readonly, [...except(["/billing", "/signups", "/settings", "/plans/new", "/announcements/new"]), ...workspacePages], FORBIDDEN);
-      await sweep("billing staff", ids.billing, [...except(["/announcements/new"]), ...workspacePages], FORBIDDEN);
+      await sweep("read-only staff", ids.readonly, [...except(["/billing", "/signups", "/settings", "/plans/new", "/announcements/new", "/help-content/new"]), ...workspacePages], FORBIDDEN);
+      await sweep("billing staff", ids.billing, [...except(["/announcements/new", "/help-content/new"]), ...workspacePages], FORBIDDEN);
       await sweep("an admin", ids.admin, [...everyPage, ...workspacePages, { name: "/staff?add=1", page: pages.staff, sp: { add: "1" } }], ["Close workspace", "Add someone"]);
 
       await actAs(ids.support);

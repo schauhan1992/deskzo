@@ -130,6 +130,7 @@
     "check:maintenance": "tsx scripts/check-maintenance.ts",
     "check:copilot": "tsx scripts/check-copilot.ts",
     "check:help": "tsx scripts/check-help.ts",
+    "check:help-content": "tsx scripts/check-help-content.ts",
     "check:document-mail": "tsx scripts/check-document-mail.ts",
     "check:geonames": "tsx scripts/check-geonames.ts",
     "check:tenancy": "tsx scripts/check-tenancy.ts",

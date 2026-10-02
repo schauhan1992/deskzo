@@ -39,7 +39,9 @@ const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group:
 export function SideRail({
   copilot = false,
   unreadUpdates = 0,
+  unreadDeskzoUpdates = 0,
   canManageHelp = false,
+  companyName = null,
   proRata = true,
   country = "IN",
   support = false,
@@ -50,24 +52,33 @@ export function SideRail({
   country?: string;
   /** The copilot is on and this person may use it — the rail then offers it beside Help. */
   copilot?: boolean;
-  /** What's new posts they have not seen, for the dot on its button. */
+  /** The company's news they have not seen, for its dot on the What's new button. */
   unreadUpdates?: number;
+  /** Deskzo's What's new they have not seen — a dot of its own, never added to the company's. */
+  unreadDeskzoUpdates?: number;
   canManageHelp?: boolean;
+  /** The company's name, for the heading over its own guides and videos ("From Acme Traders"); null: "From your company". */
+  companyName?: string | null;
   /** Offer Contact Support — the layout's answer from `supportLauncherState()`. */
   support?: boolean;
 }) {
   const open = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  // The server's count, until What's new is opened — then cleared at once, rather than on the next
-  // page load. A new count from the server (a new post, another page) replaces it.
-  const [unread, setUnread] = useState(unreadUpdates);
-  const [unreadFrom, setUnreadFrom] = useState(unreadUpdates);
-  if (unreadUpdates !== unreadFrom) {
-    setUnreadFrom(unreadUpdates);
-    setUnread(unreadUpdates);
+  // The server's counts, until What's new is opened — then each cleared at once by its own feed,
+  // rather than on the next page load. New counts from the server (a new post, another page) replace them.
+  const [unread, setUnread] = useState({ deskzo: unreadDeskzoUpdates, company: unreadUpdates });
+  const [unreadFrom, setUnreadFrom] = useState({ deskzo: unreadDeskzoUpdates, company: unreadUpdates });
+  if (unreadDeskzoUpdates !== unreadFrom.deskzo || unreadUpdates !== unreadFrom.company) {
+    setUnreadFrom({ deskzo: unreadDeskzoUpdates, company: unreadUpdates });
+    setUnread({ deskzo: unreadDeskzoUpdates, company: unreadUpdates });
   }
   useEffect(() => {
-    const clear = () => setUnread(0);
+    // The feed that was opened says whose posts it marked (src/components/help/recent-updates.tsx);
+    // an event that says nothing is the company's, as it always was.
+    const clear = (event: Event) => {
+      const source = event instanceof CustomEvent ? event.detail : null;
+      setUnread((u) => (source === "deskzo" ? { ...u, deskzo: 0 } : { ...u, company: 0 }));
+    };
     window.addEventListener(UPDATES_SEEN_EVENT, clear);
     return () => window.removeEventListener(UPDATES_SEEN_EVENT, clear);
   }, []);
@@ -134,8 +145,8 @@ export function SideRail({
             {active.key === "currency" && <RailCurrency />}
             {active.key === "lookup" && <RailLookup />}
             {active.key === "updates" && <RailUpdates canManage={canManageHelp} />}
-            {active.key === "help" && <RailHelp canManage={canManageHelp} />}
-            {active.key === "videos" && <RailVideos canManage={canManageHelp} />}
+            {active.key === "help" && <RailHelp canManage={canManageHelp} companyName={companyName} />}
+            {active.key === "videos" && <RailVideos canManage={canManageHelp} companyName={companyName} />}
           </div>
         </aside>
       )}
@@ -147,15 +158,17 @@ export function SideRail({
         {tools.map((tool, index) => {
           const Icon = tool.icon;
           const isOpen = open === tool.key;
-          const dot = tool.key === "updates" && unread > 0;
+          // What's new carries two dots, one per source, each saying its own count — never one sum.
+          const news = tool.key === "updates" ? unread : null;
+          const label = news ? withNews(tool.label, news) : tool.label;
           const startsGroup = index > 0 && tools[index - 1].group !== tool.group;
           return (
             <div key={tool.key} className="flex flex-col items-center">
               {startsGroup && <div className="my-1.5 h-px w-6 bg-line" aria-hidden="true" />}
               <button
                 type="button"
-                title={tool.label}
-                aria-label={dot ? `${tool.label} — ${unread} new` : tool.label}
+                title={label}
+                aria-label={label}
                 aria-pressed={isOpen}
                 onClick={() => choose(tool.key)}
                 className={`relative grid h-9 w-9 place-items-center rounded-base transition-colors ${
@@ -163,7 +176,8 @@ export function SideRail({
                 }`}
               >
                 <Icon className="h-[18px] w-[18px]" />
-                {dot && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" aria-hidden="true" />}
+                {news && news.company > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" aria-hidden="true" />}
+                {news && news.deskzo > 0 && <span className="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-brand ring-2 ring-surface" aria-hidden="true" />}
               </button>
             </div>
           );
@@ -200,6 +214,12 @@ export function SideRail({
       </nav>
     </div>
   );
+}
+
+/** "What's new — 2 new from Deskzo, 1 new from your company": each source's count, named, in the button's label and tooltip. */
+function withNews(label: string, news: { deskzo: number; company: number }): string {
+  const parts = [news.deskzo > 0 ? `${news.deskzo} new from Deskzo` : null, news.company > 0 ? `${news.company} new from your company` : null].filter(Boolean);
+  return parts.length ? `${label} — ${parts.join(", ")}` : label;
 }
 
 function subscribe(onChange: () => void) {

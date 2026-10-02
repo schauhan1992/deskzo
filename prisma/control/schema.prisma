@@ -893,6 +893,75 @@ model PlatformAnnouncement {
   @@map("platform_announcements")
 }
 
+// ─── Help and What's new from Deskzo ─────────────────────────────────────────────────────────────
+//
+// Published once from the console and shown, read-only, in every workspace they apply to
+// (src/lib/platform/help-content.ts). A workspace's own guides and company news are its own rows in
+// its own database (HelpLink, Announcement); the two are shown apart and never mixed.
+
+enum PlatformHelpKind {
+  /// Something to read.
+  ARTICLE
+  /// A walkthrough to watch — linked, never uploaded or embedded.
+  VIDEO
+}
+
+/// One of Deskzo's help articles or walkthrough videos. Only the link is kept: the page lives on an
+/// allowlisted host, or is a path inside the app.
+model PlatformHelpLink {
+  id          String           @id @default(cuid())
+  kind        PlatformHelpKind
+  /// 3–120 characters; the description at most 300 (a CHECK in the migration).
+  title       String
+  /// https:// or an in-app path beginning with "/", at most 2000 characters (a CHECK in the
+  /// migration); the console also holds it to the host allowlist.
+  url         String
+  description String?
+  /// Lower first, within its kind; 0–9999.
+  sortOrder   Int              @default(0)
+  /// Module keys (src/lib/modules.ts): shown where the plan has any of them. Empty: every workspace.
+  modules     String[]         @default([])
+  /// ISO 3166-1 alpha-2 codes. Empty: every country.
+  countries   String[]         @default([])
+  /// Null: a draft. Later than now: scheduled. Live from then until archived.
+  publishedAt DateTime?
+  archivedAt  DateTime?
+  /// PlatformUser ids (soft references, like the audit actor).
+  createdById String
+  updatedById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([archivedAt, publishedAt])
+  @@map("platform_help_links")
+}
+
+/// What's new from Deskzo: a release note. Plain text, line breaks kept. Who has read it is kept in
+/// each workspace, per person (User.deskzoUpdatesSeenAt), never here.
+model PlatformUpdate {
+  id          String    @id @default(cuid())
+  /// 3–120 characters, and the body 1–4000 (a CHECK in the migration).
+  title       String
+  body        String
+  /// An optional "read more", held to the same rule as a help link's url.
+  linkUrl     String?
+  /// Shown above the rest while it is live.
+  pinned      Boolean   @default(false)
+  /// As on PlatformHelpLink: empty is everybody.
+  modules     String[]  @default([])
+  countries   String[]  @default([])
+  /// Null: a draft. Later than now: scheduled. Live from then until archived.
+  publishedAt DateTime?
+  archivedAt  DateTime?
+  createdById String
+  updatedById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([archivedAt, publishedAt])
+  @@map("platform_updates")
+}
+
 /// Monthly recurring revenue at the gateways, one row per currency per day — written by the tick's daily chores.
 model PlatformRevenueSnapshot {
   day           DateTime @db.Date

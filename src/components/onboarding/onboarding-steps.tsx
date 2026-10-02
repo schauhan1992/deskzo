@@ -504,7 +504,7 @@ export function HelpStep({
       {added.length > 0 && (
         <p className="flex items-center gap-2 text-sm text-success" role="status">
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-          Added {added.join(", ")} to the Help panel.
+          Added {added.join(", ")} to your company&apos;s guides.
         </p>
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
@@ -548,9 +548,10 @@ export function HelpStep({
         </div>
       </div>
       <p className="text-xs text-subtle">
-        The support contact on everybody&apos;s dashboard is ours; these are your own guides. Manage them under{" "}
+        Deskzo&apos;s help articles, walkthrough videos and What&apos;s new — and the support contact on everybody&apos;s dashboard — come from
+        Deskzo, already in place. These are your company&apos;s own, listed apart from them under “From your company”. Manage them under{" "}
         <Link href="/settings/help" className="text-brand hover:underline">
-          Settings → Help &amp; support
+          Settings → Your company&apos;s guides
         </Link>
         .
       </p>

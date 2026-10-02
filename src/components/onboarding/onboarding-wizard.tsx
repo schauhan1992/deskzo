@@ -42,6 +42,9 @@ import { cn } from "@/lib/utils";
  * the server says the step is done or skipped. A required step can't be passed until it is done; an
  * optional one can be skipped, and a skip counts as finished. Drafts live here, and every step stays
  * mounted while the dialog is open, so going back and forth loses nothing.
+ *
+ * The company's own guides are one of the optional ones: Deskzo's help, videos and What's new are in
+ * the rail from the start, so nobody is asked to write help before they can begin.
  */
 
 const SHORT: Record<StepKey, string> = {
@@ -49,7 +52,7 @@ const SHORT: Record<StepKey, string> = {
   logo: "Logo",
   team: "Your team",
   items: "What you sell",
-  helpline: "Help for your team",
+  helpline: "Your own guides",
   photo: "Your photo",
   "two-factor": "Two-factor sign-in",
 };
@@ -277,7 +280,9 @@ export function OnboardingWizard({
           tone: "error",
           text: now.required
             ? `${now.title} is needed before you can go on — ${now.key === "two-factor" ? "set it up above." : "fill in the details above."}`
-            : `${now.key === "logo" ? "Choose a logo" : now.key === "photo" ? "Add a photo" : now.key === "team" ? "Add somebody" : "Fill this in"}, or choose Skip for now.`,
+            : now.key === "helpline"
+              ? "Add a guide of your own, or choose Skip for now — Deskzo's help is already in the rail."
+              : `${now.key === "logo" ? "Choose a logo" : now.key === "photo" ? "Add a photo" : now.key === "team" ? "Add somebody" : "Fill this in"}, or choose Skip for now.`,
         });
         return;
       }

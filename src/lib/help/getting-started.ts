@@ -9,7 +9,9 @@
  * rather than shown greyed: a salesperson has no use for "fill in your company profile".
  *
  * Two steps are required — the company profile and two-factor sign-in. The rest may be skipped, and a
- * skipped step counts as finished. Company skips are remembered for everybody
+ * skipped step counts as finished. That includes the company's own guides: Deskzo's help articles,
+ * videos and What's new are in every workspace from the start, so a new company can finish without
+ * adding any help of its own (owner, 2 Oct 2026). Company skips are remembered for everybody
  * (`OrganisationSettings.onboardingSkipped`), a person's own on their account (`User.onboardingSkipped`);
  * both arrive here as facts, so this file stays pure.
  */
@@ -37,7 +39,7 @@ export function skipScope(key: StepKey): "company" | "personal" | null {
 export type GettingStartedFacts = {
   /** Holds `settings.manage` — the company-setup steps. */
   admin: boolean;
-  /** Holds `help.manage` — the help step (with `admin`: it is one of the company's). */
+  /** Holds `help.manage` — the company's-own-guides step (with `admin`: it is one of the company's). */
   helpManager: boolean;
   /** The Items module is on and visible to them. */
   itemsModule: boolean;
@@ -47,7 +49,10 @@ export type GettingStartedFacts = {
   hasLogo: boolean;
   activeUsers: number;
   itemCount: number;
-  /** Somewhere to turn for help: a help article or video for the rail (or a helpline saved before it was retired). */
+  /**
+   * The company has a guide of its own in the rail — an article or a video it added. Named for the
+   * helpline this step began as; the key stays, so skips already saved under it still count.
+   */
   helplineSet: boolean;
 
   hasPhoto: boolean;
@@ -130,15 +135,16 @@ export function gettingStartedSteps(f: GettingStartedFacts): GettingStartedStep[
         group: "company",
       });
     }
-    // A company step, so for somebody setting the company up — and only one who may change help.
+    // A company step, so for somebody setting the company up — and only one who may change its guides.
+    // Optional, and worded so: Deskzo's help is already in the rail, and this is only the company's own.
     if (f.helpManager) {
       drafts.push({
         key: "helpline",
-        title: "Tell people where to get help",
-        description: "A help article or a training video for the Help panel on everybody's rail — where to look before asking.",
+        title: "Add your company's own guides",
+        description: "Optional — Deskzo's help articles and videos are already in everybody's rail. Add your own how-tos and SOPs, listed apart from them, if you have any.",
         href: "/settings/help",
-        action: "Add help",
-        where: "Settings → Help & support",
+        action: "Add a guide",
+        where: "Settings → Your company's guides",
         done: f.helplineSet,
         group: "company",
       });

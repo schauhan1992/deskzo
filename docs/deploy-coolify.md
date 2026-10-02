@@ -46,7 +46,7 @@ On the Deskzo application:
   - turn **off** *Inject Build Args to Dockerfile*, so no secret reaches the build;
   - leave the health check off, because the image has no curl or wget for one.
 - **Persistent Storage:** add a volume named `deskzo-data` with destination path `/data`. Workspace backups, support attachments and the GeoIP file live there.
-- **Post-deployment command:** `npm run tenants:migrate`. Each release migrates every database just after the new container starts. The migrations are written expand-then-contract, so the new code tolerates the old schema meanwhile.
+- **Post-deployment command:** `npm run tenants:migrate`. Each release migrates every database just after the new container starts. The migrations are written expand-then-contract, so the new code tolerates the old schema meanwhile. A new column on an existing table is not tolerated by itself: Prisma names every column in a query without a `select`, sign-in's among them. Until a later release, such a column goes in `NOT_YET_EVERYWHERE` in `src/lib/tenancy/clients.ts`, and the code that reads it is ready for it to be missing.
 - **Environment Variables → Developer view.** Paste this, with the database's password and host from step 2 put in the four URLs:
 
 ```ini

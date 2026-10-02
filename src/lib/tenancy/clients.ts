@@ -231,11 +231,28 @@ const factory = { provider: "postgres" as const, adapterName: "deskzo-workspaces
 type Batcher = { _requestHandler?: { dataloader?: { options?: { batchBy?: unknown } } } };
 type BatchedRequest = { transaction?: { id?: string | number } };
 
+/**
+ * Columns left out of every query that doesn't name them, until every workspace has them.
+ *
+ * A query without a `select` — a sign-in's lookup of the person, an update's RETURNING — lists every
+ * column Prisma knows. A release serves before `tenants:migrate` has reached every workspace
+ * (docs/deploy-coolify.md), so a column added to a busy table would fail those queries in each
+ * workspace still waiting its turn: nobody there could sign in. A query that wants one of these
+ * names it in its `select`, and is ready for the column not to be there yet. (The client is typed
+ * as if nothing were left out; nothing reads these but by name.)
+ *
+ * Take an entry out in a later release, once every workspace is past the migration that added it.
+ */
+const NOT_YET_EVERYWHERE = {
+  // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
+  user: { deskzoUpdatesSeenAt: true },
+} satisfies Prisma.GlobalOmitConfig;
+
 /** The one client, made on first use. */
 export function sharedClient(): PrismaClient {
   const state = tenancyState();
   if (state.shared) return state.shared;
-  const client = new PrismaClient({ adapter: factory as unknown as Prisma.PrismaClientOptions["adapter"] });
+  const client = new PrismaClient({ adapter: factory as unknown as Prisma.PrismaClientOptions["adapter"], omit: NOT_YET_EVERYWHERE }) as unknown as PrismaClient;
   // Same-tick findUnique calls are merged only within one transaction — see the top of this file.
   const options = (client as unknown as Batcher)._requestHandler?.dataloader?.options;
   if (!options || typeof options.batchBy !== "function") {

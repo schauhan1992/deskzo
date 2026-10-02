@@ -27,7 +27,7 @@ import {
 import { WelcomeHeader, type DashboardTab } from "@/components/dashboard/welcome-header";
 import { GettingStarted } from "@/components/dashboard/getting-started";
 import { RecentUpdates } from "@/components/help/recent-updates";
-import { getGettingStarted, listUpdates, unreadUpdateCount } from "@/actions/help";
+import { deskzoUpdates, getGettingStarted, listUpdates, unreadUpdateCounts, type DeskzoFeed } from "@/actions/help";
 import { getSupportContact } from "@/actions/support";
 import { getBranding } from "@/actions/branding";
 import { getOrganisation } from "@/lib/organisation";
@@ -155,7 +155,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     getOrganisation(),
     // The platform's support desk, from the console — not a helpline each workspace sets for itself.
     getSupportContact(),
-    unreadUpdateCount(),
+    // Deskzo's What's new and the company's news, counted apart — each its own pill on the tab. A count
+    // that can't be read is no pill, as in the layout, never the page failing: during a release a
+    // workspace not yet migrated has no "seen" column for Deskzo's side.
+    unreadUpdateCounts().catch(() => ({ deskzo: 0, company: 0 })),
     can(user.id, "help.manage"),
   ]);
   const companyName = organisation.tradeName || organisation.legalName || branding.appName;
@@ -166,8 +169,18 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       companyName={companyName}
       logoDataUrl={branding.logoDataUrl}
       helpDesk={helpDesk}
-      // The count is only worth showing until they open the tab that clears it.
-      tabs={TABS.map((t) => (t.key === "updates" && tab !== "updates" ? { ...t, badge: unread } : t))}
+      // The counts are only worth showing until they open the tab that clears them.
+      tabs={TABS.map((t) =>
+        t.key === "updates" && tab !== "updates"
+          ? {
+              ...t,
+              badges: [
+                { count: unread.deskzo, label: "new from Deskzo", tone: "soft" as const },
+                { count: unread.company, label: "new from your company" },
+              ],
+            }
+          : t,
+      )}
       activeTab={tab}
       actions={actions}
     />
@@ -185,10 +198,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     );
   }
   if (tab === "updates") {
+    // Two feeds, never one list: Deskzo's What's new, then the company's news (src/components/help/recent-updates.tsx).
+    // Deskzo's side failing shows its own "couldn't be reached" and leaves the company's news on screen.
+    const [deskzo, company] = await Promise.all([deskzoUpdates().catch((): DeskzoFeed => ({ ok: false, posts: [] })), listUpdates()]);
     return (
       <div>
         {header()}
-        <RecentUpdates posts={await listUpdates()} canManage={canManageHelp} />
+        <RecentUpdates deskzo={deskzo} company={company} canManage={canManageHelp} />
       </div>
     );
   }

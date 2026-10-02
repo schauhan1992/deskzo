@@ -3,6 +3,7 @@
 import {
   AtSign,
   BellRing,
+  BookOpen,
   Building2,
   CreditCard,
   DatabaseZap,
@@ -46,6 +47,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   AtSign,
   Handshake,
   Megaphone,
+  BookOpen,
   CreditCard,
   HandCoins,
   Layers,

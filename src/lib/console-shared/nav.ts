@@ -21,6 +21,7 @@ export type ConsolePageKey =
   | "names"
   | "partners"
   | "announcements"
+  | "help"
   | "billing"
   | "commissions"
   | "plans"
@@ -49,6 +50,7 @@ export type NavIconName =
   | "AtSign"
   | "Handshake"
   | "Megaphone"
+  | "BookOpen"
   | "CreditCard"
   | "HandCoins"
   | "Layers"
@@ -81,9 +83,10 @@ export type ConsolePage = {
 };
 
 /**
- * Each page's gate. Sub-routes gate themselves: /plans/new is SELLERS, /announcements/new MANAGERS,
- * /partners/requests SELLERS (a partner's own page, /partners/<slug>, keeps the partners gate);
- * a role outside the gate gets the same "not found" as a page that does not exist.
+ * Each page's gate. Sub-routes gate themselves: /plans/new is SELLERS, /announcements/new and
+ * /help-content/new MANAGERS, /partners/requests SELLERS (a partner's own page, /partners/<slug>,
+ * keeps the partners gate); a role outside the gate gets the same "not found" as a page that does
+ * not exist.
  */
 export const PAGE_ROLES: Record<ConsolePageKey, readonly ConsoleRole[] | undefined> = {
   overview: undefined,
@@ -97,6 +100,8 @@ export const PAGE_ROLES: Record<ConsolePageKey, readonly ConsoleRole[] | undefin
   names: undefined,
   partners: undefined,
   announcements: undefined,
+  // Every staff member reads Deskzo's help and What's new; OWNER and ADMIN write it (MANAGERS, in its actions).
+  help: undefined,
   billing: SELLERS,
   commissions: SELLERS,
   plans: undefined,
@@ -124,6 +129,7 @@ export const CONSOLE_PAGES: readonly ConsolePage[] = [
   { key: "names", href: "/names", label: "Workspace names", group: "customers", icon: "AtSign", keywords: ["reserved", "blocked", "address", "slug", "subdomain", "release", "names"], inNav: true },
   { key: "partners", href: "/partners", label: "Partners", group: "customers", icon: "Handshake", badge: "partners", keywords: ["resellers", "distributors", "channel", "referrals", "deals"], inNav: true },
   { key: "announcements", href: "/announcements", label: "Announcements", group: "customers", icon: "Megaphone", badge: "announcements", keywords: ["banner", "notice", "message", "broadcast"], inNav: true },
+  { key: "help", href: "/help-content", label: "Help and What's new", group: "customers", icon: "BookOpen", keywords: ["help", "articles", "videos", "walkthroughs", "guides", "whats new", "release notes", "changelog"], inNav: true },
   { key: "billing", href: "/billing", label: "Billing", group: "revenue", icon: "CreditCard", roles: PAGE_ROLES.billing, badge: "billing", keywords: ["revenue", "invoices", "subscriptions", "webhooks", "mrr", "stripe", "razorpay"], shortcut: "b", inNav: true },
   { key: "commissions", href: "/commissions", label: "Commissions", group: "revenue", icon: "HandCoins", roles: PAGE_ROLES.commissions, badge: "commissions", keywords: ["payouts", "statements", "partner revenue"], inNav: true },
   { key: "plans", href: "/plans", label: "Plans", group: "revenue", icon: "Layers", keywords: ["pricing", "editions", "modules", "prices"], inNav: true },
@@ -209,6 +215,8 @@ export const PALETTE_ACTIONS: readonly PaletteAction[] = [
   { key: "add-staff", label: "Add staff member", href: "/staff?add=1", roles: OWNERS },
   { key: "new-plan", label: "New plan", href: "/plans/new", roles: SELLERS },
   { key: "new-announcement", label: "New announcement", href: "/announcements/new", roles: MANAGERS },
+  { key: "new-help-article", label: "New help article", href: "/help-content/new?kind=article", roles: MANAGERS },
+  { key: "new-whats-new", label: "New What's new post", href: "/help-content/new?kind=post", roles: MANAGERS },
   { key: "top-up", label: "Top up warm pool", href: "/provisioning?topup=1", roles: MANAGERS },
   { key: "sync-pin", label: "Sync PIN directory", href: "/reference?sync=pin", roles: MANAGERS },
   { key: "hold-this", label: "Hold this workspace…", href: "/workspaces/{slug}?do=hold", roles: MANAGERS, context: "workspace" },

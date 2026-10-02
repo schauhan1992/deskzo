@@ -41,7 +41,7 @@ import { getCopilotAvailability } from "@/actions/copilot";
 import { CopilotButton } from "@/components/copilot/copilot-panel";
 import { HeaderSearch } from "@/components/layout/header-search";
 import { searchScopesForMe } from "@/actions/search";
-import { unreadUpdateCount } from "@/actions/help";
+import { unreadUpdateCounts } from "@/actions/help";
 import { can } from "@/lib/authz/resolve";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { activeAnnouncementsFor } from "@/lib/platform/announcements";
@@ -53,6 +53,9 @@ import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
 import { WorkspaceSwitcher } from "@/components/linked/workspace-switcher";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { wizardAutoOpens, wizardMounted } from "@/lib/help/onboarding";
+
+/** Nothing unread on either side — for nobody signed in, or a count that could not be read. */
+const NO_UNREAD = { deskzo: 0, company: 0 };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy] = await Promise.all([
@@ -90,7 +93,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // The header search offers only the lists this person can open — src/actions/search.ts. Like
     // the sidebar, it follows "view as".
     shownUser ? searchScopesForMe().catch(() => []) : Promise.resolve([]),
-    shownUser ? unreadUpdateCount().catch(() => 0) : Promise.resolve(0),
+    // What's new, Deskzo's and the company's counted apart (src/actions/help.ts): the rail gives each its
+    // own dot. Deskzo's side is a minute-long shared copy that never throws, so it costs a page nothing.
+    shownUser ? unreadUpdateCounts().catch(() => NO_UNREAD) : Promise.resolve(NO_UNREAD),
     shownUser ? can(shownUser.id, "help.manage") : Promise.resolve(false),
     // The platform's Contact Support button — null for a view-as, platform support staff, or support
     // switched off. Never throws, and reads its settings from a minute-long copy with a 1.5 s limit,
@@ -316,8 +321,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="hidden xl:block">
         <SideRail
           copilot={!!copilot}
-          unreadUpdates={unreadUpdates}
+          unreadUpdates={unreadUpdates.company}
+          unreadDeskzoUpdates={unreadUpdates.deskzo}
           canManageHelp={canManageHelp}
+          // The name it was registered under heads the company's own guides. A workspace read from the
+          // environment may be named only by its slug, so it keeps "From your company".
+          companyName={(await currentTenant()).source === "control" ? (await currentTenant()).name : null}
           proRata={await isModuleEntitled("renewals")}
           country={(await currentTenant()).country}
           support={!!supportLauncher}

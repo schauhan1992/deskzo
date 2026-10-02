@@ -15,23 +15,26 @@ type ManagedLink = HelpLinkView & { active: boolean; sortOrder: number };
 const KINDS: { kind: HelpLinkKind; label: string; noun: string; icon: typeof FileText; hint: string; placeholder: string }[] = [
   {
     kind: "ARTICLE",
-    label: "Help articles",
+    label: "Your company's articles",
     noun: "article",
     icon: FileText,
-    hint: "How-tos and guides, wherever they're written — a wiki, a shared document, or a page in the app.",
+    hint: "Your own how-tos and SOPs, wherever they're written — a wiki, a shared document, or a page in the app. Listed under “From your company” in the Help panel.",
     placeholder: "https://… or /orders/new",
   },
   {
     kind: "VIDEO",
-    label: "Video walkthroughs",
+    label: "Your company's videos",
     noun: "video",
     icon: MonitorPlay,
-    hint: "Training recordings. YouTube links show a thumbnail; every video opens in a new tab.",
+    hint: "Your own training recordings, listed under “From your company” in the Videos panel. YouTube links show a thumbnail; every video opens in a new tab.",
     placeholder: "https://www.youtube.com/watch?v=…",
   },
 ];
 
-/** The articles and videos listed in the rail's Help and Videos panels. */
+/**
+ * The company's own articles and videos, listed under "From your company" in the rail's Help and
+ * Videos panels. Deskzo's help and walkthroughs are the console's, listed apart — never edited here.
+ */
 export function HelpLinksManager({ links }: { links: ManagedLink[] }) {
   return (
     <div className="space-y-4">
@@ -69,14 +72,14 @@ function KindSection({ spec, links }: { spec: (typeof KINDS)[number]; links: Man
         setNotice({ tone: "error", text: r.error });
         return;
       }
-      setNotice({ tone: "success", text: draft.id ? "Saved." : `Added — it's in the rail now.` });
+      setNotice({ tone: "success", text: draft.id ? "Saved." : "Added — it's in the rail now, under From your company." });
       setDraft(null);
       router.refresh();
     });
   }
 
   function remove(link: ManagedLink) {
-    if (!window.confirm(`Remove “${link.title}” from the ${spec.label.toLowerCase()}?`)) return;
+    if (!window.confirm(`Remove “${link.title}” from ${spec.label.toLowerCase()}?`)) return;
     setNotice(null);
     startTransition(async () => {
       const r = await deleteHelpLink(link.id);

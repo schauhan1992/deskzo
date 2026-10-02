@@ -7,7 +7,13 @@ import type { Moment } from "@/lib/hr/celebrations";
 import type { SupportContact } from "@/lib/support/types";
 import { cn } from "@/lib/utils";
 
-export type DashboardTab = { key: string; label: string; badge?: number };
+/**
+ * A count on a tab, each its own pill. Recent Updates carries two — Deskzo's What's new and the
+ * company's news — told apart by tone and named in words for a screen reader, never added together.
+ */
+export type TabBadge = { count: number; label: string; tone?: "solid" | "soft" };
+
+export type DashboardTab = { key: string; label: string; badge?: number; badges?: TabBadge[] };
 
 /**
  * The band across the top of the dashboard: who you are, which company this is, where to get help,
@@ -92,12 +98,18 @@ export function WelcomeHeader({
                 )}
               >
                 {t.label}
-                {!!t.badge && (
-                  <span className="rounded-full bg-brand px-1.5 text-[10px] font-semibold leading-4 text-brand-contrast">
-                    {t.badge > 9 ? "9+" : t.badge}
-                    <span className="sr-only"> new</span>
-                  </span>
-                )}
+                {[...(t.badge ? [{ count: t.badge, label: "new" } as TabBadge] : []), ...(t.badges ?? [])]
+                  .filter((b) => b.count > 0)
+                  .map((b) => (
+                    <span
+                      key={b.label}
+                      title={`${b.count} ${b.label}`}
+                      className={cn("rounded-full px-1.5 text-[10px] font-semibold leading-4", b.tone === "soft" ? "bg-brand-subtle text-brand" : "bg-brand text-brand-contrast")}
+                    >
+                      {b.count > 9 ? "9+" : b.count}
+                      <span className="sr-only"> {b.label}</span>
+                    </span>
+                  ))}
               </Link>
             );
           })}

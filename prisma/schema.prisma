@@ -514,6 +514,12 @@ model User {
    */
   updatesSeenAt          DateTime?
   /**
+   * The same line for What's new from Deskzo (the control plane's PlatformUpdate), kept apart so
+   * reading one feed never marks the other read. It only moves to a post this person was shown — a
+   * failed or empty read of Deskzo's posts leaves it where it was.
+   */
+  deskzoUpdatesSeenAt    DateTime?
+  /**
    * AES-256-GCM encrypted TOTP secret (see src/lib/crypto.ts) — null until the user completes two-factor setup.
    */
   twoFactorSecretCipher  String?

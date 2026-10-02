@@ -513,6 +513,8 @@ async function main() {
       ["invitations", (require("../src/app/platform-console/(console)/invites/page") as { default: Page }).default],
       ["announcements", (require("../src/app/platform-console/(console)/announcements/page") as { default: Page }).default],
       ["a new announcement", (require("../src/app/platform-console/(console)/announcements/new/page") as { default: Page }).default],
+      ["help and What's new", (require("../src/app/platform-console/(console)/help-content/page") as { default: Page }).default],
+      ["a new help article", (require("../src/app/platform-console/(console)/help-content/new/page") as { default: Page }).default],
       ["billing", (require("../src/app/platform-console/(console)/billing/page") as { default: Page }).default],
       ["plans", (require("../src/app/platform-console/(console)/plans/page") as { default: Page }).default],
       ["a new plan", (require("../src/app/platform-console/(console)/plans/new/page") as { default: Page }).default],

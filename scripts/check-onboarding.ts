@@ -3,8 +3,10 @@
  * request, 1 Oct 2026).
  *
  *   A. The steps, without a database (src/lib/help/getting-started.ts): who gets which, required and
- *      skippable, finished = done or skipped, company skips versus a person's own; the company profile's
- *      essentials and the wizard's small forms, each problem in words that say why.
+ *      skippable, finished = done or skipped, company skips versus a person's own; the help step the
+ *      company's own guides and optional, so a new workspace finishes without adding any help (Deskzo's
+ *      is already there — owner, 2 Oct 2026); the company profile's essentials and the wizard's small
+ *      forms, each problem in words that say why.
  *   B. The dashboard's tabs and when the wizard opens (src/lib/help/onboarding.ts).
  *   C. Signup: every bad field at once, each with its reason — in the browser's checks and through the
  *      real `startSignup` (the real control plane, read only: every form sent here is refused, so
@@ -205,6 +207,17 @@ async function main() {
     const everything = gettingStartedSteps(facts({ admin: true, helpManager: true, organisationReady: true, activeUsers: 3, itemCount: 1, helplineSet: true, hasTwoFactor: true, companySkipped: ["logo"], personalSkipped: ["photo"] }));
     ok("everything done or skipped is all finished; the first unfinished is null", allFinished(everything) && firstUnfinished(everything) === null);
     ok("  otherwise the first unfinished is the first in order", firstUnfinished(owner)?.key === "organisation" && firstUnfinished(gettingStartedSteps(facts({ hasPhoto: true })))?.key === "two-factor");
+
+    section("  the help step: the company's own guides, optional");
+    const helpStep = byKey(owner).helpline!;
+    ok(
+      "it is optional — skippable, never required — and says Deskzo's help is already there, not that the admin must publish it",
+      !helpStep.required && helpStep.skippable && helpStep.title === "Add your company's own guides" && /^Optional/.test(helpStep.description) && helpStep.description.includes("Deskzo's help") && !/where to get help/i.test(helpStep.title),
+      json(helpStep),
+    );
+    const noHelp = gettingStartedSteps(facts({ admin: true, helpManager: true, organisationReady: true, hasTwoFactor: true, helplineSet: false, companySkipped: ["logo", "team", "items", "helpline"], personalSkipped: ["photo"] }));
+    ok("a new workspace finishes without adding any help: the help step skipped, nothing added, all finished", allFinished(noHelp) && byKey(noHelp).helpline!.skipped && !byKey(noHelp).helpline!.done, json(noHelp.filter((s) => !s.finished).map((s) => s.key)));
+    ok("  a guide of its own, added, ticks it done", byKey(gettingStartedSteps(facts({ admin: true, helpManager: true, helplineSet: true }))).helpline!.done);
 
     section("  the company profile's essentials");
     const india = { legalName: "Acme Technologies Pvt Ltd", gstin: "", addressLine1: "12 MG Road", city: "Pune", state: "Maharashtra", pincode: "411001", country: "India" };
@@ -431,6 +444,15 @@ async function main() {
       ok("the owner can't finish with steps left", !ownerEarly.ok && left.every((s) => ownerEarly.error.includes(s.title)), json([ownerEarly, left.map((s) => s.key)]));
       const profile = await onb.saveCompanyProfile({ legalName: "", gstin: "27AAB", addressLine1: "", city: "", state: "", pincode: "4110", country: "India" });
       ok("the profile step refuses bad fields one by one, before anything is saved", !profile.ok && json(Object.keys(profile.issues ?? {}).sort()) === json(["addressLine1", "city", "gstin", "legalName", "pincode", "state"]), json(profile));
+      const helpBefore = ownerFacts.steps.find((s) => s.key === "helpline");
+      if (helpBefore) {
+        const helpSkip = await onb.skipStep("helpline");
+        ok(
+          helpBefore.done ? "  (the company already has a guide of its own, so its help step is done)" : "the owner may skip the company's-own-guides step with no guide added; it counts as finished",
+          helpBefore.done || (helpSkip.ok && !!helpSkip.data.steps.find((s) => s.key === "helpline" && s.skipped && s.finished && !s.done)),
+          json(helpSkip),
+        );
+      } else ok("(the owner can't manage help here, so has no help step to skip)", true);
       as(newcomer);
       ok("  and somebody without settings.manage can't use it at all", (await onb.saveCompanyProfile({ legalName: "x", gstin: "", addressLine1: "x", city: "x", state: "Goa", pincode: "403001", country: "India" })).ok === false);
 
@@ -561,6 +583,17 @@ async function main() {
       const end = wizardAt("done");
       ok("the end: You're all set", end.includes("You&#x27;re all set") || end.includes("You're all set"));
       saveRender("wizard-done.html", end);
+      if (state.steps.some((s) => s.key === "helpline")) {
+        const helpHtml = wizardAt("helpline");
+        const helpSection = helpHtml.match(/<section[^>]*aria-labelledby="onb-step-helpline"[\s\S]*?<\/section>/)?.[0] ?? "";
+        ok(
+          "the help step in the wizard: the company's own guides, Optional with Skip for now, and Deskzo's help already there",
+          helpSection.includes(">Add your company&#x27;s own guides<") && (helpSection.includes(">Optional<") || helpSection.includes(">Done<") || helpSection.includes(">Skipped<")) && helpHtml.includes(">Your own guides<") && helpSection.includes("come from") && helpSection.includes("Deskzo"),
+          helpSection.slice(0, 400),
+        );
+        const helpNow = state.steps.find((s) => s.key === "helpline")!;
+        ok("  never Required; Skip for now offered while it is neither done nor skipped", !helpSection.includes(">Required<") && (helpNow.done || helpNow.skipped || helpHtml.includes(">Skip for now<")), json({ done: helpNow.done, skipped: helpNow.skipped }));
+      } else ok("(the new owner has no help step here — help.manage isn't theirs)", true);
       for (const key of ["logo", "team", "items", "helpline", "photo"] as const) {
         if (state.steps.some((s) => s.key === key)) saveRender(`wizard-step-${key}.html`, wizardAt(key));
       }

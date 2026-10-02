@@ -890,14 +890,15 @@ export const PERMISSION_REGISTRY = [
   },
   {
     /**
-     * The helpline, the help articles and videos in the rail, and the What's new posts everybody
-     * sees — src/actions/help.ts. Its own key rather than `settings.manage`, because whoever trains
-     * people and announces changes is rarely the person who should be editing the GSTIN.
+     * The company's own guides (articles and videos in the rail) and its company news —
+     * src/actions/help.ts. Deskzo's help, videos and What's new come from Deskzo's console, and no
+     * workspace permission touches them. Its own key rather than `settings.manage`, because whoever
+     * trains people and announces changes is rarely the person who should be editing the GSTIN.
      */
     key: "help.manage",
-    label: "Manage help & What's new",
+    label: "Manage your company's guides and news",
     description:
-      "Set the support helpline shown on the dashboard, list help articles and training videos, and post What's new updates that everybody sees.",
+      "Add your company's own help articles and training videos to the rail, and post company news that everybody sees. Deskzo's help and What's new come from Deskzo and are not changed here.",
     defaultRoles: ["MANAGEMENT"],
     group: "Administration",
   },

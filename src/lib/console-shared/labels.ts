@@ -620,6 +620,30 @@ export const ACTION_LABELS: Record<string, string> = {
   "announcement.update": "Announcement updated",
   "announcement.end": "Announcement ended",
   "announcement.archive": "Announcement archived",
+  // Help and What's new from Deskzo (src/actions/platform/console-help.ts).
+  "help.article.create": "Help article created",
+  "help.article.update": "Help article updated",
+  "help.article.reorder": "Help articles reordered",
+  "help.article.publish": "Help article published",
+  "help.article.schedule": "Help article scheduled",
+  "help.article.unpublish": "Help article taken down",
+  "help.article.archive": "Help article archived",
+  "help.article.restore": "Help article restored as a draft",
+  "help.video.create": "Video created",
+  "help.video.update": "Video updated",
+  "help.video.reorder": "Videos reordered",
+  "help.video.publish": "Video published",
+  "help.video.schedule": "Video scheduled",
+  "help.video.unpublish": "Video taken down",
+  "help.video.archive": "Video archived",
+  "help.video.restore": "Video restored as a draft",
+  "help.post.create": "What's new post created",
+  "help.post.update": "What's new post updated",
+  "help.post.publish": "What's new post published",
+  "help.post.schedule": "What's new post scheduled",
+  "help.post.unpublish": "What's new post taken down",
+  "help.post.archive": "What's new post archived",
+  "help.post.restore": "What's new post restored as a draft",
   "export.workspaces": "Workspaces exported",
   "export.audit": "Audit log exported",
   "linked.settings": "Linked sign-in setting changed",
@@ -646,7 +670,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
-  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings"] },
+  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings"] },
 ];
 
 export function categoryOf(action: string): AuditCategoryKey | null {
@@ -698,6 +722,12 @@ const ACTION_TONES: Record<string, Tone> = {
   "support.settings": "warning",
   "tenant.note.delete": "warning",
   "announcement.create": "success",
+  "help.article.publish": "success",
+  "help.article.unpublish": "warning",
+  "help.video.publish": "success",
+  "help.video.unpublish": "warning",
+  "help.post.publish": "success",
+  "help.post.unpublish": "warning",
   "partner.create": "success",
   "partner.user.deactivate": "warning",
   "partner.user.reactivate": "success",
@@ -809,6 +839,7 @@ export function auditLabel(action: string, detail: unknown): { title: string; to
  */
 export function auditSummary(action: string, detail: unknown): string | null {
   const d = record(detail);
+  if (action.startsWith("help.")) return helpSummary(action, d);
   switch (action) {
     case "tenant.suspend":
       return join([d.kind === "BILLING" ? "for billing" : null, quote(d.reason)]);
@@ -1018,6 +1049,11 @@ export function auditHref(action: string, detail: unknown, workspaceSlug: string
     const id = text(d.id);
     return id ? `/announcements/${encodeURIComponent(id)}` : "/announcements";
   }
+  if (action.startsWith("help.")) {
+    const id = text(d.id);
+    if (id) return `/help-content/${encodeURIComponent(id)}`;
+    return action.startsWith("help.video.") ? "/help-content?tab=videos" : "/help-content";
+  }
   if (action.startsWith("staff.")) return "/staff";
   if (action.startsWith("invite.")) return "/invites";
   if (action.startsWith("names.")) return "/names";
@@ -1118,6 +1154,23 @@ function change(what: string, from: unknown, to: unknown): string | null {
   const a = text(from) ?? "none";
   const b = text(to) ?? "none";
   return a === b ? null : `${what} ${a} → ${b}`;
+}
+
+/**
+ * A help article's, video's or What's new post's change: its title, then what the entry adds — its
+ * state and how narrowly it is aimed, when it goes live, what it was, or how much a reorder moved.
+ */
+function helpSummary(action: string, d: Record<string, unknown>): string | null {
+  const state = d.state === "draft" ? "Draft" : d.state === "scheduled" ? "Scheduled" : d.state === "live" ? "Live" : null;
+  const was = d.was === "scheduled" || d.was === "live" || d.was === "draft" ? `was ${d.was}` : null;
+  const narrowed = [
+    typeof d.modules === "number" && d.modules > 0 ? plural(d.modules, "module") : null,
+    typeof d.countries === "number" && d.countries > 0 ? plural(d.countries, "country", "countries") : null,
+  ].filter((p): p is string => !!p);
+  const aimed = "modules" in d || "countries" in d ? (narrowed.length ? narrowed.join(", ") : "every workspace") : null;
+  const at = d.state === "scheduled" || action.endsWith(".schedule") ? date(d.publishedAt) : null;
+  const moved = typeof d.moved === "number" && typeof d.count === "number" ? `${d.moved} of ${d.count} moved` : null;
+  return join([quote(d.title), state, d.pinned === true ? "pinned" : null, aimed, at ? `from ${when(at)}` : null, was, moved]);
 }
 
 function audienceText(audience: unknown, targets: unknown): string | null {

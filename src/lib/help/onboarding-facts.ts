@@ -42,13 +42,14 @@ export async function gettingStartedFor(userId: string): Promise<GettingStartedF
   ]);
   const itemsModule = items === "available";
   // Company facts are read only for somebody who will be shown the company steps.
-  const [organisation, branding, activeUsers, itemCount, helpDesk, helpLinks] = await Promise.all([
+  const [organisation, branding, activeUsers, itemCount, helpLinks] = await Promise.all([
     admin ? getOrganisation() : null,
     admin ? getBranding() : null,
     // `db` lists people only — never platform support or the Automation account (src/lib/db.ts).
     admin ? db.user.count({ where: { active: true } }) : 0,
     admin && itemsModule ? db.item.count() : 0,
-    admin && helpManager ? db.helpDesk.findUnique({ where: { id: "global" }, select: { helplinePhone: true, supportEmail: true } }) : null,
+    // The company's own guides only. Deskzo's help is in every workspace and is never this step's to
+    // tick; nor is the retired helpline, which no page shows any more.
     admin && helpManager ? db.helpLink.count({ where: { active: true } }) : 0,
   ]);
   const steps = gettingStartedSteps({
@@ -59,7 +60,7 @@ export async function gettingStartedFor(userId: string): Promise<GettingStartedF
     hasLogo: !!branding?.logoDataUrl,
     activeUsers,
     itemCount,
-    helplineSet: helpLinks > 0 || !!(helpDesk?.helplinePhone || helpDesk?.supportEmail),
+    helplineSet: helpLinks > 0,
     hasPhoto: !!me?.photoUpdatedAt,
     hasTwoFactor: !!me?.twoFactorEnabledAt,
     companySkipped: settings?.onboardingSkipped ?? [],

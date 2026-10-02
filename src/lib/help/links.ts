@@ -16,9 +16,13 @@ export function checkLink(raw: string): CheckedLink {
   if (url.length > LINK_MAX) return { ok: false, error: "That link is too long." };
 
   // An in-app path. "//host" is a protocol-relative address to somewhere else entirely, and "/\host"
-  // is read the same way by browsers, so a single leading slash is the only form accepted.
+  // is read the same way by browsers, so a single leading slash is the only form accepted. Nothing
+  // inside it may undo that: a browser drops a tab or a line break from an address before reading it
+  // ("/<tab>/evil.example" opens evil.example) and reads a backslash as "/".
   if (url.startsWith("/")) {
     if (url.startsWith("//") || url.startsWith("/\\")) return { ok: false, error: "Use a full https:// address for another site." };
+    if (/[\s\p{Cc}]/u.test(url)) return { ok: false, error: "A link can't have spaces or line breaks in it." };
+    if (url.includes("\\")) return { ok: false, error: "Use / between the parts of a path, not \\." };
     return { ok: true, url, external: false };
   }
 
