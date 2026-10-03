@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { ItemCombobox } from "@/components/items/item-combobox";
 import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type ItemOption = { id: string; name: string; sku: string; type: string; unit: string | null; sellingPrice: unknown };
 
@@ -37,10 +38,8 @@ type Requirement = {
  */
 const renewalDay = (value: Date | string | null | undefined) =>
   value ? new Date(value).toISOString().slice(0, 10) : "";
-const renewalLabel = (value: Date | string | null | undefined) =>
-  value
-    ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value))
-    : null;
+/** The same day in words — the same words on the server and in the browser, which Intl's are not. */
+const renewalLabel = (value: Date | string | null | undefined) => (value ? formatCalendarDay(value) : null);
 const REMARKS_HINT = "Remarks — contract ID, VIP number, subscription ID, tenant ID…";
 
 type AddFormValues = z.input<typeof addLeadRequirementSchema>;

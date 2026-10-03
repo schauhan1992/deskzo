@@ -2,8 +2,9 @@ import type { Prisma, SiteLeadStatus } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CmsRefused, LEAD_STATUSES, LEAD_TOPICS, type LeadDetail, type LeadFilters, type LeadRow, type Paged } from "@/lib/cms/types";
 import { csvRow } from "@/lib/csv";
-import { endOfIndianDay, formatIstDateTime, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The leads inbox: requests from the public site's contact form (src/actions/platform/site.ts
@@ -38,16 +39,21 @@ export async function recordLead(lead: NewLead): Promise<string | null> {
   return row.id;
 }
 
-function whereOf(filters: LeadFilters): Prisma.SiteLeadWhereInput {
+/**
+ * The filters as a query. From and To are days on the console's clock (Settings › Time zone) — read only
+ * when a day is given, since the CMS layout counts new leads on every page.
+ */
+async function whereOf(filters: LeadFilters, clock?: Clock): Promise<Prisma.SiteLeadWhereInput> {
   const status = filters.status && (LEAD_STATUSES as readonly string[]).includes(filters.status) ? filters.status : undefined;
   const topic = filters.topic && (LEAD_TOPICS as readonly string[]).includes(filters.topic) ? filters.topic : undefined;
-  const from = filters.from ? startOfIndianDay(String(filters.from)) : null;
-  const to = filters.to ? endOfIndianDay(String(filters.to)) : null;
+  const from = filters.from ? String(filters.from) : null;
+  const to = filters.to ? String(filters.to) : null;
+  const days = from || to ? (clock ?? (await consoleClock())).dayRange(from, to) : null;
   const q = typeof filters.q === "string" ? filters.q.trim().slice(0, 100) : "";
   return {
     ...(status ? { status } : {}),
     ...(topic ? { topic } : {}),
-    ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
+    ...(days ? { createdAt: days } : {}),
     ...(q
       ? {
           OR: [
@@ -66,7 +72,7 @@ const ROW_SELECT = { id: true, name: true, email: true, company: true, phone: tr
 /** The inbox: newest first, filtered, a page at a time — and how many there are of each status (over everything). */
 export async function listLeads(filters: LeadFilters = {}): Promise<Paged<LeadRow> & { counts: Record<SiteLeadStatus, number> }> {
   const page = Math.max(1, Math.floor(Number(filters.page) || 1));
-  const where = whereOf(filters);
+  const where = await whereOf(filters);
   const [rows, total, grouped] = await Promise.all([
     controlDb().siteLead.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * LEADS_PAGE_SIZE, take: LEADS_PAGE_SIZE, select: ROW_SELECT }),
     controlDb().siteLead.count({ where }),
@@ -126,16 +132,20 @@ export async function updateLead(id: string, change: { status?: SiteLeadStatus; 
   return getLead(before.id);
 }
 
-/** The filtered inbox as CSV (at most 10,000 rows — narrow it down for more), audited. */
+/**
+ * The filtered inbox as CSV (at most 10,000 rows — narrow it down for more), audited. Times, the days
+ * filtered by and the file's date are the console's clock's, the zone named in the header.
+ */
 export async function exportLeadsCsv(filters: LeadFilters, actor: CmsActor, now = new Date()): Promise<{ filename: string; csv: string; rows: number }> {
-  const where = whereOf(filters);
+  const clock = await consoleClock();
+  const where = await whereOf(filters, clock);
   const total = await controlDb().siteLead.count({ where });
   if (total > LEADS_EXPORT_CAP) throw new CmsRefused(`That is ${total.toLocaleString("en-IN")} leads — narrow the filters to ${LEADS_EXPORT_CAP.toLocaleString("en-IN")} or fewer.`);
   const rows = await controlDb().siteLead.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   const lines = [
-    csvRow(["Received (India time)", "Name", "Email", "Company", "Phone", "Topic", "Status", "Message", "Notes"]),
-    ...rows.map((r) => csvRow([formatIstDateTime(r.createdAt), r.name, r.email, r.company ?? "", r.phone ?? "", r.topic, r.status, r.message, r.notes ?? ""])),
+    csvRow([`Received (${clock.zone})`, "Name", "Email", "Company", "Phone", "Topic", "Status", "Message", "Notes"]),
+    ...rows.map((r) => csvRow([clock.dateTime(r.createdAt), r.name, r.email, r.company ?? "", r.phone ?? "", r.topic, r.status, r.message, r.notes ?? ""])),
   ];
   await cmsAudit(actor, "lead.export", "lead", null, { rows: rows.length, filters: { status: filters.status ?? null, topic: filters.topic ?? null, from: filters.from ?? null, to: filters.to ?? null, q: !!filters.q } });
-  return { filename: `website-leads-${now.toISOString().slice(0, 10)}.csv`, csv: `${lines.join("\r\n")}\r\n`, rows: rows.length };
+  return { filename: `website-leads-${clock.dateKey(now)}.csv`, csv: `${lines.join("\r\n")}\r\n`, rows: rows.length };
 }

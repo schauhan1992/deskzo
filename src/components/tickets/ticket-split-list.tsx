@@ -4,6 +4,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { TicketPriority, TicketStatus, TicketType } from "@prisma/client";
 import { Badge } from "@/components/ui/card";
 import { SplitRow } from "@/components/ui/split-list";
+import { useClock } from "@/components/time/clock-provider";
 import { SELECTED_PARAM } from "@/lib/view-mode";
 import { formatTicketId, getTicketSlaStatus, ticketPriorityTones, ticketStatusTones } from "@/lib/tickets";
 
@@ -26,6 +27,7 @@ type TicketRow = {
 export function TicketSplitList({ tickets, selectedId }: { tickets: TicketRow[]; selectedId: string | null }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const clock = useClock();
 
   function hrefFor(id: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -36,7 +38,7 @@ export function TicketSplitList({ tickets, selectedId }: { tickets: TicketRow[];
   return (
     <div className="divide-y divide-line">
       {tickets.map((ticket) => {
-        const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt);
+        const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt, clock);
         return (
           <SplitRow
             key={ticket.id}

@@ -1,11 +1,11 @@
 import { CLOSE_AFTER_DAYS, PAST_DUE_GRACE_DAYS, TRIAL_GRACE_DAYS, billingStandings } from "@/lib/billing/lifecycle";
-import { dayKeyLabel, dayMonth, dayMonthYear, istDayKey, istDaysBetween, plural, when } from "@/lib/console-shared/format";
+import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import { gatewayLabel, grantLabel, jobLabel, schemaLabel } from "@/lib/console-shared/labels";
 import type { AlertCategory, AlertFilters, AlertSeverity } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { SELLERS, SIGNUP_VIEWERS, hasRole } from "@/lib/console-shared/roles";
 import type { ConsoleRole } from "@/lib/console-shared/types";
-import { startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { cleanText, staffNameMap } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
@@ -24,6 +24,7 @@ import {
 } from "@/lib/platform/health";
 import { RETENTION_DAYS } from "@/lib/platform/lifecycle";
 import { autoDeprovision } from "@/lib/platform/settings";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The console's alerts: what is wrong now, or about to be, derived on every request from the control
@@ -200,7 +201,8 @@ export function alertTenantId(key: string): string | null {
 
 // ─── Sources ─────────────────────────────────────────────────────────────────────────────────────
 
-type Ctx = { now: Date };
+/** `clock` is the console's (Settings › Time zone): the days and times an alert names, and the day in its key. */
+type Ctx = { now: Date; clock: Clock };
 
 async function setupAlerts({ now }: Ctx): Promise<Alert[]> {
   const control = controlDb();
@@ -337,7 +339,7 @@ async function jobAlerts({ now }: Ctx): Promise<Alert[]> {
   );
 }
 
-async function trialAlerts({ now }: Ctx): Promise<Alert[]> {
+async function trialAlerts({ now, clock }: Ctx): Promise<Alert[]> {
   const subs = await controlDb().subscription.findMany({
     where: { gateway: "MANUAL", status: "TRIALING", trialEndsAt: { lte: new Date(now.getTime() + 3 * DAY) }, tenant: { status: "ACTIVE", isDefault: false } },
     orderBy: { trialEndsAt: "asc" },
@@ -352,17 +354,17 @@ async function trialAlerts({ now }: Ctx): Promise<Alert[]> {
     const { slug } = s.tenant;
     const ends = s.trialEndsAt;
     const holdAt = new Date(ends.getTime() + TRIAL_GRACE_DAYS * DAY);
-    const days = istDaysBetween(now, ends);
+    const days = clock.daysBetween(now, ends);
     let title: string;
     let detail: string;
     if (ends <= now) {
-      title = `${slug}'s trial ended on ${dayMonth(ends)}`;
-      detail = holdAt > now ? `It is held on ${dayMonth(holdAt)} unless a plan is bought.` : "Its grace is over; the next platform tick holds it unless a plan is bought.";
+      title = `${slug}'s trial ended on ${clock.dayMonth(ends)}`;
+      detail = holdAt > now ? `It is held on ${clock.dayMonth(holdAt)} unless a plan is bought.` : "Its grace is over; the next platform tick holds it unless a plan is bought.";
     } else {
       title = days <= 0 ? `${slug}'s trial ends today` : days === 1 ? `${slug}'s trial ends tomorrow` : `${slug}'s trial ends in ${days} days`;
-      detail = `It ends ${when(ends)}. Extend it from Trials, or it is held ${TRIAL_GRACE_DAYS} days later unless a plan is bought.`;
+      detail = `It ends ${clock.dateTime(ends)}. Extend it from Trials, or it is held ${TRIAL_GRACE_DAYS} days later unless a plan is bought.`;
     }
-    out.push(make("trial.ending", [part(s.tenant.id), istDayKey(ends)], { title, detail, href: "/trials", since: ends, tenant: s.tenant }));
+    out.push(make("trial.ending", [part(s.tenant.id), clock.dateKey(ends)], { title, detail, href: "/trials", since: ends, tenant: s.tenant }));
   }
   return out;
 }
@@ -419,7 +421,7 @@ type SeatRow = { tenantId: string; slug: string; name: string; day: Date | strin
  * Open workspaces using more seats than their limit when last counted — the rule of `overLimit().seats`
  * (src/lib/platform/usage.ts), worked out in the database so only the few over it come back.
  */
-async function seatAlerts(): Promise<Alert[]> {
+async function seatAlerts({ clock }: Ctx): Promise<Alert[]> {
   const rows = await controlDb().$queryRaw<SeatRow[]>`
     SELECT l."tenantId", t."slug", t."name", l."day", l."seatsUsed", l."seatsLimit"
     FROM (
@@ -440,13 +442,13 @@ async function seatAlerts(): Promise<Alert[]> {
       title: `${r.slug} uses ${used} of ${limit} seats`,
       detail: `${plural(used - limit, "seat")} over its limit when counted on ${dayKeyLabel(dayKey, false)}.`,
       href: workspaceHref(r.slug, "usage"),
-      since: startOfIndianDay(dayKey),
+      since: clock.startOfDay(dayKey),
       tenant: { id: r.tenantId, slug: r.slug, name: r.name },
     });
   });
 }
 
-async function purgeAlerts({ now }: Ctx): Promise<Alert[]> {
+async function purgeAlerts({ now, clock }: Ctx): Promise<Alert[]> {
   const rows = await controlDb().tenant.findMany({
     // Keys still kept: purging empties the sealed bundle (src/lib/platform/lifecycle.ts). Compared in the database, never read.
     where: { status: "DEPROVISIONED", deprovisionedAt: { lt: new Date(now.getTime() - RETENTION_DAYS * DAY) }, keyBundleCipher: { not: "" } },
@@ -460,7 +462,7 @@ async function purgeAlerts({ now }: Ctx): Promise<Alert[]> {
     return [
       make("purge.due", [part(t.id)], {
         title: `${t.slug} can be purged`,
-        detail: `Closed on ${dayMonthYear(t.deprovisionedAt)}; its ${RETENTION_DAYS} days of retention ended on ${dayMonthYear(due)}. Purging deletes its keys and final backups: npm run platform:tenant -- purge ${t.slug} on the server.`,
+        detail: `Closed on ${clock.date(t.deprovisionedAt)}; its ${RETENTION_DAYS} days of retention ended on ${clock.date(due)}. Purging deletes its keys and final backups: npm run platform:tenant -- purge ${t.slug} on the server.`,
         href: "/workspaces?view=closed",
         since: due,
         tenant: { id: t.id, slug: t.slug, name: t.name },
@@ -469,7 +471,7 @@ async function purgeAlerts({ now }: Ctx): Promise<Alert[]> {
   });
 }
 
-async function grantAlerts({ now }: Ctx): Promise<Alert[]> {
+async function grantAlerts({ now, clock }: Ctx): Promise<Alert[]> {
   const control = controlDb();
   const grants = await control.supportAccessGrant.findMany({
     where: { revokedAt: null, expiresAt: { gt: now } },
@@ -487,7 +489,7 @@ async function grantAlerts({ now }: Ctx): Promise<Alert[]> {
     return [
       make("grant.live", [part(g.id)], {
         title: `${tenant.slug} has let support in — ${grantLabel("live", g.level).label.toLowerCase()}`,
-        detail: `Granted by ${by}; it ends ${when(g.expiresAt)}.`,
+        detail: `Granted by ${by}; it ends ${clock.dateTime(g.expiresAt)}.`,
         href: workspaceHref(tenant.slug, "support"),
         since: g.createdAt,
         tenant,
@@ -546,8 +548,8 @@ async function signupAlerts({ now }: Ctx): Promise<Alert[]> {
 
 // Billing — read only for the staff who sell.
 
-async function dailyAlerts({ now }: Ctx): Promise<Alert[]> {
-  const d = await dailyChores(now);
+async function dailyAlerts({ now, clock }: Ctx): Promise<Alert[]> {
+  const d = await dailyChores(now, clock);
   if (d.state !== "late" && d.state !== "never") return [];
   return [
     make("daily.stale", [], {
@@ -608,7 +610,7 @@ async function exemptAlerts(): Promise<Alert[]> {
   );
 }
 
-async function pastDueAlerts({ now }: Ctx): Promise<Alert[]> {
+async function pastDueAlerts({ now, clock }: Ctx): Promise<Alert[]> {
   const subs = await controlDb().subscription.findMany({
     where: {
       gateway: { not: "MANUAL" },
@@ -632,14 +634,14 @@ async function pastDueAlerts({ now }: Ctx): Promise<Alert[]> {
     const { status, ...ref } = tenant;
     const title =
       holdAt > now
-        ? `${ref.slug} is past due — it will be held on ${dayMonth(holdAt)}`
+        ? `${ref.slug} is past due — it will be held on ${clock.dayMonth(holdAt)}`
         : status === "SUSPENDED"
           ? `${ref.slug} is past due and held`
-          : `${ref.slug} is past due — its hold was due on ${dayMonth(holdAt)}`;
+          : `${ref.slug} is past due — its hold was due on ${clock.dayMonth(holdAt)}`;
     const next = holdAt <= now && status !== "SUSPENDED" ? " The next platform tick holds it." : "";
-    return make("past-due", [part(ref.id), istDayKey(holdAt)], {
+    return make("past-due", [part(ref.id), clock.dateKey(holdAt)], {
       title,
-      detail: `A payment failed on ${dayMonth(since)}, and the gateway keeps retrying it.${next}`,
+      detail: `A payment failed on ${clock.dayMonth(since)}, and the gateway keeps retrying it.${next}`,
       href: workspaceHref(ref.slug, "billing"),
       since,
       tenant: ref,
@@ -647,7 +649,7 @@ async function pastDueAlerts({ now }: Ctx): Promise<Alert[]> {
   });
 }
 
-async function closeAlerts({ now }: Ctx): Promise<Alert[]> {
+async function closeAlerts({ now, clock }: Ctx): Promise<Alert[]> {
   const held = await controlDb().tenant.findMany({
     where: { status: "SUSPENDED", suspendedFor: "BILLING", suspendedAt: { lt: new Date(now.getTime() - (CLOSE_AFTER_DAYS - CLOSE_WARNING_DAYS) * DAY) } },
     orderBy: { suspendedAt: "asc" },
@@ -675,8 +677,8 @@ async function closeAlerts({ now }: Ctx): Promise<Alert[]> {
     return [
       make("close.due", [part(t.id)], {
         ...base,
-        title: closeAt > now ? `${t.slug} is due to be closed automatically on ${dayMonth(closeAt)}` : `${t.slug} is due to be closed automatically at the next platform tick`,
-        detail: `Held for billing since ${dayMonth(t.suspendedAt)}. Paying again lifts the hold.`,
+        title: closeAt > now ? `${t.slug} is due to be closed automatically on ${clock.dayMonth(closeAt)}` : `${t.slug} is due to be closed automatically at the next platform tick`,
+        detail: `Held for billing since ${clock.dayMonth(t.suspendedAt)}. Paying again lifts the hold.`,
       }),
     ];
   });
@@ -710,7 +712,7 @@ async function soft<T>(what: string, fallback: T, work: () => Promise<T>): Promi
 /** Every alert `role` may see, acknowledged or not, each key once. */
 async function derive(role: ConsoleRole, now: Date): Promise<Alert[]> {
   const seller = hasRole(role, SELLERS);
-  const ctx: Ctx = { now };
+  const ctx: Ctx = { now, clock: await consoleClock() };
   const sources: [string, (ctx: Ctx) => Promise<Alert[]>][] = [
     ["setups", setupAlerts],
     ["the warm pool", warmAlerts],

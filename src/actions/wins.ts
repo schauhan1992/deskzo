@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { isModuleEnabled } from "@/actions/module";
 import { toPlain } from "@/lib/serialize";
 import { periodContaining } from "@/lib/forecast/periods";
+import { workspaceClock } from "@/lib/time/workspace";
 import { bookingsByPerson, detectSalesWins, winsSettings, withoutOrphanedWins } from "@/lib/wins/detect";
 import type { ActionResult } from "@/actions/company";
 
@@ -38,7 +39,9 @@ export async function getWinsWall() {
   const user = await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return null;
   const now = new Date();
-  const month = periodContaining(now, "month");
+  // This month on the workspace's calendar.
+  const clock = await workspaceClock();
+  const month = periodContaining(now, "month", clock);
   const settings = await winsSettings();
 
   const [bookings, targets, allWins, wonThisMonth, canManage] = await Promise.all([
@@ -49,11 +52,11 @@ export async function getWinsWall() {
         metric: "ORDER_VALUE",
         scope: "USER",
         period: "MONTH",
-        // Date-only columns are compared by calendar day, so the bound is inclusive here and the month
-        // is matched exactly below. A strict `lt` at India midnight drops a target that ends on the
-        // month's last day.
-        fromDate: { gte: new Date(month.from.getTime() - 86_400_000) },
-        toDate: { lte: month.to },
+        // Date-only columns are compared by calendar day — the month's days, as the columns hold them —
+        // and the month is matched exactly below. A strict `lt` at the month's midnight instant drops a
+        // target that ends on its last day.
+        fromDate: { gte: clock.calendarDate(month.from) },
+        toDate: { lt: clock.calendarDate(month.to) },
       },
       select: { userId: true, value: true, fromDate: true, toDate: true, user: { select: { name: true, active: true } } },
     }),

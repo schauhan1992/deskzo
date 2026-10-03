@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import type { ReactElement } from "react";
 import type { PrismaClient } from "@prisma/client";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { istTodayKey } from "../src/lib/orders/handoff-rules";
+import { indiaClock } from "../src/lib/time/zone";
 
 let failures = 0;
 let passes = 0;
@@ -242,7 +242,8 @@ async function run(scratchUrl: string) {
       const location = await db.companyLocation.create({ data: { companyId: company.id, label: "Head Office", isPrimary: true }, select: { id: true } });
       return { id: company.id, locationId: location.id };
     };
-    const today = istTodayKey(new Date());
+    // Today in the suite's workspace, which keeps India's clock.
+    const today = indiaClock.today();
     // Ten seats, a month into a year's term.
     const subscription = (to: { id: string; locationId: string }) =>
       db.companyProduct.create({

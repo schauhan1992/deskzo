@@ -5,6 +5,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { ExpenseForm } from "@/components/expenses/expense-form";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function NewExpensePage({
   searchParams,
@@ -15,9 +16,10 @@ export default async function NewExpensePage({
   if (!enabled) return <ModuleDisabledNotice moduleKey="expenses" />;
 
   const params = await searchParams;
-  const [companies, visit] = await Promise.all([
+  const [companies, visit, clock] = await Promise.all([
     listCompanyOptions(),
     params.visitId && (await isModuleEntitled("visits")) ? getVisit(params.visitId) : Promise.resolve(null),
+    workspaceClock(),
   ]);
 
   return (
@@ -39,7 +41,7 @@ export default async function NewExpensePage({
           category: visit ? "TRAVEL" : "OTHER",
           amount: "",
           taxAmount: "",
-          spentOn: new Date().toISOString().slice(0, 10),
+          spentOn: clock.today(),
           description: "",
           paymentMode: "CASH",
           reimbursable: true,

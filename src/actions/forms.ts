@@ -29,7 +29,7 @@ import { allowsInvites, CATEGORY_KEYS, categoryOf } from "@/lib/forms/categories
 import { eventFunnel, formOpenState, hasSeat, inviteLink, inviteStatus } from "@/lib/forms/invites";
 import { inviteCandidates, queueFormInvites } from "@/lib/forms/send-invites";
 import { csvRow } from "@/lib/csv";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { pageSlice } from "@/lib/pagination";
 import type { ActionResult } from "@/actions/company";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
@@ -331,7 +331,7 @@ export async function saveForm(
     return { ok: false, error: "You can't build forms." };
   }
 
-  const checked = checkFormSettings(input);
+  const checked = checkFormSettings(input, await workspaceClock());
   if (!checked.ok) return checked;
   const shaped = checkFieldsForSave(input.fields);
   if (!shaped.ok) return shaped;
@@ -642,9 +642,10 @@ export async function exportFormResponses(formId: string): Promise<ActionResult<
   const fields = questionsOf(parseFields(found.form.fields)).filter((f) => !isReserved(f.key));
   const event = found.form.category === "EVENT";
   const rows = await db.formSubmission.findMany({ where: { formId }, orderBy: { createdAt: "asc" }, select: responseSelect });
+  const clock = await workspaceClock();
 
   const header = [
-    "Answered (India time)",
+    `Answered (${clock.zone.replace(/_/g, " ")} time)`,
     "Name",
     "Email",
     "Phone",
@@ -658,7 +659,7 @@ export async function exportFormResponses(formId: string): Promise<ActionResult<
     const answers = answersOf(row.payload);
     lines.push(
       csvRow([
-        formatIstDateTime(row.createdAt),
+        clock.dateTime(row.createdAt),
         row.name ?? "",
         row.email ?? "",
         row.phone ?? "",

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { AccountType } from "@prisma/client";
 import { Card } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 import type { AccountBalance } from "@/actions/ledger-reports";
 
 /**
@@ -158,6 +159,7 @@ export const accountTypeTone: Record<AccountType, "default" | "green" | "blue" |
   EXPENSE: "red",
 };
 
+/** The day a statement runs to — India's, in every workspace: the books keep India's calendar. */
 export function asAtLabel(date: Date) {
-  return `As at ${formatDate(date)}`;
+  return `As at ${indiaClock.date(date)}`;
 }

@@ -2,10 +2,11 @@ import Link from "next/link";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, TFoot, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonth, dayMonthYear, plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { COMMISSION_KIND, COMMISSION_STATUS, STATEMENT_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { ConsoleCommissionRow, CurrencyTotal } from "@/lib/partners/commission-data";
+import { indiaClock, type Clock } from "@/lib/time/zone";
 import { basisLine, bpText, partnerHref, statementHref } from "./format";
 import { VoidEntryButton } from "./entry-actions";
 
@@ -13,6 +14,11 @@ import { VoidEntryButton } from "./entry-actions";
  * Commission entries as staff read them — the Review queue, a partner's Commissions tab and a
  * statement's drawer. Server-safe (the drawer draws it on the client too); the Void button is the
  * only client island in a row.
+ *
+ * The day an entry was earned is India's, whatever zone the console keeps — commission is counted in
+ * India's months, as its statements are (src/lib/partners/statements.ts), so an entry dated here sits
+ * in the month it reads. When staff voided one is on the console's clock, handed in by the caller:
+ * `consoleClock()` on a server page, `useClock()` in the drawer.
  *
  * An entry worth a second look carries its reason as a chip; one refunded after the clawback window
  * says so (owner decision O3). Money is each entry's own currency; totals are one row per currency.
@@ -43,14 +49,14 @@ function FlagChips({ row }: { row: ConsoleCommissionRow }) {
   );
 }
 
-function StatusCell({ row }: { row: ConsoleCommissionRow }) {
+function StatusCell({ row, clock }: { row: ConsoleCommissionRow; clock: Clock }) {
   return (
     <span className="inline-flex flex-col items-start gap-0.5">
       <LabelPill map={COMMISSION_STATUS} value={row.status} />
       {row.clawbackNote && <span className="max-w-56 text-[11px] leading-4 whitespace-normal text-warning">{row.clawbackNote}</span>}
       {row.voided && (
         <span className="max-w-56 text-[11px] leading-4 whitespace-normal text-muted" title={row.voided.reason ?? undefined}>
-          {`Voided ${dayMonth(row.voided.at)} by ${row.voided.byName}`}
+          {`Voided ${clock.dayMonth(row.voided.at)} by ${row.voided.byName}`}
         </span>
       )}
     </span>
@@ -92,6 +98,15 @@ function KindCell({ row }: { row: ConsoleCommissionRow }) {
   );
 }
 
+/** The day an entry was earned, India's, with its time there on hover. */
+function EarnedDay({ at }: { at: Date }) {
+  return (
+    <time dateTime={at.toISOString()} title={`${indiaClock.dateTime(at)} (India time)`}>
+      {indiaClock.date(at)}
+    </time>
+  );
+}
+
 function VoidCell({ row, caps }: { row: ConsoleCommissionRow; caps: Caps }) {
   if (!caps.partnerMoney || !voidable(row)) return null;
   const amount = formatMoney(row.amount, row.currency);
@@ -100,7 +115,7 @@ function VoidCell({ row, caps }: { row: ConsoleCommissionRow; caps: Caps }) {
       entry={{
         id: row.id,
         // Two entries can share an amount and a customer; the day tells their buttons apart.
-        label: `${amount} ${row.customer ? `for ${row.customer.name}` : `(${row.partner.displayName})`}, earned ${dayMonthYear(row.earnedAt)}`,
+        label: `${amount} ${row.customer ? `for ${row.customer.name}` : `(${row.partner.displayName})`}, earned ${indiaClock.date(row.earnedAt)}`,
         partner: row.partner.displayName,
         amount,
         customer: row.customer?.name ?? null,
@@ -122,6 +137,7 @@ export function EntriesTable({
   totals,
   compact = false,
   statementParams = {},
+  clock,
 }: {
   rows: ConsoleCommissionRow[];
   caps: Caps;
@@ -131,6 +147,8 @@ export function EntriesTable({
   compact?: boolean;
   /** The filters a statement link should open the Statements list with. */
   statementParams?: Record<string, string>;
+  /** The console's clock, for when an entry was voided. */
+  clock: Clock;
 }) {
   const actions = caps.partnerMoney && rows.some(voidable);
   if (compact) {
@@ -148,9 +166,7 @@ export function EntriesTable({
           {rows.map((row) => (
             <Tr key={row.id}>
               <Td muted nowrap>
-                <time dateTime={row.earnedAt.toISOString()} title={when(row.earnedAt)}>
-                  {dayMonthYear(row.earnedAt)}
-                </time>
+                <EarnedDay at={row.earnedAt} />
               </Td>
               <Td>
                 <CustomerCell row={row} />
@@ -162,7 +178,7 @@ export function EntriesTable({
                 {formatMoney(row.amount, row.currency)}
               </Td>
               <Td>
-                <StatusCell row={row} />
+                <StatusCell row={row} clock={clock} />
               </Td>
               {actions && (
                 <RowActionsCell>
@@ -199,9 +215,7 @@ export function EntriesTable({
           return (
             <Tr key={row.id} className={row.flags.attribution || row.flags.overMedian ? "bg-warning-bg/40" : undefined}>
               <Td muted nowrap>
-                <time dateTime={row.earnedAt.toISOString()} title={when(row.earnedAt)}>
-                  {dayMonthYear(row.earnedAt)}
-                </time>
+                <EarnedDay at={row.earnedAt} />
               </Td>
               {showPartner && (
                 <Td>
@@ -229,7 +243,7 @@ export function EntriesTable({
                 {formatMoney(row.amount, row.currency)}
               </Td>
               <Td>
-                <StatusCell row={row} />
+                <StatusCell row={row} clock={clock} />
               </Td>
               <Td nowrap>
                 {row.statement ? (

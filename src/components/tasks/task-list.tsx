@@ -14,8 +14,10 @@ import { IconButton, RowActions } from "@/components/ui/icon-button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 import { formatTicketId } from "@/lib/tickets";
+import { taskDue } from "@/lib/task-due";
+import type { Clock } from "@/lib/time/zone";
 
 type AssignableUser = { id: string; name: string; role: string };
 
@@ -37,19 +39,14 @@ export type TaskRow = {
 type AddFormValues = z.input<typeof createTaskSchema>;
 type EditFormValues = z.input<typeof updateTaskSchema>;
 
-function toDateInputValue(d: Date | string | null) {
-  if (!d) return "";
-  return new Date(d).toISOString().slice(0, 10);
-}
-
-function dueBadge(task: TaskRow) {
+/** Overdue or due today by the workspace's calendar, not the browser's. */
+function dueBadge(task: TaskRow, clock: Clock) {
   if (task.done) return <Badge tone="green">Done</Badge>;
   if (!task.dueDate) return null;
-  const due = new Date(task.dueDate);
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  if (due < startOfToday) return <Badge tone="red">Overdue</Badge>;
-  if (due.getTime() === startOfToday.getTime()) return <Badge tone="amber">Due today</Badge>;
+  const due = taskDue(task.dueDate, clock).key;
+  const today = clock.today();
+  if (due < today) return <Badge tone="red">Overdue</Badge>;
+  if (due === today) return <Badge tone="amber">Due today</Badge>;
   return null;
 }
 
@@ -90,6 +87,7 @@ function EditTaskForm({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const clock = useClock();
   // The quick-add form below carries the same two labels, and an edit row can be open while it is —
   // so the ids have to be generated rather than written, or both labels point at one control.
   const fieldId = useId();
@@ -104,7 +102,7 @@ function EditTaskForm({
       id: task.id,
       title: task.title,
       description: task.description ?? "",
-      dueDate: toDateInputValue(task.dueDate),
+      dueDate: task.dueDate ? taskDue(task.dueDate, clock).key : "",
       assignedToUserId: task.assignedTo?.id ?? "",
     },
   });
@@ -182,6 +180,7 @@ export function TaskList({
   context?: { companyId?: string; leadId?: string; ticketId?: string };
 }) {
   const router = useRouter();
+  const clock = useClock();
   const fieldId = useId();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -288,8 +287,8 @@ export function TaskList({
                     </div>
                   </td>
                   <td className="px-3 py-2.5">
-                    <div className="text-muted">{formatDate(task.dueDate)}</div>
-                    <div className="mt-1">{dueBadge(task)}</div>
+                    <div className="text-muted">{task.dueDate ? taskDue(task.dueDate, clock).label : "—"}</div>
+                    <div className="mt-1">{dueBadge(task, clock)}</div>
                   </td>
                   <td className="px-3 py-2.5 text-muted">{task.assignedTo?.name ?? "Unassigned"}</td>
                   {showLinkedRecord && (

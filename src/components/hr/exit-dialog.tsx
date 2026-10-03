@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/bulk-select";
+import { useClock } from "@/components/time/clock-provider";
 import { exitTypeLabels, exitTypeValues } from "@/lib/validation/hr";
 
 /**
@@ -24,7 +25,9 @@ export function ExitDialog({ userId, name }: { userId: string; name: string }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [exitedOn, setExitedOn] = useState(new Date().toISOString().slice(0, 10));
+  // The workspace's today; UTC's was still yesterday before 05:30 in India.
+  const today = useClock().today();
+  const [exitedOn, setExitedOn] = useState(today);
   const [exitType, setExitType] = useState<string>("RESIGNED");
   const [exitReason, setExitReason] = useState("");
   const [deactivateLogin, setDeactivateLogin] = useState(true);

@@ -8,8 +8,8 @@ import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { IconButton } from "@/components/ui/icon-button";
-import { dayMonthYear, when } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import { HelpVerbDialog, VERB_LABEL, verbsFor, type HelpVerb, type HelpVerbTarget } from "./help-verb-dialog";
 import { HELP_STATE, isEverywhere, linkText, reachLine, targetingText, type HelpListItem, type HelpTab } from "./shared";
@@ -30,6 +30,9 @@ function targetOf(row: HelpListItem): HelpVerbTarget {
 }
 
 export function HelpContentTable({ rows, tab, caps, ordering }: { rows: HelpListItem[]; tab: HelpTab; caps: Caps; ordering: boolean }) {
+  const clock = useClock();
+  // The exact moment on the console's clock, saying which.
+  const zoned = (at: Date) => `${clock.dateTime(at)} ${clock.offsetLabel(at)}`;
   const [pending, setPending] = useState<{ verb: HelpVerb; target: HelpVerbTarget } | null>(null);
   const move = useConsoleAction<null>();
   const manage = caps.manage;
@@ -103,13 +106,13 @@ export function HelpContentTable({ rows, tab, caps, ordering }: { rows: HelpList
                 <Td nowrap>
                   <LabelPill map={HELP_STATE} value={row.state} />
                   {row.state === "scheduled" && row.publishedAt && (
-                    <p className="mt-0.5 text-xs text-muted" title={`${when(row.publishedAt)} IST`}>
+                    <p className="mt-0.5 text-xs text-muted" title={zoned(row.publishedAt)}>
                       Goes live <RelativeTime at={row.publishedAt} />
                     </p>
                   )}
                   {row.state === "live" && row.publishedAt && (
-                    <p className="mt-0.5 text-xs text-muted tabular-nums" title={`${when(row.publishedAt)} IST`}>
-                      Since {dayMonthYear(row.publishedAt)}
+                    <p className="mt-0.5 text-xs text-muted tabular-nums" title={zoned(row.publishedAt)}>
+                      Since {clock.date(row.publishedAt)}
                     </p>
                   )}
                 </Td>

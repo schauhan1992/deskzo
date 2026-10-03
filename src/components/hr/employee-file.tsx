@@ -19,7 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/bulk-select";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { letterGroups, letterTypeLabels } from "@/lib/hr/letters";
 
 type Doc = Awaited<ReturnType<typeof listEmployeeDocuments>>[number];
@@ -84,6 +86,7 @@ export function EmployeeFile({
 
 function DocumentsCard({ userId, documents, canManage }: { userId: string; documents: Doc[]; canManage: boolean }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
 
@@ -121,7 +124,7 @@ function DocumentsCard({ userId, documents, canManage }: { userId: string; docum
                 <span className="block text-[11px] text-subtle">
                   {DOC_LABEL[d.type]}
                   {d.sizeBytes > 0 && ` · ${(d.sizeBytes / 1024).toFixed(0)} KB`}
-                  {` · ${formatDate(d.createdAt)}`}
+                  {` · ${clock.date(d.createdAt)}`}
                   {d.uploadedBy && ` · ${d.uploadedBy.name}`}
                 </span>
               </span>
@@ -273,6 +276,7 @@ function UploadDialog({ userId, canManage, onClose }: { userId: string; canManag
 
 function HistoryCard({ userId, history, canManage }: { userId: string; history: History[]; canManage: boolean }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
 
@@ -318,7 +322,7 @@ function HistoryCard({ userId, history, canManage }: { userId: string; history: 
                   {[h.designation, h.location].filter(Boolean).join(" · ")}
                 </p>
                 <p className="mt-0.5 text-xs text-subtle">
-                  {h.fromDate ? formatDate(h.fromDate) : "?"} – {h.toDate ? formatDate(h.toDate) : "?"}
+                  {h.fromDate ? formatCalendarDay(h.fromDate) : "?"} – {h.toDate ? formatCalendarDay(h.toDate) : "?"}
                   {h.lastDrawnCtc && ` · last drawn ${formatCurrency(Number(h.lastDrawnCtc))}`}
                 </p>
                 {h.reasonForLeaving && <p className="mt-1 text-sm text-muted">Left: {h.reasonForLeaving}</p>}
@@ -330,7 +334,7 @@ function HistoryCard({ userId, history, canManage }: { userId: string; history: 
                 )}
                 {h.verifiedAt && h.verifiedBy && (
                   <p className="mt-0.5 text-[11px] text-subtle">
-                    Checked by {h.verifiedBy.name} on {formatDate(h.verifiedAt)}
+                    Checked by {h.verifiedBy.name} on {clock.date(h.verifiedAt)}
                   </p>
                 )}
               </div>
@@ -556,7 +560,7 @@ function LettersCard({
                 {l.subject}
               </Link>
               <span className="block font-mono text-[11px] text-subtle">
-                {l.letterNumber} · {formatDate(l.issuedOn)}
+                {l.letterNumber} · {formatCalendarDay(l.issuedOn)}
                 {l.issuedBy && ` · ${l.issuedBy.name}`}
               </span>
             </div>

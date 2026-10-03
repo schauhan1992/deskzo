@@ -13,10 +13,11 @@ import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { PartnerEnrolForm } from "@/components/partners/auth/auth-forms";
 import { DeviceIcon } from "@/components/partners/common/device-icon";
 import { TextField } from "@/components/partners/common/fields";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { PartnerSessionRow } from "@/lib/partners/types";
 
 /**
@@ -182,6 +183,7 @@ function RemoveTwoFactorDialog({ required, onClose }: { required: boolean; onClo
  * session is named by its handle — neither its token nor the stored hash.
  */
 export function PartnerMySessions({ sessions }: { sessions: PartnerSessionRow[] }) {
+  const clock = useClock();
   const [ending, setEnding] = useState<PartnerSessionRow | null>(null);
   const [endingOthers, setEndingOthers] = useState(false);
   const others = sessions.filter((s) => !s.current).length;
@@ -241,7 +243,7 @@ export function PartnerMySessions({ sessions }: { sessions: PartnerSessionRow[] 
                 <Td nowrap>{s.mfa ? <span className="text-success">Passed</span> : <span className="text-muted">Not asked</span>}</Td>
                 <RowActionsCell>
                   {!s.current && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setEnding(s)} aria-label={`Sign out ${s.device}, last seen ${when(s.lastSeenAt)}`}>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setEnding(s)} aria-label={`Sign out ${s.device}, last seen ${clock.dateTime(s.lastSeenAt)}`}>
                       Sign out
                     </Button>
                   )}
@@ -259,6 +261,7 @@ export function PartnerMySessions({ sessions }: { sessions: PartnerSessionRow[] 
 }
 
 function EndMySessionDialog({ session, onClose }: { session: PartnerSessionRow; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
   return (
     <ConfirmDialog
@@ -271,7 +274,7 @@ function EndMySessionDialog({ session, onClose }: { session: PartnerSessionRow; 
       onConfirm={() => action.run(() => partnerEndMySession(session.handle), { success: `Signed out of ${session.device}.`, onDone: onClose })}
     >
       <p>
-        Your session on <strong className="font-medium">{session.device}</strong>, last used {when(session.lastSeenAt)}, ends now. Whoever is using it is sent to the sign-in
+        Your session on <strong className="font-medium">{session.device}</strong>, last used {clock.dateTime(session.lastSeenAt)}, ends now. Whoever is using it is sent to the sign-in
         page at their next click.
       </p>
     </ConfirmDialog>

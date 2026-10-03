@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoginForm } from "@/components/auth/login-form";
 import { currentMaintenance } from "@/lib/maintenance";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { getBranding } from "@/actions/branding";
 import { signInProviders } from "@/lib/workplace/settings";
 import { SIGN_IN_IDS, SIGN_IN_NAMES, providerOfSignIn, sayEither } from "@/lib/workplace/providers";
@@ -15,13 +15,14 @@ export default async function LoginPage({
   /** `use`: a sign-in rule refused the way just tried — the ways this account does use (MICROSOFT,GOOGLE,ZOHO,PASSWORD). */
   searchParams: Promise<{ callbackUrl?: string; use?: string }>;
 }) {
-  const [params, security, maintenance, branding, providers] = await Promise.all([
+  const [params, security, maintenance, branding, providers, clock] = await Promise.all([
     searchParams,
     getCachedSecuritySettings(),
     currentMaintenance(),
     getBranding(),
     // Microsoft, Google and Zoho — whichever the company switched on (Settings → Security).
     signInProviders(),
+    workspaceClock(),
   ]);
   const callbackUrl = params.callbackUrl || "/dashboard";
   const ssoEnabled = providers.length > 0;
@@ -46,7 +47,7 @@ export default async function LoginPage({
               only to meet the maintenance page. See src/lib/maintenance.ts. */}
           {maintenance.phase === "on" && (
             <p role="status" className="mt-4 rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning">
-              The app is down for maintenance{maintenance.endsAt ? ` until ${formatIstDateTime(maintenance.endsAt)}` : ""}. Only administrators can use it
+              The app is down for maintenance{maintenance.endsAt ? ` until ${clock.dateTime(maintenance.endsAt)}` : ""}. Only administrators can use it
               until then.
             </p>
           )}

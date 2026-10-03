@@ -28,6 +28,7 @@ import type { Role } from "@/lib/roles";
 import { db } from "../src/lib/db";
 import { generateCode, inviteMessage, isWithinWindow, looksLikeCode, normaliseCode } from "../src/lib/visitors/invite-code";
 import { emailRequiredFor, isUsableCompany, looksLikeEmail, normaliseCompany } from "../src/lib/visitors/company-name";
+import { indiaClock } from "../src/lib/time/zone";
 
 const PREFIX = "ZZVisit";
 const EMAIL = "zzvisit.";
@@ -511,17 +512,18 @@ async function main() {
   ok("  a short one is refused before anything is looked up", !looksLikeCode("ABC123"));
   ok("  and one containing an excluded letter too", !looksLikeCode("ABCD234O"));
 
+  // Expected at 8:00 pm on the 22nd, India time; the window is that day and the next morning, in India.
   const due = new Date("2026-09-22T14:30:00.000Z");
-  ok("A code works on the day", isWithinWindow(due, new Date("2026-09-22T09:00:00.000Z")));
+  ok("A code works on the day", isWithinWindow(due, new Date("2026-09-22T09:00:00.000Z"), indiaClock));
   ok(
-    "  and the following morning",
-    isWithinWindow(due, new Date("2026-09-23T09:00:00.000Z")),
+    "  and the following morning — 9:30 am on the 23rd",
+    isWithinWindow(due, new Date("2026-09-23T04:00:00.000Z"), indiaClock),
     "a meeting that moved should not turn somebody away at the door",
   );
-  ok("  not the day before", !isWithinWindow(due, new Date("2026-09-21T23:00:00.000Z")));
+  ok("  not the day before — 10:30 pm on the 21st", !isWithinWindow(due, new Date("2026-09-21T17:00:00.000Z"), indiaClock));
   ok(
     "  and not two days later",
-    !isWithinWindow(due, new Date("2026-09-24T09:00:00.000Z")),
+    !isWithinWindow(due, new Date("2026-09-24T09:00:00.000Z"), indiaClock),
     "a code live for a week is a code worth stealing",
   );
 

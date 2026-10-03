@@ -17,7 +17,8 @@ import { Checkbox } from "@/components/ui/bulk-select";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 import { TransporterCombobox, type TransporterOption } from "@/components/logistics/transporter-combobox";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
 import {
   consignmentReasonLabels,
   consignmentStatusLabels,
@@ -60,6 +61,7 @@ export function ConsignmentBoard({
    */
   intraStateThreshold?: number;
 }) {
+  const clock = useClock();
   const [creating, setCreating] = useState(false);
 
   return (
@@ -102,7 +104,7 @@ export function ConsignmentBoard({
                       <Link href={`/logistics/${c.id}`} className="font-mono text-xs text-brand hover:underline">
                         {c.consignmentNumber}
                       </Link>
-                      <span className="block text-[11px] text-subtle">{formatDate(c.createdAt)}</span>
+                      <span className="block text-[11px] text-subtle">{clock.date(c.createdAt)}</span>
                     </td>
                     <td className="px-4 py-2.5 text-muted">
                       {consignmentReasonLabels[c.reason]}

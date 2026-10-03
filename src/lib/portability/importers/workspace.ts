@@ -149,8 +149,8 @@ function kindProblem(kind: FilterKind, value: unknown): string | null {
     case "yesno":
       return value === "yes" || value === "no" ? null : `must be "yes" or "no".`;
     case "isoDate":
-      // buildWhere hands these straight to `new Date()`, which reads 01/02/2026 as January — so the
-      // unambiguous form is the only one accepted rather than the preferred one.
+      // buildWhere reads these as the workspace's days (clock.dayRange), which takes yyyy-mm-dd alone — and
+      // 01/02/2026 could be January or February — so the unambiguous form is the only one accepted.
       return typeof value === "string" &&
         /^\d{4}-\d{2}-\d{2}$/.test(value) &&
         !Number.isNaN(new Date(value).getTime())

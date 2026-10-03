@@ -3,8 +3,8 @@ import { listPages } from "@/lib/cms/content";
 import { getMediaRows } from "@/lib/cms/media";
 import type { MediaRow } from "@/lib/cms/types";
 import { mediaIdsIn } from "@/lib/cms/validate";
-import { istDateParts } from "@/lib/india-time";
 import { getSiteSettings, siteOrigin, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * What the page and post editors' server pages hand the editor besides the document — read on the
@@ -12,7 +12,8 @@ import { getSiteSettings, siteOrigin, siteStatus, workspaceSuffix } from "@/lib/
  *
  *   · the render context the live preview draws blocks with: the site's published settings (so
  *     {siteName} and the header read as the site does), whether signup is open, the trial length;
- *   · the year for the preview's footer, in India's calendar — never the browser's clock;
+ *   · the year for the preview's footer, in India's calendar as the site's own footer has it
+ *     (src/components/site/page-view.tsx) — never the browser's clock;
  *   · the site's own addresses, offered in link fields;
  *   · the library rows of the images the document uses (filename, alt text).
  */
@@ -21,7 +22,7 @@ export async function editorEnvironment(): Promise<{ ctx: SiteRenderContext; yea
   const sitePaths = [...new Set([...pages.map((p) => p.path), "/blog", "/contact?topic=demo", "/contact?topic=sales"])];
   return {
     ctx: { settings, signupOpen: status.signupOpen, trialDays: status.trialDays, searchParams: {}, workspaceSuffix: workspaceSuffix() },
-    year: istDateParts(new Date()).year,
+    year: indiaClock.parts(new Date()).year,
     siteOrigin: siteOrigin(),
     sitePaths,
   };

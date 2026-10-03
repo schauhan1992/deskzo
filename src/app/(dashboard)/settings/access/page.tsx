@@ -28,7 +28,7 @@ import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
 import { staffFacts } from "@/lib/staff/roster";
 import { relativeAgo, staffStatus } from "@/lib/staff/status";
 import { permissionModules } from "@/lib/staff/permission-modules";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export const metadata = { title: "Staff & roles" };
 
@@ -166,10 +166,13 @@ async function StaffTab({
 
   const account = new Map(users.map((u) => [u.id, u]));
   const roleName = new Map(roles.map((r) => [r.key, r.name]));
-  const facts = await staffFacts(
-    roster.map((r) => r.id),
-    { leads: showLeads, signIns: showSignIns },
-  );
+  const [facts, clock] = await Promise.all([
+    staffFacts(
+      roster.map((r) => r.id),
+      { leads: showLeads, signIns: showSignIns },
+    ),
+    workspaceClock(),
+  ]);
   const now = new Date();
 
   const rows: StaffRow[] = roster.map((r) => {
@@ -203,7 +206,7 @@ async function StaffTab({
       openLeads: f?.openLeads ?? null,
       overdueLeads: f?.overdueLeads ?? null,
       lastSignIn: f?.lastSignInAt
-        ? { label: relativeAgo(f.lastSignInAt, now), exact: formatIstDateTime(f.lastSignInAt), iso: f.lastSignInAt.toISOString() }
+        ? { label: relativeAgo(f.lastSignInAt, now), exact: clock.dateTime(f.lastSignInAt), iso: f.lastSignInAt.toISOString() }
         : null,
       isYou: r.id === viewerId,
     };

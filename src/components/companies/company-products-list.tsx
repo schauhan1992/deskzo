@@ -18,7 +18,9 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { PaymentsDialog, type PayableOrder } from "@/components/payments/payments-dialog";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { useClock } from "@/components/time/clock-provider";
 import { getRenewalStatus } from "@/lib/renewals";
 import { formatOrderId } from "@/lib/order-id";
 import { calculateOrderAmount, getPaymentStatus, paymentTermsLabels } from "@/lib/gst";
@@ -69,6 +71,7 @@ type Product = PayableOrder & {
 
 type EditFormValues = z.input<typeof updateCompanyProductSchema>;
 
+/** A typed day as stored (midnight UTC) back into a date input: its UTC date is the day, in any zone. */
 function toDateInputValue(d: Date | string | null) {
   if (!d) return "";
   return new Date(d).toISOString().slice(0, 10);
@@ -216,6 +219,7 @@ export function CompanyProductsList({
   const router = useRouter();
   // The workspace's own names for the statuses (Settings → Wording).
   const wording = useWording();
+  const clock = useClock();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [paymentsTargetId, setPaymentsTargetId] = useState<string | null>(null);
@@ -367,7 +371,7 @@ export function CompanyProductsList({
                     {status ? (
                       <div className="space-y-1">
                         <div className="text-muted">
-                          {formatDate(p.startDate)} – {formatDate(p.endDate)}
+                          {formatCalendarDay(p.startDate)} – {formatCalendarDay(p.endDate)}
                         </div>
                         <Badge tone={status.tone}>{status.label}</Badge>
                       </div>
@@ -377,7 +381,7 @@ export function CompanyProductsList({
                   </td>
                   <td className="px-3 py-2.5 text-muted">
                     {p.addedBy.name}
-                    <div className="text-xs text-subtle">{formatDate(p.createdAt)}</div>
+                    <div className="text-xs text-subtle">{clock.date(p.createdAt)}</div>
                   </td>
                   {showActionsColumn && (
                     <td className="px-3 py-2.5 text-right">

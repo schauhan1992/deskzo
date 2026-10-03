@@ -13,6 +13,7 @@ import { nextDocumentNumber } from "@/lib/trade-number";
 import { financialYearOf, panOfGstin, stateCodeFromGstin, stateCodeFromName } from "@/lib/gst-engine";
 import { branchIdentity, defaultBranchIdFor } from "@/lib/branches/identity";
 import { formatDispatchAddress } from "@/lib/branches/format";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -318,7 +319,8 @@ export async function dispatchConsignment(input: {
     };
   }
 
-  const dispatchedOn = input.dispatchedOn ? new Date(`${input.dispatchedOn}T00:00:00.000Z`) : new Date();
+  // A typed day held at UTC midnight; left blank, today on the workspace's calendar, held the same way.
+  const dispatchedOn = input.dispatchedOn ? new Date(`${input.dispatchedOn}T00:00:00.000Z`) : (await workspaceClock()).calendarDate(new Date());
   const assetIds = consignment.movements.map((m) => m.assetId);
 
   await db.$transaction(async (tx) => {
@@ -383,7 +385,8 @@ export async function deliverConsignment(input: {
   if (consignment.status === "DRAFT") return { ok: false, error: "It hasn't been dispatched yet." };
   if (consignment.status === "DELIVERED") return { ok: false, error: "It has already been delivered." };
 
-  const deliveredOn = input.deliveredOn ? new Date(`${input.deliveredOn}T00:00:00.000Z`) : new Date();
+  // As dispatchedOn: a typed day, or today's, held at UTC midnight.
+  const deliveredOn = input.deliveredOn ? new Date(`${input.deliveredOn}T00:00:00.000Z`) : (await workspaceClock()).calendarDate(new Date());
   const assetIds = consignment.movements.map((m) => m.assetId);
   const movementType = input.installed ? "INSTALLED" : "DELIVERED";
 

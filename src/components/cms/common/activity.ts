@@ -1,6 +1,6 @@
 import type { ActivityFeedItem } from "@/components/console/kit/activity-feed";
 import type { Tone } from "@/lib/console-shared/types";
-import { formatIstDateTime } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import { CMS_ROUTES } from "@/lib/cms/nav";
 import { CMS_AUDIT_ACTIONS, CMS_ROLE_LABELS, LEAD_STATUS_LABELS, LEAD_TOPIC_LABELS, type CmsAuditAction, type CmsAuditRow, type CmsRole, type SiteLeadStatus } from "@/lib/cms/types";
 
@@ -187,9 +187,10 @@ function sizeText(bytes: number): string {
 
 /**
  * What a row was about, in a few words: the thing's name (`subject`) and, when the detail says more,
- * one line of it (`note`) — "About us", "/about → /company/about", "Editor → Admin".
+ * one line of it (`note`) — "About us", "/about → /company/about", "Editor → Admin". A time in it is
+ * on `clock`, the console's.
  */
-export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">): { subject: string | null; note: string | null } {
+export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">, clock: Clock): { subject: string | null; note: string | null } {
   const d = row.detail ?? {};
   const title = str(d.title);
   const slug = str(d.slug);
@@ -210,7 +211,7 @@ export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">): {
       return { subject: path, note: num(d.blocks) !== null ? count(num(d.blocks)!, "block") : null };
     case "post.schedule": {
       const at = str(d.publishAt);
-      return { subject: title ?? slug, note: at ? `Goes live ${formatIstDateTime(at)} IST` : null };
+      return { subject: title ?? slug, note: at ? `Goes live ${clock.dateTime(at)}` : null };
     }
     case "post.create":
     case "post.publish":
@@ -332,10 +333,14 @@ export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">): {
  * Log rows as the console's `ActivityFeed` draws them (the dashboard, My account): "Published a page
  * — About us", the note under it, who, and when. `hideActor` for a feed that is all one person's.
  */
-export function activityFeedItems(rows: CmsAuditRow[], opts: { canOpenUsers: boolean; canOpenSecurity: boolean; canOpenRedirects?: boolean; hideActor?: boolean }): ActivityFeedItem[] {
+export function activityFeedItems(
+  rows: CmsAuditRow[],
+  opts: { canOpenUsers: boolean; canOpenSecurity: boolean; canOpenRedirects?: boolean; hideActor?: boolean },
+  clock: Clock,
+): ActivityFeedItem[] {
   return rows.map((row) => {
     const { label, tone } = actionLabel(row.action);
-    const { subject, note } = describeActivity(row);
+    const { subject, note } = describeActivity(row, clock);
     return {
       id: row.id,
       at: row.at,

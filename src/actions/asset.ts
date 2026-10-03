@@ -9,7 +9,8 @@ import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { ensureChartOfAccounts, postAssetDisposalToLedger, postDepreciationToLedger } from "@/lib/ledger/journal";
 import { bookValue, endOfMonth, monthlyCharge, startOfMonth } from "@/lib/ledger/depreciation";
-import { calendarDateOf, istMidnight } from "@/lib/india-time";
+import { calendarDateOf } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -258,9 +259,10 @@ export async function runDepreciation(params: {
 
   const periodEnd = endOfMonth(params.year, params.month);
   const periodStart = startOfMonth(params.year, params.month);
-  // Over at midnight IST starting the next month. The charge's own date (12:00 UTC on the last day) is
-  // 17:30 IST, and treating that as the end let a month be charged while its evening was still to come.
-  if (istMidnight(params.year, params.month, 1) > new Date()) {
+  // Over at midnight IST starting the next month — depreciation is the books', which keep India's clock
+  // in every workspace. The charge's own date (12:00 UTC on the last day) is 17:30 IST, and treating that
+  // as the end let a month be charged while its evening was still to come.
+  if (indiaClock.midnight(params.year, params.month, 1) > new Date()) {
     return { ok: false, error: "That month isn't over yet." };
   }
 

@@ -8,11 +8,12 @@ import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
-import { dayMonth, dayMonthYear, istDayKey, plural, when } from "@/lib/console-shared/format";
+import { useClock } from "@/components/time/clock-provider";
+import { plural } from "@/lib/console-shared/format";
 import { ANNOUNCEMENT_TONE } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
-import { formatIstTime } from "@/lib/india-time";
 import type { AnnouncementListRow } from "@/lib/platform/announcements";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The announcements list (spec §3.8): one tab's rows — what each says, how loud it is, who it is for
@@ -45,20 +46,20 @@ function audienceText(row: AnnouncementListRow): string {
 }
 
 /**
- * "28 Sep, 10:00 am → 6:00 pm" (India time). Rows that are still to come or showing are near enough
- * that the year goes without saying; ended and archived ones keep it, since they may be last year's.
+ * "28 Sep, 10:00 am → 6:00 pm" on the console's clock. Rows that are still to come or showing are near
+ * enough that the year goes without saying; ended and archived ones keep it, since they may be last year's.
  */
-function windowText(row: AnnouncementListRow): string {
+function windowText(row: AnnouncementListRow, clock: Clock): string {
   const withYear = row.state === "ended" || row.state === "archived";
-  const stamp = (at: Date) => `${withYear ? dayMonthYear(at) : dayMonth(at)}, ${formatIstTime(at)}`;
+  const stamp = (at: Date) => `${withYear ? clock.date(at) : clock.dayMonth(at)}, ${clock.time(at)}`;
   const start = stamp(row.startsAt);
   if (!row.endsAt) return `${start} → no end`;
-  const end = istDayKey(row.startsAt) === istDayKey(row.endsAt) ? formatIstTime(row.endsAt) : stamp(row.endsAt);
+  const end = clock.dateKey(row.startsAt) === clock.dateKey(row.endsAt) ? clock.time(row.endsAt) : stamp(row.endsAt);
   return `${start} → ${end}`;
 }
 
-function windowTitle(row: AnnouncementListRow): string {
-  return `${when(row.startsAt)} to ${row.endsAt ? when(row.endsAt) : "no end"} (IST)`;
+function windowTitle(row: AnnouncementListRow, clock: Clock): string {
+  return `${clock.dateTime(row.startsAt)} to ${row.endsAt ? clock.dateTime(row.endsAt) : "no end"} (${clock.zone})`;
 }
 
 /** The consequence sentence for each confirmation — one line, as T1 asks. */
@@ -71,6 +72,7 @@ function consequence({ kind, row }: Pending): string {
 }
 
 export function AnnouncementsTable({ rows, caps }: { rows: AnnouncementListRow[]; caps: Caps }) {
+  const clock = useClock();
   const [pending, setPending] = useState<Pending | null>(null);
   const action = useConsoleAction<null>();
   const manage = caps.announce;
@@ -108,7 +110,7 @@ export function AnnouncementsTable({ rows, caps }: { rows: AnnouncementListRow[]
           <Th>Title</Th>
           <Th>Tone</Th>
           <Th>Audience</Th>
-          <Th>Window (IST)</Th>
+          <Th>{`Window (${clock.zone})`}</Th>
           <Th>Dismissible</Th>
           <Th>Created by</Th>
           {manage && <Th srOnly>Actions</Th>}
@@ -139,8 +141,8 @@ export function AnnouncementsTable({ rows, caps }: { rows: AnnouncementListRow[]
                   )}
                 </Td>
                 <Td nowrap>
-                  <span title={windowTitle(row)} className="tabular-nums">
-                    {windowText(row)}
+                  <span title={windowTitle(row, clock)} className="tabular-nums">
+                    {windowText(row, clock)}
                   </span>
                   {row.state === "live" && (
                     <p className="text-xs text-muted">

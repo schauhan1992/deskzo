@@ -8,7 +8,7 @@ import type { JournalSource } from "@prisma/client";
 import { reverseJournalEntry } from "@/actions/ledger";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 import { authorLabel } from "@/lib/people";
 import { Amount } from "@/components/accounting/report-chrome";
 
@@ -119,7 +119,8 @@ function EntryCard({ entry, canReverse }: { entry: Entry; canReverse: boolean })
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm font-medium text-text">{entry.entryNumber}</span>
             <Badge tone={SOURCE_TONE[entry.source]}>{SOURCE_LABEL[entry.source]}</Badge>
-            <span className="text-xs text-subtle">{formatDate(entry.date)}</span>
+            {/* The entry's day in the books: India's, in every workspace. */}
+            <span className="text-xs text-subtle">{indiaClock.date(entry.date)}</span>
             {/* "Posted automatically" for the Automation account's entries (src/lib/people.ts), "by <name>" for a person's. */}
             <span className="text-xs text-subtle">{authorLabel(entry.createdBy)}</span>
             {entry.reversedBy && (

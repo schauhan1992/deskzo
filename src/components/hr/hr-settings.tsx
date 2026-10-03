@@ -9,7 +9,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/bulk-select";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { leaveAccrualValues } from "@/lib/validation/hr";
 
 type Holiday = Awaited<ReturnType<typeof listHolidays>>[number];
@@ -94,7 +94,7 @@ function HolidayCard({ holidays, year }: { holidays: Holiday[]; year: number }) 
                 {h.optional && <Badge tone="amber">Restricted</Badge>}
               </span>
               <span className="flex items-center gap-2">
-                <span className="text-xs text-muted">{formatDate(h.date)}</span>
+                <span className="text-xs text-muted">{formatCalendarDay(h.date)}</span>
                 <button
                   type="button"
                   disabled={pending}

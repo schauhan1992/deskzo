@@ -5,6 +5,7 @@ import { ArrowLeftRight } from "lucide-react";
 import { lookupExchangeRate } from "@/actions/exchange-rate";
 import { BASE_CURRENCY, CURRENCIES, formatMoney, formatRate } from "@/lib/currency";
 import { Input, Label, Select } from "@/components/ui/input";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * What a foreign figure comes to in rupees, and back again.
@@ -21,6 +22,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 const FOREIGN = CURRENCIES.filter((c) => c.code !== BASE_CURRENCY);
 
 export function RailCurrency() {
+  const clock = useClock();
   const [code, setCode] = useState("USD");
   const [amount, setAmount] = useState("");
   const [toBase, setToBase] = useState(true);
@@ -45,7 +47,8 @@ export function RailCurrency() {
 
   useEffect(() => {
     let live = true;
-    const today = new Date().toISOString().slice(0, 10);
+    // Today in the workspace — the day a document raised now would carry.
+    const today = clock.today();
     lookupExchangeRate(code, today)
       .then((result) => {
         if (!live) return;
@@ -58,7 +61,7 @@ export function RailCurrency() {
     return () => {
       live = false;
     };
-  }, [code]);
+  }, [code, clock]);
 
   // Derived rather than stored: it is true precisely while neither answer has arrived.
   const loading = rate === null && error === null;

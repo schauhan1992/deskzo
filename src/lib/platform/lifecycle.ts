@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { runBackup } from "@/lib/backup/run";
 import { backupRootFor } from "@/lib/backup/maintenance";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { dropWorkspaceDatabase } from "@/lib/platform/provisioner";
 import { forgetRegistry, tenantById } from "@/lib/tenancy/registry";
@@ -98,7 +99,8 @@ export async function purgeTenant(tenantId: string, actor: string, options: { fo
   const row = await control.tenant.findUniqueOrThrow({ where: { id: tenantId } });
   if (row.status !== "DEPROVISIONED" || !row.deprovisionedAt) throw new LifecycleRefused(`Workspace ${row.slug} has not been closed.`);
   const due = new Date(row.deprovisionedAt.getTime() + RETENTION_DAYS * 86_400_000);
-  if (!options.force && due > new Date()) throw new LifecycleRefused(`Workspace ${row.slug} is kept until ${due.toISOString().slice(0, 10)}.`);
+  // The day on the console's clock: the refusal is shown to staff as it is.
+  if (!options.force && due > new Date()) throw new LifecycleRefused(`Workspace ${row.slug} is kept until ${(await consoleClock()).date(due)}.`);
   await rm(backupRootFor({ id: row.id, isDefault: false }), { recursive: true, force: true });
   await control.tenant.update({ where: { id: tenantId }, data: { keyBundleCipher: "" } });
   await audit(tenantId, actor, "tenant.purge");

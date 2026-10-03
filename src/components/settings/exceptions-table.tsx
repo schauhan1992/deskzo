@@ -6,10 +6,10 @@ import { AlertTriangle, CalendarClock, Infinity as InfinityIcon, ShieldOff, Tras
 import { clearUserPermission, extendUserPermission, type listPermissionExceptions } from "@/actions/access";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { lastDayOf } from "@/lib/access/last-day";
 
 type Result = Awaited<ReturnType<typeof listPermissionExceptions>>;
-type Row = Result["rows"][number];
 
 /**
  * Every personal exception in the company, on one screen.
@@ -36,6 +36,7 @@ function daysUntil(date: Date | string) {
 export function ExceptionsTable({ result, mayManage }: { result: Result; mayManage: boolean }) {
   const rows = result.rows;
   const router = useRouter();
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +152,7 @@ export function ExceptionsTable({ result, mayManage }: { result: Result; mayMana
                   </td>
 
                   <td className="whitespace-nowrap px-4 py-2.5 text-muted">
-                    {formatDate(r.grantedOn)}
+                    {clock.date(r.grantedOn)}
                     <span className="block text-xs text-subtle">
                       {/* A null grantor is what the seeder writes — not a departed employee. */}
                       {r.grantedByName ? `by ${r.grantedByName}` : "grantor not recorded"}
@@ -160,10 +161,10 @@ export function ExceptionsTable({ result, mayManage }: { result: Result; mayMana
 
                   <td className="whitespace-nowrap px-4 py-2.5">
                     {r.expired ? (
-                      <Badge tone="amber">Lapsed {formatDate(r.expiresAt!)}</Badge>
+                      <Badge tone="amber">Lapsed {clock.date(r.expiresAt && lastDayOf(r.expiresAt))}</Badge>
                     ) : r.expiresAt ? (
                       <span className={days !== null && days <= 7 ? "text-warning" : "text-muted"}>
-                        {formatDate(r.expiresAt)}
+                        {clock.date(lastDayOf(r.expiresAt))}
                         <span className="block text-xs text-subtle">
                           {days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`}
                         </span>
@@ -184,13 +185,14 @@ export function ExceptionsTable({ result, mayManage }: { result: Result; mayMana
                           size="sm"
                           disabled={busy === id}
                           onClick={() => {
-                            const from = r.expired ? new Date() : new Date(r.expiresAt!);
-                            from.setDate(from.getDate() + 30);
+                            // Thirty days on from its last day (or today, once lapsed), counted in the workspace's
+                            // calendar — not the browser's, and not UTC's.
+                            const from = clock.parts(r.expired ? new Date() : lastDayOf(r.expiresAt!));
                             act(id, () =>
                               extendUserPermission({
                                 userId: r.userId,
                                 permission: r.permission,
-                                expiresAt: from.toISOString().slice(0, 10),
+                                expiresAt: clock.dateKey(clock.midnight(from.year, from.month, from.day + 30)),
                               }),
                             );
                           }}

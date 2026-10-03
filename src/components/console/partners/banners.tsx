@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Banner } from "@/components/console/kit/banner";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PartnerHeader } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { REQUESTS_PATH, partnerPath } from "./format";
 import { PartnerTabLink } from "./tab-link";
 
@@ -11,7 +12,8 @@ import { PartnerTabLink } from "./tab-link";
  * What to read about a partner before anything else on its page (spec §9.2) — only what is true now,
  * most serious first: terminated with customers still attributed, suspended, no terms in force, no
  * active admin, a payout change waiting, still onboarding. Each says what it means and, where there
- * is one, offers the next step to the roles that can take it. Server-safe.
+ * is one, offers the next step to the roles that can take it. A server component: its days are on
+ * the console's clock.
  *
  * `statusReason` is staff's own words for the last status change: staff read it here; the partner
  * never does.
@@ -20,7 +22,8 @@ import { PartnerTabLink } from "./tab-link";
 const LINK_BUTTON =
   "inline-flex h-8 shrink-0 items-center rounded-base border border-line-strong bg-surface px-3 text-[13px] font-medium whitespace-nowrap text-text shadow-sm hover:bg-surface-sunken";
 
-export function PartnerBanners({ header, caps }: { header: PartnerHeader; caps: Caps }) {
+export async function PartnerBanners({ header, caps }: { header: PartnerHeader; caps: Caps }) {
+  const clock = await consoleClock();
   const base = partnerPath(header.slug);
   const toTab = (tab: string, label: string) => (
     <PartnerTabLink tab={tab} href={`${base}?tab=${tab}`} className={LINK_BUTTON}>
@@ -37,7 +40,7 @@ export function PartnerBanners({ header, caps }: { header: PartnerHeader; caps: 
       "terminated",
       <Banner
         tone={n > 0 ? "warning" : "neutral"}
-        title={n > 0 ? `Terminated — ${plural(n, "customer")} still attributed` : `Terminated${header.terminatedAt ? ` on ${dayMonthYear(header.terminatedAt)}` : ""}`}
+        title={n > 0 ? `Terminated — ${plural(n, "customer")} still attributed` : `Terminated${header.terminatedAt ? ` on ${clock.date(header.terminatedAt)}` : ""}`}
         action={n > 0 ? toTab("customers", "See the customers") : undefined}
       >
         {n > 0
@@ -51,7 +54,7 @@ export function PartnerBanners({ header, caps }: { header: PartnerHeader; caps: 
   if (header.status === "SUSPENDED") {
     add(
       "suspended",
-      <Banner tone="warning" title={`Suspended${header.suspendedAt ? ` since ${dayMonthYear(header.suspendedAt)}` : ""}`}>
+      <Banner tone="warning" title={`Suspended${header.suspendedAt ? ` since ${clock.date(header.suspendedAt)}` : ""}`}>
         It can sign in and keeps earning on its customers, but it can&apos;t sell: no new codes, links or deal registrations, and its codes stop attributing.
         {reason && <span className="mt-1 block">{`Reason: ${reason}`}</span>}
       </Banner>,

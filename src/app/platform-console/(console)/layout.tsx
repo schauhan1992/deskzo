@@ -1,4 +1,6 @@
 import { ConsoleShell } from "@/components/console/shell/console-shell";
+import { ClockProvider } from "@/components/time/clock-provider";
+import { consoleZone } from "@/lib/platform/console-clock";
 import { schemaLabel } from "@/lib/console-shared/labels";
 import { pagesFor } from "@/lib/console-shared/nav";
 import { consoleStaff, platformEnv } from "@/lib/platform/console-page";
@@ -19,13 +21,16 @@ export default async function ConsoleLayout({ children }: LayoutProps<"/platform
   const staff = await consoleStaff();
   const env = platformEnv();
   const visibleKeys = pagesFor(staff.role).map((page) => page.key);
-  const counts = await navCounts(staff.role);
+  const [counts, zone] = await Promise.all([navCounts(staff.role), consoleZone()]);
   // The folder read that never throws (an unreadable folder is "none", not a broken console).
   const schema = schemaLabel(workspaceMigrationNames().at(-1) ?? null);
 
   return (
-    <ConsoleShell staff={{ name: staff.name, email: staff.email, role: staff.role }} env={env} visibleKeys={visibleKeys} counts={counts} schema={schema}>
-      {children}
-    </ConsoleShell>
+    // The console's clock (Settings › Time zone) — every client component's through ClockProvider.
+    <ClockProvider zone={zone}>
+      <ConsoleShell staff={{ name: staff.name, email: staff.email, role: staff.role }} env={env} visibleKeys={visibleKeys} counts={counts} schema={schema}>
+        {children}
+      </ConsoleShell>
+    </ClockProvider>
   );
 }

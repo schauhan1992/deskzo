@@ -5,13 +5,13 @@ import { isModuleEnabled } from "@/actions/module";
 import { formEditorOptions, getFormForEdit } from "@/actions/forms";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { FormBuilder } from "@/components/forms/form-builder";
-import { istDateTimeInput } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function EditFormPage({ params }: { params: Promise<{ id: string }> }) {
   if (!(await isModuleEnabled("forms"))) return <ModuleDisabledNotice moduleKey="forms" />;
   const { id } = await params;
   // Not yours to change answers the same as not there: an id says nothing about what is behind it.
-  const [form, options] = await Promise.all([getFormForEdit(id), formEditorOptions()]);
+  const [form, options, clock] = await Promise.all([getFormForEdit(id), formEditorOptions(), workspaceClock()]);
   if (!form) notFound();
 
   return (
@@ -37,9 +37,9 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
             createsLead: form.createsLead,
             topic: form.topic,
             assignToUserId: form.assignToUserId,
-            closesAt: istDateTimeInput(form.closesAt),
-            eventStartsAt: istDateTimeInput(form.eventStartsAt),
-            eventEndsAt: istDateTimeInput(form.eventEndsAt),
+            closesAt: clock.input(form.closesAt),
+            eventStartsAt: clock.input(form.eventStartsAt),
+            eventEndsAt: clock.input(form.eventEndsAt),
             venue: form.venue ?? "",
             capacity: form.capacity === null ? "" : String(form.capacity),
             active: form.active,

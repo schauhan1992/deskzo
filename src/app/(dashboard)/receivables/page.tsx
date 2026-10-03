@@ -8,7 +8,7 @@ import { PromiseBadge, promiseText } from "@/components/collections/follow-up-hi
 import { formatCurrency } from "@/lib/utils";
 import { AGING_BUCKETS } from "@/lib/receivables";
 import { followUpChannelLabels } from "@/lib/collections/rules";
-import { formatIstDate } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /** Collections' views of the list: customers with a promise to pay broken, or due in the next week. */
 const PROMISE_FILTERS = [
@@ -28,7 +28,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
 
   const params = await searchParams;
   const promise = params.promise === "broken" || params.promise === "week" ? params.promise : undefined;
-  const { rows, totals } = await agingReport({ search: params.q, promise });
+  const [{ rows, totals }, clock] = await Promise.all([agingReport({ search: params.q, promise }), workspaceClock()]);
 
   const overdue = totals.total - totals.buckets.current;
   const query = (overrides: Record<string, string | undefined>) =>
@@ -140,7 +140,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
                 <td className="min-w-48 px-4 py-2.5 text-xs">
                   {row.lastFollowUp ? (
                     <div className="text-muted">
-                      <span className="text-text">{formatIstDate(row.lastFollowUp.createdAt)}</span> ·{" "}
+                      <span className="text-text">{clock.date(row.lastFollowUp.createdAt)}</span> ·{" "}
                       {followUpChannelLabels[row.lastFollowUp.channel]}
                       {row.lastFollowUp.byName ? ` · ${row.lastFollowUp.byName}` : ""}
                     </div>

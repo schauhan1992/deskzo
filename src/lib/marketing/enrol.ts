@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { coverExpiringWithin } from "@/lib/assets/lifecycle";
 import { audienceCompanyWhere } from "@/lib/marketing/audience";
 import { parseCompanyFilters } from "@/lib/marketing/audience";
-import { daysToFinancialYearEnd, triggerByKey } from "@/lib/marketing/triggers";
+import { daysToFinancialYearEnd, financialYearEndYear, triggerByKey } from "@/lib/marketing/triggers";
 import { advance, enrolmentKey, firstStep, mayReEnrol, parseExitConditions, shouldExit, stepDueAt, type ExitSignals } from "@/lib/marketing/journey";
 import { canSend } from "@/lib/marketing/suppression";
 import { nextSendTime } from "@/lib/marketing/schedule";
@@ -17,7 +17,8 @@ import {
   subscriptionMergeValues,
   type MarketingSettings,
 } from "@/lib/marketing/pipeline";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { currentKeys } from "@/lib/tenancy/keys";
 import { byStageDate } from "@/lib/pipeline/server";
 
@@ -63,6 +64,10 @@ export async function candidatesFor(
 ): Promise<Candidate[]> {
   const days = Number(config.days ?? triggerByKey[trigger]?.defaultDays ?? 30);
   const company = companyWhere;
+  // Days held in `@db.Date` columns are compared as days — today on the workspace's calendar — never
+  // with a moment, which leaves out a day that is still running.
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(new Date());
 
   switch (trigger) {
     case "SUBSCRIPTION_RENEWAL": {
@@ -74,7 +79,8 @@ export async function candidatesFor(
           parentId: null,
           item: { type: "SUBSCRIPTION" },
           orderStatus: { notIn: ["CANCELLED", "REJECTED"] },
-          endDate: { gte: new Date(), lte: daysAhead(days) },
+          // A typed day, held at UTC midnight: one ending today is still renewing.
+          endDate: { gte: today, lte: clock.calendarDate(daysAhead(days)) },
         },
         select: {
           id: true, companyId: true, quantity: true, endDate: true, fullTermUnitPrice: true,
@@ -96,7 +102,7 @@ export async function candidatesFor(
           parentId: null,
           item: { type: "SUBSCRIPTION" },
           orderStatus: { notIn: ["CANCELLED", "REJECTED"] },
-          endDate: { gte: daysAgo(days), lt: new Date() },
+          endDate: { gte: clock.calendarDate(daysAgo(days)), lt: today },
         },
         select: {
           id: true, companyId: true, quantity: true, endDate: true, fullTermUnitPrice: true,
@@ -128,9 +134,9 @@ export async function candidatesFor(
         where: {
           ownerCompany: company,
           status: { notIn: ["RETIRED", "LOST"] },
-          warrantyEndsOn: { gte: new Date(), lte: daysAhead(days) },
+          warrantyEndsOn: { gte: today, lte: clock.calendarDate(daysAhead(days)) },
           // Already covered by an AMC, so there is nothing to offer.
-          OR: [{ amcEndsOn: null }, { amcEndsOn: { lt: new Date() } }],
+          OR: [{ amcEndsOn: null }, { amcEndsOn: { lt: today } }],
         },
         select: { id: true, name: true, ownerCompanyId: true, warrantyEndsOn: true, amcEndsOn: true },
         take: 2000,
@@ -140,7 +146,7 @@ export async function candidatesFor(
         .map((r) => ({
           companyId: r.ownerCompanyId!,
           subjectId: r.id,
-          merge: { productName: r.name, expiryDate: r.warrantyEndsOn ? formatDate(r.warrantyEndsOn) : null },
+          merge: { productName: r.name, expiryDate: r.warrantyEndsOn ? formatCalendarDay(r.warrantyEndsOn) : null },
         }));
     }
 
@@ -156,7 +162,7 @@ export async function candidatesFor(
         .map((r) => ({
           companyId: r.ownerCompanyId!,
           subjectId: r.id,
-          merge: { productName: r.name, expiryDate: r.amcEndsOn ? formatDate(r.amcEndsOn) : null },
+          merge: { productName: r.name, expiryDate: r.amcEndsOn ? formatCalendarDay(r.amcEndsOn) : null },
         }));
     }
 
@@ -178,7 +184,7 @@ export async function candidatesFor(
           ownerCompany: company,
           status: { notIn: ["RETIRED", "LOST"] },
           kind: { in: ["LAPTOP", "DESKTOP", "SERVER"] },
-          purchasedOn: { lt: daysAgo(days) },
+          purchasedOn: { lt: clock.calendarDate(daysAgo(days)) },
         },
         select: { id: true, name: true, ownerCompanyId: true, purchasedOn: true },
         take: 2000,
@@ -188,7 +194,7 @@ export async function candidatesFor(
         .map((r) => ({
           companyId: r.ownerCompanyId!,
           subjectId: r.id,
-          merge: { productName: r.name, expiryDate: r.purchasedOn ? formatDate(r.purchasedOn) : null },
+          merge: { productName: r.name, expiryDate: r.purchasedOn ? formatCalendarDay(r.purchasedOn) : null },
         }));
     }
 
@@ -200,7 +206,7 @@ export async function candidatesFor(
           id: true,
           employeeCount: true,
           products: {
-            where: { item: { type: "SUBSCRIPTION" }, endDate: { gte: new Date() }, orderStatus: { notIn: ["CANCELLED", "REJECTED"] } },
+            where: { item: { type: "SUBSCRIPTION" }, endDate: { gte: today }, orderStatus: { notIn: ["CANCELLED", "REJECTED"] } },
             select: { quantity: true },
           },
         },
@@ -309,36 +315,34 @@ export async function candidatesFor(
         select: { id: true, products: { where: { orderStatus: "FULFILLED" }, select: { fulfilledAt: true }, orderBy: { fulfilledAt: "asc" }, take: 1 } },
         take: 2000,
       });
-      const today = new Date();
+      // The first order's day and today, both on the workspace's calendar.
+      const now = clock.parts(new Date());
       return rows
-        .map((r) => ({ id: r.id, first: r.products[0]?.fulfilledAt ?? null }))
+        .map((r) => ({ id: r.id, first: r.products[0]?.fulfilledAt ? clock.parts(r.products[0].fulfilledAt) : null }))
         .filter(({ first }) => {
           if (!first) return false;
-          const years = today.getUTCFullYear() - first.getUTCFullYear();
-          return (
-            years >= 1 &&
-            first.getUTCMonth() === today.getUTCMonth() &&
-            first.getUTCDate() === today.getUTCDate()
-          );
+          const years = now.year - first.year;
+          return years >= 1 && first.month === now.month && first.day === now.day;
         })
         .map(({ id, first }) => ({
           companyId: id,
           // Keyed by year, so it fires once a year rather than once ever.
-          subjectId: `${id}:${today.getUTCFullYear()}`,
-          merge: { quantity: today.getUTCFullYear() - first!.getUTCFullYear() },
+          subjectId: `${id}:${now.year}`,
+          merge: { quantity: now.year - first!.year },
         }));
     }
 
     case "BUDGET_FLUSH": {
-      const left = daysToFinancialYearEnd(new Date());
+      const left = daysToFinancialYearEnd(new Date(), clock);
       if (left > days || left < 0) return [];
       const rows = await db.company.findMany({
         where: { ...company, stage: "CUSTOMER" },
         select: { id: true },
         take: 2000,
       });
-      // The financial year is in the key, so it fires once per year per customer.
-      const fy = new Date().getUTCMonth() >= 3 ? new Date().getUTCFullYear() + 1 : new Date().getUTCFullYear();
+      // The financial year is in the key, so it fires once per year per customer — named by the year it
+      // ends in, on the workspace's calendar as the days left are.
+      const fy = financialYearEndYear(new Date(), clock);
       return rows.map((r) => ({ companyId: r.id, subjectId: `${r.id}:${fy}`, merge: { daysLeft: left } }));
     }
 
@@ -383,13 +387,14 @@ export async function runEnrolments(): Promise<{ enrolled: number }> {
     where: { status: "ACTIVE" },
     include: { audience: true, steps: { orderBy: { order: "asc" } } },
   });
+  const clock = await workspaceClock();
 
   let enrolled = 0;
   for (const journey of journeys) {
     const start = firstStep(journey.steps);
     if (!start) continue;
 
-    const companyWhere = audienceCompanyWhere(parseCompanyFilters(journey.audience?.companyFilters ?? {}));
+    const companyWhere = audienceCompanyWhere(parseCompanyFilters(journey.audience?.companyFilters ?? {}), clock);
     const candidates = await candidatesFor(
       journey.trigger,
       (journey.triggerConfig as Record<string, unknown>) ?? {},

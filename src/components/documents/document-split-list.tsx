@@ -10,7 +10,8 @@ import type {
 } from "@prisma/client";
 import { approvalStatusLabels, approvalStatusTone } from "@/lib/documents/approval";
 import { Badge } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { statusTone, tradeDocumentStatusLabels } from "@/lib/trade-documents";
 import { isDraftNumber } from "@/lib/document-numbering";
 import { SELECTED_PARAM } from "@/lib/view-mode";
@@ -82,7 +83,7 @@ export function DocumentSplitList({
             <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
               <span className="font-mono">{isDraftNumber(doc.docNumber) ? "Draft" : doc.docNumber}</span>
               <span>·</span>
-              <span>{formatDate(doc.issueDate)}</span>
+              <span>{formatCalendarDay(doc.issueDate)}</span>
             </div>
             <div className="mt-1.5 flex items-center gap-2">
               <Badge tone={statusTone[doc.status]}>{tradeDocumentStatusLabels[doc.status]}</Badge>

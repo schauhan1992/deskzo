@@ -27,9 +27,8 @@ import Module from "node:module";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
-import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { renderHtml } from "./lib/render-html";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -112,23 +111,9 @@ internals._load = function (this: unknown, request: string, parent: { filename?:
 
 type Page = (props: never) => Promise<unknown>;
 
-/** Renders a server page, awaiting the async components inside it (see scripts/check-item-import.ts). */
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 async function renderPage(page: Page, props: Record<string, unknown> = {}, searchParams: Record<string, string> = {}): Promise<string> {
   const el = await page({ params: Promise.resolve(props), searchParams: Promise.resolve(searchParams) } as never);
-  return renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
+  return renderHtml(el);
 }
 
 async function main() {

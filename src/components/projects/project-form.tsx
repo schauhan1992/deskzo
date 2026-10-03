@@ -31,6 +31,10 @@ type Existing = {
   value: string | number | null;
 };
 
+/**
+ * A saved date back into its field. `saveProject` holds the day typed as midnight UTC, so its UTC day is
+ * the day typed, in any zone — a clock's day would be the one before in a zone west of UTC.
+ */
 const day = (v: string | Date | null | undefined) => (v ? new Date(v).toISOString().slice(0, 10) : "");
 
 /** `ON_HOLD` and `CANCELLED` are reachable from anywhere, so they sit after the pipeline. */

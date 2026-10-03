@@ -1,7 +1,7 @@
 import { Eye, History } from "lucide-react";
 import type { permissionChangeHistory } from "@/actions/access";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatDateTime } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Row = Awaited<ReturnType<typeof permissionChangeHistory>>[number];
 
@@ -41,7 +41,8 @@ const KIND_TONE: Record<string, "green" | "red" | "amber" | "default"> = {
   MANAGER_CHANGED: "amber",
 };
 
-export function ChangeHistory({ rows, title }: { rows: Row[]; title: string }) {
+export async function ChangeHistory({ rows, title }: { rows: Row[]; title: string }) {
+  const clock = await workspaceClock();
   return (
     <Card>
       <CardHeader className="flex items-center gap-2 text-sm font-medium text-text">
@@ -77,7 +78,7 @@ export function ChangeHistory({ rows, title }: { rows: Row[]; title: string }) {
                   <p className="mt-0.5 text-xs text-muted">{row.detail ?? row.permission ?? ""}</p>
                 </div>
                 <span className="shrink-0 text-xs text-subtle">
-                  {formatDateTime(row.createdAt)}
+                  {clock.dateTimeShort(row.createdAt)}
                   {row.actor?.name && <span className="block text-right">by {row.actor.name}</span>}
                 </span>
               </li>

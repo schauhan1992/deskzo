@@ -3,9 +3,9 @@ import { ChevronRight, CreditCard, DatabaseZap, Layers, LifeBuoy, Sparkles, User
 import { Meter } from "@/components/console/charts/meter";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { SchemaPill, StandingPill, StatusDot, StatusPill } from "@/components/console/kit/status";
-import { compactNumber, dayMonth, istDayKey, monthLabel, plural } from "@/lib/console-shared/format";
+import { compactNumber, monthLabel, plural } from "@/lib/console-shared/format";
 import { gatewayLabel, schemaLabel } from "@/lib/console-shared/labels";
-import { formatIstTime } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import type { PlanPanel, SupportPanel, UsagePanel, WorkspaceHeader } from "@/lib/platform/workspace-data";
 import { cn } from "@/lib/utils";
 import { TabLink } from "./header-actions";
@@ -14,7 +14,7 @@ import { TabLink } from "./header-actions";
  * Six small cards under the header — its plan, seats, copilot, billing, support access and schema —
  * each the short answer to "how is it doing on this", and each a way into the tab with the long
  * one. Figures come from the loaders (the usage snapshot, the plan's limits, the standing worked
- * out at `asOf`), never from the reader's clock.
+ * out at `asOf`), never from the reader's clock; times are on the console's.
  */
 
 const INTEGER = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
@@ -48,7 +48,8 @@ function Secondary({ children }: { children: ReactNode }) {
 
 const overriddenPill = <StatusPill tone="warning">overridden</StatusPill>;
 
-export function SummaryStrip({ header, plan, usage, support }: { header: WorkspaceHeader; plan: PlanPanel; usage: UsagePanel; support: SupportPanel }) {
+export async function SummaryStrip({ header, plan, usage, support }: { header: WorkspaceHeader; plan: PlanPanel; usage: UsagePanel; support: SupportPanel }) {
+  const clock = await consoleClock();
   const { tenant, asOf } = header;
   const base = `/workspaces/${encodeURIComponent(tenant.slug)}`;
   const href = (tab: string) => (tab === "overview" ? base : `${base}?tab=${tab}`);
@@ -84,7 +85,7 @@ export function SummaryStrip({ header, plan, usage, support }: { header: Workspa
 
   // Support access: the level and until when — the time alone when that is today.
   const grant = support.grant;
-  const until = grant ? (istDayKey(grant.expiresAt) === istDayKey(asOf) ? formatIstTime(grant.expiresAt) : `${dayMonth(grant.expiresAt)}, ${formatIstTime(grant.expiresAt)}`) : null;
+  const until = grant ? (clock.dateKey(grant.expiresAt) === clock.dateKey(asOf) ? clock.time(grant.expiresAt) : `${clock.dayMonth(grant.expiresAt)}, ${clock.time(grant.expiresAt)}`) : null;
 
   return (
     <section aria-label="Summary" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">

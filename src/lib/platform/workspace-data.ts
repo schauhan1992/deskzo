@@ -1,7 +1,7 @@
 import type { Prisma } from "@deskzo/control-client";
 import { standingDate, standingOf, type Standing } from "@/lib/billing/lifecycle";
 import { formatMoney } from "@/lib/billing/money";
-import { istDayKey, plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, SUBSCRIPTION_STATUS, actorLabel, gatewayLabel, jobLabel, noticeLabel, schemaLabel, subscriptionKind } from "@/lib/console-shared/labels";
 import type { TerminalState } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
@@ -9,6 +9,7 @@ import type { CatalogueModuleView, GatewayKey, GatewayModes, InvoiceStatusKey, P
 import { usageDay } from "@/lib/copilot/settings";
 import { moduleEntitled, parseEntitlements, type Entitlements } from "@/lib/entitlements";
 import { getModuleDefinition } from "@/lib/modules";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { JOB_SAFE_SELECT, TENANT_SAFE_SELECT, clampInt, staffNameMap, toActivityItems, type SafeTenant } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { DomainRefused } from "@/lib/platform/domain-rules";
@@ -471,11 +472,11 @@ export async function workspaceBilling(tenantId: string, opts: { invoicePage?: n
 
 export type UsagePoint = { day: Date; seatsUsed: number; seatsLimit: number | null; copilotTokens: number };
 export type UsagePanel = {
-  /** One snapshot a day, oldest first. `day` is a calendar day (midnight UTC of the Indian date). */
+  /** One snapshot a day, oldest first. `day` is a calendar day (midnight UTC of its date on the console's clock, as the daily work keeps it). */
   series: UsagePoint[];
   /** The newest snapshot, even when it is older than the window. */
   latest: UsagePoint | null;
-  /** Copilot tokens per Indian calendar month ("2026-09"), oldest first: each month's highest snapshot — they count up through the month. */
+  /** Copilot tokens per calendar month of the snapshots' days ("2026-09"), oldest first: each month's highest snapshot — they count up through the month. */
   copilotByMonth: { month: string; tokens: number }[];
   limits: { seats: number | null; copilotTokens: number | null; seatOverride: number | null; copilotTokenOverride: number | null };
 };
@@ -485,8 +486,10 @@ const USAGE_SELECT = { day: true, seatsUsed: true, seatsLimit: true, copilotToke
 export async function workspaceUsage(tenantId: string, days = 90, now = new Date()): Promise<UsagePanel> {
   const control = controlDb();
   const span = clampInt(days, 1, 400, 90);
-  // Inclusive on a @db.Date: the first day of the window is in it.
-  const from = usageDay(new Date(now.getTime() - (span - 1) * DAY));
+  // Inclusive on a @db.Date: the first day of the window is in it. Today is the console's — the day a
+  // snapshot is kept under — and the days before it are counted on the calendar.
+  const today = usageDay(now, await consoleClock());
+  const from = new Date(today.getTime() - (span - 1) * DAY);
   const [tenant, series] = await Promise.all([
     control.tenant.findUnique({ where: { id: tenantId }, select: USAGE_TENANT }),
     control.tenantUsage.findMany({ where: { tenantId, day: { gte: from } }, orderBy: { day: "asc" }, select: USAGE_SELECT }),
@@ -496,7 +499,7 @@ export async function workspaceUsage(tenantId: string, days = 90, now = new Date
 
   const byMonth = new Map<string, number>();
   for (const point of series) {
-    // The column holds the calendar day itself, so its UTC date is the Indian date.
+    // The column holds the calendar day itself, so its UTC date is the day it was taken on.
     const month = point.day.toISOString().slice(0, 7);
     byMonth.set(month, Math.max(byMonth.get(month) ?? 0, point.copilotTokens));
   }
@@ -648,7 +651,7 @@ export type TimelineEvent = {
  * (provisioning), `tenant.migration.failed` (migration). Asked for "audit" alone, they are there.
  */
 export type TimelineOptions = { before?: Date; kinds?: TimelineKind[]; limit?: number /* 50, max 100 */ };
-/** `nextBefore`: where the next page starts, or null at the end. `todayKey`: today's Indian date, for "Today" / "Yesterday" headings. */
+/** `nextBefore`: where the next page starts, or null at the end. `todayKey`: today's date on the console's clock, for "Today" / "Yesterday" headings. */
 export type TimelinePage = { events: TimelineEvent[]; nextBefore: string | null; todayKey: string };
 
 const COVERED_AUDIT: Partial<Record<TimelineKind, readonly string[]>> = {
@@ -739,7 +742,7 @@ export async function workspaceTimeline(tenantId: string, opts: TimelineOptions 
     // The pass itself is never read — only when it was used, and what for.
     read("handoff", () => control.platformHandoffTicket.findMany({ where: { tenantId, usedAt: setAndBefore }, orderBy: { usedAt: "desc" }, take, select: { usedAt: true, purpose: true } })),
   ]);
-  const names = await staffNameMap([...audit.filter((a) => a.actorKind === "STAFF").map((a) => a.actor), ...notes.map((n) => n.authorId)]);
+  const [names, clock] = await Promise.all([staffNameMap([...audit.filter((a) => a.actorKind === "STAFF").map((a) => a.actor), ...notes.map((n) => n.authorId)]), consoleClock()]);
 
   const events: TimelineEvent[] = [];
   const add = (e: Omit<TimelineEvent, "detail" | "actor" | "href" | "code"> & Partial<Pick<TimelineEvent, "detail" | "actor" | "href" | "code">>) => {
@@ -747,7 +750,7 @@ export async function workspaceTimeline(tenantId: string, opts: TimelineOptions 
     events.push({ detail: null, actor: null, href: null, code: null, ...e });
   };
 
-  for (const item of toActivityItems(audit.map((a) => ({ ...a, tenant: null })), names)) {
+  for (const item of toActivityItems(audit.map((a) => ({ ...a, tenant: null })), names, clock)) {
     add({ id: `audit:${item.id}`, at: item.at, kind: "audit", title: item.title, detail: item.detail, tone: item.tone, actor: item.actor, href: item.href, code: item.code });
   }
   for (const e of webhooks) {
@@ -779,7 +782,7 @@ export async function workspaceTimeline(tenantId: string, opts: TimelineOptions 
     }
   }
   for (const g of granted) {
-    add({ id: `grant:${g.id}:granted`, at: g.createdAt, kind: "grant", title: "Support access granted", tone: "info", detail: `${levelText(g.level)} · until ${when(g.expiresAt)}`, actor: g.grantedByName });
+    add({ id: `grant:${g.id}:granted`, at: g.createdAt, kind: "grant", title: "Support access granted", tone: "info", detail: `${levelText(g.level)} · until ${clock.dateTime(g.expiresAt)}`, actor: g.grantedByName });
   }
   for (const g of revoked) {
     if (g.revokedAt) add({ id: `grant:${g.id}:ended`, at: g.revokedAt, kind: "grant", title: "Support access ended", tone: "neutral", detail: levelText(g.level) });
@@ -808,7 +811,7 @@ export async function workspaceTimeline(tenantId: string, opts: TimelineOptions 
   });
 
   events.sort((a, b) => b.at.getTime() - a.at.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-  const todayKey = istDayKey(now);
+  const todayKey = clock.dateKey(now);
   if (events.length <= limit) return { events, nextBefore: null, todayKey };
 
   // The first event that does not fit: everything strictly newer is on this page, and every source

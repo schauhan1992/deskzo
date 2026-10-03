@@ -8,6 +8,8 @@ import { bookingRate } from "@/lib/ledger/posting";
 import { TERMS_DAYS } from "@/lib/credit/engine";
 import { formatOrderId } from "@/lib/order-id";
 import { STALE_DAYS, dayKey, inWeek, promiseState, type PromiseState } from "@/lib/collections/rules";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * What a person may chase, and what has been said about it — the database side of Collections.
@@ -103,7 +105,7 @@ export type FollowUpView = {
   byName: string | null;
   channel: FollowUpChannel;
   remarks: string;
-  /** `yyyy-mm-dd`, the promised day in India. */
+  /** `yyyy-mm-dd`, the promised day (a calendar day, the workspace's). */
   promisedOn: string | null;
   promisedAmount: number | null;
   /** The promised amount's currency: the invoice's when an invoice is chased, otherwise rupees. */
@@ -116,7 +118,8 @@ export type FollowUpView = {
   targetLabel: string | null;
 };
 
-export function toFollowUpView(row: FollowUpRow, now: Date = new Date()): FollowUpView {
+/** `clock` is the workspace's (`workspaceClock()`): a promise is due or broken by its today. */
+export function toFollowUpView(row: FollowUpRow, clock: Clock, now: Date = new Date()): FollowUpView {
   return {
     id: row.id,
     createdAt: row.createdAt,
@@ -127,7 +130,7 @@ export function toFollowUpView(row: FollowUpRow, now: Date = new Date()): Follow
     promisedAmount: row.promisedAmount === null ? null : Number(row.promisedAmount),
     currency: row.document?.currency ?? "INR",
     promiseStatus: row.promiseStatus,
-    promise: row.promisedOn && row.promiseStatus ? promiseState({ promiseStatus: row.promiseStatus, promisedOn: row.promisedOn }, now) : null,
+    promise: row.promisedOn && row.promiseStatus ? promiseState({ promiseStatus: row.promiseStatus, promisedOn: row.promisedOn }, clock, now) : null,
     nextFollowUpOn: row.nextFollowUpOn ? dayKey(row.nextFollowUpOn) : null,
     targetLabel: row.document ? row.document.docNumber : row.companyProduct ? formatOrderId(row.companyProduct.orderSeq) : null,
   };
@@ -135,8 +138,11 @@ export function toFollowUpView(row: FollowUpRow, now: Date = new Date()): Follow
 
 /** Follow-ups matching a where clause, newest first, as the screens show them. */
 export async function loadFollowUps(where: Prisma.PaymentFollowUpWhereInput, now: Date = new Date(), take = 200): Promise<FollowUpView[]> {
-  const rows = await db.paymentFollowUp.findMany({ where, orderBy: { createdAt: "desc" }, take, select: followUpSelect });
-  return rows.map((r) => toFollowUpView(r, now));
+  const [rows, clock] = await Promise.all([
+    db.paymentFollowUp.findMany({ where, orderBy: { createdAt: "desc" }, take, select: followUpSelect }),
+    workspaceClock(),
+  ]);
+  return rows.map((r) => toFollowUpView(r, clock, now));
 }
 
 /**
@@ -166,8 +172,9 @@ export async function receivableFollowUps(
       select: followUpSelect,
     }),
   ]);
+  const clock = await workspaceClock();
   for (const id of companyIds) out.set(id, { lastFollowUp: null, promise: null, broken: false, promisedThisWeek: false });
-  for (const f of latest) out.get(f.companyId)!.lastFollowUp = toFollowUpView(f, now);
+  for (const f of latest) out.get(f.companyId)!.lastFollowUp = toFollowUpView(f, clock, now);
 
   // The latest promise on each invoice is the one in play.
   const seen = new Set<string>();
@@ -175,12 +182,12 @@ export async function receivableFollowUps(
     const invoiceId = f.documentId ?? (f.companyProductId ? invoiceOfOrder.get(f.companyProductId) : undefined);
     if (!invoiceId || seen.has(invoiceId)) continue;
     seen.add(invoiceId);
-    const view = toFollowUpView(f, now);
+    const view = toFollowUpView(f, clock, now);
     if (!view.promise || view.promiseStatus === "SUPERSEDED" || view.promiseStatus === "KEPT") continue;
     const entry = out.get(companyOfInvoice.get(invoiceId)!);
     if (!entry) continue;
     const broken = view.promise.state === "broken";
-    const thisWeek = view.promiseStatus === "OPEN" && !broken && inWeek(new Date(`${view.promisedOn}T00:00:00Z`), now);
+    const thisWeek = view.promiseStatus === "OPEN" && !broken && inWeek(new Date(`${view.promisedOn}T00:00:00Z`), clock, now);
     entry.broken ||= broken;
     entry.promisedThisWeek ||= thisWeek;
     // Broken beats due; of two due, the sooner.
@@ -386,6 +393,7 @@ async function attachFollowUps(rows: DueRow[], billed: { invoiceId: string; orde
     select: followUpSelect,
   });
   const invoiceOfOrder = new Map(billed.map((b) => [b.orderId, b.invoiceId]));
+  const clock = await workspaceClock();
   const byKey = new Map<string, FollowUpView[]>();
   for (const f of followUps) {
     const key = f.documentId
@@ -394,7 +402,7 @@ async function attachFollowUps(rows: DueRow[], billed: { invoiceId: string; orde
         ? `invoice:${invoiceOfOrder.get(f.companyProductId)}`
         : `order:${f.companyProductId}`;
     const list = byKey.get(key) ?? [];
-    list.push(toFollowUpView(f, now));
+    list.push(toFollowUpView(f, clock, now));
     byKey.set(key, list);
   }
   const staleBefore = now.getTime() - STALE_DAYS * DAY;
@@ -409,6 +417,6 @@ async function attachFollowUps(rows: DueRow[], billed: { invoiceId: string; orde
     row.stale = !row.lastFollowUp || row.lastFollowUp.createdAt.getTime() < staleBefore;
     row.broken = row.promise?.promise?.state === "broken";
     row.promisedThisWeek =
-      row.promise?.promiseStatus === "OPEN" && row.promise.promisedOn !== null && inWeek(new Date(`${row.promise.promisedOn}T00:00:00Z`), now);
+      row.promise?.promiseStatus === "OPEN" && row.promise.promisedOn !== null && inWeek(new Date(`${row.promise.promisedOn}T00:00:00Z`), clock, now);
   }
 }

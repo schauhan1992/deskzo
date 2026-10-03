@@ -1,7 +1,6 @@
 import type { CommissionKind, Prisma, StatementStatus } from "@deskzo/control-client";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonthYear, istDayKey, istMonthKey, monthLabel } from "@/lib/console-shared/format";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import { monthLabel } from "@/lib/console-shared/format";
 import { partnerAudit, type PartnerActor } from "@/lib/partners/audit";
 import { PARTNER_ROUTES } from "@/lib/partners/nav";
 import { cleanId, mailPartnerUsers, manyLines, meActor, requiredText, staffActor } from "@/lib/partners/registry";
@@ -12,10 +11,16 @@ import { partnerOrigin } from "@/lib/partners/users";
 import { controlDb } from "@/lib/platform/control-db";
 import { withPlatformLease } from "@/lib/platform/fanout";
 import type { Staff } from "@/lib/platform/staff-session";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * Partner statements (partner_statements, spec §6): what a payout is made against — one month's
  * commission for one partner in one currency.
+ *
+ * Months and days here are India's (`indiaClock`), whatever zone the console keeps: a statement is a
+ * month of the platform's books — commission on its own invoices, net of their GST, paid with the
+ * accountant's tax lines against the partner's own (GST) invoice — and its period and number, once
+ * written, must not move with a display setting.
  *
  *   · Generation drafts last IST month's statements, under a platform lease: every unattached PENDING
  *     entry earned before the month's end, plus the pending reversals of those (a refund seen before
@@ -46,9 +51,9 @@ type Tx = Prisma.TransactionClient;
 
 /** The IST month before `now`'s: "2026-08" from 1 August 00:00 IST to 1 September 00:00 IST (half-open). */
 export function previousIstMonth(now: Date): { period: string; start: Date; end: Date } {
-  const { year, month } = istDateParts(now);
-  const start = istMidnight(year, month - 1, 1);
-  return { period: istMonthKey(start), start, end: istMidnight(year, month, 1) };
+  const { year, month } = indiaClock.parts(now);
+  const start = indiaClock.midnight(year, month - 1, 1);
+  return { period: indiaClock.monthKey(start), start, end: indiaClock.midnight(year, month, 1) };
 }
 
 export type StatementSums = { entryCount: number; earned: bigint; reversed: bigint; adjustments: bigint; total: bigint };
@@ -412,7 +417,7 @@ export async function markStatementPaid(
     if (st.status !== "APPROVED") throw new PartnerRefused(st.status === "DRAFT" ? "Approve the statement before marking it paid." : statusRefusal(st.status));
     if (twoPerson && st.approvedBy === `staff:${staff.id}`) throw new PartnerRefused("A different person must mark this statement paid.");
     if (st.approvedAt && paidAt.getTime() < startOfIstToday(st.approvedAt).getTime()) {
-      throw new PartnerRefused(`The day it was paid can't be before the day it was approved (${dayMonthYear(st.approvedAt)}).`);
+      throw new PartnerRefused(`The day it was paid can't be before the day it was approved (${indiaClock.date(st.approvedAt)}).`);
     }
     const attached = await tx.commissionEntry.count({ where: { statementId: st.id } });
     const paid = await tx.commissionEntry.updateMany({ where: { statementId: st.id, status: "APPROVED" }, data: { status: "PAID" } });
@@ -425,7 +430,7 @@ export async function markStatementPaid(
     await partnerAudit(staffActor(staff), st.partnerId, "statement.paid", "statement", st.id, {
       statement: st.number,
       reference,
-      paidOn: istDayKey(paidAt),
+      paidOn: indiaClock.dateKey(paidAt),
       netPayable: minor(st.netPayable),
       currency: st.currency,
     }, { tx });
@@ -433,13 +438,13 @@ export async function markStatementPaid(
   });
 
   await mailPartnerUsers(decided.partnerId, { roles: ["ADMIN", "FINANCE"] }, `Partner portal: statement ${decided.number} paid — reference ${reference}`, [
-    `Your commission statement ${decided.number} for ${monthLabel(decided.period)} has been paid: ${formatMoney(decided.netPayable, decided.currency)}, on ${dayMonthYear(paidAt)}.`,
+    `Your commission statement ${decided.number} for ${monthLabel(decided.period)} has been paid: ${formatMoney(decided.netPayable, decided.currency)}, on ${indiaClock.date(paidAt)}.`,
     "",
     `Payment reference: ${reference}`,
     "",
     `See it in the partner portal: ${statementLink(decided.number)}`,
   ]);
-  return { ...decided, reference, paidOn: istDayKey(paidAt) };
+  return { ...decided, reference, paidOn: indiaClock.dateKey(paidAt) };
 }
 
 /**

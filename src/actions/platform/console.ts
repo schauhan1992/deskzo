@@ -7,6 +7,7 @@ import { Prisma, type StaffRole } from "@deskzo/control-client";
 import { gatewayLabel } from "@/lib/console-shared/labels";
 import { hasRole } from "@/lib/console-shared/roles";
 import { isoDateOrUndefined } from "@/lib/console-shared/params";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { ALL_ROLES, ENTER, MANAGERS, OWNERS, SELLERS, cleanText, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
 import { deprovisionTenant, resumeTenant, suspendTenant } from "@/lib/platform/lifecycle";
@@ -445,12 +446,17 @@ export async function consoleSaveBillingSettings(input: { signupOpen: boolean; t
   });
 }
 
-/** The trial ends at the end of that day in India (23:59:59 IST). */
+/**
+ * The trial ends at the end of that day on the console's clock (23:59:59 there) — the day as staff
+ * picked it, and as the console shows it back.
+ */
 export async function consoleSetTrialEnd(tenantId: string, endsOn: string) {
   return asStaff(SELLERS, async (staff) => {
     const day = isoDateOrUndefined(String(endsOn ?? ""));
-    const date = day ? new Date(`${day}T23:59:59+05:30`) : null;
-    if (!date || Number.isNaN(date.getTime())) throw new StaffChangeRefused("Give the date the trial ends.");
+    const next = day ? (await consoleClock()).endOfDay(day) : null;
+    // Its last second, as a trial extended by days ends (`trialEndAfter`).
+    const date = next ? new Date(next.getTime() - 1000) : null;
+    if (!date) throw new StaffChangeRefused("Give the date the trial ends.");
     const id = String(tenantId ?? "");
     await setTrialEnd(id, date, `staff:${staff.id}`);
     await applyStanding(id);

@@ -21,6 +21,7 @@ import {
   type PersonForCelebration,
   type StoredCelebration,
 } from "../src/lib/hr/celebrations";
+import { clockFor, indiaClock } from "../src/lib/time/zone";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: string | null | undefined = "") {
@@ -249,12 +250,18 @@ ok("an empty roster produces nothing", nobody.length === 0);
 
 // ── The greeting ────────────────────────────────────────────────────────────
 
-const at = (h: number) => new Date(2026, 8, 18, h, 0, 0);
-ok("early morning", greeting(at(3), "Alice").startsWith("Working late"), greeting(at(3), "Alice"));
-ok("morning", greeting(at(9), "Alice").startsWith("Good morning"), greeting(at(9), "Alice"));
-ok("afternoon", greeting(at(14), "Alice").startsWith("Good afternoon"), greeting(at(14), "Alice"));
-ok("evening", greeting(at(20), "Alice").startsWith("Good evening"), greeting(at(20), "Alice"));
-ok("it uses the first name", greeting(at(9), "Alice").endsWith("Alice"));
+// The hour where the workspace is — India's here — whatever zone this machine keeps.
+const at = (h: number) => indiaClock.at(2026, 8, 18, h, 0);
+ok("early morning", greeting(at(3), "Alice", indiaClock).startsWith("Working late"), greeting(at(3), "Alice", indiaClock));
+ok("morning", greeting(at(9), "Alice", indiaClock).startsWith("Good morning"), greeting(at(9), "Alice", indiaClock));
+ok("afternoon", greeting(at(14), "Alice", indiaClock).startsWith("Good afternoon"), greeting(at(14), "Alice", indiaClock));
+ok("evening", greeting(at(20), "Alice", indiaClock).startsWith("Good evening"), greeting(at(20), "Alice", indiaClock));
+ok("it uses the first name", greeting(at(9), "Alice", indiaClock).endsWith("Alice"));
+ok(
+  "it is the workspace's hour: 9 am in India is still the evening before in New York",
+  greeting(at(9), "Alice", clockFor("America/New_York")).startsWith("Good evening"),
+  greeting(at(9), "Alice", clockFor("America/New_York")),
+);
 
 console.log(failures === 0 ? "\nAll celebration checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
 process.exit(failures === 0 ? 0 : 1);

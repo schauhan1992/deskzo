@@ -9,7 +9,8 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import {
   expenseCategoryLabels,
   expensePaymentModeLabels,
@@ -178,7 +179,8 @@ export function ExpensesTable({
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-muted">{expenseCategoryLabels[e.category]}</td>
-                <td className="px-4 py-2.5 text-muted">{formatDate(e.spentOn)}</td>
+                {/* The day it was spent, as typed — held as midnight UTC. */}
+                <td className="px-4 py-2.5 text-muted">{formatCalendarDay(e.spentOn)}</td>
                 <td className="px-4 py-2.5 text-right font-medium text-text">{formatCurrency(e.amount)}</td>
                 <td className="px-4 py-2.5 text-muted">
                   {e.visit ? (

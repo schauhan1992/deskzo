@@ -47,7 +47,7 @@ export const MERGE_FIELDS: MergeField[] = [
   // Form invitations only. Anywhere else they have no value, so use them there with a fallback or not at all.
   { key: "formName", label: "Form or event", example: "Customer roundtable — Pune", source: "The form an invitation is for" },
   { key: "formLink", label: "Their personal link", example: "https://…/forms/…/…", source: "Filled in per person — an invitation must carry it" },
-  { key: "eventDate", label: "Event date", example: "Thu, 15 Oct 2026, 6:30 pm", source: "The event's start, in India time" },
+  { key: "eventDate", label: "Event date", example: "Thu, 15 Oct 2026, 6:30 pm", source: "The event's start, in the workspace's time zone" },
   { key: "eventVenue", label: "Event venue", example: "The Westin, Koregaon Park", source: "The event's venue" },
   { key: "inviterName", label: "Who invited them", example: "Priya Sharma", source: "Whoever sent the invitation" },
 ];

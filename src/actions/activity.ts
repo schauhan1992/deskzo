@@ -11,6 +11,8 @@ import { getSecurityPolicy } from "@/lib/security/store";
 import { exportDecision } from "@/lib/security/policy";
 import { pageSlice, type Paged } from "@/lib/pagination";
 import { sanitizeCsvCell } from "@/lib/csv";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -48,7 +50,7 @@ export async function canViewAllActivity(): Promise<boolean> {
  * `scopeUserId` is applied last and overwrites any `userId` in the filters — so a user without the
  * permission cannot widen their own view by passing somebody else's id, whatever the UI sends.
  */
-function buildWhere(filters: ActivityFilters, scopeUserId: string | null): Prisma.ActivityLogWhereInput {
+function buildWhere(filters: ActivityFilters, scopeUserId: string | null, clock: Clock): Prisma.ActivityLogWhereInput {
   const where: Prisma.ActivityLogWhereInput = {};
 
   if (filters.kinds?.length) where.kind = { in: filters.kinds };
@@ -56,14 +58,10 @@ function buildWhere(filters: ActivityFilters, scopeUserId: string | null): Prism
 
   if (filters.minSeverity) where.severity = { in: severitiesAtLeast(filters.minSeverity) };
 
-  if (filters.from || filters.to) {
-    where.createdAt = {
-      ...(filters.from ? { gte: new Date(`${filters.from}T00:00:00.000Z`) } : {}),
-      // Through the end of the chosen day, not up to its first instant — "to: today" that excludes
-      // everything that happened today is the classic off-by-one in a date filter.
-      ...(filters.to ? { lte: new Date(`${filters.to}T23:59:59.999Z`) } : {}),
-    };
-  }
+  // The workspace's days, through the end of the chosen one, not up to its first instant — "to: today"
+  // that excludes everything that happened today is the classic off-by-one in a date filter.
+  const range = clock.dayRange(filters.from, filters.to);
+  if (range) where.createdAt = range;
 
   if (filters.entityType) where.entityType = filters.entityType;
   if (filters.entityId) where.entityId = filters.entityId;
@@ -114,7 +112,7 @@ export async function listActivity(params: {
 }): Promise<Paged<ActivityRow> & { scoped: boolean }> {
   const user = await requireUser();
   const seeAll = await hasEffectivePermission(user.id, "activity.viewAll");
-  const where = buildWhere(params.filters, seeAll ? null : user.id);
+  const where = buildWhere(params.filters, seeAll ? null : user.id, await workspaceClock());
 
   const [rows, total] = await Promise.all([
     db.activityLog.findMany({
@@ -133,7 +131,7 @@ export async function listActivity(params: {
 export async function activitySummary(filters: ActivityFilters) {
   const user = await requireUser();
   const seeAll = await hasEffectivePermission(user.id, "activity.viewAll");
-  const where = buildWhere(filters, seeAll ? null : user.id);
+  const where = buildWhere(filters, seeAll ? null : user.id, await workspaceClock());
 
   const bySeverity = await db.activityLog.groupBy({
     by: ["severity"],
@@ -183,7 +181,7 @@ export async function exportActivity(
   }
 
   const policy = await getSecurityPolicy();
-  const where = buildWhere(filters, null);
+  const where = buildWhere(filters, null, await workspaceClock());
   const total = await db.activityLog.count({ where });
 
   const verdict = exportDecision(total, policy);

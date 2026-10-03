@@ -6,6 +6,7 @@ import { paymentTermsLabels } from "@/lib/gst";
 import { isCustomerRelationshipType } from "@/lib/validation/company";
 import { assessCredit, MIN_OVERRIDE_REASON, RATING_LABELS, termsExceed, type CreditAssessment, type TermsKey } from "@/lib/credit/engine";
 import { assessCompany } from "@/lib/credit/load";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * The rule every place that gives credit shares: terms longer than the rating supports need
@@ -46,7 +47,7 @@ export async function checkTerms(opts: {
   if (!isCustomerRelationshipType(opts.relationshipType)) return { ok: true, decision: null };
   if (opts.previousTerms && opts.previousTerms === opts.terms) return { ok: true, decision: null };
 
-  const assessment = opts.companyId ? await assessCompany(opts.companyId) : assessCredit([], { asOf: new Date() });
+  const assessment = opts.companyId ? await assessCompany(opts.companyId) : assessCredit([], { asOf: new Date(), clock: await workspaceClock() });
   if (!assessment || !termsExceed(opts.terms, assessment.recommendedTerms)) return { ok: true, decision: null };
 
   const given = paymentTermsLabels[opts.terms];

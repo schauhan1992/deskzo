@@ -9,7 +9,7 @@ import { feedbackKindLabels } from "@/lib/engagement/anonymity";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Item = {
   id: string;
@@ -87,7 +87,7 @@ function Item({ item }: { item: Item }) {
             <span className="text-xs text-muted">{"★".repeat(item.rating)}{"☆".repeat(5 - item.rating)}</span>
           )}
           {/* A date, never a time — the same coarsening the storage applies. */}
-          <span className="text-xs text-subtle">{formatDate(new Date(item.submittedOn))}</span>
+          <span className="text-xs text-subtle">{formatCalendarDay(item.submittedOn)}</span>
           {item.reviewedAt && <Badge tone="default">Reviewed</Badge>}
         </div>
 

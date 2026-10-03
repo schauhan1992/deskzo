@@ -3,8 +3,8 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { notifyUser } from "@/lib/notify";
 import { SLA_HOURS } from "@/lib/tickets";
-import { addDays, dateOnly } from "@/lib/hr/calendar";
-import { istDateParts } from "@/lib/india-time";
+import { addDays } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { awardSettings } from "@/lib/performance/award-settings";
 import { prizeNames, prizesForPeriod, recordWinners, winsModuleOn } from "@/lib/wins/prize-store";
@@ -44,6 +44,7 @@ const COUNTED_ELSEWHERE = ["CallLog", "Visit"];
 
 export async function activityCounts(f: Pick<Fortnight, "from" | "to" | "firstDay" | "lastDay">): Promise<Map<string, ActivityCounts>> {
   const within = { gte: f.from, lt: f.to };
+  const clock = await workspaceClock();
   const [audits, calls, visits, tickets, won, active] = await Promise.all([
     db.auditLog.findMany({
       where: {
@@ -83,13 +84,12 @@ export async function activityCounts(f: Pick<Fortnight, "from" | "to" | "firstDa
     return c;
   };
 
-  // An edit is one per record per day: saving the same form ten times is one edit.
+  // An edit is one per record per day — the workspace's day: saving the same form ten times is one edit.
   const edits = new Set<string>();
   for (const a of audits) {
     if (a.action === "CREATE") of(a.userId).created += 1;
     else {
-      const { year, month, day } = istDateParts(a.createdAt);
-      const key = `${a.userId}|${a.entityType}|${a.entityId}|${year}-${month}-${day}`;
+      const key = `${a.userId}|${a.entityType}|${a.entityId}|${clock.dateKey(a.createdAt)}`;
       if (edits.has(key)) continue;
       edits.add(key);
       of(a.userId).edited += 1;
@@ -159,7 +159,8 @@ async function celebrate(data: Prisma.CelebrationUncheckedCreateInput): Promise<
 export async function announceActivityAwards(now: Date = new Date()): Promise<{ announced: string | null }> {
   const s = await awardSettings();
   if (!s.enabled || !(await winsModuleOn())) return { announced: null };
-  const f = announcementDue(now);
+  const clock = await workspaceClock();
+  const f = announcementDue(now, clock);
   if (!f) return { announced: null };
   if (await db.activityAward.findUnique({ where: { period: f.key }, select: { id: true } })) return { announced: null };
 
@@ -218,7 +219,8 @@ export async function announceActivityAwards(now: Date = new Date()): Promise<{ 
   await tell(s.audience, { label, everybody, winners, winnerIds, personal });
 
   if (s.splash && s.audience !== "MANAGERS") {
-    const today = dateOnly(now);
+    // Today on the workspace's calendar, as the date columns hold a day (dateOnly was UTC's day).
+    const today = clock.calendarDate(now);
     const shown = { startsOn: today, endsOn: addDays(today, 1), kind: "ACHIEVEMENT" as const, source: "MOST_ACTIVE" as const, createdById: null };
     if (s.audience === "EVERYONE") {
       await celebrate({

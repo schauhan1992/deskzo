@@ -4,13 +4,14 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { hrCapabilities, listHolidays, listLeaveTypes } from "@/actions/hr";
 import { HrSettings } from "@/components/hr/hr-settings";
 import { HolidayList } from "@/components/hr/holiday-list";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function HolidaysPage({ searchParams }: { searchParams: Promise<{ year?: string }> }) {
   const enabled = await isModuleEnabled("hr");
   if (!enabled) return <ModuleDisabledNotice moduleKey="hr" />;
 
   const params = await searchParams;
-  const year = Number(params.year) || new Date().getUTCFullYear();
+  const year = Number(params.year) || (await workspaceClock()).parts(new Date()).year;
 
   const [caps, holidays, leaveTypes] = await Promise.all([
     hrCapabilities(),

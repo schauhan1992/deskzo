@@ -8,7 +8,8 @@ import { setCredentialPin, type VaultRow } from "@/actions/vault";
 import { Badge, Card } from "@/components/ui/card";
 import { IconButton } from "@/components/ui/icon-button";
 import { Avatar, AvatarStack } from "@/components/ui/avatar";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * The vault as a grid.
@@ -34,6 +35,7 @@ export function VaultTable({
   onTrail: (row: VaultRow) => void;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [busy, setBusy] = useState<string | null>(null);
 
   async function togglePin(row: VaultRow) {
@@ -125,7 +127,7 @@ export function VaultTable({
                   ) : r.rotation.state === "unknown" ? (
                     <span className="text-subtle">Never changed</span>
                   ) : r.passwordChangedAt ? (
-                    <span className="text-subtle">{formatDate(new Date(r.passwordChangedAt))}</span>
+                    <span className="text-subtle">{clock.date(r.passwordChangedAt)}</span>
                   ) : (
                     <span className="text-subtle">—</span>
                   )}
@@ -138,7 +140,8 @@ export function VaultTable({
                     <span className="text-danger">Expired</span>
                   ) : (
                     <span className={r.daysToExpiry <= 30 ? "text-warning" : "text-subtle"}>
-                      {r.billingExpiry ? formatDate(new Date(r.billingExpiry)) : "—"}
+                      {/* The day typed, held as midnight UTC. */}
+                      {r.billingExpiry ? formatCalendarDay(r.billingExpiry) : "—"}
                     </span>
                   )}
                 </td>

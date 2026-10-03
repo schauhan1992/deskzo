@@ -15,7 +15,7 @@
  * scoped viewer is compared against an unscoped one on the same window.
  */
 import { db } from "../src/lib/db";
-import { endOfIndianDay, startOfIndianDay } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 import { FACT_SOURCES } from "../src/lib/analytics/sources";
 import {
   COLUMN_CAP,
@@ -52,9 +52,9 @@ async function main() {
   const apr = new Date(2026, 3, 5);
   const nextJan = new Date(2027, 0, 5);
   for (const g of GRAINS) {
-    const a = bucketOf(jan, g.key);
-    const b = bucketOf(apr, g.key);
-    const c = bucketOf(nextJan, g.key);
+    const a = bucketOf(jan, g.key, indiaClock);
+    const b = bucketOf(apr, g.key, indiaClock);
+    const c = bucketOf(nextJan, g.key, indiaClock);
     // At year grain January and April are the same bucket, correctly. Requiring a strict order
     // there was the check being wrong about the code rather than the other way round.
     const sameYearOrdered = g.key === "year" ? a.key === b.key : a.key < b.key;
@@ -66,12 +66,12 @@ async function main() {
   }
   ok(
     "  a week is keyed on its Monday",
-    bucketOf(new Date(2026, 0, 8), "week").key === bucketOf(new Date(2026, 0, 5), "week").key,
+    bucketOf(new Date(2026, 0, 8), "week", indiaClock).key === bucketOf(new Date(2026, 0, 5), "week", indiaClock).key,
     "Thursday and the Monday before it land in one bucket",
   );
   ok(
     "  and December's last week does not collide with January's first",
-    bucketOf(new Date(2026, 11, 31), "week").key < bucketOf(new Date(2027, 0, 4), "week").key,
+    bucketOf(new Date(2026, 11, 31), "week", indiaClock).key < bucketOf(new Date(2027, 0, 4), "week", indiaClock).key,
     "an ISO week number alone would put week 1 before week 53",
   );
 
@@ -137,26 +137,26 @@ async function main() {
    */
   const ist = (wallClock: string) => new Date(`${wallClock}:00+05:30`);
 
-  ok("01:30 IST on 1 October is October", bucketOf(ist("2026-10-01T01:30"), "month").label === "Oct 26", bucketOf(ist("2026-10-01T01:30"), "month").label);
-  ok("  23:30 IST on 30 September is September", bucketOf(ist("2026-09-30T23:30"), "month").label === "Sep 26");
-  ok("  00:10 IST on 1 January is the new year", bucketOf(ist("2027-01-01T00:10"), "year").label === "2027");
+  ok("01:30 IST on 1 October is October", bucketOf(ist("2026-10-01T01:30"), "month", indiaClock).label === "Oct 26", bucketOf(ist("2026-10-01T01:30"), "month", indiaClock).label);
+  ok("  23:30 IST on 30 September is September", bucketOf(ist("2026-09-30T23:30"), "month", indiaClock).label === "Sep 26");
+  ok("  00:10 IST on 1 January is the new year", bucketOf(ist("2027-01-01T00:10"), "year", indiaClock).label === "2027");
   ok(
     "  and a day bucket is the Indian day",
-    bucketOf(ist("2026-10-01T01:30"), "day").key === "2026-10-01",
-    bucketOf(ist("2026-10-01T01:30"), "day").key,
+    bucketOf(ist("2026-10-01T01:30"), "day", indiaClock).key === "2026-10-01",
+    bucketOf(ist("2026-10-01T01:30"), "day", indiaClock).key,
   );
   ok(
     "  a week is keyed on the Indian Monday",
-    bucketOf(ist("2026-09-30T23:30"), "week").key === bucketOf(ist("2026-09-28T09:00"), "week").key,
+    bucketOf(ist("2026-09-30T23:30"), "week", indiaClock).key === bucketOf(ist("2026-09-28T09:00"), "week", indiaClock).key,
     "Wednesday night and the Monday of that week are one bucket",
   );
 
   /**
    * The window the form's two dates mean — half-open, so there is no ".999 of a second" edge for a
-   * timestamp to fall through.
+   * timestamp to fall through. Days on the workspace's clock, which is India's here.
    */
-  const windowFrom = startOfIndianDay("2026-09-01")!;
-  const windowTo = endOfIndianDay("2026-09-30")!;
+  const windowFrom = indiaClock.startOfDay("2026-09-01")!;
+  const windowTo = indiaClock.endOfDay("2026-09-30")!;
   const inWindow = (at: Date) => at >= windowFrom && at < windowTo;
 
   ok("A September window opens at Indian midnight on the 1st", inWindow(ist("2026-09-01T00:30")), "00:30 IST on the 1st is in it");
@@ -192,7 +192,7 @@ async function main() {
     for (const measure of source.measures) {
       for (const dimension of [...source.dimensions.map((d) => d.key), "time"]) {
         try {
-          runReport({
+          runReport({ clock: indiaClock,
             source,
             rows,
             measureKey: measure.key,
@@ -348,7 +348,7 @@ async function main() {
     );
     ok(
       "  and their colleague's revenue is absent from the total, not merely from the rows",
-      runReport({
+      runReport({ clock: indiaClock,
         source: orders,
         rows: asSalesperson as unknown as never[],
         measureKey: "value",
@@ -397,7 +397,7 @@ async function main() {
     dateFields: [{ key: "when", label: "When", get: (r: Fake) => r.when }],
   };
 
-  const byWho = runReport({
+  const byWho = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: fakeRows,
     measureKey: "amount",
@@ -409,7 +409,7 @@ async function main() {
   ok("Totals add up", byWho.grandTotal === 175, String(byWho.grandTotal));
   ok("  biggest first", byWho.rows[0]?.label === "A" && byWho.rows[0]?.total === 150, byWho.rows.map((r) => `${r.label} ${r.total}`).join(", "));
 
-  const byMonth = runReport({
+  const byMonth = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: fakeRows,
     measureKey: "amount",
@@ -424,7 +424,7 @@ async function main() {
     byMonth.rows.map((r) => `${r.label} ${r.total}`).join(", "),
   );
 
-  const byTag = runReport({
+  const byTag = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: fakeRows,
     measureKey: "amount",
@@ -458,7 +458,7 @@ async function main() {
   // The flag read the dimension's *declaration*, so every tag report warned about an inflation that
   // had not happened. Most accounts carry one tag; a warning that is always on is one nobody reads
   // on the day it is true.
-  const singleTagged = runReport({
+  const singleTagged = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: fakeRows.filter((r) => r.tags.length < 2),
     measureKey: "amount",
@@ -473,7 +473,7 @@ async function main() {
     "one tag each, so no record is in two buckets — the declaration alone used to be enough to warn",
   );
 
-  const avg = runReport({
+  const avg = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: fakeRows,
     measureKey: "avg",
@@ -488,7 +488,7 @@ async function main() {
     "A has one done at 100 and one not done — counting the second as zero would report 50",
   );
 
-  const cross = runReport({
+  const cross = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: fakeRows,
     measureKey: "amount",
@@ -526,7 +526,7 @@ async function main() {
   const trueMean = 1100 / 101;
 
   const avgBy = (dimensionKey: string, columnKey?: string) =>
-    runReport({
+    runReport({ clock: indiaClock,
       source: fakeSource,
       rows: weighted,
       measureKey: "avg",
@@ -582,7 +582,7 @@ async function main() {
     when: new Date(ist("2026-01-01T09:00").getTime() + i * 24 * 60 * 60 * 1000),
     done: true,
   }));
-  const capped = runReport({
+  const capped = runReport({ clock: indiaClock,
     source: fakeSource,
     rows: wide,
     measureKey: "amount",
@@ -632,7 +632,7 @@ async function main() {
     dimensions: [{ key: "who", label: "Who", of: (r: Undated) => r.who }],
     dateFields: [{ key: "when", label: "When", get: (r: Undated) => r.when }],
   };
-  const withUndated = runReport({
+  const withUndated = runReport({ clock: indiaClock,
     source: undatedSource,
     rows: [
       ...wide.map((r) => ({ who: r.who, when: r.when, amount: r.amount })),
@@ -665,7 +665,7 @@ async function main() {
   section("Filters");
 
   const run = (extra: Record<string, unknown> = {}) =>
-    runReport({
+    runReport({ clock: indiaClock,
       source: fakeSource,
       rows: fakeRows,
       measureKey: "amount",

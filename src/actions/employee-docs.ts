@@ -15,6 +15,7 @@ import { monthlyGross } from "@/lib/hr/payroll";
 import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@/lib/hr/letters";
 import { computeGratuity, serviceYears } from "@/lib/hr/settlement";
 import { getOrganisation } from "@/lib/organisation";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -348,6 +349,10 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
       ? computeGratuity(Number(structure.basic), profile.joinedOn, profile.exitedOn)
       : null;
 
+  // The record's own days are `@db.Date` columns, read as the days they hold; today is the workspace's.
+  const clock = await workspaceClock();
+  const today = clock.parts(new Date());
+
   const payload: LetterPayload = {
     employeeName: person.name,
     designation: profile?.designation ?? "—",
@@ -365,7 +370,7 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
     lastWorkingDay: profile?.exitedOn ? profile.exitedOn.toISOString().slice(0, 10) : null,
     reportingTo: person.manager?.name ?? null,
     workLocation: profile?.workLocation ?? null,
-    offerValidUntil: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    offerValidUntil: clock.dateKey(clock.midnight(today.year, today.month, today.day + 14)),
     forMonth: slip?.run.month ?? null,
     forYear: slip?.run.year ?? null,
     netPay: slip ? Number(slip.netPay) : null,
@@ -395,7 +400,7 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
     contractMonths: profile?.employmentType === "CONTRACT" || profile?.employmentType === "CONSULTANT" ? 12 : null,
   };
 
-  const year = new Date().getUTCFullYear();
+  const year = today.year;
   const sequence = (await db.employeeLetter.count({ where: { type, issuedOn: { gte: new Date(Date.UTC(year, 0, 1)) } } })) + 1;
 
   const created = await db.employeeLetter.create({
@@ -404,7 +409,7 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
       type,
       letterNumber: letterNumberFor(type, year, sequence, org.letterNumberPrefix),
       subject: subjectFor(type, payload),
-      issuedOn: dateOnly(new Date()),
+      issuedOn: clock.calendarDate(new Date()),
       payload: payload as unknown as Prisma.InputJsonValue,
       body: renderLetter(type, payload),
       issuedById: user.id,

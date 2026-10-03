@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 import { formatOrderId } from "@/lib/order-id";
 import {
   formatTicketId,
@@ -45,6 +45,7 @@ export function TicketsTable({
   bulkAgents?: { id: string; name: string }[];
 }) {
   const router = useRouter();
+  const clock = useClock();
   const selection = useRowSelection(tickets);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +152,7 @@ export function TicketsTable({
         </thead>
         <tbody>
           {tickets.map((t) => {
-            const sla = getTicketSlaStatus(t.priority, t.status, t.createdAt);
+            const sla = getTicketSlaStatus(t.priority, t.status, t.createdAt, clock);
             return (
               <tr key={t.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 {bulkEnabled && (
@@ -190,7 +191,7 @@ export function TicketsTable({
                   <Badge tone={sla.tone}>{sla.label}</Badge>
                 </td>
                 <td className="px-4 py-2.5 text-muted">{t.assignedTo?.name ?? "Unassigned"}</td>
-                <td className="px-4 py-2.5 text-muted">{formatDate(t.updatedAt)}</td>
+                <td className="px-4 py-2.5 text-muted">{clock.date(t.updatedAt)}</td>
               </tr>
             );
           })}

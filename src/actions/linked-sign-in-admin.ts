@@ -6,7 +6,7 @@ import { recordAudit } from "@/lib/audit";
 import { auth } from "@/lib/auth";
 import { can } from "@/lib/authz/resolve";
 import { db } from "@/lib/db";
-import { formatIstDateTime } from "@/lib/india-time";
+import { clockOfTenant } from "@/lib/time/workspace";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { linkedUsersOf, memberOf, revokeMember, revokeWorkspaceLinks, setSwitchInAllowed } from "@/lib/platform/linked/groups";
 import { UnauthorizedError, requireUser, viewAsContext } from "@/lib/session";
@@ -56,6 +56,7 @@ export async function getLinkedSignInAdmin(): Promise<LinkedSignInAdminState | n
   // This workspace's own accounts, by id. An account gone since it was linked is left out; the next switch or the sweep unlinks it.
   const users = linked.length ? await db.user.findMany({ where: { id: { in: linked.map((l) => l.userId) } }, select: { id: true, name: true, email: true } }) : [];
   const byId = new Map(users.map((u) => [u.id, u]));
+  const clock = clockOfTenant(m.tenant);
   const people = linked.flatMap((l) => {
     const user = byId.get(l.userId);
     if (!user) return [];
@@ -64,8 +65,8 @@ export async function getLinkedSignInAdmin(): Promise<LinkedSignInAdminState | n
         userId: user.id,
         name: user.name,
         email: user.email,
-        linkedAtText: formatIstDateTime(l.linkedAt),
-        lastSwitchedInText: l.lastSwitchedInAt ? formatIstDateTime(l.lastSwitchedInAt) : null,
+        linkedAtText: clock.dateTime(l.linkedAt),
+        lastSwitchedInText: l.lastSwitchedInAt ? clock.dateTime(l.lastSwitchedInAt) : null,
       },
     ];
   });
@@ -73,7 +74,7 @@ export async function getLinkedSignInAdmin(): Promise<LinkedSignInAdminState | n
     // On until an admin here turns it off (owner decision 1).
     allowSwitchIn: policy?.allowSwitchIn ?? true,
     updatedByName: policy?.updatedByName ?? null,
-    updatedAtText: policy ? formatIstDateTime(policy.updatedAt) : null,
+    updatedAtText: policy ? clock.dateTime(policy.updatedAt) : null,
     people,
   };
 }

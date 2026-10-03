@@ -15,7 +15,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 const STATUS_TONE: Record<ResellerOnboardingStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   ONBOARDING: "amber",
@@ -36,6 +36,7 @@ type ResellerRow = {
 
 export function ResellersTable({ resellers }: { resellers: ResellerRow[] }) {
   const router = useRouter();
+  const clock = useClock();
   const selection = useRowSelection(resellers);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -160,7 +161,7 @@ export function ResellersTable({ resellers }: { resellers: ResellerRow[] }) {
                   <td className="px-4 py-2.5 text-muted">{r._count.contacts}</td>
                   <td className="px-4 py-2.5 text-muted">{r.source}</td>
                   <td className="px-4 py-2.5 text-muted">{r.owner?.name ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-muted">{formatDate(r.createdAt)}</td>
+                  <td className="px-4 py-2.5 text-muted">{clock.date(r.createdAt)}</td>
                 </tr>
               ))}
               {resellers.length === 0 && (

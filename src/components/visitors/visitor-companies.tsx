@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ActionNoticeRegion, type NoticeTone } from "@/components/ui/action-notice";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/bulk-select";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Row = {
   id: string;
@@ -43,6 +43,7 @@ const sourceTone: Record<VisitorCompanySource, "default" | "blue" | "green"> = {
  */
 export function VisitorCompanies({ rows }: { rows: Row[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [adding, setAdding] = useState("");
   const [merging, setMerging] = useState<Row | null>(null);
   const [message, setMessage] = useState<{ tone: NoticeTone; message: string } | null>(null);
@@ -128,7 +129,7 @@ export function VisitorCompanies({ rows }: { rows: Row[] }) {
                   </div>
                   <p className="text-xs text-subtle">
                     {r._count.entries} visit{r._count.entries === 1 ? "" : "s"}
-                    {r.lastSeenAt && ` · last ${formatDate(new Date(r.lastSeenAt))}`}
+                    {r.lastSeenAt && ` · last ${clock.date(r.lastSeenAt)}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

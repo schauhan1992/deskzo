@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { notifyUser } from "@/lib/notify";
 import { automationUserId } from "@/lib/automation-user";
 import { PEOPLE_ONLY } from "@/lib/people";
-import { formatIstDate } from "@/lib/india-time";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { isLockedDate } from "@/lib/ledger/period";
 import { CHECKED_AUTOMATICALLY, isAutoCheckKey, type AutoCheckKey } from "@/lib/close/catalogue";
 import {
@@ -101,7 +101,7 @@ export async function generateTasks(month: Date, opts: { now?: Date } = {}): Pro
   for (const task of created) {
     await notifyOnce(task.ownerId!, "TASK_ASSIGNED", month, task.id, {
       title: `Month-end close: ${task.title}`,
-      message: `${monthLabel(month)} close · due ${formatIstDate(task.dueOn)}`,
+      message: `${monthLabel(month)} close · due ${formatCalendarDay(task.dueOn)}`,
     });
   }
   return { created: missing.length };
@@ -270,9 +270,9 @@ export async function workableTask(taskId: string): Promise<TaskGuard> {
   return { ok: true, task };
 }
 
-/** A person's note, appended under their name and the day. */
+/** A person's note, appended under their name and the day — India's, as every day on the close is. */
 export function appendNote(existing: string | null, text: string, who: string, now: Date): string {
-  const line = `${who}, ${formatIstDate(now)}: ${text.trim()}`;
+  const line = `${who}, ${indiaClock.date(now)}: ${text.trim()}`;
   const next = existing?.trim() ? `${existing.trim()}\n\n${line}` : line;
   // Keep the newest if a task's notes ever grow past what the page should show.
   return next.length > 20000 ? next.slice(next.length - 20000) : next;
@@ -312,7 +312,7 @@ export async function writeTaskOwner(input: { taskId: string; ownerId: string | 
   if (input.ownerId && input.ownerId !== input.userId && input.ownerId !== guard.task.ownerId) {
     await notifyOnce(input.ownerId, "TASK_ASSIGNED", task.month, task.id, {
       title: `Month-end close: ${task.title}`,
-      message: `${monthLabel(task.month)} close · due ${formatIstDate(task.dueOn)}`,
+      message: `${monthLabel(task.month)} close · due ${formatCalendarDay(task.dueOn)}`,
     });
   }
   return { ok: true as const, task: guard.task };
@@ -372,10 +372,10 @@ export async function sendCloseNotifications(now: Date = new Date()): Promise<{ 
     const sent = late
       ? await notifyOnce(t.ownerId!, "TASK_OVERDUE", t.month, t.id, {
           title: `Overdue: ${t.title}`,
-          message: `${monthLabel(t.month)} close · was due ${formatIstDate(t.dueOn)}`,
+          message: `${monthLabel(t.month)} close · was due ${formatCalendarDay(t.dueOn)}`,
         })
       : await notifyOnce(t.ownerId!, "TASK_DUE", t.month, t.id, {
-          title: `Due ${dayKey(t.dueOn) === dayKey(today) ? "today" : formatIstDate(t.dueOn)}: ${t.title}`,
+          title: `Due ${dayKey(t.dueOn) === dayKey(today) ? "today" : formatCalendarDay(t.dueOn)}: ${t.title}`,
           message: `${monthLabel(t.month)} close`,
         });
     if (sent && late) overdue += 1;

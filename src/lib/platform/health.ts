@@ -1,8 +1,8 @@
-import { compactNumber, dayKeyLabel, istDayKey, plural } from "@/lib/console-shared/format";
+import { compactNumber, dayKeyLabel, plural } from "@/lib/console-shared/format";
 import { jobLabel, schemaLabel } from "@/lib/console-shared/labels";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import { PIN_DIRECTORY_KEY } from "@/lib/geo/pincode";
-import { startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { platformEnv } from "@/lib/platform/console-page";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { platformKeyConfigured } from "@/lib/platform/kek";
@@ -11,6 +11,7 @@ import { WARM_POOL_SIZE } from "@/lib/platform/provisioning";
 import { refDb, referenceConfigured } from "@/lib/platform/reference-db";
 import { readPinDirectory, readWorldPlaces } from "@/lib/platform/reference-sync";
 import { gatewayModes, secretsSet, staffTwoFactorPolicy, type GatewayMode, type SecretKey } from "@/lib/platform/settings";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The platform's own health, read for the console's System health page (/health): whether the
@@ -166,7 +167,7 @@ export async function platformTick(now = new Date()): Promise<TickStatus> {
 }
 
 export type DailyChores = {
-  /** The Indian day it last ran ("2026-09-27"); null when it never has. */
+  /** The day it last ran, on the console's clock ("2026-09-27"); null when it never has. */
   ranOn: string | null;
   /** When that was recorded. */
   at: Date | null;
@@ -174,13 +175,22 @@ export type DailyChores = {
   state: "today" | "yesterday" | "late" | "never";
 };
 
-/** The once-a-day billing work the first tick of each Indian day does (reading subscriptions back, usage snapshots). */
-export async function dailyChores(now = new Date()): Promise<DailyChores> {
+/** Yesterday's `yyyy-mm-dd` on `clock` — by the calendar, so a clock change never makes it two days back. */
+function yesterdayOn(clock: Clock, now: Date): string {
+  const { year, month, day } = clock.parts(now);
+  return clock.dateKey(clock.midnight(year, month, day - 1));
+}
+
+/**
+ * The once-a-day billing work the first tick of each day does (reading subscriptions back, usage
+ * snapshots) — a day on the console's clock (`clock`), as the tick records it.
+ */
+export async function dailyChores(now: Date, clock: Clock): Promise<DailyChores> {
   const row = await controlDb().platformSetting.findUnique({ where: { key: "billing.dailyRanOn" }, select: { value: true, updatedAt: true } });
   const ranOn = row?.value && /^\d{4}-\d{2}-\d{2}$/.test(row.value) ? row.value : null;
   if (!ranOn) return { ranOn: null, at: null, state: "never" };
-  const today = istDayKey(now);
-  const yesterday = istDayKey(new Date(now.getTime() - DAY));
+  const today = clock.today(now);
+  const yesterday = yesterdayOn(clock, now);
   return { ranOn, at: row?.updatedAt ?? null, state: ranOn >= today ? "today" : ranOn === yesterday ? "yesterday" : "late" };
 }
 
@@ -544,15 +554,15 @@ function dailyVerdict(d: DailyChores): Verdict {
   }
 }
 
-async function usageVerdict(now: Date): Promise<Verdict> {
+async function usageVerdict(now: Date, clock: Clock): Promise<Verdict> {
   const newest = await controlDb().tenantUsage.aggregate({ _max: { day: true } });
   const day = newest._max.day;
   if (!day) return { status: "off", detail: "No usage has been recorded yet." };
-  // A @db.Date comes back as midnight UTC of the calendar day it holds.
+  // A @db.Date comes back as midnight UTC of the calendar day it holds — a day on the console's clock.
   const key = day.toISOString().slice(0, 10);
-  const since = startOfIndianDay(key);
-  if (key >= istDayKey(now)) return { status: "ok", detail: "Taken today.", since };
-  if (key === istDayKey(new Date(now.getTime() - DAY))) return { status: "ok", detail: "Taken yesterday.", since };
+  const since = clock.startOfDay(key);
+  if (key >= clock.today(now)) return { status: "ok", detail: "Taken today.", since };
+  if (key === yesterdayOn(clock, now)) return { status: "ok", detail: "Taken yesterday.", since };
   return { status: "warn", detail: `The newest is from ${dayKeyLabel(key)} — one is taken with each day's billing chores.`, since };
 }
 
@@ -767,14 +777,16 @@ export async function systemHealth(now = new Date()): Promise<{ asOf: Date; chec
   const drift = schemaDrift(now);
   const security = securityFacts();
   const gateways = Promise.all([gatewayKeySets(), gatewayModes(), lastWebhookAt("STRIPE"), lastWebhookAt("RAZORPAY")]);
+  // The console's clock (India's when its setting can't be read — it never throws): the days the daily work keeps.
+  const clock = consoleClock();
   for (const shared of [leases, drift, security, gateways]) shared.catch(() => {}); // Each row reports its own failure.
   const lease = async (job: string) => (await leases).find((r) => r.job === job);
   const settings = presence();
 
   const checks = await Promise.all([
     check("tick", "background", "Platform tick", null, async () => tickVerdict(tickStatusOf(await lease("platform-tick"), now), now)),
-    check("daily", "background", "Daily billing chores", null, async () => dailyVerdict(await dailyChores(now))),
-    check("usage", "background", "Usage snapshots", null, () => usageVerdict(now)),
+    check("daily", "background", "Daily billing chores", null, async () => dailyVerdict(await dailyChores(now, await clock))),
+    check("usage", "background", "Usage snapshots", null, async () => usageVerdict(now, await clock)),
     check("migrate.runs", "background", "Migration runs", "/migrations", async () => migrateRunsVerdict(await lease("migrate"), now)),
 
     check("provisioning.failed", "provisioning", "Failed setups", "/provisioning?filter=attention", () => setupsFailedVerdict()),

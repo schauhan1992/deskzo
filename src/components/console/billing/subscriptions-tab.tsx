@@ -15,14 +15,15 @@ import { RelativeTime } from "@/components/console/kit/relative-time";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { IconButton } from "@/components/ui/icon-button";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonthYear, gatewayDashboardUrl } from "@/lib/console-shared/format";
+import { gatewayDashboardUrl } from "@/lib/console-shared/format";
 import { ENDS_AT_PERIOD_END, SUBSCRIPTION_STATUS, gatewayLabel, intervalLabel, subscriptionKind } from "@/lib/console-shared/labels";
 import { parseSubscriptionFilters } from "@/lib/console-shared/params";
 import type { SubscriptionStatusKey } from "@/lib/console-shared/types";
 import type { SubscriptionListRow, SubscriptionsPage } from "@/lib/platform/revenue";
-import { ListPager, istStamp } from "./invoices-tab";
+import { ListPager } from "./invoices-tab";
 
 /**
  * The Billing hub's Subscriptions tab: every subscription — at a gateway, on a trial, given by hand —
@@ -52,12 +53,13 @@ function resyncMessage(slug: string, d: { before: string; after: string }): stri
     : `Resynced ${slug} — ${statusLabel(d.before).toLowerCase()} → ${statusLabel(d.after).toLowerCase()}.`;
 }
 
-/** A date column: "28 Sep 2026", with the exact India time on hover; "—" for none. */
+/** A date column: "28 Sep 2026", with the exact time on hover — the console's clock; "—" for none. */
 function DateCell({ at, tone }: { at: Date | null; tone?: "danger" }) {
+  const clock = useClock();
   if (!at) return <span className="text-subtle">—</span>;
   return (
-    <time dateTime={at.toISOString()} title={istStamp(at)} className={tone === "danger" ? "text-danger" : undefined}>
-      {dayMonthYear(at)}
+    <time dateTime={at.toISOString()} title={clock.dateTimeShort(at)} className={tone === "danger" ? "text-danger" : undefined}>
+      {clock.date(at)}
     </time>
   );
 }

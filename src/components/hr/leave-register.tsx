@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { allLeaveRequests } from "@/actions/leave";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { leaveStatusTone } from "@/lib/validation/hr";
 
 type Row = Awaited<ReturnType<typeof allLeaveRequests>>["rows"][number];
@@ -57,8 +57,8 @@ export function LeaveRegister({ rows, total }: { rows: Row[]; total: number }) {
                 <td className="px-4 py-2.5">
                   <Badge tone={r.type.paid ? "default" : "amber"}>{r.type.code}</Badge>
                 </td>
-                <td className="px-4 py-2.5 text-muted">{formatDate(r.fromDate)}</td>
-                <td className="px-4 py-2.5 text-muted">{formatDate(r.toDate)}</td>
+                <td className="px-4 py-2.5 text-muted">{formatCalendarDay(r.fromDate)}</td>
+                <td className="px-4 py-2.5 text-muted">{formatCalendarDay(r.toDate)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-text">{Number(r.days)}</td>
                 <td className="max-w-xs truncate px-4 py-2.5 text-muted" title={r.reason}>
                   {r.reason}

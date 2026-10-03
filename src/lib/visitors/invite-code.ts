@@ -1,4 +1,5 @@
 import { randomInt } from "crypto";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The invite code, and the window it works in.
@@ -49,10 +50,14 @@ export function looksLikeCode(input: string): boolean {
  * From the start of the day it is expected until midday the following day. The morning's grace is
  * deliberate: a visitor due at 5pm who arrives at 9am the next day because the meeting moved should
  * not be sent away, and a code that stays live for a week is a code worth stealing.
+ *
+ * The days are the workspace's (`workspaceClock()`). They were UTC's, so in India a code went live at
+ * 05:30 and lapsed at 5:30 pm the next day — a visitor arriving before 05:30 was turned away.
  */
-export function isWithinWindow(expectedAt: Date, now: Date): boolean {
-  const dayStart = new Date(Date.UTC(expectedAt.getUTCFullYear(), expectedAt.getUTCMonth(), expectedAt.getUTCDate()));
-  const graceEnd = new Date(dayStart.getTime() + 36 * 3600_000);
+export function isWithinWindow(expectedAt: Date, now: Date, clock: Clock): boolean {
+  const day = clock.parts(expectedAt);
+  const dayStart = clock.midnight(day.year, day.month, day.day);
+  const graceEnd = clock.at(day.year, day.month, day.day + 1, 12);
   return now >= dayStart && now <= graceEnd;
 }
 

@@ -9,7 +9,6 @@ import { COMMISSIONS_PATH, hrefWith } from "@/components/console/commissions/for
 import { PageHeader } from "@/components/console/kit/page-header";
 import { TabPanel } from "@/components/console/kit/tab-panel";
 import { ConsoleTabs } from "@/components/console/kit/tabs";
-import { istDayKey } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { exportParams, one, type RawParams } from "@/lib/console-shared/params";
 import {
@@ -22,7 +21,9 @@ import {
 } from "@/lib/console-shared/partner-params";
 import { capsFor } from "@/lib/console-shared/roles";
 import { commissionReview, partnerReport, statementDetail, statementsBoard } from "@/lib/partners/commission-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
+import { indiaClock } from "@/lib/time/zone";
 
 export const metadata: Metadata = { title: "Commissions" };
 
@@ -55,6 +56,11 @@ function flat(raw: RawParams): Record<string, string> {
  *                everyone here opens one in its drawer (`?statement=<id>`) and exports it
  *   Reports      revenue by partner and by country for an IST window, and its CSV
  *
+ * The programme's money days — a report's window, the day an entry was earned, an adjustment's and a
+ * payment's day — are India's, whatever zone the console keeps: commission is counted in India's
+ * months, as its statements are (src/lib/partners/statements.ts). When staff did something — generated,
+ * approved, voided — is on the console's clock.
+ *
  * Review and Statements are both light (a page of fifty and a few counts), so both panels are always
  * rendered — switching between them is instant, and the Statements controls are in the first markup
  * whichever tab is open. Reports adds up every partner's and country's MRR, so it is worked out only
@@ -72,13 +78,15 @@ export default async function ConsoleCommissionsPage({ searchParams }: PageProps
   const own = (key: CommissionTab): RawParams => (key === tab ? sp : {});
   const statementId = one(sp, "statement", 40);
 
-  const [review, board, report, detail] = await Promise.all([
+  const [review, board, report, detail, clock] = await Promise.all([
     commissionReview(parseCommissionFilters(own("review"))),
     statementsBoard(parseStatementFilters(own("statements"))),
     tab === "reports" ? partnerReport(parseReportFilters(sp)) : Promise.resolve(null),
     statementId ? statementDetail(statementId) : Promise.resolve(null),
+    consoleClock(),
   ]);
-  const todayKey = istDayKey(board.asOf);
+  // The latest day an adjustment or a payment may be dated: India's today, as the server checks it.
+  const todayKey = indiaClock.dateKey(board.asOf);
 
   /** A tab's own params for its links, without the tab and the drawer. */
   const linkParams = (key: CommissionTab) => {
@@ -127,10 +135,10 @@ export default async function ConsoleCommissionsPage({ searchParams }: PageProps
         />
         <div className="mt-6">
           <TabPanel idPrefix={TABS_ID} tabKey="review" active={tab === "review"}>
-            <ReviewTab data={review} params={linkParams("review")} exportArgs={exportArgs("review")} caps={caps} todayKey={todayKey} />
+            <ReviewTab data={review} params={linkParams("review")} exportArgs={exportArgs("review")} caps={caps} todayKey={todayKey} clock={clock} />
           </TabPanel>
           <TabPanel idPrefix={TABS_ID} tabKey="statements" active={tab === "statements"}>
-            <StatementsTab board={board} params={linkParams("statements")} caps={caps} viewerId={staff.id} todayKey={todayKey} />
+            <StatementsTab board={board} params={linkParams("statements")} caps={caps} viewerId={staff.id} todayKey={todayKey} clock={clock} />
           </TabPanel>
           <TabPanel idPrefix={TABS_ID} tabKey="reports" active={tab === "reports"}>
             {report ? <ReportsTab report={report} exportArgs={exportArgs("reports")} caps={caps} /> : <ReportPending href={BARE_HREF.reports} />}

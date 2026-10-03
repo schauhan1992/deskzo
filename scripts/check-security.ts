@@ -16,11 +16,15 @@ import {
   dlpApplies,
   hasAnyDeterrent,
   screenshotDecision,
-  istDayKey,
+  allowanceDayKey,
   exportDecision,
   isBulkRead,
   type SecurityPolicyShape,
 } from "../src/lib/security/policy";
+import { clockFor, indiaClock } from "../src/lib/time/zone";
+
+/** An India workspace's screenshot day — the default zone. */
+const istDayKey = (at: Date) => allowanceDayKey(indiaClock, at);
 import { throttle, resetThrottle } from "../src/lib/security/throttle";
 import { noteReads, resetBulkRead } from "../src/lib/security/bulk-read";
 import { ACTIVITY_KINDS, activityKind, kindsInGroup, severitiesAtLeast, SEVERITY_TONE } from "../src/lib/security/activity-kinds";
@@ -139,6 +143,7 @@ eq("3am IST counts as that morning", istDayKey(new Date("2026-09-20T21:30:00.000
 eq("  where a UTC key would say the day before", new Date("2026-09-20T21:30:00.000Z").toISOString().slice(0, 10), "2026-09-20");
 eq("Just before midnight IST is still that day", istDayKey(new Date("2026-09-21T18:29:00.000Z")), "2026-09-21");
 eq("Just after midnight IST is the next", istDayKey(new Date("2026-09-21T18:31:00.000Z")), "2026-09-22");
+eq("A workspace elsewhere counts its own day", allowanceDayKey(clockFor("America/New_York"), new Date("2026-09-21T18:31:00.000Z")), "2026-09-21");
 
 console.log("\n— Who the deterrents apply to —\n");
 

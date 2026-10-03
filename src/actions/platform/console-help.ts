@@ -4,8 +4,8 @@ import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { parseEntitlements } from "@/lib/entitlements";
 import { COUNTRIES } from "@/lib/geo/countries";
-import { parseIstDateTime } from "@/lib/india-time";
 import { getModuleDefinition } from "@/lib/modules";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { MANAGERS, consoleAudit, consoleRefusal, idList, revalidateConsole } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import {
@@ -21,6 +21,7 @@ import {
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
 import { BASE_MODULES } from "@/lib/products";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Help and What's new from Deskzo, in the console (src/lib/platform/help-content.ts): the help
@@ -200,14 +201,17 @@ const everywhere = (row: { modules: string[]; countries: string[] }) => row.modu
 
 // ─── When it shows ───────────────────────────────────────────────────────────────────────────────
 
-/** A Date, an India wall-clock "yyyy-mm-ddThh:mm" (a `datetime-local` value) or an ISO time with its zone; null when blank. */
-function instantOf(value: unknown): Date | null {
+/**
+ * A Date, a wall-clock "yyyy-mm-ddThh:mm" on the console's clock (a `datetime-local` value) or an ISO
+ * time with its zone; null when blank.
+ */
+function instantOf(value: unknown, clock: Clock): Date | null {
   if (value === undefined || value === null || value === "") return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? refuse("Enter when it goes live as a date and time.") : value;
   if (typeof value !== "string") refuse("Enter when it goes live as a date and time.");
   const v = value.trim();
   if (!v) return null;
-  const local = v.length <= 32 ? parseIstDateTime(v) : null;
+  const local = v.length <= 32 ? clock.parseInput(v) : null;
   if (local) return local;
   // An instant with its zone written on it — what a script or the check suite passes.
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(v)) {
@@ -218,8 +222,8 @@ function instantOf(value: unknown): Date | null {
 }
 
 /** A time to go live: ahead of now, and within the year. */
-function futureOf(value: unknown, now: Date): Date {
-  const at = instantOf(value);
+function futureOf(value: unknown, now: Date, clock: Clock): Date {
+  const at = instantOf(value, clock);
   if (!at) refuse("Enter when it goes live.");
   if (at.getTime() <= now.getTime()) refuse("That time has already passed — publish it now, or choose a later time.");
   if (at.getTime() - now.getTime() > AHEAD_MAX_MS) refuse("That is more than a year away — check the date.");
@@ -231,7 +235,7 @@ function futureOf(value: unknown, now: Date): Date {
  * this moment — or, for one already live, the moment it went live, so republishing a typo fix doesn't
  * make it new again; `at` a time ahead, which schedules it.
  */
-function publishedAtOf(mode: unknown, at: unknown, existing: { publishedAt: Date | null } | null, now: Date): Date | null {
+function publishedAtOf(mode: unknown, at: unknown, existing: { publishedAt: Date | null } | null, now: Date, clock: Clock): Date | null {
   const m = mode === undefined || mode === null || mode === "" ? (existing ? "keep" : "draft") : mode;
   switch (m) {
     case "keep":
@@ -241,7 +245,7 @@ function publishedAtOf(mode: unknown, at: unknown, existing: { publishedAt: Date
     case "now":
       return existing?.publishedAt && existing.publishedAt.getTime() <= now.getTime() ? existing.publishedAt : now;
     case "at":
-      return futureOf(at, now);
+      return futureOf(at, now, clock);
     default:
       return refuse("Choose whether to keep it as a draft, publish it now or schedule it.");
   }
@@ -268,8 +272,8 @@ const iso = (at: Date | null) => (at ? at.toISOString() : null);
 
 /**
  * Creates an article or a video, or saves changes to one (`id`). `publish`: "draft" (a new one's
- * default), "keep" (an edit's), "now" or "at" with `publishAt` (India time). A new one goes to the
- * end of its kind's list. An archived one can't be edited — restore it first. The kind of an
+ * default), "keep" (an edit's), "now" or "at" with `publishAt` (on the console's clock). A new one goes
+ * to the end of its kind's list. An archived one can't be edited — restore it first. The kind of an
  * existing one stays what it is.
  */
 export async function consoleSaveHelpLink(input: {
@@ -288,6 +292,7 @@ export async function consoleSaveHelpLink(input: {
     const raw: Record<string, unknown> = input && typeof input === "object" ? input : {};
     const control = controlDb();
     const now = new Date();
+    const clock = await consoleClock();
 
     const id = raw.id === undefined || raw.id === null || raw.id === "" ? null : itemId(raw.id);
     const existing = id
@@ -306,7 +311,7 @@ export async function consoleSaveHelpLink(input: {
       description: descriptionOf(raw.description),
       modules: modulesOf(raw.modules),
       countries: countriesOf(raw.countries),
-      publishedAt: publishedAtOf(raw.publish, raw.publishAt, existing, now),
+      publishedAt: publishedAtOf(raw.publish, raw.publishAt, existing, now, clock),
     };
     checkReach(staff, row, raw.confirm);
 
@@ -394,6 +399,7 @@ export async function consoleSaveHelpPost(input: {
     const raw: Record<string, unknown> = input && typeof input === "object" ? input : {};
     const control = controlDb();
     const now = new Date();
+    const clock = await consoleClock();
 
     const id = raw.id === undefined || raw.id === null || raw.id === "" ? null : itemId(raw.id);
     const existing = id ? await control.platformUpdate.findUnique({ where: { id }, select: { id: true, publishedAt: true, archivedAt: true } }) : null;
@@ -408,7 +414,7 @@ export async function consoleSaveHelpPost(input: {
       pinned: raw.pinned === true,
       modules: modulesOf(raw.modules),
       countries: countriesOf(raw.countries),
-      publishedAt: publishedAtOf(raw.publish, raw.publishAt, existing, now),
+      publishedAt: publishedAtOf(raw.publish, raw.publishAt, existing, now, clock),
     };
     checkReach(staff, row, raw.confirm);
 
@@ -473,8 +479,8 @@ async function writePublication(item: Item, row: Stored, staff: Staff, data: { p
 }
 
 /**
- * Makes a draft or a scheduled item live now — or, with `at` (India time), schedules it. Showing it
- * in every workspace needs the owner, or "publish" typed (`confirm`).
+ * Makes a draft or a scheduled item live now — or, with `at` (on the console's clock), schedules it.
+ * Showing it in every workspace needs the owner, or "publish" typed (`confirm`).
  */
 export async function consolePublishHelpItem(item: "link" | "post", id: string, input?: { at?: string; confirm?: string }): Promise<ConsoleResult<{ state: PublicationState }>> {
   return asStaff(MANAGERS, async (staff) => {
@@ -484,7 +490,8 @@ export async function consolePublishHelpItem(item: "link" | "post", id: string, 
     const state = publicationState(row, now);
     if (state === "archived") refuse("It is archived — restore it first.");
     const options: Record<string, unknown> = input && typeof input === "object" ? input : {};
-    const at = instantOf(options.at) ? futureOf(options.at, now) : null;
+    const clock = await consoleClock();
+    const at = instantOf(options.at, clock) ? futureOf(options.at, now, clock) : null;
     if (state === "live") refuse(at ? "It is already live — take it down first to schedule it." : "It is already live.");
 
     const publishedAt = at ?? now;

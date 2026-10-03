@@ -23,7 +23,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { BASE_CURRENCY, toBase } from "@/lib/currency";
 import { bookingRate } from "@/lib/ledger/posting";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
-import { istDateKey } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import {
   DOCUMENT_SOURCES,
   documentPostingSelect,
@@ -213,7 +213,7 @@ export async function repostFxDocument(
 
   const lock = await tx.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
   const date = firstOpenDate(original.date, lock?.lockedUntil);
-  const moved = date.getTime() !== original.date.getTime() ? `, dated ${istDateKey(date)} as ${istDateKey(original.date)} is closed` : "";
+  const moved = date.getTime() !== original.date.getTime() ? `, dated ${indiaClock.dateKey(date)} as ${indiaClock.dateKey(original.date)} is closed` : "";
 
   const reversal = await writeEntry(tx, {
     date,
@@ -274,8 +274,8 @@ export async function repairFxPostings(
     const on = firstOpenDate(m.entryDate, lock?.lockedUntil);
     say(
       `  ${m.docType.padEnd(11)} ${m.docNumber}  ${m.currency} ${m.total.toFixed(2)} @ ${m.rate}` +
-        `  booked ${inr(m.booked)}, should be ${inr(m.expected)}  (${m.entryNumber}, ${istDateKey(m.entryDate)}` +
-        `${on.getTime() !== m.entryDate.getTime() ? ` → re-posted ${istDateKey(on)}, after the lock` : ""})`,
+        `  booked ${inr(m.booked)}, should be ${inr(m.expected)}  (${m.entryNumber}, ${indiaClock.dateKey(m.entryDate)}` +
+        `${on.getTime() !== m.entryDate.getTime() ? ` → re-posted ${indiaClock.dateKey(on)}, after the lock` : ""})`,
     );
     if (m.ratelessPayments.count > 0) {
       const open = round2(m.ratelessPayments.items.reduce((t, p) => t + p.open, 0));
@@ -287,7 +287,7 @@ export async function repairFxPostings(
       // written for them, with or without --apply.
       for (const p of m.ratelessPayments.items) {
         say(
-          `        payment #${p.paymentSeq} (${istDateKey(p.paidOn)}): recorded ₹${p.amount.toFixed(2)} at 1, clearing ${inr(p.booked)};` +
+          `        payment #${p.paymentSeq} (${indiaClock.dateKey(p.paidOn)}): recorded ₹${p.amount.toFixed(2)} at 1, clearing ${inr(p.booked)};` +
             ` as ${m.currency} ${p.amount.toFixed(2)} at the document's ${m.rate} it clears ${inr(p.expected)}, leaving ${inr(p.open)} open.` +
             ` Re-rated to the rate it really came in at, the difference from ${inr(p.expected)} is an exchange gain or loss.`,
         );
@@ -305,7 +305,7 @@ export async function repairFxPostings(
       const done = await client.$transaction((tx) => repostFxDocument(tx, m.documentId, actor.id));
       if (!done) continue;
       outcome.repaired.push({ docNumber: m.docNumber, reversal: done.reversal.entryNumber, repost: done.repost.entryNumber, date: done.date });
-      say(`  ✓ ${m.docNumber}: reversed by ${done.reversal.entryNumber}, posted again as ${done.repost.entryNumber} on ${istDateKey(done.date)}`);
+      say(`  ✓ ${m.docNumber}: reversed by ${done.reversal.entryNumber}, posted again as ${done.repost.entryNumber} on ${indiaClock.dateKey(done.date)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       outcome.failures.push({ docNumber: m.docNumber, error: message });

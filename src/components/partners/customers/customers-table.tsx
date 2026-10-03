@@ -3,9 +3,9 @@ import { DataTable, RowLink, TBody, THead, Td, Th, Tr } from "@/components/conso
 import { MoneyStack } from "@/components/partners/common/money";
 import { SourceLabel } from "@/components/partners/common/pills";
 import { countryName } from "@/components/partners/customers/country";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { PARTNER_ROUTES } from "@/lib/partners/nav";
 import type { CustomerRow } from "@/lib/partners/portal-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 
 /** How often a plan is charged, in the words the portal uses. */
 export const INTERVAL_WORD: Record<"MONTH" | "YEAR", string> = { MONTH: "Monthly", YEAR: "Yearly" };
@@ -18,9 +18,11 @@ export const INTERVAL_WORD: Record<"MONTH" | "YEAR", string> = { MONTH: "Monthly
  * not simply active (setting up, held, closed) carries its status beside the name.
  *
  * Only the control plane's facts: never an owner or billing address, never anything from inside the
- * workspace. Server-safe: no hooks, no directive.
+ * workspace. A server component: its days are the console's clock's (Settings › Time zone), which the
+ * portal keeps.
  */
-export function CustomersTable({ rows, asOf, suffix }: { rows: CustomerRow[]; asOf: Date; suffix: string }) {
+export async function CustomersTable({ rows, asOf, suffix }: { rows: CustomerRow[]; asOf: Date; suffix: string }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="Customers credited to you" minWidth={1120}>
       <THead>
@@ -81,10 +83,10 @@ export function CustomersTable({ rows, asOf, suffix }: { rows: CustomerRow[]; as
               <MoneyStack items={row.mrr} />
             </Td>
             <Td muted nowrap>
-              {row.renewsAt ? dayMonthYear(row.renewsAt) : "—"}
+              {row.renewsAt ? clock.date(row.renewsAt) : "—"}
             </Td>
             <Td nowrap>
-              <span className="block text-text">{dayMonthYear(row.since)}</span>
+              <span className="block text-text">{clock.date(row.since)}</span>
               <SourceLabel source={row.source} className="block text-xs" />
             </Td>
           </Tr>

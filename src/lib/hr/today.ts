@@ -1,7 +1,8 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
 import { currentUser } from "@/lib/session";
-import { dateOnly } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
+import { indiaClock } from "@/lib/time/zone";
 import { greeting, momentsFor, type Moment } from "@/lib/hr/celebrations";
 import { detectSalesWinsLazily, withoutOrphanedWins } from "@/lib/wins/detect";
 import { announceActivityAwardsLazily } from "@/lib/performance/announce";
@@ -26,7 +27,9 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
   const user = await currentUser();
   const now = new Date();
   const firstName = user?.name.split(" ")[0] ?? "there";
-  const empty = { greeting: greeting(now, firstName), moments: [] as Moment[] };
+  // Never throws, as the rest of this: India's clock if the workspace can't be asked.
+  const clock = await workspaceClock().catch(() => indiaClock);
+  const empty = { greeting: greeting(now, firstName, clock), moments: [] as Moment[] };
   if (!user) return empty;
 
   try {
@@ -39,7 +42,8 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
       await announcePrizesLazily(now);
     }
 
-    const today = dateOnly(now);
+    // The workspace's today, as a @db.Date holds a day — UTC's was yesterday's until 05:30 in India.
+    const today = clock.calendarDate(now);
     const [viewer, people, holidays, allCelebrations, seen] = await Promise.all([
       db.user.findUnique({ where: { id: user.id }, select: { departmentId: true } }),
       !hrOn ? Promise.resolve([]) : db.employeeProfile.findMany({
@@ -71,7 +75,7 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
     const celebrations = await withoutOrphanedWins(allCelebrations);
 
     return {
-      greeting: greeting(now, firstName),
+      greeting: greeting(now, firstName, clock),
       moments: momentsFor({
         today,
         viewer: { userId: user.id, departmentId: viewer?.departmentId ?? null },

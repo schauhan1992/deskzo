@@ -27,8 +27,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import Module from "node:module";
 import path from "node:path";
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { renderHtml } from "./lib/render-html";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
@@ -112,23 +112,9 @@ internals._load = function (this: unknown, request: string, parent: { filename?:
 } as typeof originalLoad;
 
 type Page = (props: never) => Promise<unknown>;
-/** Renders a server page, awaiting the async components inside it (see scripts/check-item-import.ts). */
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 async function render(page: Page): Promise<string> {
   const el = await page({ params: Promise.resolve({}), searchParams: Promise.resolve({}) } as never);
-  return renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
+  return renderHtml(el);
 }
 const text = (html: string) =>
   html
@@ -189,6 +175,8 @@ async function main() {
 
   /* eslint-disable @typescript-eslint/no-require-imports */
   const rules = require("../src/lib/platform/domain-rules") as typeof import("../src/lib/platform/domain-rules");
+  // The status text names days on a clock; India's, the zone this suite's workspaces keep.
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
   const domains = require("../src/lib/platform/domains") as typeof import("../src/lib/platform/domains");
   const hostLib = require("../src/lib/tenancy/host") as typeof import("../src/lib/tenancy/host");
   const entRules = require("../src/lib/entitlements") as typeof import("../src/lib/entitlements");
@@ -280,11 +268,11 @@ async function main() {
   ok("stopped → live again as soon as it passes", step({ status: "BROKEN", failingSince: t0 }, true, t0).status === "ACTIVE");
   ok(
     "in words: waiting, live, failing with both dates, stopped",
-    rules.domainStatusText({ status: "PENDING", failingSince: null }).label === "Waiting for DNS records" &&
-      rules.domainStatusText({ status: "ACTIVE", failingSince: null }).label === "Live" &&
-      rules.domainStatusText({ status: "ACTIVE", failingSince: t0 }).label === "Live — records failing since 3 Oct, stops on 6 Oct" &&
-      rules.domainStatusText({ status: "BROKEN", failingSince: t0 }).label === "Stopped — records not found",
-    rules.domainStatusText({ status: "ACTIVE", failingSince: t0 }).label,
+    rules.domainStatusText({ status: "PENDING", failingSince: null }, indiaClock).label === "Waiting for DNS records" &&
+      rules.domainStatusText({ status: "ACTIVE", failingSince: null }, indiaClock).label === "Live" &&
+      rules.domainStatusText({ status: "ACTIVE", failingSince: t0 }, indiaClock).label === "Live — records failing since 3 Oct, stops on 6 Oct" &&
+      rules.domainStatusText({ status: "BROKEN", failingSince: t0 }, indiaClock).label === "Stopped — records not found",
+    rules.domainStatusText({ status: "ACTIVE", failingSince: t0 }, indiaClock).label,
   );
   ok("the allowance in words", rules.allowanceText(1, 1) === "1 of 1 used" && rules.allowanceText(0, 0) === "Your plan doesn't include a custom domain" && /no limit/.test(rules.allowanceText(null, 2)));
 
@@ -645,7 +633,7 @@ async function main() {
     const tE = new Date();
     await domains.checkDomain(eRow.id, { now: tE });
     const failingPage = await page("07-live-failing");
-    const failText = rules.domainStatusText({ status: "ACTIVE", failingSince: tE }).label;
+    const failText = rules.domainStatusText({ status: "ACTIVE", failingSince: tE }, indiaClock).label;
     ok("failing: 'Live — records failing since …, stops on …', and what the check found", failingPage.includes(failText) && failingPage.includes("No TXT record found"), failText);
     await domains.checkDomain(eRow.id, { now: new Date(tE.getTime() + 73 * HOUR) });
     const stoppedPage = await page("08-stopped");
@@ -726,14 +714,14 @@ async function main() {
     const { DomainsPanel } = require("../src/components/console/workspace/domains-panel") as typeof import("../src/components/console/workspace/domains-panel");
     const { capsFor } = require("../src/lib/console-shared/roles") as typeof import("../src/lib/console-shared/roles");
     const ops = { ...(await domains.workspaceDomains(E.id)), offered: true };
-    const panel = (role: (typeof roles)[number]) => text(renderToStaticMarkup(createElement(DomainsPanel, { domains: ops, tenant: { id: E.id, slug: E.slug, status: "ACTIVE" }, caps: capsFor(role) })));
-    const adminPanel = panel("ADMIN");
-    saveRender("09-console-panel-admin", renderToStaticMarkup(createElement(DomainsPanel, { domains: ops, tenant: { id: E.id, slug: E.slug, status: "ACTIVE" }, caps: capsFor("ADMIN") })));
+    const panel = async (role: (typeof roles)[number]) => text(await renderHtml(createElement(DomainsPanel, { domains: ops, tenant: { id: E.id, slug: E.slug, status: "ACTIVE" }, caps: capsFor(role) })));
+    const adminPanel = await panel("ADMIN");
+    saveRender("09-console-panel-admin", await renderHtml(createElement(DomainsPanel, { domains: ops, tenant: { id: E.id, slug: E.slug, status: "ACTIVE" }, caps: capsFor("ADMIN") })));
     ok("it shows the state, the last check and its error, failing since, the TXT record", adminPanel.includes("Stopped — records not found") && adminPanel.includes("Last check") && adminPanel.includes("No TXT record found") && adminPanel.includes(`domain-verify=${eRow.verifyToken}`));
     ok("  an admin gets Add, Check now and Remove", adminPanel.includes("Add address") && adminPanel.includes("Check now") && adminPanel.includes("Remove"));
-    const supportPanel = panel("SUPPORT");
+    const supportPanel = await panel("SUPPORT");
     ok("  support gets Check now only", supportPanel.includes("Check now") && !supportPanel.includes("Add address") && !supportPanel.includes("Remove"));
-    const readPanel = panel("READONLY");
+    const readPanel = await panel("READONLY");
     ok("  read-only staff get no control", !readPanel.includes("Check now") && !readPanel.includes("Add address") && !readPanel.includes("Remove") && readPanel.includes("erp.zzdom-e.example"));
   } finally {
     consoleToken = null;

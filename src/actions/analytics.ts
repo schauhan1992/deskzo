@@ -1,6 +1,7 @@
 "use server";
 
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { isModuleEnabled } from "@/actions/module";
@@ -77,7 +78,7 @@ async function sourceFor(key: string, userId: string): Promise<{ ok: true; sourc
 }
 
 /**
- * The two dates off the form, as the instants an Indian business means by them.
+ * The two dates off the form, as the instants the workspace means by them — its days, on its clock.
  *
  * This was `new Date(input.from)` and `to.setHours(23, 59, 59, 999)`, which is wrong twice over:
  *
@@ -87,13 +88,13 @@ async function sourceFor(key: string, userId: string): Promise<{ ok: true; sourc
  *   · `setHours` writes the **host's** clock, so on a UTC server the closing bound landed at 05:29
  *     IST the *following* morning and swept in a chunk of the next month.
  *
- * Both ends now come from `src/lib/india-time.ts`. `to` is the midnight that *begins* the day after
- * the one asked for, which is why the sources compare with `lt` rather than `lte` — an exclusive
- * bound has no ".999 of a second" edge to fall through.
+ * Both ends now come from the workspace's clock (src/lib/time/zone.ts). `to` is the midnight that
+ * *begins* the day after the one asked for, which is why the sources compare with `lt` rather than
+ * `lte` — an exclusive bound has no ".999 of a second" edge to fall through.
  */
-function indianWindow(fromText: string, toText: string): { from: Date; to: Date } | { error: string } {
-  const from = startOfIndianDay(fromText);
-  const to = endOfIndianDay(toText);
+function reportWindow(clock: Clock, fromText: string, toText: string): { from: Date; to: Date } | { error: string } {
+  const from = clock.startOfDay(fromText);
+  const to = clock.endOfDay(toText);
   if (!from || !to) return { error: "That date range isn't valid." };
   if (from >= to) return { error: "The start date is after the end date." };
   return { from, to };
@@ -150,7 +151,7 @@ export async function reportFilterOptions(input: {
   if (!found.ok) return found;
   const { source } = found;
 
-  const window = indianWindow(input.from, input.to);
+  const window = reportWindow(await workspaceClock(), input.from, input.to);
   if ("error" in window) return { ok: false, error: window.error };
 
   const rows = await source.load({
@@ -217,7 +218,8 @@ async function runAs(
   const refused = unknownKey(source, input);
   if (refused) return { ok: false, error: refused };
 
-  const window = indianWindow(input.from, input.to);
+  const clock = await workspaceClock();
+  const window = reportWindow(clock, input.from, input.to);
   if ("error" in window) return { ok: false, error: window.error };
   const { from, to } = window;
 
@@ -239,6 +241,8 @@ async function runAs(
     dimensionKey: input.dimension,
     columnKey: input.column,
     grain: input.grain,
+    // Time buckets are the workspace's days, weeks and months.
+    clock,
     dateKey: input.dateField,
     filters: input.filters,
     scopeNote: await source.scopeNote(ctx),

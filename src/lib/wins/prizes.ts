@@ -1,5 +1,5 @@
 import type { PrizeRace } from "@prisma/client";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import { fortnightByKey, fortnightContaining } from "@/lib/performance/awards";
 
 /**
@@ -46,51 +46,52 @@ export function slotLabel(race: PrizeRace, slot: string): string {
 
 // ─── Periods ─────────────────────────────────────────────────────────────────
 
+/** Months and fortnights on the workspace's clock (passed in — `workspaceClock()`), half-open. */
 export type PrizePeriod = { key: string; label: string; from: Date; to: Date };
 
 const MONTH = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", month: "long", year: "numeric" });
 
-function monthOf(year: number, month: number): PrizePeriod {
+function monthOf(year: number, month: number, clock: Clock): PrizePeriod {
   const norm = new Date(Date.UTC(year, month, 1));
   const y = norm.getUTCFullYear();
   const m = norm.getUTCMonth();
   return {
     key: `${y}-${String(m + 1).padStart(2, "0")}`,
     label: MONTH.format(new Date(Date.UTC(y, m, 15))),
-    from: istMidnight(y, m, 1),
-    to: istMidnight(y, m + 1, 1),
+    from: clock.midnight(y, m, 1),
+    to: clock.midnight(y, m + 1, 1),
   };
 }
 
-export function monthContaining(at: Date): PrizePeriod {
-  const { year, month } = istDateParts(at);
-  return monthOf(year, month);
+export function monthContaining(at: Date, clock: Clock): PrizePeriod {
+  const { year, month } = clock.parts(at);
+  return monthOf(year, month, clock);
 }
 
 /** The month or fortnight a race is being run for at this moment. */
-export function currentPeriod(race: PrizeRace, at: Date): PrizePeriod {
-  if (race === "TOP_SELLERS") return monthContaining(at);
-  const f = fortnightContaining(at);
+export function currentPeriod(race: PrizeRace, at: Date, clock: Clock): PrizePeriod {
+  if (race === "TOP_SELLERS") return monthContaining(at, clock);
+  const f = fortnightContaining(at, clock);
   return { key: f.key, label: f.label, from: f.from, to: f.to };
 }
 
 /** The period a key names, or null when the key is not one of this race's. "" is the standing list. */
-export function periodByKey(race: PrizeRace, key: string): PrizePeriod | null {
+export function periodByKey(race: PrizeRace, key: string, clock: Clock): PrizePeriod | null {
   if (race === "MOST_ACTIVE") {
-    const f = fortnightByKey(key);
+    const f = fortnightByKey(key, clock);
     return f ? { key: f.key, label: f.label, from: f.from, to: f.to } : null;
   }
   const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(key);
-  return m ? monthOf(Number(m[1]), Number(m[2]) - 1) : null;
+  return m ? monthOf(Number(m[1]), Number(m[2]) - 1, clock) : null;
 }
 
 /** This period and the next few, for planning ahead. */
-export function upcomingPeriods(race: PrizeRace, at: Date, count = 6): PrizePeriod[] {
+export function upcomingPeriods(race: PrizeRace, at: Date, clock: Clock, count = 6): PrizePeriod[] {
   const out: PrizePeriod[] = [];
-  let cursor = currentPeriod(race, at);
+  let cursor = currentPeriod(race, at, clock);
   for (let i = 0; i < count; i++) {
     out.push(cursor);
-    cursor = currentPeriod(race, cursor.to);
+    cursor = currentPeriod(race, cursor.to, clock);
   }
   return out;
 }
@@ -103,10 +104,13 @@ export function upcomingPeriods(race: PrizeRace, at: Date, count = 6): PrizePeri
 export const PRIZES_FROM_HOUR = 9;
 export const PRIZES_FOR_DAYS = 4;
 
-export function prizeAnnouncementDue(race: PrizeRace, now: Date): PrizePeriod | null {
-  const p = currentPeriod(race, now);
-  const opens = p.from.getTime() + PRIZES_FROM_HOUR * 3_600_000;
-  const closes = p.from.getTime() + PRIZES_FOR_DAYS * 86_400_000;
+export function prizeAnnouncementDue(race: PrizeRace, now: Date, clock: Clock): PrizePeriod | null {
+  const p = currentPeriod(race, now, clock);
+  // Nine on the workspace's clock, and midnight four days on — read off its calendar rather than
+  // added as hours, which a clock change in between would move.
+  const { year, month, day } = clock.parts(p.from);
+  const opens = clock.at(year, month, day, PRIZES_FROM_HOUR).getTime();
+  const closes = clock.midnight(year, month, day + PRIZES_FOR_DAYS).getTime();
   return now.getTime() >= opens && now.getTime() < closes ? p : null;
 }
 

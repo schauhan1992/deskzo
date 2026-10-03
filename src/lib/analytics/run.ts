@@ -1,4 +1,5 @@
 import { bucketOf, NONE, ROW_CAP, type FactSource, type Grain } from "./types";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Turning rows into a table.
@@ -86,6 +87,8 @@ type RunParams<Row> = {
   /** Optional second breakdown, which becomes the columns. Time is the usual one. */
   columnKey?: string;
   grain: Grain;
+  /** Whose days, weeks and months the time buckets are: the workspace's (`workspaceClock()`). */
+  clock: Clock;
   dateKey: string;
   scopeNote: string;
   /**
@@ -175,7 +178,7 @@ export const COLUMN_CAP = 40;
 export const OTHER_COLUMN = "__other__";
 
 export function runReport<Row>(params: RunParams<Row>): ReportResult {
-  const { source, rows, grain } = params;
+  const { source, rows, grain, clock } = params;
 
   const measure = source.measures.find((m) => m.key === params.measureKey) ?? source.measures[0]!;
   const dateField = source.dateFields.find((d) => d.key === params.dateKey) ?? source.dateFields[0]!;
@@ -187,7 +190,7 @@ export function runReport<Row>(params: RunParams<Row>): ReportResult {
     if (!key) return [ALL];
     if (key === "time") {
       const at = dateField.get(row);
-      return at ? [bucketOf(at, grain).key] : [NONE];
+      return at ? [bucketOf(at, grain, clock).key] : [NONE];
     }
     const dim = source.dimensions.find((d) => d.key === key);
     if (!dim) return [ALL];

@@ -8,7 +8,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { OutboundLink } from "@/components/ui/outbound-link";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 import { headcountLabel } from "@/lib/company-size";
 
 type Briefing = NonNullable<Awaited<ReturnType<typeof getDomainBriefing>>>;
@@ -23,6 +23,7 @@ type Briefing = NonNullable<Awaited<ReturnType<typeof getDomainBriefing>>>;
  */
 export function DomainPanel({ companyId, briefing }: { companyId: string; briefing: Briefing }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -50,7 +51,7 @@ export function DomainPanel({ companyId, briefing }: { companyId: string; briefi
         </span>
         <div className="flex items-center gap-2">
           {profile?.fetchedAt && (
-            <span className="text-xs font-normal text-subtle">Checked {formatDateTime(profile.fetchedAt)}</span>
+            <span className="text-xs font-normal text-subtle">Checked {clock.dateTimeShort(profile.fetchedAt)}</span>
           )}
           <Button size="sm" variant="secondary" disabled={pending} onClick={refresh}>
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${pending ? "animate-spin" : ""}`} />
@@ -144,7 +145,7 @@ export function DomainPanel({ companyId, briefing }: { companyId: string; briefi
               <Fact
                 label="Registrar"
                 value={profile.registrar}
-                detail={profile.expiresOn ? `expires ${formatDate(profile.expiresOn)}` : null}
+                detail={profile.expiresOn ? `expires ${clock.date(profile.expiresOn)}` : null}
               />
             </div>
 

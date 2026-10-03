@@ -28,11 +28,12 @@ import Module from "node:module";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import Papa from "papaparse";
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Prisma } from "@deskzo/control-client";
 import type { ConsoleResult } from "../src/actions/platform/console";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { renderHtml } from "./lib/render-html";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -135,23 +136,9 @@ internals._load = function (this: unknown, request: string, parent: { filename?:
 
 type Page = (props: never) => Promise<unknown>;
 
-/** Renders a server page, awaiting the async components inside it (see scripts/check-console.ts). */
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 async function render(page: Page, params: Record<string, string> = {}, searchParams: Record<string, string> = {}): Promise<string> {
   const el = await page({ params: Promise.resolve(params), searchParams: Promise.resolve(searchParams) } as never);
-  return renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
+  return renderHtml(el);
 }
 /** The page as text: tags stripped, the common entities read back. */
 const textOf = (html: string) =>
@@ -221,9 +208,9 @@ async function main() {
     const rules = require("../src/lib/entitlements") as typeof import("../src/lib/entitlements");
     const lifecycle = require("../src/lib/billing/lifecycle") as typeof import("../src/lib/billing/lifecycle");
     const schemaInfo = require("../src/lib/platform/schema-info") as typeof import("../src/lib/platform/schema-info");
-    const format = require("../src/lib/console-shared/format") as typeof import("../src/lib/console-shared/format");
     const params = require("../src/lib/console-shared/params") as typeof import("../src/lib/console-shared/params");
-    const india = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
+    // The scratch console chooses no zone and its workspaces keep the default: India's clock throughout.
+    const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
     const { usageDay } = require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings");
     const wsData = require("../src/lib/platform/workspace-data") as typeof import("../src/lib/platform/workspace-data");
     const directory = require("../src/lib/platform/workspace-directory") as typeof import("../src/lib/platform/workspace-directory");
@@ -508,7 +495,7 @@ async function main() {
     await mk("over");
     await subscribe(t.over.id, { gateway: "MANUAL", status: "TRIALING", trialEndsAt: new Date(t0.getTime() - 10 * DAY) }, [{ planId: pro.id }]);
     await mk("ext");
-    const extEnd = new Date(`${format.istDayKey(new Date(t0.getTime() + 4 * DAY))}T23:59:59+05:30`);
+    const extEnd = new Date(`${indiaClock.dateKey(new Date(t0.getTime() + 4 * DAY))}T23:59:59+05:30`);
     const extSub = await subscribe(t.ext.id, { gateway: "MANUAL", status: "TRIALING", trialEndsAt: extEnd }, [{ planId: pro.id }]);
     // g: its super admin has let support in.
     await mk("g");
@@ -791,7 +778,7 @@ async function main() {
       const created = (slug: string) => csvRows.find((r) => r[0] === slug)?.[13];
       ok("  created in India time: 18:29:59Z is 26 Sep 23:59, 18:30:00Z is 27 Sep 00:00", created(S("t1")) === "2026-09-26 23:59" && created(S("t2")) === "2026-09-27 00:00", `${created(S("t1"))} / ${created(S("t2"))}`);
       const aCsv = csvRows.find((r) => r[0] === S("a"));
-      ok("  a row: its standing and its date, seats, tax id, tags", aCsv?.[6] !== undefined && aCsv[7] === format.istDayKey(aEnd) && aCsv[8] === "12" && aCsv[9] === "10" && aCsv[12] === "27ZZPLUS1234A1Z5" && aCsv[15] === "zz-plus", json(aCsv));
+      ok("  a row: its standing and its date, seats, tax id, tags", aCsv?.[6] !== undefined && aCsv[7] === indiaClock.dateKey(aEnd) && aCsv[8] === "12" && aCsv[9] === "10" && aCsv[12] === "27ZZPLUS1234A1Z5" && aCsv[15] === "zz-plus", json(aCsv));
       ok("  recorded as export.workspaces", (await control.platformAuditLog.count({ where: { action: "export.workspaces", actor: ids.billing } })) === 1);
       const selected = await dirActions.consoleExportWorkspaces({ tag: "zz-plus" }, [t.a.id, t.b.id]);
       ok("  exporting the selected rows exports just those", selected.ok && selected.data.rows === 2);
@@ -831,9 +818,9 @@ async function main() {
       await actAs(ids.support);
       ok("support cannot apply billing rules", !(await dirActions.consolePreviewApplyStanding([t.a.id])).ok && !(await dirActions.consoleBulkApplyStanding([t.a.id], { held: 0, closed: 0 })).ok);
 
-      ok("7 days from a trial ending 2026-10-01T18:29:59Z is 2026-10-08T23:59:59+05:30, exactly", bulk.trialEndAfter(new Date("2026-10-01T18:29:59Z"), 7).getTime() === new Date("2026-10-08T23:59:59+05:30").getTime());
+      ok("7 days from a trial ending 2026-10-01T18:29:59Z is 2026-10-08T23:59:59+05:30, exactly", bulk.trialEndAfter(new Date("2026-10-01T18:29:59Z"), 7, indiaClock).getTime() === new Date("2026-10-08T23:59:59+05:30").getTime());
       await actAs(ids.billing);
-      const extTo = new Date(`${format.istDayKey(new Date(extEnd.getTime() + 7 * DAY))}T23:59:59+05:30`);
+      const extTo = new Date(`${indiaClock.dateKey(new Date(extEnd.getTime() + 7 * DAY))}T23:59:59+05:30`);
       const pe = await dirActions.consolePreviewExtendTrial([t.ext.id, t.b.id], 7);
       const peItem = (id: string) => (pe.ok ? pe.data.items.find((i) => i.tenantId === id) : undefined);
       ok("extend by 7, previewed: to 23:59:59 India time, seven days after its end", peItem(t.ext.id)?.eligible === true && peItem(t.ext.id)?.to?.getTime() === extTo.getTime(), json(peItem(t.ext.id)));
@@ -853,7 +840,7 @@ async function main() {
       ok("  the one held for billing is in the held bucket", board.rows.find((r) => r.tenant.id === t.held.id)?.bucket === "held");
       ok("  a workspace paying at a gateway is not on it", !board.rows.some((r) => r.tenant.id === t.b.id || r.tenant.id === t.h.id));
       const a14 = await dirActions.consoleExtendTrial(t.a.id, 14);
-      const a14Expected = new Date(`${format.istDayKey(new Date(aEnd.getTime() + 14 * DAY))}T23:59:59+05:30`);
+      const a14Expected = new Date(`${indiaClock.dateKey(new Date(aEnd.getTime() + 14 * DAY))}T23:59:59+05:30`);
       ok("extend by 14: exactly 23:59:59 India time, 14 days after the old end", a14.ok && new Date(a14.data.endsAt).getTime() === a14Expected.getTime(), a14.ok ? a14.data.endsAt : why(a14));
       const heldExt = await dirActions.consoleExtendTrial(t.held.id, 14);
       ok("on the workspace held for billing, extending reopens it", heldExt.ok && heldExt.data.action === "lifted" && (await tenantOf("held")).status === "ACTIVE", why(heldExt) || json(heldExt));
@@ -1200,7 +1187,7 @@ async function main() {
       const toPlan = await annActions.consoleSaveAnnouncement({ title: "Zz for a plan", body: "zzANNBODY for zz-plus-pro", tone: "INFO", audience: "PLANS", targets: ["zz-plus-pro"], dismissible: true });
       const planId = toPlan.ok ? toPlan.data.id : "none";
       ok("to plan zz-plus-pro: the workspace on it shows it, one on another plan does not", toPlan.ok && (await shows("a", planId)) && !(await shows("e", planId)), why(toPlan));
-      const soon = await annActions.consoleSaveAnnouncement({ title: "Zz later", body: "zzANNBODY later", tone: "INFO", audience: "TENANTS", targets: [t.a.id], startsAt: india.istDateTimeInput(new Date(Date.now() + 2 * HOUR)), dismissible: true });
+      const soon = await annActions.consoleSaveAnnouncement({ title: "Zz later", body: "zzANNBODY later", tone: "INFO", audience: "TENANTS", targets: [t.a.id], startsAt: indiaClock.input(new Date(Date.now() + 2 * HOUR)), dismissible: true });
       ok("one starting 2 hours from now is not shown yet", soon.ok && !(await shows("a", soon.ok ? soon.data.id : "none")), why(soon));
       const past = await control.platformAnnouncement.create({
         data: { title: "Zz over", body: "zzANNBODY over", audience: "TENANTS", targets: [t.a.id], startsAt: new Date(Date.now() - 3 * HOUR), endsAt: new Date(Date.now() - HOUR), createdBy: ids.admin },
@@ -1213,8 +1200,8 @@ async function main() {
       ok("ended now: gone, and on the Ended tab", endUs.ok && !(await shows("b", usId)) && (await announcements.announcementById(usId))?.state === "ended", why(endUs));
       ok("  ending it twice is refused", !(await annActions.consoleEndAnnouncement(usId)).ok);
       ok("an admin cannot announce to every workspace", !(await annActions.consoleSaveAnnouncement({ title: "Zz everyone", body: "zzANNBODY all", tone: "INFO", audience: "ALL", targets: [], dismissible: true, confirm: "publish" })).ok);
-      ok("a critical one needs publish typed", !(await annActions.consoleSaveAnnouncement({ title: "Zz critical", body: "zzANNBODY critical", tone: "CRITICAL", audience: "TENANTS", targets: [t.a.id], endsAt: india.istDateTimeInput(new Date(Date.now() + DAY)), dismissible: false })).ok);
-      const tooLong = await annActions.consoleSaveAnnouncement({ title: "Zz too long", body: "zzANNBODY long", tone: "INFO", audience: "TENANTS", targets: [t.a.id], endsAt: india.istDateTimeInput(new Date(Date.now() + 91 * DAY)), dismissible: true });
+      ok("a critical one needs publish typed", !(await annActions.consoleSaveAnnouncement({ title: "Zz critical", body: "zzANNBODY critical", tone: "CRITICAL", audience: "TENANTS", targets: [t.a.id], endsAt: indiaClock.input(new Date(Date.now() + DAY)), dismissible: false })).ok);
+      const tooLong = await annActions.consoleSaveAnnouncement({ title: "Zz too long", body: "zzANNBODY long", tone: "INFO", audience: "TENANTS", targets: [t.a.id], endsAt: indiaClock.input(new Date(Date.now() + 91 * DAY)), dismissible: true });
       ok("a 91-day window is refused", !tooLong.ok && /90 days/.test(why(tooLong)), why(tooLong));
       await actAs(ids.owner);
       ok("an owner to every workspace without publish is refused", !(await annActions.consoleSaveAnnouncement({ title: "Zz everyone", body: "zzANNBODY all", tone: "INFO", audience: "ALL", targets: [], dismissible: true })).ok);
@@ -1389,7 +1376,7 @@ async function main() {
       await actAs(ids.owner);
       const exported = await adminActions.consoleExportAudit({ action: "zzplus.edge" });
       const parsed = exported.ok ? (Papa.parse<string[]>(exported.data.csv.trim()).data as string[][]) : [];
-      ok("an owner exports: the columns, and the time in India", exported.ok && json(parsed[0]) === json(["When (IST)", "Actor kind", "Who", "Action", "Workspace", "Detail"]) && parsed.length === 3 && parsed.some((r) => r[0] === "2026-09-26 23:59:59") && parsed.some((r) => r[0] === "2026-09-27 00:00:00"), json(parsed));
+      ok("an owner exports: the columns, and the time in India", exported.ok && json(parsed[0]) === json(["When (Asia/Kolkata)", "Actor kind", "Who", "Action", "Workspace", "Detail"]) && parsed.length === 3 && parsed.some((r) => r[0] === "2026-09-26 23:59:59") && parsed.some((r) => r[0] === "2026-09-27 00:00:00"), json(parsed));
       ok("  recorded as export.audit", (await control.platformAuditLog.count({ where: { action: "export.audit", actor: ids.owner } })) === 1);
       const whoExport = await adminActions.consoleExportAudit({ who: "Zz Plus Billing" });
       const whoRows = whoExport.ok ? (Papa.parse<string[]>(whoExport.data.csv.trim()).data as string[][]).slice(1) : [];
@@ -1411,7 +1398,7 @@ async function main() {
       ok("  one by invitation, two open; by country; by day", funnel.byInvite.invited === 1 && funnel.byInvite.open === 2 && json(funnel.byCountry) === json([{ country: "IN", n: 3 }]) && json(funnel.byDay) === json([{ day: "2026-09-15", n: 3 }]));
       const now = new Date();
       const defaulted = await signups.signupFunnel({}, now);
-      ok("without a range: the last 30 days in India, today included", defaulted.to === format.istDayKey(now) && defaulted.from === format.istDayKey(new Date(now.getTime() - 29 * DAY)) && defaulted.byDay.length === 30, `${defaulted.from} – ${defaulted.to}`);
+      ok("without a range: the last 30 days in India, today included", defaulted.to === indiaClock.dateKey(now) && defaulted.from === indiaClock.dateKey(new Date(now.getTime() - 29 * DAY)) && defaulted.byDay.length === 30, `${defaulted.from} – ${defaulted.to}`);
       ok("  a range the wrong way round is read the right way", (await signups.signupFunnel({ from: "2026-09-16", to: "2026-09-14" })).started === 3);
       ok("  a stage asked for gives only that stage; a search finds by email", (await signups.stuckSignups({ stage: "setup-stuck", withIp: false })).rows.every((r) => r.stage === "setup-stuck") && (await signups.stuckSignups({ q: "zz-stuck", withIp: false })).rows.some((r) => r.email === "zz-stuck@zzplus.example") && (await signups.stuckSignups({ q: "zz-nobody-at-all", withIp: false })).total === 0);
       const stuck = await signups.stuckSignups({ withIp: false });
@@ -1664,7 +1651,7 @@ async function main() {
       const layoutProps = { children: createElement("div", null, "zz page body") };
       const shellHtml = await (async () => {
         try {
-          return renderToStaticMarkup((await resolveAsync(await (ConsoleLayout as (p: typeof layoutProps) => Promise<unknown>)(layoutProps))) as ReactElement);
+          return renderHtml((ConsoleLayout as (p: typeof layoutProps) => Promise<ReactNode>)(layoutProps));
         } catch (err) {
           return `FAILED ${err instanceof Error ? err.message : String(err)}`;
         }

@@ -305,9 +305,9 @@ async function main() {
     await db.leadAssignmentRule.update({ where: { id: rr.id }, data: { skipOnLeave: true } });
     const leaveType = await db.leaveType.findFirst({ select: { id: true } });
     if (leaveType) {
-      const { istDateParts } = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
-      const { year, month, day } = istDateParts(new Date());
-      const today = new Date(Date.UTC(year, month, day));
+      const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
+      // Today on the workspace's clock (India's here), held as the leave's @db.Date holds a day.
+      const today = indiaClock.calendarDate(new Date());
       await db.leaveRequest.create({
         data: { userId: b!.id, typeId: leaveType.id, fromDate: today, toDate: today, days: 1, reason: "Zzprobe", status: "APPROVED" },
       });

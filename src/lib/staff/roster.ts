@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { OPEN_STAGES } from "@/lib/forecast/stages";
-import { istDateParts, istMidnight } from "@/lib/india-time";
 import { PEOPLE_ONLY } from "@/lib/people";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * What the Staff tab of Staff & roles shows beside each person, past what the access roster already
@@ -25,7 +25,7 @@ export type StaffFacts = {
   lastSignInAt: Date | null;
   /** Open leads they own — any stage short of Won, Lost or Disqualified. Null when not asked for. */
   openLeads: number | null;
-  /** Of those, the ones whose expected close date is before today in India: the forecast's "slipped". */
+  /** Of those, the ones whose expected close date is before today in the workspace: the forecast's "slipped". */
   overdueLeads: number | null;
 };
 
@@ -38,8 +38,9 @@ export async function staffFacts(
   if (ids.length === 0) return facts;
 
   const now = options.now ?? new Date();
-  const today = istDateParts(now);
-  const startOfToday = istMidnight(today.year, today.month, today.day);
+  const clock = await workspaceClock();
+  const today = clock.parts(now);
+  const startOfToday = clock.midnight(today.year, today.month, today.day);
   const open = { status: { in: [...OPEN_STAGES] } };
 
   const [people, signIns, leads, slipped] = await Promise.all([

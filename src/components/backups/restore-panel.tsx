@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ARCHIVE_EXTENSION, CONFIRM_PHRASE } from "@/lib/backup/archive-format";
 import { formatBytes } from "@/lib/backup/policy";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * Upload a backup, look at what it is, then replace everything with it.
@@ -49,6 +49,7 @@ type Status = {
 };
 
 export function RestorePanel() {
+  const clock = useClock();
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [preflight, setPreflight] = useState<Preflight | null>(null);
@@ -169,7 +170,7 @@ export function RestorePanel() {
             <div className={`text-sm ${last.phase === "done" ? "text-success" : "text-danger"}`}>
               <p className="font-medium">
                 {last.phase === "done" ? "Last restore finished" : "Last restore failed"} —{" "}
-                {formatDateTime(new Date(last.finishedAt))}
+                {clock.dateTimeShort(last.finishedAt)}
               </p>
               <p className="mt-0.5 whitespace-pre-line">{last.error ?? last.message}</p>
               {last.secretHandoffPath && (
@@ -226,7 +227,7 @@ export function RestorePanel() {
           {preflight && (
             <div className="space-y-3 rounded-base border border-line bg-surface-sunken p-3">
               <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
-                <Row label="Taken" value={formatDateTime(new Date(preflight.archive.takenAt))} />
+                <Row label="Taken" value={clock.dateTimeShort(preflight.archive.takenAt)} />
                 <Row label="Contains" value={formatBytes(preflight.archive.dumpBytes)} />
                 <Row label="Schema" value={preflight.archive.schemaVersion ?? "unknown"} />
                 <Row label="This database is on" value={preflight.database.schemaVersion ?? "unknown"} />

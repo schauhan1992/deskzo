@@ -1,14 +1,16 @@
 import { DataTable, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { Amount } from "@/components/partners/common/money";
 import { StatementStatusPill } from "@/components/partners/common/pills";
-import { dayMonthYear, monthLabel, when } from "@/lib/console-shared/format";
+import { monthLabel } from "@/lib/console-shared/format";
 import { PARTNER_ROUTES } from "@/lib/partners/nav";
 import type { StatementRow } from "@/lib/partners/portal-data";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The statements list: one row per statement — a month's entries for this partner in one currency,
  * approved or paid (a draft is the platform's work in progress and never reaches the partner). Each
- * figure is in the statement's own currency. Server-safe.
+ * figure is in the statement's own currency. Server-safe. The day it was paid is India's, as its month
+ * is (src/lib/partners/statements.ts).
  */
 export function StatementsTable({ rows }: { rows: StatementRow[] }) {
   return (
@@ -46,8 +48,8 @@ export function StatementsTable({ rows }: { rows: StatementRow[] }) {
             <Td>
               {row.paidAt ? (
                 <span className="inline-flex flex-col">
-                  <time dateTime={row.paidAt.toISOString()} title={when(row.paidAt)} className="whitespace-nowrap">
-                    {dayMonthYear(row.paidAt)}
+                  <time dateTime={row.paidAt.toISOString()} title={indiaClock.dateTime(row.paidAt)} className="whitespace-nowrap">
+                    {indiaClock.date(row.paidAt)}
                   </time>
                   {row.paymentReference && <span className="font-mono text-[11px] break-all text-muted">{`Ref. ${row.paymentReference}`}</span>}
                 </span>

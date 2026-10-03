@@ -10,6 +10,7 @@ import { notifyUser } from "@/lib/notify";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
 import { measure, subjectUserIds } from "@/lib/targets/measure";
+import { workspaceClock } from "@/lib/time/workspace";
 import { metricByKey } from "@/lib/targets/metrics";
 import { computeIncentive, payableState, validateScheme, type Scheme } from "@/lib/incentives/compute";
 import type { ActionResult } from "@/actions/company";
@@ -365,10 +366,14 @@ export async function generateEarnings(params?: { upTo?: string }): Promise<Acti
   const { user, manage } = await access();
   if (!manage) return { ok: false, error: "You can't work out incentives." };
 
-  const cutoff = params?.upTo ? new Date(`${params.upTo}T23:59:59.999Z`) : new Date();
+  // Periods ending on or before the day asked for, or today on the workspace's calendar. `toDate` is
+  // a calendar day, held as midnight UTC, so today is too: compared with the moment `new Date()`, a
+  // period ending today only counted once midnight UTC had passed — 05:30 in India, the evening before
+  // in America.
+  const toDate = { lte: params?.upTo ? new Date(`${params.upTo}T23:59:59.999Z`) : (await workspaceClock()).calendarDate(new Date()) };
 
   const targets = await db.target.findMany({
-    where: { active: true, incentiveSchemeId: { not: null }, toDate: { lte: cutoff } },
+    where: { active: true, incentiveSchemeId: { not: null }, toDate },
     include: { incentiveScheme: { include: { slabs: true } }, user: { select: { id: true, name: true } } },
   });
 
@@ -620,7 +625,9 @@ export async function awardOneOff(input: {
   if (input.amount <= 0) return { ok: false, error: "How much?" };
   if (!input.reason.trim()) return { ok: false, error: "Say what it's for — it'll appear on their payslip." };
 
-  const today = new Date();
+  // Today on the workspace's calendar, as the date columns hold a day. `new Date()` was stored as its
+  // UTC date — yesterday's, for an award made before 05:30 in India.
+  const today = (await workspaceClock()).calendarDate(new Date());
   const row = await db.incentiveEarning.create({
     data: {
       userId: input.userId,

@@ -9,7 +9,7 @@ import { approveCampaign, cancelCampaign, dryRunCampaign as runDryRun, scheduleC
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type DryRun = Extract<Awaited<ReturnType<typeof dryRunCampaign>>, { ok: true }>["data"];
 
@@ -74,6 +74,7 @@ function CampaignRow({
   canApprove: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,12 +120,12 @@ function CampaignRow({
           </div>
           <p className="text-xs text-muted">
             {[campaign.audience?.name, campaign.list ? `list “${campaign.list.name}”` : null].filter(Boolean).join(" + ")} · {campaign.template.name}
-            {campaign.scheduledFor && ` · from ${formatDate(campaign.scheduledFor)}`}
+            {campaign.scheduledFor && ` · from ${clock.date(campaign.scheduledFor)}`}
             {campaign._count.messages > 0 && ` · ${campaign._count.messages} recipient(s)`}
           </p>
           <p className="text-[11px] text-subtle">
             Built by {campaign.createdBy.name}
-            {campaign.startedAt && ` · started ${formatDate(campaign.startedAt)}`}
+            {campaign.startedAt && ` · started ${clock.date(campaign.startedAt)}`}
           </p>
         </div>
 

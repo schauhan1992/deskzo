@@ -13,6 +13,7 @@ import { ActionNotice } from "@/components/ui/action-notice";
 import { EmailFrame } from "@/components/marketing/email-frame";
 import { ListUploader } from "@/components/marketing/list-uploader";
 import { TemplateEditor } from "@/components/marketing/template-editor";
+import { useClock } from "@/components/time/clock-provider";
 import { TOPICS } from "@/lib/marketing/topics";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +40,7 @@ export function MassMailWizard({
   canSend: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [audienceId, setAudienceId] = useState("");
@@ -125,7 +127,7 @@ export function MassMailWizard({
                   type="button"
                   onClick={() => {
                     setTemplateId(t.id);
-                    if (!name) setName(`${t.name} — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`);
+                    if (!name) setName(`${t.name} — ${clock.dayMonth(new Date())}`);
                   }}
                   aria-pressed={t.id === templateId}
                   className={cn("rounded-xl border p-2 text-left transition-colors", t.id === templateId ? "border-brand ring-2 ring-brand/40" : "border-line hover:bg-surface-sunken")}
@@ -243,7 +245,12 @@ export function MassMailWizard({
                 <label className="flex items-center gap-1.5">
                   <input type="radio" name="mm-when" checked={when === "later"} onChange={() => setWhen("later")} className="accent-[var(--brand)]" /> Later
                 </label>
-                {when === "later" && <Input type="datetime-local" aria-label="Send at" value={at} onChange={(e) => setAt(e.target.value)} className="h-8 w-auto" />}
+                {when === "later" && (
+                  <>
+                    <Input type="datetime-local" aria-label="Send at" value={at} onChange={(e) => setAt(e.target.value)} className="h-8 w-auto" />
+                    <span className="text-[11px] text-subtle">{clock.zone.replace(/_/g, " ")} time</span>
+                  </>
+                )}
               </div>
               <p className="flex items-center gap-1 text-[11px] text-subtle">
                 <Clock className="h-3 w-3" /> Your quiet hours and holidays are respected either way.
@@ -273,8 +280,9 @@ export function MassMailWizard({
                       templateId: templateId!,
                       audienceId: audienceId || null,
                       listId: listId || null,
-                      // The picker's time is the sender's own clock; sent as an instant so the server can't misread it.
-                      scheduledFor: when === "later" && at ? new Date(at).toISOString() : null,
+                      // The picker's time is the workspace's clock, whatever the sender's computer is set to; sent as an
+                      // instant so the server can't misread it. Anything unreadable goes as typed, for the server to refuse.
+                      scheduledFor: when === "later" && at ? (clock.parseInput(at)?.toISOString() ?? at) : null,
                     });
                     if (r.ok) setDone(r.data);
                     else setNotice({ tone: "error", text: r.error });

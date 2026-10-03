@@ -18,6 +18,7 @@ import {
 import { recordPermissionChange } from "@/lib/authz/audit";
 import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
 import { getPreset, presetDiff } from "@/lib/authz/presets";
+import { workspaceClock } from "@/lib/time/workspace";
 
 import type { ActionResult } from "@/actions/company";
 
@@ -53,23 +54,16 @@ async function mayAdminister() {
  * permission system quietly becomes decorative.
  */
 /**
- * The moment a dated grant stops applying: the end of that day, where the reader lives.
+ * The moment a dated grant stops applying: the end of that day on the workspace's clock — the
+ * midnight that begins the next one, so a reader names the day before it (`describeSource`).
  *
- * Built from local date parts rather than by appending \`T23:59:59.999Z\`, which is UTC — in India
- * that is half past five the following morning, so a grant given "until 30 Nov" quietly ran into
- * the 1st. Small, but it is an access grant outliving the day it was granted for, and the same
- * mistake in the e-way module expired every bill a day early.
+ * Not by appending \`T23:59:59.999Z\`, which is UTC — in India that is half past five the following
+ * morning, so a grant given "until 30 Nov" quietly ran into the 1st. Nor the server's own midnight,
+ * which it was until workspaces had zones: on a server in UTC, the same five and a half hours.
  */
-function expiryFromDate(date: string | null | undefined): Date | null {
+async function expiryFromDate(date: string | null | undefined): Promise<Date | null> {
   if (!date) return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
-  if (!match) return null;
-  const [, y, m, d] = match;
-  const end = new Date(Number(y), Number(m) - 1, Number(d));
-  if (Number.isNaN(end.getTime())) return null;
-  // Midnight at the end of that day.
-  end.setDate(end.getDate() + 1);
-  return end;
+  return (await workspaceClock()).endOfDay(date);
 }
 
 export async function setUserPermission(input: {
@@ -110,13 +104,14 @@ export async function setUserPermission(input: {
     select: { allowed: true },
   });
 
+  const expiresAt = await expiryFromDate(input.expiresAt);
   await db.userPermission.upsert({
     where: { user_permission: { userId: input.userId, permission: input.permission } },
     update: {
       allowed: input.allowed,
       reason: input.reason?.trim() || null,
       grantedById: actor.id,
-      expiresAt: expiryFromDate(input.expiresAt),
+      expiresAt,
     },
     create: {
       userId: input.userId,
@@ -124,7 +119,7 @@ export async function setUserPermission(input: {
       allowed: input.allowed,
       reason: input.reason?.trim() || null,
       grantedById: actor.id,
-      expiresAt: expiryFromDate(input.expiresAt),
+      expiresAt,
     },
   });
 
@@ -529,7 +524,7 @@ export async function extendUserPermission(input: {
 
   await db.userPermission.update({
     where: { user_permission: { userId: input.userId, permission: input.permission } },
-    data: { expiresAt: expiryFromDate(input.expiresAt) },
+    data: { expiresAt: await expiryFromDate(input.expiresAt) },
   });
 
   await recordPermissionChange({

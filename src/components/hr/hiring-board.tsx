@@ -12,7 +12,8 @@ import { Badge, Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { candidateStatusLabels, candidateStatusTone } from "@/lib/hr/onboarding";
 import { employmentTypeLabels, employmentTypeValues } from "@/lib/validation/hr";
 
@@ -74,7 +75,7 @@ export function HiringBoard({
                     {c.offeredCtc ? formatCurrency(Number(c.offeredCtc)) : "—"}
                   </td>
                   <td className="px-4 py-2.5 text-muted">
-                    {c.expectedJoining ? formatDate(c.expectedJoining) : "—"}
+                    {c.expectedJoining ? formatCalendarDay(c.expectedJoining) : "—"}
                   </td>
                   <td className="px-4 py-2.5">
                     {/* The thing HR is actually chasing between offer and joining. */}

@@ -10,6 +10,10 @@ import {
 import { sendEmailNotification } from "@/lib/email";
 import { wants } from "@/lib/notifications/catalogue";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
+
+const DAY_MS = 86_400_000;
 
 /**
  * Server-only helpers for creating notifications — deliberately NOT exported from a "use server"
@@ -65,8 +69,14 @@ export async function notifyUser(input: { userId: string; type: NotificationType
  */
 export async function syncSystemNotifications(userId: string) {
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000 - 1);
+  /**
+   * Today on the workspace's calendar, held as a day column holds it (midnight UTC) — a task's due
+   * date and a renewal's end are typed days kept that way, and a holiday is a `@db.Date`. It was the
+   * server's own midnight: on a server in UTC, India's tasks fell due at 05:30.
+   */
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(now);
+  const tomorrow = new Date(today.getTime() + DAY_MS);
 
   const [tasks, tickets, renewals, callbacks, noteReminders, expiringLogins] = await Promise.all([
     db.task.findMany({
@@ -80,7 +90,8 @@ export async function syncSystemNotifications(userId: string) {
     db.companyProduct.findMany({
       where: {
         item: { type: "SUBSCRIPTION" },
-        endDate: { not: null, gte: now, lte: addDays(now, 30) },
+        // Typed days: one ending today is still expiring, not gone.
+        endDate: { not: null, gte: today, lte: new Date(today.getTime() + 30 * DAY_MS) },
         company: { ownerUserId: userId },
       },
       select: { id: true, item: { select: { name: true } }, company: { select: { id: true, name: true } } },
@@ -137,7 +148,7 @@ export async function syncSystemNotifications(userId: string) {
 
   for (const task of tasks) {
     if (!task.dueDate) continue;
-    if (task.dueDate < startOfToday) {
+    if (task.dueDate < today) {
       candidates.push({
         userId,
         type: "TASK_OVERDUE",
@@ -146,7 +157,7 @@ export async function syncSystemNotifications(userId: string) {
         link: "/tasks",
         dedupeKey: `task-overdue:${task.id}`,
       });
-    } else if (task.dueDate <= endOfToday) {
+    } else if (task.dueDate < tomorrow) {
       candidates.push({
         userId,
         type: "TASK_DUE",
@@ -159,7 +170,7 @@ export async function syncSystemNotifications(userId: string) {
   }
 
   for (const ticket of tickets) {
-    const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt, now);
+    const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt, clock, now);
     if (sla.key === "overdue") {
       candidates.push({
         userId,
@@ -240,7 +251,7 @@ export async function syncSystemNotifications(userId: string) {
     });
   }
 
-  candidates.push(...(await peopleCandidates(userId, now, startOfToday)));
+  candidates.push(...(await peopleCandidates(userId, now, clock)));
 
   if (candidates.length === 0) return;
 
@@ -277,16 +288,17 @@ export async function syncSystemNotifications(userId: string) {
 async function peopleCandidates(
   userId: string,
   now: Date,
-  startOfToday: Date,
+  clock: Clock,
 ): Promise<
   { userId: string; type: NotificationType; title: string; message: string | null; link: string | null; dedupeKey: string }[]
 > {
   if (!(await moduleAvailableForTenant("hr"))) return [];
 
   const out: Awaited<ReturnType<typeof peopleCandidates>> = [];
-  const todayMonth = now.getUTCMonth() + 1;
-  const todayDay = now.getUTCDate();
-  const yearKey = now.getUTCFullYear();
+  // Today on the workspace's calendar; a birthday and a joining date are `@db.Date` days, read as UTC.
+  const { year: yearKey, month, day: todayDay } = clock.parts(now);
+  const todayMonth = month + 1;
+  const startOfToday = clock.calendarDate(now);
 
   const colleagues = await db.employeeProfile.findMany({
     where: { exitedOn: null, user: { active: true } },

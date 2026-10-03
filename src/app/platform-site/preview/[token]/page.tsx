@@ -5,14 +5,15 @@ import { Eye } from "lucide-react";
 import { SiteBlocks } from "@/components/site/blocks/render";
 import { Container } from "@/components/site/ui";
 import { loadPreview } from "@/lib/cms/preview";
-import { formatIstTime } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { PostArticle, blogContext } from "../../blog/post-article";
 
 /**
  * A draft, as it would look published — opened from the CMS's "Preview" with a signed, 15-minute token
  * (src/lib/cms/preview.ts). Never indexed, never cached (the proxy sends no-store for /preview), and
  * marked at the top so nobody mistakes it for the live page. A forged token is the site's 404; an
- * expired one, or one for a draft saved since, says so.
+ * expired one, or one for a draft saved since, says so. The link's end is told on the CMS's clock —
+ * the console's (Settings › Time zone) — with the zone named, since this page is outside the CMS.
  */
 
 export const metadata: Metadata = { title: "Preview", robots: { index: false, follow: false, nocache: true } };
@@ -41,7 +42,7 @@ export default async function PreviewPage({ params }: PageProps<"/platform-site/
       </section>
     );
   }
-  const ctx = await blogContext();
+  const [ctx, clock] = await Promise.all([blogContext(), consoleClock()]);
   return (
     <>
       <div role="status" className="sticky top-0 z-40 border-b border-warning/30 bg-warning-bg text-warning">
@@ -50,7 +51,7 @@ export default async function PreviewPage({ params }: PageProps<"/platform-site/
             <Eye aria-hidden="true" className="h-4 w-4" />
             Preview — not published
           </p>
-          <p className="text-xs">This link stops working at {formatIstTime(preview.expiresAt)} (India time).</p>
+          <p className="text-xs">{`This link stops working at ${clock.time(preview.expiresAt)} (${clock.zone.replace(/_/g, " ")} time).`}</p>
         </Container>
       </div>
       {preview.kind === "page" ? <SiteBlocks blocks={preview.page.blocks} ctx={ctx} /> : <PostArticle post={preview.post} ctx={ctx} />}

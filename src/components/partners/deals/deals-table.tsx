@@ -8,9 +8,11 @@ import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/component
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { DealStatusPill } from "@/components/partners/common/pills";
 import { CustomerName } from "@/components/partners/customers/customer-name";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
-import { dayMonthYear, istDaysBetween, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { DealRow } from "@/lib/partners/portal-data";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The partner's deal registrations: the company, its email domain and country, where the
@@ -25,16 +27,17 @@ import type { DealRow } from "@/lib/partners/portal-data";
 
 const withdrawable = (row: DealRow) => row.status === "PENDING" || row.status === "APPROVED";
 
-/** "12 Dec 2026 · 40 days left", counted in India's days from the loader's clock. */
-function protection(row: DealRow, asOf: Date): { date: string; left: string | null } | null {
+/** "12 Dec 2026 · 40 days left", counted in the portal's days — the console's clock's — from the loader's `asOf`. */
+function protection(row: DealRow, asOf: Date, clock: Clock): { date: string; left: string | null } | null {
   if (!row.expiresAt) return null;
-  const date = dayMonthYear(row.expiresAt);
+  const date = clock.date(row.expiresAt);
   if (row.status !== "APPROVED") return { date, left: null };
-  const days = istDaysBetween(asOf, row.expiresAt);
+  const days = clock.daysBetween(asOf, row.expiresAt);
   return { date, left: days <= 0 ? "ends today" : days === 1 ? "1 day left" : `${plural(days, "day")} left` };
 }
 
 export function DealsTable({ rows, asOf, canWithdraw, countryNames }: { rows: DealRow[]; asOf: Date; canWithdraw: boolean; countryNames: Record<string, string> }) {
+  const clock = useClock();
   const [withdrawing, setWithdrawing] = useState<DealRow | null>(null);
   const actions = canWithdraw && rows.some(withdrawable);
   return (
@@ -52,14 +55,14 @@ export function DealsTable({ rows, asOf, canWithdraw, countryNames }: { rows: De
         </THead>
         <TBody>
           {rows.map((row) => {
-            const until = protection(row, asOf);
+            const until = protection(row, asOf, clock);
             return (
               <Tr key={row.id}>
                 <Td>
                   <span className="block max-w-[16rem] min-w-32 truncate font-medium" title={row.companyName}>
                     {row.companyName}
                   </span>
-                  <span className="block text-[11px] text-subtle">{`Registered ${dayMonthYear(row.createdAt)}`}</span>
+                  <span className="block text-[11px] text-subtle">{`Registered ${clock.date(row.createdAt)}`}</span>
                 </Td>
                 <Td mono nowrap>
                   <span translate="no">{row.domain}</span>
@@ -110,6 +113,7 @@ export function DealsTable({ rows, asOf, canWithdraw, countryNames }: { rows: De
 
 /** Withdraw a pending or approved registration: the company is no longer held for this partner. */
 function WithdrawDialog({ row, asOf, onClose }: { row: DealRow | null; asOf: Date; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
 
   function close() {
@@ -118,7 +122,7 @@ function WithdrawDialog({ row, asOf, onClose }: { row: DealRow | null; asOf: Dat
     onClose();
   }
 
-  const until = row ? protection(row, asOf) : null;
+  const until = row ? protection(row, asOf, clock) : null;
   return (
     <ConfirmDialog
       open={row !== null}

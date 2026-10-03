@@ -4,11 +4,11 @@ import { useEffect, useEffectEvent, useId, useState, useTransition } from "react
 import { Eye, History, LoaderCircle, RotateCcw } from "lucide-react";
 import { cmsPageVersion, cmsPageVersions, cmsSavePageVersion } from "@/actions/cms/pages";
 import { RelativeTime } from "@/components/console/kit/relative-time";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { SidePane } from "@/components/ui/side-pane";
 import type { PageDocument, PageVersionRow } from "@/lib/cms/types";
-import { formatIstDateTime } from "@/lib/india-time";
 
 /**
  * A page's history: every published version and every version saved by hand, newest first, with who
@@ -58,6 +58,7 @@ function HistoryBody({
   onView: (version: PageVersionRow, doc: PageDocument) => void;
   onRestore: (version: PageVersionRow) => void;
 }) {
+  const clock = useClock();
   const noteId = useId();
   const [rows, setRows] = useState<PageVersionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -160,7 +161,7 @@ function HistoryBody({
                 <RelativeTime at={row.createdAt} /> · {row.createdBy}
               </p>
               <p className="mt-0.5 text-xs text-subtle">
-                {formatIstDateTime(row.createdAt)} · “{row.title}” · {row.blocks} {row.blocks === 1 ? "block" : "blocks"}
+                {clock.dateTime(row.createdAt)} · “{row.title}” · {row.blocks} {row.blocks === 1 ? "block" : "blocks"}
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <Button type="button" variant="secondary" size="sm" onClick={() => view(row)} disabled={pending}>

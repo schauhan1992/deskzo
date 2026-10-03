@@ -5,10 +5,12 @@ import { ActionButton } from "@/components/console/kit/action-button";
 import { Banner } from "@/components/console/kit/banner";
 import { AutoRefresh } from "@/components/console/kit/refresh";
 import { StandingPill } from "@/components/console/kit/status";
-import { dayMonth, dayMonthYear, istDaysBetween, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { gatewayLabel, schemaLabel } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import type { WorkspaceHeader } from "@/lib/platform/workspace-data";
+import type { Clock } from "@/lib/time/zone";
 import { TabLink } from "./header-actions";
 
 /**
@@ -16,7 +18,7 @@ import { TabLink } from "./header-actions";
  * true right now, most serious first: closed, held (by whom and why), held for billing, held for a
  * failed migration, being set up, about to be held, paying twice over, behind on its schema, a trial
  * about to end. Each says what it means and, where there is one, offers the next step to the roles
- * that can take it.
+ * that can take it. A server component: its days are on the console's clock.
  *
  * `setup` (an addition to spec §4.7): its newest provisioning job, for the "being set up" banner's
  * step — the header loader does not read jobs, the Operations loader does.
@@ -27,9 +29,9 @@ type SetupJob = { status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED"; step: 
 const LINK_BUTTON =
   "inline-flex h-8 shrink-0 items-center rounded-base border border-line-strong bg-surface px-3 text-[13px] font-medium whitespace-nowrap text-text shadow-sm hover:bg-surface-sunken";
 
-/** "in 5 days", "today", "tomorrow" — counted in India's days from the loader's clock. */
-function inDays(at: Date, asOf: Date): string {
-  const days = istDaysBetween(asOf, at);
+/** "in 5 days", "today", "tomorrow" — counted in the console's days from the loader's time. */
+function inDays(at: Date, asOf: Date, clock: Clock): string {
+  const days = clock.daysBetween(asOf, at);
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
   return days > 0 ? `in ${plural(days, "day")}` : `${plural(-days, "day")} ago`;
@@ -37,7 +39,8 @@ function inDays(at: Date, asOf: Date): string {
 
 const firstLine = (text: string) => text.split("\n").find((l) => l.trim())?.trim() ?? text;
 
-export function WorkspaceBanners({ header, caps, setup = null }: { header: WorkspaceHeader; caps: Caps; setup?: SetupJob | null }) {
+export async function WorkspaceBanners({ header, caps, setup = null }: { header: WorkspaceHeader; caps: Caps; setup?: SetupJob | null }) {
+  const clock = await consoleClock();
   const { tenant, standing, asOf } = header;
   const slug = encodeURIComponent(tenant.slug);
   const tabHref = (tab: string) => `/workspaces/${slug}?tab=${tab}`;
@@ -57,7 +60,7 @@ export function WorkspaceBanners({ header, caps, setup = null }: { header: Works
     const { at, backup, purgeDueAt } = header.closed;
     add(
       "closed",
-      <Banner tone="neutral" title={`Closed on ${dayMonthYear(at)}`}>
+      <Banner tone="neutral" title={`Closed on ${clock.date(at)}`}>
         {backup ? (
           <>
             Final backup <span className="font-mono text-xs break-all">{backup}</span>
@@ -65,14 +68,14 @@ export function WorkspaceBanners({ header, caps, setup = null }: { header: Works
         ) : (
           "No final backup — it had no database of its own"
         )}
-        {` · purge due ${dayMonthYear(purgeDueAt)}. Until then its keys are kept, so the backup can still be read.`}
+        {` · purge due ${clock.date(purgeDueAt)}. Until then its keys are kept, so the backup can still be read.`}
       </Banner>,
     );
   }
 
   if (heldByStaff) {
     const hold = header.hold;
-    const since = hold?.since ? ` since ${dayMonth(hold.since)}` : "";
+    const since = hold?.since ? ` since ${clock.dayMonth(hold.since)}` : "";
     const by = hold?.by ? ` by ${hold.by}` : " by staff";
     add(
       "held",
@@ -99,7 +102,7 @@ export function WorkspaceBanners({ header, caps, setup = null }: { header: Works
     const since = header.hold?.since ?? tenant.suspendedAt;
     add(
       "billing-hold",
-      <Banner tone="danger" title={`Held for billing${since ? ` since ${dayMonth(since)}` : ""}`} action={toTab("billing", "Open Billing")}>
+      <Banner tone="danger" title={`Held for billing${since ? ` since ${clock.dayMonth(since)}` : ""}`} action={toTab("billing", "Open Billing")}>
         <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
           Its standing: <StandingPill kind={standing.kind} at={header.standingAt} asOf={asOf} />
         </span>{" "}
@@ -168,21 +171,21 @@ export function WorkspaceBanners({ header, caps, setup = null }: { header: Works
     if (standing.kind === "past-due") {
       add(
         "past-due",
-        <Banner tone="warning" title={`A payment failed — it is held on ${dayMonth(standing.holdAt)} unless it is paid`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
-          {`That is ${inDays(standing.holdAt, asOf)}. Paying at its gateway before then keeps it open.`}
+        <Banner tone="warning" title={`A payment failed — it is held on ${clock.dayMonth(standing.holdAt)} unless it is paid`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
+          {`That is ${inDays(standing.holdAt, asOf, clock)}. Paying at its gateway before then keeps it open.`}
         </Banner>,
       );
     } else if (standing.kind === "trial-over") {
       add(
         "trial-over",
-        <Banner tone="warning" title={`Its trial is over — it is held on ${dayMonth(standing.holdAt)} unless it buys a plan`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
-          {`That is ${inDays(standing.holdAt, asOf)}. Extending the trial, or a plan given by hand, keeps it open.`}
+        <Banner tone="warning" title={`Its trial is over — it is held on ${clock.dayMonth(standing.holdAt)} unless it buys a plan`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
+          {`That is ${inDays(standing.holdAt, asOf, clock)}. Extending the trial, or a plan given by hand, keeps it open.`}
         </Banner>,
       );
     } else if (standing.kind === "lapsed") {
       add(
         "lapsed",
-        <Banner tone="warning" title={`Nothing live since ${dayMonth(standing.since)}`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
+        <Banner tone="warning" title={`Nothing live since ${clock.dayMonth(standing.since)}`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
           Billing holds it at the next platform tick unless it is put on a plan.
         </Banner>,
       );
@@ -209,11 +212,11 @@ export function WorkspaceBanners({ header, caps, setup = null }: { header: Works
   }
 
   if (active && standing.kind === "trial") {
-    const days = istDaysBetween(asOf, standing.endsAt);
+    const days = clock.daysBetween(asOf, standing.endsAt);
     if (days >= 0 && days <= 7) {
       add(
         "trial",
-        <Banner tone="info" title={`Trial ends ${dayMonth(standing.endsAt)} (${inDays(standing.endsAt, asOf)})`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
+        <Banner tone="info" title={`Trial ends ${clock.dayMonth(standing.endsAt)} (${inDays(standing.endsAt, asOf, clock)})`} action={caps.sell ? toTab("billing", "Open Billing") : undefined}>
           After that it is held unless it buys a plan{caps.sell ? " — or its trial is extended from Billing" : ""}.
         </Banner>,
       );

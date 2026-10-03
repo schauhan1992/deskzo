@@ -29,10 +29,10 @@
 import "dotenv/config";
 import Module from "node:module";
 import { execSync } from "node:child_process";
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { createElement, type ReactNode } from "react";
 import type { PrismaClient } from "@prisma/client";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { renderHtml } from "./lib/render-html";
 
 let failures = 0;
 let passes = 0;
@@ -123,21 +123,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
 
 // ── Rendering ────────────────────────────────────────────────────────────────────────────────────
 
-/** Awaits every async server component in a tree, so `renderToStaticMarkup` can take it. */
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
-const html = async (el: unknown) => renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
+const html = async (el: unknown) => renderHtml(el as ReactNode);
 type Page = (props: { params: Promise<Record<string, string>>; searchParams: Promise<Record<string, string>> }) => Promise<unknown>;
 const renderPage = async (page: Page, searchParams: Record<string, string> = {}, params: Record<string, string> = {}) =>
   html(await page({ params: Promise.resolve(params), searchParams: Promise.resolve(searchParams) }));

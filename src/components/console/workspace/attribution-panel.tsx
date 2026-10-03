@@ -7,10 +7,10 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { AttributionFlags } from "@/components/console/partners/flags";
 import { partnerPath } from "@/components/console/partners/format";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { ATTRIBUTION_SOURCE, PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { WorkspaceAttributionView } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { ChangePartnerButton } from "./attribution-dialog";
 
 /**
@@ -18,10 +18,12 @@ import { ChangePartnerButton } from "./attribution-dialog";
  * or "Direct — no partner" — how it came to (source), since when, whether it earns commission, any
  * flag from its signup (outside the partner's territories, other partners that claimed it, named),
  * and the five changes before this one with staff's reasons. Every staff member reads it; SELLERS
- * change the partner ("Change partner") and mark a flagged signup reviewed. Server-safe.
+ * change the partner ("Change partner") and mark a flagged signup reviewed. A server component: its
+ * days are on the console's clock.
  */
 
-export function AttributionPanel({ view, tenant, caps }: { view: WorkspaceAttributionView; tenant: { id: string; name: string }; caps: Caps }) {
+export async function AttributionPanel({ view, tenant, caps }: { view: WorkspaceAttributionView; tenant: { id: string; name: string }; caps: Caps }) {
+  const clock = await consoleClock();
   const current = view.current;
   const partner = current?.partner ?? null;
   const flagged = !!current?.flags && (current.flags.outsideTerritory || current.flags.conflicts.length > 0);
@@ -50,7 +52,7 @@ export function AttributionPanel({ view, tenant, caps }: { view: WorkspaceAttrib
   const items: { term: string; value: ReactNode; wide?: boolean }[] = [];
   if (current) {
     items.push({ term: "How", value: <LabelPill map={ATTRIBUTION_SOURCE} value={current.source} /> });
-    items.push({ term: "Since", value: `${dayMonthYear(current.validFrom)} · ${current.createdByName}` });
+    items.push({ term: "Since", value: `${clock.date(current.validFrom)} · ${current.createdByName}` });
     if (partner) items.push({ term: "Commission", value: current.commissionable ? "Earns commission" : <StatusPill tone="neutral">No commission</StatusPill> });
     if (flagged) {
       items.push({
@@ -58,7 +60,7 @@ export function AttributionPanel({ view, tenant, caps }: { view: WorkspaceAttrib
         value: (
           <span className="inline-flex flex-col items-start gap-1">
             <AttributionFlags flags={current.flags} reviewed={!!current.reviewedAt} />
-            {current.reviewedAt && <span className="text-xs text-subtle">{`Reviewed ${dayMonthYear(current.reviewedAt)}${current.reviewedByName ? ` by ${current.reviewedByName}` : ""}`}</span>}
+            {current.reviewedAt && <span className="text-xs text-subtle">{`Reviewed ${clock.date(current.reviewedAt)}${current.reviewedByName ? ` by ${current.reviewedByName}` : ""}`}</span>}
           </span>
         ),
         wide: true,
@@ -102,7 +104,7 @@ export function AttributionPanel({ view, tenant, caps }: { view: WorkspaceAttrib
                       <LabelPill map={ATTRIBUTION_SOURCE} value={h.source} />
                       {h.partner && !h.commissionable && <StatusPill tone="neutral">No commission</StatusPill>}
                     </span>
-                    <span className="text-xs text-muted">{`${dayMonthYear(h.validFrom)} – ${h.validTo ? dayMonthYear(h.validTo) : "now"} · ${h.createdByName}`}</span>
+                    <span className="text-xs text-muted">{`${clock.date(h.validFrom)} – ${h.validTo ? clock.date(h.validTo) : "now"} · ${h.createdByName}`}</span>
                   </div>
                   {h.reason && <p className="mt-0.5 text-xs break-words text-muted">{`“${h.reason}”`}</p>}
                 </li>

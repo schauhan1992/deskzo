@@ -8,7 +8,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 import { getRenewalStatus } from "@/lib/renewals";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
@@ -194,10 +194,10 @@ export function RenewalsTable({
                       <td className="px-4 py-2.5 text-muted">{r.poNumber ?? "—"}</td>
                     )}
                     {cols.show("startDate") && (
-                      <td className="px-4 py-2.5 text-muted">{formatDate(r.startDate)}</td>
+                      <td className="px-4 py-2.5 text-muted">{formatCalendarDay(r.startDate)}</td>
                     )}
                     {cols.show("expiryDate") && (
-                      <td className="px-4 py-2.5 text-muted">{formatDate(r.endDate)}</td>
+                      <td className="px-4 py-2.5 text-muted">{formatCalendarDay(r.endDate)}</td>
                     )}
                     {cols.show("accountManager") && (
                       <td className="px-4 py-2.5 text-muted">

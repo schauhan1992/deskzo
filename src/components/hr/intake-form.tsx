@@ -7,6 +7,16 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { AddressFields } from "@/components/ui/address-fields";
+import { MONTH_NAMES } from "@/lib/hr/calendar";
+
+/**
+ * "2 October 2026" for the day a `@db.Date` holds ("2026-10-02"), whatever zone the reader is in. Spelled
+ * here rather than asked of Intl, whose month names differ between Node and browsers.
+ */
+function longDay(day: string) {
+  const d = new Date(day);
+  return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
 
 /**
  * What a new joiner fills in before their first day.
@@ -83,7 +93,7 @@ export function IntakeForm({
         <p className="mt-1 text-sm text-muted">
           A few details {info.companyName} needs before you start
           {info.designation && ` as ${info.designation}`}
-          {info.expectedJoining && ` on ${new Date(info.expectedJoining).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}`}.
+          {info.expectedJoining && ` on ${longDay(info.expectedJoining)}`}.
           It takes about five minutes, and you will need your PAN and bank details to hand.
         </p>
       </div>

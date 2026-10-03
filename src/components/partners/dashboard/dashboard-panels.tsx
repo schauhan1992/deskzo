@@ -7,22 +7,24 @@ import { StatusPill } from "@/components/console/kit/status";
 import { MoneyStack } from "@/components/partners/common/money";
 import { SourceLabel } from "@/components/partners/common/pills";
 import { CustomerName } from "@/components/partners/customers/customer-name";
-import { dayMonth, dayMonthYear, istDaysBetween, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { PortalDashboard } from "@/lib/partners/portal-data";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
- * The dashboard's lists and its setup checklist. Every "in N days" is counted in India's calendar
- * days from the loader's `asOf`, never from the reader's clock, so the page says the same thing on
- * the server and in the browser. A customer's name links to its page (the view gives a slug only for
- * the partner's own current customers).
+ * The dashboard's lists and its setup checklist. Dates are on `clock` — the console's (Settings › Time
+ * zone), which the portal keeps — and every "in N days" is counted in its calendar days from the
+ * loader's `asOf`, never from the reader's clock, so the page says the same thing on the server and in
+ * the browser. A customer's name links to its page (the view gives a slug only for the partner's own
+ * current customers).
  *
  * Server-safe: no hooks, no directive.
  */
 
 /** "today", "tomorrow", "in 5 days" — from the loader's clock. */
-export function inDays(asOf: Date, at: Date): string {
-  const days = istDaysBetween(asOf, at);
+export function inDays(asOf: Date, at: Date, clock: Clock): string {
+  const days = clock.daysBetween(asOf, at);
   if (days <= 0) return "today";
   if (days === 1) return "tomorrow";
   return `in ${plural(days, "day")}`;
@@ -41,7 +43,7 @@ function ListRow({ name, slug, meta, side }: { name: string; slug: string; meta?
 }
 
 /** Trials ending within 14 days, soonest first. */
-export function TrialsEndingPanel({ rows, asOf }: { rows: PortalDashboard["trialsEnding"]; asOf: Date }) {
+export function TrialsEndingPanel({ rows, asOf, clock }: { rows: PortalDashboard["trialsEnding"]; asOf: Date; clock: Clock }) {
   return (
     <Panel title="Trials ending" description="In the next 14 days — a good moment to check in." padded={rows.length === 0}>
       {rows.length === 0 ? (
@@ -53,8 +55,8 @@ export function TrialsEndingPanel({ rows, asOf }: { rows: PortalDashboard["trial
               key={`${row.slug}-${row.endsAt.toISOString()}`}
               name={row.name}
               slug={row.slug}
-              meta={`Trial ends ${dayMonthYear(row.endsAt)}`}
-              side={<span className="font-medium whitespace-nowrap text-info">{`Ends ${inDays(asOf, row.endsAt)}`}</span>}
+              meta={`Trial ends ${clock.date(row.endsAt)}`}
+              side={<span className="font-medium whitespace-nowrap text-info">{`Ends ${inDays(asOf, row.endsAt, clock)}`}</span>}
             />
           ))}
         </ul>
@@ -64,7 +66,7 @@ export function TrialsEndingPanel({ rows, asOf }: { rows: PortalDashboard["trial
 }
 
 /** Renewals and cancellations taking effect within 30 days, soonest first; a cancellation is marked. */
-export function RenewalsPanel({ rows, asOf }: { rows: PortalDashboard["renewals"]; asOf: Date }) {
+export function RenewalsPanel({ rows, asOf, clock }: { rows: PortalDashboard["renewals"]; asOf: Date; clock: Clock }) {
   return (
     <Panel title="Renewals and cancellations due" description="In the next 30 days, with what each brings in a month." padded={rows.length === 0}>
       {rows.length === 0 ? (
@@ -79,7 +81,7 @@ export function RenewalsPanel({ rows, asOf }: { rows: PortalDashboard["renewals"
               meta={
                 <span className="inline-flex flex-wrap items-center gap-1.5">
                   {row.ending ? <StatusPill tone="warning">Cancels</StatusPill> : <StatusPill tone="success">Renews</StatusPill>}
-                  <span>{`${dayMonth(row.at)} · ${inDays(asOf, row.at)}`}</span>
+                  <span>{`${clock.dayMonth(row.at)} · ${inDays(asOf, row.at, clock)}`}</span>
                 </span>
               }
               side={<MoneyStack items={row.mrr} className="text-sm" />}
@@ -92,7 +94,7 @@ export function RenewalsPanel({ rows, asOf }: { rows: PortalDashboard["renewals"
 }
 
 /** The newest customers, and how each came. */
-export function LatestCustomersPanel({ rows, action }: { rows: PortalDashboard["latest"]; action?: ReactNode }) {
+export function LatestCustomersPanel({ rows, action, clock }: { rows: PortalDashboard["latest"]; action?: ReactNode; clock: Clock }) {
   return (
     <Panel title="Latest customers" description="The newest workspaces credited to you." padded={rows.length === 0}>
       {rows.length === 0 ? (
@@ -105,7 +107,7 @@ export function LatestCustomersPanel({ rows, action }: { rows: PortalDashboard["
               name={row.name}
               slug={row.slug}
               meta={<SourceLabel source={row.source} />}
-              side={<span className="whitespace-nowrap text-muted">{dayMonthYear(row.since)}</span>}
+              side={<span className="whitespace-nowrap text-muted">{clock.date(row.since)}</span>}
             />
           ))}
         </ul>

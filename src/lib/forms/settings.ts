@@ -1,5 +1,5 @@
 import type { FormCategory, FormFillMode, MarketingTopic } from "@prisma/client";
-import { parseIstDateTime } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import { CATEGORY_KEYS } from "@/lib/forms/categories";
 import { TOPICS } from "@/lib/marketing/topics";
 
@@ -7,7 +7,8 @@ import { TOPICS } from "@/lib/marketing/topics";
  * A form's settings as the builder sends them, checked.
  *
  * Pure, so the rules are the same whoever asks and `check:forms` can hold them without a database.
- * Times arrive as `datetime-local` text and are read as India time — see `parseIstDateTime`.
+ * Times arrive as `datetime-local` text and are read on the clock passed in — the workspace's — see
+ * `Clock.parseInput`.
  */
 
 /** Lower case, digits and single hyphens: it is a web address, and it will be typed and read aloud. */
@@ -36,7 +37,7 @@ export type FormSettingsInput = {
   createsLead: boolean;
   topic: string;
   assignToUserId?: string | null;
-  /** `yyyy-mm-ddThh:mm`, India time, or blank. */
+  /** `yyyy-mm-ddThh:mm`, the workspace's time, or blank. */
   closesAt?: string | null;
   eventStartsAt?: string | null;
   eventEndsAt?: string | null;
@@ -67,13 +68,13 @@ const text = (value: string | null | undefined, max: number): string | null => {
   return t ? t.slice(0, max) : null;
 };
 
-function when(value: string | null | undefined, label: string): { ok: true; at: Date | null } | { ok: false; error: string } {
+function when(clock: Clock, value: string | null | undefined, label: string): { ok: true; at: Date | null } | { ok: false; error: string } {
   if (!value?.trim()) return { ok: true, at: null };
-  const at = parseIstDateTime(value);
+  const at = clock.parseInput(value);
   return at ? { ok: true, at } : { ok: false, error: `${label} isn't a date and time.` };
 }
 
-export function checkFormSettings(input: FormSettingsInput): { ok: true; settings: FormSettings } | { ok: false; error: string } {
+export function checkFormSettings(input: FormSettingsInput, clock: Clock): { ok: true; settings: FormSettings } | { ok: false; error: string } {
   const name = text(input.name, 120);
   if (!name) return { ok: false, error: "Give the form a name." };
 
@@ -87,7 +88,7 @@ export function checkFormSettings(input: FormSettingsInput): { ok: true; setting
   if (!TOPICS.some((t) => t.key === input.topic)) return { ok: false, error: "Pick a topic." };
   const category = input.category as FormCategory;
 
-  const closes = when(input.closesAt, "The closing time");
+  const closes = when(clock, input.closesAt, "The closing time");
   if (!closes.ok) return closes;
 
   let eventStartsAt: Date | null = null;
@@ -98,10 +99,10 @@ export function checkFormSettings(input: FormSettingsInput): { ok: true; setting
   // The event half only means anything on an event. Anywhere else it is cleared rather than kept
   // hidden, so switching a form from event to survey does not leave a seat limit quietly in force.
   if (category === "EVENT") {
-    const starts = when(input.eventStartsAt, "The start");
+    const starts = when(clock, input.eventStartsAt, "The start");
     if (!starts.ok) return starts;
     if (!starts.at) return { ok: false, error: "An event needs a date and time." };
-    const ends = when(input.eventEndsAt, "The finish");
+    const ends = when(clock, input.eventEndsAt, "The finish");
     if (!ends.ok) return ends;
     if (ends.at && ends.at.getTime() <= starts.at.getTime()) return { ok: false, error: "The event has to finish after it starts." };
     if (closes.at && closes.at.getTime() > starts.at.getTime()) {

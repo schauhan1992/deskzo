@@ -9,7 +9,8 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof renewalDraft>>>;
@@ -125,7 +126,7 @@ export function RenewButton({ companyProductId }: { companyProductId: string }) 
               </p>
               <p className="mt-0.5 text-xs text-subtle">
                 Renewing {formatOrderId(data.product.orderSeq)}, which expires{" "}
-                {data.product.endDate ? formatDate(data.product.endDate) : "—"}
+                {formatCalendarDay(data.product.endDate)}
               </p>
             </Card>
 

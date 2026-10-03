@@ -4,7 +4,7 @@ import { FOLLOW_UP_CHANNELS, REMARKS_MAX } from "@/lib/collections/rules";
 const optionalDay = z.string().trim().optional().or(z.literal(""));
 
 /**
- * A follow-up as the dialog sends it. The dates are checked against today in India by the action
+ * A follow-up as the dialog sends it. The dates are checked against the workspace's today by the action
  * (`checkFutureDay`), which knows the clock; the amount against what is outstanding, which it looks up.
  */
 export const logFollowUpSchema = z

@@ -8,6 +8,7 @@ import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { AttendanceGrid } from "@/components/hr/attendance-grid";
 import { monthLabel } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function AttendancePage({
   searchParams,
@@ -25,9 +26,10 @@ export default async function AttendancePage({
   if (!enabled) return <ModuleDisabledNotice moduleKey="hr" />;
 
   const params = await searchParams;
-  const now = new Date();
-  const month = Math.min(12, Math.max(1, Number(params.month) || now.getUTCMonth() + 1));
-  const year = Math.min(2100, Math.max(2000, Number(params.year) || now.getUTCFullYear()));
+  // This month in the workspace's zone — UTC's was last month until 05:30 IST on the 1st.
+  const now = (await workspaceClock()).parts(new Date());
+  const month = Math.min(12, Math.max(1, Number(params.month) || now.month + 1));
+  const year = Math.min(2100, Math.max(2000, Number(params.year) || now.year));
 
   const [data, today, caps, departments, people] = await Promise.all([
     attendanceMonth({

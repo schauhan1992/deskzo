@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { TOPICS } from "@/lib/marketing/topics";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Unsubscribing from everything, by the token in an email — shared by the preference centre's
@@ -40,6 +41,8 @@ export async function unsubscribeByToken(token: string, how: "PREFERENCE_CENTRE"
   const note = how === "ONE_CLICK" ? "Unsubscribed with their mail app's one-click unsubscribe" : "Unsubscribed from everything";
   const contact = await contactForToken(token);
   if (!contact) return unsubscribeAddressOnly(token, note);
+  // The day on the workspace's calendar, not UTC's.
+  const today = (await workspaceClock()).today(now);
 
   for (const topic of TOPICS) {
     await db.contactConsent.upsert({
@@ -50,7 +53,7 @@ export async function unsubscribeByToken(token: string, how: "PREFERENCE_CENTRE"
         topic: topic.key,
         status: "UNSUBSCRIBED",
         source: "PREFERENCE_CENTRE",
-        evidence: `${note} on ${now.toISOString().slice(0, 10)}.`,
+        evidence: `${note} on ${today}.`,
         withdrawnAt: now,
       },
       update: { status: "UNSUBSCRIBED", withdrawnAt: now, source: "PREFERENCE_CENTRE" },

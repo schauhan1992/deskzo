@@ -7,7 +7,10 @@ import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { Tone } from "@/lib/console-shared/types";
+import { consoleClock } from "@/lib/platform/console-clock";
+import { domainStatusText } from "@/lib/platform/domain-rules";
 import type { DomainView, WorkspaceDomains } from "@/lib/platform/domains";
+import type { Clock } from "@/lib/time/zone";
 import { AddDomainButton, RemoveDomainButton } from "./domain-actions";
 
 /**
@@ -21,9 +24,10 @@ import { AddDomainButton, RemoveDomainButton } from "./domain-actions";
 
 const TONE: Record<DomainView["tone"], Tone> = { waiting: "info", live: "success", failing: "warning", stopped: "danger" };
 
-const dateTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+/** "3 Oct, 6:30 pm" on the console's clock. */
+const dayTime = (clock: Clock, at: Date) => `${clock.dayMonth(at)}, ${clock.time(at)}`;
 
-export function DomainsPanel({
+export async function DomainsPanel({
   domains,
   tenant,
   caps,
@@ -34,6 +38,7 @@ export function DomainsPanel({
   caps: Caps;
   className?: string;
 }) {
+  const clock = await consoleClock();
   const closed = tenant.status === "DEPROVISIONED";
   const manage = caps.manage && !closed;
   const check = caps.enter && !closed;
@@ -80,21 +85,23 @@ export function DomainsPanel({
           {domains.domains.length === 0 && <p className="text-xs text-muted">Reached at its own subdomain only.</p>}
         </li>
         {domains.domains.map((d) => (
-          <DomainItem key={d.id} d={d} tenantId={tenant.id} ownHost={domains.ownHost} manage={manage} check={check} />
+          <DomainItem key={d.id} d={d} tenantId={tenant.id} ownHost={domains.ownHost} manage={manage} check={check} clock={clock} />
         ))}
       </ul>
     </Panel>
   );
 }
 
-function DomainItem({ d, tenantId, ownHost, manage, check }: { d: DomainView; tenantId: string; ownHost: string; manage: boolean; check: boolean }) {
+function DomainItem({ d, tenantId, ownHost, manage, check, clock }: { d: DomainView; tenantId: string; ownHost: string; manage: boolean; check: boolean; clock: Clock }) {
   const txt = d.records.find((r) => r.type === "TXT") ?? null;
+  // Its state in the console's days; the view's own words are for the workspace's page.
+  const statusText = d.kind === "CUSTOM" ? domainStatusText(d, clock).label : d.statusText;
   return (
     <li className="space-y-2 px-5 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="min-w-0 font-mono text-xs break-all text-text">{d.host}</span>
-          <StatusPill tone={TONE[d.tone]}>{d.statusText}</StatusPill>
+          <StatusPill tone={TONE[d.tone]}>{statusText}</StatusPill>
           {d.isPrimary && <StatusPill tone={d.status === "ACTIVE" ? "brand" : "neutral"}>{d.status === "ACTIVE" ? "Primary" : "Primary when live"}</StatusPill>}
           <StatusPill tone="neutral">{d.kind === "CUSTOM" ? "Custom" : "Legacy"}</StatusPill>
         </span>
@@ -129,8 +136,8 @@ function DomainItem({ d, tenantId, ownHost, manage, check }: { d: DomainView; te
           <div className="flex min-w-0 gap-1.5">
             <dt className="shrink-0 text-muted">Failing since</dt>
             <dd className="min-w-0 text-warning">
-              {dateTime.format(d.failingSince)}
-              {d.stopsAt ? ` — stops ${dateTime.format(d.stopsAt)}` : ""}
+              {dayTime(clock, d.failingSince)}
+              {d.stopsAt ? ` — stops ${dayTime(clock, d.stopsAt)}` : ""}
             </dd>
           </div>
         )}

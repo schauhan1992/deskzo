@@ -40,6 +40,7 @@ import { pageDraftInput, type PageDraftSource } from "@/components/cms/seo/edito
 import { focusBlockCard, focusFieldPath } from "@/components/cms/seo/focus-field";
 import { SeoScorePanel, SeoTabBadge } from "@/components/cms/seo/score-panel";
 import { useLiveSeo } from "@/components/cms/seo/use-live-score";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -47,7 +48,6 @@ import { Input, Label } from "@/components/ui/input";
 import { CMS_ROUTES } from "@/lib/cms/nav";
 import type { AutoRedirect, CmsCaps, CmsIssue, MediaRow, PageDetail, PageDocument, PageSaved, PageVersionRow } from "@/lib/cms/types";
 import { checkPageDocument, pageSlugProblem, stableJson } from "@/lib/cms/validate";
-import { formatIstDateTime } from "@/lib/india-time";
 import { parseSeoField } from "@/lib/seo/extract";
 
 /**
@@ -91,6 +91,7 @@ const toFieldIssues = (issues: { path: string; message: string }[]): FieldIssue[
 
 export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePaths, media: initialMedia }: PageEditorProps) {
   const router = useRouter();
+  const clock = useClock();
   const notice = useEditorNotice();
   const [meta, setMeta] = useState<Meta>(() => ({
     status: page.status,
@@ -369,7 +370,7 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
         setMeta((m) => ({ ...m, status: fresh.data.status, saved: true }));
         setViewing(null);
         setHistoryOpen(false);
-        notice.show("success", `The version from ${formatIstDateTime(row.createdAt)} is now the draft. Publish it to put it on the site; Undo brings back what was there.`);
+        notice.show("success", `The version from ${clock.dateTime(row.createdAt)} is now the draft. Publish it to put it on the site; Undo brings back what was there.`);
       } catch {
         setConfirm(null);
         notice.show("error", "Restoring didn't finish. Try again.");
@@ -620,7 +621,7 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
       {viewing && (
         <EditorBanner
           tone="info"
-          title={`The preview shows the version from ${formatIstDateTime(viewing.row.createdAt)}`}
+          title={`The preview shows the version from ${clock.dateTime(viewing.row.createdAt)}`}
           action={
             <>
               {caps.write && !meta.archived && (
@@ -717,8 +718,8 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
               <PageSeoFields seo={doc.seo} onChange={(seo) => editor.update((d) => ({ ...d, seo }), "seo")} titleTemplate={ctx.settings.seo.titleTemplate} url={liveUrl} fill={fill} />
             </section>
             <section className="space-y-1 border-t border-line pt-6 text-xs text-muted">
-              <p>{page.createdAt ? `Created ${formatIstDateTime(page.createdAt)}${page.createdBy ? ` by ${page.createdBy}` : ""}.` : "Built into the site."}</p>
-              {meta.publishedAt && <p>{`Last published ${formatIstDateTime(meta.publishedAt)}${meta.publishedBy ? ` by ${meta.publishedBy}` : ""}.`}</p>}
+              <p>{page.createdAt ? `Created ${clock.dateTime(page.createdAt)}${page.createdBy ? ` by ${page.createdBy}` : ""}.` : "Built into the site."}</p>
+              {meta.publishedAt && <p>{`Last published ${clock.dateTime(meta.publishedAt)}${meta.publishedBy ? ` by ${meta.publishedBy}` : ""}.`}</p>}
             </section>
           </IssueRoot>
         </fieldset>
@@ -791,7 +792,7 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
         {confirm === "reset" && <p>The site&apos;s built-in content for this page replaces what is in the editor. Nothing is saved until you save or publish, and Undo brings back what was there.</p>}
         {confirm && typeof confirm === "object" && (
           <p>
-            The version from {formatIstDateTime(confirm.restore.createdAt)} becomes the draft. The site doesn&apos;t change until it is published.{editor.dirty ? " Your unsaved changes stay one Undo away." : ""}
+            The version from {clock.dateTime(confirm.restore.createdAt)} becomes the draft. The site doesn&apos;t change until it is published.{editor.dirty ? " Your unsaved changes stay one Undo away." : ""}
           </p>
         )}
       </ConfirmDialog>

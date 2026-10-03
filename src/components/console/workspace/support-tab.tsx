@@ -4,9 +4,9 @@ import { InsetBlock, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { when } from "@/lib/console-shared/format";
 import { grantLabel } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import type { SupportPanel, WorkspaceHeader } from "@/lib/platform/workspace-data";
 import { EnterAsSupport } from "./enter-as-support";
 import { RequestAccess } from "./request-access";
@@ -23,9 +23,10 @@ const levelText = (level: string | null) => (level === "ADMIN" ? "Administrator"
 /**
  * The live grant (or its absence) with the way in — on the Overview and, the same card, on the
  * Support tab. The grant's reason is printed as visible text: it is what the workspace's admin
- * wrote when letting support in, and the first thing staff should read.
+ * wrote when letting support in, and the first thing staff should read. Its end is on the console's clock.
  */
-export function SupportAccessCard({ header, support, caps }: { header: WorkspaceHeader; support: SupportPanel; caps: Caps }) {
+export async function SupportAccessCard({ header, support, caps }: { header: WorkspaceHeader; support: SupportPanel; caps: Caps }) {
+  const clock = await consoleClock();
   const grant = support.grant;
   const open = header.tenant.status === "ACTIVE";
   const live = grant ? grantLabel("live", grant.level) : null;
@@ -39,7 +40,7 @@ export function SupportAccessCard({ header, support, caps }: { header: Workspace
       {grant ? (
         <div className="space-y-4">
           <InsetBlock className="space-y-1.5">
-            <p className="text-sm text-text">{`${levelText(grant.level)} access granted by ${grant.grantedByName} until ${when(grant.expiresAt)}`}</p>
+            <p className="text-sm text-text">{`${levelText(grant.level)} access granted by ${grant.grantedByName} until ${clock.dateTime(grant.expiresAt)}`}</p>
             <p className="text-sm break-words text-muted">
               Reason: <span className="text-text">{grant.reason}</span>
             </p>

@@ -28,6 +28,7 @@ import { postDraftInput, type PostDraftSource } from "@/components/cms/seo/edito
 import { focusBlockCard, focusFieldPath } from "@/components/cms/seo/focus-field";
 import { SeoScorePanel, SeoTabBadge } from "@/components/cms/seo/score-panel";
 import { useLiveSeo } from "@/components/cms/seo/use-live-score";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -50,14 +51,15 @@ import {
   type SitePostStatus,
 } from "@/lib/cms/types";
 import { mediaIdOf, slugify, stableJson } from "@/lib/cms/validate";
-import { formatIstDate, formatIstDateTime, istDateTimeInput } from "@/lib/india-time";
 import { parseSeoField } from "@/lib/seo/extract";
+import { indiaClock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
  * The post editor: the same block editor and live preview as pages, for a post's body, with what a
  * post has besides — title, excerpt, cover image, categories and tags (./post-terms.tsx), its
- * address under /blog, the author, and publishing now or at a set time (India time) — with its SEO,
+ * address under /blog, the author, and publishing now or at a set time (on the console's clock,
+ * Settings › Time zone, its zone named; the server reads the time typed on the same) — with its SEO,
  * AEO and GEO scores worked out live from the draft (src/components/cms/seo). A live post's
  * new address leaves a 301 from the old one, and the editor says so; deleting a post that was ever
  * on the site offers editors and admins a redirect for its old address.
@@ -101,6 +103,7 @@ const namesOf = (refs: CmsTermRef[]): TagNames => Object.fromEntries(refs.map((t
 
 export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, media: initialMedia, categories }: PostEditorProps) {
   const router = useRouter();
+  const clock = useClock();
   const notice = useEditorNotice();
   const pageNotice = useConsoleNotice();
   const [meta, setMeta] = useState<Meta>(() => ({ status: post.status, live: post.live, archived: post.archived, publishAt: post.publishAt, slug: post.slug, wasPublished: post.wasPublished }));
@@ -257,8 +260,8 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
       return;
     }
     const scheduled = meta.status === "SCHEDULED" && !meta.live && meta.publishAt;
-    // Now, in India time, worked out in the click — never while rendering.
-    setScheduling({ mode: scheduled ? "later" : "now", when: istDateTimeInput(scheduled ? meta.publishAt : new Date()) });
+    // Now, on the console's clock, worked out in the click — never while rendering.
+    setScheduling({ mode: scheduled ? "later" : "now", when: clock.input(scheduled ? meta.publishAt : new Date()) });
   };
 
   const publish = () =>
@@ -295,7 +298,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         notice.show(
           "success",
           result.data.status === "SCHEDULED" && result.data.publishAt && !result.data.live
-            ? `Scheduled — it goes live ${formatIstDateTime(result.data.publishAt)} (India time).`
+            ? `Scheduled — it goes live ${clock.dateTime(result.data.publishAt)} (${clock.zone.replace(/_/g, " ")} time).`
             : `Published — /blog/${result.data.slug} is live.`,
         );
       } catch {
@@ -403,7 +406,8 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
   const title = doc.title.trim() || "Untitled post";
   const liveUrl = `${siteOrigin}/blog/${meta.slug}`;
   const coverRow = doc.coverMediaId ? media[doc.coverMediaId] : undefined;
-  const dateLabel = meta.publishAt ? formatIstDate(meta.publishAt) : "Not published yet";
+  // The preview's date as the site will show it: the public site dates posts on India's calendar (src/app/platform-site/blog/post-article.tsx).
+  const dateLabel = meta.publishAt ? indiaClock.date(meta.publishAt) : "Not published yet";
 
   const menu: RowMenuItem[] = [
     ...(meta.live ? [{ key: "view", label: "View on the site", href: liveUrl, external: true }] : []),
@@ -434,7 +438,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2">
           <h1 className="truncate text-lg font-semibold tracking-tight text-text">{title}</h1>
           <PostStatusPill status={meta.status} live={meta.live} archived={meta.archived} />
-          {meta.status === "SCHEDULED" && !meta.live && meta.publishAt && <span className="text-xs text-muted">{formatIstDateTime(meta.publishAt)}</span>}
+          {meta.status === "SCHEDULED" && !meta.live && meta.publishAt && <span className="text-xs text-muted">{clock.dateTime(meta.publishAt)}</span>}
         </div>
       </div>
       <SaveState
@@ -495,7 +499,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
         </EditorBanner>
       )}
       {onSite && !meta.archived && !readOnly && (
-        <EditorBanner tone="warning" title={meta.live ? "This post is live" : `This post is scheduled for ${meta.publishAt ? formatIstDateTime(meta.publishAt) : "later"}`}>
+        <EditorBanner tone="warning" title={meta.live ? "This post is live" : `This post is scheduled for ${meta.publishAt ? clock.dateTime(meta.publishAt) : "later"}`}>
           {meta.live ? "Saving updates the site at once, so it doesn't save itself — press “Update post” when the change is ready." : "Saving changes what goes live then. It doesn't save itself — press “Update post”."}
         </EditorBanner>
       )}
@@ -629,7 +633,7 @@ export function PostEditor({ post, caps, me, ctx, year, siteOrigin, sitePaths, m
                 {post.author.id === me.id ? " (you)" : ""}.
               </p>
               <p data-field-path="publishAt" className="text-xs text-subtle">
-                Created {formatIstDateTime(post.createdAt)}.{meta.publishAt ? ` ${meta.live ? "Live since" : "Goes live"} ${formatIstDateTime(meta.publishAt)}.` : ""}
+                Created {clock.dateTime(post.createdAt)}.{meta.publishAt ? ` ${meta.live ? "Live since" : "Goes live"} ${clock.dateTime(meta.publishAt)}.` : ""}
               </p>
             </section>
           </IssueRoot>
@@ -737,6 +741,7 @@ function PublishDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const clock = useClock();
   const whenId = useId();
   return (
     <Dialog open={!!state} onClose={() => !busy && onCancel()} title="Publish this post">
@@ -761,7 +766,7 @@ function PublishDialog({
           </fieldset>
           {state.mode === "later" && (
             <div className="space-y-1.5 pl-6">
-              <Label htmlFor={whenId}>Date and time (India time)</Label>
+              <Label htmlFor={whenId}>{`Date and time (${clock.zone.replace(/_/g, " ")} time)`}</Label>
               <Input id={whenId} type="datetime-local" value={state.when} onChange={(e) => onChange({ ...state, when: e.target.value })} className="w-auto" />
             </div>
           )}

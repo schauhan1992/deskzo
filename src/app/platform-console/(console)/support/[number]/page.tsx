@@ -9,9 +9,10 @@ import { SupportComposer } from "@/components/console/support/composer";
 import { RequestControls } from "@/components/console/support/request-controls";
 import { ContextPanel, RecordingDiagnostics, RequesterPanel, WorkspacePanel } from "@/components/console/support/side-panels";
 import { SupportTimeline } from "@/components/console/support/timeline";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { supportRequestDetail } from "@/lib/support/console";
 import { supportRef } from "@/lib/support/types";
@@ -42,7 +43,7 @@ export default async function ConsoleSupportRequestPage({ params }: PageProps<"/
   const caps = capsFor(staff.role);
   const number = numberFrom((await params).number);
   if (number === null) notFound();
-  const detail = await supportRequestDetail(number);
+  const [detail, clock] = await Promise.all([supportRequestDetail(number), consoleClock()]);
   if (!detail) notFound();
 
   const recording = detail.attachments.some((a) => a.kind === "RECORDING");
@@ -81,9 +82,9 @@ export default async function ConsoleSupportRequestPage({ params }: PageProps<"/
   );
 
   const stamps = [
-    detail.firstResponseAt ? `First reply ${when(detail.firstResponseAt)}` : "No reply emailed yet",
-    detail.resolvedAt ? `Resolved ${when(detail.resolvedAt)}` : null,
-    detail.closedAt ? `Closed ${when(detail.closedAt)}` : null,
+    detail.firstResponseAt ? `First reply ${clock.dateTime(detail.firstResponseAt)}` : "No reply emailed yet",
+    detail.resolvedAt ? `Resolved ${clock.dateTime(detail.resolvedAt)}` : null,
+    detail.closedAt ? `Closed ${clock.dateTime(detail.closedAt)}` : null,
   ].filter((s): s is string => s !== null);
 
   return (

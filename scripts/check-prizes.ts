@@ -32,7 +32,7 @@ import {
   type PrizeLike,
 } from "../src/lib/wins/prizes";
 import { topPerformerCopy } from "../src/lib/wins/copy";
-import { istMidnight } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 import { PEOPLE_ONLY } from "../src/lib/people";
 
 let actor = { id: "", name: "Zzprize" };
@@ -130,7 +130,8 @@ async function cleanup() {
 }
 
 async function main() {
-  const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(istMidnight(y, m, d).getTime() + h * HOUR + min * 60_000);
+  // Times on the workspace's clock, which is India's here.
+  const at =(y: number, m: number, d: number, h = 0, min = 0) => new Date(indiaClock.midnight(y, m, d).getTime() + h * HOUR + min * 60_000);
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("Which prize");
@@ -154,17 +155,19 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("Periods");
 
-  ok("top sellers are planned by month", periodByKey("TOP_SELLERS", "2026-10")?.label === "October 2026" && periodByKey("TOP_SELLERS", "2026-10-A") === null && periodByKey("TOP_SELLERS", "2026-13") === null);
-  ok("  the most active by fortnight", periodByKey("MOST_ACTIVE", "2026-10-B")?.label === "16–31 October 2026" && periodByKey("MOST_ACTIVE", "2026-10") === null);
-  ok("  each in India time", periodByKey("TOP_SELLERS", "2026-10")?.from.toISOString() === "2026-09-30T18:30:00.000Z");
-  const months = upcomingPeriods("TOP_SELLERS", at(2026, 10, 20)).map((x) => x.key);
+  // The periods are the workspace's; these are India's (the suite's fixtures are IST).
+  const clock = indiaClock;
+  ok("top sellers are planned by month", periodByKey("TOP_SELLERS", "2026-10", clock)?.label === "October 2026" && periodByKey("TOP_SELLERS", "2026-10-A", clock) === null && periodByKey("TOP_SELLERS", "2026-13", clock) === null);
+  ok("  the most active by fortnight", periodByKey("MOST_ACTIVE", "2026-10-B", clock)?.label === "16–31 October 2026" && periodByKey("MOST_ACTIVE", "2026-10", clock) === null);
+  ok("  each in India time", periodByKey("TOP_SELLERS", "2026-10", clock)?.from.toISOString() === "2026-09-30T18:30:00.000Z");
+  const months = upcomingPeriods("TOP_SELLERS", at(2026, 10, 20), clock).map((x) => x.key);
   ok("the months ahead run over the year's turn", months.join() === "2026-11,2026-12,2027-01,2027-02,2027-03,2027-04", months.join());
-  const halves = upcomingPeriods("MOST_ACTIVE", at(2026, 9, 20), 4).map((x) => x.key);
+  const halves = upcomingPeriods("MOST_ACTIVE", at(2026, 9, 20), clock, 4).map((x) => x.key);
   ok("  the fortnights ahead, half by half", halves.join() === "2026-10-B,2026-11-A,2026-11-B,2026-12-A", halves.join());
-  ok("the current period of each race", currentPeriod("TOP_SELLERS", at(2026, 8, 30, 23)).key === "2026-09" && currentPeriod("MOST_ACTIVE", at(2026, 8, 16)).key === "2026-09-B");
-  ok("announced from 9 am on the period's first day", prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 1, 9))?.key === "2026-10" && prizeAnnouncementDue("MOST_ACTIVE", at(2026, 9, 16, 9, 30))?.key === "2026-10-B");
-  ok("  not at 8:59, and not after the fourth day", prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 1, 8, 59)) === null && prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 5, 0)) === null && prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 4, 23, 59))?.key === "2026-10");
-  ok("  nor in the middle of a month for the monthly race", prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 16, 10)) === null);
+  ok("the current period of each race", currentPeriod("TOP_SELLERS", at(2026, 8, 30, 23), clock).key === "2026-09" && currentPeriod("MOST_ACTIVE", at(2026, 8, 16), clock).key === "2026-09-B");
+  ok("announced from 9 am on the period's first day", prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 1, 9), clock)?.key === "2026-10" && prizeAnnouncementDue("MOST_ACTIVE", at(2026, 9, 16, 9, 30), clock)?.key === "2026-10-B");
+  ok("  not at 8:59, and not after the fourth day", prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 1, 8, 59), clock) === null && prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 5, 0), clock) === null && prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 4, 23, 59), clock)?.key === "2026-10");
+  ok("  nor in the middle of a month for the monthly race", prizeAnnouncementDue("TOP_SELLERS", at(2026, 9, 16, 10), clock) === null);
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("The words");
@@ -253,7 +256,7 @@ async function main() {
     await remember("TOP_SELLERS", "", "3");
     ok("a standing prize is set the same way", (await prizes.savePrize({ race: "TOP_SELLERS", period: "", slot: "3", name: `${TAG} Standing bronze` })).ok);
     const admin = await prizes.getPrizesAdmin();
-    ok("  and the settings tab lists the standing and the planned, with the periods ahead", !!admin && admin.prizes.some((x) => x.period === "" && x.name === `${TAG} Standing bronze`) && admin.periods.MOST_ACTIVE.length === 6 && admin.periods.TOP_SELLERS[0]!.key === currentPeriod("TOP_SELLERS", new Date()).key);
+    ok("  and the settings tab lists the standing and the planned, with the periods ahead", !!admin && admin.prizes.some((x) => x.period === "" && x.name === `${TAG} Standing bronze`) && admin.periods.MOST_ACTIVE.length === 6 && admin.periods.TOP_SELLERS[0]!.key === currentPeriod("TOP_SELLERS", new Date(), indiaClock).key);
     as(staff);
     ok("  which somebody else can't read", (await prizes.getPrizesAdmin()) === null);
 
@@ -303,7 +306,7 @@ async function main() {
 
     // The button is about the real current month, so this run plans every slot of it — and puts back
     // whatever was planned there.
-    const month = currentPeriod("TOP_SELLERS", new Date());
+    const month = currentPeriod("TOP_SELLERS", new Date(), indiaClock);
     for (const slot of ["1", "2", "3"]) await remember("TOP_SELLERS", month.key, slot);
     as(boss);
     for (const [slot, name] of [["1", "Now gold"], ["2", "Now silver"], ["3", "Now bronze"]]) {

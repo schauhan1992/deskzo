@@ -27,7 +27,7 @@ import { financialYearBounds } from "../src/lib/ledger/period";
 import { settleInvoice } from "../src/lib/receivables";
 import { SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { PERIODS, resolvePeriod, type PeriodKey } from "../src/lib/finance/periods";
-import { istDateParts, istMidnight } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 
 let failures = 0;
 function ok(label: string, pass: boolean, detail: unknown = "") {
@@ -45,14 +45,15 @@ const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigi
 const PREFIX = "ZZFinanceCheck";
 
 /**
- * Dates are India's, whatever clock this runs under: instants are written with the offset spelled
- * out and read back as Indian calendar parts. Written in host-local time (`new Date(2026, 3, 1)`,
- * `getMonth()`) these checks agreed with the host-clock bug they were meant to catch.
+ * Dates are India's, whatever clock this runs under — the books keep India's calendar in every
+ * workspace: instants are written with the offset spelled out and read back as Indian calendar parts.
+ * Written in host-local time (`new Date(2026, 3, 1)`, `getMonth()`) these checks agreed with the
+ * host-clock bug they were meant to catch.
  *
  *   TZ=UTC npm run check:finance
  */
 const ist = (s: string) => new Date(`${s}+05:30`);
-const day = (d: Date) => istDateParts(d);
+const day = (d: Date) => indiaClock.parts(d);
 const iso = (d: Date) => d.toISOString();
 
 async function cleanup() {
@@ -93,8 +94,8 @@ async function seed(createdById: string) {
 
   // The 15th of this Indian month at noon — or a minute ago, early in a month, so the fixture is
   // never in the future of the cash-flow window that ends now.
-  const today = istDateParts(new Date());
-  const when = new Date(Math.min(istMidnight(today.year, today.month, 15).getTime() + 12 * 3600_000, Date.now() - 60_000));
+  const today = indiaClock.parts(new Date());
+  const when = new Date(Math.min(indiaClock.midnight(today.year, today.month, 15).getTime() + 12 * 3600_000, Date.now() - 60_000));
 
   const entry = async (
     suffix: string,
@@ -188,12 +189,12 @@ async function run(
   const bounds = financialYearBounds(now);
   ok(
     "It starts on 1 April, at midnight in India",
-    day(fy.from).month === 3 && day(fy.from).day === 1 && fy.from.getTime() === istMidnight(day(fy.from).year, 3, 1).getTime(),
+    day(fy.from).month === 3 && day(fy.from).day === 1 && fy.from.getTime() === indiaClock.midnight(day(fy.from).year, 3, 1).getTime(),
     iso(fy.from),
   );
   ok(
     "  and ends on 31 March, at its last millisecond in India",
-    day(fy.to).month === 2 && day(fy.to).day === 31 && fy.to.getTime() === istMidnight(day(fy.to).year, 3, 1).getTime() - 1,
+    day(fy.to).month === 2 && day(fy.to).day === 31 && fy.to.getTime() === indiaClock.midnight(day(fy.to).year, 3, 1).getTime() - 1,
     iso(fy.to),
   );
   ok(

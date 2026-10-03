@@ -7,6 +7,7 @@ import { notifyUser } from "@/lib/notify";
 import { checkUpload } from "@/lib/hr/document-upload";
 import { toPlain } from "@/lib/serialize";
 import { isWithinWindow, lookupThrottle, looksLikeCode, normaliseCode } from "@/lib/visitors/invite-code";
+import { workspaceClock } from "@/lib/time/workspace";
 import {
   MAX_COMPANY_RESULTS,
   MIN_COMPANY_QUERY,
@@ -330,7 +331,7 @@ export async function lookupInvite(
 
   // A code that does not exist, one for next week, and one already used all give the same answer.
   // Distinguishing them would turn this into an oracle for which codes are real.
-  if (!invite || !isWithinWindow(invite.expectedAt, now)) {
+  if (!invite || !isWithinWindow(invite.expectedAt, now, await workspaceClock())) {
     await db.visitorKiosk.update({
       where: { id: kiosk.id },
       data: { failedLookups: throttle.nextCount, failedSince: throttle.windowStart },
@@ -396,7 +397,7 @@ export async function checkInWithInvite(input: {
         },
       })
     : null;
-  if (!invite || !isWithinWindow(invite.expectedAt, now)) {
+  if (!invite || !isWithinWindow(invite.expectedAt, now, await workspaceClock())) {
     await db.visitorKiosk.update({
       where: { id: kiosk.id },
       data: { failedLookups: throttle.nextCount, failedSince: throttle.windowStart },

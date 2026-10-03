@@ -13,11 +13,13 @@ import { LabelPill, StandingPill, StatusPill } from "@/components/console/kit/st
 import { DataTable, RowActionsCell, TBody, TFoot, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonth, dayMonthYear, gatewayDashboardUrl, istDaysBetween, plural } from "@/lib/console-shared/format";
+import { gatewayDashboardUrl, plural } from "@/lib/console-shared/format";
 import { ENDS_AT_PERIOD_END, EVENT_STATE, INVOICE_STATUS, SUBSCRIPTION_STATUS, gatewayLabel, intervalLabel } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { GatewayKey, GatewayMode } from "@/lib/console-shared/types";
+import { consoleClock } from "@/lib/platform/console-clock";
 import type { BillingPanel, SubView, WorkspaceHeader } from "@/lib/platform/workspace-data";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 import { BillingProfileButton, EndManualPlanButton, ResyncButton, TrialCard } from "./billing-actions";
 
@@ -28,31 +30,31 @@ import { BillingProfileButton, EndManualPlanButton, ResyncButton, TrialCard } fr
  *
  * Read by every role. Sellers change the trial, the profile and resync a subscription; managers
  * apply the billing rules now and end a plan given by hand that makes a paying workspace exempt.
- * A closed workspace shows it all read-only.
+ * A closed workspace shows it all read-only. A server component: its days are on the console's clock.
  */
 
 const LIVE = new Set(["TRIALING", "ACTIVE", "PAST_DUE"]);
 
-/** "in 5 days", "today", "3 days ago" — counted from the loader's clock, never the reader's. */
-function distance(at: Date, asOf: Date): string {
-  const days = istDaysBetween(asOf, at);
+/** "in 5 days", "today", "3 days ago" — the console's days, counted from the loader's time, never the reader's. */
+function distance(at: Date, asOf: Date, clock: Clock): string {
+  const days = clock.daysBetween(asOf, at);
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
   if (days === -1) return "yesterday";
   return days > 0 ? `in ${plural(days, "day")}` : `${plural(-days, "day")} ago`;
 }
 
-function DateValue({ at, asOf, tone }: { at: Date; asOf: Date; tone?: "danger" | "warning" }) {
+function DateValue({ at, asOf, tone, clock }: { at: Date; asOf: Date; tone?: "danger" | "warning"; clock: Clock }) {
   return (
     <span>
-      <span className={cn(tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-text")}>{dayMonthYear(at)}</span>
-      <span className="ml-1.5 text-xs text-muted">{distance(at, asOf)}</span>
+      <span className={cn(tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-text")}>{clock.date(at)}</span>
+      <span className="ml-1.5 text-xs text-muted">{distance(at, asOf, clock)}</span>
     </span>
   );
 }
 
 /** One plain sentence for the standing — what it means, not only its name. */
-function standingSentence(header: WorkspaceHeader): string {
+function standingSentence(header: WorkspaceHeader, clock: Clock): string {
   const s = header.standing;
   switch (s.kind) {
     case "exempt":
@@ -60,15 +62,15 @@ function standingSentence(header: WorkspaceHeader): string {
     case "paid":
       return "Paid up at its gateway.";
     case "trial":
-      return `On a free trial until ${dayMonthYear(s.endsAt)}.`;
+      return `On a free trial until ${clock.date(s.endsAt)}.`;
     case "trial-over":
-      return `Its trial is over. It is held on ${dayMonthYear(s.holdAt)} unless it buys a plan.`;
+      return `Its trial is over. It is held on ${clock.date(s.holdAt)} unless it buys a plan.`;
     case "past-due":
-      return `A payment failed. It is held on ${dayMonthYear(s.holdAt)} unless it is paid.`;
+      return `A payment failed. It is held on ${clock.date(s.holdAt)} unless it is paid.`;
     case "ending":
-      return `Cancelled — it runs until ${dayMonthYear(s.holdAt)}, then it is held.`;
+      return `Cancelled — it runs until ${clock.date(s.holdAt)}, then it is held.`;
     case "lapsed":
-      return `Nothing live since ${dayMonthYear(s.since)} — it should be held.`;
+      return `Nothing live since ${clock.date(s.since)} — it should be held.`;
     default:
       return "No subscription at all. Put it on a plan under Plan & modules.";
   }
@@ -77,7 +79,8 @@ function standingSentence(header: WorkspaceHeader): string {
 const modeOf = (gateway: "STRIPE" | "RAZORPAY", billing: BillingPanel): GatewayMode => (gateway === "STRIPE" ? billing.modes.stripe : billing.modes.razorpay);
 const atGateway = (g: GatewayKey): g is "STRIPE" | "RAZORPAY" => g === "STRIPE" || g === "RAZORPAY";
 
-export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader; billing: BillingPanel; caps: Caps }) {
+export async function BillingTab({ header, billing, caps }: { header: WorkspaceHeader; billing: BillingPanel; caps: Caps }) {
+  const clock = await consoleClock();
   const tenant = header.tenant;
   const closed = tenant.status === "DEPROVISIONED";
   const asOf = header.asOf;
@@ -94,15 +97,15 @@ export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader;
   const facts: { term: string; value: ReactNode; wide?: boolean }[] = [
     { term: "Pays through", value: paysThrough.length > 0 ? paysThrough.join(", ") : manualActive ? "A plan given by hand" : "Nothing at a gateway" },
   ];
-  if (standing.kind === "trial") facts.push({ term: "Trial ends", value: <DateValue at={standing.endsAt} asOf={asOf} /> });
-  if (standing.kind === "trial-over" || standing.kind === "past-due") facts.push({ term: "Held on", value: <DateValue at={standing.holdAt} asOf={asOf} tone="danger" /> });
-  if (standing.kind === "ending") facts.push({ term: "Runs until", value: <DateValue at={standing.holdAt} asOf={asOf} tone="warning" /> });
-  if (standing.kind === "lapsed") facts.push({ term: "Nothing live since", value: <DateValue at={standing.since} asOf={asOf} tone="danger" /> });
+  if (standing.kind === "trial") facts.push({ term: "Trial ends", value: <DateValue clock={clock} at={standing.endsAt} asOf={asOf} /> });
+  if (standing.kind === "trial-over" || standing.kind === "past-due") facts.push({ term: "Held on", value: <DateValue clock={clock} at={standing.holdAt} asOf={asOf} tone="danger" /> });
+  if (standing.kind === "ending") facts.push({ term: "Runs until", value: <DateValue clock={clock} at={standing.holdAt} asOf={asOf} tone="warning" /> });
+  if (standing.kind === "lapsed") facts.push({ term: "Nothing live since", value: <DateValue clock={clock} at={standing.since} asOf={asOf} tone="danger" /> });
   if (liveGatewaySub?.currentPeriodEnd) {
-    facts.push({ term: liveGatewaySub.cancelAtPeriodEnd ? "Ends" : "Renews", value: <DateValue at={liveGatewaySub.currentPeriodEnd} asOf={asOf} /> });
+    facts.push({ term: liveGatewaySub.cancelAtPeriodEnd ? "Ends" : "Renews", value: <DateValue clock={clock} at={liveGatewaySub.currentPeriodEnd} asOf={asOf} /> });
   }
-  if (liveGatewaySub?.pastDueSince) facts.push({ term: "Past due since", value: <DateValue at={liveGatewaySub.pastDueSince} asOf={asOf} tone="danger" /> });
-  if (heldForBilling && tenant.suspendedAt) facts.push({ term: "Held for billing since", value: <DateValue at={tenant.suspendedAt} asOf={asOf} tone="danger" /> });
+  if (liveGatewaySub?.pastDueSince) facts.push({ term: "Past due since", value: <DateValue clock={clock} at={liveGatewaySub.pastDueSince} asOf={asOf} tone="danger" /> });
+  if (heldForBilling && tenant.suspendedAt) facts.push({ term: "Held for billing since", value: <DateValue clock={clock} at={tenant.suspendedAt} asOf={asOf} tone="danger" /> });
   facts.push({ term: "Paid, all time", value: <MoneyList amounts={billing.lifetimePaid} size="sm" empty="Nothing yet" /> });
 
   return (
@@ -137,7 +140,7 @@ export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader;
                   </StatusPill>
                 )}
               </div>
-              <p className="text-sm text-text">{standingSentence(header)}</p>
+              <p className="text-sm text-text">{standingSentence(header, clock)}</p>
             </div>
 
             {header.exemptWhilePaying && (
@@ -175,7 +178,7 @@ export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader;
             </THead>
             <TBody>
               {billing.subscriptions.map((s) => (
-                <SubscriptionRow key={s.id} sub={s} billing={billing} caps={caps} closed={closed} />
+                <SubscriptionRow key={s.id} sub={s} billing={billing} caps={caps} closed={closed} clock={clock} />
               ))}
             </TBody>
           </DataTable>
@@ -219,20 +222,20 @@ export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader;
                 const dashboard = caps.sell && atGateway(i.gateway) ? gatewayDashboardUrl(i.gateway, "invoice", i.externalId, modeOf(i.gateway, billing)) : null;
                 return (
                   <Tr key={i.id}>
-                    <Td nowrap>{dayMonthYear(i.issuedAt)}</Td>
+                    <Td nowrap>{clock.date(i.issuedAt)}</Td>
                     <Td>
                       <span className="block font-mono text-xs text-text">{i.number ?? "—"}</span>
                       <span className="block text-[11px] text-subtle">{gatewayLabel(i.gateway)}</span>
                     </Td>
                     <Td muted nowrap>
-                      {i.periodStart && i.periodEnd ? `${dayMonth(i.periodStart)} – ${dayMonthYear(i.periodEnd)}` : "—"}
+                      {i.periodStart && i.periodEnd ? `${clock.dayMonth(i.periodStart)} – ${clock.date(i.periodEnd)}` : "—"}
                     </Td>
                     <Td numeric className="font-medium">
                       {formatMoney(i.total, i.currency)}
                     </Td>
                     <Td numeric>
                       <span className={cn("block", i.amountPaid === 0 && "text-muted")}>{formatMoney(i.amountPaid, i.currency)}</span>
-                      {i.paidAt && <span className="block text-[11px] text-subtle">{dayMonthYear(i.paidAt)}</span>}
+                      {i.paidAt && <span className="block text-[11px] text-subtle">{clock.date(i.paidAt)}</span>}
                     </Td>
                     <Td>
                       <LabelPill map={INVOICE_STATUS} value={i.status} />
@@ -348,7 +351,7 @@ export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader;
                 {billing.notices.map((n) => (
                   <li key={n.key} className="flex items-baseline justify-between gap-3 py-2 first:pt-0 last:pb-0">
                     <span className="min-w-0 text-sm text-text">{n.label}</span>
-                    <span className="shrink-0 text-xs whitespace-nowrap text-muted">{dayMonthYear(n.sentAt)}</span>
+                    <span className="shrink-0 text-xs whitespace-nowrap text-muted">{clock.date(n.sentAt)}</span>
                   </li>
                 ))}
               </ul>
@@ -360,7 +363,7 @@ export function BillingTab({ header, billing, caps }: { header: WorkspaceHeader;
   );
 }
 
-function SubscriptionRow({ sub: s, billing, caps, closed }: { sub: SubView; billing: BillingPanel; caps: Caps; closed: boolean }) {
+function SubscriptionRow({ sub: s, billing, caps, closed, clock }: { sub: SubView; billing: BillingPanel; caps: Caps; closed: boolean; clock: Clock }) {
   const gateway = atGateway(s.gateway) ? s.gateway : null;
   const trialEnd = s.trialEndsAt && (s.status === "TRIALING" || !s.currentPeriodEnd) ? s.trialEndsAt : null;
   const periodEnd = trialEnd ?? s.currentPeriodEnd;
@@ -399,16 +402,16 @@ function SubscriptionRow({ sub: s, billing, caps, closed }: { sub: SubView; bill
       <Td nowrap>
         {periodEnd ? (
           <>
-            <span className="text-text">{dayMonthYear(periodEnd)}</span>
+            <span className="text-text">{clock.date(periodEnd)}</span>
             {trialEnd && <span className="ml-1.5 text-[11px] text-subtle">trial</span>}
           </>
         ) : (
           <span className="text-muted">—</span>
         )}
-        {s.status === "CANCELLED" && s.cancelledAt && <span className="block text-[11px] text-subtle">{`cancelled ${dayMonthYear(s.cancelledAt)}`}</span>}
+        {s.status === "CANCELLED" && s.cancelledAt && <span className="block text-[11px] text-subtle">{`cancelled ${clock.date(s.cancelledAt)}`}</span>}
       </Td>
       <Td>{s.cancelAtPeriodEnd ? <StatusPill tone={ENDS_AT_PERIOD_END.tone}>{ENDS_AT_PERIOD_END.label}</StatusPill> : <span className="text-muted">—</span>}</Td>
-      <Td nowrap>{s.pastDueSince ? <span className="text-danger">{dayMonthYear(s.pastDueSince)}</span> : <span className="text-muted">—</span>}</Td>
+      <Td nowrap>{s.pastDueSince ? <span className="text-danger">{clock.date(s.pastDueSince)}</span> : <span className="text-muted">—</span>}</Td>
       <Td className="min-w-56">
         {gateway && s.externalId ? (
           <CopyField

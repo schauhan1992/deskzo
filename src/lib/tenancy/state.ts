@@ -29,6 +29,11 @@ export type Tenant = {
   keyBundleCipher: string | null;
   /** ISO 3166-1 alpha-2 — which country-bound modules and features it may have. */
   country: string;
+  /**
+   * Its clock: the IANA zone its owner chose (Settings → Profile; src/lib/time). India's when absent —
+   * a workspace from the environment, a check suite's stand-in.
+   */
+  timezone?: string;
   /** What its plans let it use (src/lib/entitlements.ts). Everything, for one from the environment. */
   entitlements: Entitlements;
   /** Why it is held, when SUSPENDED: by staff, or for billing — which leaves its billing page open. */

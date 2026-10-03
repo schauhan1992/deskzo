@@ -11,6 +11,8 @@
  * subscription and they get three, which is correct.
  */
 
+import type { Clock } from "@/lib/time/zone";
+
 export type TriggerSubject = "SUBSCRIPTION" | "ASSET" | "COMPANY" | "LEAD" | "TICKET" | "ORDER";
 
 export type TriggerDefinition = {
@@ -243,9 +245,13 @@ export const RENEWAL_WINDOWS = [90, 60, 30, 7];
 /**
  * The Indian financial year ends on 31 March, and the quarter before it is when unspent IT budget
  * has to be committed or lost. Worth its own helper because the year rolls in April, not January.
+ * Counted on the workspace's calendar (it was UTC's): the year it ends in, and the days left to it.
  */
-export function daysToFinancialYearEnd(now: Date): number {
-  const year = now.getUTCMonth() >= 3 ? now.getUTCFullYear() + 1 : now.getUTCFullYear();
-  const end = Date.UTC(year, 2, 31);
-  return Math.ceil((end - now.getTime()) / 86400000);
+export function financialYearEndYear(now: Date, clock: Clock): number {
+  const { year, month } = clock.parts(now);
+  return month >= 3 ? year + 1 : year;
+}
+
+export function daysToFinancialYearEnd(now: Date, clock: Clock): number {
+  return clock.daysBetween(now, clock.midnight(financialYearEndYear(now, clock), 2, 31));
 }

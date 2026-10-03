@@ -13,6 +13,7 @@ import { winsSettings } from "@/lib/wins/detect";
 import { prizesForPeriod } from "@/lib/wins/prize-store";
 import { prizeSplashFor, raceIsPublic, raceIsPublicNow, RACES, tellEverybody } from "@/lib/wins/prize-announce";
 import { checkPrizeImage, currentPeriod, isSlot, periodByKey, RACE_LABEL, SLOTS, slotLabel, upcomingPeriods } from "@/lib/wins/prizes";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -27,12 +28,12 @@ export type ShowcaseRace = { race: PrizeRace; label: string; periodLabel: string
 export async function getPrizeShowcase(): Promise<ShowcaseRace[]> {
   await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return [];
-  const [awards, wins] = await Promise.all([awardSettings(), winsSettings()]);
+  const [awards, wins, clock] = await Promise.all([awardSettings(), winsSettings(), workspaceClock()]);
   const now = new Date();
   const out: ShowcaseRace[] = [];
   for (const race of RACES) {
     if (!raceIsPublic(race, awards, wins)) continue;
-    const period = currentPeriod(race, now);
+    const period = currentPeriod(race, now, clock);
     const prizes = await prizesForPeriod(race, period.key);
     const items = SLOTS[race].flatMap(({ slot, label }) => {
       const p = prizes.get(slot);
@@ -54,9 +55,10 @@ export async function getPrizesAdmin(): Promise<{
   const user = await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins")) || !(await can(user.id, "wins.manage"))) return null;
   const now = new Date();
+  const clock = await workspaceClock();
   const periods = {
-    TOP_SELLERS: upcomingPeriods("TOP_SELLERS", now).map(({ key, label }) => ({ key, label })),
-    MOST_ACTIVE: upcomingPeriods("MOST_ACTIVE", now).map(({ key, label }) => ({ key, label })),
+    TOP_SELLERS: upcomingPeriods("TOP_SELLERS", now, clock).map(({ key, label }) => ({ key, label })),
+    MOST_ACTIVE: upcomingPeriods("MOST_ACTIVE", now, clock).map(({ key, label }) => ({ key, label })),
   };
   const [rows, awards, wins, lastSellers, lastActive] = await Promise.all([
     db.prize.findMany({
@@ -96,8 +98,9 @@ export async function savePrize(input: {
   if (!RACES.includes(input.race)) return { ok: false, error: "Pick which prizes these are." };
   if (!isSlot(input.race, input.slot)) return { ok: false, error: "That place doesn't carry a prize." };
   const period = input.period ?? "";
+  const clock = await workspaceClock();
   if (period !== "") {
-    const p = periodByKey(input.race, period);
+    const p = periodByKey(input.race, period, clock);
     if (!p) return { ok: false, error: input.race === "TOP_SELLERS" ? "Plan prizes for a month." : "Plan prizes for a fortnight." };
     if (p.to.getTime() <= Date.now()) return { ok: false, error: `${p.label} is over — its prizes can't change now.` };
   }
@@ -127,7 +130,7 @@ export async function savePrize(input: {
     action: "UPDATE",
     entityType: "Prize",
     entityId: `${input.race}:${period || "standing"}:${input.slot}`,
-    entityLabel: `${slotLabel(input.race, input.slot)} prize${period ? `, ${periodByKey(input.race, period)!.label}` : ""}: ${name}`,
+    entityLabel: `${slotLabel(input.race, input.slot)} prize${period ? `, ${periodByKey(input.race, period, clock)!.label}` : ""}: ${name}`,
   });
   revalidatePath("/wins", "layout");
   return { ok: true, data: null };
@@ -168,7 +171,7 @@ export async function announcePrizesNow(race: PrizeRace): Promise<ActionResult<{
     };
   }
   const now = new Date();
-  const period = currentPeriod(race, now);
+  const period = currentPeriod(race, now, await workspaceClock());
   const prizes = await prizesForPeriod(race, period.key);
   if (prizes.size === 0) return { ok: false, error: `No prizes are set for ${period.label} yet.` };
   const recent = await db.prizeAnnouncement.findFirst({

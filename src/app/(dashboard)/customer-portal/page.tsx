@@ -5,7 +5,7 @@ import { can } from "@/lib/authz/resolve";
 import { portalRoster } from "@/actions/portal";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SearchParamInput } from "@/components/ui/search-param-input";
-import { formatDateTime } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Everyone who can open a portal.
@@ -33,6 +33,7 @@ export default async function CustomerPortalPage({
 
   const roster = await portalRoster(q);
   if (!roster.ok) return <p className="text-sm text-danger">{roster.error}</p>;
+  const clock = await workspaceClock();
   const { mode, enabled, rows, grantedWithoutLinks, eligibleWithoutLinks } = roster.data;
 
   const live = rows.filter((r) => r.allowed);
@@ -192,7 +193,7 @@ export default async function CustomerPortalPage({
                         )}
                       </td>
                       <td className="whitespace-nowrap px-5 py-2.5 text-muted">
-                        {r.lastSeenAt ? formatDateTime(r.lastSeenAt) : "never"}
+                        {r.lastSeenAt ? clock.dateTimeShort(r.lastSeenAt) : "never"}
                       </td>
                       <td className="px-5 py-2.5 text-muted">{r.totalVisits || "—"}</td>
                     </tr>

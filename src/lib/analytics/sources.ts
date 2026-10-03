@@ -4,6 +4,7 @@ import { scopeUserIds } from "@/lib/authz/scope";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import { buildWhere, countActiveFilters } from "@/lib/workspace/filters";
+import { workspaceClock } from "@/lib/time/workspace";
 import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
 
 /**
@@ -55,7 +56,7 @@ const dateWindow = (ctx: SourceContext) => ({ [ctx.dateColumn]: { gte: ctx.from,
 async function companyWhere(ctx: SourceContext) {
   const ids = await accountScopeIds(ctx.userId);
   const scope = ids === null ? {} : { ownerUserId: { in: ids } };
-  const filters = ctx.companyFilters ? buildWhere(ctx.companyFilters) : {};
+  const filters = ctx.companyFilters ? buildWhere(ctx.companyFilters, await workspaceClock()) : {};
   const merged = { ...scope, ...filters };
   return Object.keys(merged).length === 0 ? {} : { company: merged };
 }

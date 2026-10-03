@@ -3,9 +3,9 @@ import { ActionButton } from "@/components/console/kit/action-button";
 import { DataTable, RowActionsCell, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { MoneyStack } from "@/components/partners/common/money";
 import { PartnerStatusPill } from "@/components/partners/common/pills";
-import { dayMonthYear, when } from "@/lib/console-shared/format";
 import { PARTNER_ROUTES } from "@/lib/partners/nav";
 import type { ResellerRequestRow, ResellerRow } from "@/lib/partners/portal-data";
+import type { Clock } from "@/lib/time/zone";
 import { countryName } from "@/components/partners/profile/details";
 
 /**
@@ -64,8 +64,8 @@ export function ResellersTable({ rows }: { rows: ResellerRow[] }) {
   );
 }
 
-/** Proposed resellers waiting for review; an ADMIN may withdraw one. */
-export function ResellerRequestsTable({ rows, canWithdraw }: { rows: ResellerRequestRow[]; canWithdraw: boolean }) {
+/** Proposed resellers waiting for review; an ADMIN may withdraw one. Days on `clock`, the console's. */
+export function ResellerRequestsTable({ rows, canWithdraw, clock }: { rows: ResellerRequestRow[]; canWithdraw: boolean; clock: Clock }) {
   return (
     <DataTable caption="Proposed resellers waiting for review" minWidth={720}>
       <THead>
@@ -87,8 +87,8 @@ export function ResellerRequestsTable({ rows, canWithdraw }: { rows: ResellerReq
               <Territories codes={row.territories} />
             </Td>
             <Td muted nowrap>
-              <time dateTime={row.createdAt.toISOString()} title={when(row.createdAt)}>
-                {dayMonthYear(row.createdAt)}
+              <time dateTime={row.createdAt.toISOString()} title={clock.dateTime(row.createdAt)}>
+                {clock.date(row.createdAt)}
               </time>
             </Td>
             {canWithdraw && (

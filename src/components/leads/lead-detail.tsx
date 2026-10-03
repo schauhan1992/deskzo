@@ -17,7 +17,9 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { CompanyStageBadge } from "@/components/companies/company-stage-badge";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 import { LeadDocuments } from "@/components/leads/lead-documents";
 import { LeadVisits } from "@/components/leads/lead-visits";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
@@ -95,6 +97,7 @@ export async function LeadDetail({ id }: { id: string }) {
   // A deal can be worked by someone other than whoever manages the account, so both are named
   // rather than collapsed into one "sales rep" that would be wrong half the time.
   const accountManager = company.assignedTo ?? company.owner ?? null;
+  const clock = await workspaceClock();
 
   return (
     <div className="@container space-y-6">
@@ -201,7 +204,7 @@ export async function LeadDetail({ id }: { id: string }) {
                     <div className="flex items-center gap-2">
                       <Badge>{a.type.replaceAll("_", " ")}</Badge>
                       <span className="text-xs text-subtle">
-                        {a.user.name} · {formatDate(a.occurredAt)}
+                        {a.user.name} · {clock.date(a.occurredAt)}
                       </span>
                     </div>
                     <p className="mt-1 text-text">{a.type === "STAGE_CHANGE" ? readStageNote(a.notes, stages) : a.notes}</p>
@@ -270,7 +273,8 @@ export async function LeadDetail({ id }: { id: string }) {
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Expected close</span>
-                <span className="text-text">{formatDate(lead.expectedCloseDate)}</span>
+                {/* A typed day, held as midnight UTC. */}
+                <span className="text-text">{formatCalendarDay(lead.expectedCloseDate)}</span>
               </div>
               {lead.lostReason && (
                 <div className="pt-2 text-danger">

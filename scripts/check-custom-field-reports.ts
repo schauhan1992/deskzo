@@ -36,6 +36,7 @@ import type { ReportRequest, SourceOption } from "../src/actions/analytics";
 import type { ReportResult } from "../src/lib/analytics/run";
 import type { CustomFieldEntityKey, CustomFieldOption, CustomFieldTypeKey } from "../src/lib/custom-fields/rules";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { indiaClock } from "../src/lib/time/zone";
 
 let failures = 0;
 let passes = 0;
@@ -652,7 +653,7 @@ async function run(scratchUrl: string, scratchName: string) {
     const execSource = await effectiveSource(getSource("orders")!, exec.id);
     const execRows = await execSource.load({ userId: exec.id, from: ist("2026-09-01T00:00"), to: ist("2026-10-01T00:00"), dateColumn: "createdAt" });
     const direct = (dimensionKey: string, filters?: Record<string, string[]>) =>
-      runReport({ source: execSource, rows: execRows, measureKey: "value", dimensionKey, grain: "month", dateKey: "createdAt", scopeNote: "check", filters });
+      runReport({ clock: indiaClock, source: execSource, rows: execRows, measureKey: "value", dimensionKey, grain: "month", dateKey: "createdAt", scopeNote: "check", filters });
     const directBy = direct("cf:company:internal_rating");
     const directFiltered = direct("item", { "cf:company:internal_rating": ["Strategic"] });
     ok(

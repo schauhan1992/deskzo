@@ -1,6 +1,6 @@
 import { safeHref, safeSrc } from "@/components/site/links";
-import { istDateParts } from "@/lib/india-time";
 import type { JsonLd, SeoCrumb, SeoInput } from "@/lib/seo/types";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The site's structured data (owner decision S-D1): JSON-LD built only from what the page shows —
@@ -18,12 +18,13 @@ const SCHEMA = "https://schema.org";
  * The "Updated" date a post shows — and so the only `dateModified` its BlogPosting carries, since the
  * structured data describes what the page shows. A post counts as updated when its last change falls
  * on a later calendar day in India than the day it went live; otherwise null, and the BlogPosting's
- * dateModified is its published date.
+ * dateModified is its published date. India's days, as the site dates its posts (whatever zone the
+ * console keeps).
  */
 export function shownUpdatedAt(publishedAt: Date | null, updatedAt: Date | null): Date | null {
   if (!publishedAt || !updatedAt || Number.isNaN(publishedAt.getTime()) || Number.isNaN(updatedAt.getTime())) return null;
   const day = (d: Date) => {
-    const p = istDateParts(d);
+    const p = indiaClock.parts(d);
     return p.year * 10000 + (p.month + 1) * 100 + p.day;
   };
   return day(updatedAt) > day(publishedAt) ? updatedAt : null;

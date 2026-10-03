@@ -11,7 +11,8 @@ import {
 } from "@/lib/projects/status";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type ProjectRow = Awaited<ReturnType<typeof listProjects>>[number];
 
@@ -91,7 +92,8 @@ export function CompanyProjects({
                   </td>
                   <td className="px-4 py-2.5 text-muted">{p.manager?.name ?? "—"}</td>
                   <td className="px-4 py-2.5 text-muted">
-                    {p.targetEndDate ? formatDate(new Date(p.targetEndDate)) : "—"}
+                    {/* A typed day, held as midnight UTC. */}
+                    {formatCalendarDay(p.targetEndDate)}
                     {late !== null && <span className="block text-[11px] text-danger">{late} days late</span>}
                   </td>
                   <td className="px-4 py-2.5 text-muted">

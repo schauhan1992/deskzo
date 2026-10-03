@@ -8,8 +8,9 @@ import { DefinitionList } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusDot, StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
+import { useClock } from "@/components/time/clock-provider";
 import { SidePane } from "@/components/ui/side-pane";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { FailingJobSummary } from "@/lib/platform/health";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ function firstLine(text: string | null): string | null {
 }
 
 export function FailingJobsTable({ rows }: { rows: FailingJobSummary[] }) {
+  const clock = useClock();
   const [openJob, setOpenJob] = useState<FailingJobSummary | null>(null);
 
   if (rows.length === 0) {
@@ -101,7 +103,7 @@ export function FailingJobsTable({ rows }: { rows: FailingJobSummary[] }) {
               <span className="font-mono text-xs text-subtle">{openJob.job}</span>
             </div>
 
-            <DefinitionList columns={1} items={[{ term: "Most recent failure", value: when(openJob.lastAt) }]} />
+            <DefinitionList columns={1} items={[{ term: "Most recent failure", value: clock.dateTime(openJob.lastAt) }]} />
 
             <div>
               <h3 className="text-[13px] font-medium text-text">Last error</h3>

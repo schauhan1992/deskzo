@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Doc = {
   id: string;
@@ -40,6 +40,7 @@ export function ProjectFiles({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const fileInput = useRef<HTMLInputElement>(null);
   const [type, setType] = useState<ProjectDocumentType>("AGREEMENT");
   const [name, setName] = useState("");
@@ -103,7 +104,7 @@ export function ProjectFiles({
                   <div className="truncate text-sm text-text">{d.name}</div>
                   <div className="text-xs text-subtle">
                     {projectDocumentTypeLabels[d.type]} · {(d.sizeBytes / 1024).toFixed(0)} KB ·{" "}
-                    {formatDate(new Date(d.createdAt))}
+                    {clock.date(d.createdAt)}
                     {d.uploadedBy && ` · ${d.uploadedBy.name}`}
                   </div>
                   {d.note && <p className="text-xs text-muted">{d.note}</p>}

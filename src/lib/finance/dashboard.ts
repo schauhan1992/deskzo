@@ -2,7 +2,8 @@ import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { settleInvoice } from "@/lib/receivables";
 import { bucketOf } from "@/lib/analytics/types";
-import { financialYearStartOf, financialYearWindow, istDateParts, istMidnight, istMonthWindow } from "@/lib/india-time";
+import { financialYearStartOf, financialYearWindow } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The finance headline figures, read off the ledger rather than recomputed.
@@ -38,6 +39,7 @@ export function fiscalYearOf(date: Date): { from: Date; to: Date; label: string 
 /**
  * Where the twelve-month cash line starts: the 1st of the Indian month eleven months back, at midnight
  * IST — so the line ends on the month in progress rather than a fortnight into a thirteenth bar.
+ * India's months in every workspace: these are the books' figures, and the books keep India's calendar.
  *
  * One definition for the dashboard, the Accounting page and check:finance. Both pages built it as
  * `new Date(y, m − 11, 1)`, which is midnight on the *host's* calendar: on a server in UTC the window
@@ -45,20 +47,20 @@ export function fiscalYearOf(date: Date): { from: Date; to: Date; label: string 
  * and 05:30 IST on the 1st the host was still in the previous month, so the whole window slid back one.
  */
 export function cashWindowFrom(now: Date): Date {
-  return istMonthWindow(now, -11).from;
+  return indiaClock.monthWindow(now, -11).from;
 }
 
 /**
  * The first instant of each Indian month the window touches, from the month `from` is in to the
- * month `to` is in. The buckets are keyed by `bucketOf`, which reads India's calendar; walking them
+ * month `to` is in. The buckets are keyed by `bucketOf` on India's clock too; walking them
  * with `getMonth`/`setMonth` read the host's, so on a server in UTC a fiscal year starting at
  * 1 April 00:00 IST (31 March, 18:30 UTC) drew an empty March bar in front of April.
  */
 function monthsBetween(from: Date, to: Date): Date[] {
-  const start = istDateParts(from);
+  const start = indiaClock.parts(from);
   const out: Date[] = [];
   for (let i = 0; ; i += 1) {
-    const at = istMidnight(start.year, start.month + i, 1);
+    const at = indiaClock.midnight(start.year, start.month + i, 1);
     if (at > to) return out;
     out.push(at);
   }
@@ -153,12 +155,12 @@ export async function incomeAndExpense(from: Date, to: Date, basis: Basis): Prom
   // as missing data; a March at zero reads as a quiet month, which is what it is.
   const months = new Map<string, { key: string; label: string; income: number; expense: number }>();
   for (const d of monthsBetween(from, to)) {
-    const b = bucketOf(d, "month");
+    const b = bucketOf(d, "month", indiaClock);
     months.set(b.key, { ...b, income: 0, expense: 0 });
   }
 
   for (const line of lines) {
-    const slot = months.get(bucketOf(line.at, "month").key);
+    const slot = months.get(bucketOf(line.at, "month", indiaClock).key);
     if (!slot) continue;
     if (line.type === "INCOME") slot.income += line.amount;
     else slot.expense += line.amount;
@@ -233,7 +235,7 @@ export async function cashFlow(from: Date, to: Date): Promise<CashFlow> {
 
   const months = new Map<string, { key: string; label: string; delta: number }>();
   for (const d of monthsBetween(from, to)) {
-    const b = bucketOf(d, "month");
+    const b = bucketOf(d, "month", indiaClock);
     months.set(b.key, { ...b, delta: 0 });
   }
 
@@ -244,7 +246,7 @@ export async function cashFlow(from: Date, to: Date): Promise<CashFlow> {
     const outAmt = money(line.credit);
     incoming += inAmt;
     outgoing += outAmt;
-    const slot = months.get(bucketOf(line.entry.date, "month").key);
+    const slot = months.get(bucketOf(line.entry.date, "month", indiaClock).key);
     if (slot) slot.delta += inAmt - outAmt;
   }
 

@@ -7,7 +7,7 @@ import { ArrowRight, Check, X } from "lucide-react";
 import { applyVerification, dismissVerification, type pendingVerifications } from "@/actions/verification";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Row = Awaited<ReturnType<typeof pendingVerifications>>["rows"][number];
 
@@ -37,6 +37,7 @@ export function VerificationRows({ rows }: { rows: Row[] }) {
 
 function VerificationRow({ row }: { row: Row }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -80,7 +81,7 @@ function VerificationRow({ row }: { row: Row }) {
 
           {row.note && <p className="mt-1.5 text-sm text-muted">{row.note}</p>}
           <p className="mt-1 text-xs text-subtle">
-            {row.verifiedBy.name} · {formatDateTime(row.verifiedAt)}
+            {row.verifiedBy.name} · {clock.dateTimeShort(row.verifiedAt)}
           </p>
           {error && <p className="mt-1 text-sm text-danger">{error}</p>}
         </div>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { addTicketComment } from "@/actions/ticket";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Comment = {
   id: string;
@@ -16,6 +16,7 @@ type Comment = {
 
 export function CommentThread({ ticketId, comments }: { ticketId: string; comments: Comment[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [body, setBody] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export function CommentThread({ ticketId, comments }: { ticketId: string; commen
           <div key={c.id} className="rounded-md border border-line p-3">
             <div className="flex items-center justify-between text-xs text-muted">
               <span className="font-medium text-text">{c.user.name}</span>
-              <span>{formatDate(c.createdAt)}</span>
+              <span>{clock.date(c.createdAt)}</span>
             </div>
             <p className="mt-1.5 whitespace-pre-wrap text-sm text-text">{c.body}</p>
           </div>

@@ -124,7 +124,9 @@ async function main() {
   const geminiAdapter = require("../src/lib/copilot/providers/gemini") as typeof import("../src/lib/copilot/providers/gemini");
   const { decryptSecret } = require("../src/lib/crypto") as typeof import("../src/lib/crypto");
   const { formatCompanyId } = require("../src/lib/order-id") as typeof import("../src/lib/order-id");
-  const { indianToday } = tools;
+  // The model is told the workspace's today; this check's workspace keeps the default zone, India's.
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
+  const indianToday = (at?: Date) => indiaClock.today(at);
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("Each provider's conversation");
@@ -157,8 +159,10 @@ async function main() {
   ok("schemas go out as plain JSON Schema, without the $schema marker some providers reject", !("$schema" in spec.parameters) && spec.parameters.type === "object");
   const { usageDay } = require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings");
   const lateUtc = new Date("2026-09-25T20:00:00Z"); // 1:30 am on the 26th in India
-  ok("today, as the model is told it, is India's date — month and all", indianToday(lateUtc) === "2026-09-26" && indianToday(new Date("2026-01-31T12:00:00Z")) === "2026-01-31", indianToday(lateUtc));
-  ok("  and the allowance's day is the same calendar day", usageDay(lateUtc).toISOString() === "2026-09-26T00:00:00.000Z" && usageDay(new Date("2026-12-31T12:00:00Z")).toISOString() === "2026-12-31T00:00:00.000Z");
+  ok("today on an India workspace's clock is India's date — month and all", indianToday(lateUtc) === "2026-09-26" && indianToday(new Date("2026-01-31T12:00:00Z")) === "2026-01-31", indianToday(lateUtc));
+  ok("  and the allowance's day is the same calendar day", usageDay(lateUtc, indiaClock).toISOString() === "2026-09-26T00:00:00.000Z" && usageDay(new Date("2026-12-31T12:00:00Z"), indiaClock).toISOString() === "2026-12-31T00:00:00.000Z");
+  const { clockFor } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
+  ok("  a workspace elsewhere counts its allowance by its own day", usageDay(lateUtc, clockFor("America/New_York")).toISOString() === "2026-09-25T00:00:00.000Z");
   ok("a tool answer too long to be worth its tokens is cut short and says so",tools.outputText({ big: "x".repeat(20_000) }).endsWith("narrow the question)"));
 
   const settingsLib = require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings");
@@ -272,7 +276,7 @@ async function main() {
     ok("a question runs: a tool, then the answer", !first.error && requests.length === 2, first.error);
     const toolTurn = requests[1]!.history.find((t) => t.role === "tool") as Extract<Turn, { role: "tool" }> | undefined;
     ok("  the tool ran as the person — the model was given their account and not the other", !!toolTurn && toolTurn.results[0]!.output.includes("Alpha") && !toolTurn.results[0]!.output.includes("Beta"));
-    ok("  told who it is helping and today's date", requests[0]!.system.includes("Zzcop RepA") && requests[0]!.system.includes(indianToday()));
+    ok("  told who it is helping, today's date and the zone", requests[0]!.system.includes("Zzcop RepA") && requests[0]!.system.includes(indianToday()) && requests[0]!.system.includes("Asia/Kolkata"));
     ok("  offered the tools, the same list on every turn", requests[0]!.tools.map((t) => t.name).join() === requests[1]!.tools.map((t) => t.name).join() && requests[0]!.tools.some((t) => t.name === "propose_task"));
     const streamed = first.events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
     ok("the answer streamed as it was written, and what it looked at was shown", streamed.includes("Found") && first.events.some((e) => e.type === "block"));

@@ -3,12 +3,13 @@ import { getDomainSettings, type DomainSettingsView } from "@/actions/domains";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { AddDomainForm, DomainRow, OwnAddress, type DomainItem } from "@/components/settings/domain-settings";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 const LINK = "font-medium text-brand hover:underline";
 
 /** Each address as the controls take it: plain text, dates already in words. */
-function itemsOf(view: DomainSettingsView): DomainItem[] {
+function itemsOf(view: DomainSettingsView, clock: Clock): DomainItem[] {
   return view.domains.map((d) => ({
     id: d.id,
     host: d.host,
@@ -20,7 +21,7 @@ function itemsOf(view: DomainSettingsView): DomainItem[] {
     records: d.records,
     apex: d.apex,
     url: d.url,
-    lastChecked: d.lastCheckedAt ? `Last checked ${formatIstDateTime(d.lastCheckedAt)}` : d.kind === "CUSTOM" ? "Not checked yet — create the records below, then press Check now." : null,
+    lastChecked: d.lastCheckedAt ? `Last checked ${clock.dateTime(d.lastCheckedAt)}` : d.kind === "CUSTOM" ? "Not checked yet — create the records below, then press Check now." : null,
     problems: d.problems,
   }));
 }
@@ -42,7 +43,7 @@ export default async function DomainSettingsPage() {
     );
   }
 
-  const items = itemsOf(view);
+  const items = itemsOf(view, await workspaceClock());
   const ownPrimary = view.primaryHost === view.ownHost;
   const full = view.limit !== null && view.limit > 0 && !view.canAdd;
 

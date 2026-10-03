@@ -1,7 +1,8 @@
 import type { listHolidays, listLeaveTypes } from "@/actions/hr";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
 import { dateOnly } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Holiday = Awaited<ReturnType<typeof listHolidays>>[number];
 type LeaveType = Awaited<ReturnType<typeof listLeaveTypes>>[number];
@@ -10,7 +11,7 @@ type LeaveType = Awaited<ReturnType<typeof listLeaveTypes>>[number];
  * The holiday calendar as an employee sees it: read-only, and answering the two questions they
  * actually have — when is the next one, and how much leave am I entitled to.
  */
-export function HolidayList({
+export async function HolidayList({
   holidays,
   leaveTypes,
   year,
@@ -19,7 +20,9 @@ export function HolidayList({
   leaveTypes: LeaveType[];
   year: number;
 }) {
-  const today = dateOnly(new Date());
+  // The workspace's today. UTC's (`dateOnly(new Date())`) kept yesterday's holiday as the next one
+  // until 05:30 in India.
+  const today = (await workspaceClock()).calendarDate(new Date());
   const upcoming = holidays.filter((h) => dateOnly(h.date) >= today && !h.optional);
   const next = upcoming[0];
 
@@ -28,7 +31,7 @@ export function HolidayList({
       {next && (
         <Card className="border-brand/40 bg-brand-subtle/40 px-4 py-3 text-sm">
           <span className="text-text">
-            Next holiday: <span className="font-medium">{next.name}</span> on {formatDate(next.date)}
+            Next holiday: <span className="font-medium">{next.name}</span> on {formatCalendarDay(next.date)}
           </span>
         </Card>
       )}
@@ -51,7 +54,7 @@ export function HolidayList({
                     <span className="text-text">{h.name}</span>
                     {h.optional && <Badge tone="amber">Restricted</Badge>}
                   </span>
-                  <span className="text-xs text-muted">{formatDate(h.date)}</span>
+                  <span className="text-xs text-muted">{formatCalendarDay(h.date)}</span>
                 </div>
               );
             })}

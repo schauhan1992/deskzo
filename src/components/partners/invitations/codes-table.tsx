@@ -9,10 +9,12 @@ import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { CustomerName } from "@/components/partners/customers/customer-name";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { INVITE_STATE } from "@/lib/console-shared/labels";
 import type { InviteRow } from "@/lib/partners/portal-data";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The partner's invitation codes: who each is for, the plan it starts a workspace on, its last four
@@ -28,9 +30,10 @@ import type { InviteRow } from "@/lib/partners/portal-data";
 const CUSTOMERS_SHOWN = 3;
 
 /** How a code is named in labels and confirmations: its note, or its last four. */
-const nameOf = (row: InviteRow) => row.note?.trim() || (row.codeHint ? `the code ending ${row.codeHint}` : `the code made ${dayMonthYear(row.createdAt)}`);
+const nameOf = (row: InviteRow, clock: Clock) => row.note?.trim() || (row.codeHint ? `the code ending ${row.codeHint}` : `the code made ${clock.date(row.createdAt)}`);
 
 export function InviteCodesTable({ rows, canEnd }: { rows: InviteRow[]; canEnd: boolean }) {
+  const clock = useClock();
   const [ending, setEnding] = useState<InviteRow | null>(null);
   return (
     <>
@@ -56,7 +59,7 @@ export function InviteCodesTable({ rows, canEnd }: { rows: InviteRow[]; canEnd: 
                 ) : (
                   <span className="text-subtle">No note</span>
                 )}
-                <span className="block text-[11px] text-subtle">{`Made ${dayMonthYear(row.createdAt)}`}</span>
+                <span className="block text-[11px] text-subtle">{`Made ${clock.date(row.createdAt)}`}</span>
               </Td>
               <Td nowrap>{row.planName ?? <span className="text-muted">Default plan</span>}</Td>
               <Td mono nowrap>
@@ -65,11 +68,11 @@ export function InviteCodesTable({ rows, canEnd }: { rows: InviteRow[]; canEnd: 
               <Td nowrap>
                 <span className="inline-flex items-center gap-2">
                   <span className="tabular-nums">{`${row.uses} of ${row.maxUses}`}</span>
-                  <Meter value={row.uses} max={row.maxUses} label={`Uses of ${nameOf(row)}`} size="sm" tone={row.uses >= row.maxUses ? "muted" : "brand"} />
+                  <Meter value={row.uses} max={row.maxUses} label={`Uses of ${nameOf(row, clock)}`} size="sm" tone={row.uses >= row.maxUses ? "muted" : "brand"} />
                 </span>
               </Td>
               <Td muted nowrap>
-                {row.expiresAt ? dayMonthYear(row.expiresAt) : "No end date"}
+                {row.expiresAt ? clock.date(row.expiresAt) : "No end date"}
               </Td>
               <Td nowrap>
                 <LabelPill map={INVITE_STATE} value={row.state} />
@@ -82,7 +85,7 @@ export function InviteCodesTable({ rows, canEnd }: { rows: InviteRow[]; canEnd: 
                   {row.state === "live" && (
                     <Button type="button" variant="secondary" size="sm" onClick={() => setEnding(row)}>
                       End
-                      <span className="sr-only">{` ${nameOf(row)}`}</span>
+                      <span className="sr-only">{` ${nameOf(row, clock)}`}</span>
                     </Button>
                   )}
                 </RowActionsCell>
@@ -122,6 +125,7 @@ function MadeWith({ customers }: { customers: InviteRow["customers"] }) {
 
 /** End a live code (tier 2): what stops, and what does not. */
 function EndCodeDialog({ row, onClose }: { row: InviteRow | null; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
 
   function close() {
@@ -146,13 +150,13 @@ function EndCodeDialog({ row, onClose }: { row: InviteRow | null; onClose: () =>
       {row && (
         <>
           <p>
-            The code for <strong className="font-medium">{nameOf(row)}</strong> stops working now; nobody can sign up with it again. Customers already made with it stay yours.
+            The code for <strong className="font-medium">{nameOf(row, clock)}</strong> stops working now; nobody can sign up with it again. Customers already made with it stay yours.
           </p>
           <ImpactList
             items={[
               ...(row.codeHint ? [{ label: "Code", value: `…${row.codeHint}` }] : []),
               { label: "Uses left", value: `${Math.max(0, row.maxUses - row.uses)} → 0`, tone: "danger" as const },
-              { label: "Works until", value: `${row.expiresAt ? dayMonthYear(row.expiresAt) : "No end date"} → now`, tone: "danger" as const },
+              { label: "Works until", value: `${row.expiresAt ? clock.date(row.expiresAt) : "No end date"} → now`, tone: "danger" as const },
               { label: "Customers made with it", value: row.customers.length > 0 ? `${plural(row.customers.length, "customer")} — not affected` : "None" },
             ]}
           />

@@ -1,13 +1,14 @@
 import Papa from "papaparse";
 import type { Prisma } from "@deskzo/control-client";
-import { csvFilename, istDayKey } from "@/lib/console-shared/format";
+import { csvFilename } from "@/lib/console-shared/format";
 import { AUDIT_CATEGORIES, actorLabel, auditHref, auditLabel, auditSummary } from "@/lib/console-shared/labels";
 import type { AuditFilters } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { ActivityItem, CsvExport } from "@/lib/console-shared/types";
-import { IST_OFFSET_MS, endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { ConsoleRefused } from "@/lib/platform/refused";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The audit explorer (/audit): the platform audit log filtered, newest first, a page at a time; the
@@ -18,7 +19,8 @@ import { ConsoleRefused } from "@/lib/platform/refused";
  *     first one does (the `[at]`, `[action, at]` and `[actor, at]` indexes serve it).
  *   · `who` and `q` find staff by name or email: the log keeps a staff member's id, so a search for
  *     "Priya" is turned into her id first. That is what "search by staff name finds nothing" was.
- *   · Dates are Indian days, half-open: `from` at its IST midnight, up to the IST midnight after `to`.
+ *   · Dates are days on the console's clock (Settings › Time zone), half-open: `from` at its midnight,
+ *     up to the midnight after `to`.
  *
  * Rows are shaped like `toActivityItems` (console-guard.ts) does, with the same label helpers — but
  * this file does not import console-guard.ts: staff.ts imports this one (My account's recent
@@ -75,7 +77,8 @@ type AuditRecord = Prisma.PlatformAuditLogGetPayload<{ select: typeof ROW_SELECT
 export async function auditQuery(f: AuditFilters, now = new Date()): Promise<AuditPage> {
   const limit = clampLimit(f.limit);
   const cursor = typeof f.cursor === "string" && ID.test(f.cursor) ? f.cursor : undefined;
-  const where = await auditWhere(f);
+  const clock = await consoleClock();
+  const where = await auditWhere(f, clock);
   const control = controlDb();
   const [found, newer] = await Promise.all([
     control.platformAuditLog.findMany({ where, orderBy: NEWEST_FIRST, take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), select: ROW_SELECT }),
@@ -86,10 +89,10 @@ export async function auditQuery(f: AuditFilters, now = new Date()): Promise<Aud
   const page = found.slice(0, limit);
   const names = await staffNames(page);
   return {
-    rows: page.map((row) => toRowView(row, names)),
+    rows: page.map((row) => toRowView(row, names, clock)),
     nextCursor: found.length > limit ? page[page.length - 1].id : null,
     newerCursor: newer === null ? null : newer.length === limit ? newer[limit - 1].id : "",
-    todayKey: istDayKey(now),
+    todayKey: clock.dateKey(now),
   };
 }
 
@@ -109,7 +112,8 @@ export async function auditFacets(): Promise<{ actions: { action: string; n: num
  * export reads as a complete one.
  */
 export async function auditCsv(f: AuditFilters, now = new Date()): Promise<CsvExport> {
-  const where = await auditWhere(f);
+  const clock = await consoleClock();
+  const where = await auditWhere(f, clock);
   const control = controlDb();
   const total = await control.platformAuditLog.count({ where });
   if (total > EXPORT_CAP) throw new ConsoleRefused("Narrow the range — at most 10,000 rows.");
@@ -117,9 +121,9 @@ export async function auditCsv(f: AuditFilters, now = new Date()): Promise<CsvEx
   const names = await staffNames(rows);
   const csv = Papa.unparse(
     {
-      fields: ["When (IST)", "Actor kind", "Who", "Action", "Workspace", "Detail"],
+      fields: [`When (${clock.zone})`, "Actor kind", "Who", "Action", "Workspace", "Detail"],
       data: rows.map((row) => [
-        istStamp(row.at),
+        stamp(row.at, clock),
         row.actorKind,
         // The name for staff (the id when they are gone), the script's or job's own name otherwise.
         row.actorKind === "STAFF" ? (names.get(row.actor) ?? row.actor) : row.actor,
@@ -130,12 +134,12 @@ export async function auditCsv(f: AuditFilters, now = new Date()): Promise<CsvEx
     },
     { escapeFormulae: true },
   );
-  return { filename: csvFilename("audit-log", now), csv, rows: rows.length };
+  return { filename: csvFilename("audit-log", now, clock), csv, rows: rows.length };
 }
 
 // ─── Filters ─────────────────────────────────────────────────────────────────────────────────────
 
-async function auditWhere(f: AuditFilters): Promise<Prisma.PlatformAuditLogWhereInput> {
+async function auditWhere(f: AuditFilters, clock: Clock): Promise<Prisma.PlatformAuditLogWhereInput> {
   const and: Prisma.PlatformAuditLogWhereInput[] = [];
   const q = searchText(f.q);
   let who = searchText(f.who);
@@ -164,9 +168,8 @@ async function auditWhere(f: AuditFilters): Promise<Prisma.PlatformAuditLogWhere
     if (category) and.push({ OR: category.prefixes.map((prefix) => ({ action: { startsWith: prefix } })) });
   }
   if (typeof f.tenant === "string" && f.tenant) and.push({ tenant: { slug: f.tenant.toLowerCase() } });
-  const gte = f.from ? startOfIndianDay(f.from) : null;
-  const lt = f.to ? endOfIndianDay(f.to) : null;
-  if (gte || lt) and.push({ at: { ...(gte ? { gte } : {}), ...(lt ? { lt } : {}) } });
+  const at = clock.dayRange(f.from, f.to);
+  if (at) and.push({ at });
   return and.length ? { AND: and } : {};
 }
 
@@ -204,8 +207,8 @@ async function staffNames(rows: AuditRecord[]): Promise<Map<string, string>> {
   return names;
 }
 
-/** As `toActivityItems` shapes an entry, plus what the explorer shows besides. */
-function toRowView(row: AuditRecord, names: ReadonlyMap<string, string>): AuditRowView {
+/** As `toActivityItems` shapes an entry, plus what the explorer shows besides. Dates in a summary are on `clock`. */
+function toRowView(row: AuditRecord, names: ReadonlyMap<string, string>, clock: Clock): AuditRowView {
   const { title, tone, category } = auditLabel(row.action, row.detail);
   const slug = row.tenant?.slug ?? null;
   return {
@@ -215,7 +218,7 @@ function toRowView(row: AuditRecord, names: ReadonlyMap<string, string>): AuditR
     code: row.action,
     tone,
     category,
-    detail: redactSecrets(auditSummary(row.action, row.detail)),
+    detail: redactSecrets(auditSummary(row.action, row.detail, clock)),
     actor: actorLabel(row.actorKind, row.actor, names),
     actorKind: row.actorKind,
     workspace: slug ? { slug } : null,
@@ -226,8 +229,9 @@ function toRowView(row: AuditRecord, names: ReadonlyMap<string, string>): AuditR
   };
 }
 
-/** "2026-09-27 18:30:05", India time — sorts as text in a spreadsheet. */
-function istStamp(at: Date): string {
-  const iso = new Date(at.getTime() + IST_OFFSET_MS).toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
+/** "2026-09-27 18:30:05" on the console's clock — sorts as text in a spreadsheet. */
+function stamp(at: Date, clock: Clock): string {
+  const { hour, minute, second } = clock.parts(at);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${clock.dateKey(at)} ${pad(hour)}:${pad(minute)}:${pad(second)}`;
 }

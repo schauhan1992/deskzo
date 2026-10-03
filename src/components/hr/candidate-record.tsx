@@ -31,7 +31,10 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { toKey } from "@/lib/hr/calendar";
 import { CANDIDATE_LETTERS, candidateStatusLabels, candidateStatusTone } from "@/lib/hr/onboarding";
 import { letterTypeLabels } from "@/lib/hr/letters";
 import { employmentTypeLabels } from "@/lib/validation/hr";
@@ -78,6 +81,7 @@ const INTAKE_FIELDS: { key: string; label: string }[] = [
 
 export function CandidateRecord({ candidate, origin }: { candidate: Candidate; origin: string }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -122,7 +126,7 @@ export function CandidateRecord({ candidate, origin }: { candidate: Candidate; o
       {joined && candidate.convertedUserId && (
         <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
           <span className="text-sm text-muted">
-            Joined on {candidate.convertedAt ? formatDate(candidate.convertedAt) : "—"}. Their documents and letters
+            Joined on {candidate.convertedAt ? clock.date(candidate.convertedAt) : "—"}. Their documents and letters
             moved onto the employee record.
           </span>
           <Link
@@ -140,14 +144,17 @@ export function CandidateRecord({ candidate, origin }: { candidate: Candidate; o
             <CardHeader className="text-sm font-medium text-text">The offer</CardHeader>
             <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
               <Fact label="Offered CTC" value={candidate.offeredCtc ? formatCurrency(Number(candidate.offeredCtc)) : "—"} />
-              <Fact label="Expected joining" value={candidate.expectedJoining ? formatDate(candidate.expectedJoining) : "—"} />
+              <Fact
+                label="Expected joining"
+                value={candidate.expectedJoining ? formatCalendarDay(candidate.expectedJoining) : "—"}
+              />
               <Fact label="Work location" value={candidate.workLocation ?? "—"} />
               <Fact label="Reports to" value={candidate.manager?.name ?? "—"} />
               <Fact label="Access role on joining" value={candidate.role} />
-              <Fact label="Offer sent" value={candidate.offeredOn ? formatDate(candidate.offeredOn) : "—"} />
-              <Fact label="Accepted" value={candidate.acceptedOn ? formatDate(candidate.acceptedOn) : "—"} />
+              <Fact label="Offer sent" value={candidate.offeredOn ? formatCalendarDay(candidate.offeredOn) : "—"} />
+              <Fact label="Accepted" value={candidate.acceptedOn ? formatCalendarDay(candidate.acceptedOn) : "—"} />
               <Fact label="Owned by" value={candidate.owner?.name ?? "—"} />
-              <Fact label="Added" value={formatDate(candidate.createdAt)} />
+              <Fact label="Added" value={clock.date(candidate.createdAt)} />
             </CardContent>
             {(candidate.notes || candidate.declinedReason) && (
               <CardContent className="border-t border-line pt-3 text-sm text-muted">
@@ -305,6 +312,7 @@ function IntakePanel({
   pending: boolean;
   run: (fn: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) => void;
 }) {
+  const clock = useClock();
   const [copied, setCopied] = useState(false);
   const url = candidate.intakeToken ? `${origin}/join/${candidate.intakeToken}` : null;
   const submitted = Boolean(candidate.intakeSubmittedAt);
@@ -315,7 +323,7 @@ function IntakePanel({
       <CardHeader className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-text">
         <span>Their details</span>
         {submitted ? (
-          <Badge tone="green">Received {formatDate(candidate.intakeSubmittedAt!)}</Badge>
+          <Badge tone="green">Received {clock.date(candidate.intakeSubmittedAt)}</Badge>
         ) : candidate.intakeToken ? (
           <Badge tone="amber">Link live</Badge>
         ) : null}
@@ -353,7 +361,7 @@ function IntakePanel({
               </Button>
             </div>
             <p className="text-xs text-subtle">
-              Valid until {candidate.intakeExpiresAt ? formatDate(candidate.intakeExpiresAt) : "—"}. Anyone holding
+              Valid until {candidate.intakeExpiresAt ? clock.date(candidate.intakeExpiresAt) : "—"}. Anyone holding
               this link can fill the form, so send it to them and nobody else.
             </p>
           </div>
@@ -560,7 +568,7 @@ function LettersPanel({
                 <Link href={`/people/letters/${l.id}`} className="min-w-0 text-sm text-text hover:underline">
                   <span className="block truncate">{l.subject}</span>
                   <span className="block text-xs text-subtle">
-                    {l.letterNumber} · {formatDate(l.issuedOn)}
+                    {l.letterNumber} · {formatCalendarDay(l.issuedOn)}
                   </span>
                 </Link>
                 <Badge tone={l.status === "ISSUED" ? "green" : l.status === "REVOKED" ? "red" : "default"}>
@@ -609,11 +617,14 @@ function LettersPanel({
 
 function ConvertPanel({ candidate }: { candidate: Candidate }) {
   const router = useRouter();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // The agreed day (it arrives as a Date, and String() of one is "Fri Oct 02 …"), or the workspace's today —
+  // UTC's was still yesterday before 05:30 in India.
   const [joinedOn, setJoinedOn] = useState(
-    candidate.expectedJoining ? String(candidate.expectedJoining).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    candidate.expectedJoining ? toKey(candidate.expectedJoining) : clock.today(),
   );
   const [employeeCode, setEmployeeCode] = useState("");
   const [probationMonths, setProbationMonths] = useState("6");

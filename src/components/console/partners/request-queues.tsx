@@ -6,11 +6,12 @@ import { ActionButton } from "@/components/console/kit/action-button";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { OutboundLink, externalHref } from "@/components/ui/outbound-link";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { ATTRIBUTION_SOURCE, DEAL_STATUS, PARTNER_APPLICATION_STATUS, PARTNER_KIND, PARTNER_REQUEST_KIND, PARTNER_REQUEST_STATUS, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { ApplicationQueueRow, AttributionQueueRow, ChangeQueueRow, DealQueueRow, ResellerQueueRow } from "@/lib/partners/console-data";
 import type { PayoutMask, TermsInput } from "@/lib/partners/types";
+import { consoleClock } from "@/lib/platform/console-clock";
+import type { Clock } from "@/lib/time/zone";
 import { ApplicationUpdateButton, DealDecisionButtons, RequestDecisionButtons, ResellerApproveButton } from "./decisions";
 import { AttributionFlags } from "./flags";
 import { countryName, partnerPath, territoriesText, workspacePath } from "./format";
@@ -21,7 +22,8 @@ import { ConvertApplicationButton, type PartnerFormOptions } from "./new-partner
  * and payout changes, new resellers, flagged attributions. Each row's decision is drawn only for the
  * roles its action allows — applications, profile changes and resellers MANAGERS; deals and
  * attributions SELLERS; payout changes PAYERS — and every action checks again. Payout changes show
- * masks only, the new beside the old; the details themselves never reach this page. Server-safe.
+ * masks only, the new beside the old; the details themselves never reach this page. Server
+ * components: their days are on the console's clock.
  */
 
 const muted = (text: string) => <span className="text-muted">{text}</span>;
@@ -34,11 +36,11 @@ function PartnerLink({ partner }: { partner: { slug: string; displayName: string
   );
 }
 
-function Decided({ at, by, note }: { at: Date | null; by: string | null; note: string | null }): ReactNode {
+function Decided({ at, by, note, clock }: { at: Date | null; by: string | null; note: string | null; clock: Clock }): ReactNode {
   if (!at) return null;
   return (
     <span className="block text-xs text-muted">
-      {`${dayMonthYear(at)}${by ? ` · ${by}` : ""}`}
+      {`${clock.date(at)}${by ? ` · ${by}` : ""}`}
       {note && <span className="block max-w-xs break-words">{`“${note}”`}</span>}
     </span>
   );
@@ -46,7 +48,8 @@ function Decided({ at, by, note }: { at: Date | null; by: string | null; note: s
 
 // ─── Applications (MANAGERS act) ─────────────────────────────────────────────────────────────────
 
-export function ApplicationsQueue({ rows, caps, options }: { rows: ApplicationQueueRow[]; caps: Caps; options: PartnerFormOptions | null }) {
+export async function ApplicationsQueue({ rows, caps, options }: { rows: ApplicationQueueRow[]; caps: Caps; options: PartnerFormOptions | null }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="Partner applications" minWidth={1100}>
       <THead>
@@ -101,7 +104,7 @@ export function ApplicationsQueue({ rows, caps, options }: { rows: ApplicationQu
                 </span>
               </Td>
               <Td nowrap muted>
-                {dayMonthYear(a.createdAt)}
+                {clock.date(a.createdAt)}
               </Td>
               {caps.managePartners && (
                 <RowActionsCell>
@@ -135,7 +138,8 @@ export function ApplicationsQueue({ rows, caps, options }: { rows: ApplicationQu
 
 // ─── Deals (SELLERS act) ─────────────────────────────────────────────────────────────────────────
 
-export function DealsQueue({ rows, caps }: { rows: DealQueueRow[]; caps: Caps }) {
+export async function DealsQueue({ rows, caps }: { rows: DealQueueRow[]; caps: Caps }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="Deal registrations" minWidth={1100}>
       <THead>
@@ -176,14 +180,14 @@ export function DealsQueue({ rows, caps }: { rows: DealQueueRow[]; caps: Caps })
               </Td>
               <Td muted={!d.expectedPlanName}>{d.expectedPlanName ?? "—"}</Td>
               <Td nowrap muted>
-                {`${dayMonthYear(d.createdAt)} · ${d.submittedByName}`}
+                {`${clock.date(d.createdAt)} · ${d.submittedByName}`}
               </Td>
               <Td>
                 <span className="inline-flex flex-col items-start gap-0.5">
                   <LabelPill map={DEAL_STATUS} value={d.status} />
                   {d.lapsed && <StatusPill tone="warning">Protection over</StatusPill>}
-                  {d.expiresAt && d.status === "APPROVED" && <span className="text-xs text-muted">{`until ${dayMonthYear(d.expiresAt)}`}</span>}
-                  <Decided at={d.decidedAt} by={d.decidedByName} note={d.decisionNote} />
+                  {d.expiresAt && d.status === "APPROVED" && <span className="text-xs text-muted">{`until ${clock.date(d.expiresAt)}`}</span>}
+                  <Decided at={d.decidedAt} by={d.decidedByName} note={d.decisionNote} clock={clock} />
                 </span>
               </Td>
               {caps.partnerMoney && (
@@ -211,7 +215,8 @@ function MaskLine({ mask }: { mask: PayoutMask | null }) {
   );
 }
 
-export function ChangesQueue({ rows, caps }: { rows: ChangeQueueRow[]; caps: Caps }) {
+export async function ChangesQueue({ rows, caps }: { rows: ChangeQueueRow[]; caps: Caps }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="Profile and payout changes" minWidth={1000}>
       <THead>
@@ -228,7 +233,7 @@ export function ChangesQueue({ rows, caps }: { rows: ChangeQueueRow[]; caps: Cap
             <Tr key={r.id}>
               <Td>
                 <PartnerLink partner={r.partner} />
-                <span className="block text-xs text-muted">{`${dayMonthYear(r.createdAt)} · ${r.requestedByName}`}</span>
+                <span className="block text-xs text-muted">{`${clock.date(r.createdAt)} · ${r.requestedByName}`}</span>
               </Td>
               <Td>
                 <LabelPill map={PARTNER_REQUEST_KIND} value={r.kind} />
@@ -267,7 +272,7 @@ export function ChangesQueue({ rows, caps }: { rows: ChangeQueueRow[]; caps: Cap
               </Td>
               <Td>
                 <LabelPill map={PARTNER_REQUEST_STATUS} value={r.status} />
-                <Decided at={r.decidedAt} by={r.decidedByName} note={r.decisionNote} />
+                <Decided at={r.decidedAt} by={r.decidedByName} note={r.decisionNote} clock={clock} />
               </Td>
               <RowActionsCell>
                 {r.status === "PENDING" && allowed ? (
@@ -286,16 +291,20 @@ export function ChangesQueue({ rows, caps }: { rows: ChangeQueueRow[]; caps: Cap
 
 // ─── New resellers (MANAGERS act) ────────────────────────────────────────────────────────────────
 
-export function ResellersQueue({
+export async function ResellersQueue({
   rows,
   caps,
   terms,
 }: {
   rows: ResellerQueueRow[];
   caps: Caps;
-  /** A new reseller's first terms: the plans a plan rate may name, and the programme's defaults. Null: this role doesn't approve. */
+  /**
+   * A new reseller's first terms: the plans a plan rate may name, and the programme's defaults; `todayKey`
+   * is today in India, as terms start on India days. Null: this role doesn't approve.
+   */
   terms: { plans: { key: string; name: string }[]; defaults: TermsInput; todayKey: string } | null;
 }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="New resellers" minWidth={1000}>
       <THead>
@@ -316,7 +325,7 @@ export function ResellersQueue({
             </Td>
             <Td>
               <PartnerLink partner={r.distributor} />
-              <span className="block text-xs text-muted">{`${dayMonthYear(r.createdAt)} · ${r.requestedByName}`}</span>
+              <span className="block text-xs text-muted">{`${clock.date(r.createdAt)} · ${r.requestedByName}`}</span>
             </Td>
             <Td>
               <span className="text-sm text-text">{r.proposal.contactName}</span>
@@ -331,7 +340,7 @@ export function ResellersQueue({
                     <PartnerLink partner={r.resultPartner} />
                   </span>
                 )}
-                <Decided at={r.decidedAt} by={r.decidedByName} note={r.decisionNote} />
+                <Decided at={r.decidedAt} by={r.decidedByName} note={r.decisionNote} clock={clock} />
               </span>
             </Td>
             {caps.managePartners && (
@@ -366,7 +375,8 @@ export function ResellersQueue({
 
 // ─── Flagged attributions (SELLERS act) ──────────────────────────────────────────────────────────
 
-export function AttributionsQueue({ rows, caps }: { rows: AttributionQueueRow[]; caps: Caps }) {
+export async function AttributionsQueue({ rows, caps }: { rows: AttributionQueueRow[]; caps: Caps }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="Flagged attributions" minWidth={1000}>
       <THead>
@@ -400,11 +410,11 @@ export function AttributionsQueue({ rows, caps }: { rows: AttributionQueueRow[];
               <LabelPill map={ATTRIBUTION_SOURCE} value={r.source} />
             </Td>
             <Td nowrap muted>
-              {dayMonthYear(r.since)}
+              {clock.date(r.since)}
             </Td>
             <Td>
               <AttributionFlags flags={r.flags} reviewed={r.reviewedAt !== null} />
-              {r.reviewedAt && <span className="block text-xs text-subtle">{`Reviewed ${dayMonthYear(r.reviewedAt)}${r.reviewedByName ? ` by ${r.reviewedByName}` : ""}`}</span>}
+              {r.reviewedAt && <span className="block text-xs text-subtle">{`Reviewed ${clock.date(r.reviewedAt)}${r.reviewedByName ? ` by ${r.reviewedByName}` : ""}`}</span>}
             </Td>
             {caps.partnerMoney && (
               <RowActionsCell>

@@ -11,6 +11,7 @@ import { bookingRate, settlementRateError } from "@/lib/ledger/posting";
 import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { hasEffectivePermission } from "@/actions/permission";
 import { ensureHeadOffice } from "@/lib/branches/identity";
+import { calendarDayRange } from "@/lib/time/zone";
 import {
   agingBucket,
   daysOverdue,
@@ -270,11 +271,9 @@ export async function payablesAging(params?: { search?: string }) {
 /** A vendor's account: bills credit what we owe, payments out debit it back down. */
 export async function vendorStatement(companyId: string, opts?: { from?: string; to?: string }) {
   await requireModuleUser("payables");
-  const range = {
-    ...(opts?.from ? { gte: new Date(opts.from) } : {}),
-    ...(opts?.to ? { lte: new Date(opts.to) } : {}),
-  };
-  const dateFilter = Object.keys(range).length > 0 ? range : undefined;
+  // A bill's and a payment's dates are typed days held at UTC midnight: From and To are those days,
+  // both ends in.
+  const dateFilter = calendarDayRange(opts?.from, opts?.to) ?? undefined;
 
   const [company, bills, payments] = await Promise.all([
     db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true } }),

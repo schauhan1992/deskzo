@@ -5,12 +5,13 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { Badge, Card } from "@/components/ui/card";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { formatCurrency } from "@/lib/utils";
-import { istTodayKey } from "@/lib/orders/handoff-rules";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 
-const DAY = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
-const dayLabel = (key: string) => DAY.format(new Date(`${key}T00:00:00Z`));
+/** "1 Apr 2026" for a `yyyy-mm-dd` — the day itself, in the clock's words. */
+const dayLabel = (key: string) => formatCalendarDay(key);
 
-/** The financial year's first day in India — 1 April — for the default range. */
+/** The financial year's first day — 1 April — for the default range. */
 function fyStartKey(todayKey: string) {
   const [y, m] = todayKey.split("-").map(Number);
   return `${m >= 4 ? y : y - 1}-04-01`;
@@ -26,7 +27,8 @@ export default async function RebatesPage({ searchParams }: { searchParams: Prom
   if (!enabled) return <ModuleDisabledNotice moduleKey="orders" />;
 
   const params = await searchParams;
-  const today = istTodayKey(new Date());
+  // Today on the workspace's calendar, as the report reads its days.
+  const today = (await workspaceClock()).today();
   const from = params.from || fyStartKey(today);
   const to = params.to || today;
   const report = await rebatesReport({ from, to });

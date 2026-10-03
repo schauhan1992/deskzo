@@ -1,8 +1,9 @@
 import type { AiProvider } from "@prisma/client";
 import { db } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
-import { istDateParts } from "@/lib/india-time";
 import { currentTenant } from "@/lib/tenancy/resolve";
+import { workspaceClock } from "@/lib/time/workspace";
+import { indiaClock, type Clock } from "@/lib/time/zone";
 
 /**
  * The copilot's configuration and the daily allowance. Server-only: this is where the provider keys
@@ -58,27 +59,32 @@ export async function providerKey(provider: AiProvider): Promise<string | null> 
   }
 }
 
-/** Today in India, as the calendar day a `@db.Date` column holds. */
-export function usageDay(now = new Date()): Date {
-  const { year, month, day } = istDateParts(now);
-  // `month` is 0-based, as Date has it.
-  return new Date(Date.UTC(year, month, day));
+/**
+ * Today on a clock, as the calendar day a `@db.Date` column holds. A person's allowance runs on the
+ * workspace's day — it resets at the workspace's midnight — so the copilot passes the workspace's clock.
+ * The platform's daily snapshots (revenue, usage) pass the console's (`consoleClock`). India's is only
+ * the default, for a caller with no clock to hand.
+ */
+export function usageDay(now = new Date(), clock: Clock = indiaClock): Date {
+  return clock.calendarDate(now);
 }
 
 export async function usedToday(userId: string, now = new Date()): Promise<number> {
-  const u = await db.copilotUsage.findUnique({ where: { userId_day: { userId, day: usageDay(now) } } });
+  const day = usageDay(now, await workspaceClock());
+  const u = await db.copilotUsage.findUnique({ where: { userId_day: { userId, day } } });
   return u ? u.inputTokens + u.outputTokens : 0;
 }
 
-/** The first day of this month in India, as a `@db.Date` column holds it. */
-export function usageMonthStart(now = new Date()): Date {
-  const { year, month } = istDateParts(now);
+/** The first day of this month on a clock — the workspace's for its allowance — as a `@db.Date` column holds it. */
+export function usageMonthStart(now = new Date(), clock: Clock = indiaClock): Date {
+  const { year, month } = clock.parts(now);
   return new Date(Date.UTC(year, month, 1));
 }
 
 /** Tokens the whole workspace has used this month, everybody together — what the plan allows is counted in. */
 export async function usedThisMonth(now = new Date()): Promise<number> {
-  const sum = await db.copilotUsage.aggregate({ where: { day: { gte: usageMonthStart(now) } }, _sum: { inputTokens: true, outputTokens: true } });
+  const from = usageMonthStart(now, await workspaceClock());
+  const sum = await db.copilotUsage.aggregate({ where: { day: { gte: from } }, _sum: { inputTokens: true, outputTokens: true } });
   return (sum._sum.inputTokens ?? 0) + (sum._sum.outputTokens ?? 0);
 }
 
@@ -95,7 +101,7 @@ export async function planStopsCopilot(now = new Date()): Promise<string | null>
 }
 
 export async function recordUsage(userId: string, usage: { input: number; output: number }, now = new Date()) {
-  const day = usageDay(now);
+  const day = usageDay(now, await workspaceClock());
   await db.copilotUsage.upsert({
     where: { userId_day: { userId, day } },
     create: { userId, day, inputTokens: usage.input, outputTokens: usage.output, requests: 1 },

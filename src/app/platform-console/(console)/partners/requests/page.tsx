@@ -7,7 +7,7 @@ import { Panel } from "@/components/console/kit/panel";
 import { PARTNERS_PATH, REQUESTS_PATH } from "@/components/console/partners/format";
 import { LinkPager } from "@/components/console/partners/pager";
 import { ApplicationsQueue, AttributionsQueue, ChangesQueue, DealsQueue, ResellersQueue } from "@/components/console/partners/request-queues";
-import { istDayKey, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { withParams, type RawParams } from "@/lib/console-shared/params";
 import { REQUEST_TABS, parseRequestTab, type RequestTab } from "@/lib/console-shared/partner-params";
 import { SELLERS, capsFor } from "@/lib/console-shared/roles";
@@ -15,6 +15,7 @@ import { parseRequestsFilters, partnerDirectory, requestsBoard } from "@/lib/par
 import { DEFAULT_TERMS, TAX_ID_KINDS } from "@/lib/partners/types";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { plansList } from "@/lib/platform/console-data";
+import { indiaClock } from "@/lib/time/zone";
 
 export const metadata: Metadata = { title: "Partner requests" };
 
@@ -55,7 +56,8 @@ export default async function ConsolePartnerRequestsPage({ searchParams }: PageP
     makesPartners ? plansList() : Promise.resolve([]),
     caps.managePartners && tab === "applications" ? partnerDirectory({ kind: "DISTRIBUTOR", page: 1 }, false) : Promise.resolve(null),
   ]);
-  const todayKey = istDayKey(board.asOf);
+  // The earliest day a new partner's terms may start: India's today, as the server checks it (src/lib/partners/terms.ts).
+  const todayKey = indiaClock.dateKey(board.asOf);
   const offered = plans.filter((p) => p.active && p.kind !== "INTERNAL").map((p) => ({ key: p.key, name: p.name }));
   const all = board.show === "all";
   const tabHref = (key: RequestTab) => withParams(REQUESTS_PATH, {}, { tab: key === "applications" ? null : key, show: all ? "all" : null });

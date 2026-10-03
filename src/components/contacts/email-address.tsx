@@ -18,7 +18,7 @@ import { markEmailConfirmed, verifyContactEmail } from "@/actions/email-verifica
 import { emailCheckState, emailMethodLabels, emailStatusLabels } from "@/lib/email-verification";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 import { cn } from "@/lib/utils";
 
 export type VerifiableContact = {
@@ -96,6 +96,7 @@ export function EmailCheckBadge({ contact }: { contact: VerifiableContact }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const clock = useClock();
 
   useEffect(() => {
     if (!open) return;
@@ -175,7 +176,7 @@ export function EmailCheckBadge({ contact }: { contact: VerifiableContact }) {
 
           {contact.emailCheckedAt && contact.emailCheckMethod && (
             <p className="text-[11px] text-subtle">
-              {emailMethodLabels[contact.emailCheckMethod]} · {formatDateTime(contact.emailCheckedAt)}
+              {emailMethodLabels[contact.emailCheckMethod]} · {clock.dateTimeShort(contact.emailCheckedAt)}
             </p>
           )}
 

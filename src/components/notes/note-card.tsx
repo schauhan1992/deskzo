@@ -4,8 +4,10 @@ import type { NoteListItem } from "@/actions/note";
 import type { NoteColor } from "@/lib/validation/note";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
 import { Badge } from "@/components/ui/card";
-import { cn, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { cn } from "@/lib/utils";
 import { formatTicketId } from "@/lib/tickets";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The sticky-note palette, defined once here and reused by the dialog's swatches.
@@ -107,15 +109,14 @@ function AttachedRecord({ note }: { note: NoteListItem }) {
  * exactly like a board with no reminders on it — which is the state somebody checks when they are
  * wondering whether they set one at all.
  */
-function formatReminder(at: Date): string {
-  const today = new Date();
-  const sameDay = at.toDateString() === today.toDateString();
-  const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  if (sameDay) return time;
-  return `${at.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`;
+function formatReminder(at: Date, clock: Clock): string {
+  const time = clock.time(at);
+  if (clock.dateKey(at) === clock.today()) return time;
+  return `${clock.dayMonth(at)}, ${time}`;
 }
 
 function ReminderBadge({ remindAt, due }: { remindAt: Date | null; due: boolean }) {
+  const clock = useClock();
   if (!remindAt) return null;
   return (
     <span
@@ -123,10 +124,10 @@ function ReminderBadge({ remindAt, due }: { remindAt: Date | null; due: boolean 
         "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px]",
         due ? "bg-warning-bg text-warning" : "text-muted",
       )}
-      title={remindAt.toLocaleString()}
+      title={clock.dateTime(remindAt)}
     >
       <Bell className="h-3 w-3 shrink-0" />
-      {due ? "Due" : formatReminder(remindAt)}
+      {due ? "Due" : formatReminder(remindAt, clock)}
     </span>
   );
 }
@@ -148,6 +149,7 @@ export function NoteCard({
   busy?: boolean;
   className?: string;
 }) {
+  const clock = useClock();
   const archived = note.archivedAt !== null;
   const attached = note.company ?? note.lead ?? note.ticket;
 
@@ -210,7 +212,7 @@ export function NoteCard({
             <span aria-hidden className="text-subtle">·</span>
           </>
         )}
-        <span>{formatDate(note.updatedAt)}</span>
+        <span>{clock.date(note.updatedAt)}</span>
       </div>
     </article>
   );

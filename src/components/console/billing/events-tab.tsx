@@ -17,17 +17,18 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { SidePane } from "@/components/ui/side-pane";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { EVENT_STATE, gatewayLabel } from "@/lib/console-shared/labels";
 import { parseEventFilters } from "@/lib/console-shared/params";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { BillingEventDetail, BillingEventRow, BillingEventsPage } from "@/lib/platform/billing-events";
 import { cn } from "@/lib/utils";
-import { ListPager, istStamp, rangeLabel } from "./invoices-tab";
+import { ListPager, rangeLabel } from "./invoices-tab";
 
 /**
  * The Billing hub's Events tab: what the gateways' webhooks said, and what became of each one.
@@ -57,6 +58,7 @@ function payloadText(payload: unknown): string {
 }
 
 export function EventsTable({ list, caps }: { list: BillingEventsPage; caps: Caps }) {
+  const clock = useClock();
   const searchParams = useSearchParams();
   const params: Record<string, string> = {};
   for (const [key, value] of searchParams.entries()) if (key !== "page" && value) params[key] = value;
@@ -229,10 +231,10 @@ export function EventsTable({ list, caps }: { list: BillingEventsPage; caps: Cap
                     <button
                       type="button"
                       onClick={() => openPane(row)}
-                      aria-label={`Open the ${row.type} event from ${gatewayLabel(row.gateway)}, received ${istStamp(row.receivedAt)}`}
+                      aria-label={`Open the ${row.type} event from ${gatewayLabel(row.gateway)}, received ${clock.dateTimeShort(row.receivedAt)}`}
                       className="rounded-base text-left font-medium text-text after:absolute after:inset-0 after:content-[''] hover:text-brand"
                     >
-                      <time dateTime={row.receivedAt.toISOString()}>{istStamp(row.receivedAt)}</time>
+                      <time dateTime={row.receivedAt.toISOString()}>{clock.dateTimeShort(row.receivedAt)}</time>
                     </button>
                   </Td>
                   <Td nowrap>{gatewayLabel(row.gateway)}</Td>
@@ -261,7 +263,7 @@ export function EventsTable({ list, caps }: { list: BillingEventsPage; caps: Cap
                     )}
                   </Td>
                   <RowActionsCell>
-                    {unprocessed(row) && <IconButton icon={RotateCcw} label={`Replay the ${row.type} event received ${istStamp(row.receivedAt)}`} onClick={() => askReplay(row)} />}
+                    {unprocessed(row) && <IconButton icon={RotateCcw} label={`Replay the ${row.type} event received ${clock.dateTimeShort(row.receivedAt)}`} onClick={() => askReplay(row)} />}
                   </RowActionsCell>
                 </Tr>
               ))}
@@ -276,7 +278,7 @@ export function EventsTable({ list, caps }: { list: BillingEventsPage; caps: Cap
           <div className="space-y-5 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <LabelPill map={EVENT_STATE} value={shown && shown.processedAt ? "processed" : openRow.state} />
-              <span className="text-muted">{`${gatewayLabel(openRow.gateway)} · received ${dayMonthYear(openRow.receivedAt)}`}</span>
+              <span className="text-muted">{`${gatewayLabel(openRow.gateway)} · received ${clock.date(openRow.receivedAt)}`}</span>
             </div>
 
             <DefinitionList
@@ -293,8 +295,8 @@ export function EventsTable({ list, caps }: { list: BillingEventsPage; caps: Cap
                     <span className="text-muted">Not matched to a workspace</span>
                   ),
                 },
-                { term: "Received", value: istStamp(openRow.receivedAt) },
-                { term: "Processed", value: shown?.processedAt ? istStamp(shown.processedAt) : openRow.processedAt ? istStamp(openRow.processedAt) : "Not yet" },
+                { term: "Received", value: clock.dateTimeShort(openRow.receivedAt) },
+                { term: "Processed", value: shown?.processedAt ? clock.dateTimeShort(shown.processedAt) : openRow.processedAt ? clock.dateTimeShort(openRow.processedAt) : "Not yet" },
               ]}
             />
 
@@ -383,7 +385,7 @@ export function EventsTable({ list, caps }: { list: BillingEventsPage; caps: Cap
                 { label: "Event", value: <span className="font-mono text-xs">{replayTarget.type}</span> },
                 { label: "Gateway", value: gatewayLabel(replayTarget.gateway) },
                 { label: "Workspace", value: replayTarget.tenant?.slug ?? "Not matched yet" },
-                { label: "Received", value: istStamp(replayTarget.receivedAt) },
+                { label: "Received", value: clock.dateTimeShort(replayTarget.receivedAt) },
                 ...(replayTarget.error ? [{ label: "Last error", value: <span className="block max-w-64 truncate" title={replayTarget.error}>{replayTarget.error}</span>, tone: "danger" as const }] : []),
               ]}
             />

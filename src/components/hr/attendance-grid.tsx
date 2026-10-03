@@ -10,6 +10,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
+import { useClock } from "@/components/time/clock-provider";
 import { attendanceStatusLabels, attendanceStatusValues } from "@/lib/validation/hr";
 
 type Month = Awaited<ReturnType<typeof attendanceMonth>>;
@@ -142,6 +143,7 @@ export function AttendanceGrid({
 /** Today's clock, for the signed-in user. */
 function ClockCard({ today }: { today: TodayRow }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -157,8 +159,8 @@ function ClockCard({ today }: { today: TodayRow }) {
     });
   }
 
-  const time = (value: Date | string | null) =>
-    value ? new Date(value).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : null;
+  // The workspace's time of day, not the browser's.
+  const time = (value: Date | string | null) => (value ? clock.time(value) : null);
 
   return (
     <Card>

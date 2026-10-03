@@ -8,7 +8,7 @@ import { ARCHIVE_RETENTION_DAYS } from "@/lib/vault/policy";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * Deleted logins, and the clock they are on.
@@ -23,6 +23,7 @@ import { formatDate } from "@/lib/utils";
  */
 export function VaultArchive({ rows }: { rows: ArchivedRow[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [busy, setBusy] = useState<string | null>(null);
   const [destroying, setDestroying] = useState<ArchivedRow | null>(null);
 
@@ -67,7 +68,7 @@ export function VaultArchive({ rows }: { rows: ArchivedRow[] }) {
 
               <div className="mt-1 space-y-0.5 text-xs text-muted">
                 <div>
-                  Was {r.ownerName}&apos;s · deleted {formatDate(new Date(r.archivedAt))}
+                  Was {r.ownerName}&apos;s · deleted {clock.date(r.archivedAt)}
                   {r.archivedByName ? ` by ${r.archivedByName}` : ""}
                 </div>
                 {r.archiveReason ? (

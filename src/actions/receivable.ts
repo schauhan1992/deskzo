@@ -27,6 +27,8 @@ import {
   type AgingBucket,
 } from "@/lib/receivables";
 import { applyCreditNoteSchema, recordInvoicePaymentSchema } from "@/lib/validation/receivable";
+import { calendarDateOf } from "@/lib/india-time";
+import { calendarDayRange } from "@/lib/time/zone";
 import type { ActionResult } from "@/actions/company";
 
 /** Everything needed to settle an invoice, in one shape the whole module reads. */
@@ -606,9 +608,13 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
     })),
   ];
 
+  // An invoice's and a payment's dates are typed days held at UTC midnight: From and To are compared
+  // with the days they hold, both ends in. They were the server's own midnights.
+  const days = calendarDayRange(opts?.from, opts?.to);
   const filtered = entries.filter((e) => {
-    if (opts?.from && e.date < new Date(`${opts.from}T00:00:00`)) return false;
-    if (opts?.to && e.date > new Date(`${opts.to}T23:59:59.999`)) return false;
+    const day = calendarDateOf(e.date).getTime();
+    if (days?.gte && day < days.gte.getTime()) return false;
+    if (days?.lte && day > days.lte.getTime()) return false;
     return true;
   });
 

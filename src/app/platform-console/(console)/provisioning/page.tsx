@@ -199,7 +199,7 @@ function SetupsEmpty({ board, filters, clearHref }: { board: ProvisioningBoard; 
   return <EmptyState icon={filters.filter === "attention" ? <CircleCheck className="h-5 w-5" /> : undefined} title={copy.title} body={copy.body} variant="filtered" clearHref={clearHref} />;
 }
 
-/** Fourteen of India's days of finished setups, by how they ended. */
+/** Fourteen of the console's days of finished setups, by how they ended. */
 function SetupsChart({ byDay }: { byDay: ProvisioningBoard["byDay"] }) {
   const done = byDay.reduce((sum, d) => sum + d.succeeded, 0);
   const failed = byDay.reduce((sum, d) => sum + d.failed, 0);

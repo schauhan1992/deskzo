@@ -10,8 +10,8 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { formatIstDate } from "@/lib/india-time";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { closableYears } from "@/lib/ledger/period";
 
 type Status = Awaited<ReturnType<typeof getBooksStatus>>;
@@ -79,7 +79,7 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
             Period lock
           </span>
           {status.lockedUntil ? (
-            <Badge tone="green">Closed to {formatDate(status.lockedUntil)}</Badge>
+            <Badge tone="green">Closed to {formatCalendarDay(status.lockedUntil)}</Badge>
           ) : (
             <Badge tone="amber">Nothing is locked</Badge>
           )}
@@ -88,13 +88,14 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
         <CardContent className="space-y-4">
           {status.lockedUntil ? (
             <p className="text-sm text-muted">
-              Nothing dated on or before <span className="text-text">{formatDate(status.lockedUntil)}</span> can be
+              Nothing dated on or before <span className="text-text">{formatCalendarDay(status.lockedUntil)}</span> can be
               posted, reversed or corrected. To fix something in a closed period, post the correction in an open one —
               which is what an accountant would do on paper.
               {status.lockedBy && (
                 <span className="block text-xs text-subtle">
                   Set by {status.lockedBy}
-                  {status.lockUpdatedAt && ` on ${formatDate(status.lockUpdatedAt)}`}
+                  {/* India's day, as everything else on the books is. */}
+                  {status.lockUpdatedAt && ` on ${indiaClock.date(status.lockUpdatedAt)}`}
                   {status.lockNote && ` — ${status.lockNote}`}
                 </span>
               )}
@@ -152,7 +153,7 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
 
           {isAdmin && reopenedByLock.length > 0 && (
             <p className="rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
-              Locking to {formatIstDate(`${lockDate}T00:00:00.000Z`)} reopens {listOf(reopenedByLock.map((m) => m.label))} on
+              Locking to {formatCalendarDay(lockDate)} reopens {listOf(reopenedByLock.map((m) => m.label))} on
               the{" "}
               <Link href="/accounting/close" className="font-medium underline underline-offset-2">
                 month-end close
@@ -202,7 +203,7 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
                     </Link>
                   )}
                   <span className="text-xs text-subtle">
-                    Closed by {close.closedBy.name} on {formatDate(close.closedAt)}
+                    Closed by {close.closedBy.name} on {indiaClock.date(close.closedAt)}
                   </span>
                   {isAdmin && (
                     <button
@@ -234,7 +235,7 @@ export function BooksManager({ status, isAdmin }: { status: Status; isAdmin: boo
           {closable.length === 0 && status.closes.length === 0 && (
             <p className="text-sm text-subtle">
               No finished year is waiting to be closed. The current year, {status.currentYear.label}, can be closed
-              after {formatDate(status.currentYear.to)}.
+              after {formatCalendarDay(status.currentYear.to)}.
             </p>
           )}
         </CardContent>

@@ -9,7 +9,8 @@ import { STATE_LABELS, type ReconcileState } from "@/lib/reconcile/match";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The exceptions, and clearing one.
@@ -42,6 +43,7 @@ export type ExceptionRow = {
 
 export function ExceptionList({ rows }: { rows: ExceptionRow[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string | null>(null);
@@ -164,7 +166,7 @@ export function ExceptionList({ rows }: { rows: ExceptionRow[] }) {
                   {row.resolvedAt ? (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-base bg-surface-sunken px-3 py-2">
                       <p className="text-xs text-muted">
-                        <span className="font-medium text-text">Cleared</span> {formatDateTime(row.resolvedAt)}
+                        <span className="font-medium text-text">Cleared</span> {clock.dateTimeShort(row.resolvedAt)}
                         {row.resolvedByName ? ` by ${row.resolvedByName}` : ""} — {row.resolutionNote}
                       </p>
                       <Button variant="ghost" size="sm" onClick={() => reopen(row.id)} disabled={busy === row.id}>

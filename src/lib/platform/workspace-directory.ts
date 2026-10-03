@@ -1,11 +1,11 @@
 import Papa from "papaparse";
 import type { Prisma, SubscriptionStatus } from "@deskzo/control-client";
 import { billingStandings, standingDate, type Standing } from "@/lib/billing/lifecycle";
-import { csvFilename, daysBetween, istDayKey } from "@/lib/console-shared/format";
+import { csvFilename, daysBetween } from "@/lib/console-shared/format";
 import { STANDING_KIND_LABEL, TENANT_STATUS, actorLabel } from "@/lib/console-shared/labels";
 import type { DirectoryFilters, DirectorySort, DirectoryView } from "@/lib/console-shared/params";
 import type { CsvExport, StandingKind, TenantStatusKey } from "@/lib/console-shared/types";
-import { endOfIndianDay, istDateTimeInput, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { EXPORT_CAPS, staffNameMap } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
@@ -15,6 +15,7 @@ import { behindBy, workspaceMigrationNames } from "@/lib/platform/schema-info";
 import { latestUsage, type LatestUsage } from "@/lib/platform/usage";
 import { protocolFor } from "@/lib/tenancy/host";
 import { subdomainHost } from "@/lib/tenancy/registry";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The console's list of workspaces (/workspaces): its filters and views, the counts beside them, the
@@ -190,10 +191,9 @@ async function directoryWhere(f: DirectoryFilters, latest: string | null, now: D
     });
     and.push({ id: { in: grants.map((g) => g.tenantId) } });
   }
-  const from = f.from ? startOfIndianDay(f.from) : null;
-  const to = f.to ? endOfIndianDay(f.to) : null;
-  if (from) and.push({ createdAt: { gte: from } });
-  if (to) and.push({ createdAt: { lt: to } });
+  // Made within whole days on the console's clock, half-open.
+  const createdAt = f.from || f.to ? (await consoleClock()).dayRange(f.from, f.to) : null;
+  if (createdAt) and.push({ createdAt });
   if (f.ids?.length) and.push({ id: { in: f.ids } });
   if (f.q) and.push(searchWhere(f.q));
   return { AND: and };
@@ -467,7 +467,8 @@ export async function directoryFacets(now = new Date()): Promise<DirectoryFacets
   };
 }
 
-const CSV_FIELDS = [
+/** The columns: dates are on the console's clock, and their headings say which zone. */
+const csvFields = (clock: Clock) => [
   "Slug",
   "Name",
   "Status",
@@ -475,13 +476,13 @@ const CSV_FIELDS = [
   "Country",
   "Plans",
   "Standing",
-  "Standing date (IST)",
+  `Standing date (${clock.zone})`,
   "Seats used",
   "Seat limit",
   "Owner email",
   "Billing email",
   "Tax ID",
-  "Created (IST)",
+  `Created (${clock.zone})`,
   "Schema current",
   "Tags",
 ];
@@ -494,6 +495,7 @@ const CSV_FIELDS = [
 export async function workspacesCsv(f: DirectoryFilters, now = new Date()): Promise<CsvExport> {
   const names = workspaceMigrationNames();
   const latest = latestOf(names);
+  const clock = await consoleClock();
   const where = await directoryWhere(f, latest, now);
   const cap = EXPORT_CAPS.workspaces;
   const tooMany = () => new ConsoleRefused(`Narrow it down — at most ${new Intl.NumberFormat("en-IN").format(cap)} rows.`);
@@ -521,18 +523,18 @@ export async function workspacesCsv(f: DirectoryFilters, now = new Date()): Prom
     r.country,
     r.plans.map((p) => (p.quantity > 1 ? `${p.name} ×${p.quantity}` : p.name)).join("; "),
     STANDING_KIND_LABEL[r.standing.kind],
-    r.standing.at ? istDayKey(r.standing.at) : "",
+    r.standing.at ? clock.dateKey(r.standing.at) : "",
     r.seats ? r.seats.used : "",
     r.seats?.limit ?? "",
     r.ownerEmail ?? "",
     r.billingEmail ?? "",
     taxIdOf.get(r.id) ?? "",
-    istDateTimeInput(r.createdAt).replace("T", " "),
+    clock.input(r.createdAt).replace("T", " "),
     latest && r.schemaVersion === latest ? "yes" : "no",
     r.tags.join("; "),
   ]);
-  const csv = Papa.unparse({ fields: CSV_FIELDS, data }, { escapeFormulae: true });
-  return { filename: csvFilename("workspaces", now), csv, rows: rows.length };
+  const csv = Papa.unparse({ fields: csvFields(clock), data }, { escapeFormulae: true });
+  return { filename: csvFilename("workspaces", now, clock), csv, rows: rows.length };
 }
 
 type ClosedRow = { id: string; slug: string; name: string; deprovisionedAt: Date; keysKept: boolean };

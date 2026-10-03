@@ -6,7 +6,8 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
-import { dateRangeFilter } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { pageSlice } from "@/lib/pagination";
 import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -906,8 +907,13 @@ async function companyCustom(userId: string, params?: { search?: string; customF
   return { search: search as Prisma.CompanyWhereInput[], filters: filters as Prisma.CompanyWhereInput[] };
 }
 
-function companyListWhere(params?: CompanyListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
-  const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
+/**
+ * The lists' Created From and To are the workspace's days, half-open, on its clock. They were the
+ * server's: on a server in UTC a company added at 1 am in India was filed under the day before, and
+ * one added late on the To day fell outside it.
+ */
+function companyListWhere(clock: Clock, params?: CompanyListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
+  const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: params?.relationshipType ?? "CLIENT",
     // A reseller's end customer is theirs to call, not ours — keep them out of the sourcing pool.
@@ -955,7 +961,7 @@ const companyListInclude = {
 export async function listCompanies(params?: CompanyListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...companyListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { ...companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -966,7 +972,7 @@ export async function listCompaniesPaged(params: CompanyListParams & { page: num
   const user = await requireUser();
   // One `where` for both queries below: a pager whose count outran its rows would offer page 9 of
   // a list that ends at page 2.
-  const where = { ...companyListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { ...companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1000,8 +1006,8 @@ type CustomerListParams = {
   customFilters?: CustomFilterInputs;
 };
 
-function customerListWhere(params?: CustomerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
-  const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
+function customerListWhere(clock: Clock, params?: CustomerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
+  const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: "CLIENT",
     // Resellers have their own module, and their end customers are never our customer — the
@@ -1024,7 +1030,7 @@ function customerListWhere(params?: CustomerListParams, custom: CompanyCustom = 
 export async function listCustomers(params?: CustomerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...customerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { ...customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -1032,7 +1038,7 @@ export async function listCustomers(params?: CustomerListParams) {
 
 export async function listCustomersPaged(params: CustomerListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...customerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { ...customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1064,8 +1070,8 @@ type VendorListParams = {
   customFilters?: CustomFilterInputs;
 };
 
-function vendorListWhere(params?: VendorListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
-  const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
+function vendorListWhere(clock: Clock, params?: VendorListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
+  const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: params?.relationshipType ?? { in: vendorRelationshipTypeValues },
     ...(params?.vendorStatus ? { vendorStatus: params.vendorStatus } : {}),
@@ -1111,7 +1117,7 @@ const vendorListInclude = {
 export async function listVendors(params?: VendorListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...vendorListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: vendorListInclude,
   });
@@ -1120,7 +1126,7 @@ export async function listVendors(params?: VendorListParams) {
 /** One page of the Vendors / Commission Parties lists. */
 export async function listVendorsPaged(params: VendorListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...vendorListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1243,8 +1249,8 @@ type ResellerListParams = {
   customFilters?: CustomFilterInputs;
 };
 
-function resellerListWhere(params?: ResellerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
-  const createdAt = dateRangeFilter(params?.createdFrom, params?.createdTo);
+function resellerListWhere(clock: Clock, params?: ResellerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
+  const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
   return {
     relationshipType: "RESELLER",
     ...companyNarrowing(params?.search, custom),
@@ -1276,7 +1282,7 @@ const resellerListInclude = {
 export async function listResellers(params?: ResellerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...resellerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { ...resellerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: resellerListInclude,
   });
@@ -1286,7 +1292,7 @@ export async function listResellersPaged(params: ResellerListParams & { page: nu
   const user = await requireUser();
   // The end-customer tally below is built from this same `where`, so the scope reaches it for free —
   // it counts end customers of the resellers on screen rather than of every reseller in the business.
-  const where = { ...resellerListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { ...resellerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
   const [rows, total, endCustomerTotal] = await Promise.all([
     db.company.findMany({
       where,
@@ -1781,6 +1787,6 @@ export async function countVendorsOnboarding(params?: VendorListParams) {
   // Scoped to match `listVendorsPaged`, or the badge would advertise a number of vendors larger
   // than the list underneath it can account for.
   return db.company.count({
-    where: { ...vendorListWhere(params, await companyCustom(user.id, params)), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
+    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
   });
 }

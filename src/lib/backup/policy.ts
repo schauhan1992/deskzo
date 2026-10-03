@@ -25,7 +25,14 @@ export const DEFAULT_KEEP_MINIMUM = 3;
 /** A warning appears once no successful backup has been taken for this long. */
 export const STALE_AFTER_HOURS = 36;
 
-/** `deskzo-2026-09-20-1432.dump` — sortable, and obvious what it is a year later. */
+/**
+ * `deskzo-2026-09-20-1432.dump` — sortable, and obvious what it is a year later.
+ *
+ * Stamped in the server's own time: a file on the server's disk, read in its folder listings. The
+ * schedule that takes it runs on the workspace's clock (src/lib/backup/schedule.ts), so on a server
+ * in another zone the stamp and the scheduled time differ — the stamp names the file, it is not the
+ * schedule.
+ */
 export function backupFilename(at: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return [

@@ -6,6 +6,7 @@ import { PinDirectoryCard, WorldPlacesCard, isSyncing } from "@/components/conso
 import { plural } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { readPinDirectory, readWorldPlaces } from "@/lib/platform/reference-sync";
 
@@ -27,7 +28,7 @@ const REFRESH_SECONDS = 5;
 export default async function ConsoleReferencePage() {
   const staff = await consoleStaff(PAGE_ROLES.reference);
   const caps = capsFor(staff.role);
-  const [pin, world] = await Promise.all([readPinDirectory(), readWorldPlaces()]);
+  const [pin, world, clock] = await Promise.all([readPinDirectory(), readWorldPlaces(), consoleClock()]);
 
   // One poll for the page, however many syncs run: each card would otherwise start its own.
   const running = isSyncing(pin.sync) || isSyncing(world.sync);
@@ -46,10 +47,10 @@ export default async function ConsoleReferencePage() {
 
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <div className="min-w-0 space-y-6">
-          <PinDirectoryCard pin={pin} caps={caps} />
+          <PinDirectoryCard pin={pin} caps={caps} clock={clock} />
           {unresolved.length > 0 && <UnresolvedStates rows={unresolved} />}
         </div>
-        <WorldPlacesCard world={world} caps={caps} />
+        <WorldPlacesCard world={world} caps={caps} clock={clock} />
       </div>
     </>
   );

@@ -5,7 +5,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ListUploader } from "@/components/marketing/list-uploader";
 import { TOPICS } from "@/lib/marketing/topics";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export const metadata = { title: "Mailing lists" };
 
@@ -15,7 +15,7 @@ export const metadata = { title: "Mailing lists" };
  */
 export default async function MailingListsPage() {
   if (!(await isModuleEnabled("marketing"))) return <ModuleDisabledNotice moduleKey="marketing" />;
-  const [lists, canManage] = await Promise.all([listMarketingLists(), viewerHas("marketing.manage")]);
+  const [lists, canManage, clock] = await Promise.all([listMarketingLists(), viewerHas("marketing.manage"), workspaceClock()]);
   const topicLabel = (t: string) => TOPICS.find((x) => x.key === t)?.label ?? t;
 
   return (
@@ -59,7 +59,7 @@ export default async function MailingListsPage() {
                 <td className="px-4 py-2.5 text-xs text-muted">{l.topics.map(topicLabel).join(", ")}</td>
                 <td className="max-w-md px-4 py-2.5 text-xs text-muted">{l.consentNote}</td>
                 <td className="px-4 py-2.5 text-xs text-muted">
-                  {formatIstDateTime(l.createdAt)}
+                  {clock.dateTime(l.createdAt)}
                   <div className="text-subtle">by {l.createdBy.name}</div>
                 </td>
               </tr>

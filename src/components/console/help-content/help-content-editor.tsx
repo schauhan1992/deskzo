@@ -10,15 +10,16 @@ import { ImpactList } from "@/components/console/kit/impact";
 import { InsetBlock, Panel } from "@/components/console/kit/panel";
 import { StatusPill } from "@/components/console/kit/status";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { dayMonthYear, plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import { COUNTRIES } from "@/lib/geo/countries";
 import { checkLink, youtubeId } from "@/lib/help/links";
-import { parseIstDateTime } from "@/lib/india-time";
 import type { PublicationState } from "@/lib/platform/help-content";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 import {
   KIND_TITLE,
@@ -52,7 +53,8 @@ import { useReportUnsaved } from "./help-verb-dialog";
  * T2 confirmation saying what goes where and when; one that shows in every workspace also needs
  * "publish" typed unless an owner saves it, which the server checks again. The checks here mirror
  * the save's (src/actions/platform/console-help.ts) only to point at the field early; the save's
- * refusal is what is shown. Times are India wall-clock `datetime-local` values.
+ * refusal is what is shown. Times are `datetime-local` values on the console's clock (Settings › Time
+ * zone), as the server reads them.
  */
 
 type Mode = "create" | "edit";
@@ -70,7 +72,7 @@ type Draft = {
   modules: string[];
   countries: string[];
   publish: Publish;
-  /** `yyyy-mm-ddThh:mm`, India time; "" for none. */
+  /** `yyyy-mm-ddThh:mm` on the console's clock; "" for none. */
   publishAt: string;
 };
 
@@ -142,7 +144,7 @@ function linkProblem(raw: string, choices: HelpEditorChoices): string | null {
  * What stops a save. `now` is the moment Save was pressed (state, never the render's clock): the
  * check that a scheduled time is still ahead waits for it.
  */
-function problemsOf(d: Draft, kind: HelpItemKind, choices: HelpEditorChoices, now: number | null): Problem[] {
+function problemsOf(d: Draft, kind: HelpItemKind, choices: HelpEditorChoices, now: number | null, clock: Clock): Problem[] {
   const { limits } = choices;
   const out: Problem[] = [];
   const title = charCount(oneLine(d.title));
@@ -166,7 +168,7 @@ function problemsOf(d: Draft, kind: HelpItemKind, choices: HelpEditorChoices, no
   if (d.countries.length > limits.countries) out.push({ field: "targets", message: `Choose at most ${limits.countries} countries.` });
 
   if (d.publish === "at") {
-    const at = d.publishAt ? parseIstDateTime(d.publishAt) : null;
+    const at = d.publishAt ? clock.parseInput(d.publishAt) : null;
     if (!at) out.push({ field: "publishAt", message: "Enter when it goes live as a date and time." });
     else if (now !== null && at.getTime() <= now) out.push({ field: "publishAt", message: "That time has already passed — publish it now, or choose a later time." });
     else if (now !== null && at.getTime() - now > YEAR_MS) out.push({ field: "publishAt", message: "That is more than a year away — check the date." });
@@ -178,6 +180,9 @@ function problemsOf(d: Draft, kind: HelpItemKind, choices: HelpEditorChoices, no
 function clockNow(): number {
   return Date.now();
 }
+
+/** "Thu, 1 Oct 2026, 10:00 am UTC+05:30" — on the console's clock, saying which. */
+const zoned = (at: Date, clock: Clock) => `${clock.dateTime(at)} ${clock.offsetLabel(at)}`;
 
 /** What the save sends — the same shape for both actions, which each read their own fields. */
 function inputOf(d: Draft, kind: HelpItemKind, id: string | undefined) {
@@ -219,6 +224,7 @@ export function HelpContentEditor({
   mode: Mode;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const uid = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   /** The draft the page came with, and its reach key — never set again. */
@@ -237,7 +243,7 @@ export function HelpContentEditor({
   const dirty = mode === "create" || JSON.stringify(input) !== initialSignature;
   // The item page's header verbs act on what was saved, so they wait while this holds changes.
   useReportUnsaved(mode === "edit" && dirty);
-  const problems = problemsOf(draft, kind, choices, attemptedAt);
+  const problems = problemsOf(draft, kind, choices, attemptedAt, clock);
   const errors: Partial<Record<Field, string>> = {};
   if (attemptedAt !== null) for (const p of problems) errors[p.field] ??= p.message;
 
@@ -340,7 +346,7 @@ export function HelpContentEditor({
   function requestSave() {
     const now = clockNow();
     setAttemptedAt(now);
-    const found = problemsOf(draft, kind, choices, now);
+    const found = problemsOf(draft, kind, choices, now, clock);
     if (found.length > 0) {
       rootRef.current?.querySelector<HTMLElement>(`[data-help-field="${found[0]!.field}"]`)?.focus();
       return;
@@ -350,8 +356,8 @@ export function HelpContentEditor({
       send(input, null);
       return;
     }
-    const at = draft.publish === "at" ? parseIstDateTime(draft.publishAt) : null;
-    setSnapshot({ input, result, at: at ? when(at) : "" });
+    const at = draft.publish === "at" ? clock.parseInput(draft.publishAt) : null;
+    setSnapshot({ input, result, at: at ? zoned(at, clock) : "" });
     setSaveOpen(true);
   }
 
@@ -391,22 +397,23 @@ export function HelpContentEditor({
   const titleCount = charCount(oneLine(draft.title));
   const descriptionCount = charCount(oneLine(draft.description));
   const bodyCount = charCount(draft.body.trim());
-  const atText = draft.publish === "at" && draft.publishAt && parseIstDateTime(draft.publishAt) ? when(parseIstDateTime(draft.publishAt)) : null;
+  const atChosen = draft.publish === "at" && draft.publishAt ? clock.parseInput(draft.publishAt) : null;
+  const atText = atChosen ? zoned(atChosen, clock) : null;
   const shows =
     result === "draft"
       ? "Nowhere — it is a draft"
       : draft.publish === "now"
         ? saved?.state === "live" && saved.publishedAt
-          ? `Since ${when(saved.publishedAt)} IST`
+          ? `Since ${zoned(saved.publishedAt, clock)}`
           : "As soon as it's saved"
         : draft.publish === "at"
           ? atText
-            ? `From ${atText} IST`
+            ? `From ${atText}`
             : "At the time you choose"
           : saved?.publishedAt
             ? saved.state === "live"
-              ? `Since ${when(saved.publishedAt)} IST`
-              : `From ${when(saved.publishedAt)} IST`
+              ? `Since ${zoned(saved.publishedAt, clock)}`
+              : `From ${zoned(saved.publishedAt, clock)}`
             : "—";
 
   return (
@@ -528,7 +535,7 @@ export function HelpContentEditor({
             />
           </Panel>
 
-          <Panel title="Publishing" description="India time (IST). Workspaces pick up a change within a minute.">
+          <Panel title="Publishing" description={`Times in ${clock.zone.replace(/_/g, " ")}, the console's time zone. Workspaces pick up a change within a minute.`}>
             <PublishChoice
               name={ids.publish}
               value={draft.publish}
@@ -645,7 +652,7 @@ export function HelpContentEditor({
             <p>
               {snapshot.result === "scheduled"
                 ? snapshot.at
-                  ? `It goes live ${snapshot.at} IST.`
+                  ? `It goes live ${snapshot.at}.`
                   : "It goes live at the time it was scheduled for."
                 : saved?.state === "live"
                   ? "Workspaces it reaches see the change on their next page."
@@ -896,17 +903,18 @@ function PublishChoice({
   onChange: (value: Publish) => void;
   atInput: ReactNode;
 }) {
+  const clock = useClock();
   const state = saved?.state ?? null;
-  const since = saved?.publishedAt ? when(saved.publishedAt) : null;
+  const since = saved?.publishedAt ? zoned(saved.publishedAt, clock) : null;
   const options: { value: Publish; title: string; body: string }[] =
     state === "live"
       ? [
-          { value: "keep", title: "Keep it live", body: since ? `Live since ${since} IST.` : "It stays where it is." },
+          { value: "keep", title: "Keep it live", body: since ? `Live since ${since}.` : "It stays where it is." },
           { value: "draft", title: "Take it down", body: "Back to the drafts — it stops showing." },
         ]
       : state === "scheduled"
         ? [
-            { value: "keep", title: "Keep the schedule", body: since ? `Goes live ${since} IST.` : "It goes live as planned." },
+            { value: "keep", title: "Keep the schedule", body: since ? `Goes live ${since}.` : "It goes live as planned." },
             { value: "now", title: "Publish now", body: "It shows as soon as it's saved." },
             { value: "at", title: "Change the time", body: "Choose another time to go live." },
             { value: "draft", title: "Back to drafts", body: "It won't go live." },
@@ -943,6 +951,7 @@ function PublishChoice({
 
 /** The item as a workspace's rail or What's new draws it under "From Deskzo" — drawn here, not borrowed, so it never depends on a workspace's own components. */
 function Preview({ kind, draft, published, atText }: { kind: HelpItemKind; draft: Draft; published: Date | null; atText: string | null }) {
+  const clock = useClock();
   const title = oneLine(draft.title) || "Your title";
   const url = draft.url.trim();
   const checked = url ? checkLink(url) : null;
@@ -963,7 +972,7 @@ function Preview({ kind, draft, published, atText }: { kind: HelpItemKind; draft
               </StatusPill>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-muted">{published ? dayMonthYear(published) : atText ? `${atText} IST` : "The day it's published"}</p>
+          <p className="mt-0.5 text-xs text-muted">{published ? clock.date(published) : (atText ?? "The day it's published")}</p>
           <p className="mt-2 text-sm whitespace-pre-line break-words text-text">{draft.body.trim() || "What the post says appears here."}</p>
           {url && (
             <p className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand">

@@ -1,5 +1,4 @@
 import type { BillingCycle, ItemType, TradeDocumentType } from "@prisma/client";
-import { istDateKey } from "@/lib/india-time";
 import { addMonths, cycleMonths } from "@/lib/subscriptions/renewal-order";
 
 /**
@@ -10,12 +9,13 @@ import { addMonths, cycleMonths } from "@/lib/subscriptions/renewal-order";
  * raised. Everything here is pure and safe in the browser: the document form, the server actions and
  * the check suite all read the same rules.
  *
- * ## Days are Indian calendar days, held as a `@db.Date` holds them
+ * ## Days are calendar days, held as a `@db.Date` holds them
  *
  * A `yyyy-mm-dd` string is the day itself, never an instant: it is stored as midnight UTC of that day
  * (what a `@db.Date` column reads back as) and read back with `toISOString().slice(0, 10)`. An
- * order's `startDate`/`endDate` are timestamps, so they are turned into the Indian day they fall on
- * first (`istDateKey`) — right whether the order was saved at UTC midnight or at India midnight.
+ * order's `startDate`/`endDate` are timestamp columns written the same way — the typed day at midnight
+ * UTC — so their UTC date is the day too, in every workspace's zone. (Read on a zone's clock instead,
+ * west of UTC they would fall on the day before.)
  */
 
 /** The longest period a line may cover. A typo in the year is the usual reason for more. */
@@ -77,8 +77,10 @@ export function orderServicePeriod(order: {
   endDate: Date | string | null;
 }): ServicePeriod | null {
   if (!order.startDate || !order.endDate) return null;
-  const from = istDateKey(new Date(order.startDate));
-  const to = istDateKey(new Date(order.endDate));
+  // Typed days held as midnight UTC — see "Days are calendar days" above.
+  const from = periodKey(order.startDate);
+  const to = periodKey(order.endDate);
+  if (!from || !to) return null;
   return servicePeriodProblem(from, to) ? null : { from, to };
 }
 

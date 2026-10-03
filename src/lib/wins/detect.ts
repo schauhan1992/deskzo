@@ -1,7 +1,7 @@
 import type { CelebrationSource, Prisma, SalesCelebrationSettings, SplashScope, TargetMetric } from "@prisma/client";
 import { db, getTenantDb } from "@/lib/db";
-import { dateOnly, addDays } from "@/lib/hr/calendar";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import { addDays } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 import { measureMany, subjectUserIdsMany } from "@/lib/targets/measure";
 import { dealWonCopy, firstOrderCopy, inrSpoken, targetHitCopy, topPerformerCopy } from "@/lib/wins/copy";
 import { notifyUser } from "@/lib/notify";
@@ -74,7 +74,8 @@ type NewWin = {
 };
 
 async function celebrate(win: NewWin, now: Date): Promise<boolean> {
-  const today = dateOnly(now);
+  // Today on the workspace's calendar, as the date columns hold a day (dateOnly was UTC's day).
+  const today = (await workspaceClock()).calendarDate(now);
   try {
     await db.celebration.create({
       data: {
@@ -302,12 +303,14 @@ export async function bookingsByPerson(from: Date, to: Date): Promise<{ userId: 
 const MONTH_LABEL = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", month: "long", year: "numeric" });
 
 async function topPerformer(s: WinsSettings, now: Date): Promise<NewWin[]> {
-  const { year, month, day } = istDateParts(now);
+  // The workspace's months, on its clock.
+  const clock = await workspaceClock();
+  const { year, month, day } = clock.parts(now);
   // Announced in the first week of the month, about the one before.
   if (day > 7) return [];
-  const from = istMidnight(year, month - 1, 1);
-  const to = istMidnight(year, month, 1);
-  const last = istDateParts(from);
+  const from = clock.midnight(year, month - 1, 1);
+  const to = clock.midnight(year, month, 1);
+  const last = clock.parts(from);
   const key = `top:${last.year}-${String(last.month + 1).padStart(2, "0")}`;
   if ((await alreadyCelebrated([key])).size) return [];
   const ranking = (await bookingsByPerson(from, to)).slice(0, Math.max(1, Math.min(10, s.topPerformerCount)));

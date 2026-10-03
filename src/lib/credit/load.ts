@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { calculateOrderAmount } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
 import { assessCredit, TERMS_DAYS, type Bill, type CreditAssessment } from "@/lib/credit/engine";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * The database side of the credit engine: a customer's history as `Bill`s, then assessed.
@@ -137,9 +138,10 @@ export async function loadCreditSubjects(companyIds: string[]): Promise<Map<stri
 }
 
 export async function assessCompanies(companyIds: string[], asOf = new Date()): Promise<Map<string, CreditAssessment>> {
-  const subjects = await loadCreditSubjects(companyIds);
+  const [subjects, clock] = await Promise.all([loadCreditSubjects(companyIds), workspaceClock()]);
   const out = new Map<string, CreditAssessment>();
-  for (const [id, s] of subjects) out.set(id, assessCredit(s.bills, { asOf, manualLimit: s.manualLimit }));
+  // Days late are the workspace's days.
+  for (const [id, s] of subjects) out.set(id, assessCredit(s.bills, { asOf, manualLimit: s.manualLimit, clock }));
   return out;
 }
 

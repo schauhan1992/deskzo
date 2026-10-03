@@ -1,5 +1,6 @@
 import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import type { CustomSheet } from "@/lib/custom-fields/sheets";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The contract every importer satisfies, and the helpers that keep them consistent.
@@ -137,9 +138,19 @@ export function parseNumber(field: string, raw: string): { value?: number; error
  * Getting a warranty end date wrong by eleven months is the kind of error nobody finds until the
  * renewal is missed, so day-first is explicit here and an ambiguous value is refused rather than
  * guessed.
+ *
+ * The day comes back as a `@db.Date` holds one: midnight UTC. A full timestamp that names an instant
+ * — what our own CSV export writes for a moment, "2026-10-15T19:30:00.000Z" — is the day that instant
+ * falls on in the workspace, given its clock; the date its text begins with is UTC's, which in India is
+ * the day before for anything after 18:30 UTC.
  */
-export function parseDate(field: string, raw: string): { value?: Date; error?: string } {
+export function parseDate(field: string, raw: string, clock?: Clock): { value?: Date; error?: string } {
   if (!raw) return {};
+
+  if (clock && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i.test(raw)) {
+    const at = new Date(raw);
+    if (!Number.isNaN(at.getTime())) return { value: clock.calendarDate(at) };
+  }
 
   // ISO, which is what our own export writes.
   const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
@@ -158,11 +169,16 @@ export function parseDate(field: string, raw: string): { value?: Date; error?: s
     return Number.isNaN(d.getTime()) ? { error: `${field} "${raw}" isn't a date.` } : { value: d };
   }
 
-  // Anything else — "15 Jan 2024", a locale string Excel produced. Parsed at local midnight, which
-  // in IST is 18:30 the previous day in UTC, so the calendar date is rebuilt in UTC afterwards.
-  // Getting a warranty date wrong by one day is not obviously wrong, which is what makes it bite.
+  // Anything else — "15 Jan 2024", a locale string Excel produced. With no time in it, it is parsed
+  // at the host's midnight, which in IST is 18:30 the previous day in UTC, so the calendar date is
+  // read back off the host's own calendar — the day as typed, whatever zone the host keeps. With a
+  // time ("15 Jan 2024 23:30 GMT"), it names an instant, and its day is the workspace's: the host's
+  // calendar would make it depend on where the server runs. Getting a warranty date wrong by one day
+  // is not obviously wrong, which is what makes it bite.
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return { error: `${field} "${raw}" isn't a date. Use DD/MM/YYYY or YYYY-MM-DD.` };
+  const bareDay = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0;
+  if (clock && !bareDay) return { value: clock.calendarDate(d) };
   return { value: new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())) };
 }
 
@@ -239,7 +255,14 @@ export function updateRow(
 export class RowReader {
   private failure: string | null = null;
 
-  constructor(private readonly row: Record<string, string>) {}
+  /**
+   * `clock`, the workspace's (`workspaceClock()`), reads a cell holding a full timestamp as the day it
+   * falls on there — see `parseDate`. Importers of moments pass it.
+   */
+  constructor(
+    private readonly row: Record<string, string>,
+    private readonly clock?: Clock,
+  ) {}
 
   text(column: string): string {
     return trim(this.row[column]);
@@ -258,7 +281,7 @@ export class RowReader {
   }
 
   date(column: string): Date | undefined {
-    const r = parseDate(column, this.text(column));
+    const r = parseDate(column, this.text(column), this.clock);
     if (r.error) this.fail(r.error);
     return r.value;
   }

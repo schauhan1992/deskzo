@@ -23,6 +23,7 @@ import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/
 import { customSheetFor, exportCells } from "@/lib/custom-fields/sheets";
 import { hasEffectivePermission } from "@/actions/permission";
 import { canonicalColumn, cleanName, nameKey } from "@/lib/items/catalogue-import";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 const FIXED_DIRECTION: Partial<Record<string, 1 | -1>> = {
@@ -463,7 +464,7 @@ export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; file
   const withCustom = rows.map((row, n) => Object.assign(row, custom(items[n]!.id)));
 
   const csv = Papa.unparse(withCustom);
-  return { ok: true, data: { csv, filename: csvFilename("items-export") } };
+  return { ok: true, data: { csv, filename: csvFilename("items-export", new Date(), await workspaceClock()) } };
 }
 
 export type ImportItemsResult = {

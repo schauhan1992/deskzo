@@ -7,7 +7,7 @@ import { requireUser, viewAsContext } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
-import { parseIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { checkLink, youtubeId } from "@/lib/help/links";
 import type { GettingStartedStep } from "@/lib/help/getting-started";
 import { gettingStartedFor } from "@/lib/help/onboarding-facts";
@@ -319,7 +319,7 @@ export type UpdateInput = {
   body: string;
   linkUrl?: string;
   pinned?: boolean;
-  /** India time from a `datetime-local` input; empty means now. */
+  /** The workspace's time from a `datetime-local` input; empty means now. */
   publishAt?: string;
 };
 
@@ -343,7 +343,7 @@ export async function saveUpdate(input: UpdateInput): Promise<ActionResult<{ id:
 
   let publishedAt: Date | undefined;
   if (typeof input.publishAt === "string" && input.publishAt.trim()) {
-    const at = parseIstDateTime(input.publishAt);
+    const at = (await workspaceClock()).parseInput(input.publishAt);
     if (!at) return { ok: false, error: "That publish time isn't a date and time." };
     publishedAt = at;
   }

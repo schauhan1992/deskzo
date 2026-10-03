@@ -1,3 +1,5 @@
+import type { Clock } from "@/lib/time/zone";
+
 // Guards against formula injection if the CSV is opened in Excel/Sheets — a cell value
 // starting with one of these characters can be interpreted as a formula.
 export function sanitizeCsvCell(value: string): string {
@@ -19,8 +21,13 @@ export function desanitizeCsvCell(value: string): string {
   return /^'[=+\-@]/.test(value) ? value.slice(1) : value;
 }
 
-export function csvFilename(prefix: string) {
-  return `${prefix}-${new Date().toISOString().slice(0, 10)}.csv`;
+/**
+ * `leads-export-2026-10-02.csv` — dated on the clock passed in (the workspace's: `workspaceClock()`,
+ * or `useClock()` in a client component), not UTC's, which is a day behind in India until 05:30.
+ * The console's own exports use src/lib/console-shared/format.ts, which takes the same arguments.
+ */
+export function csvFilename(prefix: string, at: Date, clock: Clock) {
+  return `${prefix}-${clock.dateKey(at)}.csv`;
 }
 
 /**

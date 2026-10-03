@@ -32,7 +32,7 @@
  * rather than quietly reporting a fraction of the truth.
  */
 
-import { IST_OFFSET_MS, istDateParts, istMidnight } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
 
@@ -216,19 +216,20 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
  * label is for reading — they are not the same string.
  */
 /**
- * Which bucket an instant falls in, on **India's** calendar.
+ * Which bucket an instant falls in, on the calendar of the clock passed in — the workspace's, for a
+ * report; India's, for the books.
  *
  * This read `getFullYear()`, `getMonth()` and `getDate()` — the *host's* calendar. Correct on a
  * laptop in Pune and wrong in the container this deploys to, where the clock is UTC: an order
  * punched at 01:30 IST on 1 October is 20:00 UTC on 30 September, so a monthly report put October's
  * revenue in September. Nothing about that looks wrong on screen; the month totals are simply off,
- * and they are off by the orders placed in the five and a half hours after midnight, which for a
- * business that punches renewals late is not a rounding error.
+ * and they are off by the orders placed in the hours after midnight, which for a business that
+ * punches renewals late is not a rounding error.
  *
- * Everything below works from `istDateParts`, so no `Date` is ever asked what day it is.
+ * Everything below works from `clock.parts`, so no `Date` is ever asked what day it is.
  */
-export function bucketOf(date: Date, grain: Grain): { key: string; label: string } {
-  const { year: y, month: m, day: dayOfMonth } = istDateParts(date);
+export function bucketOf(date: Date, grain: Grain, clock: Clock): { key: string; label: string } {
+  const { year: y, month: m, day: dayOfMonth, weekday } = clock.parts(date);
 
   switch (grain) {
     case "day": {
@@ -238,11 +239,10 @@ export function bucketOf(date: Date, grain: Grain): { key: string; label: string
     case "week": {
       // Monday-based, and keyed on that Monday's date so weeks sort and never collide across years
       // — an ISO week number alone puts week 1 of next January before week 52 of this December.
-      // Built as an IST midnight and read back as IST parts, so the week never shifts a day
-      // because the host happens to be behind India.
-      const atNoon = istMidnight(y, m, dayOfMonth);
-      const weekday = new Date(atNoon.getTime() + IST_OFFSET_MS).getUTCDay();
-      const monday = istDateParts(istMidnight(y, m, dayOfMonth - ((weekday + 6) % 7)));
+      // Counted back on the calendar alone — day arithmetic on the clock's date, held as UTC — so
+      // the week never shifts a day because the host is in another zone.
+      const at = new Date(Date.UTC(y, m, dayOfMonth - ((weekday + 6) % 7)));
+      const monday = { year: at.getUTCFullYear(), month: at.getUTCMonth(), day: at.getUTCDate() };
       const key = `${monday.year}-${String(monday.month + 1).padStart(2, "0")}-${String(monday.day).padStart(2, "0")}`;
       return { key, label: `w/c ${monday.day} ${MONTHS[monday.month]}` };
     }

@@ -13,12 +13,12 @@ import { AFTER, BEFORE, UNDATED } from "@/lib/forecast/periods";
 import { STAGE_LABEL } from "@/lib/forecast/stages";
 import { formatOrderId } from "@/lib/order-id";
 import { formatCurrency, cn } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 type Params = { view?: string; grain?: string; count?: string; owner?: string; period?: string };
 
-const DATE = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" });
-const d = (v: Date | string | null) => (v ? DATE.format(new Date(v)) : "—");
-const inr = (n: number | null | undefined) => (n === null || n === undefined ? "—" : formatCurrency(n));
+const inr =(n: number | null | undefined) => (n === null || n === undefined ? "—" : formatCurrency(n));
 
 const COLORS = { forecast: "#6366f1", booked: "#10b981", target: "#f59e0b", lastYear: "#94a3b8", due: "#cbd5e1" };
 
@@ -31,6 +31,10 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const data = await getForecast({ grain: params.grain, count: params.count, ownerId: params.owner });
   if (!data) return <ModuleDisabledNotice moduleKey="forecast" />;
+  // Every date the forecast hands back is a moment on the workspace's clock (a calendar day as the
+  // moment it begins), so the day shown is the clock's.
+  const clock = await workspaceClock();
+  const d = (v: Date | string | null) => clock.date(v);
 
   const view = ["sales", "renewals", "collections", "amc", "commits"].includes(params.view ?? "") ? params.view! : "sales";
   const grainDef = data.grains.find((g) => g.key === data.grain)!;
@@ -158,7 +162,7 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
                   </tbody>
                 </table>
               </Card>
-              <DealList deals={inBucket} title={titleFor(pick, data.periods)} />
+              <DealList deals={inBucket} title={titleFor(pick, data.periods)} clock={clock} />
               <StageWeights weights={data.sales.weights} canManage={data.canManage} />
             </>
           );
@@ -485,9 +489,11 @@ function OutsideRow({ label, hint, cell, active, href }: { label: string; hint?:
 function DealList({
   deals,
   title,
+  clock,
 }: {
   deals: { id: string; ref: number; title: string; stage: string; value: number | null; valueSource: string | null; closeDate: Date | string | null; weighted: number | null; owner: { name: string } | null; company: { id: string; name: string } }[];
   title: string;
+  clock: Clock;
 }) {
   return (
     <Card>
@@ -506,7 +512,7 @@ function DealList({
                     {deal.title}
                   </Link>
                   <div className="text-xs text-muted">
-                    {deal.company.name} · {STAGE_LABEL[deal.stage as keyof typeof STAGE_LABEL] ?? deal.stage} · closes {d(deal.closeDate)}
+                    {deal.company.name} · {STAGE_LABEL[deal.stage as keyof typeof STAGE_LABEL] ?? deal.stage} · closes {clock.date(deal.closeDate)}
                     {deal.owner && ` · ${deal.owner.name}`}
                   </div>
                 </div>

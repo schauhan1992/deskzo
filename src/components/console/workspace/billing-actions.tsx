@@ -11,14 +11,15 @@ import { ImpactList } from "@/components/console/kit/impact";
 import { Panel } from "@/components/console/kit/panel";
 import { StatusPill } from "@/components/console/kit/status";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label } from "@/components/ui/input";
-import { dayKeyLabel, dayMonthYear, istDayKey, istDaysBetween, plural } from "@/lib/console-shared/format";
+import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import { SUBSCRIPTION_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
-import { istDateParts, istMidnight } from "@/lib/india-time";
 import type { BillingPanel } from "@/lib/platform/workspace-data";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The Billing tab's own controls: the trial (extend, set a date, keep its plan free), the billing
@@ -27,19 +28,21 @@ import type { BillingPanel } from "@/lib/platform/workspace-data";
  * clock and the page refreshes from what it did.
  */
 
-const DAY = 86_400_000;
 const EXTEND_DAYS = [7, 14, 30] as const;
 type ExtendDays = (typeof EXTEND_DAYS)[number];
 
 const asDate = (at: Date | string) => (at instanceof Date ? at : new Date(at));
 
-/** The last second, India time, of the day `days` after `base` — as the server extends a trial (src/lib/platform/bulk.ts). */
-function trialEndAfter(base: Date, days: number): Date {
-  const { year, month, day } = istDateParts(new Date(base.getTime() + days * DAY));
-  return new Date(istMidnight(year, month, day + 1).getTime() - 1000);
+/**
+ * The last second on the console's clock of the day `days` after `base`'s — as the server extends a
+ * trial (`trialEndAfter`, src/lib/platform/bulk.ts), in calendar days.
+ */
+function trialEndAfter(base: Date, days: number, clock: Clock): Date {
+  const { year, month, day } = clock.parts(base);
+  return new Date(clock.midnight(year, month, day + days + 1).getTime() - 1000);
 }
 
-/** "today", "in 5 days", "3 days ago" — counted in India's days from the page's own clock. */
+/** "today", "in 5 days", "3 days ago" — counted in the console's days from the page's own time. */
 function dayDistance(days: number): string {
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
@@ -53,10 +56,11 @@ type TrialMode = { kind: "extend"; days: ExtendDays } | { kind: "date" } | { kin
 
 /**
  * Its trial — running, or ended and reopenable. Extending counts from the later of now and its end,
- * on the server; a new end date is the end of that day in India. Managers can instead keep its
+ * on the server; a new end date is the end of that day on the console's clock. Managers can instead keep its
  * trial's plans with no end (a pilot, a partner).
  */
 export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; trial: NonNullable<BillingPanel["trial"]>; caps: Caps; asOf: Date }) {
+  const clock = useClock();
   const [mode, setMode] = useState<TrialMode>(null);
   const [dateText, setDateText] = useState("");
   const extend = useConsoleAction<{ endsAt: string; action: "none" | "held" | "lifted" | "closed" }>();
@@ -66,17 +70,17 @@ export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; t
 
   const now = asDate(asOf);
   const ends = trial.endsAt ? asDate(trial.endsAt) : null;
-  const days = ends ? istDaysBetween(now, ends) : null;
+  const days = ends ? clock.daysBetween(now, ends) : null;
   const running = trial.status === "TRIALING";
   const over = !running || (days !== null && days < 0);
-  const todayKey = istDayKey(now);
+  const todayKey = clock.dateKey(now);
   const pending = extend.pending || plain.pending;
   const error = mode?.kind === "extend" ? extend.error : plain.error;
 
   function open(next: NonNullable<TrialMode>) {
     extend.reset();
     plain.reset();
-    if (next.kind === "date") setDateText(ends && days !== null && days >= 0 ? istDayKey(ends) : todayKey);
+    if (next.kind === "date") setDateText(ends && days !== null && days >= 0 ? clock.dateKey(ends) : todayKey);
     setMode(next);
   }
 
@@ -93,7 +97,7 @@ export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; t
     if (!mode) return;
     if (mode.kind === "extend") {
       extend.run(() => consoleExtendTrial(tenantId, mode.days), {
-        success: (d) => `Trial extended — it ends ${dayMonthYear(d.endsAt)}.${d.action === "lifted" ? " Its billing hold is lifted." : ""}`,
+        success: (d) => `Trial extended — it ends ${clock.date(d.endsAt)}.${d.action === "lifted" ? " Its billing hold is lifted." : ""}`,
         onDone: done,
       });
     } else if (mode.kind === "date") {
@@ -109,12 +113,12 @@ export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; t
   let confirmLabel = "";
   let body: ReactNode = null;
   if (mode?.kind === "extend") {
-    const next = trialEndAfter(ends && ends.getTime() > now.getTime() ? ends : now, mode.days);
+    const next = trialEndAfter(ends && ends.getTime() > now.getTime() ? ends : now, mode.days, clock);
     title = `Extend the trial by ${mode.days} days`;
     confirmLabel = "Extend trial";
     body = (
       <>
-        <p>{`It ends ${dayMonthYear(next)}${ends ? ` instead of ${dayMonthYear(ends)}` : ""} — ${plural(mode.days, "day")} from ${over ? "today" : "its current end"}.`}</p>
+        <p>{`It ends ${clock.date(next)}${ends ? ` instead of ${clock.date(ends)}` : ""} — ${plural(mode.days, "day")} from ${over ? "today" : "its current end"}.`}</p>
         <p className="text-muted">Extending can reopen an ended trial and lift a billing hold: its billing rules are applied at once.</p>
       </>
     );
@@ -126,7 +130,7 @@ export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; t
         <Label htmlFor={dateId}>Last day of the trial</Label>
         <Input id={dateId} type="date" min={todayKey} value={dateText} onChange={(e) => setDateText(e.target.value)} aria-describedby={dateHintId} className="w-48" />
         <p id={dateHintId} className="text-xs text-muted">
-          It ends at the end of that day, India time. Setting a date can reopen an ended trial and lift a billing hold.
+          {`It ends at the end of that day in ${clock.zone.replace(/_/g, " ")}, the console's time zone. Setting a date can reopen an ended trial and lift a billing hold.`}
         </p>
       </div>
     );
@@ -144,7 +148,7 @@ export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; t
   return (
     <Panel
       title="Trial"
-      description={ends ? `${over ? "Ended" : "Ends"} ${dayMonthYear(ends)} (${dayDistance(days ?? 0)})` : "No end date"}
+      description={ends ? `${over ? "Ended" : "Ends"} ${clock.date(ends)} (${dayDistance(days ?? 0)})` : "No end date"}
       actions={<StatusPill tone={running ? (over ? "warning" : "info") : "neutral"}>{running ? (over ? "Over" : "Running") : "Ended"}</StatusPill>}
     >
       <div className="space-y-3">

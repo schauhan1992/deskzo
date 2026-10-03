@@ -11,7 +11,9 @@ import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { DashboardCustomizeButton } from "@/components/dashboard/dashboard-customize-button";
 import { WidgetGrid, type GridItem } from "@/components/dashboard/widget-grid";
 import { Bell, Pin } from "lucide-react";
-import { formatCurrency, formatDate, formatDateTime, cn } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 import { SCOPE_LABEL, getDashboardWidgetDefinition } from "@/lib/dashboard-widgets";
 import type { ProjectHealth, ProjectStatus } from "@prisma/client";
@@ -149,7 +151,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const tabKeys = dashboardTabKeys(onboardingPending(me));
   const TABS: DashboardTab[] = tabKeys.map((key) => ({ key, label: DASHBOARD_TAB_LABELS[key] }));
   const tab = resolveDashboardTab(requested, tabKeys);
-  const [today, branding, organisation, helpDesk, unread, canManageHelp] = await Promise.all([
+  const [today, branding, organisation, helpDesk, unread, canManageHelp, clock] = await Promise.all([
     todaysMoments(),
     getBranding(),
     getOrganisation(),
@@ -160,6 +162,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     // workspace not yet migrated has no "seen" column for Deskzo's side.
     unreadUpdateCounts().catch(() => ({ deskzo: 0, company: 0 })),
     can(user.id, "help.manage"),
+    workspaceClock(),
   ]);
   const companyName = organisation.tradeName || organisation.legalName || branding.appName;
   const header = (actions?: ReactNode) => (
@@ -454,7 +457,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     {r.itemName} · {formatOrderId(r.orderSeq)}
                   </p>
                 </div>
-                <span className="shrink-0 text-xs text-muted">{formatDate(r.endDate)}</span>
+                {/* A typed day, held at UTC midnight: the day itself. */}
+                <span className="shrink-0 text-xs text-muted">{formatCalendarDay(r.endDate)}</span>
               </li>
             ))}
           </ul>
@@ -577,7 +581,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   {row.userName ?? "System"} · {row.kind.replaceAll("_", " ").toLowerCase()}
                 </p>
               </div>
-              <span className="shrink-0 text-xs text-subtle">{formatDateTime(row.at)}</span>
+              <span className="shrink-0 text-xs text-subtle">{clock.dateTimeShort(row.at)}</span>
             </li>
           ))}
         </ul>

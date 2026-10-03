@@ -4,7 +4,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { accountLedger } from "@/actions/ledger-reports";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 import { accountTypeLabels } from "@/lib/ledger/chart";
 import { Amount, ReportHeader, accountTypeTone } from "@/components/accounting/report-chrome";
 import { DateParamInput } from "@/components/accounting/date-param-input";
@@ -81,9 +81,10 @@ export default async function AccountLedgerPage({
                 <td className="px-4 py-1.5 text-right"><Amount value={report.openingBalance} bold /></td>
               </tr>
             )}
+            {/* An entry's day is India's, as the From and To are: the books keep India's calendar. */}
             {report.rows.map((row) => (
               <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
-                <td className="whitespace-nowrap px-4 py-1.5 text-muted">{formatDate(row.date)}</td>
+                <td className="whitespace-nowrap px-4 py-1.5 text-muted">{indiaClock.date(row.date)}</td>
                 <td className="px-4 py-1.5">
                   <Link href={`/accounting/journal?q=${row.entryNumber}`} className="font-mono text-xs text-brand hover:underline">
                     {row.entryNumber}

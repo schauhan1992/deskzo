@@ -13,6 +13,7 @@ import { isCustomerRelationshipType } from "@/lib/validation/company";
 import { assessCredit, termsExceed, type CreditAssessment } from "@/lib/credit/engine";
 import { assessCompanies, assessCompany, cacheAssessments } from "@/lib/credit/load";
 import { MIN_REASON, recordDecision } from "@/lib/credit/guard";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -72,7 +73,7 @@ export async function getCreditSnapshot(companyId: string) {
  */
 export async function newCustomerTermsAdvice() {
   await requireModuleUser("receivables");
-  const a = assessCredit([], { asOf: new Date() });
+  const a = assessCredit([], { asOf: new Date(), clock: await workspaceClock() });
   return { rating: a.rating, score: a.score, recommendedTerms: a.recommendedTerms, canOverride: await viewerHas("credit.override"), currentTerms: null };
 }
 

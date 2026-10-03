@@ -3,7 +3,8 @@ import type { TradeDocumentType } from "@prisma/client";
 import { listCompanyDocuments } from "@/actions/trade-document";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { statusTone, tradeDocumentLabels, tradeDocumentStatusLabels } from "@/lib/trade-documents";
 import { isDraftNumber } from "@/lib/document-numbering";
 
@@ -98,7 +99,7 @@ export function CompanyDocuments({
                       <td className="px-3 py-2">
                         <Badge tone={statusTone[doc.status]}>{tradeDocumentStatusLabels[doc.status]}</Badge>
                       </td>
-                      <td className="px-3 py-2 text-muted">{formatDate(doc.issueDate)}</td>
+                      <td className="px-3 py-2 text-muted">{formatCalendarDay(doc.issueDate)}</td>
                       <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(doc.total)}</td>
                       <td className="px-3 py-2 text-subtle">{doc.reference ?? "—"}</td>
                     </tr>

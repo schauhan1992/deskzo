@@ -1,7 +1,8 @@
 import type { Prize, PrizeRace, SplashScope } from "@prisma/client";
 import { db } from "@/lib/db";
 import { notifyUser } from "@/lib/notify";
-import { addDays, dateOnly } from "@/lib/hr/calendar";
+import { addDays } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 import { awardSettings, type AwardSettings } from "@/lib/performance/award-settings";
 import { winsSettings, type WinsSettings } from "@/lib/wins/detect";
 import { prizesForPeriod, winsModuleOn } from "@/lib/wins/prize-store";
@@ -46,7 +47,8 @@ export async function tellEverybody(input: {
   const copy = upForGrabsCopy(input.race, input.period.label, input.prizes);
   const people = await db.user.findMany({ where: { active: true }, select: { id: true } });
   for (const p of people) await notifyUser({ userId: p.id, type: "ACTIVITY_AWARD", link: PRIZES_LINK[input.race], ...copy });
-  const today = dateOnly(input.now);
+  // Today on the workspace's calendar, as the date columns hold a day (dateOnly was UTC's day).
+  const today = (await workspaceClock()).calendarDate(input.now);
   try {
     await db.celebration.create({
       data: {
@@ -73,11 +75,11 @@ export async function tellEverybody(input: {
 /** The automatic announcements, for whichever periods have just opened. */
 export async function announcePrizes(now: Date = new Date()): Promise<{ announced: string[] }> {
   if (!(await winsModuleOn())) return { announced: [] };
-  const [awards, wins] = await Promise.all([awardSettings(), winsSettings()]);
+  const [awards, wins, clock] = await Promise.all([awardSettings(), winsSettings(), workspaceClock()]);
   const announced: string[] = [];
   for (const race of RACES) {
     if (!raceIsPublic(race, awards, wins)) continue;
-    const period = prizeAnnouncementDue(race, now);
+    const period = prizeAnnouncementDue(race, now, clock);
     if (!period) continue;
     const prizes = await prizesForPeriod(race, period.key);
     if (prizes.size === 0) continue;

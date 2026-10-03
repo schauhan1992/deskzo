@@ -6,10 +6,11 @@ import { EmptyState } from "@/components/console/kit/empty-state";
 import { Panel } from "@/components/console/kit/panel";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { DEAL_STATUS, INVITE_STATE } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PartnerPipeline } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { DealDecisionButtons } from "./decisions";
 import { countryName, workspacePath } from "./format";
 
@@ -17,7 +18,8 @@ import { countryName, workspacePath } from "./format";
  * Partner 360 › Pipeline (spec §9.2): what the partner has out selling — its invitation codes (named
  * by their hint, never the code), its referral links, its deal registrations (approve or decline the
  * pending ones: SELLERS) — and how many signups are under way with them (a count only: an
- * unverified signup belongs to nobody yet). Each list holds the latest 200. Server-safe.
+ * unverified signup belongs to nobody yet). Each list holds the latest 200. A server component: its
+ * days are on the console's clock.
  */
 
 function Customers({ list }: { list: { slug: string; name: string }[] }) {
@@ -39,7 +41,8 @@ function Customers({ list }: { list: { slug: string; name: string }[] }) {
 
 const moreNote = (shown: number, total: number, noun: string) => (total > shown ? `Showing the latest ${shown} of ${plural(total, noun)}.` : undefined);
 
-export function PartnerPipelineTab({ data, caps, partnerName }: { data: PartnerPipeline; caps: Caps; partnerName: string }) {
+export async function PartnerPipelineTab({ data, caps, partnerName }: { data: PartnerPipeline; caps: Caps; partnerName: string }) {
+  const clock = await consoleClock();
   return (
     <div className="space-y-6">
       <p className="flex items-center gap-2 text-sm text-muted">
@@ -72,7 +75,7 @@ export function PartnerPipelineTab({ data, caps, partnerName }: { data: PartnerP
                   <Td muted={!i.planName}>{i.planName ?? "Their choice"}</Td>
                   <Td numeric>{`${i.uses} / ${i.maxUses}`}</Td>
                   <Td nowrap muted>
-                    {i.expiresAt ? dayMonthYear(i.expiresAt) : "Never"}
+                    {i.expiresAt ? clock.date(i.expiresAt) : "Never"}
                   </Td>
                   <Td>
                     <LabelPill map={INVITE_STATE} value={i.state} />
@@ -81,7 +84,7 @@ export function PartnerPipelineTab({ data, caps, partnerName }: { data: PartnerP
                     <Customers list={i.customers} />
                   </Td>
                   <Td nowrap muted>
-                    {`${dayMonthYear(i.createdAt)} · ${i.createdByName}`}
+                    {`${clock.date(i.createdAt)} · ${i.createdByName}`}
                   </Td>
                 </Tr>
               ))}
@@ -116,13 +119,13 @@ export function PartnerPipelineTab({ data, caps, partnerName }: { data: PartnerP
                   <Td numeric>{l.signups}</Td>
                   <Td numeric>{l.customers}</Td>
                   <Td nowrap muted>
-                    {l.endedAt ? `Ended ${dayMonthYear(l.endedAt)}` : l.expiresAt ? dayMonthYear(l.expiresAt) : "Never"}
+                    {l.endedAt ? `Ended ${clock.date(l.endedAt)}` : l.expiresAt ? clock.date(l.expiresAt) : "Never"}
                   </Td>
                   <Td>
                     <LabelPill map={INVITE_STATE} value={l.state} />
                   </Td>
                   <Td nowrap muted>
-                    {`${dayMonthYear(l.createdAt)} · ${l.createdByName}`}
+                    {`${clock.date(l.createdAt)} · ${l.createdByName}`}
                   </Td>
                 </Tr>
               ))}
@@ -178,10 +181,10 @@ export function PartnerPipelineTab({ data, caps, partnerName }: { data: PartnerP
                     </span>
                   </Td>
                   <Td nowrap muted>
-                    {d.expiresAt ? dayMonthYear(d.expiresAt) : "—"}
+                    {d.expiresAt ? clock.date(d.expiresAt) : "—"}
                   </Td>
                   <Td nowrap muted>
-                    {`${dayMonthYear(d.createdAt)} · ${d.submittedByName}`}
+                    {`${clock.date(d.createdAt)} · ${d.submittedByName}`}
                   </Td>
                   <Td>
                     {d.customer ? (

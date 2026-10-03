@@ -5,7 +5,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
-import { formatIstDate } from "@/lib/india-time";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * Vendor credits (owner, 1 Oct 2026): what distributors and OEMs have given back — credit notes
@@ -71,7 +71,7 @@ export default async function VendorCreditsPage() {
                   <Badge tone={c.form === "PAYOUT" ? "green" : "blue"}>{c.form === "PAYOUT" ? "Payout" : "Credit note"}</Badge>
                 </td>
                 <td className="px-4 py-2.5 text-muted">{c.vendor.name}</td>
-                <td className="px-4 py-2.5 text-muted">{formatIstDate(c.date)}</td>
+                <td className="px-4 py-2.5 text-muted">{formatCalendarDay(c.date)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-text">{formatCurrency(Number(c.total))}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-text">{formatCurrency(c.allocated)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-text">{c.form === "CREDIT_NOTE" ? formatCurrency(c.applied) : "—"}</td>

@@ -13,6 +13,7 @@ import { presentBackups, resolveDumpTool, runBackup } from "@/lib/backup/run";
 import { loadSchedule, nextRunFor, scheduleState, type StoredSchedule } from "@/lib/backup/scheduled";
 import { dueNow, parseTimeOfDay } from "@/lib/backup/schedule";
 import type { ActionResult } from "@/actions/company";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * The backup log, the button that takes one, and the schedule.
@@ -119,6 +120,7 @@ export async function backupOverview(): Promise<ActionResult<BackupOverview>> {
   );
 
   const lastSucceeded = records.find((r) => r.status === "SUCCEEDED")?.finishedAt ?? null;
+  const clock = await workspaceClock();
 
   return {
     ok: true,
@@ -129,8 +131,8 @@ export async function backupOverview(): Promise<ActionResult<BackupOverview>> {
       tool: tool?.via ?? null,
       store,
       schedule,
-      nextRunAt: nextRunFor(schedule),
-      scheduleVerdict: dueNow(schedule, state, new Date()).reason,
+      nextRunAt: nextRunFor(schedule, clock),
+      scheduleVerdict: dueNow(schedule, state, new Date(), clock).reason,
       rows: records.map((r) => ({
         id: r.id,
         filename: r.filename,

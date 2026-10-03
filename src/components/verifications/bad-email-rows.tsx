@@ -10,7 +10,7 @@ import { EmailCheckBadge } from "@/components/contacts/email-address";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { emailStatusLabels } from "@/lib/email-verification";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Row = Awaited<ReturnType<typeof badEmailContacts>>["rows"][number];
 
@@ -22,6 +22,7 @@ type Row = Awaited<ReturnType<typeof badEmailContacts>>["rows"][number];
  */
 export function BadEmailRows({ rows }: { rows: Row[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -73,7 +74,7 @@ export function BadEmailRows({ rows }: { rows: Row[] }) {
 
             {row.emailCheckDetail && <p className="mt-1 text-sm text-muted">{row.emailCheckDetail}</p>}
             {row.emailCheckedAt && (
-              <p className="mt-1 text-xs text-subtle">Checked {formatDateTime(row.emailCheckedAt)}</p>
+              <p className="mt-1 text-xs text-subtle">Checked {clock.dateTimeShort(row.emailCheckedAt)}</p>
             )}
           </div>
         </Card>

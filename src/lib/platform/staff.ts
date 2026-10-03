@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Prisma, StaffRole } from "@deskzo/control-client";
-import { deviceFromUserAgent, istDayKey } from "@/lib/console-shared/format";
+import { deviceFromUserAgent } from "@/lib/console-shared/format";
 import type { StaffFilters } from "@/lib/console-shared/params";
 import type { ConsoleRole } from "@/lib/console-shared/types";
 import { auditQuery, type AuditRowView } from "@/lib/platform/audit-query";
@@ -287,6 +287,7 @@ export async function accountOverview(staffId: string, currentSessionId: string 
     // Stable: the rest keep their most-recently-used order.
     sessions: [...marked.filter((s) => s.current), ...marked.filter((s) => !s.current)],
     recent: recent.rows,
-    todayKey: istDayKey(now),
+    // Today on the console's clock, as the audit query worked it out for the same `now`.
+    todayKey: recent.todayKey,
   };
 }

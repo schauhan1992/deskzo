@@ -1,5 +1,6 @@
 import { isLockedDate } from "@/lib/ledger/period";
-import { calendarDateOf, istDateKey, istDateParts } from "@/lib/india-time";
+import { calendarDateOf } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * Revenue recognition's calendar and arithmetic (Ind AS 115): which invoice lines are earned over
@@ -16,8 +17,11 @@ import { calendarDateOf, istDateKey, istDateParts } from "@/lib/india-time";
  *     the day they name, so a `Date` handed in as a period end is read by its UTC parts (`dayKeyOf`)
  *     — that is the calendar day, whatever the server's zone.
  *   · **Instants** — an invoice's issue date, a milestone's completion, "now" — are turned into the
- *     Indian day they fall on (`dayKeyAt`) before anything is compared. 00:10 IST on 1 October is
- *     October's, although it is still 30 September in UTC.
+ *     Indian day they fall on (`dayKeyAt`, on `indiaClock`) before anything is compared. 00:10 IST on
+ *     1 October is October's, although it is still 30 September in UTC.
+ *
+ * India's calendar in every workspace, whatever zone it keeps: revenue is recognised in the books'
+ * months, and the books keep India's calendar.
  *
  * ## Money
  *
@@ -85,7 +89,7 @@ export function dayKeyOf(date: Date): DayKey {
 
 /** The Indian calendar day an instant falls on. */
 export function dayKeyAt(instant: Date): DayKey {
-  return istDateKey(instant);
+  return indiaClock.dateKey(instant);
 }
 
 /** A period end as a day: a `yyyy-mm-dd` string as it is, a `@db.Date` value by its UTC parts. */
@@ -108,8 +112,7 @@ export function monthKeyOfDate(date: Date): MonthKey {
 
 /** The Indian month an instant falls in. 00:10 IST on 1 October is October's. */
 export function monthKeyAt(instant: Date): MonthKey {
-  const { year, month } = istDateParts(instant);
-  return `${year}-${pad(month + 1)}`;
+  return indiaClock.monthKey(instant);
 }
 
 export function addMonths(month: MonthKey, n: number): MonthKey {

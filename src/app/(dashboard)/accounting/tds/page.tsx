@@ -8,8 +8,9 @@ import { Card } from "@/components/ui/card";
 import { Amount, ReportHeader } from "@/components/accounting/report-chrome";
 import { MonthPicker } from "@/components/accounting/month-picker";
 import { monthName } from "@/lib/ledger/period";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { previousIstMonth } from "@/lib/india-time";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 
 /**
  * What was withheld, both ways.
@@ -43,11 +44,11 @@ export default async function TdsPage({
     );
   }
 
-  const dueDate = new Date(`${tds.dueOn}T00:00:00.000Z`);
-  // One reading of the clock for the whole render, so "overdue" and "days left" can't disagree.
-  const renderedAt = now.getTime();
-  const overdue = tds.totals.payable > 0 && dueDate.getTime() < renderedAt;
-  const daysLeft = Math.ceil((dueDate.getTime() - renderedAt) / 86400000);
+  // One reading of the clock for the whole render, so "overdue" and "days left" can't disagree. Both
+  // count India's days, in every workspace: the deposit is due by the end of the 7th in India. Comparing
+  // the due day's UTC midnight with now made it overdue from 05:30 IST on the 7th itself.
+  const daysLeft = indiaClock.daysBetween(now, indiaClock.startOfDay(tds.dueOn) ?? now);
+  const overdue = tds.totals.payable > 0 && daysLeft < 0;
 
   return (
     <div className="animate-fade-rise">
@@ -65,9 +66,9 @@ export default async function TdsPage({
         >
           <span className="font-medium">{formatCurrency(tds.totals.payable)}</span> was deducted and is payable
           {overdue ? (
-            <> by {formatDate(dueDate)} — that date has passed, and interest runs at 1.5% a month from the day after.</>
+            <> by {formatCalendarDay(tds.dueOn)} — that date has passed, and interest runs at 1.5% a month from the day after.</>
           ) : (
-            <> by {formatDate(dueDate)}{daysLeft >= 0 && ` — ${daysLeft} day(s) left`}.</>
+            <> by {formatCalendarDay(tds.dueOn)}{daysLeft >= 0 && ` — ${daysLeft} day(s) left`}.</>
           )}
         </Card>
       )}
@@ -105,7 +106,7 @@ export default async function TdsPage({
         </Card>
         <Card className="px-4 py-3">
           <div className="text-xs uppercase tracking-wide text-subtle">Due on</div>
-          <div className="mt-1 text-2xl font-semibold text-text">{formatDate(dueDate)}</div>
+          <div className="mt-1 text-2xl font-semibold text-text">{formatCalendarDay(tds.dueOn)}</div>
           <div className="mt-0.5 text-xs text-muted">The 7th of the following month.</div>
         </Card>
       </div>
@@ -159,7 +160,8 @@ function TdsTable({
             {rows.map((row) => (
               <tr key={row.docNumber} className="border-b border-line last:border-0">
                 <td className="px-4 py-2 font-mono text-xs text-muted">{row.docNumber}</td>
-                <td className="px-4 py-2 text-muted">{formatDate(row.issueDate)}</td>
+                {/* The day the return reports it on: India's, in every workspace. */}
+                <td className="px-4 py-2 text-muted">{indiaClock.date(row.issueDate)}</td>
                 <td className="px-4 py-2 text-text">{row.partyName}</td>
                 <td className="px-4 py-2 font-mono text-xs">
                   {row.partyPan ?? <span className="text-danger">missing</span>}

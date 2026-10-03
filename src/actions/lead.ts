@@ -19,7 +19,8 @@ import { exportCells } from "@/lib/custom-fields/sheets";
 import { inStageWhere, leadStages, newLeadStage, stageWrite, stagesOfLeads } from "@/lib/pipeline/server";
 import { stageChangeNote, stageForStatus } from "@/lib/pipeline/rules";
 import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
-import { dateRangeFilter } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { calendarDayRange } from "@/lib/time/zone";
 import { pageSlice } from "@/lib/pagination";
 import {
   createLeadSchema,
@@ -331,7 +332,9 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   // No pipeline at all: a `where` nothing matches, so the list, the pager's count and the export
   // all come back empty from the one place rather than each needing to remember.
   if (!(await canViewLeads(userId))) return { id: { in: [] } };
-  const expectedCloseDate = dateRangeFilter(params?.closeFrom, params?.closeTo);
+  // A close date is a calendar day, typed and kept as its midnight UTC — so the From and To are days
+  // too, both ends in, whatever the zone.
+  const expectedCloseDate = calendarDayRange(params?.closeFrom, params?.closeTo);
   // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts),
   // and filtered on — a clause each, in an `AND` of their own beside the search's `OR`.
   const [customBranches, fieldFilters] = await Promise.all([
@@ -617,6 +620,7 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
     },
   });
 
+  const clock = await workspaceClock();
   const rows = leads.map((lead) => ({
     title: sanitizeCsvCell(lead.title),
     company: sanitizeCsvCell(lead.company.name),
@@ -624,6 +628,7 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
     status: lead.status,
     owner: sanitizeCsvCell(lead.owner?.name ?? ""),
     estimatedValue: lead.estimatedValue?.toString() ?? "",
+    // A calendar day held as midnight UTC, so its UTC date is the day typed.
     expectedCloseDate: lead.expectedCloseDate ? lead.expectedCloseDate.toISOString().slice(0, 10) : "",
     products: sanitizeCsvCell(
       lead.requirements.map((r) => `${r.item.name} x${r.quantity}`).join("; "),
@@ -632,14 +637,16 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
     qualifiedBy: sanitizeCsvCell(lead.qualifiedBy?.name ?? ""),
     lostReason: sanitizeCsvCell(lead.lostReason ?? ""),
     description: sanitizeCsvCell(lead.description ?? ""),
-    createdAt: lead.createdAt.toISOString().slice(0, 10),
+    // A moment: the day it falls on in the workspace (its UTC date was the day before for a lead
+    // added in India before 05:30).
+    createdAt: clock.dateKey(lead.createdAt),
   }));
 
   // The workspace's own lead fields this person may see, as the last columns — every row carries every
   // one, since the file's header is its first row's keys (src/lib/custom-fields/sheets.ts).
   const custom = await exportCells("LEAD", user.id, leads.map((l) => l.id), Object.keys(rows[0] ?? {}), { sanitize: sanitizeCsvCell });
   const csv = Papa.unparse(rows.map((row, i) => ({ ...row, ...custom(leads[i]!.id) })));
-  return { ok: true, data: { csv, filename: csvFilename("leads-export") } };
+  return { ok: true, data: { csv, filename: csvFilename("leads-export", new Date(), clock) } };
 }
 
 export async function logActivity(input: unknown): Promise<ActionResult<{ id: string }>> {

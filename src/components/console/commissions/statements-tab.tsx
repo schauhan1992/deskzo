@@ -9,6 +9,7 @@ import { STATEMENT_STATUS } from "@/lib/console-shared/labels";
 import { STATEMENT_STATUSES, parseStatementFilters } from "@/lib/console-shared/partner-params";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { StatementsBoard } from "@/lib/partners/commission-data";
+import type { Clock } from "@/lib/time/zone";
 import { COMMISSIONS_PATH, currencyOptions, hrefWith, recentPeriods } from "./format";
 import { Pager } from "./pager";
 import { StatementsTable } from "./statements-table";
@@ -26,13 +27,17 @@ export function StatementsTab({
   caps,
   viewerId,
   todayKey,
+  clock,
 }: {
   board: StatementsBoard;
   /** The Statements tab's own query string (empty while another tab is the one open). */
   params: Record<string, string>;
   caps: Caps;
   viewerId: string;
+  /** India's today: the latest "paid on" day. */
   todayKey: string;
+  /** The console's clock, for when a statement was generated, approved or voided. */
+  clock: Clock;
 }) {
   const f = parseStatementFilters(params);
   const base: Record<string, string> = { ...params, tab: "statements" };
@@ -94,7 +99,7 @@ export function StatementsTab({
             />
           )
         ) : (
-          <StatementsTable rows={board.rows} caps={caps} viewerId={viewerId} twoPersonPayout={board.twoPersonPayout} todayKey={todayKey} showPartner listParams={listParams} />
+          <StatementsTable rows={board.rows} caps={caps} viewerId={viewerId} twoPersonPayout={board.twoPersonPayout} todayKey={todayKey} showPartner listParams={listParams} clock={clock} />
         )}
       </Panel>
       <Pager page={board.page} pageSize={board.pageSize} total={board.total} noun="statement" path={COMMISSIONS_PATH} params={base} />

@@ -13,7 +13,8 @@ import { renewalGroup } from "@/lib/subscriptions/proration";
 import { loadCreditSubjects } from "@/lib/credit/load";
 import { assessCredit } from "@/lib/credit/engine";
 import { BEFORE, GRAINS, bucketFor, monthsIn, periodContaining, periodsFrom, yearEarlier, type Grain, type Period } from "@/lib/forecast/periods";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { CLOSED_STAGES, OPEN_STAGES, furthestOpenStage, isOpenStage, learnWeights, parseStageChange, weightMap, type OpenStage } from "@/lib/forecast/stages";
 import {
   forecastAmc,
@@ -40,9 +41,18 @@ import { byStageDate } from "@/lib/pipeline/server";
 
 const DAY = 86_400_000;
 
-function startOfToday(now: Date): Date {
-  const { year, month, day } = istDateParts(now);
-  return istMidnight(year, month, day);
+function startOfToday(now: Date, clock: Clock): Date {
+  const { year, month, day } = clock.parts(now);
+  return clock.midnight(year, month, day);
+}
+
+/**
+ * A calendar day — a `@db.Date`, or a day typed into a form and held as midnight UTC (a close date, an
+ * order's end date) — as the moment it begins on the workspace's clock, which is what the periods and
+ * "today" are made of: so it lands in its own day's period on either side of UTC.
+ */
+function dayStart(day: Date, clock: Clock): Date {
+  return clock.midnight(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
 }
 const money = (v: Prisma.Decimal | number | null | undefined) => (v === null || v === undefined ? 0 : Number(v));
 
@@ -109,7 +119,8 @@ export async function getForecast(params: ForecastParams = {}) {
   const grain: Grain = grainDef.key;
   const count = grainDef.counts.includes(Number(params.count)) ? Number(params.count) : grainDef.defaultCount;
   const now = new Date();
-  const periods = periodsFrom(now, grain, count);
+  const clock = await workspaceClock();
+  const periods = periodsFrom(now, grain, count, clock);
   const horizonEnd = periods[periods.length - 1]!.to;
   const who = ownerFilter(v.scope, params.ownerId);
 
@@ -149,8 +160,9 @@ export async function getForecast(params: ForecastParams = {}) {
         item: { type: "SUBSCRIPTION" },
         parentId: null,
         orderStatus: { notIn: ["CANCELLED", "REJECTED", "PENDING_APPROVAL"] },
-        // Lapsed in the last ninety days still counts: a late renewal is still a renewal.
-        endDate: { gte: new Date(periods[0]!.from.getTime() - 90 * DAY), lt: horizonEnd },
+        // Lapsed in the last ninety days still counts: a late renewal is still a renewal. The end date
+        // is a calendar day held as midnight UTC, so it is bounded by days.
+        endDate: { gte: clock.calendarDate(new Date(periods[0]!.from.getTime() - 90 * DAY)), lt: clock.calendarDate(horizonEnd) },
         company: accountWhere,
       },
       select: {
@@ -175,7 +187,7 @@ export async function getForecast(params: ForecastParams = {}) {
       where: {
         ownership: "CLIENT_OWNED",
         status: { notIn: ["RETIRED", "LOST"] },
-        warrantyEndsOn: { gte: new Date(periods[0]!.from.getTime() - 90 * DAY), lt: horizonEnd },
+        warrantyEndsOn: { gte: clock.calendarDate(new Date(periods[0]!.from.getTime() - 90 * DAY)), lt: clock.calendarDate(horizonEnd) },
         // No AMC, or one that ends before the warranty does — either way, nothing follows it.
         OR: [{ amcEndsOn: null }, { amcEndsOn: { lt: db.asset.fields.warrantyEndsOn } }],
         ownerCompany: accountWhere,
@@ -188,13 +200,15 @@ export async function getForecast(params: ForecastParams = {}) {
   ]);
 
   const weightOf = weightMap(weights);
-  const today = startOfToday(now);
-  // Each row carries the bucket it lands in, worked out here in India time, so the page's lists and
-  // its table can never disagree about which month a deal belongs to.
+  const today = startOfToday(now, clock);
+  // Each row carries the bucket it lands in, worked out here on the workspace's clock, so the page's
+  // lists and its table can never disagree about which month a deal belongs to. Every date handed on
+  // is a moment on that clock — a calendar day as the moment it begins (`dayStart`).
   const deals: (Deal & { bucket: string; weighted: number | null; title: string; ref: number; owner: { id: string; name: string } | null; company: { id: string; name: string }; valueSource: string | null })[] = leads.map((l) => {
     const proposal = l.documents[0];
     const fromProposal = proposal ? money(proposal.taxableValue) * (Number(proposal.exchangeRate) || 1) : null;
     const value = fromProposal && fromProposal > 0 ? fromProposal : l.estimatedValue !== null ? money(l.estimatedValue) : null;
+    const closeDate = l.expectedCloseDate ? dayStart(l.expectedCloseDate, clock) : null;
     return {
       id: l.id,
       ref: l.leadSeq,
@@ -202,8 +216,8 @@ export async function getForecast(params: ForecastParams = {}) {
       stage: l.status as OpenStage,
       value,
       valueSource: fromProposal && fromProposal > 0 ? `Proposal ${proposal!.docNumber}` : l.estimatedValue !== null ? "Estimate" : null,
-      closeDate: l.expectedCloseDate,
-      bucket: l.expectedCloseDate && l.expectedCloseDate.getTime() < today.getTime() ? BEFORE : bucketFor(l.expectedCloseDate, periods),
+      closeDate,
+      bucket: closeDate && closeDate.getTime() < today.getTime() ? BEFORE : bucketFor(closeDate, periods),
       weighted: value === null ? null : Math.round(value * (weightOf[l.status as OpenStage] ?? 0)) / 100,
       owner: l.owner,
       company: l.company,
@@ -222,15 +236,16 @@ export async function getForecast(params: ForecastParams = {}) {
         isAddon: true,
       })),
     ]);
+    const endDate = dayStart(p.endDate!, clock);
     return {
       id: p.id,
       ref: p.orderSeq,
-      endDate: p.endDate!,
+      endDate,
       brand: p.item.brand?.name ?? null,
       value: group.renewalValue,
       incomplete: group.incomplete,
       outcome: p.renewedBy ? "RENEWED" : p.renewalStage === "LOST" ? "LOST" : "OPEN",
-      bucket: bucketFor(p.endDate, periods),
+      bucket: bucketFor(endDate, periods),
       product: p.item.name,
       company: p.company,
       accountManager: p.company.owner?.name ?? null,
@@ -238,19 +253,19 @@ export async function getForecast(params: ForecastParams = {}) {
   });
 
   const [collections, targets, booked, lastYear, commits] = await Promise.all([
-    loadCollections(accountWhere, periods, now),
-    loadTargets(periods, grain, who.ids),
+    loadCollections(accountWhere, periods, now, clock),
+    loadTargets(periods, grain, who.ids, clock),
     bookings(periods, who, now),
-    bookings(periods.map((p) => ({ ...p, ...yearEarlier(p) })), who, null),
+    bookings(periods.map((p) => ({ ...p, ...yearEarlier(p, clock) })), who, null),
     db.forecastCommit.findMany({
-      where: { month: { in: periods.flatMap((p) => monthsIn(p)) }, ...(who.ids ? { userId: { in: who.ids } } : {}) },
+      where: { month: { in: periods.flatMap((p) => monthsIn(p, clock)) }, ...(who.ids ? { userId: { in: who.ids } } : {}) },
       select: { month: true, commit: true, bestCase: true },
     }),
   ]);
 
   const commitsBy = Object.fromEntries(
     periods.map((p) => {
-      const months = monthsIn(p);
+      const months = monthsIn(p, clock);
       const rows = commits.filter((c) => months.includes(c.month));
       return [p.key, rows.length ? { commit: rows.reduce((t, r) => t + money(r.commit), 0), bestCase: rows.reduce((t, r) => t + money(r.bestCase ?? r.commit), 0) } : null];
     }),
@@ -268,8 +283,11 @@ export async function getForecast(params: ForecastParams = {}) {
     renewals: { buckets: forecastRenewals(renewalItems, periods, rates), rates, items: renewalItems },
     collections,
     amc: {
-      buckets: forecastAmc(assets.map((a) => ({ id: a.id, companyId: a.ownerCompany!.id, warrantyEndsOn: a.warrantyEndsOn! })), periods),
-      assets: assets.map((a) => ({ id: a.id, name: a.name, serial: a.serialNumber, warrantyEndsOn: a.warrantyEndsOn!, company: a.ownerCompany!, bucket: bucketFor(a.warrantyEndsOn, periods) })),
+      buckets: forecastAmc(assets.map((a) => ({ id: a.id, companyId: a.ownerCompany!.id, warrantyEndsOn: dayStart(a.warrantyEndsOn!, clock) })), periods),
+      assets: assets.map((a) => {
+        const warrantyEndsOn = dayStart(a.warrantyEndsOn!, clock);
+        return { id: a.id, name: a.name, serial: a.serialNumber, warrantyEndsOn, company: a.ownerCompany!, bucket: bucketFor(warrantyEndsOn, periods) };
+      }),
     },
     targets,
     booked,
@@ -279,7 +297,7 @@ export async function getForecast(params: ForecastParams = {}) {
 }
 
 /** Open bills on the accounts in view, each timed by that customer's own record of paying late. */
-async function loadCollections(accountWhere: Prisma.CompanyWhereInput, periods: Period[], now: Date) {
+async function loadCollections(accountWhere: Prisma.CompanyWhereInput, periods: Period[], now: Date, clock: Clock) {
   const recent = new Date(now.getTime() - 180 * DAY);
   const [withInvoices, withOrders] = await Promise.all([
     db.tradeDocument.findMany({
@@ -302,23 +320,26 @@ async function loadCollections(accountWhere: Prisma.CompanyWhereInput, periods: 
 
   const bills: (OpenBill & { ref: string; company: { id: string; name: string }; kind: string; expected: Date; bucket: string })[] = [];
   for (const [companyId, subject] of subjects) {
-    const assessment = assessCredit(subject.bills, { asOf: now, manualLimit: subject.manualLimit });
+    const assessment = assessCredit(subject.bills, { asOf: now, manualLimit: subject.manualLimit, clock });
     for (const bill of subject.bills) {
       const settled = bill.settlements.reduce((t, s) => t + s.amount, 0);
       const balance = Math.round((bill.amount - settled) * 100) / 100;
       if (balance <= 0.5) continue;
       const averageDaysLate = assessment.metrics.averageDaysLate;
-      const expected = expectedOn({ dueOn: bill.dueOn, averageDaysLate });
+      // An invoice's due date is a calendar day, held as midnight UTC; an order's is the moment its
+      // terms run out (src/lib/credit/load.ts).
+      const dueOn = bill.kind === "INVOICE" ? dayStart(bill.dueOn, clock) : bill.dueOn;
+      const expected = expectedOn({ dueOn, averageDaysLate });
       bills.push({
         id: bill.id,
         ref: bill.ref,
         kind: bill.kind,
-        dueOn: bill.dueOn,
+        dueOn,
         balance,
         averageDaysLate,
         expected,
         // Past due is its own list: when it arrives is the one thing nobody knows.
-        bucket: bill.dueOn.getTime() < now.getTime() ? "OVERDUE" : bucketFor(expected, periods),
+        bucket: dueOn.getTime() < now.getTime() ? "OVERDUE" : bucketFor(expected, periods),
         company: { id: companyId, name: nameOf.get(companyId) ?? "—" },
       });
     }
@@ -331,24 +352,28 @@ async function loadCollections(accountWhere: Prisma.CompanyWhereInput, periods: 
  * otherwise the months inside it added up — never both, or a quarter with monthly targets and a
  * quarterly one would count twice.
  */
-async function loadTargets(periods: Period[], grain: Grain, userIds: string[] | null) {
+async function loadTargets(periods: Period[], grain: Grain, userIds: string[] | null, clock: Clock) {
+  // A date column holds the calendar day, as midnight UTC, so it is compared with the days the
+  // periods begin and end on the workspace's clock — never with their instants, which a zone west
+  // of UTC puts after that midnight and one east of it before.
+  const firstDay = clock.calendarDate(periods[0]!.from);
+  const endDay = clock.calendarDate(periods[periods.length - 1]!.to);
   const rows = await db.target.findMany({
     where: {
       metric: "ORDER_VALUE",
       active: true,
       scope: "USER",
-      fromDate: { gte: new Date(periods[0]!.from.getTime() - DAY) },
-      // Inclusive: a date-only column is compared by calendar day, and a strict bound at India
-      // midnight would drop a target ending on the horizon's last day. The exact fit is decided below.
-      toDate: { lte: periods[periods.length - 1]!.to },
+      fromDate: { gte: firstDay },
+      // Before the day after the horizon ends: a target ending on its last day is in. The exact fit
+      // is decided below.
+      toDate: { lt: endDay },
       ...(userIds ? { userId: { in: userIds } } : {}),
     },
     select: { userId: true, period: true, fromDate: true, toDate: true, value: true },
   });
   const exact = grain === "month" ? "MONTH" : grain === "quarter" ? "QUARTER" : "YEAR";
-  // A date column holds the calendar day; it falls inside a period if it is on or after the day the
-  // period begins in India, and before the day after it ends.
-  const inside = (d: Date, p: Period) => d.getTime() >= p.from.getTime() - DAY / 4 && d.getTime() < p.to.getTime();
+  // Inside a period: on or after the day it begins, and before the day after it ends.
+  const inside = (d: Date, p: Period) => d.getTime() >= clock.calendarDate(p.from).getTime() && d.getTime() < clock.calendarDate(p.to).getTime();
   return Object.fromEntries(
     periods.map((p) => {
       const within = rows.filter((r) => inside(r.fromDate, p) && inside(r.toDate, p));
@@ -417,7 +442,8 @@ export async function getCommits() {
   const v = await viewer();
   if (!v) return null;
   const now = new Date();
-  const months = periodsFrom(now, "month", 3);
+  const clock = await workspaceClock();
+  const months = periodsFrom(now, "month", 3, clock);
   const people = v.scope === null
     ? await db.user.findMany({ where: { active: true, OR: [{ leadsOwned: { some: {} } }, { forecastCommits: { some: {} } }] }, orderBy: { name: "asc" }, select: { id: true, name: true } })
     : await db.user.findMany({ where: { id: { in: v.scope }, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } });
@@ -427,7 +453,8 @@ export async function getCommits() {
     stageWeights(),
     db.forecastCommit.findMany({ where: { userId: { in: ids }, month: { in: months.map((m) => m.key) } } }),
     db.lead.findMany({
-      where: { status: { in: [...OPEN_STAGES] as LeadStatus[] }, ownerUserId: { in: ids }, expectedCloseDate: { gte: months[0]!.from, lt: months[months.length - 1]!.to } },
+      // A close date is a calendar day held as midnight UTC, so it is bounded by the months' days.
+      where: { status: { in: [...OPEN_STAGES] as LeadStatus[] }, ownerUserId: { in: ids }, expectedCloseDate: { gte: clock.calendarDate(months[0]!.from), lt: clock.calendarDate(months[months.length - 1]!.to) } },
       select: {
         ownerUserId: true,
         status: true,
@@ -444,7 +471,7 @@ export async function getCommits() {
       .map((l) => {
         const p = l.documents[0];
         const fromProposal = p ? money(p.taxableValue) * (Number(p.exchangeRate) || 1) : 0;
-        return { id: "", stage: l.status as OpenStage, value: fromProposal > 0 ? fromProposal : l.estimatedValue !== null ? money(l.estimatedValue) : null, closeDate: l.expectedCloseDate };
+        return { id: "", stage: l.status as OpenStage, value: fromProposal > 0 ? fromProposal : l.estimatedValue !== null ? money(l.estimatedValue) : null, closeDate: l.expectedCloseDate ? dayStart(l.expectedCloseDate, clock) : null };
       });
     return forecastSales(deals, months, weightOf).periods;
   };
@@ -478,7 +505,7 @@ export async function saveCommit(input: { month: string; commit: number; bestCas
   const user = await requireModuleUser("forecast");
   if (!(await isModuleEnabled("forecast"))) return { ok: false, error: "Forecasting is switched off." };
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) return { ok: false, error: "Pick a month." };
-  const current = periodContaining(new Date(), "month").key;
+  const current = periodContaining(new Date(), "month", await workspaceClock()).key;
   if (input.month < current) return { ok: false, error: "That month is over — its commit stays as it was made." };
   const commit = Number(input.commit);
   const bestCase = input.bestCase === null || input.bestCase === undefined || (input.bestCase as unknown) === "" ? null : Number(input.bestCase);

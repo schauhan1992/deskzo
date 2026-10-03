@@ -10,7 +10,7 @@ import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { buildCashFlow, type AccountMovement } from "@/lib/ledger/cashflow";
 import { buildGstr1, buildGstr3b, buildTdsSummary, type ReturnDocument } from "@/lib/ledger/gst-returns";
 import { profitAndLoss } from "@/actions/ledger-reports";
-import { endOfIndianDay, istMidnight, startOfIndianDay } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import { listRegistrationChoices } from "@/lib/branches/identity";
 import type { RegistrationChoice } from "@/lib/branches/format";
 
@@ -31,16 +31,17 @@ async function requireAccounts() {
 
 /**
  * A return month, in India: from midnight IST on the 1st up to — not including — midnight IST on the
- * 1st of the next month. Queries use `gte: from, lt: before`.
+ * 1st of the next month. Queries use `gte: from, lt: before`. India's in every workspace: the law fixes
+ * a return's month to India time.
  *
  * It used to be the UTC month, inclusive, so a document issued between 00:00 and 05:30 IST on the 1st
  * landed in the previous month's return (X4). Past months' figures change with the fix, because those
  * were the wrong ones. `to` — the month's last millisecond — is only for the pages' labels.
  */
 function monthBounds(month: number, year: number) {
-  const from = istMidnight(year, month - 1, 1);
-  // `month` is 1-based and istMidnight's is 0-based, so this is the next month; December carries into January.
-  const before = istMidnight(year, month, 1);
+  const from = indiaClock.midnight(year, month - 1, 1);
+  // `month` is 1-based and midnight's is 0-based, so this is the next month; December carries into January.
+  const before = indiaClock.midnight(year, month, 1);
   return { from, before, to: new Date(before.getTime() - 1) };
 }
 
@@ -391,9 +392,10 @@ export async function cashFlow(params: { from: string; to: string }) {
   // The page checks this too, but a server action can be called without its page: the books are
   // `ledger.viewReports`, as everywhere else in src/actions/ledger-reports.ts.
   if (!(await can(user.id, "ledger.viewReports"))) throw new Error("You don't have permission to see the books.");
-  // Indian days, as the returns' months are — not UTC days, which began and ended at 05:30 IST.
-  const from = startOfIndianDay(params.from) ?? new Date(NaN);
-  const toNext = endOfIndianDay(params.to);
+  // Indian days, as the returns' months are — not UTC days, which began and ended at 05:30 IST, nor the
+  // workspace's: the books keep India's calendar.
+  const from = indiaClock.startOfDay(params.from) ?? new Date(NaN);
+  const toNext = indiaClock.endOfDay(params.to);
   const to = toNext ? new Date(toNext.getTime() - 1) : new Date(NaN);
 
   const accounts = await db.ledgerAccount.findMany({

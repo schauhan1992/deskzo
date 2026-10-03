@@ -8,6 +8,8 @@ import { setUserPermission, clearUserPermission, userPermissionOverrides } from 
 import { Badge, Card } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
+import { useClock } from "@/components/time/clock-provider";
+import { lastDayOf } from "@/lib/access/last-day";
 
 /**
  * One person's access, and why.
@@ -64,6 +66,7 @@ export function UserAccessDrawer({
   mayManage?: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [overrides, setOverrides] = useState<Awaited<ReturnType<typeof userPermissionOverrides>>>([]);
@@ -164,9 +167,8 @@ export function UserAccessDrawer({
                                 {o.reason ? `${o.reason} · ` : ""}
                                 {/* A null grantor is what the seeder writes, not a departed employee. */}
                                 {o.grantedBy?.name ? `by ${o.grantedBy.name}` : "grantor not recorded"}
-                                {o.createdAt && ` on ${new Date(o.createdAt).toLocaleDateString("en-IN")}`}
-                                {o.expiresAt &&
-                                  ` · ${o.expired ? "lapsed" : "until"} ${new Date(o.expiresAt).toLocaleDateString("en-IN")}`}
+                                {o.createdAt && ` on ${clock.date(o.createdAt)}`}
+                                {o.expiresAt && ` · ${o.expired ? "lapsed" : "until"} ${clock.date(lastDayOf(o.expiresAt))}`}
                               </div>
                             </div>
                             {mayManage && (<button

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { marketableCompanyFilter } from "@/lib/reseller";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The filter set behind a workbook.
@@ -114,8 +115,10 @@ function daysAhead(days: number) {
  * explicitly says otherwise. They belong to the reseller, and this is the seam every list in the
  * app passes through — a calling workbook and a marketing audience alike. Enforcing it anywhere
  * further out would mean enforcing it in several places, which is how it stops being enforced.
+ *
+ * `clock` is the workspace's (`workspaceClock()`): "Added from" and "Added up to" are its days.
  */
-export function buildWhere(filters: WorkbookFilters): Prisma.CompanyWhereInput {
+export function buildWhere(filters: WorkbookFilters, clock: Clock): Prisma.CompanyWhereInput {
   const and: Prisma.CompanyWhereInput[] = [];
 
   if (!filters.includeResellerManaged) and.push(marketableCompanyFilter);
@@ -203,12 +206,10 @@ export function buildWhere(filters: WorkbookFilters): Prisma.CompanyWhereInput {
     // "None since the cutoff" also catches companies never called, which is the point of the filter.
     and.push({ calls: { none: { startedAt: { gte: daysAgo(filters.noCallInDays) } } } });
   }
-  if (filters.createdFrom) and.push({ createdAt: { gte: new Date(filters.createdFrom) } });
-  if (filters.createdTo) {
-    const to = new Date(filters.createdTo);
-    to.setHours(23, 59, 59, 999);
-    and.push({ createdAt: { lte: to } });
-  }
+  // The workspace's days, half-open, the whole "up to" day included. It began the From day at UTC's
+  // midnight and ended the To day at the server's own.
+  const added = clock.dayRange(filters.createdFrom, filters.createdTo);
+  if (added) and.push({ createdAt: added });
 
   if (has(filters.emailProvider)) {
     and.push({ domainProfile: { is: { emailProvider: { in: filters.emailProvider } } } });

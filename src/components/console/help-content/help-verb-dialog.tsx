@@ -6,10 +6,12 @@ import type { ConsoleResult } from "@/actions/platform/console";
 import { consoleArchiveHelpItem, consolePublishHelpItem, consoleRestoreHelpItem, consoleUnpublishHelpItem } from "@/actions/platform/console-help";
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PublicationState } from "@/lib/platform/help-content";
+import type { Clock } from "@/lib/time/zone";
 import { KIND_WORD, isEverywhere, tableOf, type HelpItemKind } from "./shared";
 
 /**
@@ -58,15 +60,15 @@ function whereText(t: HelpVerbTarget): string {
   return t.reach === null ? "the workspaces it is for" : `the ${plural(t.reach, "open workspace")} it is for`;
 }
 
-/** The consequence sentence for each confirmation — one line, as T1 asks. */
-function consequence(verb: HelpVerb, t: HelpVerbTarget): string {
+/** The consequence sentence for each confirmation — one line, as T1 asks. Times on the console's clock. */
+function consequence(verb: HelpVerb, t: HelpVerbTarget, clock: Clock): string {
   const word = KIND_WORD[t.kind];
   const where = whereText(t);
   const servers = "Other servers pick it up within a minute.";
   switch (verb) {
     case "publish":
       return t.state === "scheduled" && t.publishedAt
-        ? `It shows in ${where} now, instead of from ${when(t.publishedAt)} IST. ${servers}`
+        ? `It shows in ${where} now, instead of from ${clock.dateTime(t.publishedAt)} ${clock.offsetLabel(t.publishedAt)}. ${servers}`
         : `The ${word} shows in ${where} from now on, under "From Deskzo". ${servers}`;
     case "unpublish":
       return t.state === "live" ? `It stops showing in ${where} and goes back to the drafts. ${servers}` : "It won't go live, and goes back to the drafts.";
@@ -85,6 +87,7 @@ function consequence(verb: HelpVerb, t: HelpVerbTarget): string {
 
 /** The dialog for one verb on one item; nothing while `pending` is null. */
 export function HelpVerbDialog({ pending, caps, onClose }: { pending: { verb: HelpVerb; target: HelpVerbTarget } | null; caps: Caps; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<unknown>();
   const verb = pending?.verb ?? "publish";
   const target = pending?.target ?? null;
@@ -130,7 +133,7 @@ export function HelpVerbDialog({ pending, caps, onClose }: { pending: { verb: He
       {target && (
         <>
           <p className="font-medium break-words">{target.title}</p>
-          <p className="text-muted">{consequence(verb, target)}</p>
+          <p className="text-muted">{consequence(verb, target, clock)}</p>
           {typed && (
             <p className="text-xs text-muted">
               No module or country is chosen, so it shows in every workspace — that needs <span className="font-mono text-text">publish</span> typed below.

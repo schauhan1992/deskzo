@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { HandoverEntry } from "@/actions/handover";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * What has been handed over, on the record of whoever it concerns.
@@ -11,7 +11,7 @@ import { formatDate } from "@/lib/utils";
  * than "where did his go", and until this existed only the audit log could answer either — in a
  * sentence, without naming who actually received what.
  */
-export function HandoverHistory({
+export async function HandoverHistory({
   entries,
   personId,
   personName,
@@ -22,6 +22,8 @@ export function HandoverHistory({
   personName: string;
   canHandOver: boolean;
 }) {
+  const clock = await workspaceClock();
+
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-text">
@@ -52,7 +54,7 @@ export function HandoverHistory({
                     : `${entry.total} item${entry.total === 1 ? "" : "s"} taken over from ${entry.counterpartName}`}
                 </span>
                 <span className="text-xs text-subtle">
-                  {formatDate(entry.at)} · by {entry.performedByName}
+                  {clock.date(entry.at)} · by {entry.performedByName}
                 </span>
               </div>
 

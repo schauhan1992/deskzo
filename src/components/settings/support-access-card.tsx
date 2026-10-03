@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { endPlatformSupport, grantPlatformSupport, type SupportAccessState } from "@/actions/support-access";
-import { formatIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The super admin letting Deskzo's support staff in (src/actions/support-access.ts): read-only, or an
@@ -16,6 +16,7 @@ export function SupportAccessCard({ state, compact = false }: { state: SupportAc
   // Its own ids wherever it is drawn: the Security page and the rail can both show it at once.
   const uid = useId();
   const router = useRouter();
+  const clock = useClock();
   const [level, setLevel] = useState<"READONLY" | "ADMIN">("READONLY");
   const [hours, setHours] = useState("24");
   const [reason, setReason] = useState("");
@@ -35,7 +36,7 @@ export function SupportAccessCard({ state, compact = false }: { state: SupportAc
       <div className="space-y-3 text-sm">
         <p className="text-text">
           Platform support can come in as <span className="font-medium">{state.grant.level === "ADMIN" ? "an administrator" : "read-only"}</span> until{" "}
-          {formatIstDateTime(state.grant.expiresAt)}.
+          {clock.dateTime(state.grant.expiresAt)}.
         </p>
         <p className="text-xs text-muted">
           Granted by {state.grant.grantedByName}: {state.grant.reason}

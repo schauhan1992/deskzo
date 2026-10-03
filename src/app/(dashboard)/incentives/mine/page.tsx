@@ -2,7 +2,8 @@ import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { myEarnings } from "@/actions/incentive";
 import { Badge, Card } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 import { statusLabels, statusTone } from "@/lib/incentives/compute";
 import { metricByKey } from "@/lib/targets/metrics";
 
@@ -10,7 +11,7 @@ export default async function MyIncentivesPage() {
   const enabled = await isModuleEnabled("incentives");
   if (!enabled) return <ModuleDisabledNotice moduleKey="incentives" />;
 
-  const earnings = await myEarnings();
+  const [earnings, clock] = await Promise.all([myEarnings(), workspaceClock()]);
   const paid = earnings.filter((e) => e.status === "PAID").reduce((t, e) => t + Number(e.amount), 0);
   const coming = earnings
     .filter((e) => e.status === "DUE" || e.status === "APPROVED")
@@ -53,7 +54,7 @@ export default async function MyIncentivesPage() {
                 <p className="mt-0.5 text-xs text-subtle">
                   {e.label}
                   {e.scheme && ` · ${e.scheme.name}`}
-                  {e.paidAt && ` · paid ${formatDate(e.paidAt)}`}
+                  {e.paidAt && ` · paid ${clock.date(e.paidAt)}`}
                 </p>
               </div>
               <div className="text-lg font-semibold tabular-nums text-text">{formatCurrency(Number(e.amount))}</div>

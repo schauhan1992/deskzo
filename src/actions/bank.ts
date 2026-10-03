@@ -8,7 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { ensureChartOfAccounts, postChequeClearingToLedger } from "@/lib/ledger/journal";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
-import { endOfIndianDay, istDateKey, startOfIndianDay } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import {
   parseStatementCsv,
   reconcile,
@@ -223,8 +223,9 @@ export async function clearCheque(input: {
 
   const clearedOn = new Date(`${input.clearedOn}T00:00:00.000Z`);
   if (Number.isNaN(clearedOn.getTime())) return { ok: false, error: "That isn't a date." };
-  // A cheque cannot clear before it was written — the Indian day it was written, not the UTC one.
-  if (clearedOn < new Date(`${istDateKey(payment.paidOn)}T00:00:00.000Z`)) {
+  // A cheque cannot clear before it was written — the Indian day it was written, not the UTC one: the
+  // books keep India's calendar in every workspace.
+  if (clearedOn < new Date(`${indiaClock.dateKey(payment.paidOn)}T00:00:00.000Z`)) {
     return { ok: false, error: "A cheque can't clear before the day it was written." };
   }
 
@@ -330,9 +331,10 @@ export async function reconciliationView(params: { bankAccountId: string; to?: s
   // As at the end of an Indian day: the one asked for, or today in India. It was the end of the UTC
   // day (`T23:59:59.999Z`), which is 05:29 IST the next morning — so a receipt posted at 01:00 IST on
   // the 1st counted in a reconciliation to the 31st. Journal dates are instants, compared up to the
-  // next Indian midnight; statement dates are a `@db.Date`, compared as that calendar day itself.
-  const asAtDay = params.to && startOfIndianDay(params.to) ? params.to : istDateKey(new Date());
-  const before = endOfIndianDay(asAtDay)!;
+  // next Indian midnight; statement dates are a `@db.Date`, compared as that calendar day itself. A
+  // reconciliation is the books', so India's day in every workspace.
+  const asAtDay = params.to && indiaClock.startOfDay(params.to) ? params.to : indiaClock.today();
+  const before = indiaClock.endOfDay(asAtDay)!;
   const to = new Date(before.getTime() - 1);
 
   const [lines, statementLines] = await Promise.all([

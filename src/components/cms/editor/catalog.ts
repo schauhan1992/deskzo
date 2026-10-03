@@ -25,7 +25,7 @@ import { BLOCK_TYPES, type BlockPropsMap, type BlockType, type SiteBlock } from 
 import { DEFAULT_SITE_PAGES } from "@/components/site/defaults";
 import { plainInline } from "@/components/cms/editor/inline-markup";
 import { newBlockId } from "@/components/cms/editor/doc-utils";
-import { istDateKey } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * What the editor knows about each block type besides its shape (src/components/site/blocks/types.ts):
@@ -146,8 +146,9 @@ const STARTERS: { [K in BlockType]: () => BlockPropsMap[K] } = {
     heading: "How {siteName} compares",
     intro: "What each product offers, point by point, from each one's own public information.",
     competitor: "Other product's name",
-    // Today in India: the day the other product's website is read, which the page states.
-    asOf: istDateKey(new Date()),
+    // Today in India: the day the other product's website is read, which the page states — the public
+    // site's dates are India's, whatever zone the console keeps.
+    asOf: indiaClock.today(),
     rows: [{ feature: "First feature compared", us: "yes", them: "partial", note: "What differs, in a line." }],
     disclaimer: "Information about other products is from their public websites as of the date above and may have changed since. Product names and trademarks belong to their owners.",
   }),

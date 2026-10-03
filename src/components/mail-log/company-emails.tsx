@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { companyMailSummary, listMailLog } from "@/actions/mail-log";
 import { Card } from "@/components/ui/card";
 import { MailLogTable } from "@/components/mail-log/mail-log-table";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Summary = NonNullable<Awaited<ReturnType<typeof companyMailSummary>>>;
 type Rows = Awaited<ReturnType<typeof listMailLog>>;
@@ -12,9 +12,10 @@ type Rows = Awaited<ReturnType<typeof listMailLog>>;
  *
  * The latest fifty here; the full history, with filters, is the Mail log narrowed to this customer.
  */
-export function CompanyEmails({ companyId, summary, recent }: { companyId: string; summary: Summary; recent: Rows }) {
+export async function CompanyEmails({ companyId, summary, recent }: { companyId: string; summary: Summary; recent: Rows }) {
+  const clock = await workspaceClock();
   const tiles: [string, string, string][] = [
-    ["Emails", String(summary.total), summary.lastSentAt ? `last sent ${formatDate(summary.lastSentAt)}` : "none sent yet"],
+    ["Emails", String(summary.total), summary.lastSentAt ? `last sent ${clock.date(summary.lastSentAt)}` : "none sent yet"],
     ["Delivered", String(summary.delivered), summary.total ? `${Math.round((summary.delivered / summary.total) * 100)}% of all` : ""],
     ["Opened", String(summary.opened), ""],
     ["Bounced or failed", String(summary.problem), summary.held ? `${summary.held} held back` : ""],

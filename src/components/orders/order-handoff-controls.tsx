@@ -15,8 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
-import { istTodayKey, shortDay, type ReleaseState } from "@/lib/orders/handoff-rules";
+import { shortDay, type ReleaseState } from "@/lib/orders/handoff-rules";
 import { formatCurrency } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The controls for an order's hand-off to purchase and its distributor price, each a small client
@@ -47,7 +49,14 @@ function useAction() {
   return { isPending, error, run };
 }
 
-const tomorrowKey = () => new Date(Date.parse(`${istTodayKey(new Date())}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+/** Tomorrow on the workspace's calendar, as a date input's `yyyy-mm-dd`. */
+function tomorrowKey(clock: Clock): string {
+  const { year, month, day } = clock.parts(new Date());
+  return clock.dateKey(clock.midnight(year, month, day + 1));
+}
+
+/** A `@db.Date` day (held as midnight UTC) back into a date input: its UTC date is the day. */
+const dayInput = (value: Date | string) => new Date(value).toISOString().slice(0, 10);
 
 export function OrderHandoffPanel({
   orderId,
@@ -59,7 +68,8 @@ export function OrderHandoffPanel({
   releaseOn: Date | string | null;
 }) {
   const { isPending, error, run } = useAction();
-  const [date, setDate] = useState(() => (releaseOn ? new Date(releaseOn).toISOString().slice(0, 10) : tomorrowKey()));
+  const clock = useClock();
+  const [date, setDate] = useState(() => (releaseOn ? dayInput(releaseOn) : tomorrowKey(clock)));
   if (purchaseRelease === "RELEASED") return null;
 
   return (
@@ -67,7 +77,7 @@ export function OrderHandoffPanel({
       <p className="text-sm font-medium text-text">
         {purchaseRelease === "HELD"
           ? "In hand — not yet sent to purchase"
-          : `Goes to purchase on ${releaseOn ? shortDay(releaseOn) : "its day"}`}
+          : `Goes to purchase on ${releaseOn ? shortDay(releaseOn, clock) : "its day"}`}
       </p>
       <p className="text-xs text-muted">Purchase can&apos;t process it until it&apos;s sent. You can change this until then.</p>
       {error && <p className="text-sm text-danger">{error}</p>}
@@ -82,7 +92,7 @@ export function OrderHandoffPanel({
           <Input
             id={`release-on-${orderId}`}
             type="date"
-            min={tomorrowKey()}
+            min={tomorrowKey(clock)}
             value={date}
             onChange={(e) => setDate(e.target.value)}
             className="w-40"
@@ -196,12 +206,13 @@ export function OrderQuoteEditor({
   vendors: { id: string; name: string }[];
 }) {
   const { isPending, error, run } = useAction();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState(quote.price !== null ? String(quote.price) : "");
   const [vendorId, setVendorId] = useState(quote.vendorId ?? "");
   const [vendorName, setVendorName] = useState(quote.vendorName ?? "");
   const [contact, setContact] = useState(quote.contact ?? "");
-  const [quotedOn, setQuotedOn] = useState(quote.quotedOn ? new Date(quote.quotedOn).toISOString().slice(0, 10) : "");
+  const [quotedOn, setQuotedOn] = useState(quote.quotedOn ? dayInput(quote.quotedOn) : "");
   const [remarks, setRemarks] = useState(quote.remarks ?? "");
 
   const save = (remove: boolean) =>
@@ -233,7 +244,7 @@ export function OrderQuoteEditor({
               <Input
                 id={`quote-on-${orderId}`}
                 type="date"
-                max={istTodayKey(new Date())}
+                max={clock.today()}
                 value={quotedOn}
                 onChange={(e) => setQuotedOn(e.target.value)}
               />

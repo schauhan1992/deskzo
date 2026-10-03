@@ -16,7 +16,9 @@ import { currentKeys } from "@/lib/tenancy/keys";
 import { postalAddressFor } from "@/lib/marketing/footer";
 import { providerByKey, routeFor, type RoutableProvider } from "@/lib/marketing/providers";
 import type { OutboundMessage } from "@/lib/marketing/providers/types";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * The machinery between "somebody pressed send" and "a provider accepted it".
@@ -39,9 +41,10 @@ export type MarketingSettings = {
 };
 
 export async function marketingSettings(): Promise<MarketingSettings> {
-  const [org, holidays] = await Promise.all([
+  const [org, holidays, clock] = await Promise.all([
     getOrganisation(),
     db.holiday.findMany({ select: { date: true, optional: true } }),
+    workspaceClock(),
   ]);
 
   return {
@@ -50,6 +53,8 @@ export async function marketingSettings(): Promise<MarketingSettings> {
       skipNonWorkingDays: org.marketingSkipNonWorkingDays,
       // Restricted holidays are excluded by `closedDates` — the office is open on those.
       holidays: closedDates(holidays),
+      // Quiet hours are the workspace's own: 8 pm in Dubai is 8 pm there, not in India.
+      clock,
     },
     limits: {
       maxPerContactPerWeek: org.marketingMaxPerContactPerWeek,
@@ -105,7 +110,7 @@ export async function resolveRecipients(params: {
 
   const fromAudience: Prisma.ContactWhereInput | null =
     params.companyFilters !== undefined
-      ? { company: audienceCompanyWhere(companyFilters), ...contactWhere(contactFilters, params.channel, db.contact.fields.email) }
+      ? { company: audienceCompanyWhere(companyFilters, params.settings.rules.clock), ...contactWhere(contactFilters, params.channel, db.contact.fields.email) }
       : null;
   // A list is everyone on it. Whether each of them may be mailed is the verdict's job below, the
   // same as for anybody else — being uploaded earns nobody a way round the rules.
@@ -205,7 +210,7 @@ export async function resolveRecipients(params: {
 
   const unanswered = tally(feedback, (f) => f.companyId);
   const breached = tally(
-    tickets.filter((t) => getTicketSlaStatus(t.priority, t.status, t.createdAt, now).key === "overdue"),
+    tickets.filter((t) => getTicketSlaStatus(t.priority, t.status, t.createdAt, params.settings.rules.clock, now).key === "overdue"),
     (t) => t.companyId,
   );
   const overdueBy = new Map<string, number>();
@@ -303,7 +308,8 @@ export function subscriptionMergeValues(product: {
   return {
     productName: product.item.name,
     quantity: product.quantity,
-    expiryDate: product.endDate ? formatDate(product.endDate) : null,
+    // A typed day, held at UTC midnight: the day itself, in any zone.
+    expiryDate: product.endDate ? formatCalendarDay(product.endDate) : null,
     daysLeft: days,
     renewalValue: price === null ? null : formatCurrency(price * product.quantity),
   };

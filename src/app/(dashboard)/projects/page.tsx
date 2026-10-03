@@ -19,7 +19,8 @@ import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * Every project this person is on.
@@ -119,7 +120,8 @@ export default async function ProjectsPage({
                         {p.manager && ` · ${p.manager.name}`}
                       </p>
                       <p className="mt-0.5 text-xs text-subtle">
-                        {p.targetEndDate && `Promised ${formatDate(new Date(p.targetEndDate))}`}
+                        {/* A typed day, held at UTC midnight: the day itself. */}
+                        {p.targetEndDate && `Promised ${formatCalendarDay(p.targetEndDate)}`}
                         {/* Said plainly, because a slipping project is the one thing a list of
                             projects exists to surface. */}
                         {late !== null && <span className="text-danger"> · {late} days late</span>}

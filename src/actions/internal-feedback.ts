@@ -9,6 +9,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
 import { DAILY_FEEDBACK_LIMIT, submissionDate } from "@/lib/engagement/anonymity";
 import type { ActionResult } from "@/actions/company";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * The anonymous channel.
@@ -50,7 +51,7 @@ export async function submitAnonymousFeedback(input: {
     return { ok: false, error: "A rating is one to five." };
   }
 
-  const onDate = submissionDate(new Date());
+  const onDate = submissionDate(new Date(), await workspaceClock());
 
   // ── The roll. Written first and on its own, so a failure here stops the submission rather than
   //    leaving an uncounted one behind. Holds no content.
@@ -110,7 +111,7 @@ export async function submitAnonymousFeedback(input: {
 export async function remainingFeedbackToday(): Promise<number> {
   const user = await requireModuleUser("engagement");
   const row = await db.feedbackQuota.findUnique({
-    where: { user_day: { userId: user.id, onDate: submissionDate(new Date()) } },
+    where: { user_day: { userId: user.id, onDate: submissionDate(new Date(), await workspaceClock()) } },
     select: { count: true },
   });
   return DAILY_FEEDBACK_LIMIT - (row?.count ?? 0);

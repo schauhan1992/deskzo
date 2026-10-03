@@ -6,7 +6,8 @@ import { can } from "@/lib/authz/resolve";
 import { reconcilableVendors } from "@/actions/reconcile";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { UploadStatement } from "@/components/reconcile/upload-statement";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,8 @@ export default async function ReconciliationPage() {
                         <div className="text-xs text-muted">{r.vendor}</div>
                       </td>
                       <td className="whitespace-nowrap px-5 py-2.5 text-muted">
-                        {formatDate(r.periodStart)} – {formatDate(r.periodEnd)}
+                        {/* Typed days, held at UTC midnight: the days themselves. */}
+                        {formatCalendarDay(r.periodStart)} – {formatCalendarDay(r.periodEnd)}
                       </td>
                       <td className="px-5 py-2.5 text-muted">
                         {r.matched}/{r.lineCount} matched

@@ -13,7 +13,7 @@ import { getTradeDocument } from "@/actions/trade-document";
 import { getBranding } from "@/actions/branding";
 import { getOrganisation } from "@/lib/organisation";
 import { formatMoney } from "@/lib/currency";
-import { formatIstDate } from "@/lib/india-time";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { tradeDocumentLabels } from "@/lib/trade-documents";
 import { approvalDocumentFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
 import { approvalRequirement } from "@/lib/documents/approval";
@@ -73,7 +73,8 @@ async function mergeValuesFor(doc: Doc, senderId: string): Promise<MergeValues> 
     getOrganisation(),
     getBranding(),
   ]);
-  const day = (d: string | Date | null | undefined) => (d ? formatIstDate(d) : null);
+  // A document's dates are calendar days, held as midnight UTC: the day typed, in any zone.
+  const day = (d: string | Date | null | undefined) => (d ? formatCalendarDay(d) : null);
   return {
     "customer.name": doc.company.name,
     "document.type": tradeDocumentLabels[doc.docType],

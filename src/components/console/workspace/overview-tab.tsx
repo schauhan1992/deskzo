@@ -8,11 +8,12 @@ import { CopyField } from "@/components/console/kit/copy-field";
 import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
-import { dayMonthYear, gatewayDashboardUrl } from "@/lib/console-shared/format";
+import { gatewayDashboardUrl } from "@/lib/console-shared/format";
 import { ALERT_SEVERITY, HELD_FOR } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { GatewayModes } from "@/lib/console-shared/types";
 import type { Alert } from "@/lib/platform/alerts";
+import { consoleClock } from "@/lib/platform/console-clock";
 import type { NoteView, OpsPanel, PlanPanel, SupportPanel, TimelinePage, WorkspaceHeader } from "@/lib/platform/workspace-data";
 import { CloseWorkspaceButton } from "./close-dialog";
 import { DomainsPanel } from "./domains-panel";
@@ -30,7 +31,8 @@ import { SupportAccessCard } from "./support-tab";
  * offers Reopen instead. Close is an owner's, never for the installation's own workspace.
  *
  * `modes` (an addition to spec §4.7): the gateways' test/live modes, so a customer id links to the
- * right dashboard — shown to sellers only, as on the Billing tab.
+ * right dashboard — shown to sellers only, as on the Billing tab. A server component: its days are on
+ * the console's clock.
  */
 
 const RECENT = 8;
@@ -93,7 +95,7 @@ function AttentionPanel({ alerts }: { alerts: Alert[] }) {
   );
 }
 
-export function OverviewTab({
+export async function OverviewTab({
   header,
   support,
   timeline,
@@ -114,6 +116,7 @@ export function OverviewTab({
   /** Its addresses, as the Operations tab has them (`workspaceOps`). */
   domains: OpsPanel["domains"];
 }) {
+  const clock = await consoleClock();
   const { tenant } = header;
   const base = `/workspaces/${encodeURIComponent(tenant.slug)}`;
   const status = tenant.status;
@@ -140,7 +143,7 @@ export function OverviewTab({
     { term: "Country · currency · time zone", value: `${tenant.country} · ${tenant.currency} · ${tenant.timezone}` },
     { term: "Region", value: tenant.region },
     { term: "Database", value: tenant.dbName ? <span className="font-mono text-xs break-all">{tenant.dbName}</span> : <span className="text-muted">The installation&apos;s own</span> },
-    { term: "Created", value: dayMonthYear(tenant.createdAt) },
+    { term: "Created", value: clock.date(tenant.createdAt) },
     { term: "Updated", value: <RelativeTime at={tenant.updatedAt} /> },
   ];
   if (status === "SUSPENDED") {
@@ -149,13 +152,13 @@ export function OverviewTab({
       term: "Held",
       value: (
         <span>
-          {tenant.suspendedAt ? `Since ${dayMonthYear(tenant.suspendedAt)}` : "Yes"}
+          {tenant.suspendedAt ? `Since ${clock.date(tenant.suspendedAt)}` : "Yes"}
           {heldFor && <span className={heldFor.tone === "danger" ? "text-danger" : "text-warning"}>{` · ${heldFor.label}`}</span>}
         </span>
       ),
     });
   }
-  if (header.closed) details.push({ term: "Closed on", value: dayMonthYear(header.closed.at) });
+  if (header.closed) details.push({ term: "Closed on", value: clock.date(header.closed.at) });
   if (tenant.stripeCustomerId) details.push({ term: "Stripe customer", value: customer("STRIPE", tenant.stripeCustomerId) });
   if (tenant.razorpayCustomerId) details.push({ term: "Razorpay customer", value: customer("RAZORPAY", tenant.razorpayCustomerId) });
 

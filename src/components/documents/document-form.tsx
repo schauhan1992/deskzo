@@ -32,7 +32,8 @@ import { registeredTreatments } from "@/lib/validation/trade-document";
 import { blankLine, type AddressDraft, type DocumentFormDefaults, type LineDraft } from "@/lib/document-draft";
 import { branchLabel, type BranchChoice } from "@/lib/branches/format";
 import { GST_NUMBERED_TYPES, expandPrefix } from "@/lib/document-numbering";
-import { startOfIndianDay } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
+import { useClock } from "@/components/time/clock-provider";
 import { formatOrderId } from "@/lib/order-id";
 import {
   defaultServicePeriod,
@@ -58,7 +59,7 @@ const periodDefault = nextLinePeriod;
 
 /** "ORD-000123 · Microsoft 365 × 10 · 1 Oct 2026 – 30 Sep 2027", for the order picker. */
 function orderLabel(order: PartyOrder): string {
-  // The order's dates are instants; `orderServicePeriod` reads them as the Indian days they fall on.
+  // `orderServicePeriod` reads the order's stored start and end as the days of its term.
   const term = orderServicePeriod(order);
   return `${formatOrderId(order.orderSeq)} · ${order.item.name} × ${order.quantity}${term ? ` · ${formatServicePeriod(term.from, term.to)}` : ""}`;
 }
@@ -68,10 +69,11 @@ const GST_RATES = ["0", "0.25", "3", "5", "12", "18", "28"];
 /**
  * Whether a stored number is one this series generated: its prefix, expanded for the document's date,
  * then digits only. The server's own test (`isAutoNumberOf`) for renumbering a moved draft — a number
- * somebody typed is never renumbered.
+ * somebody typed is never renumbered. The financial year in a prefix is India's (a GST series runs
+ * April to March), so the day is read on India's clock in every workspace.
  */
 function generatedBy(setting: NumberSetting, docNumber: string, issueDate: string) {
-  const prefix = expandPrefix(setting.prefix, startOfIndianDay(issueDate) ?? new Date(), setting.ctx ?? {});
+  const prefix = expandPrefix(setting.prefix, indiaClock.startOfDay(issueDate) ?? new Date(), setting.ctx ?? {});
   return docNumber.startsWith(prefix) && /^\d+$/.test(docNumber.slice(prefix.length));
 }
 
@@ -102,6 +104,7 @@ export function DocumentForm({
   defaults: DocumentFormDefaults;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   /** Prefix for ids that tie captions to their controls, unique per mount of this form. */
@@ -483,7 +486,7 @@ export function DocumentForm({
   /** The document's date moved: a period that is one billing cycle from it moves with it. */
   function changeIssueDate(next: string) {
     setIssueDate(next);
-    if (!periodShown || !startOfIndianDay(next)) return;
+    if (!periodShown || !clock.startOfDay(next)) return;
     setLines((prev) =>
       prev.map((l) =>
         l.periodSource === "item"

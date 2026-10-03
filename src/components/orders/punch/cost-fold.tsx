@@ -3,7 +3,7 @@
 import { Controller, useWatch } from "react-hook-form";
 import { dealRegStatusValues } from "@/lib/validation/order";
 import { DEAL_REG_LABELS } from "@/lib/rebates/rules";
-import { istTodayKey } from "@/lib/orders/handoff-rules";
+import { useClock } from "@/components/time/clock-provider";
 import { formatCurrency } from "@/lib/utils";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
@@ -64,7 +64,9 @@ export function CostFold({
   });
   const [quoteVendorId, quoteVendorName, , , , dealRegStatus] = details;
   const hasValue = figures.quotePrice !== null || figures.dealPrice !== null || details.some((v) => !!v);
-  const today = istTodayKey(new Date());
+  // Today on the workspace's calendar — the same today the server checks "not in the future" against.
+  const clock = useClock();
+  const today = clock.today();
 
   const vendorName = quoteVendorId ? vendors.find((v) => v.id === quoteVendorId)?.name : quoteVendorName?.trim();
   const summary = [

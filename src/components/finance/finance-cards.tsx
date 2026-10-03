@@ -6,7 +6,8 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cashFlowForPeriod, financeForPeriod } from "@/actions/finance";
 import { PERIODS, type PeriodKey } from "@/lib/finance/periods";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 import type { Basis, CashFlow, IncomeExpense, Outstanding } from "@/lib/finance/dashboard";
 
 /**
@@ -390,11 +391,12 @@ export function CashFlowCard({
           )}
         </div>
 
+        {/* The window's first and last days are India's (src/lib/finance/periods.ts): the books' calendar. */}
         <dl className="w-full shrink-0 space-y-2 lg:w-56">
-          <Movement dot="bg-subtle" label={`Cash as on ${formatDate(from)}`} value={data.opening} />
+          <Movement dot="bg-subtle" label={`Cash as on ${indiaClock.date(from)}`} value={data.opening} />
           <Movement dot="bg-success" label="Incoming" value={data.incoming} sign="+" />
           <Movement dot="bg-danger" label="Outgoing" value={data.outgoing} sign="−" />
-          <Movement dot="bg-brand" label={`Cash as on ${formatDate(to)}`} value={data.closing} sign="=" strong />
+          <Movement dot="bg-brand" label={`Cash as on ${indiaClock.date(to)}`} value={data.closing} sign="=" strong />
         </dl>
       </CardContent>
     </Card>

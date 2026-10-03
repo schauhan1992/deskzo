@@ -1,7 +1,7 @@
 import type { JournalSource, Prisma, RevenueScheduleKind, RevenueScheduleStatus } from "@prisma/client";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { documentPostingSelect, revenueInRupees } from "@/lib/ledger/journal";
-import { istMidnight } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import {
   addMonths,
   dayDate,
@@ -42,10 +42,10 @@ type Scope = Prisma.RevenueScheduleWhereInput;
 const sum = (values: number[]) => round2(values.reduce((t, v) => t + v, 0));
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
-/** The month's instants in India, half-open. */
+/** The month's instants in India, half-open — in every workspace, as the books keep India's calendar. */
 function monthWindow(month: MonthKey): { from: Date; to: Date } {
   const [y, m] = [Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1];
-  return { from: istMidnight(y, m, 1), to: istMidnight(y, m + 1, 1) };
+  return { from: indiaClock.midnight(y, m, 1), to: indiaClock.midnight(y, m + 1, 1) };
 }
 
 // ─── The list and one schedule ───────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import { cidrSize, normaliseIp, parseCidr } from "@/lib/access/ip";
 import { geoDatabaseInfo } from "@/lib/access/geo";
 import { activeIpRules, clearAccessCache, sessionKey } from "@/lib/access/gate";
 import { requestFacts } from "@/lib/access/request";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -177,13 +178,13 @@ export async function listIpRules() {
     include: { createdBy: { select: { name: true } } },
   });
   const now = Date.now();
-  const lastDay = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" });
+  const clock = await workspaceClock();
   return toPlain(
     rules.map((r) => ({
       ...r,
       expired: r.expiresAt !== null && r.expiresAt.getTime() <= now,
       // Stored as the midnight that ends the day, so the day shown is the one before it.
-      untilText: r.expiresAt ? lastDay.format(new Date(r.expiresAt.getTime() - 1)) : null,
+      untilText: r.expiresAt ? clock.date(new Date(r.expiresAt.getTime() - 1)) : null,
     })),
   );
 }
@@ -194,7 +195,7 @@ export async function saveIpRule(input: {
   action: IpRuleAction;
   label: string;
   roleKeys: string[];
-  /** yyyy-mm-dd, India time, or blank. */
+  /** yyyy-mm-dd, a day on the workspace's clock, or blank. */
   expiresOn?: string | null;
 }): Promise<ActionResult<{ id: string; cidr: string }>> {
   const user = await requireUser();
@@ -215,8 +216,7 @@ export async function saveIpRule(input: {
   }
   let expiresAt: Date | null = null;
   if (input.expiresOn?.trim()) {
-    const { endOfIndianDay } = await import("@/lib/india-time");
-    expiresAt = endOfIndianDay(input.expiresOn);
+    expiresAt = (await workspaceClock()).endOfDay(input.expiresOn);
     if (!expiresAt || expiresAt.getTime() <= Date.now()) return { ok: false, error: "The end date has to be a day in the future." };
   }
 
@@ -448,9 +448,9 @@ const signInSelect = {
 export async function listSignIns(params: { userId?: string; flag?: string; q?: string; from?: string; to?: string; page?: number; pageSize?: number } = {}) {
   const user = await requireUser();
   if (!(await can(user.id, "access.viewSignIns"))) return null;
-  const { startOfIndianDay, endOfIndianDay } = await import("@/lib/india-time");
-  const from = params.from ? startOfIndianDay(params.from) : null;
-  const to = params.to ? endOfIndianDay(params.to) : null;
+  const clock = await workspaceClock();
+  const from = params.from ? clock.startOfDay(params.from) : null;
+  const to = params.to ? clock.endOfDay(params.to) : null;
   const q = params.q?.trim();
   const where: Prisma.SignInWhereInput = {
     ...(params.userId ? { userId: params.userId } : {}),

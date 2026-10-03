@@ -1,7 +1,7 @@
 import { CalendarX } from "lucide-react";
 import type { HandoverEntry } from "@/actions/handover";
 import { HandoverHistory } from "@/components/people/handover-history";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * What has moved on or off somebody's plate, on their own page.
@@ -33,7 +33,8 @@ export function MyHandover({
 }) {
   if (entries.length === 0) return null;
 
-  const leaving = exitedOn ? new Date(exitedOn) : null;
+  // A `@db.Date` — the day itself, whatever zone the reader is in.
+  const leaving = exitedOn ? formatCalendarDay(exitedOn) : null;
   const gave = entries.some((e) => e.direction === "given");
 
   return (
@@ -42,7 +43,7 @@ export function MyHandover({
         <div className="flex flex-wrap items-center gap-2 rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
           <CalendarX className="h-4 w-4 shrink-0" aria-hidden />
           <span>
-            Your last working day is {formatDate(leaving)}. This is what has been handed on so far — anything
+            Your last working day is {leaving}. This is what has been handed on so far — anything
             still on your name is still yours.
           </span>
         </div>

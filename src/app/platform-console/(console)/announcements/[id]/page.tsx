@@ -10,12 +10,14 @@ import { PageHeader } from "@/components/console/kit/page-header";
 import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { LabelPill } from "@/components/console/kit/status";
 import { AnnouncementBanner } from "@/components/platform/announcement-banner";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { ANNOUNCEMENT_STATE, ANNOUNCEMENT_TONE } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
 import { announcementById, announcementTargets, type AnnouncementListRow, type AnnouncementRow, type AnnouncementTargets } from "@/lib/platform/announcements";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
+import type { Clock } from "@/lib/time/zone";
 
 /** The address holds an id, not a name, so the title says what the page is and nothing more. */
 export const metadata: Metadata = { title: "Announcement" };
@@ -38,7 +40,7 @@ export default async function ConsoleAnnouncementPage({ params }: PageProps<"/pl
   const staff = await consoleStaff(PAGE_ROLES.announcements);
   const caps = capsFor(staff.role);
   const { id } = await params;
-  const [row, editorTargets] = await Promise.all([announcementById(String(id)), caps.announce ? announcementTargets() : Promise.resolve(null)]);
+  const [row, editorTargets, clock] = await Promise.all([announcementById(String(id)), caps.announce ? announcementTargets() : Promise.resolve(null), consoleClock()]);
   if (!row) notFound();
   // Names for the chosen plans and workspaces, when there are any to name.
   const targets = editorTargets ?? (row.audience === "PLANS" || row.audience === "TENANTS" ? await announcementTargets() : null);
@@ -142,7 +144,7 @@ export default async function ConsoleAnnouncementPage({ params }: PageProps<"/pl
               You can still end or archive it, or duplicate it for a narrower audience.
             </Banner>
           )}
-          <ReadOnlyView row={row} targets={targets} />
+          <ReadOnlyView row={row} targets={targets} clock={clock} />
         </div>
       )}
     </>
@@ -164,8 +166,10 @@ function editorRow(row: AnnouncementListRow): AnnouncementRow {
   };
 }
 
-function ReadOnlyView({ row, targets }: { row: AnnouncementListRow; targets: AnnouncementTargets | null }) {
+function ReadOnlyView({ row, targets, clock }: { row: AnnouncementListRow; targets: AnnouncementTargets | null; clock: Clock }) {
   const showing = row.state === "live" || row.state === "scheduled";
+  // It goes up everywhere at once, whatever a workspace's own zone: the console's is named with the time.
+  const at = (moment: Date) => `${clock.dateTime(moment)} ${clock.offsetLabel(moment)}`;
   return (
     <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
       <Panel title="Details">
@@ -173,8 +177,8 @@ function ReadOnlyView({ row, targets }: { row: AnnouncementListRow; targets: Ann
           items={[
             { term: "Tone", value: <LabelPill map={ANNOUNCEMENT_TONE} value={row.tone} /> },
             { term: "Can be dismissed", value: row.dismissible ? "Yes" : row.tone === "CRITICAL" ? "No — it is critical" : "No" },
-            { term: "Starts", value: `${when(row.startsAt)} IST` },
-            { term: "Ends", value: row.endsAt ? `${when(row.endsAt)} IST` : "No end — until someone ends it" },
+            { term: "Starts", value: at(row.startsAt) },
+            { term: "Ends", value: row.endsAt ? at(row.endsAt) : "No end — until someone ends it" },
             { term: "Audience", value: <AudienceDetail row={row} targets={targets} />, wide: true },
             ...(showing ? [{ term: row.state === "live" ? "Showing in" : "Reaches today", value: <span className="tabular-nums">{plural(row.reach, "open workspace")}</span> }] : []),
             { term: "Created by", value: row.createdByName },

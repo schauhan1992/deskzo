@@ -15,7 +15,7 @@ import { listTradeDocuments } from "@/actions/trade-document";
 import { formatCompanyId, formatItemId, formatLeadId, formatOrderId } from "@/lib/order-id";
 import { formatTicketId } from "@/lib/tickets";
 import { documentPath } from "@/lib/trade-documents";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import {
   SEARCH_MAX_LENGTH,
   SEARCH_MIN_LENGTH,
@@ -117,10 +117,11 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
     }
     case "renewals": {
       const { rows } = await listRenewalsPaged({ search, ...page });
+      // A typed day, held at UTC midnight: the day itself, in any zone.
       return rows.map((r) => ({
         id: r.id,
         title: r.company?.name ?? formatOrderId(r.orderSeq),
-        subtitle: joined(r.item?.name, r.endDate ? `renews ${formatDate(r.endDate)}` : null),
+        subtitle: joined(r.item?.name, r.endDate ? `renews ${formatCalendarDay(r.endDate)}` : null),
         // A renewal is an order record, so it opens as one.
         href: `/orders/${r.id}`,
       }));
@@ -128,10 +129,11 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
     case "proposals":
     case "invoices": {
       const { rows } = await listTradeDocuments({ docType: key === "proposals" ? "PROPOSAL" : "INVOICE", search, ...page });
+      // The document's date is a calendar day held at UTC midnight (src/actions/trade-document.ts).
       return rows.map((d) => ({
         id: d.id,
         title: d.docNumber ?? "Draft",
-        subtitle: joined(d.company?.name, formatDate(d.issueDate)),
+        subtitle: joined(d.company?.name, formatCalendarDay(d.issueDate)),
         href: documentPath(d.id),
       }));
     }

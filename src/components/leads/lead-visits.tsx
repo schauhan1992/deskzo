@@ -11,7 +11,7 @@ import {
   visitStatusLabels,
   visitStatusTone,
 } from "@/lib/visits";
-import { formatIstDate } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Visit = Awaited<ReturnType<typeof listLeadVisits>>[number];
 
@@ -23,7 +23,7 @@ type Visit = Awaited<ReturnType<typeof listLeadVisits>>[number];
  * The outcome is shown inline because a visit with no write-up is the common failure, and a blank
  * line where the outcome should be is the clearest way to say so.
  */
-export function LeadVisits({
+export async function LeadVisits({
   visits,
   leadId,
   companyId,
@@ -33,6 +33,7 @@ export function LeadVisits({
   companyId: string;
 }) {
   const planHref = `/visits/new?companyId=${companyId}&leadId=${leadId}`;
+  const clock = await workspaceClock();
 
   return (
     <Card>
@@ -68,7 +69,7 @@ export function LeadVisits({
                 </Link>
                 <Badge tone={visitStatusTone[v.status]}>{visitStatusLabels[v.status]}</Badge>
                 <span className="text-xs text-subtle">
-                  {visitPurposeLabels[v.purpose]} · {formatIstDate(v.scheduledFor)} · {v.user.name}
+                  {visitPurposeLabels[v.purpose]} · {clock.date(v.scheduledFor)} · {v.user.name}
                 </span>
               </div>
               {v.checkInAt && (

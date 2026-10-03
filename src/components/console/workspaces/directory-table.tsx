@@ -16,9 +16,10 @@ import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import { StandingPill, StatusPill, TenantStatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, RowLink, SortTh, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
-import { dayMonthYear, plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { grantLabel, schemaStatus } from "@/lib/console-shared/labels";
 import type { DirectorySort } from "@/lib/console-shared/params";
 import type { Caps } from "@/lib/console-shared/roles";
@@ -70,6 +71,7 @@ export function DirectoryTable({
   sort: DirectorySort;
   exportParams: Record<string, string>;
 }) {
+  const clock = useClock();
   const selection = useRowSelection(rows);
   const { show } = useConsoleNotice();
   const action = useConsoleAction<unknown>();
@@ -125,7 +127,7 @@ export function DirectoryTable({
         ...done,
         success: (data) => {
           const d = data as { endsAt?: string; action?: string } | null;
-          const end = d?.endsAt ? ` to ${dayMonthYear(d.endsAt)}` : "";
+          const end = d?.endsAt ? ` to ${clock.date(d.endsAt)}` : "";
           return `${row.name}'s trial is extended${end}${d?.action === "lifted" ? " and its hold lifted" : ""}.`;
         },
       });
@@ -288,7 +290,7 @@ export function DirectoryTable({
                       <StatusPill
                         tone={grantLabel("live", row.grant.level).tone}
                         icon={<ShieldCheck className="h-3 w-3" />}
-                        title={`Support access until ${when(row.grant.expiresAt)}`}
+                        title={`Support access until ${clock.dateTime(row.grant.expiresAt)}`}
                       >
                         {grantLabel("live", row.grant.level).label}
                       </StatusPill>

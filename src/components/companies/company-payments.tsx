@@ -4,7 +4,8 @@ import { Badge } from "@/components/ui/card";
 import { RecordPaymentButton } from "@/components/payments/record-payment-button";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { AllocatePaymentButton } from "@/components/payments/allocate-payment-button";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { paymentMethodLabels } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
 import { isBaseCurrency } from "@/lib/currency";
@@ -75,7 +76,8 @@ export function CompanyPayments({
             <tbody>
               {payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-line align-top last:border-0">
-                  <td className="px-3 py-2 text-muted">{formatDate(payment.paidOn)}</td>
+                  {/* The day typed as paid on, held as midnight UTC. */}
+                  <td className="px-3 py-2 text-muted">{formatCalendarDay(payment.paidOn)}</td>
                   <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(payment.amount, payment.currency)}</td>
                   <td className="px-3 py-2 text-muted">{paymentMethodLabels[payment.method]}</td>
                   <td className="px-3 py-2 text-subtle">{payment.reference ?? "—"}</td>

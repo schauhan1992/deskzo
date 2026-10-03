@@ -1,6 +1,7 @@
 /**
  * check:visit-times — a field visit's time is India time, whatever zone the server runs in
- * (src/actions/visit.ts, the visit pages, the lists that show one).
+ * (src/actions/visit.ts, the visit pages, the lists that show one). India's because the scratch
+ * workspace sets no zone of its own: a workspace's times are on its own clock (src/lib/time/zone.ts).
  *
  * Production runs in UTC, and this suite does too: the process is switched to UTC before anything is
  * read, and the first check proves it. On a machine in India the old code was right by accident — a
@@ -31,7 +32,7 @@ import { randomUUID } from "node:crypto";
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import type { PrismaClient } from "@prisma/client";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { parseIstDateTime } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 import { formatVisitId } from "../src/lib/visits";
 
 // As production runs. Node re-reads the zone when TZ is assigned; the first check confirms it took.
@@ -295,7 +296,7 @@ async function run(scratchUrl: string) {
     const before = Date.now();
     const fresh = await render(NewVisitPage({ searchParams: Promise.resolve({}) }));
     const suggested = (/id="scheduledFor"[^>]*value="([^"]+)"/.exec(fresh) ?? /value="([^"]+)"[^>]*id="scheduledFor"/.exec(fresh))?.[1] ?? "";
-    const suggestedAt = parseIstDateTime(suggested);
+    const suggestedAt = indiaClock.parseInput(suggested);
     ok(
       "a new visit suggests the next half hour in India",
       !!suggestedAt && /:(00|30)$/.test(suggested) && suggestedAt.getTime() > before && suggestedAt.getTime() <= before + 30 * 60_000 + 1000,

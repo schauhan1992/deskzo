@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { useClock } from "@/components/time/clock-provider";
 
 export type CopilotSettingsView = {
   enabled: boolean;
@@ -23,6 +24,7 @@ const LIMITS = [100_000, 300_000, 1_000_000, 3_000_000];
 
 export function CopilotSettingsForm({ settings }: { settings: CopilotSettingsView }) {
   const router = useRouter();
+  const clock = useClock();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [provider, setProvider] = useState<AiProvider>(settings.provider);
   const [model, setModel] = useState(settings.model);
@@ -149,7 +151,8 @@ export function CopilotSettingsForm({ settings }: { settings: CopilotSettingsVie
               ))}
             </div>
             <p className="text-[11px] text-subtle">
-              A question that looks things up and draws a report typically uses 15,000–40,000 tokens. Resets at midnight India time. Cached tokens count a tenth, as they&apos;re billed.
+              A question that looks things up and draws a report typically uses 15,000–40,000 tokens. Resets at midnight, {clock.zone.replace(/_/g, " ")}{" "}
+              time. Cached tokens count a tenth, as they&apos;re billed.
             </p>
           </div>
 

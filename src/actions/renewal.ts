@@ -7,7 +7,7 @@ import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { resolveRenewalStage, type RenewalStageKey } from "@/lib/renewals";
 import { pageSlice } from "@/lib/pagination";
-import { addDays } from "@/lib/date-range-presets";
+import { workspaceClock } from "@/lib/time/workspace";
 import { revalidatePath } from "next/cache";
 import { notifyUser } from "@/lib/notify";
 import { formatOrderId } from "@/lib/order-id";
@@ -23,9 +23,14 @@ export type RenewalWindow = "expired" | "30" | "60" | "90";
  * counts are built from — so a filter can never mean one thing to the rows and another to the
  * tally beside them.
  *
- * `now` is passed in rather than taken here, because the window bound and the expired bound have to
- * be the same instant: computing them a few milliseconds apart would let a subscription expiring in
- * that gap be inside the window and outside the expired count at the same time.
+ * `today` is passed in rather than taken here, because the window bound and the expired bound have to
+ * be the same day: computing them a few milliseconds apart, across midnight, would let a subscription
+ * expiring in that gap be inside the window and outside the expired count at the same time.
+ *
+ * It is the workspace's today as the column holds a day (`clock.calendarDate(now)`). An end date is a
+ * calendar day, kept as its midnight UTC, so a subscription runs through its last day and has expired
+ * the day after. Compared with the moment instead, it lapsed at midnight UTC on its last day — 05:30
+ * in India, the evening before in America.
  *
  * The account scope lives here for the same reason the filters do. A renewal is an order, so it
  * reaches its account through its own company, one hop — and the page runs this `where` three
@@ -35,15 +40,16 @@ export type RenewalWindow = "expired" | "30" | "60" | "90";
  */
 async function renewalWhere(
   params: { window?: RenewalWindow; search?: string } | undefined,
-  now: Date,
+  today: Date,
   userId: string,
 ) {
   const endDate: { not: null; lt?: Date; gte?: Date; lte?: Date } = { not: null };
   if (params?.window === "expired") {
-    endDate.lt = now;
+    endDate.lt = today;
   } else if (params?.window === "30" || params?.window === "60" || params?.window === "90") {
-    endDate.gte = now;
-    endDate.lte = addDays(now, Number(params.window));
+    endDate.gte = today;
+    // Days added to a midnight UTC: UTC has no clock changes, so this is the day `window` days on.
+    endDate.lte = new Date(today.getTime() + Number(params.window) * 86_400_000);
   }
 
   return {
@@ -290,7 +296,7 @@ export async function listRenewals(params?: { window?: RenewalWindow; search?: s
   const user = await requireModuleUser("renewals");
   if (!(await viewerHas("orders.view"))) return [];
   const rows = await db.companyProduct.findMany({
-    where: await renewalWhere(params, new Date(), user.id),
+    where: await renewalWhere(params, (await workspaceClock()).calendarDate(new Date()), user.id),
     include: renewalInclude,
     orderBy: renewalOrderBy,
   });
@@ -307,8 +313,8 @@ export async function listRenewals(params?: { window?: RenewalWindow; search?: s
 export async function listRenewalsPaged(params: { window?: RenewalWindow; search?: string; page: number; pageSize: number }) {
   const user = await requireModuleUser("renewals");
   if (!(await viewerHas("orders.view"))) return { rows: [], total: 0, expired: 0 };
-  const now = new Date();
-  const where = await renewalWhere(params, now, user.id);
+  const today = (await workspaceClock()).calendarDate(new Date());
+  const where = await renewalWhere(params, today, user.id);
 
   const [rows, total, expired] = await Promise.all([
     db.companyProduct.findMany({
@@ -320,10 +326,10 @@ export async function listRenewalsPaged(params: { window?: RenewalWindow; search
     db.companyProduct.count({ where }),
     // The expired tally is over everything the filters match, not over the page — so it is its own
     // count, with the same `where` narrowed to what has already lapsed. Spreading the window's own
-    // `endDate` bounds keeps the two consistent: on the 30/60/90 windows the added `lt: now` cannot
-    // be satisfied alongside `gte: now`, which is right — nothing in a forward-looking window has
+    // `endDate` bounds keeps the two consistent: on the 30/60/90 windows the added `lt: today` cannot
+    // be satisfied alongside `gte: today`, which is right — nothing in a forward-looking window has
     // expired yet.
-    db.companyProduct.count({ where: { ...where, endDate: { ...where.endDate, lt: now } } }),
+    db.companyProduct.count({ where: { ...where, endDate: { ...where.endDate, lt: today } } }),
   ]);
 
   return { rows: toPlain(await withRenewalStage(rows.map(withRenewalGroup))), total, expired };

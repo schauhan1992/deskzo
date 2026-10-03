@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 import { CallButton } from "@/components/calls/call-button";
 import type { runWorkbook } from "@/actions/workspace";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
@@ -15,7 +15,8 @@ type Row = Awaited<ReturnType<typeof runWorkbook>>["rows"][number];
  * who owns it, where it is, how big, and when it was last called. Each row carries a call button,
  * because the point of a worklist is to be worked from, not read.
  */
-export function WorkbookResults({ rows, filters }: { rows: Row[]; filters?: WorkbookFilters }) {
+export async function WorkbookResults({ rows, filters }: { rows: Row[]; filters?: WorkbookFilters }) {
+  const clock = await workspaceClock();
   // When the list was narrowed by place, the row shows the site that actually matched rather than
   // the head office — otherwise a correct match reads as a bug.
   const wantedCities = (filters?.city ?? []).map((c) => c.toLowerCase());
@@ -76,7 +77,7 @@ export function WorkbookResults({ rows, filters }: { rows: Row[]; filters?: Work
                 <td className="px-4 py-2.5 text-xs text-subtle">
                   {lastCall ? (
                     <>
-                      {formatDate(lastCall.startedAt)}
+                      {clock.date(lastCall.startedAt)}
                       <div className="text-subtle">{lastCall.outcome.replaceAll("_", " ").toLowerCase()}</div>
                     </>
                   ) : (

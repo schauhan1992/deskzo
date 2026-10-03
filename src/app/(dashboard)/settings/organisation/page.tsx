@@ -3,14 +3,17 @@ import { getOrganisation, isOrganisationReady } from "@/lib/organisation";
 import { branchIdentity, isMultiBranch } from "@/lib/branches/identity";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { OrganisationManager } from "@/components/settings/organisation-manager";
+import { TimeZoneCard } from "@/components/settings/time-zone-card";
 import { Card } from "@/components/ui/card";
+import { getTimeZoneSetting } from "@/actions/time-zone";
 
 export default async function Page() {
-  const [organisation, headOffice, multiBranch] = await Promise.all([
+  const [organisation, headOffice, multiBranch, timeZone] = await Promise.all([
     getOrganisation(),
     // Never throws: at worst the organisation's own details under a "Head office" placeholder.
     branchIdentity(null),
     isMultiBranch().catch(() => false),
+    getTimeZoneSetting(),
   ]);
   /**
    * A head office with an address of its own is not the registered office, and its GSTIN may be
@@ -45,6 +48,7 @@ export default async function Page() {
         multiBranch={multiBranch}
         headOffice={gstinManagedByBranch ? { name: headOffice.name, city: headOffice.city, state: headOffice.state } : null}
       />
+      {timeZone && <TimeZoneCard setting={timeZone} />}
     </SettingsPage>
   );
 }

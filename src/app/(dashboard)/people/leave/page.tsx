@@ -12,6 +12,7 @@ import { Input, Label } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { financialYearLabel, financialYearOf } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Params = {
   view?: string;
@@ -56,7 +57,8 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
       : Promise.resolve({ rows: [], total: 0, pendingCount: 0 }),
   ]);
 
-  const fy = financialYearOf(new Date());
+  // The leave year we are in, from the workspace's today — as leaveBalances reads it.
+  const fy = financialYearOf((await workspaceClock()).calendarDate(new Date()));
   const otherParams = Object.fromEntries(Object.entries(params).filter(([k]) => k !== "page")) as Record<string, string>;
 
   return (

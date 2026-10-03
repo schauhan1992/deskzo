@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CircleCheck, Clock, FileText, HandCoins, Wallet } from "lucide-react";
+import { CircleCheck, Clock as ClockIcon, FileText, HandCoins, Wallet } from "lucide-react";
 import { KpiGrid, KpiTile } from "@/components/console/charts/kpi-tile";
 import { MoneyList } from "@/components/console/charts/money-list";
 import { Banner } from "@/components/console/kit/banner";
@@ -8,11 +8,12 @@ import { DateRangeFilter, SelectFilter } from "@/components/console/kit/filter-c
 import { FilterBar } from "@/components/console/kit/filters";
 import { Panel } from "@/components/console/kit/panel";
 import { formatMoney } from "@/lib/billing/money";
-import { istDayKey, monthLabel, plural } from "@/lib/console-shared/format";
+import { monthLabel, plural } from "@/lib/console-shared/format";
 import { COMMISSION_KIND, COMMISSION_STATUS } from "@/lib/console-shared/labels";
 import { COMMISSION_KINDS, COMMISSION_STATUSES } from "@/lib/console-shared/partner-params";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PartnerCommissionsTab as PartnerCommissionsData, PartnerStatementsTab as PartnerStatementsData } from "@/lib/partners/commission-data";
+import { indiaClock, type Clock } from "@/lib/time/zone";
 import { AddAdjustmentButton } from "./adjustment-dialog";
 import { COMMISSIONS_PATH, currencyOptions, hrefWith, partnerHref } from "./format";
 import { EntriesTable } from "./entries-table";
@@ -24,8 +25,10 @@ import { StatementsTable } from "./statements-table";
 /**
  * A partner's Commissions and Statements tabs, for the partner 360 (/partners/<slug>; spec §9.2).
  * Server-renderable with no async inside: the 360 page loads `partnerCommissionsTab(id, filters)` and
- * `partnerStatementsTab(id)` and hands them in. The same tables as /commissions, narrowed to one
- * partner: void and adjust for SELLERS, approve, pay and void for PAYERS, Generate statements for it.
+ * `partnerStatementsTab(id)` and hands them in, with the console's clock. The same tables as
+ * /commissions, narrowed to one partner: void and adjust for SELLERS, approve, pay and void for
+ * PAYERS, Generate statements for it. An adjustment's and a payment's day are India's, as the server
+ * checks them (src/lib/partners/terms.ts), whatever zone the console keeps.
  *
  * The Commissions tab's filters live in the 360's address, unprefixed: `status`, `currency`,
  * `kind`, `from`, `to` and `page` (the 360's activity filters carry their own prefix).
@@ -48,10 +51,10 @@ function MoneyHidden({ what }: { what: string }) {
 
 const nonZero = (list: { currency: string; minor: number }[]) => list.filter((m) => m.minor !== 0);
 
-export function PartnerCommissionsTab({ partner, data, caps }: { partner: PartnerProp; data: PartnerCommissionsData; caps: Caps }) {
+export function PartnerCommissionsTab({ partner, data, caps, clock }: { partner: PartnerProp; data: PartnerCommissionsData; caps: Caps; clock: Clock }) {
   if (!caps.partnerMoney) return <MoneyHidden what="Commissions" />;
   const base = partnerHref(partner.slug);
-  const todayKey = istDayKey(data.asOf);
+  const todayKey = indiaClock.dateKey(data.asOf);
   const currencies = currencyOptions(data.currencies);
   const anything = data.totals.length > 0;
   const balance = (pick: "pending" | "approved" | "paid") => nonZero(data.totals.map((t) => ({ currency: t.currency, minor: t[pick] })));
@@ -59,7 +62,7 @@ export function PartnerCommissionsTab({ partner, data, caps }: { partner: Partne
   return (
     <div className="space-y-6">
       <KpiGrid columns={3}>
-        <KpiTile label="Pending" icon={<Clock className="h-4 w-4" />} value={<MoneyList amounts={balance("pending")} />} secondary="Not on an approved statement yet" />
+        <KpiTile label="Pending" icon={<ClockIcon className="h-4 w-4" />} value={<MoneyList amounts={balance("pending")} />} secondary="Not on an approved statement yet" />
         <KpiTile label="Approved — to pay" icon={<Wallet className="h-4 w-4" />} value={<MoneyList amounts={balance("approved")} />} secondary="On approved statements" />
         <KpiTile label="Paid" icon={<CircleCheck className="h-4 w-4" />} value={<MoneyList amounts={balance("paid")} />} secondary="Every statement paid so far" />
       </KpiGrid>
@@ -91,7 +94,7 @@ export function PartnerCommissionsTab({ partner, data, caps }: { partner: Partne
               />
             )
           ) : (
-            <EntriesTable rows={data.rows} caps={caps} showPartner={false} statementParams={{ partner: partner.slug }} />
+            <EntriesTable rows={data.rows} caps={caps} showPartner={false} statementParams={{ partner: partner.slug }} clock={clock} />
           )}
         </Panel>
         <LivePager path={base} tab="commissions" page={data.page} pageSize={data.pageSize} total={data.total} noun="entry" nouns="entries" />
@@ -113,6 +116,7 @@ export function PartnerStatementsTab({
   data,
   caps,
   viewerId = null,
+  clock,
 }: {
   partner: PartnerProp;
   data: PartnerStatementsData;
@@ -122,9 +126,10 @@ export function PartnerStatementsTab({
    * get a switched-off "Mark paid" and the reason; without it the server still refuses, in the dialog.
    */
   viewerId?: string | null;
+  clock: Clock;
 }) {
   if (!caps.partnerMoney) return <MoneyHidden what="Statements" />;
-  const todayKey = istDayKey(data.asOf);
+  const todayKey = indiaClock.dateKey(data.asOf);
   const waiting = nonZero(data.awaitingStatement);
 
   return (
@@ -163,6 +168,7 @@ export function PartnerStatementsTab({
             todayKey={todayKey}
             showPartner={false}
             listParams={{ partner: partner.slug }}
+            clock={clock}
           />
         )}
       </Panel>

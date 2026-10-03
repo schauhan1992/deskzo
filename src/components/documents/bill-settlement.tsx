@@ -7,9 +7,10 @@ import { recordBillPayment } from "@/actions/payable";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { formatRate, isBaseCurrency } from "@/lib/currency";
-import { istDateKey } from "@/lib/india-time";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { useClock } from "@/components/time/clock-provider";
 import { ReceiptRateHint } from "@/components/documents/invoice-settlement";
 
 /**
@@ -62,6 +63,7 @@ export function BillSettlementPanel({
   canRecord: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,8 +77,8 @@ export function BillSettlementPanel({
     amount: settlement.balance > 0 ? String(settlement.balance) : "",
     // A foreign bill: the rate the money went out at, the bill's own until somebody says otherwise.
     rate: String(bookedAt),
-    // Today in India, not in UTC: before 05:30 IST the UTC date is still yesterday.
-    paidOn: istDateKey(new Date()),
+    // Today in the workspace's zone, not in UTC's, which can be a day either side of it.
+    paidOn: clock.today(),
     method: "BANK_TRANSFER" as (typeof METHODS)[number]["value"],
     reference: "",
   });
@@ -140,7 +142,7 @@ export function BillSettlementPanel({
             {settlement.payments.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-3 py-1.5">
                 <span className="text-muted">
-                  {p.payment ? formatDate(p.payment.paidOn) : "—"}
+                  {p.payment ? formatCalendarDay(p.payment.paidOn) : "—"}
                   {p.payment?.reference && <span className="ml-2 text-subtle">{p.payment.reference}</span>}
                 </span>
                 <span className="tabular-nums text-text">{money(Number(p.amount))}</span>
@@ -158,7 +160,7 @@ export function BillSettlementPanel({
                   <a href={`/purchase/vendor-credits/${c.vendorCredit.id}`} className="underline">
                     {c.vendorCredit.reference}
                   </a>
-                  <span className="ml-2 text-subtle">{formatDate(c.vendorCredit.date)}</span>
+                  <span className="ml-2 text-subtle">{formatCalendarDay(c.vendorCredit.date)}</span>
                 </span>
                 <span className="tabular-nums text-text">{money(Number(c.amount))}</span>
               </li>

@@ -2,7 +2,6 @@
 
 import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
-import { parseIstDateTime } from "@/lib/india-time";
 import {
   ANNOUNCEMENT_AUDIENCES,
   announcementReach,
@@ -11,10 +10,12 @@ import {
   validateAnnouncement,
   type AnnouncementAudienceKey,
 } from "@/lib/platform/announcements";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { MANAGERS, consoleAudit, consoleRefusal, idList, revalidateConsole } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Platform announcements from the console — the banner across workspaces' pages
@@ -51,12 +52,12 @@ function announcementId(value: unknown): string {
   return id;
 }
 
-/** A `datetime-local` value, read as India time; undefined when blank. */
-function istInput(value: unknown, what: "start" | "end"): Date | undefined {
+/** A `datetime-local` value, read on the console's clock; undefined when blank. */
+function timeInput(value: unknown, what: "start" | "end", clock: Clock): Date | undefined {
   if (value === undefined || value === null) return undefined;
   const text = String(value).trim();
   if (!text) return undefined;
-  const at = text.length <= 32 ? parseIstDateTime(text) : null;
+  const at = text.length <= 32 ? clock.parseInput(text) : null;
   if (!at) throw new ConsoleRefused(`Enter the ${what} as a date and time.`);
   return at;
 }
@@ -81,6 +82,7 @@ export async function consoleSaveAnnouncement(input: {
     const raw: Record<string, unknown> = input && typeof input === "object" ? input : {};
     const control = controlDb();
     const now = new Date();
+    const clock = await consoleClock();
 
     const id = raw.id === undefined || raw.id === null || raw.id === "" ? null : announcementId(raw.id);
     const existing = id ? await control.platformAnnouncement.findUnique({ where: { id }, select: { id: true, startsAt: true, archivedAt: true } }) : null;
@@ -94,8 +96,8 @@ export async function consoleSaveAnnouncement(input: {
         tone: raw.tone,
         audience: raw.audience,
         targets: Array.isArray(raw.targets) ? raw.targets : [],
-        startsAt: istInput(raw.startsAt, "start") ?? existing?.startsAt,
-        endsAt: istInput(raw.endsAt, "end"),
+        startsAt: timeInput(raw.startsAt, "start", clock) ?? existing?.startsAt,
+        endsAt: timeInput(raw.endsAt, "end", clock),
         dismissible: raw.dismissible === true,
       },
       now,

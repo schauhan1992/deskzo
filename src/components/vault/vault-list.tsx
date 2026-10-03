@@ -33,7 +33,8 @@ import { ArchiveDialog } from "@/components/vault/archive-dialog";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 import type { ViewMode } from "@/lib/view-mode";
 import { PersonCombobox, type PersonOption } from "@/components/ui/person-combobox";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Options = {
   categories: { id: string; name: string }[];
@@ -69,6 +70,7 @@ export function VaultList({
   mode: ViewMode;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [editing, setEditing] = useState<VaultRow | "new" | null>(null);
   const [opening, setOpening] = useState<{ row: VaultRow; field: VaultField } | null>(null);
   const [sharing, setSharing] = useState<VaultRow | null>(null);
@@ -161,7 +163,7 @@ export function VaultList({
                     {/* Why it is due, when something other than the standing policy decided. */}
                     {r.rotation.reason && <span className="text-warning">{r.rotation.reason}</span>}
                     {r.rotation.state === "fine" && r.passwordChangedAt && (
-                      <span className="text-subtle">Changed {formatDate(new Date(r.passwordChangedAt))}</span>
+                      <span className="text-subtle">Changed {clock.date(r.passwordChangedAt)}</span>
                     )}
                     {r.daysToExpiry !== null && (
                       <span className={r.daysToExpiry < 30 ? "text-warning" : "text-subtle"}>
@@ -251,7 +253,7 @@ export function VaultList({
                         users={r.lastOpened.map((v) => ({ id: v.userId, name: v.userName, photoUpdatedAt: v.photoUpdatedAt }))}
                       />
                       <span>
-                        {formatDate(new Date(r.lastOpened[0]!.at))}
+                        {clock.date(r.lastOpened[0]!.at)}
                         {r.openedCount > 1 && ` · ${r.openedCount} times`}
                       </span>
                     </button>
@@ -397,6 +399,7 @@ function EditDialog({
     secret: "",
     recoveryKey: "",
     remarks: row?.remarks ?? "",
+    // Held as midnight UTC of the day typed, so its UTC day is that day, in any zone.
     billingExpiry: row?.billingExpiry ? new Date(row.billingExpiry).toISOString().slice(0, 10) : "",
     rotateAfterDays: row?.rotateAfterDays != null ? String(row.rotateAfterDays) : "",
   });
@@ -581,7 +584,8 @@ function ShareDialog({ row, options, onClose }: { row: VaultRow; options: Option
                   {s.kind === "department" && <span className="text-muted"> (department)</span>}
                   <div className="text-xs text-subtle">
                     {accessLevelLabels[s.level]}
-                    {s.expiresAt && ` · until ${formatDate(new Date(s.expiresAt))}`}
+                    {/* The day picked, held as midnight UTC. */}
+                    {s.expiresAt && ` · until ${formatCalendarDay(s.expiresAt)}`}
                   </div>
                 </div>
                 <IconButton
@@ -717,6 +721,7 @@ function SharedWith({ shares }: { shares: VaultRow["shares"] }) {
  * recording one is that somebody notices it.
  */
 function TrailDialog({ row, onClose }: { row: VaultRow; onClose: () => void }) {
+  const clock = useClock();
   const [entries, setEntries] = useState<TrailEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -767,7 +772,7 @@ function TrailDialog({ row, onClose }: { row: VaultRow; onClose: () => void }) {
                     Override
                   </Badge>
                 )}
-                <span className="shrink-0 text-xs text-subtle">{formatDateTime(new Date(e.at))}</span>
+                <span className="shrink-0 text-xs text-subtle">{clock.dateTimeShort(e.at)}</span>
               </li>
             ))}
           </ul>

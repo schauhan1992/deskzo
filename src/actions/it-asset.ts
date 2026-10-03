@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
 import { awayFromSite, canMove, checkOwnership, mayBeCapitalised, statusAfter } from "@/lib/assets/lifecycle";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -250,7 +251,8 @@ export async function saveAsset(input: {
       data: {
         assetId: row.id,
         type: "RECEIVED",
-        occurredAt: data.purchasedOn ?? new Date(),
+        // A typed day held at UTC midnight, as the purchase date is; without one, today's.
+        occurredAt: data.purchasedOn ?? (await workspaceClock()).calendarDate(new Date()),
         toCompanyId: data.siteCompanyId,
         toLocationId: data.locationId,
         note: "Added to the register",
@@ -306,7 +308,7 @@ export async function moveAsset(input: {
   const allowed = canMove(asset.status, input.type);
   if (!allowed.ok) return { ok: false, error: allowed.reason };
 
-  const occurredAt = input.occurredAt ? new Date(`${input.occurredAt}T00:00:00.000Z`) : new Date();
+  const occurredAt = input.occurredAt ? new Date(`${input.occurredAt}T00:00:00.000Z`) : (await workspaceClock()).calendarDate(new Date());
   const status = statusAfter(input.type);
 
   await db.$transaction(async (tx) => {

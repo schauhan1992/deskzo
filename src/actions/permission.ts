@@ -11,6 +11,7 @@ import { can, permissionsFor, explain, resolveUserPermissions, describeSource } 
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
 import { actorContext, assertGrantWithinOwnAuthority, assertKeepsOwnAccessAdmin, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 import { AWAITING_SETUP } from "@/lib/no-password";
 
@@ -315,6 +316,7 @@ export async function effectivePermissionsFor(userId: string) {
     select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true },
   });
   if (!target) return null;
+  const clock = await workspaceClock();
 
   return {
     user: target,
@@ -327,7 +329,7 @@ export async function effectivePermissionsFor(userId: string) {
         tier: def.tier ?? "standard",
         held: source.via !== "none" && source.via !== "inactive" && !(source.via === "userGrant" && !source.allowed) && !(source.via === "roleOverride" && !source.allowed),
         via: source.via,
-        why: describeSource(source),
+        why: describeSource(source, clock),
       };
     }),
   };
@@ -338,7 +340,7 @@ export async function explainPermission(userId: string, key: PermissionKey | str
   const session = await requireUser();
   if (userId !== session.id && !(await can(session.id, "permissions.view"))) return null;
   const source = await explain(userId, key);
-  return { source, why: describeSource(source) };
+  return { source, why: describeSource(source, await workspaceClock()) };
 }
 
 // ─── The reverse index ────────────────────────────────────────────────────────
@@ -364,13 +366,14 @@ export async function holdersOf(key: PermissionKey | string) {
   const def = getPermissionDefinition(key);
   if (!def) return null;
 
-  const [users, everyone] = await Promise.all([
+  const [users, everyone, clock] = await Promise.all([
     db.user.findMany({
       where: { active: true },
       orderBy: [{ role: "asc" }, { name: "asc" }],
       select: { id: true, name: true, email: true, role: true, isSuperAdmin: true },
     }),
     resolveEveryone(),
+    workspaceClock(),
   ]);
 
   const holders: {
@@ -395,13 +398,13 @@ export async function holdersOf(key: PermissionKey | string) {
         email: user.email,
         role: user.role,
         via: source.via,
-        why: describeSource(source),
+        why: describeSource(source, clock),
         expiresAt: source.via === "userGrant" ? (source.expiresAt ?? null) : null,
       });
     } else if (source.via === "userGrant" || source.via === "roleOverride") {
       // Told apart from "never had it", because somebody deliberately took this away and that is a
       // different fact — the one an access review is looking for.
-      denied.push({ id: user.id, name: user.name, role: user.role, why: describeSource(source) });
+      denied.push({ id: user.id, name: user.name, role: user.role, why: describeSource(source, clock) });
     }
   }
 

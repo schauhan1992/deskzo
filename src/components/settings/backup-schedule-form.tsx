@@ -8,7 +8,7 @@ import { formatTimeOfDay } from "@/lib/backup/schedule";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The schedule, and the honest paragraph about what still has to be set up outside the app.
@@ -27,6 +27,7 @@ export function BackupScheduleForm({
   nextRunAt: Date | null;
   verdict: string;
 }) {
+  const clock = useClock();
   const [enabled, setEnabled] = useState(schedule.enabled);
   const [time, setTime] = useState(formatTimeOfDay(schedule.hour, schedule.minute));
   const [keepDays, setKeepDays] = useState(String(schedule.keepDays));
@@ -68,7 +69,7 @@ export function BackupScheduleForm({
           <div className="mt-0.5 text-xs text-muted">
             {schedule.enabled
               ? nextRunAt
-                ? `Next: ${formatDateTime(nextRunAt)}`
+                ? `Next: ${clock.dateTimeShort(nextRunAt)}`
                 : "On"
               : "Off — every backup is somebody remembering."}
           </div>
@@ -118,7 +119,8 @@ export function BackupScheduleForm({
               onChange={(e) => setTime(e.target.value)}
             />
             <p className="text-xs text-muted">
-              The server&rsquo;s clock. Pick an hour when nobody is working — a dump holds a transaction open.
+              In this workspace&rsquo;s time zone ({clock.zone.replace(/_/g, " ")}). Pick an hour when nobody is working — a dump holds a
+              transaction open.
             </p>
           </div>
 
@@ -166,7 +168,7 @@ export function BackupScheduleForm({
             <span className="font-medium text-text">Right now:</span> {verdict}
             {schedule.updatedAt && (
               <>
-                {" · "}Schedule last changed {formatDateTime(schedule.updatedAt)}
+                {" · "}Schedule last changed {clock.dateTimeShort(schedule.updatedAt)}
                 {schedule.updatedByName ? ` by ${schedule.updatedByName}` : ""}
               </>
             )}

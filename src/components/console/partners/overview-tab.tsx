@@ -9,10 +9,11 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { OutboundLink, externalHref } from "@/components/ui/outbound-link";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { PARTNER_KIND, PARTNER_REQUEST_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PartnerHeader, PartnerOverview } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { AttributionFlags } from "./flags";
 import { REQUESTS_PATH, countryName, partnerPath, territoriesText, workspacePath } from "./format";
 import { PartnerNotes } from "./notes-editor";
@@ -22,13 +23,15 @@ import { SetPayoutButton } from "./payout";
  * Partner 360 › Overview (spec §9.2): the profile, contacts and address; for SELLERS its tax ids,
  * the payout mask and the money KPIs, with "Set payout details" for PAYERS; staff notes (MANAGERS
  * edit); a distributor's resellers; its customers' open flags and the requests waiting on staff.
- * Server-safe. Money is not even loaded for other roles (`overview.money` is null), so nothing here
- * can leak it.
+ * A server component, its days on the console's clock — but "this year" of commission is India's, as
+ * the programme's money is. Money is not even loaded for other roles (`overview.money` is null), so
+ * nothing here can leak it.
  */
 
 const muted = (text: string) => <span className="text-muted">{text}</span>;
 
-export function PartnerOverviewTab({ header, overview, caps }: { header: PartnerHeader; overview: PartnerOverview; caps: Caps }) {
+export async function PartnerOverviewTab({ header, overview, caps }: { header: PartnerHeader; overview: PartnerOverview; caps: Caps }) {
+  const clock = await consoleClock();
   const { profile, contact, address, money } = overview;
   const base = partnerPath(header.slug);
   const addressText = [address.line1, address.line2, address.city, address.region, address.postalCode].filter(Boolean).join(", ");
@@ -63,10 +66,10 @@ export function PartnerOverviewTab({ header, overview, caps }: { header: Partner
     },
     { term: "Public listing", value: profile.publicListing ? "Listed on Find a partner" : muted("Not listed") },
     ...(profile.publicListing && profile.publicBlurb ? [{ term: "Public blurb", value: profile.publicBlurb, wide: true }] : []),
-    { term: "Created", value: `${dayMonthYear(profile.createdAt)} by ${profile.createdByName}` },
+    { term: "Created", value: `${clock.date(profile.createdAt)} by ${profile.createdByName}` },
     { term: "Updated", value: <RelativeTime at={profile.updatedAt} /> },
   ];
-  if (header.activatedAt) details.push({ term: "First activated", value: dayMonthYear(header.activatedAt) });
+  if (header.activatedAt) details.push({ term: "First activated", value: clock.date(header.activatedAt) });
 
   return (
     <div className="space-y-6">
@@ -112,7 +115,7 @@ export function PartnerOverviewTab({ header, overview, caps }: { header: Partner
                       <Link href={workspacePath(flag.workspace.slug)} className="text-sm font-medium text-text hover:text-brand">
                         {flag.workspace.name}
                       </Link>
-                      <p className="text-xs text-muted">{`${flag.workspace.slug} · ${countryName(flag.workspace.country)} · since ${dayMonthYear(flag.since)}`}</p>
+                      <p className="text-xs text-muted">{`${flag.workspace.slug} · ${countryName(flag.workspace.country)} · since ${clock.date(flag.since)}`}</p>
                       <AttributionFlags flags={flag.flags} />
                     </div>
                     {caps.partnerMoney && (
@@ -169,7 +172,7 @@ export function PartnerOverviewTab({ header, overview, caps }: { header: Partner
                     ...(money.payout.ifsc ? [{ term: "IFSC", value: <span className="font-mono text-xs">{money.payout.ifsc}</span> }] : []),
                     ...(money.payout.swift ? [{ term: "SWIFT (BIC)", value: <span className="font-mono text-xs">{money.payout.swift}</span> }] : []),
                     { term: "Country · currency", value: `${countryName(money.payout.country)} · ${money.payout.currency}` },
-                    ...(money.payoutUpdatedAt ? [{ term: "Set", value: dayMonthYear(money.payoutUpdatedAt) }] : []),
+                    ...(money.payoutUpdatedAt ? [{ term: "Set", value: clock.date(money.payoutUpdatedAt) }] : []),
                   ]}
                 />
               ) : (

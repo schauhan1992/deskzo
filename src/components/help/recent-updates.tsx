@@ -6,7 +6,7 @@ import { ExternalLink, Megaphone, Pin, Plus } from "lucide-react";
 import { markDeskzoUpdatesSeen, markUpdatesSeen, type DeskzoFeed, type UpdateView } from "@/actions/help";
 import { Card, CardContent } from "@/components/ui/card";
 import { OutboundLink } from "@/components/ui/outbound-link";
-import { formatIstDate } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { cn } from "@/lib/utils";
 import { UPDATES_SEEN_EVENT } from "@/lib/side-rail";
 
@@ -66,6 +66,7 @@ function UpdatesFeed({
   compact: boolean;
 }) {
   const headingId = useId();
+  const clock = useClock();
   const unread = posts.filter((p) => p.unread).length;
   // Only the company's feed is ever offered to its managers.
   const manage = source === "company" && canManage;
@@ -105,7 +106,7 @@ function UpdatesFeed({
               )}
             </div>
             <p className="mt-0.5 text-xs text-subtle">
-              {formatIstDate(post.publishedAt)}
+              {clock.date(post.publishedAt)}
               {post.author ? ` · ${post.author}` : ""}
             </p>
             <p className={cn("mt-2 whitespace-pre-line text-muted", compact ? "text-xs" : "text-sm")}>{post.body}</p>

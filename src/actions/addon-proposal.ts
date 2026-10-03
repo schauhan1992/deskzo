@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { proRata, proRataMonths, canAddTo } from "@/lib/subscriptions/proration";
-import { partyDetails, todayInIndia } from "@/lib/proposals/party";
+import { partyDetails } from "@/lib/proposals/party";
+import { workspaceClock } from "@/lib/time/workspace";
 import { createTradeDocument } from "@/actions/trade-document";
 import type { ActionResult } from "@/actions/company";
 
@@ -140,7 +141,9 @@ export async function createProposalFromAddonQuote(input: {
   const party = partyDetails(location, parent.company.name);
   if (!party.ok) return party;
 
-  const today = todayInIndia();
+  // Today on the workspace's calendar. The parent's end date is a calendar day held as midnight UTC,
+  // so its UTC date is the day.
+  const today = (await workspaceClock()).today();
   const expiry = parent.endDate.toISOString().slice(0, 10);
   const unitWord = byMonth ? "months" : "days";
   const address = party.data.address;

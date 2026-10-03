@@ -3,7 +3,7 @@ import { Eye, MousePointerClick } from "lucide-react";
 import type { listMailLog } from "@/actions/mail-log";
 import { Badge } from "@/components/ui/card";
 import { MAIL_STATUS_LABEL, MAIL_STATUS_TONE } from "@/lib/mail-log";
-import { formatDateTime } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Row = Awaited<ReturnType<typeof listMailLog>>["rows"][number];
 
@@ -13,7 +13,8 @@ type Row = Awaited<ReturnType<typeof listMailLog>>["rows"][number];
  * A held-back or failed message is a row like any other, with its reason under the status: "why
  * didn't they get it?" is the question this log is most often opened to answer.
  */
-export function MailLogTable({ rows, showCompany = true }: { rows: Row[]; showCompany?: boolean }) {
+export async function MailLogTable({ rows, showCompany = true }: { rows: Row[]; showCompany?: boolean }) {
+  const clock = await workspaceClock();
   return (
     <table className="w-full text-sm">
       <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
@@ -29,7 +30,7 @@ export function MailLogTable({ rows, showCompany = true }: { rows: Row[]; showCo
       <tbody>
         {rows.map((m) => (
           <tr key={m.id} className="border-b border-line align-top last:border-0 hover:bg-surface-sunken">
-            <td className="whitespace-nowrap px-4 py-2.5 text-muted">{formatDateTime(m.sentAt ?? m.createdAt)}</td>
+            <td className="whitespace-nowrap px-4 py-2.5 text-muted">{clock.dateTimeShort(m.sentAt ?? m.createdAt)}</td>
             {showCompany && (
               <td className="px-4 py-2.5">
                 <Link href={`/companies/${m.company.id}?tab=emails`} className="text-text hover:underline">

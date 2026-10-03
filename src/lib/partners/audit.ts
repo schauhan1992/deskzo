@@ -1,5 +1,5 @@
 import type { PartnerActorKind, Prisma } from "@deskzo/control-client";
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import type { Paged, PartnerAuditAction, PartnerAuditFilters, PartnerAuditRow } from "@/lib/partners/types";
 
@@ -100,7 +100,8 @@ export const AUDIT_PAGE_SIZE = 50;
 
 /**
  * One partner's activity: newest first, 50 a page, filtered by person, action (or an action prefix
- * like "user."), thing and India dates (half-open: `from` from its start, `to` to its end).
+ * like "user."), thing and dates — days on the console's clock (Settings › Time zone), which the
+ * portal keeps too; half-open: `from` from its start, `to` to its end.
  *
  *   "partner"  the partner's own Activity page: only rows written visible, and no staff member's id.
  *   "staff"    the console: every row.
@@ -108,15 +109,16 @@ export const AUDIT_PAGE_SIZE = 50;
 export async function listPartnerAudit(partnerId: string, filters: PartnerAuditFilters = {}, view: "partner" | "staff" = "partner"): Promise<Paged<PartnerAuditRow>> {
   const page = Math.max(1, Math.min(10_000, Math.floor(Number(filters.page) || 1)));
   const action = typeof filters.action === "string" ? filters.action.trim().slice(0, 60) : "";
-  const from = typeof filters.from === "string" && filters.from ? startOfIndianDay(filters.from) : null;
-  const to = typeof filters.to === "string" && filters.to ? endOfIndianDay(filters.to) : null;
+  const from = typeof filters.from === "string" && filters.from ? filters.from : null;
+  const to = typeof filters.to === "string" && filters.to ? filters.to : null;
+  const days = from || to ? (await consoleClock()).dayRange(from, to) : null;
   const where: Prisma.PartnerAuditLogWhereInput = {
     partnerId: String(partnerId ?? ""),
     ...(view === "partner" ? { visibleToPartner: true } : {}),
     ...(filters.actorId ? { actorId: String(filters.actorId).slice(0, 40) } : {}),
     ...(action ? (action.endsWith(".") ? { action: { startsWith: action } } : { action }) : {}),
     ...(filters.entity ? { entity: String(filters.entity).slice(0, 40) } : {}),
-    ...(from || to ? { at: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
+    ...(days ? { at: days } : {}),
   };
   const [rows, total] = await Promise.all([
     controlDb().partnerAuditLog.findMany({

@@ -6,7 +6,7 @@ import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { MAIL_STATUS_LABEL, MAIL_STATUS_TONE, mailPreviewDocument } from "@/lib/mail-log";
 import { formatOrderId } from "@/lib/order-id";
-import { formatDateTime } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 const EVENT_LABEL: Record<string, string> = {
   DELIVERED: "Delivered",
@@ -28,7 +28,7 @@ const EVENT_LABEL: Record<string, string> = {
 export default async function MailMessagePage({ params }: { params: Promise<{ id: string }> }) {
   if (!(await viewerHas("emails.view"))) return <NoAccessNotice title="Email" permission="emails.view" />;
   const { id } = await params;
-  const m = await getMailMessage(id);
+  const [m, clock] = await Promise.all([getMailMessage(id), workspaceClock()]);
   if (!m) notFound();
 
   const from = m.provider ? `${m.provider.fromName ? `${m.provider.fromName} ` : ""}${m.provider.fromEmail ? `<${m.provider.fromEmail}>` : ""}`.trim() || m.provider.label : "—";
@@ -56,8 +56,8 @@ export default async function MailMessagePage({ params }: { params: Promise<{ id
     ],
     ["Sent by", m.sender],
     ["Kind", m.messageClass === "TRANSACTIONAL" ? "Notice" : "Marketing"],
-    ["Queued", formatDateTime(m.createdAt)],
-    ["Sent", m.sentAt ? formatDateTime(m.sentAt) : "—"],
+    ["Queued", clock.dateTimeShort(m.createdAt)],
+    ["Sent", m.sentAt ? clock.dateTimeShort(m.sentAt) : "—"],
   ];
   if (m.attempts > 1) facts.push(["Attempts", String(m.attempts)]);
   if (m.providerMessageId) facts.push(["Provider reference", m.providerMessageId]);
@@ -102,7 +102,7 @@ export default async function MailMessagePage({ params }: { params: Promise<{ id
                   {m.events.map((e, i) => (
                     <li key={i} className="border-l-2 border-line pl-3">
                       <span className="text-text">{EVENT_LABEL[e.type] ?? e.type}</span>
-                      <span className="ml-2 text-xs text-muted">{formatDateTime(e.occurredAt)}</span>
+                      <span className="ml-2 text-xs text-muted">{clock.dateTimeShort(e.occurredAt)}</span>
                       {(e.url || e.detail) && <span className="block break-all text-xs text-subtle">{e.url ?? e.detail}</span>}
                     </li>
                   ))}

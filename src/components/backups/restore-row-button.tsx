@@ -8,7 +8,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { CONFIRM_PHRASE } from "@/lib/backup/archive-format";
 import { formatBytes } from "@/lib/backup/policy";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * Puts one of this server's own backups back, from the row it is listed on.
@@ -33,6 +33,7 @@ export function RestoreRowButton({
 }: {
   backup: { id: string; filename: string; sizeBytes: number | null; startedAt: Date | string };
 }) {
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [staging, setStaging] = useState(false);
   const [staged, setStaged] = useState<Staged | null>(null);
@@ -96,7 +97,7 @@ export function RestoreRowButton({
           <div className="rounded-base border border-line bg-surface-sunken px-3 py-2">
             <p className="font-mono text-xs break-all text-text">{backup.filename}</p>
             <p className="mt-0.5 text-xs text-muted">
-              {formatDateTime(new Date(backup.startedAt))} · {formatBytes(backup.sizeBytes)}
+              {clock.dateTimeShort(backup.startedAt)} · {formatBytes(backup.sizeBytes)}
             </p>
           </div>
 

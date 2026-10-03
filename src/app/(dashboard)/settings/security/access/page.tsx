@@ -28,7 +28,7 @@ import { DEVICE_KIND_LABEL } from "@/lib/access/device";
 import { GEO_ATTRIBUTION, placeText } from "@/lib/access/geo";
 import { normaliseIp } from "@/lib/access/ip";
 import { requestFacts } from "@/lib/access/request";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 
 type Params = { tab?: string; page?: string; pageSize?: string; q?: string; status?: string; view?: string; flag?: string; userId?: string };
@@ -98,13 +98,14 @@ export default async function AccessControlPage({ searchParams }: { searchParams
 }
 
 async function RulesTab({ geo }: { geo: { installed: boolean; file: string | null; type: string | null; builtAt: string | Date | null; sizeBytes: number | null; directory: string } | null }) {
-  const [policies, rules, roles, facts, manageShared] = await Promise.all([
+  const [policies, rules, roles, facts, manageShared, clock] = await Promise.all([
     listRolePolicies(),
     listIpRules(),
     db.role.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { key: true, name: true } }),
     requestFacts(),
     // The location file is the whole server's, not this workspace's (src/lib/platform/shared-data.ts).
     mayManageSharedData(),
+    workspaceClock(),
   ]);
   return (
     <>
@@ -131,7 +132,7 @@ async function RulesTab({ geo }: { geo: { installed: boolean; file: string | nul
           <CardContent className="space-y-2 text-sm">
             {geo.installed ? (
               <p className="text-text">
-                {geo.type} · built {geo.builtAt ? formatIstDateTime(geo.builtAt) : "—"} · {Math.round((geo.sizeBytes ?? 0) / 1048576)} MB
+                {geo.type} · built {geo.builtAt ? clock.dateTime(geo.builtAt) : "—"} · {Math.round((geo.sizeBytes ?? 0) / 1048576)} MB
               </p>
             ) : (
               <p className="text-warning">
@@ -166,7 +167,7 @@ async function RulesTab({ geo }: { geo: { installed: boolean; file: string | nul
 }
 
 async function NetworksTab({ params, page, pageSize }: { params: Params; page: number; pageSize: number }) {
-  const data = await listNetworks({ view: params.view, q: params.q, page, pageSize });
+  const [data, clock] = await Promise.all([listNetworks({ view: params.view, q: params.q, page, pageSize }), workspaceClock()]);
   if (!data) return null;
   return (
     <>
@@ -182,8 +183,8 @@ async function NetworksTab({ params, page, pageSize }: { params: Params; page: n
           standing: r.standing,
           rule: r.rule,
           lastUserName: r.lastUserName,
-          firstSeenText: formatIstDateTime(r.firstSeenAt),
-          lastSeenText: formatIstDateTime(r.lastSeenAt),
+          firstSeenText: clock.dateTime(r.firstSeenAt),
+          lastSeenText: clock.dateTime(r.lastSeenAt),
           held: r.heldAt !== null,
           alerted: r.alertedAt !== null,
           dismissed: r.dismissedAt !== null,
@@ -195,7 +196,7 @@ async function NetworksTab({ params, page, pageSize }: { params: Params; page: n
 }
 
 async function DevicesTab({ params, page, pageSize, canDecide }: { params: Params; page: number; pageSize: number; canDecide: boolean }) {
-  const data = await listDevices({ status: params.status ?? "PENDING", q: params.q, page, pageSize });
+  const [data, clock] = await Promise.all([listDevices({ status: params.status ?? "PENDING", q: params.q, page, pageSize }), workspaceClock()]);
   if (!data) return null;
   return (
     <>
@@ -222,8 +223,8 @@ async function DevicesTab({ params, page, pageSize, canDecide }: { params: Param
           label: d.label,
           status: d.status,
           auto: d.status === "APPROVED" && d.decidedBy === null,
-          firstSeenText: formatIstDateTime(d.firstSeenAt),
-          lastSeenText: formatIstDateTime(d.lastSeenAt),
+          firstSeenText: clock.dateTime(d.firstSeenAt),
+          lastSeenText: clock.dateTime(d.lastSeenAt),
           lastIp: d.lastIp,
           lastPlace: d.lastPlace,
           decisionNote: d.decisionNote,
@@ -238,7 +239,7 @@ async function DevicesTab({ params, page, pageSize, canDecide }: { params: Param
 }
 
 async function SignInsTab({ params, page, pageSize }: { params: Params; page: number; pageSize: number }) {
-  const data = await listSignIns({ q: params.q, flag: params.flag, userId: params.userId, page, pageSize });
+  const [data, clock] = await Promise.all([listSignIns({ q: params.q, flag: params.flag, userId: params.userId, page, pageSize }), workspaceClock()]);
   if (!data) return null;
   return (
     <>
@@ -259,8 +260,8 @@ async function SignInsTab({ params, page, pageSize }: { params: Params; page: nu
         canEnd={data.canEnd}
         rows={data.rows.map((s) => ({
           id: s.id,
-          atText: formatIstDateTime(s.at),
-          lastSeenText: formatIstDateTime(s.lastSeenAt),
+          atText: clock.dateTime(s.at),
+          lastSeenText: clock.dateTime(s.lastSeenAt),
           user: s.user,
           ip: s.ip,
           place: placeText(s),

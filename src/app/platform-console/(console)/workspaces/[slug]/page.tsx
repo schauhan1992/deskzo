@@ -20,13 +20,13 @@ import { PlanTab } from "@/components/console/workspace/plan-tab";
 import { SummaryStrip } from "@/components/console/workspace/summary-strip";
 import { SupportTab } from "@/components/console/workspace/support-tab";
 import { UsageTab } from "@/components/console/workspace/usage-tab";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { WORKSPACE_TAB_LABELS } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { WORKSPACE_TABS, parseWorkspaceTab, type WorkspaceTab } from "@/lib/console-shared/params";
 import { capsFor } from "@/lib/console-shared/roles";
 import { alertsForTenant } from "@/lib/platform/alerts";
 import { workspaceAttribution } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { workspaceBilling, workspaceHeader, workspaceNotes, workspaceOps, workspacePlan, workspaceSupport, workspaceTimeline, workspaceUsage } from "@/lib/platform/workspace-data";
 import { supportRequestsForTenant } from "@/lib/support/console";
@@ -53,7 +53,7 @@ export default async function ConsoleWorkspacePage({ params, searchParams }: Pag
   const staff = await consoleStaff(PAGE_ROLES.workspaces);
   const caps = capsFor(staff.role);
   const { slug } = await params;
-  const header = await workspaceHeader(slug, staff.id);
+  const [header, clock] = await Promise.all([workspaceHeader(slug, staff.id), consoleClock()]);
   if (!header) notFound();
 
   const { tenant } = header;
@@ -103,7 +103,7 @@ export default async function ConsoleWorkspacePage({ params, searchParams }: Pag
       <span aria-hidden="true" className="text-subtle">
         ·
       </span>
-      <span className="text-xs">{`created ${dayMonthYear(tenant.createdAt)}`}</span>
+      <span className="text-xs">{`created ${clock.date(tenant.createdAt)}`}</span>
     </span>
   );
 

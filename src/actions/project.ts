@@ -18,7 +18,8 @@ import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { visibleProjectsWhere } from "@/lib/projects/visibility";
 import { milestonesFromTemplate, projectStatusLabels } from "@/lib/projects/status";
-import { partyDetails, todayInIndia } from "@/lib/proposals/party";
+import { partyDetails } from "@/lib/proposals/party";
+import { workspaceClock } from "@/lib/time/workspace";
 import { createTradeDocument } from "@/actions/trade-document";
 import type { ActionResult } from "@/actions/company";
 
@@ -742,7 +743,8 @@ export async function raiseBillingMilestoneInvoice(id: string): Promise<ActionRe
     reverseCharge: false,
     currency: "INR",
     exchangeRate: 1,
-    issueDate: todayInIndia(),
+    // Today on the workspace's calendar.
+    issueDate: (await workspaceClock()).today(),
     dueDate: "",
     validUntil: "",
     // The project's reference, so the invoice can be found from the project and the other way round.

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { directClient } from "@/lib/tenancy/direct-client";
 import { WORLD_COUNTRIES } from "@/lib/geo/world-countries";
+import { defaultZoneFor } from "@/lib/time/zones";
 import { bootstrapOwner } from "@/lib/platform/bootstrap-owner";
 import { controlDb } from "@/lib/platform/control-db";
 import { openForPlatform, openForTenant, sealForPlatform, sealForTenant } from "@/lib/platform/kek";
@@ -99,8 +100,8 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
         keyBundleCipher: sealKeyBundle(tenantId, newKeyBundle()),
         country: country.code,
         currency: country.currency ?? "USD",
-        // A seam: organisations will carry their own zone. India's is the one the app knows today.
-        timezone: country.code === "IN" ? "Asia/Kolkata" : "UTC",
+        // Its country's zone to start with (src/lib/time/zones.ts); the owner changes it under Settings → Profile.
+        timezone: defaultZoneFor(country.code),
         ownerEmail: input.ownerEmail.trim().toLowerCase(),
       },
     });

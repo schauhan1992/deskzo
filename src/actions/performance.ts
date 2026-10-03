@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { SLA_HOURS } from "@/lib/tickets";
-import { dateRangeFilter } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { calendarDayRange } from "@/lib/time/zone";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { byStageDate } from "@/lib/pipeline/server";
 
@@ -34,17 +35,15 @@ export type UserPerformanceRow = {
 };
 
 /**
- * Purchase savings per purchaser over the page's range, by the Indian day each was recorded on — a
+ * Purchase savings per purchaser over the page's range, by the workspace's day each was recorded on — a
  * `@db.Date`, so the `yyyy-mm-dd` bounds are compared as calendar days. A cancelled order's never counts.
  */
 async function purchaseSavingsByUser(from?: string, to?: string): Promise<Map<string, number> | null> {
   if (!(await moduleAvailableForTenant("orders"))) return null;
-  const day = (key: string | undefined) => (key && /^\d{4}-\d{2}-\d{2}$/.test(key) ? new Date(`${key}T00:00:00Z`) : undefined);
-  const gte = day(from);
-  const lte = day(to);
+  const recordedOn = calendarDayRange(from, to);
   const rows = await db.purchaseSaving.groupBy({
     by: ["purchaserId"],
-    where: { cancelledAt: null, ...(gte || lte ? { recordedOn: { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) } } : {}) },
+    where: { cancelledAt: null, ...(recordedOn ? { recordedOn } : {}) },
     _sum: { amount: true },
   });
   return new Map(rows.map((r) => [r.purchaserId, Math.round(Number(r._sum.amount ?? 0) * 100) / 100]));
@@ -62,16 +61,22 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
     return [];
   }
 
-  const createdAtRange = dateRangeFilter(params?.from, params?.to);
+  // The page's From and To are the workspace's days: half-open instants on its clock for the columns
+  // that hold a moment (an audit entry, a stage move, a resolution), and the days themselves for the
+  // one that holds a day. They were the server's zone, so on a server in UTC an Indian day began at
+  // 05:30 and took in the first hours of the next.
+  const clock = await workspaceClock();
+  const within = clock.dayRange(params?.from, params?.to);
+  const days = calendarDayRange(params?.from, params?.to);
 
   const [users, activityRows, auditRows, assignedTickets, wonLeads, savings] = await Promise.all([
     db.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, role: true, active: true } }),
     db.userDailyActivity.findMany({
-      where: createdAtRange ? { date: createdAtRange } : undefined,
+      where: days ? { date: days } : undefined,
       select: { userId: true, activeSeconds: true },
     }),
     db.auditLog.findMany({
-      where: createdAtRange ? { createdAt: createdAtRange } : undefined,
+      where: within ? { createdAt: within } : undefined,
       select: { userId: true, action: true },
     }),
     db.ticket.findMany({
@@ -87,7 +92,7 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
     // Won within the window: when they moved to won, not when they last changed (src/lib/pipeline).
     byStageDate((moved) =>
       db.lead.findMany({
-        where: { status: "WON", ownerUserId: { not: null }, ...(createdAtRange ? moved(createdAtRange) : {}) },
+        where: { status: "WON", ownerUserId: { not: null }, ...(within ? moved(within) : {}) },
         select: { ownerUserId: true },
       }),
     ),
@@ -104,8 +109,8 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
 
     const resolvedTickets = myTickets.filter((t) => {
       if (!t.resolvedAt) return false;
-      if (createdAtRange?.gte && t.resolvedAt < createdAtRange.gte) return false;
-      if (createdAtRange?.lte && t.resolvedAt > createdAtRange.lte) return false;
+      if (within?.gte && t.resolvedAt < within.gte) return false;
+      if (within?.lt && t.resolvedAt >= within.lt) return false;
       return true;
     });
     const ticketsResolved = resolvedTickets.length;

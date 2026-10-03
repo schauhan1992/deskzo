@@ -2,17 +2,19 @@ import Link from "next/link";
 import { MoneyList } from "@/components/console/charts/money-list";
 import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import type { PartnerDirectoryRow } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { partnerPath, territoriesText } from "./format";
 
 /**
  * The /partners directory (spec §9.2): one row a partner, the whole row a link to its 360. Money
  * columns — its customers' MRR and the commission not yet on a statement — only for SELLERS
- * (`withMoney`); the loader does not even read them otherwise. Server-safe.
+ * (`withMoney`); the loader does not even read them otherwise. A server component: its days are on
+ * the console's clock.
  */
-export function PartnerDirectoryTable({ rows, withMoney }: { rows: PartnerDirectoryRow[]; withMoney: boolean }) {
+export async function PartnerDirectoryTable({ rows, withMoney }: { rows: PartnerDirectoryRow[]; withMoney: boolean }) {
+  const clock = await consoleClock();
   return (
     <DataTable caption="Partners" minWidth={withMoney ? 1080 : 880}>
       <THead>
@@ -65,7 +67,7 @@ export function PartnerDirectoryTable({ rows, withMoney }: { rows: PartnerDirect
             )}
             <Td numeric>{row.users}</Td>
             <Td nowrap muted>
-              {dayMonthYear(row.createdAt)}
+              {clock.date(row.createdAt)}
             </Td>
           </Tr>
         ))}

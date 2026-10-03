@@ -17,7 +17,6 @@ import { PartnerOverviewTab } from "@/components/console/partners/overview-tab";
 import { PartnerPipelineTab } from "@/components/console/partners/pipeline-tab";
 import { PartnerTermsTab } from "@/components/console/partners/terms-tab";
 import { PartnerUsersTab } from "@/components/console/partners/users-tab";
-import { dayMonthYear, istDayKey } from "@/lib/console-shared/format";
 import { PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import type { RawParams } from "@/lib/console-shared/params";
@@ -36,7 +35,9 @@ import {
   partnerUsersView,
 } from "@/lib/partners/console-data";
 import { DEFAULT_TERMS, TAX_ID_KINDS } from "@/lib/partners/types";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
+import { indiaClock } from "@/lib/time/zone";
 
 const TAB_LABEL: Record<PartnerTab, string> = {
   overview: "Overview",
@@ -80,7 +81,7 @@ export default async function ConsolePartnerPage({ params, searchParams }: PageP
   const staff = await consoleStaff(PAGE_ROLES.partners);
   const caps = capsFor(staff.role);
   const { slug } = await params;
-  const header = await partnerHeader(slug);
+  const [header, clock] = await Promise.all([partnerHeader(slug), consoleClock()]);
   if (!header) notFound();
 
   const sp: RawParams = (await searchParams) ?? {};
@@ -104,7 +105,10 @@ export default async function ConsolePartnerPage({ params, searchParams }: PageP
   if (!overview) notFound();
 
   const base = partnerPath(header.slug);
-  const todayKey = istDayKey(header.asOf);
+  // The activity log's days are the console's; the day new terms start is India's, as the server
+  // checks it (the programme's money days, src/lib/partners/terms.ts).
+  const todayKey = clock.dateKey(header.asOf);
+  const termsTodayKey = indiaClock.dateKey(header.asOf);
   const ownLink = (key: PartnerTab) => {
     const p = flat(own(key));
     delete p.tab;
@@ -164,7 +168,7 @@ export default async function ConsolePartnerPage({ params, searchParams }: PageP
       <span aria-hidden="true" className="text-subtle">
         ·
       </span>
-      <span className="text-xs">{`created ${dayMonthYear(header.createdAt)}`}</span>
+      <span className="text-xs">{`created ${clock.date(header.createdAt)}`}</span>
     </span>
   );
 
@@ -231,10 +235,10 @@ export default async function ConsolePartnerPage({ params, searchParams }: PageP
               <PartnerPipelineTab data={pipeline} caps={caps} partnerName={header.displayName} />
             </TabPanel>
             <TabPanel idPrefix={PARTNER_TABS_ID} tabKey="commissions" active={tab === "commissions"}>
-              {commissions ? <PartnerCommissionsTab partner={partnerRef} data={commissions} caps={caps} /> : moneyNote("Commissions")}
+              {commissions ? <PartnerCommissionsTab partner={partnerRef} data={commissions} caps={caps} clock={clock} /> : moneyNote("Commissions")}
             </TabPanel>
             <TabPanel idPrefix={PARTNER_TABS_ID} tabKey="statements" active={tab === "statements"}>
-              {statements ? <PartnerStatementsTab partner={partnerRef} data={statements} caps={caps} viewerId={staff.id} /> : moneyNote("Statements")}
+              {statements ? <PartnerStatementsTab partner={partnerRef} data={statements} caps={caps} viewerId={staff.id} clock={clock} /> : moneyNote("Statements")}
             </TabPanel>
             <TabPanel idPrefix={PARTNER_TABS_ID} tabKey="users" active={tab === "users"}>
               <PartnerUsersTab data={users} caps={caps} partnerName={header.displayName} />
@@ -246,7 +250,7 @@ export default async function ConsolePartnerPage({ params, searchParams }: PageP
                 partner={{ id, displayName: header.displayName, kind: header.kind, terminated: header.status === "TERMINATED" }}
                 defaults={DEFAULT_TERMS[header.kind]}
                 plans={terms?.plans ?? []}
-                todayKey={todayKey}
+                todayKey={termsTodayKey}
               />
             </TabPanel>
             <TabPanel idPrefix={PARTNER_TABS_ID} tabKey="activity" active={tab === "activity"}>

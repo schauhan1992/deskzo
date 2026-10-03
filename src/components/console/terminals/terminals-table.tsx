@@ -11,7 +11,7 @@ import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import { StatusDot } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
-import { dayMonthYear, when } from "@/lib/console-shared/format";
+import { useClock } from "@/components/time/clock-provider";
 import { TERMINAL_STATE } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { TerminalRow } from "@/lib/platform/console-data";
@@ -26,6 +26,7 @@ import type { TerminalRow } from "@/lib/platform/console-data";
  * from its own attendance settings, so both sides agree.
  */
 export function TerminalsTable({ rows, caps }: { rows: TerminalRow[]; caps: Caps }) {
+  const clock = useClock();
   const searchParams = useSearchParams();
   const action = useConsoleAction<null>();
   const [releasing, setReleasing] = useState<TerminalRow | null>(null);
@@ -99,7 +100,7 @@ export function TerminalsTable({ rows, caps }: { rows: TerminalRow[]; caps: Caps
                   </span>
                 </Td>
                 <Td nowrap muted>
-                  <span title={when(row.createdAt)}>{dayMonthYear(row.createdAt)}</span>
+                  <span title={clock.dateTime(row.createdAt)}>{clock.date(row.createdAt)}</span>
                 </Td>
                 <RowActionsCell>
                   <RowMenu label={`Actions for ${row.serial}`} items={menuFor(row)} />

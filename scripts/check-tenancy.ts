@@ -133,6 +133,8 @@ const STATE: Record<string, Allowed> = {
   "src/lib/mail/microsoft.ts:endpoints": { reason: "test override of Microsoft's addresses, set only by check scripts" },
   "src/lib/mail/google.ts:endpoints": { reason: "test override of Google's addresses, set only by check scripts" },
   "src/lib/mail/zoho.ts:regions": { reason: "test override of Zoho's data centres, set only by check scripts" },
+  "src/lib/time/zone.ts:partsFormatters": { reason: "Intl formatters keyed by time zone name — the same for every workspace in that zone; no workspace data" },
+  "src/lib/time/zone.ts:clocks": { reason: "a clock per time zone name — pure functions of the zone; no workspace data" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },
   "src/lib/platform/domains.ts:testResolver": { reason: "test override, set only by check scripts — no check asks real DNS" },
 };

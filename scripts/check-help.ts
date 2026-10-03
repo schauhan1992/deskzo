@@ -38,7 +38,7 @@ import { directClient } from "../src/lib/tenancy/direct-client";
 import { checkLink, youtubeId, LINK_MAX } from "../src/lib/help/links";
 import { gettingStartedSteps, progressOf, type GettingStartedFacts } from "../src/lib/help/getting-started";
 import { SEARCH_SCOPES, refShortcut, searchListHref, searchScope } from "../src/lib/search/scopes";
-import { istDateTimeInput } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 
 const db = directClient();
 const MAIL = "@zzprobe-help.invalid";
@@ -381,10 +381,11 @@ async function main() {
     ok("a post needs a body", !(await help.saveUpdate({ title: `${TAG} empty`, body: "  " })).ok);
     ok("a post's link is checked too", !(await help.saveUpdate({ title: `${TAG} bad link`, body: "x", linkUrl: "http://example.com" })).ok);
     // Published an hour before the seller's account existed: they joined after it, so it is not news.
-    const old = await help.saveUpdate({ title: `${TAG} Old news`, body: "Before your time.", publishAt: istDateTimeInput(new Date(seller.createdAt.getTime() - 3_600_000)) });
+    // Typed on the workspace's clock, which is India's here.
+    const old = await help.saveUpdate({ title: `${TAG} Old news`, body: "Before your time.", publishAt: indiaClock.input(new Date(seller.createdAt.getTime() - 3_600_000)) });
     const fresh = await help.saveUpdate({ title: `${TAG} Fresh news`, body: "Renewals now remind 90 days ahead.", linkUrl: "/renewals" });
     const pinned = await help.saveUpdate({ title: `${TAG} Pinned`, body: "Read this first.", pinned: true, linkUrl: "https://example.com/policy" });
-    const later = await help.saveUpdate({ title: `${TAG} Not yet`, body: "Coming soon.", publishAt: istDateTimeInput(new Date(Date.now() + 2 * 86_400_000)) });
+    const later = await help.saveUpdate({ title: `${TAG} Not yet`, body: "Coming soon.", publishAt: indiaClock.input(new Date(Date.now() + 2 * 86_400_000)) });
     ok("help.manage can post, now and for later", old.ok && fresh.ok && pinned.ok && later.ok);
 
     as(seller);

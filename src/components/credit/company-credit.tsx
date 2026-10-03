@@ -5,7 +5,9 @@ import { CreditBadge } from "@/components/credit/credit-badge";
 import { CreditLimitForm } from "@/components/credit/credit-limit-form";
 import { paymentTermsLabels } from "@/lib/gst";
 import { GRACE_DAYS, LOOKBACK_DAYS, MIN_HISTORY } from "@/lib/credit/engine";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Profile = NonNullable<Awaited<ReturnType<typeof getCreditProfile>>>;
 
@@ -19,9 +21,13 @@ const KIND_LABEL = { TERMS: "Terms", LIMIT: "Limit", ORDER: "Order" } as const;
  * how that sits against their limit, then the bills the verdict came from, then what people have
  * already decided against it. Nothing here is a black box; every number traces to a row below it.
  */
-export function CompanyCredit({ companyId, profile }: { companyId: string; profile: Profile }) {
+export async function CompanyCredit({ companyId, profile }: { companyId: string; profile: Profile }) {
   const used = profile.limit > 0 ? Math.min(100, Math.round((profile.outstanding / profile.limit) * 100)) : null;
   const m = profile.metrics;
+  const clock = await workspaceClock();
+  // An invoice's dates are the days typed on it, held as midnight UTC. An order's are moments — when
+  // accounts approved it, and its terms on from that — so they read on the workspace's clock.
+  const billDay = (kind: Profile["bills"][number]["kind"], at: Date) => (kind === "INVOICE" ? formatCalendarDay(at) : clock.date(at));
 
   return (
     <div className="space-y-4">
@@ -106,7 +112,8 @@ export function CompanyCredit({ companyId, profile }: { companyId: string; profi
           ["Worst in 12 months", m.worstDaysLate === null ? "—" : `${m.worstDaysLate} days`],
           ["Largest balance cleared", formatCurrency(m.largestBalanceCleared)],
           ["Paid to date", formatCurrency(m.paidTotal)],
-          ["Customer since", m.firstBillOn ? formatDate(m.firstBillOn) : "—"],
+          // The first bill may be either kind: its day on the workspace's clock, right for both in a zone ahead of UTC.
+          ["Customer since", m.firstBillOn ? clock.date(m.firstBillOn) : "—"],
           ["Bills on record", String(m.bills)],
           ["Owes now", formatCurrency(profile.outstanding)],
         ].map(([label, value]) => (
@@ -138,11 +145,12 @@ export function CompanyCredit({ companyId, profile }: { companyId: string; profi
                     {b.ref}
                   </Link>
                 </td>
-                <td className="px-4 py-2.5 text-muted">{formatDate(b.issuedOn)}</td>
-                <td className="px-4 py-2.5 text-muted">{formatDate(b.dueOn)}</td>
+                <td className="px-4 py-2.5 text-muted">{billDay(b.kind, b.issuedOn)}</td>
+                <td className="px-4 py-2.5 text-muted">{billDay(b.kind, b.dueOn)}</td>
                 <td className="px-4 py-2.5 text-right text-text">{formatCurrency(b.amount)}</td>
                 <td className="px-4 py-2.5 text-muted">
-                  {b.paidOn ? formatDate(b.paidOn) : <span className="text-text">{formatCurrency(b.outstanding)} owed</span>}
+                  {/* The day the settling payment was typed as paid on. */}
+                  {b.paidOn ? formatCalendarDay(b.paidOn) : <span className="text-text">{formatCurrency(b.outstanding)} owed</span>}
                 </td>
                 <td className="px-4 py-2.5 text-right">
                   {b.paidOn ? (
@@ -181,7 +189,7 @@ export function CompanyCredit({ companyId, profile }: { companyId: string; profi
                   </p>
                   <p className="mt-0.5 text-xs text-muted">&ldquo;{d.reason}&rdquo;</p>
                   <p className="mt-0.5 text-[11px] text-subtle">
-                    {d.decidedBy.name} · {formatDate(d.createdAt)} · rated {d.rating.toLowerCase()}
+                    {d.decidedBy.name} · {clock.date(d.createdAt)} · rated {d.rating.toLowerCase()}
                     {d.score !== null ? ` (${d.score})` : ""} at the time
                   </p>
                 </li>

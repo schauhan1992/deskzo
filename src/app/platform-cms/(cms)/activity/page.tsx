@@ -11,14 +11,14 @@ import { Panel } from "@/components/console/kit/panel";
 import { TONE_DOT } from "@/components/console/kit/status";
 import { DataTable, DayHeaderRow, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { ACTION_CATEGORIES, actionLabel, actorParts, describeActivity, entityHref, type ActionCategory } from "@/components/cms/common/activity";
-import { dayGroupLabel, dayKeyLabel, istDayKey, when } from "@/lib/console-shared/format";
+import { dayGroupLabel, dayKeyLabel } from "@/lib/console-shared/format";
 import { withParams } from "@/lib/console-shared/params";
-import { formatIstTime } from "@/lib/india-time";
 import { listCmsAudit } from "@/lib/cms/audit";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { CMS_AUDIT_ACTIONS, cmsCapsFor, type CmsAuditFilters } from "@/lib/cms/types";
 import { listCmsUsers } from "@/lib/cms/users";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Activity" };
@@ -37,7 +37,7 @@ function actorOrigin(label: string): string {
   return "outside the CMS";
 }
 
-/** The address's filters, whitelisted: a person, a kind of change (or one exact action), India days, a page. */
+/** The address's filters, whitelisted: a person, a kind of change (or one exact action), days on the console's clock, a page. */
 function parseFilters(sp: Record<string, string | string[] | undefined>) {
   const actor = one(sp.actor)?.trim().slice(0, 40) || undefined;
   const kindRaw = one(sp.kind);
@@ -51,15 +51,15 @@ function parseFilters(sp: Record<string, string | string[] | undefined>) {
   return { actor, kind, action, from, to, page, filters };
 }
 
-/** The log a page at a time, and India's today for the day headings — read on the server. */
+/** The log a page at a time, and the console's clock for the times and day headings — read on the server. */
 async function loadActivity(filters: CmsAuditFilters) {
-  const [log, users] = await Promise.all([listCmsAudit(filters), listCmsUsers()]);
-  return { log, users, todayKey: istDayKey(new Date()) };
+  const [log, users, clock] = await Promise.all([listCmsAudit(filters), listCmsUsers(), consoleClock()]);
+  return { log, users, clock, todayKey: clock.today() };
 }
 
 /**
  * Activity: everything changed in the CMS — by whom, what, to which thing and when, newest first,
- * 50 at a time — grouped under India's days. Filtered by person, by kind of change (pages, posts,
+ * 50 at a time — grouped under the console's days. Filtered by person, by kind of change (pages, posts,
  * sign-ins…) and by dates, all in the address. Each row links to what it is about where that still
  * exists and this role may open it. The log holds ids, titles, slugs and counts — never a page's
  * text, a lead's message or anything secret — so every role may read it.
@@ -69,7 +69,7 @@ export default async function CmsActivityPage({ searchParams }: PageProps<"/plat
   const caps = cmsCapsFor(session.user.role);
   const sp = await searchParams;
   const f = parseFilters(sp);
-  const { log, users, todayKey } = await loadActivity(f.filters);
+  const { log, users, clock, todayKey } = await loadActivity(f.filters);
   const opts = { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish };
 
   const actorName = f.actor ? (users.find((u) => u.id === f.actor)?.name ?? "Somebody removed") : null;
@@ -87,10 +87,10 @@ export default async function CmsActivityPage({ searchParams }: PageProps<"/plat
   const first = log.total === 0 ? 0 : (log.page - 1) * log.pageSize + 1;
   const last = Math.min(log.total, log.page * log.pageSize);
 
-  // Rows under their India day, in the order they came.
+  // Rows under their day on the console's clock, in the order they came.
   const groups: { day: string; rows: typeof log.rows }[] = [];
   for (const row of log.rows) {
-    const day = istDayKey(row.at);
+    const day = clock.dateKey(row.at);
     const lastGroup = groups[groups.length - 1];
     if (lastGroup && lastGroup.day === day) lastGroup.rows.push(row);
     else groups.push({ day, rows: [row] });
@@ -128,14 +128,14 @@ export default async function CmsActivityPage({ searchParams }: PageProps<"/plat
                   <DayHeaderRow label={dayGroupLabel(group.day, todayKey)} colSpan={4} />
                   {group.rows.map((row) => {
                     const { label, tone } = actionLabel(row.action);
-                    const { subject, note } = describeActivity(row);
+                    const { subject, note } = describeActivity(row, clock);
                     const who = actorParts(row.actorLabel);
                     const href = entityHref(row, opts);
                     return (
                       <Tr key={row.id}>
                         <Td muted nowrap className="align-top">
-                          <time dateTime={row.at.toISOString()} title={when(row.at)} className="tabular-nums">
-                            {formatIstTime(row.at)}
+                          <time dateTime={row.at.toISOString()} title={clock.dateTime(row.at)} className="tabular-nums">
+                            {clock.time(row.at)}
                           </time>
                         </Td>
                         <Td className="align-top">

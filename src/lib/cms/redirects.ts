@@ -33,6 +33,7 @@ import {
   type RedirectStatus,
 } from "@/lib/cms/types";
 import { csvFilename } from "@/lib/console-shared/format";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
 
@@ -413,12 +414,12 @@ export async function releasePath(path: string, by: CmsActor): Promise<void> {
 
 // ─── CSV ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** Every redirect as CSV — from, to, status, match, note — guarded against formulas, CRLF lines. */
+/** Every redirect as CSV — from, to, status, match, note — guarded against formulas, CRLF lines; the file dated on the console's clock. */
 export async function exportRedirectsCsv(me: CmsMe, now = new Date()): Promise<{ filename: string; csv: string; rows: number }> {
   assertPublisher(me);
-  const rows = await controlDb().siteRedirect.findMany({ orderBy: { fromPath: "asc" } });
+  const [rows, clock] = await Promise.all([controlDb().siteRedirect.findMany({ orderBy: { fromPath: "asc" } }), consoleClock()]);
   const data = rows.map((r) => [r.fromPath, r.toUrl, r.status, r.match.toLowerCase(), r.note ?? ""]);
-  return { filename: csvFilename("redirects", now), csv: Papa.unparse({ fields: CSV_FIELDS, data }, { escapeFormulae: true, newline: "\r\n" }), rows: rows.length };
+  return { filename: csvFilename("redirects", now, clock), csv: Papa.unparse({ fields: CSV_FIELDS, data }, { escapeFormulae: true, newline: "\r\n" }), rows: rows.length };
 }
 
 type CsvRow = { line: number; from: string; to: string; status: string; match: string; note: string };

@@ -1,4 +1,5 @@
-import { calendarDateOf, financialYearStartOf, financialYearWindow, istCalendarDate } from "@/lib/india-time";
+import { calendarDateOf, financialYearStartOf, financialYearWindow } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The Indian financial year a date falls in, as `yyyy-mm-dd` strings and a label. It lives in
@@ -10,15 +11,15 @@ export { financialYearBounds } from "@/lib/india-time";
 /**
  * Whether an entry dated `date` falls in books closed to `lockedUntil`.
  *
- * By calendar day in India, not by instant. `lockedUntil` is a `@db.Date`, which reads back as
- * midnight UTC, and payroll and depreciation date their entries 12:00 UTC on the month's last day —
- * so comparing the two instants let a September payroll through a lock set to 30 September. The
- * entry's day is its Indian date (01:00 IST on 1 October is October's), the lock's is the date it
- * holds, and a day on or before the lock is closed.
+ * By calendar day in India — in every workspace, as the books keep India's calendar — not by instant.
+ * `lockedUntil` is a `@db.Date`, which reads back as midnight UTC, and payroll and depreciation date
+ * their entries 12:00 UTC on the month's last day — so comparing the two instants let a September
+ * payroll through a lock set to 30 September. The entry's day is its Indian date (01:00 IST on
+ * 1 October is October's), the lock's is the date it holds, and a day on or before the lock is closed.
  */
 export function isLockedDate(date: Date, lockedUntil: Date | null | undefined): boolean {
   if (!lockedUntil) return false;
-  return istCalendarDate(date).getTime() <= calendarDateOf(lockedUntil).getTime();
+  return indiaClock.calendarDate(date).getTime() <= calendarDateOf(lockedUntil).getTime();
 }
 
 /**

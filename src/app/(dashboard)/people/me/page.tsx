@@ -12,13 +12,17 @@ import { handoverHistory } from "@/actions/handover";
 import { db } from "@/lib/db";
 import { dateOnly } from "@/lib/hr/calendar";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function MyHrPage() {
   const enabled = await isModuleEnabled("hr");
   if (!enabled) return <ModuleDisabledNotice moduleKey="hr" />;
 
   const caps = await hrCapabilities();
-  const year = new Date().getUTCFullYear();
+  // The workspace's year and today; UTC's lagged a day behind India until 05:30.
+  const clock = await workspaceClock();
+  const now = new Date();
+  const year = clock.parts(now).year;
 
   const [today, balances, leave, regularisations, queue, payslips, holidays, handovers, me] = await Promise.all([
     myToday(),
@@ -43,7 +47,7 @@ export default async function MyHrPage() {
     }),
   ]);
 
-  const todayDate = dateOnly(new Date());
+  const todayDate = clock.calendarDate(now);
   const nextHoliday = holidays.find((h) => !h.optional && dateOnly(h.date) >= todayDate) ?? null;
 
   return (

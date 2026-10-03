@@ -1,6 +1,9 @@
+"use client";
+
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
-import { dayGroupLabel, istDayKey } from "@/lib/console-shared/format";
+import { useClock } from "@/components/time/clock-provider";
+import { dayGroupLabel } from "@/lib/console-shared/format";
 import type { Tone } from "@/lib/console-shared/types";
 import { cn } from "@/lib/utils";
 import { RelativeTime } from "./relative-time";
@@ -22,9 +25,13 @@ export type ActivityFeedItem = {
 const toDate = (at: Date | string) => (at instanceof Date ? at : new Date(at));
 
 /**
- * A list of things that happened, newest first, under India-day headings ("Today", "Yesterday",
- * "Thu 24 Sep"). `todayKey` comes from the loader, so the server and the browser agree on which day
- * is today even across midnight.
+ * A list of things that happened, newest first, under day headings ("Today", "Yesterday",
+ * "Thu 24 Sep") on the clock the layout provides — the console's, in the console, the CMS and the
+ * partners' portal. `todayKey` comes from the loader, so the server and the browser agree on which
+ * day is today even across midnight.
+ *
+ * A client component for that clock (`useClock()`), so the pages that draw it on the server hand it
+ * nothing more than the items.
  */
 export function ActivityFeed({
   items,
@@ -39,11 +46,12 @@ export function ActivityFeed({
   showWorkspace?: boolean;
   empty?: string;
 }) {
+  const clock = useClock();
   if (items.length === 0) return <p className="py-6 text-center text-sm text-muted">{empty}</p>;
 
   const groups: { key: string; items: ActivityFeedItem[] }[] = [];
   for (const item of items) {
-    const key = groupByDay ? istDayKey(toDate(item.at)) : "all";
+    const key = groupByDay ? clock.dateKey(toDate(item.at)) : "all";
     const last = groups[groups.length - 1];
     if (last && last.key === key) last.items.push(item);
     else groups.push({ key, items: [item] });

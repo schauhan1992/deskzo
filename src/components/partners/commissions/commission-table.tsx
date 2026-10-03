@@ -4,12 +4,12 @@ import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/ta
 import { Amount } from "@/components/partners/common/money";
 import { CommissionStatusPill } from "@/components/partners/common/pills";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonthYear, when } from "@/lib/console-shared/format";
 import { COMMISSION_KIND } from "@/lib/console-shared/labels";
 import { PARTNER_ROUTES } from "@/lib/partners/nav";
 import type { CommissionRow } from "@/lib/partners/portal-data";
 import type { RateBy } from "@/lib/partners/rates";
 import { bpToPercent, type CommissionKind } from "@/lib/partners/types";
+import { indiaClock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -27,6 +27,10 @@ import { cn } from "@/lib/utils";
  * A customer is a link only while it is this partner's customer now (`slug` is null otherwise — a
  * former customer, or a reseller's). A statement number is a link only for an approved or paid
  * statement; the loader never hands over a draft's. Server-safe: no hooks, no directive.
+ *
+ * The day an entry was earned is India's, whatever zone the console keeps: commission is counted in
+ * India's months, as its statements are (src/lib/partners/statements.ts) — an entry dated here sits
+ * in the month it reads.
  */
 
 const KIND_LABEL = (kind: CommissionKind) => (Object.prototype.hasOwnProperty.call(COMMISSION_KIND, kind) ? COMMISSION_KIND[kind].label : String(kind));
@@ -125,8 +129,8 @@ export function CommissionTable({
           return (
             <Tr key={row.id}>
               <Td muted nowrap className="align-top">
-                <time dateTime={row.earnedAt.toISOString()} title={when(row.earnedAt)}>
-                  {dayMonthYear(row.earnedAt)}
+                <time dateTime={row.earnedAt.toISOString()} title={`${indiaClock.dateTime(row.earnedAt)} (India time)`}>
+                  {indiaClock.date(row.earnedAt)}
                 </time>
               </Td>
               <Td className="align-top">

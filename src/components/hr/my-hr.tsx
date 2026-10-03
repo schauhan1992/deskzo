@@ -14,8 +14,10 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { monthLabel, dateOnly } from "@/lib/hr/calendar";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
+import { monthLabel } from "@/lib/hr/calendar";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { attendanceStatusLabels, attendanceStatusValues, leaveStatusTone } from "@/lib/validation/hr";
 
 type Leave = Awaited<ReturnType<typeof myLeaveRequests>>[number];
@@ -66,7 +68,7 @@ export function MyHr({
             {nextHoliday ? (
               <>
                 <div className="mt-1 font-medium text-text">{nextHoliday.name}</div>
-                <div className="text-xs text-muted">{formatDate(nextHoliday.date)}</div>
+                <div className="text-xs text-muted">{formatCalendarDay(nextHoliday.date)}</div>
               </>
             ) : (
               <div className="mt-1 text-sm text-subtle">Nothing on the calendar.</div>
@@ -202,11 +204,12 @@ export function MyHr({
 
 function ClockCard({ today }: { today: TodayRow }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const time = (v: Date | string | null) =>
-    v ? new Date(v).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : null;
+  // The workspace's time of day, not the browser's.
+  const time = (v: Date | string | null) => (v ? clock.time(v) : null);
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -263,6 +266,8 @@ function ClockCard({ today }: { today: TodayRow }) {
 
 function RegulariseDialog() {
   const router = useRouter();
+  // The latest day that can be asked about: the workspace's today, as requestRegularisation checks it.
+  const today = useClock().today();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -308,7 +313,7 @@ function RegulariseDialog() {
                 type="date"
                 value={form.date}
                 onChange={set("date")}
-                max={dateOnly(new Date()).toISOString().slice(0, 10)}
+                max={today}
               />
             </div>
             <div className="space-y-1.5">
@@ -373,7 +378,7 @@ function MyRegRow({ request }: { request: Reg }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Badge tone={leaveStatusTone[request.status]}>{request.status}</Badge>
-          <span className="text-text">{formatDate(request.date)}</span>
+          <span className="text-text">{formatCalendarDay(request.date)}</span>
           <span className="text-xs text-muted">
             → {attendanceStatusLabels[request.requestedStatus]}
           </span>
@@ -428,7 +433,7 @@ function QueueRow({ request }: { request: Queue[number] }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-medium text-text">{request.user.name}</span>
-            <span className="text-muted">{formatDate(request.date)}</span>
+            <span className="text-muted">{formatCalendarDay(request.date)}</span>
             <Badge tone="default">{attendanceStatusLabels[request.requestedStatus]}</Badge>
           </div>
           <p className="mt-1 text-sm text-text">{request.reason}</p>

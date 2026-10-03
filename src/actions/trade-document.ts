@@ -18,7 +18,8 @@ import {
   GST_STATE_CODES,
 } from "@/lib/gst-engine";
 import { GST_NUMBERED_TYPES, gstNumberProblem, isDraftNumber } from "@/lib/document-numbering";
-import { dateRangeFilter } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { calendarDayRange } from "@/lib/time/zone";
 import { advanceSerialPast, isAutoNumberOf, nextDocumentNumber, seriesFor } from "@/lib/trade-number";
 import { branchFilter, branchIdentity, defaultBranchIdFor, ensureHeadOffice, type BranchWithRegistration } from "@/lib/branches/identity";
 import { branchLabel, type BranchIdentity } from "@/lib/branches/format";
@@ -223,7 +224,7 @@ function lineData(input: TradeDocumentInput["lines"][number], computed: ReturnTy
   return {
     itemId: input.itemId || null,
     companyProductId: input.companyProductId || null,
-    // Indian calendar days, stored as a @db.Date holds them; both or neither (the schema checked).
+    // Calendar days, stored as a @db.Date holds them; both or neither (the schema checked).
     servicePeriodFrom: periodDay(input.servicePeriodFrom),
     servicePeriodTo: periodDay(input.servicePeriodTo),
     billingMilestoneId: input.billingMilestoneId || null,
@@ -284,7 +285,10 @@ async function buildDocumentData(data: TradeDocumentInput, branch: { id: string 
       roundOff: identity.roundOffTotals,
     },
   );
-  const issueDate = parseDate(data.issueDate, new Date()) as Date;
+  // A document's dates are typed days, kept as their midnight UTC; left blank, it is dated today on
+  // the workspace's calendar, held the same way — not the moment, whose UTC date is yesterday's
+  // before 05:30 in India.
+  const issueDate = parseDate(data.issueDate, (await workspaceClock()).calendarDate(new Date())) as Date;
   // "Same as billing" is stored resolved rather than as a flag alone, so a printed document and the
   // e-invoice payload don't each have to re-derive where the goods went.
   const shipping = data.shippingSameAsBilling ? data.billing : data.shipping;
@@ -1105,7 +1109,8 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
   const { branchId, gstRegistrationId } = source.branchId
     ? { branchId: source.branchId, gstRegistrationId: source.gstRegistrationId }
     : await ensureHeadOffice().then((ho) => ({ branchId: ho.id, gstRegistrationId: ho.gstRegistrationId }));
-  const issueDate = new Date();
+  // Dated today on the workspace's calendar, as a typed day is kept: its midnight UTC.
+  const issueDate = (await workspaceClock()).calendarDate(new Date());
 
   // The number comes from the source branch's series in the transaction that creates the document, so
   // a create that fails gives it back (X12).
@@ -1327,7 +1332,7 @@ export async function listTradeDocuments(params: {
 }) {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return { rows: [], total: 0 };
-  const dateWindow = dateRangeFilter(params.from, params.to);
+  const dateWindow = calendarDayRange(params.from, params.to);
   const where: Prisma.TradeDocumentWhereInput = {
     // One `where` for the rows and the count both — a scope on the page that the pager doesn't
     // know about offers page 9 of a list that ends at page 2.
@@ -1348,9 +1353,9 @@ export async function listTradeDocuments(params: {
     docType: params.docType,
     ...(params.status ? { status: params.status } : {}),
     /**
-     * The window is built in the server's own timezone, which is what `dateRangeFilter` does and
-     * what all eleven other filtered lists use. Deliberately not `startOfIndianDay` here: doing it
-     * for documents alone would make this list disagree with every other one about where a day ends.
+     * The window is the days themselves, both ends in: an issue date is a typed day kept as its
+     * midnight UTC, so it is compared by calendar day (`calendarDayRange`) — the same day in every
+     * zone. It was built in the server's own timezone, which happened to agree only on a server in UTC.
      */
     ...(dateWindow ? { issueDate: dateWindow } : {}),
     ...(params.salespersonId ? { salespersonId: params.salespersonId } : {}),

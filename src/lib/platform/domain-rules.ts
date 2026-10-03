@@ -1,5 +1,6 @@
 import { domainToASCII } from "node:url";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Custom domains — the rules, with nothing read and nothing written, so a check can test each of them
@@ -250,14 +251,6 @@ export function mailKind(state: DomainState): "failing" | "broken" | null {
 
 // ─── In words ────────────────────────────────────────────────────────────────────────────────────
 
-const DAY_MONTH = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
-const DAY_MONTH_YEAR = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
-
-/** "3 Oct" in India time. */
-export const istDayMonth = (at: Date) => DAY_MONTH.format(at);
-/** "3 Oct 2026" in India time. */
-export const istDayMonthYear = (at: Date) => DAY_MONTH_YEAR.format(at);
-
 /** How a state reads: "waiting" (amber), "live" (green), "failing" (amber), "stopped" (red). */
 export type DomainTone = "waiting" | "live" | "failing" | "stopped";
 
@@ -266,11 +259,13 @@ export type DomainTone = "waiting" | "live" | "failing" | "stopped";
  *   Live
  *   Live — records failing since 3 Oct, stops on 6 Oct
  *   Stopped — records not found
+ *
+ * The days are `clock`'s: the workspace's on its own pages, the console's in the console.
  */
-export function domainStatusText(state: DomainState): { label: string; tone: DomainTone } {
+export function domainStatusText(state: DomainState, clock: Clock): { label: string; tone: DomainTone } {
   if (state.status === "PENDING") return { label: "Waiting for DNS records", tone: "waiting" };
   if (state.status === "BROKEN") return { label: "Stopped — records not found", tone: "stopped" };
-  if (state.failingSince) return { label: `Live — records failing since ${istDayMonth(state.failingSince)}, stops on ${istDayMonth(stopsAt(state.failingSince))}`, tone: "failing" };
+  if (state.failingSince) return { label: `Live — records failing since ${clock.dayMonth(state.failingSince)}, stops on ${clock.dayMonth(stopsAt(state.failingSince))}`, tone: "failing" };
   return { label: "Live", tone: "live" };
 }
 
@@ -291,10 +286,14 @@ export function allowanceRefusal(limit: number | null, used: number): string | n
   return `Your plan allows ${limit === 1 ? "one custom domain" : `${limit} custom domains`}, and ${used === 1 ? "one is" : `${used} are`} added already. Remove one first.`;
 }
 
-/** The mail to the workspace's owner, when an address starts failing and when it stops. Signed with the platform's name. */
+/**
+ * The mail to the workspace's owner, when an address starts failing and when it stops. Its days are on
+ * `clock` — the workspace's own (`clockOfTenant`), as its owner reads them. Signed with the platform's name.
+ */
 export function domainMail(
   kind: "failing" | "broken",
   d: { host: string; workspace: string; ownAddress: string; failingSince: Date; problems: string[]; settingsUrl: string; brand: string },
+  clock: Clock,
 ): { subject: string; text: string } {
   const problems = d.problems.length ? d.problems.map((p) => `  · ${p}`) : ["  · The records could not be found."];
   if (kind === "failing") {
@@ -307,7 +306,7 @@ export function domainMail(
         "",
         ...problems,
         "",
-        `It keeps working for now. Unless the records check out again by ${istDayMonthYear(stopsAt(d.failingSince))}, ${d.host} stops reaching the workspace, and links fall back to ${d.ownAddress}.`,
+        `It keeps working for now. Unless the records check out again by ${clock.date(stopsAt(d.failingSince))}, ${d.host} stops reaching the workspace, and links fall back to ${d.ownAddress}.`,
         "",
         `The records are listed under Settings › Domain: ${d.settingsUrl}`,
         "",
@@ -320,7 +319,7 @@ export function domainMail(
     text: [
       "Hello,",
       "",
-      `${d.host} no longer reaches ${d.workspace}: its DNS records have not checked out since ${istDayMonthYear(d.failingSince)}.`,
+      `${d.host} no longer reaches ${d.workspace}: its DNS records have not checked out since ${clock.date(d.failingSince)}.`,
       "",
       ...problems,
       "",

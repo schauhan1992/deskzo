@@ -33,7 +33,8 @@ import { cloneElement, createElement, isValidElement, type ReactElement, type Re
 import { renderToStaticMarkup } from "react-dom/server";
 import bcrypt from "bcryptjs";
 import { db } from "../src/lib/db";
-import { istMidnight } from "../src/lib/india-time";
+// Revenue periods keep India's calendar in every workspace (the accounting family).
+import { indiaClock } from "../src/lib/time/zone";
 import {
   defaultServicePeriod,
   descriptionStatesPeriod,
@@ -264,7 +265,7 @@ function docIn(companyId: string, locationId: string, lines: LineIn[], over: Rec
   };
 }
 function today() {
-  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  return indiaClock.today();
 }
 const linesOf = (documentId: string) =>
   db.tradeDocumentLine.findMany({
@@ -286,9 +287,11 @@ async function main() {
   ok("  a day more is refused", /10 years/.test(servicePeriodProblem("2026-10-01", "2036-10-01") ?? ""));
   ok("31 February is not a date", servicePeriodProblem("2027-02-31", "2027-03-31") !== null);
 
-  // An order saved at India midnight is 18:30 UTC the day before; its day is still the Indian one.
-  const istOrder = orderServicePeriod({ startDate: istMidnight(2026, 9, 1), endDate: istMidnight(2027, 8, 30) });
-  ok("an order's dates are read as Indian days (saved at India midnight)", istOrder?.from === "2026-10-01" && istOrder?.to === "2027-09-30", JSON.stringify(istOrder));
+  // An order's dates are typed days, kept as their midnight UTC — and they reach the form as that, in
+  // text: read by their UTC date, the same day whatever zone the workspace keeps (on a zone's clock,
+  // west of UTC, they would be the day before).
+  const typedOrder = orderServicePeriod({ startDate: "2026-10-01T00:00:00.000Z", endDate: "2027-09-30T00:00:00.000Z" });
+  ok("an order's dates are read as the days typed (midnight UTC), in any zone", typedOrder?.from === "2026-10-01" && typedOrder?.to === "2027-09-30", JSON.stringify(typedOrder));
   const utcOrder = orderServicePeriod({ startDate: new Date("2026-10-01"), endDate: new Date("2027-09-30") });
   ok("  and at UTC midnight", utcOrder?.from === "2026-10-01" && utcOrder?.to === "2027-09-30", JSON.stringify(utcOrder));
   ok("an order with no term has no period", orderServicePeriod({ startDate: null, endDate: new Date() }) === null);
@@ -370,7 +373,8 @@ async function main() {
         select: { id: true },
       });
     const a1 = await order(a.id, locA, subItem.id, new Date("2026-04-01"), new Date("2027-03-31"));
-    const a2 = await order(a.id, locA, subItem.id, istMidnight(2026, 9, 1), istMidnight(2027, 8, 30));
+    // Saved as the order form saves a term: the days typed, at midnight UTC.
+    const a2 = await order(a.id, locA, subItem.id, new Date("2026-10-01"), new Date("2027-09-30"));
     const a3 = await order(a.id, locA, subItem.id, new Date("2026-04-01"), new Date("2027-03-31"), "CANCELLED");
     const b1 = await order(b.id, b.locations[0]!.id, subItem.id, new Date("2026-04-01"), new Date("2027-03-31"));
     const projectOrder = await order(a.id, locA, serviceItem.id, null, null);
@@ -385,7 +389,7 @@ async function main() {
     const fromA1 = defaultServicePeriod({ order: listed(a1.id)!, item: listed(a1.id)!.item, issueDate: today() });
     ok("an order's term becomes the line's period", fromA1?.source === "order" && fromA1.from === "2026-04-01" && fromA1.to === "2027-03-31", JSON.stringify(fromA1));
     const fromA2 = defaultServicePeriod({ order: listed(a2.id)!, item: listed(a2.id)!.item, issueDate: today() });
-    ok("  read as Indian days for an order saved at India midnight", fromA2?.from === "2026-10-01" && fromA2.to === "2027-09-30", JSON.stringify(fromA2));
+    ok("  read as the days typed, through the picker", fromA2?.from === "2026-10-01" && fromA2.to === "2027-09-30", JSON.stringify(fromA2));
 
     const billed = await td.createTradeDocument(
       docIn(a.id, locA, [
@@ -663,7 +667,7 @@ async function main() {
     const { getNumberSetting } = load("../src/actions/document-number") as typeof import("../src/actions/document-number");
     const branches = await listBranchChoices();
     const formFor = async (docType: "INVOICE" | "BILL") => {
-      const defaults = emptyDefaults();
+      const defaults = emptyDefaults(indiaClock);
       defaults.companyId = a.id;
       defaults.lines = [
         { ...blankLine(), name: "M365 E3", itemType: "SUBSCRIPTION", itemCycle: "ANNUAL", companyProductId: a1.id, servicePeriodFrom: "2026-10-01", servicePeriodTo: "2027-09-30", periodSource: "typed" },

@@ -1,9 +1,10 @@
 import { billingStandings, plannedAction, type Standing } from "@/lib/billing/lifecycle";
 import type { StandingKind } from "@/lib/console-shared/types";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { PLAN_REFUSALS, liveGatewaySubscription } from "@/lib/platform/plans";
 import { autoDeprovision } from "@/lib/platform/settings";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * What a bulk action from the workspace directory would do, before it does it — shown in its
@@ -19,8 +20,6 @@ import { autoDeprovision } from "@/lib/platform/settings";
 
 export { BULK_CAPS } from "@/lib/platform/console-guard";
 
-const DAY = 86_400_000;
-
 /** How far a trial is extended at a time — from the console's +7 / +14 / +30. */
 export const EXTEND_DAYS = [7, 14, 30] as const;
 export type ExtendDays = (typeof EXTEND_DAYS)[number];
@@ -32,12 +31,13 @@ export function extendDays(days: unknown): ExtendDays | null {
 }
 
 /**
- * The last second, India time, of the day `days` after `base` — 23:59:59 IST, the same end a trial
- * set by date gets (`consoleSetTrialEnd`: `T23:59:59+05:30`).
+ * The last second on `clock` of the day `days` after `base`'s — 23:59:59 there, the same end a trial
+ * set by date gets (`consoleSetTrialEnd`). Counted in calendar days, so a clock change on the way
+ * moves no end. From the console, the console's clock: the day staff see is the day it ends.
  */
-export function trialEndAfter(base: Date, days: number): Date {
-  const { year, month, day } = istDateParts(new Date(base.getTime() + days * DAY));
-  return new Date(istMidnight(year, month, day + 1).getTime() - 1000);
+export function trialEndAfter(base: Date, days: number, clock: Clock): Date {
+  const { year, month, day } = clock.parts(base);
+  return new Date(clock.midnight(year, month, day + days + 1).getTime() - 1000);
 }
 
 const unique = (ids: string[]) => [...new Set(ids)];
@@ -116,13 +116,14 @@ export async function previewExtendTrial(ids: string[], days: ExtendDays, now = 
   const wanted = unique(ids);
   if (!wanted.length) return { days, items: [] };
   const control = controlDb();
-  const [tenants, trials] = await Promise.all([
+  const [tenants, trials, clock] = await Promise.all([
     control.tenant.findMany({ where: { id: { in: wanted } }, select: { id: true, slug: true, status: true, suspendedFor: true } }),
     control.subscription.findMany({
       where: { tenantId: { in: wanted }, gateway: "MANUAL", status: { in: ["TRIALING", "CANCELLED"] }, trialEndsAt: { not: null } },
       orderBy: { createdAt: "desc" },
       select: { tenantId: true, trialEndsAt: true },
     }),
+    consoleClock(),
   ]);
   // The guard `setTrialEnd` applies, asked the same way — at most a batch's worth of workspaces.
   const gateways = new Map(await Promise.all(tenants.map(async (t) => [t.id, await liveGatewaySubscription(t.id, now)] as const)));
@@ -147,7 +148,7 @@ export async function previewExtendTrial(ids: string[], days: ExtendDays, now = 
       slug: t.slug,
       eligible: true,
       from,
-      to: trialEndAfter(new Date(Math.max(now.getTime(), from.getTime())), days),
+      to: trialEndAfter(new Date(Math.max(now.getTime(), from.getTime())), days, clock),
       liftsHold: t.status === "SUSPENDED" && t.suspendedFor === "BILLING",
     });
   }

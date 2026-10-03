@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { cn, formatCurrency } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 import { accountTypeLabels } from "@/lib/ledger/chart";
 import { branchLabel, type BranchChoice, type RegistrationChoice } from "@/lib/branches/format";
 
@@ -67,7 +68,8 @@ export function NewJournalDialog({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Today in India, not UTC's today: the books keep India's calendar in every workspace.
+  const [date, setDate] = useState(() => indiaClock.today());
   const [narration, setNarration] = useState("");
   const [source, setSource] = useState<"MANUAL" | "OPENING">("MANUAL");
   const [rows, setRows] = useState<Row[]>([blank(), blank()]);

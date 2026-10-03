@@ -4,9 +4,10 @@ import { EmptyState } from "@/components/console/kit/empty-state";
 import { Panel } from "@/components/console/kit/panel";
 import { LabelPill, StandingPill, StatusPill, TenantStatusPill } from "@/components/console/kit/status";
 import { DataTable, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { ATTRIBUTION_SOURCE } from "@/lib/console-shared/labels";
 import type { PartnerCustomers } from "@/lib/partners/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { AttributionFlags } from "./flags";
 import { workspacePath } from "./format";
 
@@ -14,9 +15,10 @@ import { workspacePath } from "./format";
  * Partner 360 › Customers (spec §9.2): the workspaces attributed to it now, the latest first — their
  * standing, plans, how they came (source) and since when, whether they earn commission, and any
  * flag. Each row opens the workspace's 360, whose Partner panel is where a customer is reassigned.
- * MRR only for SELLERS (the loader reads no money otherwise). Server-safe.
+ * MRR only for SELLERS (the loader reads no money otherwise). A server component: its days are on the
+ * console's clock.
  */
-export function PartnerCustomersTab({ data, withMoney, partnerName }: { data: PartnerCustomers; withMoney: boolean; partnerName: string }) {
+export async function PartnerCustomersTab({ data, withMoney, partnerName }: { data: PartnerCustomers; withMoney: boolean; partnerName: string }) {
   if (data.rows.length === 0) {
     return (
       <Panel>
@@ -28,6 +30,7 @@ export function PartnerCustomersTab({ data, withMoney, partnerName }: { data: Pa
       </Panel>
     );
   }
+  const clock = await consoleClock();
   return (
     <div className="space-y-3">
       <Panel
@@ -76,7 +79,7 @@ export function PartnerCustomersTab({ data, withMoney, partnerName }: { data: Pa
                   <LabelPill map={ATTRIBUTION_SOURCE} value={row.source} />
                 </Td>
                 <Td nowrap muted>
-                  {dayMonthYear(row.since)}
+                  {clock.date(row.since)}
                 </Td>
                 <Td>{row.commissionable ? <span className="text-sm text-text">Earns</span> : <StatusPill tone="neutral">No commission</StatusPill>}</Td>
                 <Td>

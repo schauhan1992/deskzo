@@ -5,12 +5,12 @@ import { AlertActions } from "@/components/console/alerts/alert-actions";
 import { Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill, TONE_DOT } from "@/components/console/kit/status";
-import { dayMonth, istDaysBetween, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { ALERT_CATEGORY_LABELS, ALERT_SEVERITY } from "@/lib/console-shared/labels";
 import type { AlertSeverity } from "@/lib/console-shared/params";
 import type { Caps } from "@/lib/console-shared/roles";
-import { formatIstTime } from "@/lib/india-time";
 import type { Alert } from "@/lib/platform/alerts";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,7 +20,8 @@ import { cn } from "@/lib/utils";
  * and links to the page that fixes it; staff who change things also get acknowledge and snooze.
  *
  * `alerts` arrives filtered and sorted by the loader (severity, standing conditions, newest). `asOf` is
- * the loader's clock, so "until 6:30 pm tomorrow" never depends on the reader's.
+ * the loader's now, so "until 6:30 pm tomorrow" never depends on the reader's; `clock` is the console's
+ * (`consoleClock()`), which the page passes down — this list is drawn on the server.
  */
 
 const SEVERITIES: AlertSeverity[] = ["critical", "warning", "info"];
@@ -34,16 +35,16 @@ const CHIP: Record<AlertSeverity, string> = {
 const REVIEW =
   "inline-flex h-8 shrink-0 items-center rounded-base border border-line-strong bg-surface px-3 text-[13px] font-medium whitespace-nowrap text-text shadow-sm hover:bg-surface-sunken";
 
-/** "6:30 pm today", "9:00 am tomorrow", "3 Oct, 9:00 am" — counted in India's days from the loader's clock. */
-function untilText(until: Date, asOf: Date): string {
-  const days = istDaysBetween(asOf, until);
-  const time = formatIstTime(until);
+/** "6:30 pm today", "9:00 am tomorrow", "3 Oct, 9:00 am" — counted in the console's days from the loader's `asOf`. */
+function untilText(until: Date, asOf: Date, clock: Clock): string {
+  const days = clock.daysBetween(asOf, until);
+  const time = clock.time(until);
   if (days === 0) return `${time} today`;
   if (days === 1) return `${time} tomorrow`;
-  return `${dayMonth(until)}, ${time}`;
+  return `${clock.dayMonth(until)}, ${time}`;
 }
 
-export function AlertList({ alerts, caps, asOf }: { alerts: Alert[]; caps: Caps; asOf: Date }) {
+export function AlertList({ alerts, caps, asOf, clock }: { alerts: Alert[]; caps: Caps; asOf: Date; clock: Clock }) {
   const open = alerts.filter((a) => a.ack === null);
   const handled = alerts.filter((a) => a.ack !== null);
 
@@ -66,7 +67,7 @@ export function AlertList({ alerts, caps, asOf }: { alerts: Alert[]; caps: Caps;
             count={group.length}
           >
             {group.map((alert) => (
-              <AlertRow key={alert.key} alert={alert} caps={caps} asOf={asOf} />
+              <AlertRow key={alert.key} alert={alert} caps={caps} asOf={asOf} clock={clock} />
             ))}
           </AlertGroup>
         );
@@ -85,7 +86,7 @@ export function AlertList({ alerts, caps, asOf }: { alerts: Alert[]; caps: Caps;
           count={handled.length}
         >
           {handled.map((alert) => (
-            <AlertRow key={alert.key} alert={alert} caps={caps} asOf={asOf} />
+            <AlertRow key={alert.key} alert={alert} caps={caps} asOf={asOf} clock={clock} />
           ))}
         </AlertGroup>
       )}
@@ -107,7 +108,7 @@ function AlertGroup({ id, title, description, count, children }: { id: string; t
   );
 }
 
-function AlertRow({ alert, caps, asOf }: { alert: Alert; caps: Caps; asOf: Date }) {
+function AlertRow({ alert, caps, asOf, clock }: { alert: Alert; caps: Caps; asOf: Date; clock: Clock }) {
   const Icon = ICON[alert.severity] ?? Info;
   const severity = ALERT_SEVERITY[alert.severity] ?? ALERT_SEVERITY.info;
   const ack = alert.ack;
@@ -162,7 +163,7 @@ function AlertRow({ alert, caps, asOf }: { alert: Alert; caps: Caps; asOf: Date 
             <div className="mt-3 space-y-1 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-xs text-muted">
               <p>
                 {ack.snoozeUntil ? (
-                  `Snoozed by ${ack.byName} until ${untilText(ack.snoozeUntil, asOf)}`
+                  `Snoozed by ${ack.byName} until ${untilText(ack.snoozeUntil, asOf, clock)}`
                 ) : (
                   <>
                     {`Acknowledged by ${ack.byName} · `}

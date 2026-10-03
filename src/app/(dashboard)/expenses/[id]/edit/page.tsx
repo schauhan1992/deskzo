@@ -49,6 +49,7 @@ export default async function EditExpensePage({ params }: { params: Promise<{ id
           category: expense.category,
           amount: String(expense.amount),
           taxAmount: expense.taxAmount !== null ? String(expense.taxAmount) : "",
+          // A calendar day held at UTC midnight (src/actions/expense.ts): the day it holds, in any zone.
           spentOn: new Date(expense.spentOn).toISOString().slice(0, 10),
           description: expense.description,
           paymentMode: expense.paymentMode,

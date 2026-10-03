@@ -10,7 +10,8 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof noticeRecipients>>>;
 
@@ -118,7 +119,7 @@ export function CustomerNoticeButton({
               <p className="text-sm font-medium text-text">{data.subscription.itemName}</p>
               <p className="mt-0.5 text-xs text-muted">
                 {data.subscription.quantity} × · expires{" "}
-                {data.subscription.endDate ? formatDate(data.subscription.endDate) : "—"}
+                {data.subscription.endDate ? formatCalendarDay(data.subscription.endDate) : "—"}
                 {data.subscription.renewalValue > 0 && ` · ${formatCurrency(data.subscription.renewalValue)} to renew`}
                 {data.subscription.addonCount > 0 && ` · includes ${data.subscription.addonCount} added batch(es)`}
               </p>

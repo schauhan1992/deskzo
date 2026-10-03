@@ -9,7 +9,8 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
-import { countLeaveDays, dateOnly, eachDay, financialYearOf, toKey } from "@/lib/hr/calendar";
+import { addDays, countLeaveDays, dateOnly, eachDay, financialYearOf, toKey } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 import { leaveDecisionSchema, leaveRequestSchema } from "@/lib/validation/hr";
 import type { ActionResult } from "@/actions/company";
 
@@ -52,15 +53,18 @@ async function canDecide(deciderId: string, requesterId: string) {
  * elapsed month for one that accrues. Accrual is computed rather than run by a scheduled job,
  * because this app has no scheduler and a balance that silently depends on a cron having fired is
  * worse than one that is worked out when somebody looks at it.
+ *
+ * `today` is the workspace's day, as a `@db.Date` holds it — `clock.calendarDate(new Date())`. The
+ * UTC day credited a month's accrual five and a half hours late in India.
  */
-async function ensureBalance(userId: string, typeId: string, year: number) {
+async function ensureBalance(userId: string, typeId: string, year: number, today: Date) {
   const existing = await db.leaveBalance.findUnique({
     where: { userId_typeId_year: { userId, typeId, year } },
   });
   const type = await db.leaveType.findUnique({ where: { id: typeId } });
   if (!type) return null;
 
-  const credited = accruedTo(type, year, new Date());
+  const credited = accruedTo(type, year, today);
   if (!existing) {
     return db.leaveBalance.create({
       data: { userId, typeId, year, credited: new Prisma.Decimal(credited), opening: new Prisma.Decimal(0) },
@@ -106,12 +110,13 @@ export async function leaveBalances(userId: string, year?: number): Promise<Bala
   const allowed = await visibleUserIds(user.id);
   if (allowed && !allowed.includes(userId)) return [];
 
-  const fy = year ?? financialYearOf(new Date());
+  const today = (await workspaceClock()).calendarDate(new Date());
+  const fy = year ?? financialYearOf(today);
   const types = await db.leaveType.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
 
   const rows: BalanceRow[] = [];
   for (const type of types) {
-    const balance = await ensureBalance(userId, type.id, fy);
+    const balance = await ensureBalance(userId, type.id, fy, today);
     if (!balance) continue;
     const pendingAgg = await db.leaveRequest.aggregate({
       where: { userId, typeId: type.id, status: "PENDING" },
@@ -280,7 +285,7 @@ export async function decideLeave(input: unknown): Promise<ActionResult<null>> {
   const fy = financialYearOf(request.fromDate);
 
   if (approve) {
-    await ensureBalance(request.userId, request.typeId, fy);
+    await ensureBalance(request.userId, request.typeId, fy, (await workspaceClock()).calendarDate(new Date()));
 
     const holidays = await db.holiday.findMany({
       where: { date: { gte: request.fromDate, lte: request.toDate } },
@@ -372,7 +377,8 @@ export async function cancelLeave(id: string): Promise<ActionResult<null>> {
   if (request.status === "CANCELLED") return { ok: false, error: "It's already cancelled." };
   if (request.status === "REJECTED") return { ok: false, error: "A rejected request can't be cancelled." };
 
-  const today = dateOnly(new Date());
+  // The workspace's today; UTC's was still yesterday until 05:30 in India.
+  const today = (await workspaceClock()).calendarDate(new Date());
   if (request.fromDate <= today) {
     return { ok: false, error: "That leave has already started — ask HR to correct it." };
   }
@@ -520,8 +526,8 @@ export async function leaveApprovalQueue(filters?: LeaveFilters) {
 export async function upcomingLeave(days = 30) {
   const user = await requireModuleUser("hr");
   const allowed = await visibleUserIds(user.id);
-  const from = dateOnly(new Date());
-  const to = dateOnly(new Date(Date.now() + days * 86400000));
+  const from = (await workspaceClock()).calendarDate(new Date());
+  const to = addDays(from, days);
 
   return toPlain(
     await db.leaveRequest.findMany({

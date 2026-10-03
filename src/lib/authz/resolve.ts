@@ -3,6 +3,7 @@ import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The one place that decides whether somebody may do something.
@@ -272,8 +273,12 @@ export async function explain(userId: string, key: PermissionKey | string): Prom
   return resolved.sources.get(key) ?? { via: "none" };
 }
 
-/** A one-line, human explanation of a source, for the drawer and the audit screen. */
-export function describeSource(source: PermissionSource): string {
+/**
+ * A one-line, human explanation of a source, for the drawer and the audit screen. A grant's end is
+ * kept as the midnight that ends its last day, so the day named is the one before it, on the
+ * workspace's clock.
+ */
+export function describeSource(source: PermissionSource, clock: Clock): string {
   switch (source.via) {
     case "superAdmin":
       return "Super admin — holds everything, and cannot be restricted.";
@@ -281,7 +286,7 @@ export function describeSource(source: PermissionSource): string {
       return "The account is deactivated.";
     case "userGrant":
       return source.allowed
-        ? `Granted to this person directly${source.reason ? ` — ${source.reason}` : ""}${source.expiresAt ? `, until ${source.expiresAt.toISOString().slice(0, 10)}` : ""}.`
+        ? `Granted to this person directly${source.reason ? ` — ${source.reason}` : ""}${source.expiresAt ? `, until ${clock.date(new Date(source.expiresAt.getTime() - 1))}` : ""}.`
         : `Denied to this person directly${source.reason ? ` — ${source.reason}` : ""}, overriding their role.`;
     case "roleOverride":
       return source.allowed

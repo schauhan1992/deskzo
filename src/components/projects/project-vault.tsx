@@ -14,7 +14,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * The customer's passwords and keys.
@@ -38,6 +39,7 @@ export function ProjectVault({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [editing, setEditing] = useState<CredentialSummary | "new" | null>(null);
   const [revealing, setRevealing] = useState<CredentialSummary | null>(null);
 
@@ -78,8 +80,9 @@ export function ProjectVault({
                     {c.url && <div className="break-all">{c.url}</div>}
                     <div className="flex items-center gap-2 text-subtle">
                       <span>Password ••••••••</span>
-                      {c.rotatedAt && <span>· changed {formatDate(c.rotatedAt)}</span>}
-                      {c.expiresAt && <span>· expires {formatDate(c.expiresAt)}</span>}
+                      {c.rotatedAt && <span>· changed {clock.date(c.rotatedAt)}</span>}
+                      {/* The day typed, held as midnight UTC. */}
+                      {c.expiresAt && <span>· expires {formatCalendarDay(c.expiresAt)}</span>}
                     </div>
                   </div>
                   {c.note && <p className="mt-1 text-xs text-muted">{c.note}</p>}
@@ -110,7 +113,7 @@ export function ProjectVault({
 
               {c.reveals.length > 0 && (
                 <p className="mt-2 border-t border-line pt-2 text-xs text-subtle">
-                  Opened by {c.reveals.map((r) => `${r.userName} (${formatDate(r.at)})`).join(", ")}
+                  Opened by {c.reveals.map((r) => `${r.userName} (${clock.date(r.at)})`).join(", ")}
                 </p>
               )}
             </div>
@@ -227,7 +230,9 @@ function CredentialDialog({
   const [url, setUrl] = useState(credential?.url ?? "");
   const [secret, setSecret] = useState("");
   const [note, setNote] = useState(credential?.note ?? "");
-  const [expiresAt, setExpiresAt] = useState(credential?.expiresAt ? credential.expiresAt.toString().slice(0, 10) : "");
+  // Held as midnight UTC of the day typed, so its UTC day is that day, in any zone. (`toString()` here
+  // gave "Mon Oct 05", which a date field can't show.)
+  const [expiresAt, setExpiresAt] = useState(credential?.expiresAt ? new Date(credential.expiresAt).toISOString().slice(0, 10) : "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 

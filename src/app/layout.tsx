@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getBranding } from "@/actions/branding";
 import { brandingCss } from "@/lib/branding";
+import { ClockProvider } from "@/components/time/clock-provider";
+import { workspaceZone } from "@/lib/time/workspace";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -33,7 +35,9 @@ const themeScript = `(function(){try{var s=localStorage.getItem("theme");var d=d
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const branding = await getBranding();
+  // The workspace's clock on its own addresses — sign-in, public, print and TV pages included — and India's
+  // elsewhere; the console, partner and CMS layouts hand down the console's instead (src/lib/time).
+  const [branding, zone] = await Promise.all([getBranding(), workspaceZone()]);
 
   return (
     <html
@@ -46,7 +50,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <style dangerouslySetInnerHTML={{ __html: brandingCss(branding) }} />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="flex min-h-full flex-col bg-bg text-text">{children}</body>
+      <body className="flex min-h-full flex-col bg-bg text-text">
+        <ClockProvider zone={zone}>{children}</ClockProvider>
+      </body>
     </html>
   );
 }

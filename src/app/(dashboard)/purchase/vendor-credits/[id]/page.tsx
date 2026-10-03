@@ -7,7 +7,8 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { VendorCreditSettle } from "@/components/rebates/vendor-credit-form";
 import { CancelVendorCreditButton, RemoveSettlementButton } from "@/components/rebates/vendor-credit-actions";
 import { formatCurrency } from "@/lib/utils";
-import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 
 const KIND_LABEL = { REBATE: "Backend rebate", PRICE_DIFFERENCE: "Bill above the deal price", OTHER: "Other" } as const;
@@ -21,6 +22,7 @@ export default async function VendorCreditPage({ params }: { params: Promise<{ i
   const data = await getVendorCredit(id);
   if (!data) notFound();
   const { credit, canManage } = data;
+  const clock = await workspaceClock();
   const allocated = round2(credit.allocations.reduce((t, a) => t + Number(a.amount), 0));
   const applied = round2(credit.applications.reduce((t, a) => t + Number(a.amount), 0));
   const live = !credit.cancelledAt;
@@ -44,7 +46,7 @@ export default async function VendorCreditPage({ params }: { params: Promise<{ i
             <Link href={`/companies/${credit.vendor.id}`} className="hover:underline">
               {credit.vendor.name}
             </Link>{" "}
-            on {formatIstDate(credit.date)} · {KIND_LABEL[credit.kind]}
+            on {formatCalendarDay(credit.date)} · {KIND_LABEL[credit.kind]}
             {credit.bankAccount ? ` · into ${credit.bankAccount.name}` : ""}
           </p>
         </div>
@@ -53,7 +55,7 @@ export default async function VendorCreditPage({ params }: { params: Promise<{ i
 
       {credit.cancelledAt && (
         <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">
-          Cancelled {formatIstDateTime(credit.cancelledAt)}
+          Cancelled {clock.dateTime(credit.cancelledAt)}
           {credit.cancelledBy ? ` by ${credit.cancelledBy.name}` : ""}: {credit.cancelReason}
         </p>
       )}
@@ -154,7 +156,7 @@ export default async function VendorCreditPage({ params }: { params: Promise<{ i
 
       {credit.notes && <p className="text-sm text-muted">{credit.notes}</p>}
       <p className="text-xs text-subtle">
-        Recorded {formatIstDateTime(credit.createdAt)}
+        Recorded {clock.dateTime(credit.createdAt)}
         {credit.createdBy ? ` by ${credit.createdBy.name}` : ""}
       </p>
     </div>

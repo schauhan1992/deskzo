@@ -3,7 +3,7 @@ import { runBillingLifecycle } from "@/lib/billing/lifecycle";
 import { onPlatformHost } from "@/lib/billing/platform-request";
 import { reconcileSubscriptions, snapshotUsage } from "@/lib/billing/reconcile";
 import { redactSecrets } from "@/lib/console-shared/redact";
-import { istDateParts } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { runPartnerChores } from "@/lib/partners/commission";
 import { domainSweep, type DomainSweep } from "@/lib/platform/domains";
 import { reconcileEmailIndex } from "@/lib/platform/email-index";
@@ -55,8 +55,9 @@ async function handle(request: Request) {
     const started = Date.now();
     const now = new Date();
     const lifecycle = await runBillingLifecycle(now);
-    const { year, month, day } = istDateParts(now);
-    const today = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    // The platform's day is the console's (Settings › Time zone): the same day the daily snapshots are
+    // keyed by (snapshotUsage, snapshotRevenue), and the one System health reads `dailyRanOn` against.
+    const today = (await consoleClock()).today(now);
     let daily: { reconciled: number; failed: string[]; usage: number; revenue: number; domains: DomainSweep | null } | null = null;
     if ((await getSetting("billing.dailyRanOn")) !== today) {
       const reconciled = await reconcileSubscriptions();

@@ -8,7 +8,7 @@ import { PEOPLE_ONLY } from "@/lib/people";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
-import { dateRangeFilter } from "@/lib/utils";
+import { calendarDayRange } from "@/lib/time/zone";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
 import { isModuleEnabled } from "@/actions/module";
@@ -92,6 +92,14 @@ function validateReceipt(dataUrl: string | undefined): string | null {
   return null;
 }
 
+/**
+ * The day it was spent is a calendar day, held as a `@db.Date` would hold it — UTC midnight of the day
+ * picked — so it reads back as that day in every zone (formatCalendarDay). Null when it isn't a date.
+ */
+function spentOnFrom(day: string): Date | null {
+  return calendarDayRange(day, null)?.gte ?? null;
+}
+
 export type ExpenseListParams = {
   status?: ExpenseStatus;
   category?: ExpenseCategory;
@@ -108,7 +116,8 @@ export type ExpenseListParams = {
 
 async function expenseListWhere(viewerId: string, params?: ExpenseListParams): Promise<Prisma.ExpenseWhereInput> {
   const allowed = await visibleUserIds(viewerId);
-  const spentOn = dateRangeFilter(params?.from, params?.to);
+  // Calendar days, as the column holds them.
+  const spentOn = calendarDayRange(params?.from, params?.to);
   return {
     ...(allowed ? { userId: { in: allowed } } : {}),
     ...(params?.userId ? { userId: params.userId } : {}),
@@ -232,6 +241,8 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
   }
   const receiptError = validateReceipt(data.receiptDataUrl || undefined);
   if (receiptError) return { ok: false, error: receiptError };
+  const spentOn = spentOnFrom(data.spentOn);
+  if (!spentOn) return { ok: false, error: "That isn't a date." };
 
   // A visit fixes which company the spend belongs to, so the company is taken from it rather than
   // trusted from the form — otherwise a claim can be filed against the wrong account.
@@ -251,7 +262,7 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
       category: data.category,
       amount: new Prisma.Decimal(data.amount),
       taxAmount: data.taxAmount !== undefined ? new Prisma.Decimal(data.taxAmount) : null,
-      spentOn: new Date(data.spentOn),
+      spentOn,
       description: data.description.trim(),
       paymentMode: data.paymentMode,
       reimbursable: data.reimbursable,
@@ -306,6 +317,8 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
   }
   const receiptError = validateReceipt(data.receiptDataUrl || undefined);
   if (receiptError) return { ok: false, error: receiptError };
+  const spentOn = spentOnFrom(data.spentOn);
+  if (!spentOn) return { ok: false, error: "That isn't a date." };
 
   await db.expense.update({
     where: { id },
@@ -313,7 +326,7 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
       category: data.category,
       amount: new Prisma.Decimal(data.amount),
       taxAmount: data.taxAmount !== undefined ? new Prisma.Decimal(data.taxAmount) : null,
-      spentOn: new Date(data.spentOn),
+      spentOn,
       description: data.description.trim(),
       paymentMode: data.paymentMode,
       reimbursable: data.reimbursable,
@@ -448,6 +461,9 @@ export async function reimburseExpenses(input: unknown): Promise<ActionResult<{ 
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { expenseIds, reimbursementRef, reimbursedOn } = parsed.data;
+  // A day given is held as a calendar day (UTC midnight), as the day spent is; none is now.
+  const paidOn = reimbursedOn ? (calendarDayRange(reimbursedOn, null)?.gte ?? null) : new Date();
+  if (!paidOn) return { ok: false, error: "That reimbursement date isn't a date." };
 
   const expenses = await db.expense.findMany({
     where: { id: { in: expenseIds } },
@@ -462,13 +478,13 @@ export async function reimburseExpenses(input: unknown): Promise<ActionResult<{ 
       where: { id: { in: payable.map((e) => e.id) } },
       data: {
         status: "REIMBURSED",
-        reimbursedAt: reimbursedOn ? new Date(reimbursedOn) : new Date(),
+        reimbursedAt: paidOn,
         reimbursementRef: reimbursementRef || null,
       },
     });
     // And the money actually leaving: the claim was accrued at approval, this is it being settled.
     for (const e of payable) {
-      await postExpensePayment(e.id, user.id, reimbursedOn ? new Date(reimbursedOn) : new Date());
+      await postExpensePayment(e.id, user.id, paidOn);
     }
 
     for (const claimantId of new Set(payable.map((e) => e.userId))) {

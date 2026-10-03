@@ -15,10 +15,11 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { paymentMethodValues, paymentMethodLabels } from "@/lib/gst";
 import { formatRate, isBaseCurrency, toBase } from "@/lib/currency";
-import { istDateKey } from "@/lib/india-time";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { useClock } from "@/components/time/clock-provider";
 import { exchangeDifference, settlementRateError } from "@/lib/ledger/posting";
 
 type Settlement = NonNullable<Awaited<ReturnType<typeof getInvoiceSettlement>>>;
@@ -80,6 +81,7 @@ export function InvoiceSettlementPanel({
   canRemove: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState(false);
@@ -93,8 +95,8 @@ export function InvoiceSettlementPanel({
   const [amount, setAmount] = useState(settlement.balance.toFixed(2));
   // The rate the money came in at, for a foreign invoice: the invoice's own until somebody says otherwise.
   const [rate, setRate] = useState(String(settlement.exchangeRate));
-  // Today in India, not in UTC: before 05:30 IST the UTC date is still yesterday.
-  const [paidOn, setPaidOn] = useState(istDateKey(new Date()));
+  // Today in the workspace's zone, not in UTC's, which can be a day either side of it.
+  const [paidOn, setPaidOn] = useState(() => clock.today());
   const [method, setMethod] = useState("BANK_TRANSFER");
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
@@ -179,7 +181,7 @@ export function InvoiceSettlementPanel({
                     <td className="px-3 py-2">
                       <Badge tone="green">Payment</Badge>
                     </td>
-                    <td className="px-3 py-2 text-muted">{formatDate(p.payment.paidOn)}</td>
+                    <td className="px-3 py-2 text-muted">{formatCalendarDay(p.payment.paidOn)}</td>
                     <td className="px-3 py-2 text-muted">
                       {p.payment.reference ?? paymentMethodLabels[p.payment.method as keyof typeof paymentMethodLabels]}
                     </td>
@@ -202,7 +204,7 @@ export function InvoiceSettlementPanel({
                     <td className="px-3 py-2">
                       <Badge tone="amber">Credit note</Badge>
                     </td>
-                    <td className="px-3 py-2 text-muted">{formatDate(c.creditNote.issueDate)}</td>
+                    <td className="px-3 py-2 text-muted">{formatCalendarDay(c.creditNote.issueDate)}</td>
                     <td className="px-3 py-2">
                       <Link href={`/documents/${c.creditNote.id}`} className="font-mono text-xs text-text hover:underline">
                         {c.creditNote.docNumber}
@@ -437,7 +439,7 @@ export function CreditNoteApplications({
                 <Link href={`/documents/${a.invoice.id}`} className="font-mono text-xs text-text hover:underline">
                   {a.invoice.docNumber}
                 </Link>
-                <span className="text-muted">{formatDate(a.invoice.issueDate)}</span>
+                <span className="text-muted">{formatCalendarDay(a.invoice.issueDate)}</span>
                 <span className="font-medium text-text">{formatCurrency(a.amount, balance.currency)}</span>
               </div>
             ))}

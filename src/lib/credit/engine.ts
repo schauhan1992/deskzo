@@ -1,3 +1,5 @@
+import { MONTH_NAMES, type Clock } from "@/lib/time/zone";
+
 /**
  * How much credit a customer has earned, from how they have actually paid.
  *
@@ -74,10 +76,9 @@ export const MIN_OVERRIDE_REASON = 5;
 const SETTLED_TOLERANCE = 1;
 
 const DAY = 86_400_000;
-const IST = 5.5 * 3_600_000;
-/** The Indian calendar day an instant falls on, as a day count — so "days late" is whole Indian days. */
-export function dayNumber(at: Date): number {
-  return Math.floor((at.getTime() + IST) / DAY);
+/** The day an instant falls on, on the workspace's clock, as a day count — so "days late" is whole days there. */
+export function dayNumber(at: Date, clock: Clock): number {
+  return Math.round(clock.calendarDate(at).getTime() / DAY);
 }
 
 export type BillOutcome = {
@@ -92,7 +93,7 @@ export type BillOutcome = {
   overdueDays: number;
 };
 
-export function billOutcome(bill: Bill, asOf: Date): BillOutcome {
+export function billOutcome(bill: Bill, asOf: Date, clock: Clock): BillOutcome {
   const settlements = bill.settlements.filter((s) => s.on.getTime() <= asOf.getTime()).sort((a, b) => a.on.getTime() - b.on.getTime());
   let running = 0;
   let paidOn: Date | null = null;
@@ -101,14 +102,14 @@ export function billOutcome(bill: Bill, asOf: Date): BillOutcome {
     if (!paidOn && bill.amount - running <= SETTLED_TOLERANCE) paidOn = s.on;
   }
   const outstanding = Math.max(0, Math.round((bill.amount - running) * 100) / 100);
-  const due = dayNumber(bill.dueOn);
+  const due = dayNumber(bill.dueOn, clock);
   return {
     bill,
     settled: Math.round(running * 100) / 100,
     outstanding: paidOn ? 0 : outstanding,
     paidOn,
-    daysLate: paidOn ? Math.max(0, dayNumber(paidOn) - due) : null,
-    overdueDays: paidOn ? 0 : Math.max(0, dayNumber(asOf) - due),
+    daysLate: paidOn ? Math.max(0, dayNumber(paidOn, clock) - due) : null,
+    overdueDays: paidOn ? 0 : Math.max(0, dayNumber(asOf, clock) - due),
   };
 }
 
@@ -184,21 +185,26 @@ export type CreditAssessment = {
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
-const monthYear = (d: Date) => new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(d);
+/** "Sep 2026", in the workspace's month. */
+const monthYear = (d: Date, clock: Clock) => {
+  const { year, month } = clock.parts(d);
+  return `${MONTH_NAMES[month]} ${year}`;
+};
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export function assessCredit(bills: Bill[], opts: { asOf: Date; manualLimit?: number | null }): CreditAssessment {
-  const { asOf } = opts;
-  const outcomes = bills.map((b) => billOutcome(b, asOf)).sort((a, b) => b.bill.issuedOn.getTime() - a.bill.issuedOn.getTime());
-  const windowStart = dayNumber(asOf) - LOOKBACK_DAYS;
-  const yearStart = dayNumber(asOf) - 365;
+/** `clock` is the workspace's (`workspaceClock()`): its days are the ones a bill is late by. */
+export function assessCredit(bills: Bill[], opts: { asOf: Date; manualLimit?: number | null; clock: Clock }): CreditAssessment {
+  const { asOf, clock } = opts;
+  const outcomes = bills.map((b) => billOutcome(b, asOf, clock)).sort((a, b) => b.bill.issuedOn.getTime() - a.bill.issuedOn.getTime());
+  const windowStart = dayNumber(asOf, clock) - LOOKBACK_DAYS;
+  const yearStart = dayNumber(asOf, clock) - 365;
 
-  const paid = outcomes.filter((o) => o.paidOn && dayNumber(o.bill.issuedOn) >= windowStart);
+  const paid = outcomes.filter((o) => o.paidOn && dayNumber(o.bill.issuedOn, clock) >= windowStart);
   const paidValue = paid.reduce((t, o) => t + o.bill.amount, 0);
   const onTime = paid.filter((o) => (o.daysLate ?? 0) <= GRACE_DAYS);
   const onTimeShare = paidValue > 0 ? onTime.reduce((t, o) => t + o.bill.amount, 0) / paidValue : null;
   const averageDaysLate = paidValue > 0 ? paid.reduce((t, o) => t + (o.daysLate ?? 0) * o.bill.amount, 0) / paidValue : null;
-  const lastYear = paid.filter((o) => dayNumber(o.paidOn!) >= yearStart);
+  const lastYear = paid.filter((o) => dayNumber(o.paidOn!, clock) >= yearStart);
   const worst = lastYear.reduce<BillOutcome | null>((w, o) => (!w || (o.daysLate ?? 0) > (w.daysLate ?? 0) ? o : w), null);
   const worstDaysLate = worst?.daysLate ?? null;
 
@@ -210,10 +216,10 @@ export function assessCredit(bills: Bill[], opts: { asOf: Date; manualLimit?: nu
   const oldestOverdueDays = oldest?.overdueDays ?? 0;
 
   const firstBillOn = outcomes.length ? outcomes[outcomes.length - 1]!.bill.issuedOn : null;
-  const tenureDays = firstBillOn ? dayNumber(asOf) - dayNumber(firstBillOn) : 0;
+  const tenureDays = firstBillOn ? dayNumber(asOf, clock) - dayNumber(firstBillOn, clock) : 0;
   const paidTotal = Math.round(outcomes.reduce((t, o) => t + Math.min(o.settled, o.bill.amount), 0) * 100) / 100;
   const cleared = largestBalanceCleared(
-    bills.filter((b) => dayNumber(b.issuedOn) >= windowStart),
+    bills.filter((b) => dayNumber(b.issuedOn, clock) >= windowStart),
     asOf,
   );
 
@@ -239,7 +245,7 @@ export function assessCredit(bills: Bill[], opts: { asOf: Date; manualLimit?: nu
     reasons.push({ tone: "neutral", text: `${inr(outstanding)} owed, none of it past due` });
   }
   if (firstBillOn && paidTotal > 0) {
-    reasons.push({ tone: tenureDays >= 365 ? "good" : "neutral", text: `Customer since ${monthYear(firstBillOn)} · ${inr(paidTotal)} paid` });
+    reasons.push({ tone: tenureDays >= 365 ? "good" : "neutral", text: `Customer since ${monthYear(firstBillOn, clock)} · ${inr(paidTotal)} paid` });
   }
 
   // ── The rating ──

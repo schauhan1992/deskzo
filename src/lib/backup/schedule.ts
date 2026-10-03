@@ -27,6 +27,8 @@
  * Everything here is pure and covered by `scripts/check-backup.ts`.
  */
 
+import { clockFor, type Clock } from "@/lib/time/zone";
+
 export const DEFAULT_HOUR = 2;
 export const DEFAULT_MINUTE = 0;
 
@@ -52,10 +54,17 @@ export const RUNNING_PRESUMED_DEAD_MINUTES = 120;
 
 export type Schedule = {
   enabled: boolean;
-  /** Local time on the machine that runs the backup — see `scheduledTimeOn`. */
+  /** The workspace's wall-clock time — see `scheduledTimeOn`. */
   hour: number;
   minute: number;
 };
+
+/**
+ * The server's own zone: what the schedule followed before workspaces had zones, and what it falls
+ * back to when no clock is passed — the command-line driver outside a workspace, and check-backup's
+ * host-local cases. Everything that knows its workspace passes `workspaceClock()`.
+ */
+const serverClock = (): Clock => clockFor(Intl.DateTimeFormat().resolvedOptions().timeZone);
 
 export type ScheduleState = {
   lastSucceededAt: Date | null;
@@ -76,27 +85,27 @@ export function normaliseSchedule(schedule: Partial<Schedule> | null | undefined
 }
 
 /**
- * Today's scheduled moment, in the server's own time zone.
+ * Today's scheduled moment, on the workspace's clock.
  *
- * Local rather than UTC, deliberately. "Two in the morning" means two in the morning where the
- * business is, and the whole reason for picking that time is that nobody is working — a schedule
- * that drifts an hour twice a year, or sits at 07:30 local because somebody thought in UTC, has
- * lost the only property that made the time worth choosing. `backupFilename` stamps local time for
- * the same reason, so a folder listing and this agree.
+ * Wall-clock time where the business is rather than UTC, deliberately. "Two in the morning" means two
+ * in the morning there, and the whole reason for picking that time is that nobody is working — a
+ * schedule that drifts an hour twice a year, or sits at 07:30 local because somebody thought in UTC,
+ * has lost the only property that made the time worth choosing. It was the server's own zone, which
+ * on a server in UTC put "02:00" at 07:30 in India while the settings page showed the next run on the
+ * workspace's clock.
  */
-export function scheduledTimeOn(day: Date, schedule: Schedule): Date {
-  const at = new Date(day);
-  at.setHours(schedule.hour, schedule.minute, 0, 0);
-  return at;
+export function scheduledTimeOn(day: Date, schedule: Schedule, clock: Clock = serverClock()): Date {
+  const p = clock.parts(day);
+  return clock.at(p.year, p.month, p.day, schedule.hour, schedule.minute);
 }
 
 /** The next moment it will fire, from `now`. Today's if that is still ahead, otherwise tomorrow's. */
-export function nextRunAfter(now: Date, schedule: Schedule): Date {
-  const today = scheduledTimeOn(now, schedule);
+export function nextRunAfter(now: Date, schedule: Schedule, clock: Clock = serverClock()): Date {
+  const today = scheduledTimeOn(now, schedule, clock);
   if (today.getTime() > now.getTime()) return today;
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return scheduledTimeOn(tomorrow, schedule);
+  const p = clock.parts(now);
+  // Day 32 is the next month's 1st: `at` normalises it.
+  return clock.at(p.year, p.month, p.day + 1, schedule.hour, schedule.minute);
 }
 
 const minutes = (ms: number) => ms / 60000;
@@ -108,7 +117,7 @@ const minutes = (ms: number) => ms / 60000;
  * due" — it is "why has it not run". A boolean cannot answer that, and a scheduler that skips
  * silently is indistinguishable from one that is broken.
  */
-export function dueNow(schedule: Schedule, state: ScheduleState, now: Date): Due {
+export function dueNow(schedule: Schedule, state: ScheduleState, now: Date, clock: Clock = serverClock()): Due {
   if (!schedule.enabled) {
     return { due: false, reason: "Automatic backups are switched off.", nextRunAt: null };
   }
@@ -117,7 +126,7 @@ export function dueNow(schedule: Schedule, state: ScheduleState, now: Date): Due
     return { due: false, reason: "A backup is already running.", nextRunAt: null };
   }
 
-  const todaysRun = scheduledTimeOn(now, schedule);
+  const todaysRun = scheduledTimeOn(now, schedule, clock);
 
   if (now.getTime() < todaysRun.getTime()) {
     return { due: false, reason: "Today's backup is not due yet.", nextRunAt: todaysRun };
@@ -127,7 +136,7 @@ export function dueNow(schedule: Schedule, state: ScheduleState, now: Date): Due
     return {
       due: false,
       reason: "Today's backup has already been taken.",
-      nextRunAt: nextRunAfter(now, schedule),
+      nextRunAt: nextRunAfter(now, schedule, clock),
     };
   }
 
@@ -173,8 +182,8 @@ export function parseTimeOfDay(value: string | null | undefined): { hour: number
   return { hour: Number(match[1]), minute: Number(match[2]) };
 }
 
-/** One line for a settings page. */
-export function describeSchedule(schedule: Schedule): string {
+/** One line for a settings page — naming the zone of the clock it runs on. */
+export function describeSchedule(schedule: Schedule, clock?: Clock): string {
   if (!schedule.enabled) return "Automatic backups are off.";
-  return `Every day at ${formatTimeOfDay(schedule.hour, schedule.minute)}, server time.`;
+  return `Every day at ${formatTimeOfDay(schedule.hour, schedule.minute)}, ${clock ? `${clock.zone.replace(/_/g, " ")} time` : "server time"}.`;
 }

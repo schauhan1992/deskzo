@@ -16,7 +16,7 @@ import {
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label, Input, Select, Textarea } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Risk = {
   id: string;
@@ -60,6 +60,7 @@ export function ProjectLog({
   currentHealth: ProjectHealth;
   canManage: boolean;
 }) {
+  const clock = useClock();
   const open = risks.filter((r) => riskIsOpen(r.status));
   const rest = risks.filter((r) => !riskIsOpen(r.status));
 
@@ -87,7 +88,7 @@ export function ProjectLog({
                 <div className="mt-1 text-xs text-subtle">
                   {riskStatusLabels[r.status]}
                   {r.owner && ` · ${r.owner.name}`}
-                  {` · raised ${formatDate(new Date(r.raisedOn))}`}
+                  {` · raised ${clock.date(r.raisedOn)}`}
                   {r.raisedBy && ` by ${r.raisedBy.name}`}
                 </div>
                 {/* An open risk with nothing being done about it is itself the finding. */}
@@ -115,7 +116,7 @@ export function ProjectLog({
                   {/* The health as it was, not as it is now — so a run of updates reads as a
                       narrative rather than every past entry adopting today's colour. */}
                   <span className="text-text">{projectHealthLabels[u.health]}</span>
-                  <span>{formatDate(new Date(u.at))}</span>
+                  <span>{clock.date(u.at)}</span>
                   {u.author && <span>· {u.author.name}</span>}
                 </div>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-text">{u.body}</p>

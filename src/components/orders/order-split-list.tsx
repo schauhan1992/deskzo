@@ -13,6 +13,7 @@ import { formatCurrency } from "@/lib/utils";
 import { orderBusinessTypeLabels } from "@/lib/validation/order";
 import { orderFlags } from "@/components/orders/orders-table";
 import type { ReleaseState } from "@/lib/orders/handoff-rules";
+import { useClock } from "@/components/time/clock-provider";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -51,6 +52,7 @@ export function OrderSplitList({ orders, selectedId }: { orders: OrderRow[]; sel
   const searchParams = useSearchParams();
   // The workspace's own names for the statuses (Settings → Wording).
   const wording = useWording();
+  const clock = useClock();
 
   function hrefFor(id: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -85,7 +87,7 @@ export function OrderSplitList({ orders, selectedId }: { orders: OrderRow[]; sel
                   {statusSlot(wording, order.orderStatus, order.orderStatus.replaceAll("_", " "))}
                 </Badge>
                 <span className="text-xs text-subtle">{orderBusinessTypeLabels[order.businessType]}</span>
-                {orderFlags(order).map((flag) => (
+                {orderFlags(order, clock).map((flag) => (
                   <Badge key={flag} tone="amber">
                     {flag}
                   </Badge>

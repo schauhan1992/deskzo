@@ -4,6 +4,7 @@ import { getRazorpaySubscription } from "@/lib/billing/razorpay";
 import { getStripeSubscription } from "@/lib/billing/stripe";
 import { applyRazorpaySubscription, applyStripeSubscription } from "@/lib/billing/sync";
 import { usedThisMonth, usageDay } from "@/lib/copilot/settings";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { forEachTenant } from "@/lib/platform/fanout";
 import { ConsoleRefused } from "@/lib/platform/refused";
@@ -64,7 +65,8 @@ export async function resyncSubscription(
 }
 
 export async function snapshotUsage(now = new Date()) {
-  const day = usageDay(now);
+  // Kept under today on the console's clock — a day the platform keeps for itself, as the console reads it.
+  const day = usageDay(now, await consoleClock());
   return forEachTenant(
     "usage-snapshot",
     // Workspaces in the control plane: one from the environment has no row to record against.

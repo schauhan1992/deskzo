@@ -10,10 +10,10 @@ import { SourceLabel } from "@/components/partners/common/pills";
 import { CommissionEntriesTable } from "@/components/partners/customers/commission-entries";
 import { countryName } from "@/components/partners/customers/country";
 import { SubscriptionsTable } from "@/components/partners/customers/subscriptions-table";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { partnerPage } from "@/lib/partners/guard";
 import { PARTNER_PAGE_ROLES, PARTNER_ROUTES, canOpenPartnerPage } from "@/lib/partners/nav";
 import { portalCustomer } from "@/lib/partners/portal-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { workspaceSuffix } from "@/lib/platform/site-content";
 
 export const metadata: Metadata = { title: "Customer" };
@@ -33,10 +33,10 @@ export default async function PartnerCustomerPage({ params }: PageProps<"/platfo
   const session = await partnerPage(PARTNER_PAGE_ROLES.customers);
   const me = session.user;
   const { slug } = await params;
-  const customer = await portalCustomer(me, slug, new Date());
+  const [customer, clock] = await Promise.all([portalCustomer(me, slug, new Date()), consoleClock()]);
   if (!customer) notFound();
 
-  const address = `${customer.slug}${workspaceSuffix()}`;
+  const address =`${customer.slug}${workspaceSuffix()}`;
   const ends = customer.standing.kind === "ending" || customer.standing.kind === "trial" ? customer.endsAt : null;
 
   return (
@@ -64,13 +64,13 @@ export default async function PartnerCustomerPage({ params }: PageProps<"/platfo
               { term: "Name", value: customer.name },
               { term: "Address", value: <span className="font-mono text-xs">{address}</span> },
               { term: "Country", value: `${countryName(customer.country)} (${customer.country})` },
-              { term: "Created", value: dayMonthYear(customer.createdAt) },
+              { term: "Created", value: clock.date(customer.createdAt) },
               { term: "Status", value: <TenantStatusPill status={customer.status} /> },
               { term: "Billing standing", value: <StandingPill kind={customer.standing.kind} at={customer.standing.at} asOf={customer.asOf} /> },
               { term: "Pays in", value: customer.currency ?? "—" },
               { term: "MRR at list prices", value: <MoneyStack items={customer.mrr} /> },
-              { term: "Renews", value: customer.renewsAt ? dayMonthYear(customer.renewsAt) : "—" },
-              ...(ends ? [{ term: customer.standing.kind === "trial" ? "Trial ends" : "Ends", value: dayMonthYear(ends) }] : []),
+              { term: "Renews", value: customer.renewsAt ? clock.date(customer.renewsAt) : "—" },
+              ...(ends ? [{ term: customer.standing.kind === "trial" ? "Trial ends" : "Ends", value: clock.date(ends) }] : []),
             ]}
           />
         </Panel>
@@ -80,7 +80,7 @@ export default async function PartnerCustomerPage({ params }: PageProps<"/platfo
             columns={1}
             items={[
               { term: "Credited through", value: <SourceLabel source={customer.source} className="text-text" /> },
-              { term: "Yours since", value: dayMonthYear(customer.since) },
+              { term: "Yours since", value: clock.date(customer.since) },
               {
                 term: "Commission",
                 value: customer.commissionable ? (
@@ -101,7 +101,7 @@ export default async function PartnerCustomerPage({ params }: PageProps<"/platfo
         {customer.subscriptions.length === 0 ? (
           <EmptyState icon={<Layers className="h-5 w-5" />} title="No live subscription" body="It has no trial or paid plan running right now." />
         ) : (
-          <SubscriptionsTable subscriptions={customer.subscriptions} />
+          <SubscriptionsTable subscriptions={customer.subscriptions} clock={clock} />
         )}
       </Panel>
 

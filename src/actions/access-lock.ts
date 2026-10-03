@@ -7,7 +7,8 @@ import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { clearAccessCache } from "@/lib/access/gate";
 import { COMPANY_LOCK_PHRASE, companyLockActive, LOCK_MESSAGE_MAX, personalLockActive } from "@/lib/access/lock";
-import { formatIstDateTime, parseIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { toPlain } from "@/lib/serialize";
 import { PEOPLE_ONLY } from "@/lib/people";
 import type { ActionResult } from "@/actions/company";
@@ -30,9 +31,9 @@ async function actor(): Promise<Actor> {
   return { me, canLock: me.isSuperAdmin || (await can(me.id, "users.lock")) };
 }
 
-function untilFrom(text: string | undefined | null): { until: Date | null } | { error: string } {
+function untilFrom(text: string | undefined | null, clock: Clock): { until: Date | null } | { error: string } {
   if (!text?.trim()) return { until: null };
-  const until = parseIstDateTime(text);
+  const until = clock.parseInput(text);
   if (!until) return { error: "That end time isn't a date and time." };
   if (until.getTime() <= Date.now()) return { error: "The end time has to be in the future — or leave it empty to lock until you lift it." };
   return { until };
@@ -82,7 +83,8 @@ export async function lockUser(input: { userId: string; message?: string; until?
   if (target.isSuperAdmin) return { ok: false, error: "The super admin can't be locked." };
   const m = messageFrom(input.message);
   if ("error" in m) return { ok: false, error: m.error };
-  const u = untilFrom(input.until);
+  const clock = await workspaceClock();
+  const u = untilFrom(input.until, clock);
   if ("error" in u) return { ok: false, error: u.error };
 
   await db.user.update({ where: { id: target.id }, data: { lockedAt: new Date(), lockedUntil: u.until, lockMessage: m.message, lockedById: a.me.id } });
@@ -92,7 +94,7 @@ export async function lockUser(input: { userId: string; message?: string; until?
     action: "UPDATE",
     entityType: "User",
     entityId: target.id,
-    entityLabel: `${target.name} locked out of the CRM${u.until ? ` until ${formatIstDateTime(u.until)}` : " until unlocked"}`,
+    entityLabel: `${target.name} locked out of the CRM${u.until ? ` until ${clock.dateTime(u.until)}` : " until unlocked"}`,
   });
   revalidatePath("/settings/locks");
   return { ok: true, data: null };
@@ -119,7 +121,8 @@ export async function lockCompany(input: { message?: string; until?: string; con
   if (typeof input?.confirm !== "string" || input.confirm.trim().toUpperCase() !== COMPANY_LOCK_PHRASE) return { ok: false, error: `Type ${COMPANY_LOCK_PHRASE} to confirm.` };
   const m = messageFrom(input.message);
   if ("error" in m) return { ok: false, error: m.error };
-  const u = untilFrom(input.until);
+  const clock = await workspaceClock();
+  const u = untilFrom(input.until, clock);
   if ("error" in u) return { ok: false, error: u.error };
 
   const data = { enabled: true, message: m.message, until: u.until, lockedAt: new Date(), lockedById: a.me.id };
@@ -130,7 +133,7 @@ export async function lockCompany(input: { message?: string; until?: string; con
     action: "UPDATE",
     entityType: "CompanyLock",
     entityId: "global",
-    entityLabel: `Whole company locked out of the CRM${u.until ? ` until ${formatIstDateTime(u.until)}` : " until unlocked"}`,
+    entityLabel: `Whole company locked out of the CRM${u.until ? ` until ${clock.dateTime(u.until)}` : " until unlocked"}`,
   });
   revalidatePath("/settings/locks");
   return { ok: true, data: null };

@@ -1,7 +1,7 @@
 import { Mail } from "lucide-react";
 import { listDocumentEmails } from "@/actions/document-mail";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Every time this document was emailed from here, one line per send: when, who sent it, from which
@@ -11,6 +11,7 @@ import { formatIstDateTime } from "@/lib/india-time";
 export async function DocumentEmailHistory({ documentId }: { documentId: string }) {
   const rows = await listDocumentEmails(documentId);
   if (rows.length === 0) return null;
+  const clock = await workspaceClock();
 
   // One send reaches several people; they are one line here, as they were one email.
   const sends = new Map<string, typeof rows>();
@@ -37,7 +38,7 @@ export async function DocumentEmailHistory({ documentId }: { documentId: string 
                   {group.map((r) => (r.contact?.name ? `${r.contact.name} <${r.toEmail}>` : r.toEmail)).join(", ")}
                 </p>
                 <p className="mt-0.5 text-xs text-muted">
-                  {formatIstDateTime(first.sentAt ?? first.createdAt)}
+                  {clock.dateTime(first.sentAt ?? first.createdAt)}
                   {first.sentBy?.name ? ` · by ${first.sentBy.name}` : ""}
                   {first.fromEmail ? ` · from ${first.fromEmail}` : ""}
                 </p>

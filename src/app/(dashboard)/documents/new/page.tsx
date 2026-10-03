@@ -10,6 +10,7 @@ import { getOrganisation } from "@/lib/organisation";
 import { defaultBranchIdFor, listBranchChoices } from "@/lib/branches/identity";
 import { DocumentForm } from "@/components/documents/document-form";
 import { blankLine, emptyDefaults } from "@/lib/document-draft";
+import { workspaceClock } from "@/lib/time/workspace";
 import { defaultServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
 import { viewerHas } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
@@ -58,7 +59,8 @@ export default async function NewDocumentPage({
   // Raised from the writer's own branch (else the head office): its address is where goods leave from.
   const startBranch = branches.find((b) => b.id === defaultBranchId) ?? branches.find((b) => b.isHeadOffice);
 
-  const defaults = emptyDefaults();
+  // Dated today on the workspace's calendar.
+  const defaults = emptyDefaults(await workspaceClock());
   defaults.docNumber = nextNumber;
   defaults.branchId = startBranch?.id ?? "";
   defaults.dispatchFromAddress = startBranch?.dispatchAddress ?? "";

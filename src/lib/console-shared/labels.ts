@@ -1,5 +1,5 @@
 import { formatMoney } from "@/lib/billing/money";
-import { dayKeyLabel, dayMonth, dayMonthYear, istDaysBetween, plural, when } from "@/lib/console-shared/format";
+import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import type {
   AlertCategory,
   AlertSeverity,
@@ -28,6 +28,7 @@ import type {
   Tone,
 } from "@/lib/console-shared/types";
 import type { SupportPriorityKey, SupportStatusKey } from "@/lib/support/types";
+import type { Clock } from "@/lib/time/zone";
 import type {
   AttributionSource,
   CommissionKind,
@@ -44,7 +45,8 @@ import type {
 /**
  * How the console names things: status pills, standing, audit entries, jobs, schemas, actors.
  * Every label and tone the console shows comes from here (spec §1.3), so a status reads the same on
- * every page, in every table and in every chart legend.
+ * every page, in every table and in every chart legend. The few that name a day take the console's
+ * clock — `consoleClock()` on the server, `useClock()` in a client component.
  *
  * One rule runs through all of it: text shared between roles never contains the phrases kept for the
  * roles allowed to act (`FORBIDDEN_FOR_SUPPORT`) — audit titles are past tense ("Workspace held").
@@ -93,10 +95,10 @@ const validDate = (at: Date | string | null): Date | null => {
 
 /**
  * A workspace's billing standing as a pill: "Trial · 5 days left", "Past due · hold 12 Oct". `at` is
- * the standing's date (`standingDate`); days are counted from the loader's `asOf`, never from the
- * reader's clock, so the server and the browser agree.
+ * the standing's date (`standingDate`); days are counted on the console's clock from the loader's
+ * `asOf`, never from the reader's now, so the server and the browser agree.
  */
-export function standingLabel(kind: StandingKind, at: Date | string | null, asOf: Date | string): Label {
+export function standingLabel(kind: StandingKind, at: Date | string | null, asOf: Date | string, clock: Clock): Label {
   const date = validDate(at);
   switch (kind) {
     case "exempt":
@@ -106,16 +108,16 @@ export function standingLabel(kind: StandingKind, at: Date | string | null, asOf
     case "trial": {
       const now = validDate(asOf);
       if (!date || !now) return { label: "Trial", tone: "info" };
-      const days = istDaysBetween(now, date);
-      if (days < 0) return { label: `Trial · ended ${dayMonth(date)}`, tone: "info" };
+      const days = clock.daysBetween(now, date);
+      if (days < 0) return { label: `Trial · ended ${clock.dayMonth(date)}`, tone: "info" };
       return { label: days === 0 ? "Trial · ends today" : `Trial · ${plural(days, "day")} left`, tone: "info" };
     }
     case "trial-over":
-      return { label: date ? `Trial over · hold ${dayMonth(date)}` : "Trial over", tone: "warning" };
+      return { label: date ? `Trial over · hold ${clock.dayMonth(date)}` : "Trial over", tone: "warning" };
     case "past-due":
-      return { label: date ? `Past due · hold ${dayMonth(date)}` : "Past due", tone: "danger" };
+      return { label: date ? `Past due · hold ${clock.dayMonth(date)}` : "Past due", tone: "danger" };
     case "ending":
-      return { label: date ? `Cancelled · ends ${dayMonth(date)}` : "Cancelled", tone: "warning" };
+      return { label: date ? `Cancelled · ends ${clock.dayMonth(date)}` : "Cancelled", tone: "warning" };
     case "lapsed":
       return { label: "Lapsed", tone: "danger" };
     default:
@@ -474,10 +476,10 @@ export const STAFF_STATE: Record<"active" | "off", Label> = {
   off: { label: "Switched off", tone: "neutral" },
 };
 
-/** "Set up 3 Mar", or "Not yet" — a warning while the policy requires an authenticator. */
-export function twoFactorLabel(enrolledAt: Date | string | null, required: boolean): Label {
+/** "Set up 3 Mar" (the console's day), or "Not yet" — a warning while the policy requires an authenticator. */
+export function twoFactorLabel(enrolledAt: Date | string | null, required: boolean, clock: Clock): Label {
   const at = validDate(enrolledAt);
-  if (at) return { label: `Set up ${dayMonth(at)}`, tone: "success" };
+  if (at) return { label: `Set up ${clock.dayMonth(at)}`, tone: "success" };
   return { label: "Not yet", tone: required ? "warning" : "neutral" };
 }
 
@@ -525,6 +527,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "tenant.domain.expired": "Unproved address removed",
   "tenant.domain.mail": "Owner told about a failing address",
   "domains.settings": "Custom domains setting changed",
+  "console.time-zone": "Console time zone changed",
   "bulk.apply-standing": "Billing rules applied to a batch",
   "bulk.trial-extend": "Trials extended in bulk",
   "export.invoices": "Invoices exported",
@@ -670,7 +673,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
-  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings"] },
+  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings", "console.time-zone"] },
 ];
 
 export function categoryOf(action: string): AuditCategoryKey | null {
@@ -835,11 +838,11 @@ export function auditLabel(action: string, detail: unknown): { title: string; to
 /**
  * A one-line summary of an audit entry's detail — "crm ×1, seats ×2", "Admin → Billing". Null when
  * there is nothing a person would want. The detail holds no secrets by design; the console still
- * passes this through `redactSecrets` before showing it.
+ * passes this through `redactSecrets` before showing it. A date in it is on `clock`, the console's.
  */
-export function auditSummary(action: string, detail: unknown): string | null {
+export function auditSummary(action: string, detail: unknown, clock: Clock): string | null {
   const d = record(detail);
-  if (action.startsWith("help.")) return helpSummary(action, d);
+  if (action.startsWith("help.")) return helpSummary(action, d, clock);
   switch (action) {
     case "tenant.suspend":
       return join([d.kind === "BILLING" ? "for billing" : null, quote(d.reason)]);
@@ -890,8 +893,10 @@ export function auditSummary(action: string, detail: unknown): string | null {
       return join([text(d.host), d.kind === "broken" ? "stopped" : d.kind === "failing" ? "failing" : null, d.mailed === false ? "no owner email" : null]);
     case "domains.settings":
       return typeof d.offered === "boolean" ? (d.offered ? "offered to workspaces" : "not offered") : null;
+    case "console.time-zone":
+      return change("zone", d.from, d.to);
     case "tenant.trial":
-      return join([date(d.endsAt) ? `ends ${dayMonthYear(date(d.endsAt))}` : null, typeof d.days === "number" ? `+${d.days} days` : null]);
+      return join([date(d.endsAt) ? `ends ${clock.date(date(d.endsAt))}` : null, typeof d.days === "number" ? `+${d.days} days` : null]);
     case "tenant.billing-details":
       return join([change("billing email", record(d.from).billingEmail, record(d.to).billingEmail), change("tax ID", record(d.from).taxId, record(d.to).taxId), quote(d.reason)]);
     case "tenant.role-limits":
@@ -1013,7 +1018,7 @@ export function auditSummary(action: string, detail: unknown): string | null {
       return [...added, ...removed].join(", ") || null;
     }
     case "alert.ack":
-      return join([text(d.key), date(d.snoozeUntil) ? `until ${when(date(d.snoozeUntil))}` : null, quote(d.note)]);
+      return join([text(d.key), date(d.snoozeUntil) ? `until ${clock.dateTime(date(d.snoozeUntil))}` : null, quote(d.note)]);
     case "alert.unack":
       return text(d.key);
     case "announcement.create":
@@ -1160,7 +1165,7 @@ function change(what: string, from: unknown, to: unknown): string | null {
  * A help article's, video's or What's new post's change: its title, then what the entry adds — its
  * state and how narrowly it is aimed, when it goes live, what it was, or how much a reorder moved.
  */
-function helpSummary(action: string, d: Record<string, unknown>): string | null {
+function helpSummary(action: string, d: Record<string, unknown>, clock: Clock): string | null {
   const state = d.state === "draft" ? "Draft" : d.state === "scheduled" ? "Scheduled" : d.state === "live" ? "Live" : null;
   const was = d.was === "scheduled" || d.was === "live" || d.was === "draft" ? `was ${d.was}` : null;
   const narrowed = [
@@ -1170,7 +1175,7 @@ function helpSummary(action: string, d: Record<string, unknown>): string | null 
   const aimed = "modules" in d || "countries" in d ? (narrowed.length ? narrowed.join(", ") : "every workspace") : null;
   const at = d.state === "scheduled" || action.endsWith(".schedule") ? date(d.publishedAt) : null;
   const moved = typeof d.moved === "number" && typeof d.count === "number" ? `${d.moved} of ${d.count} moved` : null;
-  return join([quote(d.title), state, d.pinned === true ? "pinned" : null, aimed, at ? `from ${when(at)}` : null, was, moved]);
+  return join([quote(d.title), state, d.pinned === true ? "pinned" : null, aimed, at ? `from ${clock.dateTime(at)}` : null, was, moved]);
 }
 
 function audienceText(audience: unknown, targets: unknown): string | null {

@@ -12,12 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SharedDataNote } from "@/components/settings/shared-data-note";
 import { Input, Label } from "@/components/ui/input";
-
-/** India time, stated — the server and the browser must print the same thing for hydration. */
-const when = (iso: string | null) =>
-  iso
-    ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(iso))
-    : "—";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The PIN directory's settings: what is loaded, the API key, and a Sync button.
@@ -27,6 +22,9 @@ const when = (iso: string | null) =>
  * stop it — coming back shows where it has got to.
  */
 export function PinDirectoryManager({ initial }: { initial: PinDirectoryState }) {
+  // The workspace's clock — its words are the same on the server and in the browser, as hydration needs.
+  const clock = useClock();
+  const when = (iso: string | null) => clock.dateTimeShort(iso);
   const [state, setState] = useState(initial);
   const [keyInput, setKeyInput] = useState("");
   const [replacing, setReplacing] = useState(false);

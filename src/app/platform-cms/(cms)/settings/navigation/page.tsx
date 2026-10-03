@@ -5,17 +5,21 @@ import { getSettingsForEdit } from "@/lib/cms/content";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES } from "@/lib/cms/nav";
 import { cmsCapsFor } from "@/lib/cms/types";
-import { istDateParts } from "@/lib/india-time";
 import { siteOrigin, siteStatus } from "@/lib/platform/site-content";
+import { indiaClock } from "@/lib/time/zone";
 import { SettingsTabs } from "../settings-tabs";
 import { NavigationForm } from "./navigation-form";
 
 export const metadata: Metadata = { title: "Navigation" };
 
-/** What the page needs: the settings, whether sign-up is open, the trial's length, and India's year for the preview. */
+/**
+ * What the page needs: the settings, whether sign-up is open, the trial's length, and India's year for
+ * the preview — the public site's footer reads India's clock (src/components/site/page-view.tsx), and
+ * the preview shows what it will.
+ */
 async function loadNavigation() {
   const [detail, status] = await Promise.all([getSettingsForEdit(), siteStatus()]);
-  return { detail, status, year: istDateParts(new Date()).year };
+  return { detail, status, year: indiaClock.parts(new Date()).year };
 }
 
 /**

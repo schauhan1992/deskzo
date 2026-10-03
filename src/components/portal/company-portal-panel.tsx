@@ -13,7 +13,7 @@ import {
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * Granting one customer a portal, and handing out their links.
@@ -38,6 +38,7 @@ export function CompanyPortalPanel({
   contacts: { id: string; name: string; email: string | null }[];
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
   const [override, setOverride] = useState<boolean | null>(initialOverride);
@@ -195,8 +196,8 @@ export function CompanyPortalPanel({
                       </p>
                       <p className="text-xs text-muted">
                         {l.visits === 0 ? "Never opened" : `Opened ${l.visits}×`}
-                        {l.lastSeenAt ? `, last ${formatDateTime(l.lastSeenAt)}` : ""}
-                        {l.expiresAt ? ` · expires ${formatDate(l.expiresAt)}` : " · no expiry"}
+                        {l.lastSeenAt ? `, last ${clock.dateTimeShort(l.lastSeenAt)}` : ""}
+                        {l.expiresAt ? ` · expires ${clock.date(l.expiresAt)}` : " · no expiry"}
                       </p>
                     </div>
                     {!l.revokedAt && (

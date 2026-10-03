@@ -1,3 +1,5 @@
+import { formatCalendarDay } from "@/lib/time/zone";
+
 /**
  * Custom fields (owner, 2 Oct 2026): fields a workspace adds to its own companies, contacts, leads,
  * orders and products — "Bed no." on a patient, "Tower / floor" on a booking, "Batch no." on an item.
@@ -408,7 +410,6 @@ export function formValues(defs: CustomFieldDef[], values: CustomFieldValues): R
 
 // ─── Showing what is stored ───────────────────────────────────────────────────────────────────────
 
-const DAY_LABEL = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
 const NUMBER_LABEL = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 6 });
 const MONEY_LABEL = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
 
@@ -432,7 +433,9 @@ export function formatValue(def: CustomFieldDef, value: CustomFieldValue | undef
     case "MONEY":
       return typeof value === "number" ? MONEY_LABEL.format(value) : String(value);
     case "DATE":
-      return typeof value === "string" && validDay(value) ? DAY_LABEL.format(new Date(`${value}T00:00:00.000Z`)) : String(value);
+      // The day itself, in the clock's words: Intl's en-IN September is "Sept" in Node and "Sep" in
+      // some browsers, and a form renders on both.
+      return typeof value === "string" && validDay(value) ? formatCalendarDay(value) : String(value);
     case "SELECT":
       return typeof value === "string" ? optionLabel(def, value) : String(value);
     case "MULTI_SELECT":

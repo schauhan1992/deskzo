@@ -6,19 +6,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(date: Date | string | null | undefined) {
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(date));
-}
-
-/**
- * Date and time together, for records where the time of day is part of what happened — a call at
- * 10:15 and one at 16:40 are different facts about the same day.
+/*
+ * Dates are not formatted here: a moment is shown in the workspace's zone — `clock.date(at)`,
+ * `clock.dateTimeShort(at)` from `workspaceClock()` or `useClock()` — and a `@db.Date` day as the
+ * day it holds, `formatCalendarDay(day)` (src/lib/time/zone.ts). The old formatDate and formatDateTime
+ * read the server's zone on the server and the reader's in the browser.
  */
-export function formatDateTime(date: Date | string | null | undefined) {
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(date));
-}
 
 /**
  * An amount, in rupees unless told otherwise.
@@ -33,11 +26,8 @@ export function formatCurrency(value: number | string | null | undefined, curren
   return formatMoney(value, currency ?? "INR");
 }
 
-/** Builds a Prisma `gte`/`lte` range from "YYYY-MM-DD" query params — `to` is inclusive
- * of the whole day, so it's pushed to 23:59:59.999 rather than midnight. */
-export function dateRangeFilter(from?: string, to?: string) {
-  const range: { gte?: Date; lte?: Date } = {};
-  if (from) range.gte = new Date(`${from}T00:00:00`);
-  if (to) range.lte = new Date(`${to}T23:59:59.999`);
-  return Object.keys(range).length > 0 ? range : undefined;
-}
+/*
+ * Nor are date filters built here: a list's From and To are the workspace's days — `clock.dayRange` for a
+ * column holding a moment, `calendarDayRange` for a `@db.Date` one (src/lib/time/zone.ts). The old
+ * dateRangeFilter read the server's zone.
+ */

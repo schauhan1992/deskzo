@@ -5,7 +5,7 @@ import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { formatOrderId } from "@/lib/order-id";
-import { istCalendarDate } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { automationUserId } from "@/lib/automation-user";
 
@@ -55,7 +55,8 @@ export async function tellPurchase(
 }
 
 /**
- * Releases every scheduled order whose day has come (its `releaseOn` is today or earlier, in India).
+ * Releases every scheduled order whose day has come (its `releaseOn` is today or earlier, on the
+ * workspace's calendar).
  *
  * Each order is claimed with a conditional update — `purchaseRelease` still SCHEDULED — so the daily job
  * and a purchase screen releasing lazily at the same moment release it once, and purchase is told once.
@@ -64,8 +65,8 @@ export async function tellPurchase(
  * `onlyIds` narrows it to the orders a screen is about to show.
  */
 export async function releaseDueOrders(now: Date = new Date(), onlyIds?: string[]): Promise<string[]> {
-  // A `@db.Date` compared with midnight UTC of today's Indian date: exact by calendar day.
-  const today = istCalendarDate(now);
+  // A `@db.Date` compared with midnight UTC of the workspace's today: exact by calendar day.
+  const today = (await workspaceClock()).calendarDate(now);
   const due = await db.companyProduct.findMany({
     where: {
       purchaseRelease: "SCHEDULED",
@@ -110,7 +111,7 @@ export async function releaseDueOrders(now: Date = new Date(), onlyIds?: string[
 export const ORDER_RELEASE_JOB = "order-release";
 
 /**
- * The heartbeat's daily release, once per workspace per India day — the `DailyJobRun (order-release,
+ * The heartbeat's daily release, once per workspace per day of its own — the `DailyJobRun (order-release,
  * day)` row is the claim, as src/lib/close/nightly.ts claims its run: whoever inserts it releases, and a
  * later tick (or a second server firing the same tick) hits the key and leaves.
  *
@@ -119,7 +120,7 @@ export const ORDER_RELEASE_JOB = "order-release";
  */
 export async function runOrderReleases(now: Date = new Date()): Promise<{ ran: boolean; released: number; reason?: string }> {
   if (!(await moduleAvailableForTenant("orders"))) return { ran: false, released: 0, reason: "the orders module is off" };
-  const day = istCalendarDate(now);
+  const day = (await workspaceClock()).calendarDate(now);
   const key = { job_day: { job: ORDER_RELEASE_JOB, day } };
   if (await db.dailyJobRun.findUnique({ where: key, select: { job: true } })) {
     return { ran: false, released: 0, reason: "already ran today" };

@@ -3,9 +3,9 @@ import { EmptyState } from "@/components/console/kit/empty-state";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { when } from "@/lib/console-shared/format";
 import { leaseOutcome } from "@/lib/console-shared/labels";
 import type { PlatformLease } from "@/lib/platform/health";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * "Platform leases" on System health (spec §3.11): the platform's own scheduled jobs — the tick,
@@ -25,7 +25,8 @@ function firstLine(text: string | null): string | null {
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }
 
-export function LeasesTable({ rows }: { rows: PlatformLease[] }) {
+/** `clock` is the console's (`consoleClock()`): the page draws this on the server. */
+export function LeasesTable({ rows, clock }: { rows: PlatformLease[]; clock: Clock }) {
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -64,7 +65,7 @@ export function LeasesTable({ rows }: { rows: PlatformLease[] }) {
                 {row.runningNow ? (
                   <RelativeTime at={row.leasedUntil} />
                 ) : (
-                  <span className="text-subtle" title={`The last lease ran out ${when(row.leasedUntil)}`}>
+                  <span className="text-subtle" title={`The last lease ran out ${clock.dateTime(row.leasedUntil)}`}>
                     Not held
                   </span>
                 )}

@@ -7,7 +7,9 @@ import { getExpense } from "@/actions/expense";
 import { hasEffectivePermission } from "@/actions/permission";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ExpenseActions } from "@/components/expenses/expense-actions";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import {
   expenseCategoryLabels,
   expensePaymentModeLabels,
@@ -39,9 +41,10 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
 
   const userId = session!.user.id;
   const isMine = expense.userId === userId;
-  const [canOverride, canReimburse] = await Promise.all([
+  const [canOverride, canReimburse, clock] = await Promise.all([
     hasEffectivePermission(userId, "expenses.approve"),
     hasEffectivePermission(userId, "expenses.reimburse"),
+    workspaceClock(),
   ]);
   // Never your own claim, whatever permissions you hold.
   const canDecide = !isMine && (expense.approverUserId === userId || canOverride);
@@ -60,7 +63,7 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
             {!expense.reimbursable && <Badge tone="default">Not reimbursable</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted">
-            {expenseCategoryLabels[expense.category]} · {expense.user.name} · {formatDate(expense.spentOn)}
+            {expenseCategoryLabels[expense.category]} · {expense.user.name} · {formatCalendarDay(expense.spentOn)}
           </p>
         </div>
         <div className="text-right">
@@ -171,16 +174,16 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
             <CardHeader className="text-sm font-medium text-text">Approval</CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Row label="Claimant" value={expense.user.name} />
-              <Row label="Submitted" value={expense.submittedAt ? formatDate(expense.submittedAt) : "Not yet"} />
+              <Row label="Submitted" value={expense.submittedAt ? clock.date(expense.submittedAt) : "Not yet"} />
               <Row
                 label={expense.status === "REJECTED" ? "Rejected by" : "Approver"}
                 value={expense.approver?.name ?? "Not routed yet"}
               />
-              <Row label="Decided" value={expense.decidedAt ? formatDate(expense.decidedAt) : "—"} />
+              <Row label="Decided" value={expense.decidedAt ? clock.date(expense.decidedAt) : "—"} />
               {expense.status === "APPROVED" && expense.decisionNote && (
                 <p className="text-xs text-subtle">{expense.decisionNote}</p>
               )}
-              <Row label="Reimbursed" value={expense.reimbursedAt ? formatDate(expense.reimbursedAt) : "—"} />
+              <Row label="Reimbursed" value={expense.reimbursedAt ? clock.date(expense.reimbursedAt) : "—"} />
               {expense.reimbursementRef && <Row label="Reference" value={expense.reimbursementRef} />}
             </CardContent>
           </Card>

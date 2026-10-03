@@ -1,11 +1,11 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { Prisma, type DealStatus } from "@deskzo/control-client";
 import { isDisposableDomain, parseEmailAddress } from "@/lib/email-verification";
-import { formatIstDate } from "@/lib/india-time";
 import { partnerAudit, type PartnerActor } from "@/lib/partners/audit";
 import { cleanCountry, cleanId, mailPartnerUsers, manyLines, meActor, oneLine, optionalText, requiredText, staffActor } from "@/lib/partners/registry";
 import { dealDays } from "@/lib/partners/settings";
 import { PARTNER_LIMITS, PARTNER_SELLERS, PartnerRefused, type PartnerMe } from "@/lib/partners/types";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { siteOrigin } from "@/lib/platform/site-content";
 import type { Staff } from "@/lib/platform/staff-session";
@@ -415,9 +415,10 @@ export async function decideDeal(
     if (done.count === 0) throw new PartnerRefused("That registration has been decided already.");
     await partnerAudit(staffActor(staff), deal.partnerId, status === "APPROVED" ? "deal.approve" : "deal.decline", "deal", deal.id, { companyName: deal.companyName, domain: deal.domain }, { tx });
   });
+  // The day it ends on the portal's clock — the console's (Settings › Time zone) — as the partner's deal list shows it.
   const lines =
     status === "APPROVED"
-      ? [`Your registration of ${deal.companyName} (${deal.domain}) has been approved. It is protected until ${formatIstDate(expiresAt!)}: a workspace that signs up from ${deal.domain} before then is credited to you.`]
+      ? [`Your registration of ${deal.companyName} (${deal.domain}) has been approved. It is protected until ${(await consoleClock()).date(expiresAt!)}: a workspace that signs up from ${deal.domain} before then is credited to you.`]
       : [`Your registration of ${deal.companyName} (${deal.domain}) has been declined.`];
   if (note) lines.push("", `Note from your partner manager: ${note}`);
   await mailPartnerUsers(deal.partnerId, { userIds: [deal.submittedBy] }, `Partner portal: deal registration ${status === "APPROVED" ? "approved" : "declined"}`, lines);

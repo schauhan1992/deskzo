@@ -5,6 +5,7 @@ import type {
   SurveyQuestionKind,
   SurveyStatus,
 } from "@prisma/client";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The rules that make "anonymous" true rather than merely claimed.
@@ -39,9 +40,12 @@ export function stillNeeded(responseCount: number) {
  * Not a formatting nicety. A timestamp to the second, against a company of forty, correlates with
  * a login, a door swipe and an idle-time record — three things this application already stores.
  * The date is enough to sort by and too coarse to single anybody out.
+ *
+ * The day on the workspace's calendar (`workspaceClock()`), held as a `@db.Date` holds it. It was
+ * UTC's, which in India filed everything before 05:30 under the day before.
  */
-export function submissionDate(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+export function submissionDate(now: Date, clock: Clock): Date {
+  return clock.calendarDate(now);
 }
 
 /** How many anonymous items one person may send in a day. Generous, and still not a flood. */

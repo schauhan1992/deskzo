@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { consignmentReasonLabels, consignmentStatusLabels, consignmentStatusTone } from "@/lib/assets/lifecycle";
 import { branchLabel } from "@/lib/branches/format";
 
@@ -156,9 +158,10 @@ export function ConsignmentRecord({ consignment }: { consignment: Consignment })
               <Fact label="Docket" value={consignment.docketNumber ?? "—"} />
               <Fact label="LR number" value={consignment.lrNumber ?? "—"} />
               <Fact label="Vehicle" value={consignment.vehicleNumber ?? "—"} />
-              <Fact label="Dispatched" value={consignment.dispatchedOn ? formatDate(consignment.dispatchedOn) : "—"} />
-              <Fact label="Expected" value={consignment.expectedOn ? formatDate(consignment.expectedOn) : "—"} />
-              <Fact label="Delivered" value={consignment.deliveredOn ? formatDate(consignment.deliveredOn) : "—"} />
+              {/* Days, as typed on the consignment — held as midnight UTC. */}
+              <Fact label="Dispatched" value={consignment.dispatchedOn ? formatCalendarDay(consignment.dispatchedOn) : "—"} />
+              <Fact label="Expected" value={consignment.expectedOn ? formatCalendarDay(consignment.expectedOn) : "—"} />
+              <Fact label="Delivered" value={consignment.deliveredOn ? formatCalendarDay(consignment.deliveredOn) : "—"} />
               {consignment.receivedBy && <Fact label="Received by" value={consignment.receivedBy} />}
             </CardContent>
           </Card>
@@ -245,8 +248,9 @@ function DispatchDialog({
   pending: boolean;
   run: (fn: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) => void;
 }) {
+  const clock = useClock();
   const [form, setForm] = useState({
-    dispatchedOn: new Date().toISOString().slice(0, 10),
+    dispatchedOn: clock.today(),
     courier: consignment.courier ?? "",
     docketNumber: consignment.docketNumber ?? "",
     lrNumber: consignment.lrNumber ?? "",
@@ -323,7 +327,8 @@ function DeliverDialog({
   pending: boolean;
   run: (fn: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) => void;
 }) {
-  const [deliveredOn, setDeliveredOn] = useState(new Date().toISOString().slice(0, 10));
+  const clock = useClock();
+  const [deliveredOn, setDeliveredOn] = useState(clock.today());
   const [receivedBy, setReceivedBy] = useState("");
   const [installed, setInstalled] = useState(false);
 

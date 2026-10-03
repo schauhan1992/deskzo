@@ -14,6 +14,7 @@ import { createNote } from "@/actions/note";
 import { adapterFor, PROVIDERS } from "@/lib/copilot/providers";
 import { CIPHER_FIELD, copilotConfig, providerKey, usageDay, usedToday } from "@/lib/copilot/settings";
 import { unavailableBecause } from "@/lib/copilot/agent";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { DisplayBlock, ProposalBlock } from "@/lib/copilot/types";
 import type { ActionResult } from "@/actions/company";
 
@@ -163,8 +164,9 @@ export async function getCopilotSettings() {
   const user = await requireUser();
   if (!(await can(user.id, "settings.manage"))) return null;
   const config = await copilotConfig();
-  const since = new Date(usageDay().getTime() - 29 * 86_400_000);
-  const today = usageDay();
+  // The workspace's days, which the allowance is counted in.
+  const today = usageDay(new Date(), await workspaceClock());
+  const since = new Date(today.getTime() - 29 * 86_400_000);
   const rows = await db.copilotUsage.findMany({ where: { day: { gte: since } }, select: { userId: true, day: true, inputTokens: true, outputTokens: true, requests: true, user: { select: { name: true } } } });
   const byUser = new Map<string, { name: string; today: number; month: number; requests: number }>();
   for (const r of rows) {

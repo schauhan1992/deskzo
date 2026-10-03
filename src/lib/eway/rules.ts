@@ -24,10 +24,11 @@
  * says plainly that it is doing that rather than pretending to know all twenty-eight answers.
  */
 
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
- * Every day boundary here is **India's**, not the server's.
+ * Every day boundary here is **India's** — not the server's, and not the workspace's: the law counts
+ * an e-way bill's days on India's clock, whatever zone a workspace keeps.
  *
  * All of this arithmetic used to run through `setHours` and `getFullYear`, which read the clock of
  * whatever machine happened to execute them. That is correct on a developer's laptop in Pune and
@@ -37,8 +38,8 @@ import { istDateParts, istMidnight } from "@/lib/india-time";
  * the goods were legally covered. The same shift lands `lastValidDay` on the wrong date for
  * anything generated after 18:30 IST, which is most of a despatch office's evening.
  *
- * IST is UTC+5:30 and has no daylight saving, so the offset is a constant rather than a lookup —
- * but it has to be applied deliberately, which is what these two functions do.
+ * So every day here is read and built on India's clock (`indiaClock`, src/lib/time/zone.ts),
+ * deliberately, and never asked of a `Date`.
  */
 /** The central threshold. Consignment value, not invoice value — see `consignmentValue`. */
 export const THRESHOLD = 50000;
@@ -196,8 +197,8 @@ export function validityFor(
    * milliseconds — the two differ across a daylight-saving boundary, and while India has none, a
    * function that is only correct because of where it happens to run is a trap for whoever ports it.
    */
-  const { year, month, day } = istDateParts(generatedAt);
-  const validUntil = istMidnight(year, month, day + days + 1);
+  const { year, month, day } = indiaClock.parts(generatedAt);
+  const validUntil = indiaClock.midnight(year, month, day + days + 1);
 
   return { days, validUntil };
 }
@@ -329,22 +330,27 @@ export function standingOf(
  * **UTC** midnight, which in India is half past five in the morning on the 20th — so a bill valid
  * all that day would read expired before most people had got to work.
  *
- * Both directions go through `istDateParts` / `istMidnight`, so the day they mean is the day the
- * despatch office is standing in whatever clock the server keeps.
+ * Both directions go through India's clock, so the day they mean is the day the despatch office is
+ * standing in whatever clock the server keeps.
  */
 export function lastValidDay(validUntil: Date): string {
-  const { year, month, day } = istDateParts(new Date(validUntil.getTime() - 1));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${year}-${pad(month + 1)}-${pad(day)}`;
+  return indiaClock.dateKey(new Date(validUntil.getTime() - 1));
 }
 
 /**
- * The two date-field conversions, from `src/lib/india-time.ts`.
+ * The two date-field conversions: a day typed into an e-way form or filter, as India's day.
  *
- * Re-exported rather than redefined. They were written here first, then the report window needed
- * exactly the same arithmetic — and a second copy of a timezone rule is how the first one drifts.
+ * Thin names over India's clock rather than a rule of their own — a second copy of a timezone rule is
+ * how the first one drifts — kept because they say which clock in every place that uses them.
  *
  * `endOfIndianDay` is midnight at the *start of the following day*, which is what makes
  * `isValidAt`'s `<` comparison correct: a bill covering the 21st is good until the 22nd begins.
+ * Either is null for what isn't a date.
  */
-export { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+export function startOfIndianDay(date: string): Date | null {
+  return indiaClock.startOfDay(date);
+}
+
+export function endOfIndianDay(date: string): Date | null {
+  return indiaClock.endOfDay(date);
+}

@@ -23,7 +23,8 @@
 import type { PrismaClient, TargetScope } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { toBase } from "@/lib/currency";
-import { istCalendarDate, istMidnight } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import type { MetricKey } from "@/lib/targets/metrics";
 import { byStageDate } from "@/lib/pipeline/server";
@@ -34,29 +35,31 @@ export type MeasureWindow = { from: Date; to: Date; userIds: string[] };
 export type MeasureRequest = { metric: MetricKey } & MeasureWindow;
 
 /**
- * The instants a target's window covers: from 00:00 India time on its first day up to, not including,
- * 00:00 on the day after its last. A target's `fromDate`/`toDate` are calendar dates (midnight UTC), and
- * comparing instants against them directly dropped everything booked on the last day after 05:30 IST —
- * a month's target missed that day's orders, and a target reached on the 30th wasn't celebrated.
- * Right for `@db.Date` columns too: a date is its midnight UTC, inside the same bounds.
+ * The instants a target's window covers: from 00:00 on its first day up to, not including, 00:00 on
+ * the day after its last — on the workspace's clock (`workspaceClock()`, India's for a script outside
+ * a workspace). A target's `fromDate`/`toDate` are calendar dates (midnight UTC), and comparing
+ * instants against them directly dropped everything booked on the last day after 05:30 IST — a
+ * month's target missed that day's orders, and a target reached on the 30th wasn't celebrated.
  */
 type Range = { gte: Date; lt: Date };
 
-function rangeOf(from: Date, to: Date): Range {
+function rangeOf(from: Date, to: Date, clock: Clock): Range {
   const day = (d: Date) => [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()] as const;
   const [fy, fm, fd] = day(from);
   const [ty, tm, td] = day(to);
-  return { gte: istMidnight(fy, fm, fd), lt: istMidnight(ty, tm, td + 1) };
+  return { gte: clock.midnight(fy, fm, fd), lt: clock.midnight(ty, tm, td + 1) };
 }
 
 /**
- * The same window as calendar days, for a `@db.Date` column: its first day up to, not including, the day
- * after its last — each as midnight UTC, the way the column holds a day. Prisma sends a date column's
- * bound as the bound's UTC *date*, so the IST-midnight instants above would read as the day before
- * each end: the period's own last day dropped and the day before its first let in.
+ * The same window as calendar days, for a column that holds a day — a `@db.Date`, or a date typed into
+ * a form and kept as its midnight UTC (an invoice's issue date, a payment's paid-on): its first day up
+ * to, not including, the day after its last — each as midnight UTC, the way the column holds a day.
+ * Prisma sends a date column's bound as the bound's UTC *date*, so the midnight instants above would
+ * read as the day before each end in a zone east of UTC; and west of it a day's midnight UTC falls
+ * on the day before, outside its own window.
  */
-function calendarRangeOf(range: Range): Range {
-  return { gte: istCalendarDate(range.gte), lt: istCalendarDate(range.lt) };
+function calendarRangeOf(range: Range, clock: Clock): Range {
+  return { gte: clock.calendarDate(range.gte), lt: clock.calendarDate(range.lt) };
 }
 
 /**
@@ -129,16 +132,18 @@ async function splitByUser(
   metric: MetricKey,
   range: Range,
   userIds: string[],
+  clock: Clock,
 ): Promise<Split | null> {
   switch (metric) {
     case "INVOICED_VALUE": {
-      // Issued invoices less credit notes. A draft is not a sale and a cancelled one never was.
+      // Issued invoices less credit notes. A draft is not a sale and a cancelled one never was. By the
+      // day each is dated: an issue date is a calendar day, held as its midnight UTC.
       const rows = await db.tradeDocument.groupBy({
         by: ["docType", "salespersonId"],
         where: {
           docType: { in: ["INVOICE", "CREDIT_NOTE"] },
           status: { notIn: ["DRAFT", "CANCELLED"] },
-          issueDate: range,
+          issueDate: calendarRangeOf(range, clock),
           salespersonId: { in: userIds },
         },
         _sum: { total: true },
@@ -158,10 +163,11 @@ async function splitByUser(
 
     case "COLLECTED_VALUE": {
       // Money received in the window, against invoices these people own — whenever those invoices
-      // were raised. Attribution follows the invoice, not whoever happened to key the receipt in.
+      // were raised. Attribution follows the invoice, not whoever happened to key the receipt in. By
+      // the day it was paid on: a calendar day, held as its midnight UTC.
       const allocations = await db.paymentAllocation.findMany({
         where: {
-          payment: { paidOn: range, direction: "RECEIVED" },
+          payment: { paidOn: calendarRangeOf(range, clock), direction: "RECEIVED" },
           document: { salespersonId: { in: userIds }, docType: "INVOICE" },
         },
         select: {
@@ -363,11 +369,11 @@ async function splitByUser(
     }
 
     case "PURCHASE_SAVINGS": {
-      // What each purchaser saved against the salesperson's distributor price, on the day in India it
-      // was recorded — negative where sales accepted a higher price. A cancelled order's never counts.
+      // What each purchaser saved against the salesperson's distributor price, on the workspace's day
+      // it was recorded — negative where sales accepted a higher price. A cancelled order's never counts.
       const rows = await db.purchaseSaving.groupBy({
         by: ["purchaserId"],
-        where: { purchaserId: { in: userIds }, cancelledAt: null, recordedOn: calendarRangeOf(range) },
+        where: { purchaserId: { in: userIds }, cancelledAt: null, recordedOn: calendarRangeOf(range, clock) },
         _sum: { amount: true },
       });
       const byUser = new Map<string, Prisma.Decimal>();
@@ -408,8 +414,9 @@ async function measureWholeSet(
 
 /** One target's achievement. */
 export async function measure(db: PrismaClient, metric: MetricKey, w: MeasureWindow): Promise<number> {
-  const range = rangeOf(w.from, w.to);
-  const split = await splitByUser(db, metric, range, w.userIds);
+  const clock = await workspaceClock();
+  const range = rangeOf(w.from, w.to, clock);
+  const split = await splitByUser(db, metric, range, w.userIds, clock);
   return split ? split(w.userIds) : measureWholeSet(db, metric, range, w.userIds);
 }
 
@@ -434,16 +441,17 @@ export async function measureMany(db: PrismaClient, requests: MeasureRequest[]):
   });
 
   const answers = new Array<number>(requests.length).fill(0);
+  const clock = await workspaceClock();
 
   await Promise.all(
     [...groups.values()].map(async (indexes) => {
       const first = requests[indexes[0]];
-      const range = rangeOf(first.from, first.to);
+      const range = rangeOf(first.from, first.to, clock);
       // Everybody any target in this group is measured across, asked about once.
       const everyone = [...new Set(indexes.flatMap((i) => requests[i].userIds))];
       if (everyone.length === 0) return; // Nobody to measure: every answer in the group is zero.
 
-      const split = await splitByUser(db, first.metric, range, everyone);
+      const split = await splitByUser(db, first.metric, range, everyone, clock);
       if (split) {
         for (const i of indexes) answers[i] = split(requests[i].userIds);
         return;

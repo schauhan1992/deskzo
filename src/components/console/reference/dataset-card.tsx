@@ -6,11 +6,11 @@ import { DefinitionList, InsetBlock, Panel } from "@/components/console/kit/pane
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { when } from "@/lib/console-shared/format";
 import { SYNC_STATUS } from "@/lib/console-shared/labels";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PinDirectory, SyncStatus, WorldPlaces } from "@/lib/platform/reference-sync";
+import type { Clock } from "@/lib/time/zone";
 import { PinKeyButtons, SyncButton } from "./reference-actions";
 
 /**
@@ -18,8 +18,8 @@ import { PinKeyButtons, SyncButton } from "./reference-actions";
  * GeoNames world places, each with its sync's state, what is loaded, and — while a sync runs — how far
  * it has got. The page refreshes itself every five seconds while one runs (see the page).
  *
- * Server components: the only interactive parts are the managers' buttons (reference-actions.tsx),
- * which are not drawn for anybody else.
+ * Server components, handed the console's clock by the page: the only interactive parts are the
+ * managers' buttons (reference-actions.tsx), which are not drawn for anybody else.
  */
 
 type Sync = { status: SyncStatus; stale: boolean; startedAt: string | null; finishedAt: string | null; message: string | null };
@@ -118,11 +118,11 @@ function Progress({ sync, done, total, unit, label }: { sync: Sync; done: number
  * What went wrong, or what the last run said. A stale run is a worker that died mid-way (no word for
  * 30 minutes); a failed one says why in its own message.
  */
-function Outcome({ sync, caps }: { sync: Sync; caps: Caps }) {
+function Outcome({ sync, caps, clock }: { sync: Sync; caps: Caps; clock: Clock }) {
   if (sync.stale) {
     return (
       <Banner tone="warning" title="The sync stopped answering">
-        {`It started ${when(sync.startedAt)} and has not finished in 30 minutes. `}
+        {`It started ${clock.dateTime(sync.startedAt)} and has not finished in 30 minutes. `}
         {caps.manage ? "Sync now starts it again." : "A manager can start it again."}
       </Banner>
     );
@@ -131,7 +131,7 @@ function Outcome({ sync, caps }: { sync: Sync; caps: Caps }) {
     return (
       <Banner tone="danger" title="The last sync failed">
         {redactSecrets(sync.message) ?? "No reason was recorded."}
-        {sync.finishedAt && <span className="mt-1 block text-xs">{`Stopped ${when(sync.finishedAt)}. What was loaded before is still in use.`}</span>}
+        {sync.finishedAt && <span className="mt-1 block text-xs">{`Stopped ${clock.dateTime(sync.finishedAt)}. What was loaded before is still in use.`}</span>}
       </Banner>
     );
   }
@@ -155,7 +155,7 @@ function Footer({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-2">{children}</div>;
 }
 
-export function PinDirectoryCard({ pin, caps }: { pin: PinDirectory; caps: Caps }) {
+export function PinDirectoryCard({ pin, caps, clock }: { pin: PinDirectory; caps: Caps; clock: Clock }) {
   const { loaded, sync } = pin;
   const running = isSyncing(sync);
   const message = quietMessage(sync);
@@ -204,7 +204,7 @@ export function PinDirectoryCard({ pin, caps }: { pin: PinDirectory; caps: Caps 
           )
         )}
         {running && <Progress sync={sync} done={sync.fetched} total={sync.total} unit="post offices fetched" label="Post offices fetched" />}
-        <Outcome sync={sync} caps={caps} />
+        <Outcome sync={sync} caps={caps} clock={clock} />
       </div>
 
       <div className="border-t border-line px-5 py-4">
@@ -214,7 +214,7 @@ export function PinDirectoryCard({ pin, caps }: { pin: PinDirectory; caps: Caps 
   );
 }
 
-export function WorldPlacesCard({ world, caps }: { world: WorldPlaces; caps: Caps }) {
+export function WorldPlacesCard({ world, caps, clock }: { world: WorldPlaces; caps: Caps; clock: Clock }) {
   const { loaded, sync } = world;
   const running = isSyncing(sync);
   const message = quietMessage(sync);
@@ -264,7 +264,7 @@ export function WorldPlacesCard({ world, caps }: { world: WorldPlaces; caps: Cap
           )
         )}
         {running && <Progress sync={sync} done={sync.done} total={sync.total} unit="files done" label="Files downloaded and loaded" />}
-        <Outcome sync={sync} caps={caps} />
+        <Outcome sync={sync} caps={caps} clock={clock} />
       </div>
 
       {loadedCount > 0 && (

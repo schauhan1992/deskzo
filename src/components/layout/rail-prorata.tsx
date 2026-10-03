@@ -11,6 +11,8 @@ import { addonQuote } from "@/lib/subscriptions/addon-quote";
 import { Button } from "@/components/ui/button";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 import { Input, Label, Select } from "@/components/ui/input";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Subscription = Awaited<ReturnType<typeof addableSubscriptions>>[number];
 type Quote = NonNullable<Awaited<ReturnType<typeof quoteAddon>>>;
@@ -32,7 +34,8 @@ type Quote = NonNullable<Awaited<ReturnType<typeof quoteAddon>>>;
  * subscription the system would not let you add to is worse than one that says why not.
  */
 export function RailProRata() {
-  const today = new Date().toISOString().slice(0, 10);
+  const clock = useClock();
+  const today = clock.today();
 
   const [companies, setCompanies] = useState<{ id: string; name: string }[] | null>(null);
   const [companyId, setCompanyId] = useState("");
@@ -204,7 +207,8 @@ export function RailProRata() {
         <dl className="space-y-1 rounded-base border border-line px-3 py-2 text-xs">
           {/* What it was sold at, not list price — the whole reason for picking the order. */}
           <Row label="Sold at" value={`${inr(Number(chosen.fullTermUnitPrice ?? chosen.unitPrice ?? 0))} per ${chosen.item.unit ?? "seat"}`} />
-          <Row label="Term" value={`${date(chosen.startDate)} – ${date(chosen.endDate)}`} />
+          {/* The order's days, as typed — held as midnight UTC. */}
+          <Row label="Term" value={`${formatCalendarDay(chosen.startDate)} – ${formatCalendarDay(chosen.endDate)}`} />
           <Row label="Already on it" value={`${chosen.quantity}${addonCount(chosen) ? ` + ${addonCount(chosen)} added` : ""}`} />
         </dl>
       )}
@@ -429,9 +433,6 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(n);
-
-const date = (value: Date | string | null) =>
-  value ? new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 /** Seats added since, so "already on it" reflects what the customer actually has. */
 function addonCount(sub: Subscription) {

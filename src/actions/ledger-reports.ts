@@ -1,7 +1,7 @@
 "use server";
 
 import type { AccountType } from "@prisma/client";
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { requireModuleUser } from "@/lib/modules-access";
@@ -392,19 +392,20 @@ function sumTop(rows: AccountBalance[]) {
 }
 
 /**
- * Where a report's first day begins, in India — whatever the server's clock. `setHours` on the parsed
- * date used the process's zone: right on a laptop in Pune, five and a half hours late on a server in
- * UTC, and a day early in New York. An unreadable date stays unreadable (Invalid Date), as before.
+ * Where a report's first day begins, in India — whatever the server's clock or the workspace's zone:
+ * the books keep India's calendar. `setHours` on the parsed date used the process's zone: right on a
+ * laptop in Pune, five and a half hours late on a server in UTC, and a day early in New York. An
+ * unreadable date stays unreadable (Invalid Date), as before.
  */
 function startOfDay(value: string) {
-  return startOfIndianDay(value) ?? new Date(NaN);
+  return indiaClock.startOfDay(value) ?? new Date(NaN);
 }
 
 /**
  * The last millisecond of a report's last day, in India. Inclusive, because every caller here compares
- * with `lte`: the instant before the next Indian midnight (src/lib/india-time.ts `endOfIndianDay`).
+ * with `lte`: the instant before the next Indian midnight (`indiaClock.endOfDay`).
  */
 function endOfDay(value: string) {
-  const next = endOfIndianDay(value);
+  const next = indiaClock.endOfDay(value);
   return next ? new Date(next.getTime() - 1) : new Date(NaN);
 }

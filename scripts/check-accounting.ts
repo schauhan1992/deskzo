@@ -32,21 +32,13 @@ import {
   type PayrollTotals,
 } from "../src/lib/ledger/posting";
 import { computeDocument, financialYearOf, shortFinancialYear, type SupplyType } from "../src/lib/gst-engine";
-import { computePreset, indianToday, matchPreset, toISODate } from "../src/lib/date-range-presets";
+import { computePreset, matchPreset, toISODate, todayOn } from "../src/lib/date-range-presets";
 import { toBase } from "../src/lib/currency";
 import { closableYears, firstOpenDate, isLockedDate, startYearOf, yearEndDates } from "../src/lib/ledger/period";
 import { resolvePeriod } from "../src/lib/finance/periods";
-import {
-  calendarDateOf,
-  endOfIndianDay,
-  financialYearBounds,
-  financialYearWindow,
-  istCalendarDate,
-  istDateKey,
-  istDateParts,
-  istMonthWindow,
-  previousIstMonth,
-} from "../src/lib/india-time";
+import { calendarDateOf, financialYearBounds, financialYearWindow, previousIstMonth } from "../src/lib/india-time";
+// The books keep India's calendar in every workspace (statutory), so the day and month helpers are India's clock's.
+import { indiaClock } from "../src/lib/time/zone";
 import { EXPENSE_CATEGORY_ACCOUNT, SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { bookValue, depreciableAmount, monthlyCharge, schedule } from "../src/lib/ledger/depreciation";
 import { buildGstr1, buildGstr3b, buildTdsSummary, countsForReturn, type ReturnDocument } from "../src/lib/ledger/gst-returns";
@@ -849,7 +841,7 @@ console.log("\n— The year-end close sums the whole Indian year (F3) —\n");
   ok("  nor 31 March 2025 in India", !inYear(ist("2025-03-31T23:59:59")));
   ok(
     "The closing entry is dated 31 March, inside the year",
-    inYear(y.closingDate) && same(istCalendarDate(y.closingDate), d("2026-03-31")),
+    inYear(y.closingDate) && same(indiaClock.calendarDate(y.closingDate), d("2026-03-31")),
     y.closingDate.toISOString(),
   );
   ok("  and the lock and the close record hold 31 March and 1 April as days", same(y.toDate, d("2026-03-31")) && same(y.fromDate, d("2025-04-01")));
@@ -870,10 +862,10 @@ console.log("\n— Months and years on India's calendar, whatever the host's (F5
   ok("The financial year window is half-open in India", same(fyWindow.from, ist("2026-04-01T00:00:00")) && same(fyWindow.to, ist("2027-04-01T00:00:00")));
 
   const oct = ist("2026-10-01T01:30:00"); // 30 September, 20:00 UTC
-  ok("The month of 01:30 IST on 1 October is October", same(istMonthWindow(oct).from, ist("2026-10-01T00:00:00")) && same(istMonthWindow(oct).to, ist("2026-11-01T00:00:00")));
-  ok("  and the month before it September", same(istMonthWindow(oct, -1).from, ist("2026-09-01T00:00:00")) && same(istMonthWindow(oct, -1).to, ist("2026-10-01T00:00:00")));
-  ok("  its date is the 1st, not the UTC 30th", istDateKey(oct) === "2026-10-01", istDateKey(oct));
-  ok("A @db.Date comparison day for it is 1 October", same(istCalendarDate(oct), d("2026-10-01")) && same(calendarDateOf(new Date("2026-10-01T18:00:00.000Z")), d("2026-10-01")));
+  ok("The month of 01:30 IST on 1 October is October", same(indiaClock.monthWindow(oct).from, ist("2026-10-01T00:00:00")) && same(indiaClock.monthWindow(oct).to, ist("2026-11-01T00:00:00")));
+  ok("  and the month before it September", same(indiaClock.monthWindow(oct, -1).from, ist("2026-09-01T00:00:00")) && same(indiaClock.monthWindow(oct, -1).to, ist("2026-10-01T00:00:00")));
+  ok("  its date is the 1st, not the UTC 30th", indiaClock.dateKey(oct) === "2026-10-01", indiaClock.dateKey(oct));
+  ok("A @db.Date comparison day for it is 1 October", same(indiaClock.calendarDate(oct), d("2026-10-01")) && same(calendarDateOf(new Date("2026-10-01T18:00:00.000Z")), d("2026-10-01")));
 
   const lastMs = (s: string) => new Date(ist(s).getTime() - 1);
   const month = resolvePeriod("thisMonth", oct);
@@ -922,7 +914,7 @@ console.log("\n— Months and years on India's calendar, whatever the host's (F5
   ok("The last twelve months start on 1 October a year back, in India", same(twelve.from, ist("2025-10-01T00:00:00")), twelve.from.toISOString());
 
   // The reconciliation screen's "as at" day (src/actions/bank.ts): up to India's midnight after it.
-  ok("As at 30 September runs to 1 October 00:00 IST", same(endOfIndianDay("2026-09-30")!, ist("2026-10-01T00:00:00")), "not 23:59:59.999 UTC, which is 05:29 IST the next morning");
+  ok("As at 30 September runs to 1 October 00:00 IST", same(indiaClock.endOfDay("2026-09-30")!, ist("2026-10-01T00:00:00")), "not 23:59:59.999 UTC, which is 05:29 IST the next morning");
 }
 
 // ── The remaining host-clock dates (PAY-FIXES §3) ─────────────────────────────────────────────────
@@ -940,23 +932,23 @@ console.log("\n— The last host-clock dates (PAY-FIXES §3) —\n");
   const sep30 = previousIstMonth(ist("2026-09-30T23:59:00"));
   ok("  and at 23:59 IST on 30 September, still August", sep30.month === 8 && sep30.year === 2026, `${sep30.month}/${sep30.year}`);
 
-  // The date-range presets: "today" is India's date, held as the picker holds a day.
+  // The date-range presets: "today" is the workspace's date — India's here — held as the picker holds a day.
   const early = ist("2026-10-01T02:00:00");
-  ok("At 02:00 IST on 1 October, Today is 1 October", toISODate(indianToday(early)) === "2026-10-01", toISODate(indianToday(early)));
-  const today = computePreset("today", early);
-  const yesterday = computePreset("yesterday", early);
-  const thisMonth = computePreset("thisMonth", early);
-  const lastMonth = computePreset("lastMonth", early);
+  ok("At 02:00 IST on 1 October, Today is 1 October", toISODate(todayOn(indiaClock, early)) === "2026-10-01", toISODate(todayOn(indiaClock, early)));
+  const today = computePreset("today", indiaClock, early);
+  const yesterday = computePreset("yesterday", indiaClock, early);
+  const thisMonth = computePreset("thisMonth", indiaClock, early);
+  const lastMonth = computePreset("lastMonth", indiaClock, early);
   ok("  the Today preset says so", toISODate(today.from!) === "2026-10-01" && toISODate(today.to!) === "2026-10-01");
   ok("  Yesterday is 30 September", toISODate(yesterday.from!) === "2026-09-30");
   ok("  This month starts on 1 October", toISODate(thisMonth.from!) === "2026-10-01" && toISODate(thisMonth.to!) === "2026-10-01");
   ok("  Last month is 1–30 September", toISODate(lastMonth.from!) === "2026-09-01" && toISODate(lastMonth.to!) === "2026-09-30", `${toISODate(lastMonth.from!)} – ${toISODate(lastMonth.to!)}`);
-  ok("  and the picker recognises its own preset", matchPreset(lastMonth.from, lastMonth.to, early) === "lastMonth");
-  const late = computePreset("today", ist("2026-09-30T23:30:00"));
+  ok("  and the picker recognises its own preset", matchPreset(lastMonth.from, lastMonth.to, indiaClock, early) === "lastMonth");
+  const late = computePreset("today", indiaClock, ist("2026-09-30T23:30:00"));
   ok("  at 23:30 IST on 30 September, Today is still the 30th", toISODate(late.from!) === "2026-09-30");
 
   // The month picker's newest year.
-  ok("At 01:00 IST on 1 January 2027 the month picker's year is 2027", istDateParts(ist("2027-01-01T01:00:00")).year === 2027);
+  ok("At 01:00 IST on 1 January 2027 the month picker's year is 2027", indiaClock.parts(ist("2027-01-01T01:00:00")).year === 2027);
 
   // Which years the books screen offers to close.
   const eve = closableYears(ist("2026-03-31T20:00:00"), new Set());

@@ -2,9 +2,10 @@ import { notFound } from "next/navigation";
 import { getPayslip } from "@/actions/payroll";
 import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { PrintButton } from "@/components/documents/print-button";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { amountInWords } from "@/lib/gst-engine";
 import { monthLabel } from "@/lib/hr/calendar";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 
 /**
  * A payslip as a document.
@@ -76,7 +77,7 @@ export default async function PrintPayslipPage({
         <Row label="Name" value={slip.user.name} strong />
         <Row label="Employee code" value={profile?.employeeCode ?? "—"} />
         <Row label="Designation" value={profile?.designation ?? "—"} />
-        <Row label="Date of joining" value={profile?.joinedOn ? formatDate(profile.joinedOn) : "—"} />
+        <Row label="Date of joining" value={profile?.joinedOn ? formatCalendarDay(profile.joinedOn) : "—"} />
         <Row label="PAN" value={profile?.panNumber ?? "—"} />
         <Row label="UAN" value={profile?.uanNumber ?? "—"} />
         <Row
@@ -156,7 +157,8 @@ export default async function PrintPayslipPage({
       <footer className="mt-6 border-t border-neutral-300 pt-3 text-[10px] text-neutral-500">
         <p>
           Computer generated — no signature required.
-          {slip.run.paidAt && ` Paid ${formatDate(slip.run.paidAt)}.`}
+          {/* Payroll is India's (statutory), so the day it was paid is India's day in every workspace. */}
+          {slip.run.paidAt && ` Paid ${indiaClock.date(slip.run.paidAt)}.`}
         </p>
       </footer>
     </div>

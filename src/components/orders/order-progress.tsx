@@ -8,7 +8,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { StageColor } from "@/lib/pipeline/rules";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Step = { id: string; label: string; color: StageColor };
 type Move = { id: string; fromLabel: string | null; toLabel: string; note: string | null; createdAt: string; by: string };
@@ -35,6 +35,7 @@ export function OrderProgress({
 }) {
   const router = useRouter();
   const id = useId();
+  const clock = useClock();
   const [isPending, startTransition] = useTransition();
   const [target, setTarget] = useState("");
   const [note, setNote] = useState("");
@@ -124,7 +125,7 @@ export function OrderProgress({
                   {m.fromLabel ? `${m.fromLabel} → ` : ""}
                   {m.toLabel}
                 </span>{" "}
-                · {m.by} · {formatDate(m.createdAt)}
+                · {m.by} · {clock.date(m.createdAt)}
                 {m.note && <span className="block text-subtle">{m.note}</span>}
               </li>
             ))}

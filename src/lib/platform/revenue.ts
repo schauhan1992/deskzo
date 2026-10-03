@@ -1,16 +1,17 @@
 import Papa from "papaparse";
 import type { BillingGateway, BillingInterval, Prisma, SubscriptionStatus } from "@deskzo/control-client";
 import { usageDay } from "@/lib/copilot/settings";
-import { csvFilename, istMonthKey } from "@/lib/console-shared/format";
+import { csvFilename } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, gatewayLabel } from "@/lib/console-shared/labels";
 import type { InvoiceFilters, SubscriptionFilters } from "@/lib/console-shared/params";
 import type { CsvExport, GatewayKey, GatewayModes, InvoiceStatusKey, PlanKindKey, SubscriptionStatusKey } from "@/lib/console-shared/types";
-import { endOfIndianDay, istDateParts, istDateTimeInput, istMidnight, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { EXPORT_CAPS, clampInt } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { gatewayModes } from "@/lib/platform/settings";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Revenue, as the control plane recorded it from the gateways' webhooks — before tax, and not
@@ -19,8 +20,9 @@ import { gatewayModes } from "@/lib/platform/settings";
  *
  *   · Money is in each currency's smallest unit (paise, cents), per currency — never added across
  *     currencies and never converted. There is no exchange rate here, on purpose.
- *   · Months and days are India's (src/lib/india-time.ts): a payment at 00:30 IST on 1 September is
- *     September's, whatever the server's clock says.
+ *   · Months and days are the console's clock's (Settings › Time zone): a payment at 00:30 there on
+ *     1 September is September's, whatever the server's clock says. Not India's statutory calendar —
+ *     these are the platform's own figures, not its books.
  *   · A plan given by hand (MANUAL) has no price and brings in nothing; a subscription trialing at a
  *     gateway is not paying yet. Neither is counted as revenue. A gateway item with no price is
  *     counted as "unpriced" rather than guessed.
@@ -61,11 +63,11 @@ const upper = (currency: string) => currency.trim().toUpperCase();
 /** Currencies in a stable order: the one most workspaces pay in first, then alphabetically. */
 const byReach = (a: { currency: string; n: number }, b: { currency: string; n: number }) => b.n - a.n || a.currency.localeCompare(b.currency);
 
-/** The IST month keys ("2026-09") of the last `months` months, oldest first, ending with `now`'s; and the instant the first began. */
-function monthWindow(months: number, now: Date): { keys: string[]; start: Date } {
-  const { year, month } = istDateParts(now);
-  const keys = Array.from({ length: months }, (_, i) => istMonthKey(istMidnight(year, month - (months - 1) + i, 1)));
-  return { keys, start: istMidnight(year, month - (months - 1), 1) };
+/** The month keys ("2026-09") on `clock` of the last `months` months, oldest first, ending with `now`'s; and the instant the first began. */
+function monthWindow(months: number, now: Date, clock: Clock): { keys: string[]; start: Date } {
+  const { year, month } = clock.parts(now);
+  const keys = Array.from({ length: months }, (_, i) => clock.monthKey(clock.midnight(year, month - (months - 1) + i, 1)));
+  return { keys, start: clock.midnight(year, month - (months - 1), 1) };
 }
 
 // ─── MRR ─────────────────────────────────────────────────────────────────────────────────────────
@@ -164,7 +166,7 @@ export async function mrrByPlan(now = new Date()): Promise<MrrByPlan> {
 // ─── Collected, outstanding ──────────────────────────────────────────────────────────────────────
 
 export type CollectedByMonth = {
-  /** IST months, oldest first: "2026-09". */
+  /** Months on the console's clock, oldest first: "2026-09". */
   months: string[];
   /** Per currency, one value per month (minor units paid), aligned with `months`. */
   series: { currency: string; values: number[] }[];
@@ -174,10 +176,11 @@ export type CollectedByMonth = {
   thisMonth: Money[];
 };
 
-/** Paid invoices by the IST month they were paid in (or issued in, when the gateway gave no payment time). */
+/** Paid invoices by the month they were paid in (or issued in, when the gateway gave no payment time), on the console's clock. */
 export async function collectedByMonth(months = 12, now = new Date()): Promise<CollectedByMonth> {
   const n = clampInt(months, 1, 36, 12);
-  const { keys, start } = monthWindow(n, now);
+  const clock = await consoleClock();
+  const { keys, start } = monthWindow(n, now, clock);
   const control = controlDb();
   const [paid, owed] = await Promise.all([
     control.invoice.findMany({
@@ -190,7 +193,7 @@ export async function collectedByMonth(months = 12, now = new Date()): Promise<C
   const index = new Map(keys.map((key, i) => [key, i]));
   const byCurrency = new Map<string, { values: number[]; n: number }>();
   for (const invoice of paid) {
-    const at = index.get(istMonthKey(invoice.paidAt ?? invoice.issuedAt));
+    const at = index.get(clock.monthKey(invoice.paidAt ?? invoice.issuedAt));
     if (at === undefined) continue; // Dated after this month — nothing to put it against.
     const currency = upper(invoice.currency);
     let s = byCurrency.get(currency);
@@ -267,7 +270,7 @@ export async function planMix(): Promise<{ key: string; name: string; kind: Plan
 // ─── Trials and churn ────────────────────────────────────────────────────────────────────────────
 
 export type TrialCohort = {
-  /** The IST month the workspaces were made in: "2026-09". */
+  /** The month the workspaces were made in, on the console's clock: "2026-09". */
   month: string;
   started: number;
   /** Pays at a gateway now, or has paid an invoice (converted, perhaps gone since). */
@@ -290,14 +293,15 @@ export type TrialCohort = {
  */
 export async function trialCohorts(months = 6, now = new Date()): Promise<TrialCohort[]> {
   const n = clampInt(months, 1, 24, 6);
-  const { keys, start } = monthWindow(n, now);
+  const clock = await consoleClock();
+  const { keys, start } = monthWindow(n, now, clock);
   const tenants = await controlDb().tenant.findMany({
     where: { isDefault: false, createdAt: { gte: start } },
     select: { createdAt: true, status: true, subscriptions: { select: { gateway: true, status: true } }, invoices: { where: { status: "PAID" }, select: { id: true }, take: 1 } },
   });
   const cohorts = new Map(keys.map((month) => [month, { month, started: 0, paying: 0, given: 0, trialing: 0, lapsed: 0, closed: 0, rate: null as number | null }]));
   for (const t of tenants) {
-    const cohort = cohorts.get(istMonthKey(t.createdAt));
+    const cohort = cohorts.get(clock.monthKey(t.createdAt));
     if (!cohort) continue;
     cohort.started += 1;
     const has = (gateway: "MANUAL" | "GATEWAY", statuses: SubscriptionStatus[]) =>
@@ -314,10 +318,11 @@ export async function trialCohorts(months = 6, now = new Date()): Promise<TrialC
   });
 }
 
-/** Gateway subscriptions that ended, by the IST month they ended in: how many workspaces, and the monthly revenue that went with them. */
+/** Gateway subscriptions that ended, by the month they ended in on the console's clock: how many workspaces, and the monthly revenue that went with them. */
 export async function churnByMonth(months = 6, now = new Date()): Promise<{ month: string; workspaces: number; lost: Money[] }[]> {
   const n = clampInt(months, 1, 36, 6);
-  const { keys, start } = monthWindow(n, now);
+  const clock = await consoleClock();
+  const { keys, start } = monthWindow(n, now, clock);
   const subs = await controlDb().subscription.findMany({
     where: { gateway: { in: GATEWAYS }, cancelledAt: { gte: start } },
     select: { tenantId: true, cancelledAt: true, items: { select: { quantity: true, price: { select: { amount: true, currency: true, interval: true } } } } },
@@ -325,7 +330,7 @@ export async function churnByMonth(months = 6, now = new Date()): Promise<{ mont
   const byMonth = new Map(keys.map((month) => [month, { tenants: new Set<string>(), lost: new Map<string, Tally>() }]));
   for (const sub of subs) {
     if (!sub.cancelledAt) continue;
-    const month = byMonth.get(istMonthKey(sub.cancelledAt));
+    const month = byMonth.get(clock.monthKey(sub.cancelledAt));
     if (!month) continue;
     month.tenants.add(sub.tenantId);
     for (const item of sub.items) {
@@ -351,10 +356,10 @@ export async function churnByMonth(months = 6, now = new Date()): Promise<{ mont
 
 // ─── The daily snapshot ──────────────────────────────────────────────────────────────────────────
 
-/** MRR as the tick recorded it each day, oldest first — `day` is the IST calendar day, "2026-09-27". */
+/** MRR as the tick recorded it each day, oldest first — `day` is the day on the console's clock, "2026-09-27". */
 export async function mrrHistory(days = 180, now = new Date()): Promise<{ day: string; currency: string; mrr: number }[]> {
   const n = clampInt(days, 1, 3660, 180);
-  const today = usageDay(now);
+  const today = usageDay(now, await consoleClock());
   const rows = await controlDb().platformRevenueSnapshot.findMany({
     // A date column: inclusive bounds, compared by calendar day.
     where: { day: { gte: new Date(today.getTime() - (n - 1) * DAY), lte: today } },
@@ -366,14 +371,14 @@ export async function mrrHistory(days = 180, now = new Date()): Promise<{ day: s
 }
 
 /**
- * Today's MRR, one row per currency, for the history — run by the platform tick's once-a-day block.
- * Run again on the same day, it replaces that day's rows. A currency recorded in the last week that
- * has nothing now is written as zero, so its history falls to nothing rather than stopping short.
- * Returns the rows written.
+ * Today's MRR, one row per currency, for the history — run by the platform tick's once-a-day block,
+ * "today" being the console's (a day the platform keeps for itself). Run again on the same day, it
+ * replaces that day's rows. A currency recorded in the last week that has nothing now is written as
+ * zero, so its history falls to nothing rather than stopping short. Returns the rows written.
  */
 export async function snapshotRevenue(now = new Date()): Promise<number> {
   const control = controlDb();
-  const day = usageDay(now);
+  const day = usageDay(now, await consoleClock());
   const [summary, recent] = await Promise.all([
     mrrByCurrency(now),
     control.platformRevenueSnapshot.findMany({ where: { day: { gte: new Date(day.getTime() - 7 * DAY), lt: day } }, select: { currency: true }, distinct: ["currency"] }),
@@ -463,19 +468,12 @@ async function tenantIdFor(slug: string | undefined): Promise<string | null | un
   return tenant?.id ?? null;
 }
 
-/** The half-open IST range of `from`–`to` (whole days), for a timestamp column. */
-function istRange(from: string | undefined, to: string | undefined): { gte?: Date; lt?: Date } | undefined {
-  const gte = from ? startOfIndianDay(from) : null;
-  const lt = to ? endOfIndianDay(to) : null;
-  if (!gte && !lt) return undefined;
-  return { ...(gte ? { gte } : {}), ...(lt ? { lt } : {}) };
-}
-
 /** The filters as a query; null when they name a workspace that does not exist (so nothing matches). */
 async function invoiceWhere(f: InvoiceFilters): Promise<Prisma.InvoiceWhereInput | null> {
   const tenantId = await tenantIdFor(f.tenant);
   if (tenantId === null) return null;
-  const issuedAt = istRange(f.from, f.to);
+  // Whole days on the console's clock, half-open.
+  const issuedAt = f.from || f.to ? (await consoleClock()).dayRange(f.from, f.to) : null;
   return {
     ...(f.status ? { status: f.status } : {}),
     ...(f.gateway ? { gateway: f.gateway } : {}),
@@ -524,11 +522,12 @@ function minorDigits(currency: string): number {
   }
 }
 
-/** A time as India's wall clock, sortable: "2026-09-27 18:30". Empty for none. */
-const istStamp = (at: Date | null) => (at ? istDateTimeInput(at).replace("T", " ") : "");
+/** A time as the console's wall clock, sortable: "2026-09-27 18:30". Empty for none. */
+const stamp = (at: Date | null, clock: Clock) => (at ? clock.input(at).replace("T", " ") : "");
 
-const INVOICE_CSV_FIELDS = [
-  "Issued (IST)",
+/** The columns: times are on the console's clock, and their headings say which zone. */
+const invoiceCsvFields = (clock: Clock) => [
+  `Issued (${clock.zone})`,
   "Workspace",
   "Number",
   "Gateway",
@@ -539,9 +538,9 @@ const INVOICE_CSV_FIELDS = [
   "Tax",
   "Total",
   "Paid",
-  "Period from (IST)",
-  "Period to (IST)",
-  "Paid on (IST)",
+  `Period from (${clock.zone})`,
+  `Period to (${clock.zone})`,
+  `Paid on (${clock.zone})`,
   "Invoice page",
   "PDF",
 ];
@@ -553,6 +552,7 @@ const INVOICE_CSV_FIELDS = [
  */
 export async function invoicesCsv(f: InvoiceFilters, now = new Date()): Promise<CsvExport> {
   const cap = EXPORT_CAPS.invoices;
+  const clock = await consoleClock();
   const where = await invoiceWhere(f);
   const control = controlDb();
   const count = where ? await control.invoice.count({ where }) : 0;
@@ -571,7 +571,7 @@ export async function invoicesCsv(f: InvoiceFilters, now = new Date()): Promise<
   const data = rows.map((r) => {
     const currency = upper(r.currency);
     return [
-      istStamp(r.issuedAt),
+      stamp(r.issuedAt, clock),
       r.tenant.slug,
       r.number ?? "",
       gatewayLabel(r.gateway),
@@ -582,14 +582,14 @@ export async function invoicesCsv(f: InvoiceFilters, now = new Date()): Promise<
       major(r.tax, currency),
       major(r.total, currency),
       major(r.amountPaid, currency),
-      istStamp(r.periodStart),
-      istStamp(r.periodEnd),
-      istStamp(r.paidAt),
+      stamp(r.periodStart, clock),
+      stamp(r.periodEnd, clock),
+      stamp(r.paidAt, clock),
       safeUrl(r.hostedUrl) ?? "",
       safeUrl(r.pdfUrl) ?? "",
     ];
   });
-  return { filename: csvFilename("invoices", now), csv: Papa.unparse({ fields: INVOICE_CSV_FIELDS, data }, { escapeFormulae: true }), rows: data.length };
+  return { filename: csvFilename("invoices", now, clock), csv: Papa.unparse({ fields: invoiceCsvFields(clock), data }, { escapeFormulae: true }), rows: data.length };
 }
 
 // ─── Subscriptions ───────────────────────────────────────────────────────────────────────────────

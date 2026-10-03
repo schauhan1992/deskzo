@@ -1,13 +1,14 @@
 import { Badge } from "@/components/ui/card";
 import { formatMoney } from "@/lib/currency";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { followUpChannelLabels, longDay, shortDay, type PromiseTone } from "@/lib/collections/rules";
 import type { FollowUpView } from "@/lib/collections/load";
 
 /**
  * Payment follow-ups as every screen shows them — the invoice, the order, the customer statement and
  * a due on the Collections page: who, when, how, what the client said, and any promise with how it
- * stands. No hooks and no actions, so a server component can render it anywhere.
+ * stands. No hooks and no actions: a server component, on the workspace's clock, that any server page
+ * can render.
  */
 
 const TONE: Record<PromiseTone, "amber" | "red" | "green" | "default"> = { amber: "amber", red: "red", green: "green", default: "default" };
@@ -26,7 +27,7 @@ export function PromiseBadge({ view }: { view: FollowUpView }) {
   return <Badge tone={TONE[view.promise.tone]}>{view.promise.text}</Badge>;
 }
 
-export function FollowUpHistory({
+export async function FollowUpHistory({
   history,
   showTarget = false,
   emptyText = "No follow-ups logged yet.",
@@ -37,13 +38,14 @@ export function FollowUpHistory({
   emptyText?: string;
 }) {
   if (history.length === 0) return <p className="text-sm text-subtle">{emptyText}</p>;
+  const clock = await workspaceClock();
   return (
     <ol className="space-y-3">
       {history.map((f) => (
         <li key={f.id} className="border-b border-line pb-3 text-sm last:border-0 last:pb-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-medium text-text">{f.byName ?? "Someone no longer here"}</span>
-            <span className="text-xs text-subtle">{formatIstDateTime(f.createdAt)}</span>
+            <span className="text-xs text-subtle">{clock.dateTime(f.createdAt)}</span>
             <Badge tone="default">{followUpChannelLabels[f.channel]}</Badge>
             {showTarget && f.targetLabel && <span className="font-mono text-xs text-muted">{f.targetLabel}</span>}
           </div>

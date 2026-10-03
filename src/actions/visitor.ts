@@ -13,7 +13,7 @@ import { notifyUser } from "@/lib/notify";
 import { generateCode } from "@/lib/visitors/invite-code";
 import { isUsableCompany, normaliseCompany } from "@/lib/visitors/company-name";
 import type { ActionResult } from "@/actions/company";
-import { formatIstDateTime, parseTypedTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * The visitor book, and the tablets that write it.
@@ -39,9 +39,10 @@ export async function listVisitors(filters?: { onDate?: string; status?: "IN" | 
   const { view } = await access(user.id);
   if (!view) return null;
 
-  const day = filters?.onDate ? new Date(`${filters.onDate}T00:00:00.000Z`) : null;
-  const from = day ?? new Date(Date.now() - 7 * 86400000);
-  const to = day ? new Date(day.getTime() + 86400000) : new Date(Date.now() + 86400000);
+  // One day on the workspace's clock, or the last week.
+  const day = filters?.onDate ? (await workspaceClock()).dayRange(filters.onDate, filters.onDate) : null;
+  const from = day?.gte ?? new Date(Date.now() - 7 * 86400000);
+  const to = day?.lt ?? new Date(Date.now() + 86400000);
 
   return toPlain(
     await db.visitorEntry.findMany({
@@ -188,8 +189,11 @@ export async function closeStaleVisits(): Promise<ActionResult<{ closed: number 
   const { view } = await access(user.id);
   if (!view) return { ok: false, error: "You can't see the visitor book." };
 
+  // Today on the workspace's clock. UTC's began at 05:30 in India, closing out the night's visitors.
   const now = new Date();
-  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const clock = await workspaceClock();
+  const today = clock.parts(now);
+  const startOfToday = clock.midnight(today.year, today.month, today.day);
   const { count } = await db.visitorEntry.updateMany({
     where: { status: "IN", checkedInAt: { lt: startOfToday } },
     data: { status: "ABANDONED", checkedOutAt: now, closedById: user.id },
@@ -228,8 +232,9 @@ export async function createInvite(input: {
   if (!name) return { ok: false, error: "Who are you expecting?" };
   if (!input.expectedAt) return { ok: false, error: "When are they coming?" };
 
-  // The form's time is India time, wherever the server is.
-  const expectedAt = parseTypedTime(input.expectedAt);
+  // The form's time is the workspace's time, wherever the server is.
+  const clock = await workspaceClock();
+  const expectedAt = clock.parseTyped(input.expectedAt);
   if (!expectedAt) return { ok: false, error: "That date doesn't look right." };
 
   const hostUserId = input.hostUserId || user.id;
@@ -269,7 +274,7 @@ export async function createInvite(input: {
       userId: host.id,
       type: "VISITOR_EXPECTED",
       title: `${user.name} booked a visitor for you`,
-      message: `${name} — ${formatIstDateTime(expectedAt)}`,
+      message: `${name} — ${clock.dateTime(expectedAt)}`,
       link: "/visitors/expected",
     });
   }

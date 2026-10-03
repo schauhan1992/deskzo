@@ -16,13 +16,15 @@ import { BehindTable } from "@/components/console/migrations/behind-table";
 import { RunsList } from "@/components/console/migrations/runs-list";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Pagination } from "@/components/ui/pagination";
-import { dayMonth, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { runOutcome, schemaLabel } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { parseMigrationFilters, withParams } from "@/lib/console-shared/params";
 import { capsFor } from "@/lib/console-shared/roles";
 import { migrationsBoard, type MigrationsBoard } from "@/lib/platform/console-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Migrations" };
@@ -48,7 +50,7 @@ export default async function ConsoleMigrationsPage({ searchParams }: PageProps<
   const caps = capsFor(staff.role);
   const sp = await searchParams;
   const f = parseMigrationFilters(sp);
-  const board = await migrationsBoard(f);
+  const [board, clock] = await Promise.all([migrationsBoard(f), consoleClock()]);
   const c = board.counts;
 
   const narrowed = Boolean(f.q) || f.outcome !== "all";
@@ -106,7 +108,7 @@ export default async function ConsoleMigrationsPage({ searchParams }: PageProps<
             tone={c.held > 0 ? "danger" : "neutral"}
             secondary={c.held > 0 ? "Users see a maintenance page" : "None held"}
           />
-          <LastFullRunTile run={board.lastFullRun} />
+          <LastFullRunTile run={board.lastFullRun} clock={clock} />
         </KpiGrid>
 
         {c.held > 0 && (
@@ -231,7 +233,7 @@ function UpToDateTile({ counts }: { counts: MigrationsBoard["counts"] }) {
   );
 }
 
-function LastFullRunTile({ run }: { run: MigrationsBoard["lastFullRun"] }) {
+function LastFullRunTile({ run, clock }: { run: MigrationsBoard["lastFullRun"]; clock: Clock }) {
   if (!run) {
     return <KpiTile label="Last full run" value="Never" icon={<Terminal className="h-4 w-4" />} secondary={`Started on the server with ${SCRIPT}`} />;
   }
@@ -240,7 +242,7 @@ function LastFullRunTile({ run }: { run: MigrationsBoard["lastFullRun"] }) {
   return (
     <KpiTile
       label="Last full run"
-      value={dayMonth(run.startedAt)}
+      value={clock.dayMonth(run.startedAt)}
       icon={<Terminal className="h-4 w-4" />}
       tone={tone}
       secondary={

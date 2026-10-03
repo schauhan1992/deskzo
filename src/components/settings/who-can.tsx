@@ -5,6 +5,8 @@ import { Crown, Loader2, Search, ShieldOff, Users } from "lucide-react";
 import { holdersOf, type permissionCatalogue } from "@/actions/permission";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useClock } from "@/components/time/clock-provider";
+import { lastDayOf } from "@/lib/access/last-day";
 
 type CatalogueRow = Awaited<ReturnType<typeof permissionCatalogue>>[number];
 type Result = NonNullable<Awaited<ReturnType<typeof holdersOf>>>;
@@ -40,6 +42,7 @@ const TIER_TONE: Record<string, "red" | "amber" | "default"> = {
 };
 
 export function WhoCan({ catalogue }: { catalogue: CatalogueRow[] }) {
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -160,7 +163,7 @@ export function WhoCan({ catalogue }: { catalogue: CatalogueRow[] }) {
                         <span className="text-sm font-medium text-text">{h.name}</span>
                         <Badge>{h.role}</Badge>
                         {h.expiresAt && (
-                          <Badge tone="amber">until {new Date(h.expiresAt).toLocaleDateString("en-IN")}</Badge>
+                          <Badge tone="amber">until {clock.date(lastDayOf(h.expiresAt))}</Badge>
                         )}
                       </div>
                       <p className="text-xs text-subtle">{h.why}</p>

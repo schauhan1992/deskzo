@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/bulk-select";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { toKey } from "@/lib/hr/calendar";
 import { leaveStatusTone } from "@/lib/validation/hr";
 
 type MyRequest = Awaited<ReturnType<typeof myLeaveRequests>>[number];
@@ -88,8 +90,8 @@ export function LeaveWorkspace({
               <div key={r.id} className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-text">{r.user.name}</span>
                 <span className="text-xs text-muted">
-                  {formatDate(r.fromDate)}
-                  {String(r.fromDate) !== String(r.toDate) && ` – ${formatDate(r.toDate)}`} · {r.type.code}
+                  {formatCalendarDay(r.fromDate)}
+                  {String(r.fromDate) !== String(r.toDate) && ` – ${formatCalendarDay(r.toDate)}`} · {r.type.code}
                 </span>
               </div>
             ))}
@@ -107,7 +109,7 @@ export function LeaveWorkspace({
                   {r.user.name} · {Number(r.days)} day(s) {r.type.code}
                 </span>
                 <span className="flex items-center gap-2 text-xs text-muted">
-                  {formatDate(r.fromDate)}
+                  {formatCalendarDay(r.fromDate)}
                   <Badge tone={leaveStatusTone[r.status]}>{r.status}</Badge>
                 </span>
               </div>
@@ -293,8 +295,8 @@ function ApprovalRow({ request }: { request: Queue["pending"][number] }) {
             <span className="font-medium text-text">{request.user.name}</span>
             <Badge tone="default">{request.type.code}</Badge>
             <span className="text-sm text-muted">
-              {Number(request.days)} day(s) · {formatDate(request.fromDate)}
-              {String(request.fromDate) !== String(request.toDate) && ` – ${formatDate(request.toDate)}`}
+              {Number(request.days)} day(s) · {formatCalendarDay(request.fromDate)}
+              {String(request.fromDate) !== String(request.toDate) && ` – ${formatCalendarDay(request.toDate)}`}
             </span>
             {!request.type.paid && <Badge tone="amber">Unpaid</Badge>}
           </div>
@@ -332,10 +334,13 @@ function ApprovalRow({ request }: { request: Queue["pending"][number] }) {
 
 function MyRequestRow({ request }: { request: MyRequest }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const started = new Date(request.fromDate) <= new Date();
+  // Its first day against the workspace's today, as cancelLeave decides it. Against the moment now it
+  // started at midnight UTC: 05:30 on the day in India, the evening before west of UTC.
+  const started = toKey(request.fromDate) <= clock.today();
   const cancellable = (request.status === "PENDING" || request.status === "APPROVED") && !started;
 
   function cancel() {
@@ -359,8 +364,8 @@ function MyRequestRow({ request }: { request: MyRequest }) {
             {Number(request.days)} day(s) {request.type.name}
           </span>
           <span className="text-xs text-muted">
-            {formatDate(request.fromDate)}
-            {String(request.fromDate) !== String(request.toDate) && ` – ${formatDate(request.toDate)}`}
+            {formatCalendarDay(request.fromDate)}
+            {String(request.fromDate) !== String(request.toDate) && ` – ${formatCalendarDay(request.toDate)}`}
           </span>
         </div>
         <p className="mt-0.5 text-sm text-muted">{request.reason}</p>

@@ -14,14 +14,12 @@ import type {
   TenantStatus,
 } from "@deskzo/control-client";
 import type { CsvExport } from "@/lib/console-shared/types";
-import { istDateParts, istMidnight, endOfIndianDay } from "@/lib/india-time";
 import { listPartnerAudit } from "@/lib/partners/audit";
 import { CSV_MAX_ROWS, commissionCsv, statementCsv, type CommissionCsvRow } from "@/lib/partners/csv";
 import { attributedMrr, customerFacts, type CustomerFacts, type StandingKind } from "@/lib/partners/customers";
 import { canOpenPartnerPage, type PartnerPageKey } from "@/lib/partners/nav";
 import { referralUrl } from "@/lib/partners/referrals";
 import { dealDays } from "@/lib/partners/settings";
-import { istDayStart } from "@/lib/partners/terms";
 import {
   PARTNER_MONEY,
   PartnerRefused,
@@ -41,6 +39,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { signupOpen } from "@/lib/platform/settings";
 import { siteOrigin } from "@/lib/platform/site-content";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * What the partner portal's pages show (spec §8.5, §8.7, Appendix B) — server only, called by the
@@ -63,7 +62,10 @@ import { siteOrigin } from "@/lib/platform/site-content";
  *   · Staff's fields never leave: notes, attribution reasons and flags, void reasons, the terms'
  *     note, a request's sealed copy, the payout cipher, DRAFT and VOID statements.
  *
- * Dates from the URL are India days, half-open: `from` from its start, `to` to the start of the next.
+ * Dates from the URL are days, half-open: `from` from its start, `to` to the start of the next. The
+ * commissions' are India's, and so is "this month": commission is counted in India's months, as its
+ * statements are (src/lib/partners/statements.ts), whatever zone the console keeps. The activity log's
+ * are the console's clock's (src/lib/partners/audit.ts), as every time the portal shows.
  */
 
 export type { CustomerFacts, StandingKind } from "@/lib/partners/customers";
@@ -343,15 +345,13 @@ const SHOWN_STATEMENTS: StatementStatus[] = ["APPROVED", "PAID"];
 
 /** The instant this IST month began, and the next one. */
 function istMonth(now: Date): { start: Date; end: Date } {
-  const { year, month } = istDateParts(now);
-  return { start: istMidnight(year, month, 1), end: istMidnight(year, month + 1, 1) };
+  const { from, to } = indiaClock.monthWindow(now);
+  return { start: from, end: to };
 }
 
 /** "yyyy-mm-dd" → [start of that India day, start of the day after); a missing or impossible day is no bound. */
 function istRange(from: unknown, to: unknown): { gte?: Date; lt?: Date } | null {
-  const start = typeof from === "string" && from ? istDayStart(from) : null;
-  const end = typeof to === "string" && to && istDayStart(to) ? endOfIndianDay(to.trim()) : null;
-  return start || end ? { ...(start ? { gte: start } : {}), ...(end ? { lt: end } : {}) } : null;
+  return indiaClock.dayRange(typeof from === "string" ? from : null, typeof to === "string" ? to : null);
 }
 
 /** Sums per currency — never added across currencies — without the zeros, by currency code. */

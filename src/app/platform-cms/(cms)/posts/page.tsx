@@ -18,7 +18,7 @@ import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { listCategories } from "@/lib/cms/taxonomy";
 import { cmsCapsFor, type SitePostStatus } from "@/lib/cms/types";
 import { listCmsUsers } from "@/lib/cms/users";
-import { formatIstDateTime } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { siteOrigin } from "@/lib/platform/site-content";
 
 export const metadata: Metadata = { title: "Posts" };
@@ -52,7 +52,7 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
   const author = (one(sp.author) ?? "").trim().slice(0, 40);
   const page = Math.min(1000, Math.max(1, Math.floor(Number(one(sp.page)) || 1)));
 
-  const [posts, tags, users, tree] = await Promise.all([
+  const [posts, tags, users, tree, clock] = await Promise.all([
     listPosts({
       status: view !== "all" && view !== "archived" ? (view as SitePostStatus) : undefined,
       archived: view === "archived",
@@ -65,6 +65,7 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
     listPostTags(),
     listCmsUsers(),
     listCategories(),
+    consoleClock(),
   ]);
   const categoryOptions = tree.flatMap((top) => [{ value: top.slug, label: top.name }, ...top.children.map((c) => ({ value: c.slug, label: `${top.name} › ${c.name}` }))]);
   const categoryName = category ? (categoryOptions.find((c) => c.value === category)?.label ?? category) : null;
@@ -141,8 +142,8 @@ export default async function CmsPostsPage({ searchParams }: PageProps<"/platfor
                     </Td>
                     <Td>
                       <PostStatusPill status={post.status} live={post.live} archived={post.archived} />
-                      {post.status === "SCHEDULED" && !post.live && post.publishAt && <span className="mt-0.5 block text-xs text-muted">{formatIstDateTime(post.publishAt)}</span>}
-                      {post.live && post.publishAt && <span className="mt-0.5 block text-xs text-subtle">since {formatIstDateTime(post.publishAt)}</span>}
+                      {post.status === "SCHEDULED" && !post.live && post.publishAt && <span className="mt-0.5 block text-xs text-muted">{clock.dateTime(post.publishAt)}</span>}
+                      {post.live && post.publishAt && <span className="mt-0.5 block text-xs text-subtle">since {clock.dateTime(post.publishAt)}</span>}
                     </Td>
                     <Td muted nowrap>
                       {post.author.name}

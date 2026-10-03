@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
-import { istCalendarDate } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The one path every change to the period lock takes.
@@ -11,8 +11,8 @@ import { istCalendarDate } from "@/lib/india-time";
  *
  *   · **No lock into a period that hasn't finished.** A lock into the future would refuse entries for
  *     work that hasn't happened yet, which is not a lock — it is the books being shut. "Finished" is
- *     India's today: the lock is a calendar day, and compared with the instant now it refused today's
- *     date until 05:30 IST.
+ *     India's today, in every workspace: the lock is a calendar day, and compared with the instant now
+ *     it refused today's date until 05:30 IST.
  *   · **Every change is audited, and a loosening says so.** "Reopened the books to 2025-04-01" reads
  *     differently from "Locked the books to 2025-04-01", and it is the interesting event.
  *   · **A month below the lock is not closed.** The month-end close (Revenue & Close) shows a month as
@@ -49,7 +49,7 @@ function closeMonthLabel(month: Date): string {
   return `${MONTH_NAMES[month.getUTCMonth()]} ${month.getUTCFullYear()}`;
 }
 
-/** `yyyy-mm-dd` of a calendar day. */
+/** `yyyy-mm-dd` of a calendar day, held as midnight UTC — its UTC date is the day it names, not "today". */
 function dayKeyOf(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -112,7 +112,7 @@ export async function moveBooksLock(
   if (input.lockedUntil && (!/^\d{4}-\d{2}-\d{2}$/.test(input.lockedUntil) || Number.isNaN(lockedUntil!.getTime()))) {
     return { ok: false, error: "That isn't a date." };
   }
-  if (lockedUntil && lockedUntil > istCalendarDate(input.now ?? new Date())) {
+  if (lockedUntil && lockedUntil > indiaClock.calendarDate(input.now ?? new Date())) {
     return { ok: false, error: "You can't lock a period that hasn't finished." };
   }
 

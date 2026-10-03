@@ -2,9 +2,9 @@ import { LabelPill, StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { INTERVAL_WORD } from "@/components/partners/customers/customers-table";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { ENDS_AT_PERIOD_END, SUBSCRIPTION_STATUS } from "@/lib/console-shared/labels";
 import type { CustomerSubscription } from "@/lib/partners/portal-data";
+import type { Clock } from "@/lib/time/zone";
 
 const PER: Record<"MONTH" | "YEAR", string> = { MONTH: "month", YEAR: "year" };
 
@@ -12,11 +12,11 @@ const PER: Record<"MONTH" | "YEAR", string> = { MONTH: "month", YEAR: "year" };
  * A customer's live subscriptions, one row per plan on them: the plan, how many, how often it is
  * charged, its list price, when the current period ends, and the subscription's state — with "Ends at
  * period end" when it is set to cancel. A plan with no gateway price (a trial, a plan given by hand)
- * says it is not charged rather than showing a price nobody pays.
+ * says it is not charged rather than showing a price nobody pays. Days on `clock`, the console's.
  *
  * Server-safe: no hooks, no directive.
  */
-export function SubscriptionsTable({ subscriptions }: { subscriptions: CustomerSubscription[] }) {
+export function SubscriptionsTable({ subscriptions, clock }: { subscriptions: CustomerSubscription[]; clock: Clock }) {
   const rows = subscriptions.flatMap((sub, s) => sub.items.map((item, i) => ({ key: `${s}-${i}-${item.key}`, sub, item })));
   return (
     <DataTable caption="Subscriptions" minWidth={820}>
@@ -53,7 +53,7 @@ export function SubscriptionsTable({ subscriptions }: { subscriptions: CustomerS
               <Td muted nowrap>
                 {periodEnd ? (
                   <>
-                    {dayMonthYear(periodEnd)}
+                    {clock.date(periodEnd)}
                     {sub.status === "TRIALING" && !sub.currentPeriodEnd && <span className="block text-[11px] text-subtle">Trial ends</span>}
                   </>
                 ) : (

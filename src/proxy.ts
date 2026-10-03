@@ -19,6 +19,7 @@ import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
 import { billingHeldPage, noWorkspacePage, unavailableWorkspacePage } from "@/lib/tenancy/pages";
 import { holdFor } from "@/lib/tenancy/hold";
+import { clockOfTenant } from "@/lib/time/workspace";
 
 /**
  * Served from the proxy while a restore is running, so it depends on nothing.
@@ -386,7 +387,7 @@ async function handle(req: NextRequest & { auth: unknown }, pathname: string, te
     if (verdict === "hold") {
       const retryAfter = maintenance.endsAt ? Math.max(60, Math.round((maintenance.endsAt.getTime() - Date.now()) / 1000)) : 300;
       return harden(
-        new NextResponse(maintenancePage(maintenance, await maintenanceAppName()), {
+        new NextResponse(maintenancePage(maintenance, clockOfTenant(tenant), await maintenanceAppName()), {
           status: 503,
           headers: { "content-type": "text/html; charset=utf-8", "retry-after": String(retryAfter), "cache-control": "no-store" },
         }) as NextResponse,

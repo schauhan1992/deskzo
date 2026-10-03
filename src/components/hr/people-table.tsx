@@ -1,7 +1,9 @@
 import Link from "next/link";
 import type { listPeople } from "@/actions/hr";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { toKey } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { employmentTypeLabels, exitTypeLabels } from "@/lib/validation/hr";
 
 type Row = Awaited<ReturnType<typeof listPeople>>[number];
@@ -13,7 +15,7 @@ type Row = Awaited<ReturnType<typeof listPeople>>[number];
  * sensitive — address, bank, date of birth — lives one click away on the record itself, so a
  * directory left open on a shared screen does not leak anybody's personal details.
  */
-export function PeopleTable({ people }: { people: Row[] }) {
+export async function PeopleTable({ people }: { people: Row[] }) {
   if (people.length === 0) {
     return (
       <Card className="px-4 py-12 text-center text-sm text-subtle">
@@ -21,6 +23,10 @@ export function PeopleTable({ people }: { people: Row[] }) {
       </Card>
     );
   }
+
+  // Probation runs to the end of its last day in the workspace. Against the moment now it ended at
+  // midnight UTC — 05:30 on that day in India.
+  const today = (await workspaceClock()).today();
 
   return (
     <Card className="overflow-hidden p-0">
@@ -42,7 +48,7 @@ export function PeopleTable({ people }: { people: Row[] }) {
             {people.map((p) => {
               const profile = p.employeeProfile;
               const onProbation =
-                profile?.probationEndsOn && !profile.confirmedOn && new Date(profile.probationEndsOn) > new Date();
+                profile?.probationEndsOn && !profile.confirmedOn && toKey(profile.probationEndsOn) >= today;
               return (
                 <tr key={p.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-4 py-2.5">
@@ -58,14 +64,16 @@ export function PeopleTable({ people }: { people: Row[] }) {
                   <td className="px-4 py-2.5 text-muted">
                     {profile ? employmentTypeLabels[profile.employmentType] : "—"}
                   </td>
-                  <td className="px-4 py-2.5 text-muted">{profile?.joinedOn ? formatDate(profile.joinedOn) : "—"}</td>
+                  <td className="px-4 py-2.5 text-muted">
+                    {profile?.joinedOn ? formatCalendarDay(profile.joinedOn) : "—"}
+                  </td>
                   <td className="px-4 py-2.5">
                     {profile?.exitedOn ? (
                       <Badge tone="red">
-                        {profile.exitType ? exitTypeLabels[profile.exitType] : "Exited"} {formatDate(profile.exitedOn)}
+                        {profile.exitType ? exitTypeLabels[profile.exitType] : "Exited"} {formatCalendarDay(profile.exitedOn)}
                       </Badge>
                     ) : onProbation ? (
-                      <Badge tone="amber">Probation to {formatDate(profile!.probationEndsOn!)}</Badge>
+                      <Badge tone="amber">Probation to {formatCalendarDay(profile!.probationEndsOn)}</Badge>
                     ) : p.active ? (
                       <Badge tone="green">Active</Badge>
                     ) : (

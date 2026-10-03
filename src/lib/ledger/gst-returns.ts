@@ -412,6 +412,7 @@ export function buildTdsSummary(params: { docs: ReturnDocument[]; withholdings: 
     else receivable.push(row);
   }
 
+  // The 7th of the month after, as a calendar day: built in UTC, so its ISO date is that day, whatever zone.
   const due = new Date(Date.UTC(params.year, params.month, 7));
   return {
     payable: payable.sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime()),

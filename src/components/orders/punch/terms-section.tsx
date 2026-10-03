@@ -4,7 +4,8 @@ import { useWatch } from "react-hook-form";
 import { handoffValues } from "@/lib/validation/order";
 import { paymentTermsLabels, paymentTermsValues } from "@/lib/gst";
 import { creditConcerns, termsExceed, type TermsKey } from "@/lib/credit/engine";
-import { handoffLabels, istTodayKey } from "@/lib/orders/handoff-rules";
+import { handoffLabels } from "@/lib/orders/handoff-rules";
+import { useClock } from "@/components/time/clock-provider";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import type { ItemComboOption } from "@/components/items/item-combobox";
 import { FieldError, Section } from "./parts";
@@ -32,6 +33,7 @@ export function TermsSection({
   const { control, register } = form;
   const { total } = usePriceFigures(control, selectedItem);
   const [paymentTerms, handoff] = useWatch({ control, name: ["paymentTerms", "handoff"] });
+  const clock = useClock();
 
   const chosenTerms = (paymentTerms || "") as TermsKey | "";
   const effectiveTerms = (chosenTerms || credit?.defaultTerms) as TermsKey | undefined;
@@ -40,9 +42,9 @@ export function TermsSection({
   const overridingTerms =
     !!credit && !!chosenTerms && chosenTerms !== credit.defaultTerms && termsExceed(chosenTerms, credit.recommendedTerms);
 
-  // India's today, whatever the browser's clock zone: the earliest go-ahead day is the one after it.
-  const today = istTodayKey(new Date());
-  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  // The workspace's today, whatever the browser's clock zone: the earliest go-ahead day is the one after it.
+  const { year, month, day } = clock.parts(new Date());
+  const tomorrow = clock.dateKey(clock.midnight(year, month, day + 1));
 
   return (
     <Section title="Terms and hand-off">

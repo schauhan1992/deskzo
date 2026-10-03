@@ -8,6 +8,7 @@ import { ensureDefaultTemplates } from "@/lib/close/templates";
 import { evaluateAutoChecks, generateTasks, sendCloseNotifications } from "@/lib/close/checklist";
 import { anyActiveAccountingSchedule, runAccountingSchedules } from "@/lib/close/schedules";
 import { readCloseSettings } from "@/lib/close/settings";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * Revenue & Close's nightly work (spec §5), for the workspace in hand — called from the five-minute
@@ -42,8 +43,9 @@ export type NightlyReport = { ran: boolean; reason?: string; day: string; steps:
 const POSTING_CHECKS = ["revenue-recognised", "schedules-posted", "flux-explained"] as const;
 
 export async function runRevenueAndClose(now: Date = new Date()): Promise<NightlyReport> {
+  // India's day in every workspace, as the close's months are.
   const day = indiaToday(now);
-  const dayKey = day.toISOString().slice(0, 10);
+  const dayKey = indiaClock.today(now);
   const report: NightlyReport = { ran: false, day: dayKey, steps: [] };
 
   if (await db.dailyJobRun.findUnique({ where: { job_day: { job: NIGHTLY_JOB, day } }, select: { job: true } })) {

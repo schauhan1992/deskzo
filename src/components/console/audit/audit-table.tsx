@@ -22,20 +22,21 @@ import { CopyButton } from "@/components/console/kit/copy-field";
 import { StatusPill, TONE_TEXT } from "@/components/console/kit/status";
 import { DataTable, DayHeaderRow, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { Avatar } from "@/components/ui/avatar";
-import { dayGroupLabel, istDayKey } from "@/lib/console-shared/format";
+import { dayGroupLabel } from "@/lib/console-shared/format";
 import { AUDIT_CATEGORIES } from "@/lib/console-shared/labels";
 import type { AuditCategoryKey } from "@/lib/console-shared/types";
-import { formatIstDateTime, formatIstTime } from "@/lib/india-time";
 import type { AuditRowView } from "@/lib/platform/audit-query";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
- * The audit log as a table (spec §3.17): newest first, grouped under a heading per Indian day, one
- * row per entry — when, who, what, on which workspace, and the entry's one-line summary. A row opens
- * (a plain `<details>`, so it works before any script loads) to the entry's full detail as JSON,
- * already redacted by the loader, with a button to copy it.
+ * The audit log as a table (spec §3.17): newest first, grouped under a heading per day on the
+ * console's clock, one row per entry — when, who, what, on which workspace, and the entry's one-line
+ * summary. A row opens (a plain `<details>`, so it works before any script loads) to the entry's full
+ * detail as JSON, already redacted by the loader, with a button to copy it.
  *
- * Server-safe: the day headings come from the loader's `todayKey`, never from a clock read here.
+ * Server-safe: the day headings come from the loader's `todayKey` and the console's `clock`, which the
+ * page passes — nothing here reads the time.
  */
 
 const COLUMNS = 5;
@@ -61,11 +62,11 @@ function asDate(at: Date | string): Date {
   return at instanceof Date ? at : new Date(at);
 }
 
-/** Consecutive rows of one Indian day — the rows arrive newest first, so each day is one run. */
-function byDay(rows: AuditRowView[]): { day: string; rows: AuditRowView[] }[] {
+/** Consecutive rows of one day on the console's clock — the rows arrive newest first, so each day is one run. */
+function byDay(rows: AuditRowView[], clock: Clock): { day: string; rows: AuditRowView[] }[] {
   const groups: { day: string; rows: AuditRowView[] }[] = [];
   for (const row of rows) {
-    const day = istDayKey(asDate(row.at));
+    const day = clock.dateKey(asDate(row.at));
     const last = groups[groups.length - 1];
     if (last && last.day === day) last.rows.push(row);
     else groups.push({ day, rows: [row] });
@@ -73,7 +74,7 @@ function byDay(rows: AuditRowView[]): { day: string; rows: AuditRowView[] }[] {
   return groups;
 }
 
-export function AuditLogTable({ rows, todayKey }: { rows: AuditRowView[]; todayKey: string }) {
+export function AuditLogTable({ rows, todayKey, clock }: { rows: AuditRowView[]; todayKey: string; clock: Clock }) {
   return (
     <DataTable stickyHeader minWidth={960} caption="Audit log entries, newest first">
       <THead>
@@ -83,12 +84,12 @@ export function AuditLogTable({ rows, todayKey }: { rows: AuditRowView[]; todayK
         <Th className="w-40">Workspace</Th>
         <Th>Details</Th>
       </THead>
-      {byDay(rows).map((group) => (
+      {byDay(rows, clock).map((group) => (
         // One row group per day: the heading row names it for a screen reader as well.
         <TBody key={group.day}>
           <DayHeaderRow label={dayGroupLabel(group.day, todayKey)} colSpan={COLUMNS} />
           {group.rows.map((row) => (
-            <AuditRow key={row.id} row={row} />
+            <AuditRow key={row.id} row={row} clock={clock} />
           ))}
         </TBody>
       ))}
@@ -96,15 +97,15 @@ export function AuditLogTable({ rows, todayKey }: { rows: AuditRowView[]; todayK
   );
 }
 
-function AuditRow({ row }: { row: AuditRowView }) {
+function AuditRow({ row, clock }: { row: AuditRowView; clock: Clock }) {
   const at = asDate(row.at);
   const workspaceHref = row.href?.startsWith("/workspaces/") ? row.href : null;
   return (
     // Top-aligned: an opened row grows downwards without dragging its other cells to the middle.
     <Tr className="[&>td]:align-top">
       <Td nowrap muted className="tabular-nums">
-        <time dateTime={at.toISOString()} title={`${formatIstDateTime(at)} IST`}>
-          {formatIstTime(at)}
+        <time dateTime={at.toISOString()} title={`${clock.dateTime(at)} ${clock.offsetLabel(at)}`}>
+          {clock.time(at)}
         </time>
       </Td>
       <Td>

@@ -4,7 +4,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { LeadStatus } from "@prisma/client";
 import { SplitRow } from "@/components/ui/split-list";
 import { SELECTED_PARAM } from "@/lib/view-mode";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import type { LeadStageDef } from "@/lib/pipeline/rules";
 
@@ -50,7 +51,7 @@ export function LeadSplitList({ leads, selectedId }: { leads: LeadRow[]; selecte
             <>
               <LeadStatusBadge status={lead.status} stage={lead.stage} lostReason={lead.lostReason} />
               {lead.expectedCloseDate && (
-                <span className="text-xs text-subtle">Closes {formatDate(lead.expectedCloseDate)}</span>
+                <span className="text-xs text-subtle">Closes {formatCalendarDay(lead.expectedCloseDate)}</span>
               )}
               {lead.owner && <span className="text-xs text-subtle">{lead.owner.name}</span>}
             </>

@@ -9,7 +9,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { attachmentName, mergeTemplate, recipientNames } from "@/lib/documents/email-template";
-import { formatIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { MAIL_NAMES, SIGN_IN_NAMES, mailConnectPath } from "@/lib/workplace/providers";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,7 @@ type Prepared = Extract<Awaited<ReturnType<typeof prepareDocumentEmail>>, { ok: 
  */
 export function DocumentMailButton({ documentId }: { documentId: string }) {
   const router = useRouter();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [loading, startLoading] = useTransition();
   const [sending, startSending] = useTransition();
@@ -205,7 +206,7 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
               {attachmentName(prepared.document.label, prepared.document.number)} — the same PDF as Print, made when you press Send.
             </p>
             {prepared.document.lastEmailedAt && (
-              <p className="text-xs text-subtle">Last emailed {formatIstDateTime(prepared.document.lastEmailedAt)}.</p>
+              <p className="text-xs text-subtle">Last emailed {clock.dateTime(prepared.document.lastEmailedAt)}.</p>
             )}
 
             {notice && <ActionNotice tone={notice.tone}>{notice.text}</ActionNotice>}

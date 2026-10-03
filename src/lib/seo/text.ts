@@ -1,3 +1,5 @@
+import { indiaClock } from "@/lib/time/zone";
+
 /**
  * Text measures the checks share: words, phrases, sentences, questions. Every comparison runs on the
  * same tokens — lower-case runs of letters and digits in any script — so "GST-ready", "gst ready"
@@ -104,9 +106,12 @@ export function quote(text: string | null | undefined, max = 70): string {
 /** "1 word", "12 words" and the like. */
 export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
-/** A date as India's calendar has it, "2026-09-29" — independent of the host's time zone. */
+/**
+ * A date as India's calendar has it, "2026-09-29" — independent of the host's time zone. India's, as
+ * the public site dates its posts (src/lib/seo/schema.ts `shownUpdatedAt`).
+ */
 export function istDay(date: Date): string {
-  return new Date(date.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+  return indiaClock.dateKey(date);
 }
 
 /** Whole months from `from` to `to` (30.44-day months), never negative. */

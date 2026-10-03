@@ -5,7 +5,7 @@ import { getVisit, listVisitAssignees } from "@/actions/visit";
 import { listCompanyOptions } from "@/actions/company";
 import { VisitForm } from "@/components/visits/visit-form";
 import { isVisitOpen } from "@/lib/visits";
-import { istDateTimeInput } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function EditVisitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,7 +26,7 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
     );
   }
 
-  const [companies, assignees] = await Promise.all([listCompanyOptions(), listVisitAssignees()]);
+  const [companies, assignees, clock] = await Promise.all([listCompanyOptions(), listVisitAssignees(), workspaceClock()]);
 
   return (
     <div>
@@ -49,8 +49,8 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
           locationId: visit.locationId ?? "",
           purpose: visit.purpose,
           agenda: visit.agenda ?? "",
-          // The time as it was planned in India, not in the server's own zone.
-          scheduledFor: istDateTimeInput(visit.scheduledFor),
+          // The time as it was planned on the workspace's clock, not in the server's own zone.
+          scheduledFor: clock.input(visit.scheduledFor),
           address: visit.address ?? "",
           distanceKm: visit.distanceKm !== null ? String(visit.distanceKm) : "",
           userId: visit.userId,

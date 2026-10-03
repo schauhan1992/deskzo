@@ -6,9 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SharedDataNote } from "@/components/settings/shared-data-note";
 import { OutboundLink } from "@/components/ui/outbound-link";
-
-const when = (iso: string | null) =>
-  iso ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(iso)) : "—";
+import { useClock } from "@/components/time/clock-provider";
 
 const LABELS: Record<string, string> = {
   "geonames-states": "States & provinces",
@@ -21,6 +19,8 @@ const LABELS: Record<string, string> = {
  * (see `startWorldPlacesSync`), so leaving the page does not stop it; this polls while it runs.
  */
 export function WorldPlacesManager({ initial }: { initial: WorldPlacesState }) {
+  const clock = useClock();
+  const when = (iso: string | null) => clock.dateTimeShort(iso);
   const [state, setState] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();

@@ -17,6 +17,7 @@ import {
   suggestedWindows,
   type PeriodWindow,
 } from "@/lib/targets/metrics";
+import { useClock } from "@/components/time/clock-provider";
 
 type Options = {
   people: { id: string; name: string; role: string; department: { id: string; name: string } | null }[];
@@ -38,12 +39,15 @@ const SCOPES: TargetScope[] = ["USER", "DEPARTMENT", "COMPANY"];
  */
 export function SetTargetsDialog({ options }: { options: Options }) {
   const router = useRouter();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [bulk, setBulk] = useState(false);
 
-  const windows = suggestedWindows(new Date());
+  // The periods around the workspace's today, given as a day is held (midnight UTC) — how
+  // `suggestedWindows` reads the date it is handed.
+  const windows = suggestedWindows(clock.calendarDate(new Date()));
   const [windowIndex, setWindowIndex] = useState(0);
   const [metric, setMetric] = useState<TargetMetric>("INVOICED_VALUE");
   const [scope, setScope] = useState<TargetScope>("USER");
@@ -58,6 +62,7 @@ export function SetTargetsDialog({ options }: { options: Options }) {
   const definition = metricByKey[metric];
 
   // The equivalent window immediately before this one, for the "what did they do last time" figure.
+  // Whole days counted on the windows' own `yyyy-mm-dd` keys, in UTC: no zone enters into it.
   function previousWindow(w: PeriodWindow) {
     const from = new Date(`${w.fromDate}T00:00:00.000Z`);
     const to = new Date(`${w.toDate}T00:00:00.000Z`);

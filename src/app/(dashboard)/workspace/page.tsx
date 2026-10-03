@@ -5,7 +5,8 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { listWorkbooks } from "@/actions/workspace";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Saved lists. The ones most recently opened come first, because a worklist is something people
@@ -13,7 +14,7 @@ import { formatDate } from "@/lib/utils";
  */
 type Workbook = Awaited<ReturnType<typeof listWorkbooks>>[number];
 
-function WorkbookCard({ workbook: w }: { workbook: Workbook }) {
+function WorkbookCard({ workbook: w, clock }: { workbook: Workbook; clock: Clock }) {
   return (
     <Link href={`/workspace/${w.id}`}>
       <Card className="h-full p-4 transition-colors hover:bg-surface-sunken">
@@ -47,7 +48,7 @@ function WorkbookCard({ workbook: w }: { workbook: Workbook }) {
             </span>
           )}
           <span>·</span>
-          <span>{w.lastOpenedAt ? `opened ${formatDate(w.lastOpenedAt)}` : `saved ${formatDate(w.updatedAt)}`}</span>
+          <span>{w.lastOpenedAt ? `opened ${clock.date(w.lastOpenedAt)}` : `saved ${clock.date(w.updatedAt)}`}</span>
           {!w.shared && (
             <>
               <span>·</span>
@@ -64,7 +65,7 @@ export default async function WorkspacePage() {
   const enabled = await isModuleEnabled("workspace");
   if (!enabled) return <ModuleDisabledNotice moduleKey="workspace" />;
 
-  const all = await listWorkbooks();
+  const [all, clock] = await Promise.all([listWorkbooks(), workspaceClock()]);
   const mine = all.filter((w) => w.assignedToMe);
   const rest = all.filter((w) => !w.assignedToMe);
 
@@ -91,7 +92,7 @@ export default async function WorkspacePage() {
           <h2 className="mt-6 text-sm font-medium text-text">Assigned to you</h2>
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {mine.map((w) => (
-              <WorkbookCard key={w.id} workbook={w} />
+              <WorkbookCard key={w.id} workbook={w} clock={clock} />
             ))}
           </div>
           <h2 className="mt-8 text-sm font-medium text-text">Everything else</h2>
@@ -100,7 +101,7 @@ export default async function WorkspacePage() {
 
       <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {rest.map((w) => (
-          <WorkbookCard key={w.id} workbook={w} />
+          <WorkbookCard key={w.id} workbook={w} clock={clock} />
         ))}
 
         {all.length === 0 && (

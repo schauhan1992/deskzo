@@ -8,7 +8,8 @@ import { getSource } from "@/lib/analytics/sources";
 import { effectiveSource } from "@/lib/analytics/custom";
 import { countActiveFilters, describeFilters, type WorkbookFilters } from "@/lib/workspace/filters";
 import { workbookFilterOptions } from "@/actions/workspace";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 import { currentUser } from "@/lib/session";
 import { PrintButton } from "@/components/reports/print-button";
 
@@ -39,7 +40,7 @@ export default async function ReportPrintPage({
     notFound();
   }
 
-  const [result, viewer] = await Promise.all([runAnalyticsReport(request!), currentUser()]);
+  const [result, viewer, clock] = await Promise.all([runAnalyticsReport(request!), currentUser(), workspaceClock()]);
   if (!result.ok) {
     return <p className="p-8 text-sm text-danger">{result.error}</p>;
   }
@@ -106,7 +107,7 @@ export default async function ReportPrintPage({
           <Row label="Rows counted" value={data.rowCount.toLocaleString("en-IN")} />
           <Row label="Scope" value={data.scopeNote} />
           <Row label="Run by" value={viewer?.name ?? "—"} />
-          <Row label="Run at" value={formatDateTime(new Date())} />
+          <Row label="Run at" value={clock.dateTimeShort(new Date())} />
           {appliedDimensions.length > 0 && <Row label="Filtered to" value={appliedDimensions.join(" · ")} />}
           {appliedCompany.length > 0 && (
             <Row

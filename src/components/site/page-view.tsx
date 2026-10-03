@@ -10,7 +10,6 @@ import { fill, resolveAction } from "@/components/site/links";
 import { fillNav } from "@/components/site/nav";
 import { applicationsShown, directoryShown } from "@/components/site/partners/programme";
 import { Breadcrumbs, ButtonLink, Container } from "@/components/site/ui";
-import { istDateParts } from "@/lib/india-time";
 import { getSitePage, getSiteSettings, sitePath, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
 import { aiSearchCrawlersAllowed } from "@/lib/seo/crawlers";
 import { inputFromPage, siteContextFrom } from "@/lib/seo/extract";
@@ -18,6 +17,7 @@ import { buildLayoutMetadata, buildPageMetadata } from "@/lib/seo/metadata";
 import { serialiseLd } from "@/lib/seo/schema";
 import type { JsonLd, SeoInput, SeoSiteContext } from "@/lib/seo/types";
 import { HOST_MISMATCH, protocolFor, requestHost } from "@/lib/tenancy/host";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * How a page of the public site is put together: its content from the one loader
@@ -42,9 +42,9 @@ async function renderContext(query: Query = {}): Promise<SiteRenderContext> {
   return { settings, signupOpen: status.signupOpen, trialDays: status.trialDays, searchParams: firstValues(query), workspaceSuffix: workspaceSuffix(), hiddenPaths };
 }
 
-/** The year in India, on the server — never a client's clock. */
+/** The year in India, on the server — never a client's clock; the public site dates everything on India's. */
 function thisYear(): number {
-  return istDateParts(new Date()).year;
+  return indiaClock.parts(new Date()).year;
 }
 
 /** The site's frame: header, main, footer. */

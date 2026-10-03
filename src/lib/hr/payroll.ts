@@ -1,3 +1,5 @@
+import { formatCalendarDay } from "@/lib/time/zone";
+
 /**
  * Indian payroll arithmetic: gross, the statutory deductions, and what actually reaches the bank.
  *
@@ -332,7 +334,8 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   if (!input.flags.pfApplicable && previous && inForce && c.basic > previous.ceiling && c.basic <= latest.ceiling) {
     const rupees = (v: number) => `₹${v.toLocaleString("en-IN")}`;
     const { year, month, day } = latest.from;
-    const since = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    // A calendar day, in the app's own words: Intl's en-IN says "Sept" in some ICU versions.
+    const since = formatCalendarDay(new Date(Date.UTC(year, month - 1, day)));
     warnings.push(
       `PF isn't on for this employee, but their basic of ${rupees(c.basic)} is within the PF wage ceiling of ${rupees(latest.ceiling)} from ${since} (it was ${rupees(previous.ceiling)}). If your establishment is covered by EPF, they must be enrolled — switch PF on in their salary structure.`,
     );

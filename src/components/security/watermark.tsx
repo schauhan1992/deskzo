@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { useClock } from "@/components/time/clock-provider";
 import { showsCustomerData } from "@/lib/security/watermark-pages";
 
 /**
@@ -29,19 +30,16 @@ export function Watermark({
   // Read here, in the browser: the dashboard layout that mounts this stays put as people move
   // between pages, so only the page itself knows where it is now.
   const pathname = usePathname();
-  // The clock is deliberately not read during render — the React compiler's purity rule forbids it,
-  // and a value that changes every render would defeat memoisation anyway.
+  // The workspace's zone. The time itself is deliberately not read during render — the React
+  // compiler's purity rule forbids it, and a value that changes every render would defeat memoisation anyway.
+  const clock = useClock();
   const [stamp, setStamp] = useState("");
 
   useEffect(() => {
-    const format = () =>
-      new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+    const format = () => {
+      const now = new Date();
+      return `${clock.dayMonth(now)}, ${clock.time(now)}`;
+    };
     // Deferred by a tick rather than called here: setting state synchronously in an effect body
     // forces a second render pass before paint, which the React compiler flags. Zero milliseconds
     // is imperceptible, and the label renders without the time until then.
@@ -52,7 +50,7 @@ export function Watermark({
       clearTimeout(first);
       clearInterval(timer);
     };
-  }, []);
+  }, [clock]);
 
   const text = stamp ? `${label} · ${stamp}` : label;
   if (scope === "CUSTOMER_DATA" && !showsCustomerData(pathname)) return null;

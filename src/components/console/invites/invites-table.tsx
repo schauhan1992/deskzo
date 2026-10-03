@@ -12,11 +12,13 @@ import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Input, Label } from "@/components/ui/input";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { INVITE_STATE } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { InviteRow } from "@/lib/platform/console-data";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,10 +39,11 @@ const EXTEND_DAYS = { min: 1, max: 90, start: "14" };
 
 type Pending = { kind: "end"; row: InviteRow } | { kind: "extend"; row: InviteRow } | null;
 
-/** What a row is called in labels and confirmations: its note, or when it was made. */
-const nameOf = (row: InviteRow) => row.note?.trim() || `the invitation made ${dayMonthYear(row.createdAt)}`;
+/** What a row is called in labels and confirmations: its note, or when it was made (the console's day). */
+const nameOf = (row: InviteRow, clock: Clock) => row.note?.trim() || `the invitation made ${clock.date(row.createdAt)}`;
 
 export function InvitesTable({ rows, caps }: { rows: InviteRow[]; caps: Caps }) {
+  const clock = useClock();
   const [pending, setPending] = useState<Pending>(null);
   const manage = caps.manage;
 
@@ -95,7 +98,7 @@ export function InvitesTable({ rows, caps }: { rows: InviteRow[]; caps: Caps }) 
                     <span className="text-text tabular-nums">
                       {row.uses} of {row.maxUses}
                     </span>
-                    <Meter value={row.uses} max={row.maxUses} label={`Uses of ${nameOf(row)}`} size="sm" tone={usedUp ? "muted" : "brand"} />
+                    <Meter value={row.uses} max={row.maxUses} label={`Uses of ${nameOf(row, clock)}`} size="sm" tone={usedUp ? "muted" : "brand"} />
                   </div>
                 </Td>
                 <Td nowrap>
@@ -115,7 +118,7 @@ export function InvitesTable({ rows, caps }: { rows: InviteRow[]; caps: Caps }) 
                 </Td>
                 {manage && (
                   <RowActionsCell>
-                    <RowMenu label={`Actions for ${nameOf(row)}`} items={menuFor(row)} />
+                    <RowMenu label={`Actions for ${nameOf(row, clock)}`} items={menuFor(row)} />
                   </RowActionsCell>
                 )}
               </Tr>
@@ -177,6 +180,7 @@ function Workspaces({ slugs }: { slugs: string[] }): ReactNode {
 
 /** End a live invitation (T1): its code stops working now. */
 function EndInviteDialog({ row, onClose }: { row: InviteRow | null; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
 
   function close() {
@@ -200,7 +204,7 @@ function EndInviteDialog({ row, onClose }: { row: InviteRow | null; onClose: () 
     >
       {row && (
         <p>
-          The code for <strong className="font-medium">{nameOf(row)}</strong> stops working now
+          The code for <strong className="font-medium">{nameOf(row, clock)}</strong> stops working now
           {row.uses > 0 ? `. The ${plural(row.uses, "workspace")} already made with it ${row.uses === 1 ? "is" : "are"} not affected.` : "."}
           {row.heldSlug ? <> The address it holds, <span className="font-mono">{row.heldSlug}</span>, is let go: anybody may have it again.</> : null}
         </p>
@@ -214,6 +218,7 @@ function EndInviteDialog({ row, onClose }: { row: InviteRow | null; onClose: () 
  * The new end is worked out from the row, never from the reader's clock.
  */
 function ExtendInviteDialog({ row, onClose }: { row: InviteRow; onClose: () => void }) {
+  const clock = useClock();
   const id = useId();
   const action = useConsoleAction<{ expiresAt: string }>();
   const [days, setDays] = useState(EXTEND_DAYS.start);
@@ -239,13 +244,13 @@ function ExtendInviteDialog({ row, onClose }: { row: InviteRow; onClose: () => v
       confirmDisabled={!valid}
       onConfirm={() =>
         action.run(() => consoleExtendInvite(row.codeHash, n), {
-          success: (data) => `Invitation extended — it now works until ${dayMonthYear(data.expiresAt)}.`,
+          success: (data) => `Invitation extended — it now works until ${clock.date(data.expiresAt)}.`,
           onDone: onClose,
         })
       }
     >
       <p>
-        The code for <strong className="font-medium">{nameOf(row)}</strong> works for longer —{" "}
+        The code for <strong className="font-medium">{nameOf(row, clock)}</strong> works for longer —{" "}
         {live ? "counted from its current end." : "counted from now, since it has lapsed."}
       </p>
       <div className="space-y-1.5">
@@ -270,10 +275,10 @@ function ExtendInviteDialog({ row, onClose }: { row: InviteRow; onClose: () => v
       </div>
       <ImpactList
         items={[
-          { label: live ? "Works until" : "Lapsed", value: dayMonthYear(row.expiresAt) },
+          { label: live ? "Works until" : "Lapsed", value: clock.date(row.expiresAt) },
           {
             label: "Will work until",
-            value: !valid ? "—" : live && row.expiresAt ? dayMonthYear(new Date(new Date(row.expiresAt).getTime() + n * DAY_MS)) : `${plural(n, "day")} from now`,
+            value: !valid ? "—" : live && row.expiresAt ? clock.date(new Date(new Date(row.expiresAt).getTime() + n * DAY_MS)) : `${plural(n, "day")} from now`,
             tone: valid ? "success" : undefined,
           },
           { label: "Uses left", value: `${Math.max(0, row.maxUses - row.uses)} of ${row.maxUses}` },

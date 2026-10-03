@@ -12,7 +12,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { RatingStars } from "@/components/feedback/feedback-summary";
 import { linkState, ratingLabels, ratingTone, subjectOf } from "@/lib/feedback/rating";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Row = Awaited<ReturnType<typeof listFeedback>>["rows"][number];
 
@@ -54,6 +54,7 @@ export function FeedbackList({
 
 function FeedbackRow({ row, origin, showCompany }: { row: Row; origin: string; showCompany: boolean }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [answering, setAnswering] = useState(false);
   const [note, setNote] = useState("");
@@ -96,8 +97,8 @@ function FeedbackRow({ row, origin, showCompany }: { row: Row; origin: string; s
           <p className="text-xs text-subtle">
             {row.sentToName ? `Asked ${row.sentToName}` : "Asked"}
             {row.aboutUser && ` · about ${row.aboutUser.name}`}
-            {row.sentAt && ` · sent ${formatDate(row.sentAt)}`}
-            {response && ` · replied ${formatDate(response.submittedAt)}`}
+            {row.sentAt && ` · sent ${clock.date(row.sentAt)}`}
+            {response && ` · replied ${clock.date(response.submittedAt)}`}
           </p>
         </div>
 
@@ -131,7 +132,7 @@ function FeedbackRow({ row, origin, showCompany }: { row: Row; origin: string; s
           {response.acknowledgedAt ? (
             <p className="text-xs text-muted">
               <span className="font-medium text-text">Answered</span> by {response.acknowledgedBy?.name ?? "somebody"}{" "}
-              on {formatDate(response.acknowledgedAt)} — {response.actionNote}
+              on {clock.date(response.acknowledgedAt)} — {response.actionNote}
             </p>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -206,7 +207,7 @@ function FeedbackRow({ row, origin, showCompany }: { row: Row; origin: string; s
             <X className="mr-1 h-3 w-3" />
             Withdraw
           </Button>
-          {row.expiresAt && <span className="text-[11px] text-subtle">Closes {formatDate(row.expiresAt)}</span>}
+          {row.expiresAt && <span className="text-[11px] text-subtle">Closes {clock.date(row.expiresAt)}</span>}
         </div>
       )}
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}

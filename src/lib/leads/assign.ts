@@ -1,6 +1,6 @@
 import type { ContactDesignation, ItemType, LeadAssignmentStrategy, LeadSource, Prisma, PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "@/lib/db";
-import { istDateParts } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { stateCodeFromName } from "@/lib/gst-engine";
 
 /**
@@ -84,9 +84,8 @@ async function available(db: Db, rule: RuleShape, now: Date, companyOwnerId: str
   const active = await db.user.findMany({ where: { id: { in: candidates }, active: true }, select: { id: true } });
   let ids = candidates.filter((id) => active.some((u) => u.id === id));
   if (rule.skipOnLeave && ids.length) {
-    // Leave dates are calendar days, stored as dates; today is India's today, not the server's.
-    const { year, month, day } = istDateParts(now);
-    const today = new Date(Date.UTC(year, month, day));
+    // Leave dates are calendar days, stored as dates; today is the workspace's today, not the server's.
+    const today = (await workspaceClock()).calendarDate(now);
     const away = await db.leaveRequest.findMany({
       where: { userId: { in: ids }, status: "APPROVED", fromDate: { lte: today }, toDate: { gte: today } },
       select: { userId: true },

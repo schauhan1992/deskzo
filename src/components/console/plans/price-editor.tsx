@@ -10,11 +10,11 @@ import { InsetBlock, Panel } from "@/components/console/kit/panel";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { gatewayLabel, intervalLabel } from "@/lib/console-shared/labels";
 import type { PlanDetail } from "@/lib/platform/console-data";
 
@@ -65,6 +65,7 @@ function parseAmount(text: string, currency: string): { minor: number | null; er
 
 export function PriceEditor({ planKey, prices, editable }: { planKey: string; prices: PlanDetail["prices"]; editable: boolean }) {
   const id = useId();
+  const clock = useClock();
   const retire = useConsoleAction<null>();
   const add = useConsoleAction<{ id: string; externalId: string }>();
   const [retiring, setRetiring] = useState<Price | null>(null);
@@ -188,7 +189,7 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
                     </StatusPill>
                   </Td>
                   <Td nowrap muted className="tabular-nums">
-                    {dayMonthYear(price.createdAt)}
+                    {clock.date(price.createdAt)}
                   </Td>
                   {editable && (
                     <RowActionsCell>

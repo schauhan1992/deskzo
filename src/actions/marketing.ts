@@ -18,7 +18,7 @@ import { audienceCompanyWhere, parseCompanyFilters, DEFAULT_CONTACT_FILTERS } fr
 import { TRIGGERS } from "@/lib/marketing/triggers";
 import type { ActionResult } from "@/actions/company";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
-import { parseTypedTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Building and sending campaigns.
@@ -137,7 +137,7 @@ export async function previewAudience(input: {
     settings,
   });
 
-  const companies = await db.company.count({ where: audienceCompanyWhere(parseCompanyFilters(input.companyFilters)) });
+  const companies = await db.company.count({ where: audienceCompanyWhere(parseCompanyFilters(input.companyFilters), settings.rules.clock) });
   const summary = summariseSuppressions(resolved.map((r) => r.verdict));
 
   return toPlain({
@@ -460,9 +460,9 @@ export async function saveCampaign(input: {
     return { ok: false, error: "That list isn't there any more." };
   }
 
-  // The campaign editor sends "Not before" as typed — India time; the mass-mail wizard sends a
-  // timestamp with its zone. Both are read for what they are, wherever the server is.
-  const scheduledFor = input.scheduledFor ? parseTypedTime(input.scheduledFor) : null;
+  // The campaign editor sends "Not before" as typed — the workspace's time; the mass-mail wizard sends
+  // a timestamp with its zone. Both are read for what they are, wherever the server is.
+  const scheduledFor = input.scheduledFor ? (await workspaceClock()).parseTyped(input.scheduledFor) : null;
   if (input.scheduledFor && !scheduledFor) return { ok: false, error: "That send time isn't a date." };
   const data = {
     name: input.name.trim(),
@@ -738,7 +738,7 @@ export async function sendMassMail(input: {
   if (!manage) return { ok: false, error: "You can't create campaigns." };
   const template = await db.marketingTemplate.findUnique({ where: { id: input.templateId }, select: { channel: true, active: true } });
   if (!template || !template.active) return { ok: false, error: "Pick a template that's in use." };
-  if (input.scheduledFor && !parseTypedTime(input.scheduledFor)) return { ok: false, error: "That send time isn't a date." };
+  if (input.scheduledFor && !(await workspaceClock()).parseTyped(input.scheduledFor)) return { ok: false, error: "That send time isn't a date." };
   const saved = await saveCampaign({
     name: input.name,
     templateId: input.templateId,
@@ -912,7 +912,7 @@ export async function previewTrigger(input: {
   const audience = input.audienceId
     ? await db.audience.findUnique({ where: { id: input.audienceId }, select: { companyFilters: true } })
     : null;
-  const where = audienceCompanyWhere(parseCompanyFilters(audience?.companyFilters ?? {}));
+  const where = audienceCompanyWhere(parseCompanyFilters(audience?.companyFilters ?? {}), await workspaceClock());
   const candidates = await candidatesFor(input.trigger, input.triggerConfig ?? {}, where);
 
   const companies = await db.company.findMany({

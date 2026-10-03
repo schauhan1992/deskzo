@@ -6,7 +6,8 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { balanceSheet, profitAndLoss, trialBalance } from "@/actions/ledger-reports";
 import { getOrganisation } from "@/lib/organisation";
 import { Card } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { financialYearBounds } from "@/lib/ledger/period";
 import { BalanceCheck, ReportHeader } from "@/components/accounting/report-chrome";
 import { getBooksStatus } from "@/actions/books";
@@ -206,7 +207,8 @@ export default async function AccountingOverviewPage() {
     <div className="animate-fade-rise">
       <ReportHeader
         title="Accounting"
-        subtitle={`Financial year ${fy.label} · ${formatDate(pl.from)} to ${formatDate(pl.to)}`}
+        // The year's first and last moments, India's days: the books keep India's calendar.
+        subtitle={`Financial year ${fy.label} · ${indiaClock.date(pl.from)} to ${indiaClock.date(pl.to)}`}
         organisation={org.legalName}
       />
 
@@ -224,7 +226,7 @@ export default async function AccountingOverviewPage() {
       {books.lockedUntil && (
         <Card className="mt-4 flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm text-muted">
           <Lock className="h-3.5 w-3.5 text-success" />
-          The books are closed to {formatDate(books.lockedUntil)} — nothing on or before that date can be changed.
+          The books are closed to {formatCalendarDay(books.lockedUntil)} — nothing on or before that date can be changed.
           <Link href="/accounting/books" className="ml-auto text-brand hover:underline">
             Manage
           </Link>

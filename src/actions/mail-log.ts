@@ -7,7 +7,7 @@ import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
-import { startOfIndianDay, endOfIndianDay } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { formatOrderId } from "@/lib/order-id";
 import { MAIL_STATUS_GROUPS, mailSender, mailSource, type MailStatusGroup } from "@/lib/mail-log";
 
@@ -71,8 +71,7 @@ export type MailLogParams = {
 
 async function mailWhere(userId: string, params: MailLogParams): Promise<Prisma.MarketingMessageWhereInput> {
   const q = params.q?.trim();
-  const from = params.from ? startOfIndianDay(params.from) : null;
-  const to = params.to ? endOfIndianDay(params.to) : null;
+  const days = (await workspaceClock()).dayRange(params.from, params.to);
   const channel = params.channel ?? "EMAIL";
   return {
     AND: [
@@ -82,8 +81,8 @@ async function mailWhere(userId: string, params: MailLogParams): Promise<Prisma.
       ...(channel === "ALL" ? [] : [{ channel }]),
       ...(params.status && MAIL_STATUS_GROUPS[params.status] ? [{ status: { in: [...MAIL_STATUS_GROUPS[params.status].statuses] } }] : []),
       ...(params.kind ? [{ messageClass: params.kind }] : []),
-      // Half-open, in Indian days — see src/lib/india-time.ts.
-      ...(from || to ? [{ createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } }] : []),
+      // Half-open, in the workspace's days — see src/lib/time/zone.ts.
+      ...(days ? [{ createdAt: days }] : []),
       ...(q
         ? [
             {

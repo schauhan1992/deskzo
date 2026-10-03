@@ -17,6 +17,7 @@ import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { exportParams, parseAuditFilters, withParams, type AuditFilters, type RawParams } from "@/lib/console-shared/params";
 import { capsFor } from "@/lib/console-shared/roles";
 import { auditFacets, auditQuery } from "@/lib/platform/audit-query";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 
 export const metadata: Metadata = { title: "Audit log" };
@@ -47,7 +48,7 @@ export default async function ConsoleAuditPage({ searchParams }: PageProps<"/pla
   const caps = capsFor(staff.role);
   const sp: RawParams = (await searchParams) ?? {};
   const f = parseAuditFilters(sp);
-  const [log, facets] = await Promise.all([auditQuery(f), auditFacets()]);
+  const [log, facets, clock] = await Promise.all([auditQuery(f), auditFacets(), consoleClock()]);
 
   const chips = filterChips(f, sp, facets.staff);
   const filtered = chips.length > 0;
@@ -85,7 +86,7 @@ export default async function ConsoleAuditPage({ searchParams }: PageProps<"/pla
       {log.rows.length > 0 ? (
         <>
           <Panel padded={false}>
-            <AuditLogTable rows={log.rows} todayKey={log.todayKey} />
+            <AuditLogTable rows={log.rows} todayKey={log.todayKey} clock={clock} />
           </Panel>
           <CursorPager newerHref={newerHref} olderHref={olderHref} summary={`Showing ${plural(log.rows.length, "entry", "entries")}`} />
         </>

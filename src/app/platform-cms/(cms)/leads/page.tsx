@@ -16,7 +16,7 @@ import { cmsPage } from "@/lib/cms/guard";
 import { listLeads } from "@/lib/cms/leads";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, LEAD_TOPICS, LEAD_TOPIC_LABELS, cmsCapsFor, type LeadFilters, type SiteLeadStatus } from "@/lib/cms/types";
-import { formatIstDateTime } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 
 export const metadata: Metadata = { title: "Leads" };
 
@@ -27,7 +27,7 @@ const topicLabel = (topic: string) => (LEAD_TOPIC_LABELS as Record<string, strin
 
 /**
  * The leads inbox: what people sent through the site's contact form, newest first, 30 at a time —
- * by status (with counts over everything), topic, the day it came in (India's calendar) and a search
+ * by status (with counts over everything), topic, the day it came in (the console's calendar) and a search
  * over name, email, company and message. Everybody reads it; editors and admins work it and export
  * it as CSV.
  */
@@ -45,8 +45,8 @@ export default async function CmsLeadsPage({ searchParams }: PageProps<"/platfor
   const page = Math.min(1000, Math.max(1, Math.floor(Number(one(sp.page)) || 1)));
   const filters: LeadFilters = { status, topic, from, to, q, page };
 
-  const leads = await listLeads(filters);
-  const all = LEAD_STATUSES.reduce((sum, s) => sum + leads.counts[s], 0);
+  const [leads, clock] = await Promise.all([listLeads(filters), consoleClock()]);
+  const all =LEAD_STATUSES.reduce((sum, s) => sum + leads.counts[s], 0);
   const totalPages = Math.max(1, Math.ceil(leads.total / leads.pageSize));
   const chips = [
     ...(topic ? [{ key: "topic", label: `Topic: ${topicLabel(topic)}`, removeHref: withParams(PATH, sp, { topic: null }) }] : []),
@@ -117,7 +117,7 @@ export default async function CmsLeadsPage({ searchParams }: PageProps<"/platfor
                       {lead.handledBy && <span className="mt-0.5 block text-xs text-subtle">{lead.handledBy}</span>}
                     </Td>
                     <Td muted nowrap>
-                      <span title={formatIstDateTime(lead.createdAt)}>
+                      <span title={clock.dateTime(lead.createdAt)}>
                         <RelativeTime at={lead.createdAt} />
                       </span>
                     </Td>

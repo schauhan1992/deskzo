@@ -1,6 +1,6 @@
 import type { PlanLine } from "@/lib/billing/sync";
-import { istDateParts, istMidnight } from "@/lib/india-time";
 import type { AttributionSource, TermsRates } from "@/lib/partners/types";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The commission engine's arithmetic (spec §5.3–§5.6), pure: no database, no clock of its own, and
@@ -12,6 +12,8 @@ import type { AttributionSource, TermsRates } from "@/lib/partners/types";
  *   · Rates are basis points (1500 is 15 %), 0–10000.
  *   · Months are India's calendar months (`addIstMonths`): the same wall-clock time n months on, the
  *     day clamped to the month's end — 31 January + 1 month is 28 (or 29) February, same time of day.
+ *     India's whatever zone the console keeps: commission is earned on the platform's own invoices, and
+ *     a display setting must not move an invoice between a customer's new and renewal months.
  *
  * Client-safe. src/lib/partners/commission.ts does the reading and writing.
  */
@@ -81,12 +83,13 @@ export function rateFor(terms: TermsRates, ctx: RateContext): { rateBp: number; 
  * clamped to the last day of that month: 31 Jan 2026 18:30 IST + 1 is 28 Feb 2026 18:30 IST.
  */
 export function addIstMonths(at: Date, n: number): Date {
-  const { year, month, day } = istDateParts(at);
-  const timeOfDay = at.getTime() - istMidnight(year, month, day).getTime();
+  const { year, month, day } = indiaClock.parts(at);
+  // India keeps no daylight saving, so a time of day is the same span after every midnight.
+  const timeOfDay = at.getTime() - indiaClock.midnight(year, month, day).getTime();
   const target = month + whole(n);
   // Day 0 of the month after is the target month's last day; Date.UTC carries a month past 11 into the next year.
   const lastDay = new Date(Date.UTC(year, target + 1, 0)).getUTCDate();
-  return new Date(istMidnight(year, target, Math.min(day, lastDay)).getTime() + timeOfDay);
+  return new Date(indiaClock.midnight(year, target, Math.min(day, lastDay)).getTime() + timeOfDay);
 }
 
 /** NEW while the customer is within its first `newMonths` months from its first paid invoice; RENEWAL after. */

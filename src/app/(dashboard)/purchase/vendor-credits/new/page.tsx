@@ -3,7 +3,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { viewerHas } from "@/actions/permission";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { VendorCreditForm } from "@/components/rebates/vendor-credit-form";
-import { istTodayKey } from "@/lib/orders/handoff-rules";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /** Recording a credit note or a payout from a distributor or an OEM — `rebates.manage`. */
 export default async function NewVendorCreditPage() {
@@ -17,7 +17,8 @@ export default async function NewVendorCreditPage() {
       </div>
     );
   }
-  const issuers = await vendorCreditIssuers();
+  // Today on the workspace's calendar — the latest date the action accepts.
+  const [issuers, clock] = await Promise.all([vendorCreditIssuers(), workspaceClock()]);
   return (
     <div className="max-w-4xl">
       <h1 className="text-xl font-semibold text-text">Record a credit</h1>
@@ -26,7 +27,7 @@ export default async function NewVendorCreditPage() {
         it is recorded: what we owe them goes down (or the bank up), and Purchase Rebates &amp; Discounts goes up.
       </p>
       <div className="mt-5">
-        <VendorCreditForm issuers={issuers.map((c) => ({ id: c.id, name: c.name }))} today={istTodayKey(new Date())} />
+        <VendorCreditForm issuers={issuers.map((c) => ({ id: c.id, name: c.name }))} today={clock.today()} />
       </div>
     </div>
   );

@@ -1,12 +1,13 @@
 import type { Prisma } from "@deskzo/control-client";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonth, dayMonthYear } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, INVITE_STATE, PARTNER_KIND, PARTNER_STATUS, ROLE_LABEL, SUBSCRIPTION_STATUS, TENANT_STATUS, planKindLabel, subscriptionKind } from "@/lib/console-shared/labels";
 import { SELLERS, SIGNUP_VIEWERS, hasRole } from "@/lib/console-shared/roles";
 import type { ConsoleRole, SearchHit, SearchKind, SearchResults, TenantStatusKey } from "@/lib/console-shared/types";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { cleanText } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { normaliseSerial } from "@/lib/platform/device-routes";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The command palette's search (Ctrl K): the control plane's workspaces, their addresses, billing,
@@ -61,6 +62,8 @@ type Ctx = {
   compact: string;
   seller: boolean;
   now: Date;
+  /** The console's (Settings › Time zone): the days a line names. */
+  clock: Clock;
 };
 
 // ─── Small helpers ───────────────────────────────────────────────────────────────────────────────
@@ -264,7 +267,7 @@ async function invoiceHits(c: Ctx): Promise<SearchHit[]> {
       kind: "invoice",
       key: i.id,
       title: i.number ? text(i.number, 80) : i.externalId,
-      subtitle: line(formatMoney(i.total, i.currency), INVOICE_STATUS[i.status].label, i.tenant.slug, dayMonthYear(i.issuedAt)),
+      subtitle: line(formatMoney(i.total, i.currency), INVOICE_STATUS[i.status].label, i.tenant.slug, c.clock.date(i.issuedAt)),
       href: `/workspaces/${encode(i.tenant.slug)}?tab=billing`,
     }));
 }
@@ -282,7 +285,7 @@ async function terminalHits(c: Ctx): Promise<SearchHit[]> {
     kind: "terminal",
     key: d.serial,
     title: d.serial,
-    subtitle: line(text(d.tenant.name), d.tenant.slug, d.lastSeenAt ? `last heard ${dayMonth(d.lastSeenAt)}` : "never heard from"),
+    subtitle: line(text(d.tenant.name), d.tenant.slug, d.lastSeenAt ? `last heard ${c.clock.dayMonth(d.lastSeenAt)}` : "never heard from"),
     href: `/devices?q=${encode(d.serial)}`,
   }));
 }
@@ -369,7 +372,7 @@ async function inviteHits(c: Ctx): Promise<SearchHit[]> {
       const stored = (i.note ?? "").trim();
       const pageQuery = stored && stored === note && stored.length <= MAX_QUERY ? stored : c.term;
       // Its state as the Invitations page words it: used up, expired (on a date), or live (until one).
-      const until = i.expiresAt ? ` ${dayMonthYear(i.expiresAt)}` : "";
+      const until = i.expiresAt ? ` ${c.clock.date(i.expiresAt)}` : "";
       const state =
         i.uses >= i.maxUses
           ? INVITE_STATE.used.label
@@ -380,7 +383,7 @@ async function inviteHits(c: Ctx): Promise<SearchHit[]> {
         kind: "invite",
         key: `${i.createdAt.getTime().toString(36)}-${n}`,
         title: note || "An invitation",
-        subtitle: line(state, `${i.uses} of ${i.maxUses} used`, `made ${dayMonthYear(i.createdAt)}`),
+        subtitle: line(state, `${i.uses} of ${i.maxUses} used`, `made ${c.clock.date(i.createdAt)}`),
         href: `/invites?status=all&q=${encode(pageQuery)}`,
       };
     });
@@ -404,7 +407,7 @@ async function signupHits(c: Ctx): Promise<SearchHit[]> {
         text(s.companyName),
         s.slug,
         !s.verifiedAt ? "email not confirmed" : s.tenantId ? "workspace requested" : "email confirmed",
-        `started ${dayMonthYear(s.createdAt)}`,
+        `started ${c.clock.date(s.createdAt)}`,
       ),
       href: `/signups?q=${encode(text(s.email, MAX_QUERY))}`,
     }));
@@ -437,7 +440,7 @@ export async function searchControlPlane(q: string, role: ConsoleRole, now = new
   const { kinds, term } = scopeOf(query);
   if (term.length < MIN_TERM) return empty;
 
-  const ctx: Ctx = { term, compact: term.replace(/\s/g, ""), seller: hasRole(role, SELLERS), now };
+  const ctx: Ctx = { term, compact: term.replace(/\s/g, ""), seller: hasRole(role, SELLERS), now, clock: await consoleClock() };
   const groups = GROUPS.filter((g) => (!kinds || kinds.includes(g.kind)) && visibleTo(g.kind, role));
   const hits = await Promise.all(groups.map((g) => SEARCHES[g.kind](ctx)));
   return {

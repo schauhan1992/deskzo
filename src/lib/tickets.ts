@@ -1,4 +1,5 @@
 import type { TicketPriority, TicketStatus, TicketType } from "@prisma/client";
+import type { Clock } from "@/lib/time/zone";
 
 export function formatTicketId(seq: number) {
   return `TCK-${String(seq).padStart(6, "0")}`;
@@ -42,13 +43,17 @@ export type TicketSlaStatus = {
   tone: "default" | "red" | "green";
 };
 
-const dueByFormatter = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" });
-
-/** SLA is a fixed target-response window per priority, counted from ticket creation. Not configurable per admin yet. */
+/**
+ * SLA is a fixed target-response window per priority, counted from ticket creation. Not configurable per admin yet.
+ *
+ * The label's time is on `clock` — the workspace's (`workspaceClock()`, `useClock()`), so the server and
+ * the browser print the same words. It used an Intl formatter with no zone: the server's, or the reader's.
+ */
 export function getTicketSlaStatus(
   priority: TicketPriority,
   status: TicketStatus,
   createdAt: Date | string,
+  clock: Clock,
   now: Date = new Date(),
 ): TicketSlaStatus {
   if (status === "RESOLVED") return { key: "resolved", label: "Resolved", tone: "default" };
@@ -56,7 +61,7 @@ export function getTicketSlaStatus(
 
   const dueBy = new Date(new Date(createdAt).getTime() + SLA_HOURS[priority] * 60 * 60 * 1000);
   if (now.getTime() > dueBy.getTime()) {
-    return { key: "overdue", label: `Overdue since ${dueByFormatter.format(dueBy)}`, tone: "red" };
+    return { key: "overdue", label: `Overdue since ${clock.dateTimeShort(dueBy)}`, tone: "red" };
   }
-  return { key: "on-track", label: `Due by ${dueByFormatter.format(dueBy)}`, tone: "green" };
+  return { key: "on-track", label: `Due by ${clock.dateTimeShort(dueBy)}`, tone: "green" };
 }

@@ -4,13 +4,14 @@ import { BillingDetailsForm, CancelRazorpay, ManageAtStripe, PlanPicker } from "
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatMoney } from "@/lib/billing/money";
-import { formatIstDate } from "@/lib/india-time";
+import { clockOfTenant } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { partnerShownToCustomer } from "@/lib/partners/customer-facing";
 import { COMPANY_NAME } from "@/lib/brand-names";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
-/** Where this workspace stands, in a sentence. */
-function standingText(view: BillingView): { tone: "green" | "amber" | "red" | "blue" | "default"; text: string } {
+/** Where this workspace stands, in a sentence — its dates on the workspace's own clock. */
+function standingText(view: BillingView, clock: Clock): { tone: "green" | "amber" | "red" | "blue" | "default"; text: string } {
   const s = view.standing;
   if (view.held) return { tone: "red", text: "The workspace is held until a plan is paid for. Nothing has been deleted — paying opens it again at once." };
   switch (s.kind) {
@@ -19,13 +20,13 @@ function standingText(view: BillingView): { tone: "green" | "amber" | "red" | "b
     case "paid":
       return { tone: "green", text: "Paid up." };
     case "trial":
-      return { tone: "blue", text: `On a free trial until ${formatIstDate(s.endsAt)}.` };
+      return { tone: "blue", text: `On a free trial until ${clock.date(s.endsAt)}.` };
     case "trial-over":
-      return { tone: "amber", text: `The trial has ended. Choose a plan by ${formatIstDate(s.holdAt)}, or the workspace is held.` };
+      return { tone: "amber", text: `The trial has ended. Choose a plan by ${clock.date(s.holdAt)}, or the workspace is held.` };
     case "past-due":
-      return { tone: "amber", text: `A payment has failed and is being retried. Unless it is paid by ${formatIstDate(s.holdAt)}, the workspace is held.` };
+      return { tone: "amber", text: `A payment has failed and is being retried. Unless it is paid by ${clock.date(s.holdAt)}, the workspace is held.` };
     case "ending":
-      return { tone: "amber", text: `Cancelled: it runs until ${formatIstDate(s.holdAt)} and does not renew.` };
+      return { tone: "amber", text: `Cancelled: it runs until ${clock.date(s.holdAt)} and does not renew.` };
     case "lapsed":
       return { tone: "red", text: "No plan is paid for." };
     default:
@@ -47,12 +48,14 @@ export default async function BillingPage() {
       </div>
     );
   }
-  const { id: tenantId, country } = await currentTenant();
+  const tenant = await currentTenant();
+  const { id: tenantId, country } = tenant;
+  const clock = clockOfTenant(tenant);
   // The partner that sold this workspace, named but read-only: moving a workspace to another partner
   // is a staff act with a reason (spec §4.4), so there is nothing here to change it. It never throws
   // and waits 1.5 s at most; without an answer the line is simply left out.
   const partner = await partnerShownToCustomer(tenantId).catch(() => null);
-  const standing = standingText(view);
+  const standing = standingText(view, clock);
   const paying = view.subscriptions.some((s) => s.gateway !== "MANUAL");
   const mayBuy = !paying && view.standing.kind !== "exempt";
   return (
@@ -73,7 +76,7 @@ export default async function BillingPage() {
                 <span className="block text-xs text-muted">
                   {s.gateway === "MANUAL" ? (s.status === "TRIALING" ? "Free trial" : `Given by ${COMPANY_NAME}`) : `${s.gateway === "STRIPE" ? "Stripe" : "Razorpay"}, ${s.interval === "YEAR" ? "yearly" : "monthly"}`}
                   {s.status === "PAST_DUE" && " — payment overdue"}
-                  {s.currentPeriodEnd && ` — ${s.cancelAtPeriodEnd ? "ends" : "renews"} ${formatIstDate(s.currentPeriodEnd)}`}
+                  {s.currentPeriodEnd && ` — ${s.cancelAtPeriodEnd ? "ends" : "renews"} ${clock.date(s.currentPeriodEnd)}`}
                 </span>
               </span>
               {s.gateway === "RAZORPAY" && !s.cancelAtPeriodEnd && <CancelRazorpay subscriptionId={s.id} plan={s.plans[0]?.name ?? "this plan"} />}
@@ -132,7 +135,7 @@ export default async function BillingPage() {
               <tbody className="divide-y divide-line">
                 {view.invoices.map((i) => (
                   <tr key={i.id}>
-                    <td className="py-1.5 text-muted">{formatIstDate(i.issuedAt)}</td>
+                    <td className="py-1.5 text-muted">{clock.date(i.issuedAt)}</td>
                     <td className="py-1.5">{i.number ?? "—"}</td>
                     <td className="py-1.5">{formatMoney(i.total, i.currency)}</td>
                     <td className="py-1.5">{i.status.toLowerCase()}</td>

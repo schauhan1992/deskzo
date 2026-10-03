@@ -2,7 +2,8 @@ import Link from "next/link";
 import { PhoneCall } from "lucide-react";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { allocationMethodLabels, formatSpan } from "@/lib/workspace/allocation";
 import type { activityReport } from "@/actions/calling-activity";
 
@@ -14,8 +15,12 @@ type Report = NonNullable<Awaited<ReturnType<typeof activityReport>>>;
  * Handle time and gap are shown separately on purpose: a slow day is either long calls or long
  * silences between them, and those are different problems with different answers. A single
  * "average time per record" would hide which one you have.
+ *
+ * A deadline is a day as typed, held as midnight UTC, and a row under "By day" is the workspace's
+ * day — both shown as the day they are; when somebody last worked is a moment, on the workspace's clock.
  */
-export function ActivityDashboard({ report, currentUserId }: { report: Report; currentUserId?: string }) {
+export async function ActivityDashboard({ report, currentUserId }: { report: Report; currentUserId?: string }) {
+  const clock = await workspaceClock();
   const { totals, callers, days, workbook } = report;
   const percent = totals.records > 0 ? Math.round((totals.worked / totals.records) * 100) : 0;
   const mine = callers.find((c) => c.id === currentUserId);
@@ -27,7 +32,7 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
             <span className="text-sm text-text">
               <span className="font-medium">{mine.remaining}</span> of your {mine.total} still to call
-              {mine.dueAt && ` · due ${formatDate(mine.dueAt)}`}
+              {mine.dueAt && ` · due ${formatCalendarDay(mine.dueAt)}`}
             </span>
             <Link href={`/workspace/${workbook.id}/call`}>
               <Button size="sm">
@@ -41,7 +46,7 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
 
       <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-4">
         <Stat label="Worked" value={`${totals.worked} / ${totals.records}`} hint={`${percent}% through`} />
-        <Stat label="Still to call" value={String(totals.remaining)} hint={workbook.dueAt ? `due ${formatDate(workbook.dueAt)}` : "no deadline set"} />
+        <Stat label="Still to call" value={String(totals.remaining)} hint={workbook.dueAt ? `due ${formatCalendarDay(workbook.dueAt)}` : "no deadline set"} />
         <Stat label="Time on records" value={formatSpan(totals.talkSeconds)} hint={`avg ${formatSpan(totals.averageHandleSeconds)} each`} />
         <Stat label="Time between" value={formatSpan(totals.idleSeconds)} hint={`avg ${formatSpan(totals.averageGapSeconds)} gap`} />
       </div>
@@ -51,7 +56,7 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
           <span>By caller</span>
           <span className="text-xs font-normal text-subtle">
             Shared out {allocationMethodLabels[workbook.allocationMethod].toLowerCase()}
-            {workbook.startedAt && ` · started ${formatDate(workbook.startedAt)}`}
+            {workbook.startedAt && ` · started ${clock.date(workbook.startedAt)}`}
           </span>
         </CardHeader>
         <table className="w-full text-sm">
@@ -70,7 +75,8 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
           <tbody>
             {callers.map((c) => {
               const share = c.total > 0 ? Math.round((c.worked / c.total) * 100) : 0;
-              const overdue = c.dueAt && !c.finishedAt && new Date(c.dueAt) < new Date();
+              // Overdue once its day has passed on the workspace's calendar — the deadline is a typed day.
+              const overdue = c.dueAt && !c.finishedAt && new Date(c.dueAt).toISOString().slice(0, 10) < clock.today();
               return (
                 <tr key={c.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5 font-medium text-text">{c.name}</td>
@@ -89,7 +95,7 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
                   <td className="px-4 py-2.5 text-right tabular-nums text-muted">{formatSpan(c.averageHandleSeconds)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-muted">{formatSpan(c.averageGapSeconds)}</td>
                   <td className="px-4 py-2.5 text-xs text-subtle">
-                    {c.lastActivityAt ? formatDateTime(c.lastActivityAt) : "Not started"}
+                    {c.lastActivityAt ? clock.dateTimeShort(c.lastActivityAt) : "Not started"}
                   </td>
                   <td className="px-4 py-2.5">
                     {c.finishedAt ? (
@@ -97,7 +103,7 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
                     ) : overdue ? (
                       <Badge tone="red">Overdue</Badge>
                     ) : c.dueAt ? (
-                      <Badge tone="amber">Due {formatDate(c.dueAt)}</Badge>
+                      <Badge tone="amber">Due {formatCalendarDay(c.dueAt)}</Badge>
                     ) : (
                       <Badge tone="default">In progress</Badge>
                     )}
@@ -131,7 +137,7 @@ export function ActivityDashboard({ report, currentUserId }: { report: Report; c
             <tbody>
               {days.map((d) => (
                 <tr key={d.date} className="border-b border-line last:border-0">
-                  <td className="px-4 py-2 text-text">{formatDate(d.date)}</td>
+                  <td className="px-4 py-2 text-text">{formatCalendarDay(d.date)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-text">{d.worked}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-muted">{formatSpan(d.talkSeconds)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-muted">

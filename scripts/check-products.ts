@@ -31,9 +31,9 @@ import Module from "node:module";
 import os from "node:os";
 import path from "node:path";
 import bcrypt from "bcryptjs";
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { renderHtml } from "./lib/render-html";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -126,22 +126,9 @@ internals._load = function (this: unknown, request: string, parent: { filename?:
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 type Page = (props: never) => Promise<unknown>;
 async function html(node: unknown): Promise<string> {
-  return renderToStaticMarkup((await resolveAsync(node)) as ReactElement);
+  return renderHtml(node);
 }
 async function renderPage(page: Page, params: Record<string, unknown> = {}, searchParams: Record<string, string> = {}): Promise<string> {
   return html(await page({ params: Promise.resolve(params), searchParams: Promise.resolve(searchParams) } as never));

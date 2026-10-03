@@ -8,7 +8,8 @@ import { recordAudit } from "@/lib/audit";
 import { auth, signIn, signOut } from "@/lib/auth";
 import { clientIpFrom } from "@/lib/client-ip";
 import { db } from "@/lib/db";
-import { formatIstDateTime } from "@/lib/india-time";
+import { clockOfTenant } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { LinkRefused, linkedSignInEnabled, linkedWorkspacesFor, memberOf, revokeMember, type LinkRefusal, type LinkedWorkspace } from "@/lib/platform/linked/groups";
 import { LinkNeedsCode, cancelLinkIntent, completeLinkIntent, createLinkIntent, presentLinkIntent, proveLinkIntent } from "@/lib/platform/linked/intents";
 import { LINK_COOKIE_MAX_AGE, MAX_LINKED_WORKSPACES, linkCookieName, type LinkCookie } from "@/lib/platform/linked/keys";
@@ -167,12 +168,13 @@ const text = (value: unknown) => (typeof value === "string" ? value : "");
 
 // ─── The list ────────────────────────────────────────────────────────────────────────────────────
 
-function viewOf(w: LinkedWorkspace): LinkedWorkspaceView {
+/** Times in the zone of the workspace the person is reading this in. */
+function viewOf(w: LinkedWorkspace, clock: Clock): LinkedWorkspaceView {
   const { linkedAt, lastSwitchedInAt, ...rest } = w;
   return {
     ...rest,
-    linkedAtText: formatIstDateTime(linkedAt),
-    lastSwitchedInText: lastSwitchedInAt ? formatIstDateTime(lastSwitchedInAt) : null,
+    linkedAtText: clock.dateTime(linkedAt),
+    lastSwitchedInText: lastSwitchedInAt ? clock.dateTime(lastSwitchedInAt) : null,
     loginUrl: `${w.origin}/login`,
     markUrl: `${w.origin}/api/brand/mark`,
   };
@@ -203,7 +205,8 @@ export async function myLinkedWorkspaces(): Promise<MyLinkedWorkspaces> {
   ]);
   const reauth = !policy.password ? "sso" : account.twoFactorEnabledAt ? "password+code" : "password";
   const sso = reauth === "sso" ? await ssoProviderFor(me.userId, policy.providers) : null;
-  return { enabled: !paused, items: linked.map(viewOf), reauth, ...(sso ? { ssoName: SIGN_IN_NAMES[sso] } : {}) };
+  const clock = clockOfTenant(tenant);
+  return { enabled: !paused, items: linked.map((w) => viewOf(w, clock)), reauth, ...(sso ? { ssoName: SIGN_IN_NAMES[sso] } : {}) };
 }
 
 // ─── Linking (spec §4.2) ─────────────────────────────────────────────────────────────────────────

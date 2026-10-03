@@ -11,11 +11,11 @@ import {
   visitDuration,
   formatDuration,
 } from "@/lib/visits";
-import { formatIstDate } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Visit = Awaited<ReturnType<typeof listCompanyVisits>>[number];
 
-export function CompanyVisits({
+export async function CompanyVisits({
   companyId,
   visits,
   expenseTotal,
@@ -26,6 +26,7 @@ export function CompanyVisits({
   expenseTotal: number;
 }) {
   const completed = visits.filter((v) => v.status === "COMPLETED").length;
+  const clock = await workspaceClock();
 
   return (
     <div className="space-y-4">
@@ -66,7 +67,7 @@ export function CompanyVisits({
                     <Badge tone={visitStatusTone[v.status]}>{visitStatusLabels[v.status]}</Badge>
                   </td>
                   <td className="px-3 py-2 text-muted">{visitPurposeLabels[v.purpose]}</td>
-                  <td className="px-3 py-2 text-muted">{formatIstDate(v.scheduledFor)}</td>
+                  <td className="px-3 py-2 text-muted">{clock.date(v.scheduledFor)}</td>
                   <td className="px-3 py-2 text-muted">{formatDuration(visitDuration(v.checkInAt, v.checkOutAt))}</td>
                   <td className="px-3 py-2 text-muted">{v.user.name}</td>
                 </tr>

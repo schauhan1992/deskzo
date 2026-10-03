@@ -1,4 +1,5 @@
 import type { Role } from "@/lib/roles";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The shape of the DLP policy, its defaults, and the questions the rest of the app asks it.
@@ -141,16 +142,14 @@ export function screenshotDecision(used: number, limitPerDay: number): Screensho
 }
 
 /**
- * The working day a screenshot counts against, in IST.
+ * The working day a screenshot counts against: the day on the workspace's clock (`workspaceClock()`).
  *
- * Not `toISOString().slice(0,10)`, which is UTC: a screenshot taken at 3am IST is 21:30 the
- * previous day in UTC, so a UTC key would hand somebody a second allowance every night and reset
- * the cap in the middle of the afternoon shift.
+ * Not the UTC date: a screenshot taken at 3am IST is 21:30 the previous day in UTC, so a UTC key
+ * would hand somebody a second allowance every night and reset the cap in the middle of the
+ * afternoon shift. It was India's day for every workspace; a workspace elsewhere resets on its own.
  */
-const IST_OFFSET_MINUTES = 330;
-
-export function istDayKey(at: Date = new Date()): string {
-  return new Date(at.getTime() + IST_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);
+export function allowanceDayKey(clock: Clock, at: Date = new Date()): string {
+  return clock.dateKey(at);
 }
 
 /**

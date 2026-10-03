@@ -11,9 +11,17 @@ import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Pagination } from "@/components/ui/pagination";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
+import { lastValidDay } from "@/lib/eway/rules";
 
 const PAGE_SIZES = [25, 50, 100] as const;
+
+/**
+ * The last day a bill covers, as the law counts it: India's day, in every workspace. Not the day of
+ * `validUntil` itself, which is the midnight after it — a day the bill does not cover.
+ */
+const coveredTo = (validUntil: Date) => formatCalendarDay(lastValidDay(new Date(validUntil)));
 
 const DOC_LABEL: Record<string, string> = {
   INVOICE: "Invoice",
@@ -147,7 +155,8 @@ export default async function EwayBillsPage({
           <tbody>
             {rows.map((r) => (
               <tr key={r.documentId} className="border-b border-line last:border-0 hover:bg-surface-sunken">
-                <td className="whitespace-nowrap px-4 py-2.5 text-muted">{formatDate(r.issueDate)}</td>
+                {/* The document's day as the e-way bill states it: India's. */}
+                <td className="whitespace-nowrap px-4 py-2.5 text-muted">{indiaClock.date(r.issueDate)}</td>
                 <td className="px-4 py-2.5">
                   <Link href={`/documents/${r.documentId}`} className="font-medium text-text hover:text-brand">
                     {r.docNumber}
@@ -177,9 +186,9 @@ export default async function EwayBillsPage({
                   {r.status === "CANCELLED" ? (
                     <Badge>Cancelled</Badge>
                   ) : r.status === "EXPIRED" ? (
-                    <Badge tone="amber">Expired {r.validUntil ? formatDate(r.validUntil) : ""}</Badge>
+                    <Badge tone="amber">Expired {r.validUntil ? coveredTo(r.validUntil) : ""}</Badge>
                   ) : (
-                    (r.validUntil && formatDate(r.validUntil)) || "—"
+                    (r.validUntil && coveredTo(r.validUntil)) || "—"
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-text">

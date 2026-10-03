@@ -9,7 +9,8 @@ import { approvalStatusLabels } from "@/lib/documents/approval";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The sign-off banner: where the document has got to, and the one or two things this person can do.
@@ -44,6 +45,7 @@ export function DocumentApprovalBar({
   maySubmit: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [sendBackOpen, setSendBackOpen] = useState(false);
@@ -62,7 +64,7 @@ export function DocumentApprovalBar({
     });
   };
 
-  const { tone, headline, detail } = describe({ status, submittedBy, submittedAt, approvedBy, approvedAt, mayApprove });
+  const { tone, headline, detail } = describe({ status, submittedBy, submittedAt, approvedBy, approvedAt, mayApprove }, clock);
 
   return (
     <div
@@ -164,23 +166,26 @@ export function DocumentApprovalBar({
 }
 
 /** The sentence for each state, written for whoever is looking rather than about the record. */
-function describe({
-  status,
-  submittedBy,
-  submittedAt,
-  approvedBy,
-  approvedAt,
-  mayApprove,
-}: {
-  status: DocumentApprovalStatus;
-  submittedBy: string | null;
-  submittedAt: Date | string | null;
-  approvedBy: string | null;
-  approvedAt: Date | string | null;
-  mayApprove: boolean;
-}): { tone: "info" | "warning" | "danger" | "success"; headline: string; detail: string } {
+function describe(
+  {
+    status,
+    submittedBy,
+    submittedAt,
+    approvedBy,
+    approvedAt,
+    mayApprove,
+  }: {
+    status: DocumentApprovalStatus;
+    submittedBy: string | null;
+    submittedAt: Date | string | null;
+    approvedBy: string | null;
+    approvedAt: Date | string | null;
+    mayApprove: boolean;
+  },
+  clock: Clock,
+): { tone: "info" | "warning" | "danger" | "success"; headline: string; detail: string } {
   const by = (name: string | null, at: Date | string | null) =>
-    name ? `${name}${at ? ` on ${formatDate(at)}` : ""}` : "somebody";
+    name ? `${name}${at ? ` on ${clock.date(at)}` : ""}` : "somebody";
 
   switch (status) {
     case "PENDING":

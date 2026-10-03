@@ -4,7 +4,8 @@ import { getItem, updateItemCustomFields } from "@/actions/item";
 import { isModuleEnabled } from "@/actions/module";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 import { formatItemId } from "@/lib/order-id";
 import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { db } from "@/lib/db";
@@ -38,6 +39,7 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
 
   const item = await getItem(resolved);
   if (!item) notFound();
+  const clock = await workspaceClock();
 
   // After the check, never before — see `canonicalise`.
   canonicalise(id, "/items", formatItemId(item.itemSeq), query);
@@ -139,7 +141,7 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
                     <tbody>
                       {item.stockMovements.map((m) => (
                         <tr key={m.id} className="border-t border-line">
-                          <td className="py-1.5 text-muted">{formatDate(m.createdAt)}</td>
+                          <td className="py-1.5 text-muted">{clock.date(m.createdAt)}</td>
                           <td className="py-1.5 text-muted">{m.type}</td>
                           <td className={`py-1.5 font-medium ${m.quantityChange >= 0 ? "text-success" : "text-danger"}`}>
                             {m.quantityChange >= 0 ? `+${m.quantityChange}` : m.quantityChange}
@@ -198,7 +200,7 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
               </div>
               <div className="flex justify-between">
                 <span className="text-muted">Added on</span>
-                <span className="text-text">{formatDate(item.createdAt)}</span>
+                <span className="text-text">{clock.date(item.createdAt)}</span>
               </div>
             </CardContent>
           </Card>

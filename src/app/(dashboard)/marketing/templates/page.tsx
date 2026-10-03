@@ -7,16 +7,17 @@ import { Badge, Card } from "@/components/ui/card";
 import { TemplateEditor } from "@/components/marketing/template-editor";
 import { TOPICS } from "@/lib/marketing/topics";
 import { requiredFields } from "@/lib/marketing/merge";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function TemplatesPage() {
   const enabled = await isModuleEnabled("marketing");
   if (!enabled) return <ModuleDisabledNotice moduleKey="marketing" />;
 
   const user = await currentUser();
-  const [templates, canManage] = await Promise.all([
+  const [templates, canManage, clock] = await Promise.all([
     listTemplates(),
     user ? hasEffectivePermission(user.id, "marketing.manage") : Promise.resolve(false),
+    workspaceClock(),
   ]);
 
   return (
@@ -53,7 +54,7 @@ export default async function TemplatesPage() {
                     </div>
                     {t.subject && <p className="text-xs text-muted">{t.subject}</p>}
                     <p className="text-[11px] text-subtle">
-                      {t.createdBy.name} · updated {formatDate(t.updatedAt)}
+                      {t.createdBy.name} · updated {clock.date(t.updatedAt)}
                       {required.length > 0 && (
                         <> · every recipient must have: {required.map((r) => `{{${r}}}`).join(", ")}</>
                       )}

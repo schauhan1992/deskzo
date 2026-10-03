@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { documentPostingSelect, resolveAccounts, revenueInRupees, writeEntry } from "@/lib/ledger/journal";
-import { istMidnight } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import {
   addMonths,
   asDayKey,
@@ -70,12 +70,15 @@ function checkAsAt(asAt: MonthKey, now: Date) {
   if (asAt > monthKeyAt(now)) throw new ScheduleRefusal("Deferred revenue can't be opened at a month that hasn't started.");
 }
 
-/** The instants an invoice must be issued between to be a candidate: the 24 months up to the month end. */
+/**
+ * The instants an invoice must be issued between to be a candidate: the 24 months up to the month end.
+ * India's months in every workspace: revenue is recognised in the books' months.
+ */
 function lookback(asAt: MonthKey) {
   const first = addMonths(asAt, -(OPENING_LOOKBACK_MONTHS - 1));
   const [fy, fm] = [Number(first.slice(0, 4)), Number(first.slice(5, 7)) - 1];
   const [ey, em] = [Number(asAt.slice(0, 4)), Number(asAt.slice(5, 7)) - 1];
-  return { from: istMidnight(fy, fm, 1), to: istMidnight(ey, em + 1, 1) };
+  return { from: indiaClock.midnight(fy, fm, 1), to: indiaClock.midnight(ey, em + 1, 1) };
 }
 
 const invoiceSelect = {

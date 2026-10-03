@@ -7,7 +7,7 @@ import { RefreshCw, ShieldAlert } from "lucide-react";
 import { refreshDomainProfile, type listDomainProfiles } from "@/actions/domain";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 import { toDomain } from "@/lib/domain-intel/signatures";
 
 type Row = Awaited<ReturnType<typeof listDomainProfiles>>["rows"][number];
@@ -53,6 +53,7 @@ export function DomainRows({ rows }: { rows: Row[] }) {
 
 function DomainRow({ row }: { row: Row }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const profile = row.domainProfile;
@@ -123,11 +124,11 @@ function DomainRow({ row }: { row: Row }) {
       <td className="px-4 py-2.5 text-muted">
         {profile?.registrar ?? "—"}
         {profile?.expiresOn && (
-          <div className="mt-0.5 text-xs text-subtle">expires {formatDate(profile.expiresOn)}</div>
+          <div className="mt-0.5 text-xs text-subtle">expires {clock.date(profile.expiresOn)}</div>
         )}
       </td>
       <td className="px-4 py-2.5 text-xs text-subtle">
-        {profile?.fetchedAt ? formatDate(profile.fetchedAt) : "Never"}
+        {profile?.fetchedAt ? clock.date(profile.fetchedAt) : "Never"}
       </td>
       <td className="px-4 py-2.5 text-right">
         <Button size="sm" variant="ghost" disabled={pending} onClick={refresh} title="Look this domain up now">

@@ -6,7 +6,7 @@ import { CheckCircle2, Plug, Unplug } from "lucide-react";
 import { disconnectMailbox } from "@/actions/document-mail";
 import { Button } from "@/components/ui/button";
 import { ActionNotice } from "@/components/ui/action-notice";
-import { formatIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { MAIL_NAMES, PROVIDER_NAMES, SIGN_IN_NAMES, mailConnectPath, providerOfMailSlug, sayEither, type WorkplaceProvider } from "@/lib/workplace/providers";
 
 /** What a round trip to the provider came back as — `?mailbox=…&via=…` on the way back here. */
@@ -69,6 +69,7 @@ export function MailboxConnection({
   via: string | null;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const said = outcome ? outcomeNotice(outcome, providerOfMailSlug(via) ?? "MICROSOFT") : null;
@@ -104,8 +105,8 @@ export function MailboxConnection({
               {live.mailbox}
             </p>
             <p className="text-xs text-muted">
-              {MAIL_NAMES[live.provider]} · connected {formatIstDateTime(live.connectedAt)}
-              {live.lastUsedAt ? ` · last used ${formatIstDateTime(live.lastUsedAt)}` : ""}
+              {MAIL_NAMES[live.provider]} · connected {clock.dateTime(live.connectedAt)}
+              {live.lastUsedAt ? ` · last used ${clock.dateTime(live.lastUsedAt)}` : ""}
             </p>
           </div>
           <Button size="sm" variant="ghost" onClick={disconnect} disabled={pending}>

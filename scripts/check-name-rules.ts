@@ -154,6 +154,7 @@ async function main() {
   const names = require("../src/lib/workspace-names") as typeof import("../src/lib/workspace-names");
   const host = require("../src/lib/tenancy/host") as typeof import("../src/lib/tenancy/host");
   const labels = require("../src/lib/console-shared/labels") as typeof import("../src/lib/console-shared/labels");
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
   const { nameVerdict, signupNameVerdict, NAME_RESERVED, NAME_TAKEN, NAME_PATTERN_MESSAGE } = names;
   type Rule = import("../src/lib/workspace-names").NameRule;
   const hostOf = (sub: string) => host.classifyHost(`${sub}.${host.PLATFORM_DOMAIN}:3000`);
@@ -518,8 +519,8 @@ async function main() {
         const label = labels.auditLabel(action, {});
         ok(`${action}: "${label.title}", in ${label.category}`, label.title !== action && label.category === (action.startsWith("names.") ? "names" : "invites"));
       }
-      ok("summaries say what changed", labels.auditSummary("names.block", { value: "acme", kind: "BLOCK_WORD", reason: "zz", workspaces: 2 }) === "acme · any name with this word · “zz” · 2 workspaces keep it" || (labels.auditSummary("names.block", { value: "acme", kind: "BLOCK_WORD", reason: "zz", workspaces: 2 }) ?? "").includes("2 workspaces keep it"));
-      ok("  an ended invitation names the address it let go", labels.auditSummary("invite.end", { codeHashPrefix: "abcd1234", heldSlug: "acme" }) === "acme no longer held");
+      ok("summaries say what changed", labels.auditSummary("names.block", { value: "acme", kind: "BLOCK_WORD", reason: "zz", workspaces: 2 }, indiaClock) === "acme · any name with this word · “zz” · 2 workspaces keep it" || (labels.auditSummary("names.block", { value: "acme", kind: "BLOCK_WORD", reason: "zz", workspaces: 2 }, indiaClock) ?? "").includes("2 workspaces keep it"));
+      ok("  an ended invitation names the address it let go", labels.auditSummary("invite.end", { codeHashPrefix: "abcd1234", heldSlug: "acme" }, indiaClock) === "acme no longer held");
       ok("names.* entries lead to the Workspace names page", labels.auditHref("names.release", { value: "books" }, null) === "/names" && labels.auditHref("invite.hold", {}, null) === "/invites");
     });
 

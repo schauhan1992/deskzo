@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { OutboundLink, whatsappHref } from "@/components/ui/outbound-link";
-import { formatDate } from "@/lib/utils";
-import { formatIstDate } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 
 type Targets = Awaited<ReturnType<typeof feedbackTargets>>;
 
@@ -41,6 +40,7 @@ export function AskFeedbackDialog({
   preset?: { ticketId?: string; visitId?: string; companyProductId?: string; aboutUserId?: string };
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export function AskFeedbackDialog({
         {created && url ? (
           <div className="space-y-4">
             <p className="text-sm text-muted">
-              {created.reference} · open until {formatDate(created.expiresAt)}. It works once, then it closes.
+              {created.reference} · open until {clock.date(created.expiresAt)}. It works once, then it closes.
             </p>
 
             <div className="flex items-center gap-2">
@@ -203,7 +203,7 @@ export function AskFeedbackDialog({
                   <optgroup label="Site visits">
                     {targets.visits.map((v) => (
                       <option key={v.id} value={`visit:${v.id}`}>
-                        {formatIstDate(v.scheduledFor)} — {v.purpose.toLowerCase().replaceAll("_", " ")}
+                        {clock.date(v.scheduledFor)} — {v.purpose.toLowerCase().replaceAll("_", " ")}
                       </option>
                     ))}
                   </optgroup>

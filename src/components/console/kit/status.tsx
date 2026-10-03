@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
 import { Check, LoaderCircle } from "lucide-react";
-import { HELD_FOR, JOB_STATUS, ROLE_LABEL, TENANT_STATUS, schemaStatus, standingLabel } from "@/lib/console-shared/labels";
-import type { ConsoleRole, StandingKind, TenantStatusKey, Tone } from "@/lib/console-shared/types";
+import { HELD_FOR, JOB_STATUS, ROLE_LABEL, TENANT_STATUS, schemaStatus } from "@/lib/console-shared/labels";
+import type { ConsoleRole, TenantStatusKey, Tone } from "@/lib/console-shared/types";
 import { cn } from "@/lib/utils";
 
 /**
  * Status pills, dots and the tone classes behind them (spec §1.2–§1.3). Every label and tone comes
  * from src/lib/console-shared/labels.ts, so "Held" is the same amber pill in the directory, the
- * workspace header and a chart legend. Server-safe: no hooks, no directive.
+ * workspace header and a chart legend. Server-safe: no hooks, no directive — but for `StandingPill`,
+ * which counts days on the console's clock and so is a client component of its own (standing-pill.tsx).
  */
+
+export { StandingPill } from "./standing-pill";
 
 export const TONE_PILL: Record<Tone, string> = {
   neutral: "border-line bg-surface-sunken text-muted",
@@ -128,12 +131,6 @@ export function TenantStatusPill({
       <span className={cn("text-[11px] leading-4", TONE_TEXT[held.tone])}>{held.label}</span>
     </span>
   );
-}
-
-/** Billing standing: "Trial · 5 days left", counted from the loader's `asOf`, never the reader's clock. */
-export function StandingPill({ kind, at, asOf }: { kind: StandingKind; at: Date | string | null; asOf: Date | string }) {
-  const { label, tone } = standingLabel(kind, at, asOf);
-  return <StatusPill tone={tone}>{label}</StatusPill>;
 }
 
 export function JobStatusPill({ status }: { status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" }) {

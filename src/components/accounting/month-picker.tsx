@@ -3,7 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Label, Select } from "@/components/ui/input";
 import { MONTH_NAMES } from "@/lib/ledger/period";
-import { istDateParts } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 
 /**
@@ -25,8 +25,9 @@ export function MonthPicker({ month, year }: { month: number; year: number }) {
 
   // Far enough back to cover a business's history here, and no further forward than this month —
   // a return for a month that hasn't happened is not a thing.
-  // India's year: on 1 January before 05:30 IST a browser or server on UTC is still in the old one.
-  const thisYear = istDateParts(new Date()).year;
+  // India's year, whatever zone the workspace keeps — returns are filed for India's months: on 1 January
+  // before 05:30 IST a browser or server on UTC is still in the old one.
+  const thisYear = indiaClock.parts(new Date()).year;
   const years = Array.from({ length: 6 }, (_, i) => thisYear - 4 + i);
 
   return (

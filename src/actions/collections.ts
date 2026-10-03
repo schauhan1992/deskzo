@@ -16,7 +16,6 @@ import {
   STALE_DAYS,
   checkFutureDay,
   followUpChannelLabels,
-  istToday,
   shortDay,
   weekWindow,
   dayKey,
@@ -29,6 +28,7 @@ import {
   type DueRow,
   type FollowUpView,
 } from "@/lib/collections/load";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -97,7 +97,7 @@ export async function listCollections(params: { filter?: string; q?: string; sor
     groups.set(row.companyId, group);
   }
 
-  const { from, to } = weekWindow(now);
+  const { from, to } = weekWindow(await workspaceClock(), now);
   return {
     restricted,
     filter,
@@ -133,15 +133,17 @@ export async function logFollowUp(input: unknown): Promise<ActionResult<{ id: st
   }
 
   const now = new Date();
+  // Today, and so "not in the past", on the workspace's calendar — as the dialog's date inputs are.
+  const clock = await workspaceClock();
   let promisedOn: Date | null = null;
   if (data.promisedOn) {
-    const day = checkFutureDay(data.promisedOn, now, "promised date");
+    const day = checkFutureDay(data.promisedOn, now, "promised date", clock);
     if (!day.ok) return { ok: false, error: day.error };
     promisedOn = day.day;
   }
   let nextFollowUpOn: Date | null = null;
   if (data.nextFollowUpOn) {
-    const day = checkFutureDay(data.nextFollowUpOn, now, "next follow-up date");
+    const day = checkFutureDay(data.nextFollowUpOn, now, "next follow-up date", clock);
     if (!day.ok) return { ok: false, error: day.error };
     nextFollowUpOn = day.day;
   }
@@ -295,6 +297,8 @@ export async function followUpPanel(
   const user = await requireModuleUser("receivables");
   if (!(await can(user.id, "payments.view"))) return null;
   const now = new Date();
+  // The dialog's earliest date: today on the workspace's calendar.
+  const today = (await workspaceClock()).today(now);
 
   if (of.documentId) {
     const invoice = await db.tradeDocument.findUnique({
@@ -325,7 +329,7 @@ export async function followUpPanel(
       history,
       canLog: chaseable && (await mayLogFollowUps(user.id)),
       target: { documentId: invoice.id, label: invoice.docNumber, companyName: invoice.company.name, balance, currency: invoice.currency },
-      today: dayKey(istToday(now)),
+      today,
     };
   }
 
@@ -351,7 +355,7 @@ export async function followUpPanel(
       history,
       canLog: chaseable && (await mayLogFollowUps(user.id)),
       target: { companyProductId: order.id, label: formatOrderId(order.orderSeq), companyName: order.company.name, balance, currency: "INR" },
-      today: dayKey(istToday(now)),
+      today,
     };
   }
   return null;

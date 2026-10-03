@@ -7,7 +7,8 @@ import type { userPermissionOverrides } from "@/actions/access";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PERMISSION_GROUP_ORDER } from "@/lib/permissions";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { lastDayOf } from "@/lib/access/last-day";
 
 type Resolved = NonNullable<Awaited<ReturnType<typeof effectivePermissionsFor>>>;
 type Exception = Awaited<ReturnType<typeof userPermissionOverrides>>[number];
@@ -26,6 +27,7 @@ const TIER_TONE: Record<string, "red" | "amber" | "default"> = {
 };
 
 export function MyAccess({ resolved, exceptions }: { resolved: Resolved; exceptions: Exception[] }) {
+  const clock = useClock();
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
 
@@ -104,7 +106,7 @@ export function MyAccess({ resolved, exceptions }: { resolved: Resolved; excepti
                 {e.expiresAt && (
                   <span className="shrink-0 text-xs text-warning">
                     {/* The line somebody needs before the cover ends, rather than after. */}
-                    ends {formatDate(e.expiresAt)}
+                    ends {clock.date(lastDayOf(e.expiresAt))}
                   </span>
                 )}
               </div>

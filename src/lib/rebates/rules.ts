@@ -129,9 +129,10 @@ export type ProgrammeForMatch = {
 };
 
 /**
- * The programmes that apply to an order: active, in date on `on` (India's calendar day, as
- * `yyyy-mm-dd`), for its item's brand (or any), through its distributor (or any), and — for one that
- * needs it — with the deal registration approved.
+ * The programmes that apply to an order: active, in date on `on` (the workspace's calendar day, as
+ * `yyyy-mm-dd` — `clock.today()`), for its item's brand (or any), through its distributor (or any),
+ * and — for one that needs it — with the deal registration approved. A programme's dates are
+ * `@db.Date` days, so their UTC date is the day.
  */
 export function matchingProgrammes<P extends ProgrammeForMatch>(
   programmes: P[],

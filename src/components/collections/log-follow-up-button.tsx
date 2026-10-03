@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { FOLLOW_UP_CHANNELS, REMARKS_MAX, followUpChannelLabels } from "@/lib/collections/rules";
-import { istDateKey } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { formatMoney, isBaseCurrency } from "@/lib/currency";
 
 export type LogFollowUpTarget = {
@@ -51,20 +51,21 @@ export function LogFollowUpButton({
 }
 
 /**
- * The form itself. The dates can't be before today in India — the server says so too
+ * The form itself. The dates can't be before the workspace's today — the server says so too
  * (`checkFutureDay`), since a date input's `min` is only a hint. A promised amount is in the invoice's
  * own currency.
  */
 export function LogFollowUpForm({ target, onDone, onCancel }: { target: LogFollowUpTarget; onDone: () => void; onCancel: () => void }) {
   const router = useRouter();
   const id = useId();
+  const clock = useClock();
   const [channel, setChannel] = useState<FollowUpChannel>("CALL");
   const [remarks, setRemarks] = useState("");
   const [promisedOn, setPromisedOn] = useState("");
   const [promisedAmount, setPromisedAmount] = useState("");
   const [nextFollowUpOn, setNextFollowUpOn] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [today] = useState(() => istDateKey(new Date()));
+  const [today] = useState(() => clock.today());
   const [pending, startTransition] = useTransition();
   const foreign = !isBaseCurrency(target.currency);
 

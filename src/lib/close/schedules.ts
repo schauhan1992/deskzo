@@ -6,7 +6,6 @@ import { resolveAccounts, writeEntry } from "@/lib/ledger/journal";
 import { round2 } from "@/lib/close/checks";
 import { planLines, replanUnposted } from "@/lib/close/plan";
 import {
-  indiaToday,
   lastCompletedMonth,
   monthFirstPostingDate,
   monthKeyOf,
@@ -14,6 +13,7 @@ import {
   parseMonthKey,
 } from "@/lib/close/months";
 import { openDateToday, postingDateFor, postingMonthFor, reversalDateFor, todayPostingDate } from "@/lib/close/posting-months";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * Prepaids and accruals (spec §4.3): a cost spread over the months it belongs to.
@@ -376,7 +376,8 @@ export async function stopAccountingSchedule(
           entryNumber = entry.entryNumber;
         }
       }
-      const stamp = `Stopped ${indiaToday(now).toISOString().slice(0, 10)}${entryNumber ? `; ₹${expensedNow.toLocaleString("en-IN")} expensed by ${entryNumber}` : ""}.`;
+      // India's day, as the schedule's months and the books are.
+      const stamp = `Stopped ${indiaClock.today(now)}${entryNumber ? `; ₹${expensedNow.toLocaleString("en-IN")} expensed by ${entryNumber}` : ""}.`;
       await tx.accountingSchedule.update({
         where: { id },
         data: { status: "CANCELLED", note: s.note ? `${s.note}\n\n${stamp}` : stamp },

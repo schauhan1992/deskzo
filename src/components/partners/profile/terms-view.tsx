@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { TermsView } from "@/lib/partners/portal-data";
+import { indiaClock } from "@/lib/time/zone";
 import { countryName } from "@/components/partners/profile/details";
 
 /**
@@ -9,7 +10,7 @@ import { countryName } from "@/components/partners/profile/details";
  * rate for a new customer and for renewals, the default, how long a customer earns, a distributor's
  * override on its resellers' customers and its territory rate, and any rate set for a plan or a
  * country. Only ever rendered for the money roles; the loader reads no terms for anyone else.
- * Server-safe.
+ * Server-safe. The day terms take effect is India's, as it was set (src/lib/partners/terms.ts).
  */
 
 function Rate({ label, rate, note }: { label: string; rate: string; note?: ReactNode }) {
@@ -93,7 +94,7 @@ export function TermsSection({ inForce, scheduled, distributor }: { inForce: Ter
     <div className="space-y-6">
       {inForce ? (
         <div className="space-y-3">
-          <p className="text-xs text-muted">{`In force since ${dayMonthYear(inForce.effectiveFrom)}.`}</p>
+          <p className="text-xs text-muted">{`In force since ${indiaClock.date(inForce.effectiveFrom)}.`}</p>
           <TermsBlock terms={inForce} />
         </div>
       ) : (
@@ -101,7 +102,7 @@ export function TermsSection({ inForce, scheduled, distributor }: { inForce: Ter
       )}
       {scheduled.map((terms) => (
         <div key={terms.effectiveFrom.toISOString()} className="space-y-3 border-t border-line pt-4">
-          <h3 className="text-[13px] font-medium text-text">{`From ${dayMonthYear(terms.effectiveFrom)}`}</h3>
+          <h3 className="text-[13px] font-medium text-text">{`From ${indiaClock.date(terms.effectiveFrom)}`}</h3>
           <TermsBlock terms={terms} />
         </div>
       ))}

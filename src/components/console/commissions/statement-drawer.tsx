@@ -9,12 +9,14 @@ import { ExportCsvButton } from "@/components/console/kit/export-button";
 import { ImpactList } from "@/components/console/kit/impact";
 import { DefinitionList, InsetBlock, SubHeading } from "@/components/console/kit/panel";
 import { LabelPill } from "@/components/console/kit/status";
+import { useClock } from "@/components/time/clock-provider";
 import { SidePane } from "@/components/ui/side-pane";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonthYear, monthLabel, plural, when } from "@/lib/console-shared/format";
+import { monthLabel, plural } from "@/lib/console-shared/format";
 import { STATEMENT_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { ConsoleStatementDetail } from "@/lib/partners/commission-data";
+import { indiaClock } from "@/lib/time/zone";
 import { ACCOUNTANT_POINTS, TAX_NOTE, bpText, partnerHref } from "./format";
 import { EntriesTable } from "./entries-table";
 import { StatementRowActions } from "./statements-table";
@@ -24,6 +26,9 @@ import { StatementRowActions } from "./statements-table";
  * did what when, the partner as the statement recorded it — with the bank details as a mask only —
  * and its entries. The page loads it from `?statement=<id>`; closing drops that param. It opens only
  * after hydration (a pane is drawn into `<body>`, which the server does not have).
+ *
+ * The day it was paid is India's, as its month is (src/lib/partners/statements.ts); who did what when
+ * is on the console's clock (`useClock()`).
  */
 
 const noSubscribe = () => () => {};
@@ -90,6 +95,7 @@ export function StatementDetailBody({
   twoPersonPayout: boolean;
   todayKey: string;
 }) {
+  const clock = useClock();
   const { currency, snapshot } = detail;
   const money = (minor: number) => formatMoney(minor, currency);
   const address = [snapshot.address.line1, snapshot.address.line2, snapshot.address.city, snapshot.address.region, snapshot.address.postalCode].filter(Boolean).join(", ");
@@ -147,13 +153,13 @@ export function StatementDetailBody({
         <DefinitionList
           columns={1}
           items={[
-            { term: "Generated", value: `${when(detail.generatedAt)} · ${detail.generatedByName}` },
-            ...(detail.approvedAt ? [{ term: "Approved", value: `${when(detail.approvedAt)}${detail.approvedByName ? ` · ${detail.approvedByName}` : ""}` }] : []),
+            { term: "Generated", value: `${clock.dateTime(detail.generatedAt)} · ${detail.generatedByName}` },
+            ...(detail.approvedAt ? [{ term: "Approved", value: `${clock.dateTime(detail.approvedAt)}${detail.approvedByName ? ` · ${detail.approvedByName}` : ""}` }] : []),
             ...(detail.paidAt
-              ? [{ term: "Paid", value: `${dayMonthYear(detail.paidAt)}${detail.paidByName ? ` · recorded by ${detail.paidByName}` : ""}${detail.paymentReference ? ` · reference ${detail.paymentReference}` : ""}` }]
+              ? [{ term: "Paid", value: `${indiaClock.date(detail.paidAt)}${detail.paidByName ? ` · recorded by ${detail.paidByName}` : ""}${detail.paymentReference ? ` · reference ${detail.paymentReference}` : ""}` }]
               : []),
             ...(detail.paymentNote ? [{ term: "Payment note", value: detail.paymentNote }] : []),
-            ...(detail.voidedAt ? [{ term: "Voided", value: `${when(detail.voidedAt)}${detail.voidedByName ? ` · ${detail.voidedByName}` : ""}${detail.voidReason ? ` — ${detail.voidReason}` : ""}` }] : []),
+            ...(detail.voidedAt ? [{ term: "Voided", value: `${clock.dateTime(detail.voidedAt)}${detail.voidedByName ? ` · ${detail.voidedByName}` : ""}${detail.voidReason ? ` — ${detail.voidReason}` : ""}` }] : []),
             { term: "Partner's invoice number", value: detail.partnerInvoiceNumber ?? (detail.status === "APPROVED" ? "Not entered yet" : "—") },
           ]}
         />
@@ -189,7 +195,7 @@ export function StatementDetailBody({
           <p className="text-xs text-muted">{detail.status === "VOID" ? "A void statement holds no entries — they went back to pending." : "No entries."}</p>
         ) : (
           <div className="overflow-hidden rounded-lg border border-line">
-            <EntriesTable rows={detail.entries} caps={caps} showPartner={false} compact />
+            <EntriesTable rows={detail.entries} caps={caps} showPartner={false} compact clock={clock} />
           </div>
         )}
         {shown < detail.entryCount && <p className="text-xs text-muted">{`Showing the first ${shown}. Export CSV has them all.`}</p>}

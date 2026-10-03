@@ -32,26 +32,27 @@ import { activityFeedItems } from "@/components/cms/common/activity";
 import { CmsRolePill } from "@/components/cms/common/status";
 import { ScoreFigure } from "@/components/cms/seo/score-ui";
 import { NewItemButton } from "@/components/cms/shell/new-menu";
-import { istDayKey, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { cmsDashboard } from "@/lib/cms/content";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { siteSummary } from "@/lib/cms/seo-scores";
 import { CMS_ROLE_DESCRIPTIONS, cmsCapsFor, type CmsCaps, type CmsMe, type SeoSiteSummary } from "@/lib/cms/types";
 import { cn } from "@/lib/utils";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { getSiteSettings, siteOrigin } from "@/lib/platform/site-content";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 const num = (n: number) => n.toLocaleString("en-IN");
 
-/** The dashboard's figures and the clock it was read by — India's day and hour, from the server. */
+/** The dashboard's figures and the clock it was read by — the console's day and hour (Settings › Time zone), from the server. */
 async function loadDashboard(me: CmsMe) {
   const now = new Date();
   // The SEO card is a courtesy: if the score cache can't be read, the dashboard still renders without it.
-  const [data, settings, seo] = await Promise.all([cmsDashboard(me, now), getSiteSettings(), siteSummary().catch(() => null)]);
-  const hour = Number(new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", hourCycle: "h23" }).format(now));
-  return { data, settings, seo, todayKey: istDayKey(now), greeting: hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening" };
+  const [data, settings, seo, clock] = await Promise.all([cmsDashboard(me, now), getSiteSettings(), siteSummary().catch(() => null), consoleClock()]);
+  const hour = clock.parts(now).hour;
+  return { data, settings, seo, clock, todayKey: clock.dateKey(now), greeting: hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening" };
 }
 
 /**
@@ -65,11 +66,11 @@ export default async function CmsDashboardPage() {
   const session = await cmsPage(CMS_PAGE_ROLES.dashboard);
   const me = session.user;
   const caps = cmsCapsFor(me.role);
-  const { data, settings, seo, todayKey, greeting } = await loadDashboard(me);
+  const { data, settings, seo, clock, todayKey, greeting } = await loadDashboard(me);
   const siteHost = new URL(siteOrigin()).host;
   const firstName = me.name.trim().split(/\s+/)[0] || me.name;
   const drafts = data.pages.drafts + data.posts.drafts;
-  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish });
+  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish }, clock);
 
   return (
     <>

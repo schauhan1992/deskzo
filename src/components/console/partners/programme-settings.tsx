@@ -5,12 +5,12 @@ import { LoaderCircle, SlidersHorizontal } from "lucide-react";
 import { consoleSetPartnerSettings } from "@/actions/platform/console-partners";
 import { DefinitionList } from "@/components/console/kit/panel";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import type { ProgrammeSettingsView } from "@/lib/partners/console-data";
 import { cn } from "@/lib/utils";
 import { wholeIn } from "./format";
@@ -56,6 +56,7 @@ function describe(s: Settings, twoFactorDefault: string) {
 }
 
 export function ProgrammeSettingsButton({ view, canEdit, ranges }: { view: ProgrammeSettingsView; canEdit: boolean; ranges: SettingRanges }) {
+  const clock = useClock();
   const isClient = useSyncExternalStore(noSubscribe, () => true, () => false);
   const action = useConsoleAction<{ changed: string[] }>();
   const [open, setOpen] = useState(false);
@@ -87,7 +88,7 @@ export function ProgrammeSettingsButton({ view, canEdit, ranges }: { view: Progr
           <div className="space-y-4">
             <DefinitionList columns={1} items={describe(view.settings, view.twoFactorDefault)} />
             <p className="text-xs text-muted">Only an owner changes these.</p>
-            {view.lastChange && <p className="text-xs text-subtle">{`Last changed ${dayMonthYear(view.lastChange.at)} by ${view.lastChange.byName}.`}</p>}
+            {view.lastChange && <p className="text-xs text-subtle">{`Last changed ${clock.date(view.lastChange.at)} by ${view.lastChange.byName}.`}</p>}
             <div className="flex justify-end">
               <Button type="button" variant="secondary" onClick={close}>
                 Close
@@ -112,6 +113,7 @@ function SettingsForm({
   onClose: () => void;
 }) {
   const id = useId();
+  const clock = useClock();
   const s = view.settings;
   const [twoFactor, setTwoFactor] = useState<"required" | "optional">(s.twoFactor);
   const [numbers, setNumbers] = useState<Record<NumberKey, string>>({
@@ -222,7 +224,7 @@ function SettingsForm({
         </label>
       </fieldset>
 
-      {view.lastChange && <p className="text-xs text-subtle">{`Last changed ${dayMonthYear(view.lastChange.at)} by ${view.lastChange.byName}.`}</p>}
+      {view.lastChange && <p className="text-xs text-subtle">{`Last changed ${clock.date(view.lastChange.at)} by ${view.lastChange.byName}.`}</p>}
 
       <ActionNoticeRegion notice={action.error ? { tone: "error", message: action.error } : null} />
 

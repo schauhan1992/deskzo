@@ -8,8 +8,9 @@ import { ImpactList } from "@/components/console/kit/impact";
 import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { INVITE_STATE } from "@/lib/console-shared/labels";
 import type { LinkRow } from "@/lib/partners/portal-data";
 
@@ -26,6 +27,7 @@ import type { LinkRow } from "@/lib/partners/portal-data";
 const nameOf = (row: LinkRow) => row.label?.trim() || `the link ${row.code}`;
 
 export function ReferralLinksTable({ rows, canEnd }: { rows: LinkRow[]; canEnd: boolean }) {
+  const clock = useClock();
   const [ending, setEnding] = useState<LinkRow | null>(null);
   return (
     <>
@@ -52,7 +54,7 @@ export function ReferralLinksTable({ rows, canEnd }: { rows: LinkRow[]; canEnd: 
                 ) : (
                   <span className="text-subtle">No label</span>
                 )}
-                <span className="block text-[11px] text-subtle">{`Made ${dayMonthYear(row.createdAt)}`}</span>
+                <span className="block text-[11px] text-subtle">{`Made ${clock.date(row.createdAt)}`}</span>
               </Td>
               <Td mono nowrap>
                 <span translate="no">{row.code}</span>
@@ -68,7 +70,7 @@ export function ReferralLinksTable({ rows, canEnd }: { rows: LinkRow[]; canEnd: 
               <Td numeric>{row.signups.toLocaleString("en-IN")}</Td>
               <Td numeric>{row.customers.toLocaleString("en-IN")}</Td>
               <Td muted nowrap>
-                {row.endedAt ? `Ended ${dayMonthYear(row.endedAt)}` : row.expiresAt ? dayMonthYear(row.expiresAt) : "No end date"}
+                {row.endedAt ? `Ended ${clock.date(row.endedAt)}` : row.expiresAt ? clock.date(row.expiresAt) : "No end date"}
               </Td>
               <Td nowrap>
                 <LabelPill map={INVITE_STATE} value={row.state} />
@@ -94,6 +96,7 @@ export function ReferralLinksTable({ rows, canEnd }: { rows: LinkRow[]; canEnd: 
 
 /** End a live link (tier 2): what stops, and what does not. */
 function EndLinkDialog({ row, onClose }: { row: LinkRow | null; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
 
   function close() {
@@ -124,7 +127,7 @@ function EndLinkDialog({ row, onClose }: { row: LinkRow | null; onClose: () => v
           <ImpactList
             items={[
               { label: "Code", value: row.code },
-              { label: "Works until", value: `${row.expiresAt ? dayMonthYear(row.expiresAt) : "No end date"} → now`, tone: "danger" as const },
+              { label: "Works until", value: `${row.expiresAt ? clock.date(row.expiresAt) : "No end date"} → now`, tone: "danger" as const },
               { label: "Signups with it so far", value: row.signups.toLocaleString("en-IN") },
               { label: "Customers from it", value: row.customers > 0 ? `${plural(row.customers, "customer")} — not affected` : "None" },
             ]}

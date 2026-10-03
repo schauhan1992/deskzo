@@ -29,6 +29,7 @@ type Programme = {
   _count: { rebates: number };
 };
 
+/** A `@db.Date` day (held as midnight UTC) as `yyyy-mm-dd`: its UTC date is the day, in any zone. */
 const dayKey = (d: string | Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : "");
 
 type Draft = {

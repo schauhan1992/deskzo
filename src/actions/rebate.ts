@@ -9,7 +9,9 @@ import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { formatOrderId } from "@/lib/order-id";
-import { calendarDay, istTodayKey } from "@/lib/orders/handoff-rules";
+import { calendarDay } from "@/lib/orders/handoff-rules";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { isVendorRelationshipType } from "@/lib/validation/company";
 import { saveOrderRebateSchema } from "@/lib/validation/order";
 import { rebateProgrammeSchema, writeOffRebateSchema } from "@/lib/validation/rebate";
@@ -139,8 +141,10 @@ export async function suggestOrderRebates(input: { itemId: string; vendorId?: st
     },
   });
   const status = ["APPLIED", "APPROVED", "REJECTED"].includes(input.dealRegStatus ?? "") ? (input.dealRegStatus as DealRegStatusKey) : null;
+  // In date on the workspace's today.
+  const today = (await workspaceClock()).today();
   return toPlain(
-    matchingProgrammes(programmes, { brandId: item?.brandId ?? null, vendorId: input.vendorId || null, dealRegStatus: status, on: istTodayKey(new Date()) }).map((p) => ({
+    matchingProgrammes(programmes, { brandId: item?.brandId ?? null, vendorId: input.vendorId || null, dealRegStatus: status, on: today }).map((p) => ({
       id: p.id,
       name: p.name,
       basis: p.basis,
@@ -252,33 +256,35 @@ export async function reopenOrderRebate(rebateId: string): Promise<ActionResult<
 
 // ─── The report ──────────────────────────────────────────────────────────────────────────────────
 
-/** India's financial-year quarter of a day: "Q3 FY26-27" for October 2026. */
-function fyQuarter(at: Date) {
-  const ist = new Date(at.getTime() + 330 * 60_000);
-  const month = ist.getUTCMonth(); // 0 = January
-  const fyStart = month >= 3 ? ist.getUTCFullYear() : ist.getUTCFullYear() - 1;
+/** The financial-year quarter a moment falls in on the workspace's calendar: "Q3 FY26-27" for October 2026. */
+function fyQuarter(at: Date, clock: Clock) {
+  const { year, month } = clock.parts(at); // month 0 = January
+  const fyStart = month >= 3 ? year : year - 1;
   const quarter = Math.floor(((month + 9) % 12) / 3) + 1;
   return { key: `${fyStart}-Q${quarter}`, label: `Q${quarter} FY${String(fyStart).slice(2)}-${String(fyStart + 1).slice(2)}` };
 }
 
 /**
- * What the backend rebates on orders booked between two days (India's calendar days, `yyyy-mm-dd`,
- * both inclusive) come to: each order's expected, received and still to come, and the same totalled by
- * who pays, by the OEM (the item's brand) and by quarter. Cancelled and rejected orders are left out.
+ * What the backend rebates on orders booked between two days (the workspace's calendar days,
+ * `yyyy-mm-dd`, both inclusive) come to: each order's expected, received and still to come, and the
+ * same totalled by who pays, by the OEM (the item's brand) and by quarter. Cancelled and rejected
+ * orders are left out.
  */
 export async function rebatesReport(params: { from: string; to: string }) {
   const user = await rebateUser("view");
   if (!user) return null;
-  const from = calendarDay(params.from);
-  const toDay = calendarDay(params.to);
-  if (!from || !toDay) return null;
-  const before = new Date(toDay.getTime() + 24 * 60 * 60 * 1000 - 330 * 60_000);
+  const clock = await workspaceClock();
+  // From the first day's midnight up to, not including, the midnight after the last — on the
+  // workspace's clock. This was India's, by a fixed offset.
+  const from = clock.startOfDay(params.from);
+  const before = clock.endOfDay(params.to);
+  if (!from || !before) return null;
   const orders = await db.companyProduct.findMany({
     where: {
       ...(await viaCompanyScope(user.id)),
       rebates: { some: {} },
       orderStatus: { notIn: [...DONE_STATUSES] },
-      bookedAt: { gte: new Date(from.getTime() - 330 * 60_000), lt: before },
+      bookedAt: { gte: from, lt: before },
     },
     orderBy: { bookedAt: "desc" },
     select: {
@@ -304,7 +310,7 @@ export async function rebatesReport(params: { from: string; to: string }) {
   const byQuarter = new Map<string, Total>();
   const rows = orders.map((o) => {
     const summary = rebateSummary(o);
-    const quarter = fyQuarter(o.bookedAt ?? new Date());
+    const quarter = fyQuarter(o.bookedAt ?? new Date(), clock);
     for (const r of summary.rebates) {
       add(byPayer, r.payerCompany?.id ?? `none:${r.payer}`, r.payerCompany?.name ?? (r.payer === "OEM" ? "An OEM — not named" : "A distributor — not named"), r);
     }

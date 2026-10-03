@@ -4,7 +4,7 @@ import { companyMarketing } from "@/actions/marketing";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { TOPICS } from "@/lib/marketing/topics";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 const STATUS_TONE: Record<string, "default" | "green" | "blue" | "red" | "amber"> = {
   QUEUED: "default",
@@ -53,6 +53,7 @@ export async function CompanyMarketing({ companyId, companyName }: { companyId: 
   }
 
   const { messages, consents, enrolments, company } = data;
+  const clock = await workspaceClock();
   const managed = company.managedByResellerId !== null;
   const byContact = new Map<string, typeof consents>();
   for (const consent of consents) {
@@ -148,7 +149,7 @@ export async function CompanyMarketing({ companyId, companyName }: { companyId: 
                   </Link>
                   <span className="text-xs text-subtle">
                     step {e.currentStep}
-                    {e.nextRunAt && ` · next ${formatDate(e.nextRunAt)}`}
+                    {e.nextRunAt && ` · next ${clock.date(e.nextRunAt)}`}
                   </span>
                 </li>
               ))}
@@ -186,7 +187,7 @@ export async function CompanyMarketing({ companyId, companyName }: { companyId: 
                 <tbody>
                   {messages.map((m) => (
                     <tr key={m.id} className="border-b border-line last:border-0">
-                      <td className="px-4 py-2.5 text-xs text-muted">{formatDate(m.sentAt ?? m.createdAt)}</td>
+                      <td className="px-4 py-2.5 text-xs text-muted">{clock.date(m.sentAt ?? m.createdAt)}</td>
                       <td className="px-4 py-2.5 text-text">
                         {m.contact?.name ?? "—"}
                         {m.toEmail && <span className="block text-[11px] text-subtle">{m.toEmail}</span>}

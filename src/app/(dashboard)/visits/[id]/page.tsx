@@ -8,7 +8,7 @@ import { getDownlineUserIds } from "@/lib/org-chart";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { VisitActions } from "@/components/visits/visit-actions";
 import { EmailAddress } from "@/components/contacts/email-address";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import {
   formatVisitId,
   visitPurposeLabels,
@@ -20,10 +20,8 @@ import {
 import { expenseCategoryLabels, expenseStatusLabels, expenseStatusTone, formatExpenseId } from "@/lib/expenses";
 import { viewerHas } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
-import { formatIstDateTime } from "@/lib/india-time";
-
-/** When it was planned, arrived and left — in India time, whatever zone the server renders in. */
-const stamp = (value: Date | string | null) => (value ? formatIstDateTime(value) : "—");
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
@@ -40,8 +38,10 @@ export default async function VisitDetailPage({ params, searchParams }: { params
       ? ((await db.visit.findUnique({ where: { visitSeq: ref.seq }, select: { id: true } }))?.id ?? id)
       : ref.id;
 
-  const [visit, session] = await Promise.all([getVisit(resolved), auth()]);
+  const [visit, session, clock] = await Promise.all([getVisit(resolved), auth(), workspaceClock()]);
   if (!visit) notFound();
+  /** When it was planned, arrived and left — on the workspace's clock, whatever zone the server renders in. */
+  const stamp = (value: Date | string | null) => clock.dateTime(value);
 
   // After the check, never before — see `canonicalise`.
   canonicalise(id, "/visits", formatVisitId(visit.visitSeq), query);
@@ -132,7 +132,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
                           <div className="text-xs text-subtle">{expense.description}</div>
                         </td>
                         <td className="px-3 py-2 text-muted">{expenseCategoryLabels[expense.category]}</td>
-                        <td className="px-3 py-2 text-muted">{formatDate(expense.spentOn)}</td>
+                        <td className="px-3 py-2 text-muted">{formatCalendarDay(expense.spentOn)}</td>
                         <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(expense.amount)}</td>
                         <td className="px-3 py-2">
                           <Badge tone={expenseStatusTone[expense.status]}>{expenseStatusLabels[expense.status]}</Badge>

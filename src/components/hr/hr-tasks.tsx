@@ -8,7 +8,8 @@ import type { hrTasksFor } from "@/actions/hr";
 import { raiseOffboardingTasks } from "@/actions/hr";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { taskDue } from "@/lib/task-due";
 
 type Task = Awaited<ReturnType<typeof hrTasksFor>>[number];
 
@@ -30,6 +31,7 @@ export function HrTasks({
   hasExited: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +86,8 @@ export function HrTasks({
           <ul className="divide-y divide-line">
             {tasks.map((task) => {
               // "Overdue" is only meaningful while the thing is still outstanding.
-              const overdue = !task.done && task.dueDate && new Date(task.dueDate) < new Date();
+              // By the workspace's calendar: a day picked on the form is overdue once it has passed, not at midnight UTC.
+              const overdue = !task.done && !!task.dueDate && taskDue(task.dueDate, clock).key < clock.today();
               return (
                 <li key={task.id} className="flex items-start gap-2 py-2">
                   {task.done ? (
@@ -101,7 +104,7 @@ export function HrTasks({
                     </Link>
                     <span className="block text-xs text-subtle">
                       {task.assignedTo?.name ?? "Unassigned"}
-                      {task.dueDate && ` · due ${formatDate(task.dueDate)}`}
+                      {task.dueDate && ` · due ${taskDue(task.dueDate, clock).label}`}
                     </span>
                   </span>
                   {overdue && <Badge tone="red">Overdue</Badge>}

@@ -26,6 +26,7 @@ export const PLAIN_KEYS = [
   "staff.twoFactor",
   "platform.lastTick",
   "domains.offered",
+  "console.timezone",
   "support.enabled",
   "support.email",
   "support.helpline",

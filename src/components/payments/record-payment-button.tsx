@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { useClock } from "@/components/time/clock-provider";
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodValues, paymentMethodLabels } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
@@ -33,6 +34,7 @@ export function RecordPaymentButton({
   canRecord: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   // This button sits on list pages and on a company's own page, so two dialogs can be mounted at
   // once. Literal ids would collide and point both labels at whichever form mounted first.
   const fieldId = useId();
@@ -52,7 +54,7 @@ export function RecordPaymentButton({
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, RecordPaymentInput>({
     resolver: zodResolver(recordPaymentSchema),
-    defaultValues: { method: "BANK_TRANSFER", paidOn: new Date().toISOString().slice(0, 10) },
+    defaultValues: { method: "BANK_TRANSFER", paidOn: clock.today() },
   });
 
   if (!canRecord) return null;
@@ -94,7 +96,7 @@ export function RecordPaymentButton({
       companyId: selectedCompany!.id,
       allocateToOrderId: order?.id ?? "",
       method: "BANK_TRANSFER",
-      paidOn: new Date().toISOString().slice(0, 10),
+      paidOn: clock.today(),
     });
   }
 

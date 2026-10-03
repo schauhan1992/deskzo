@@ -9,28 +9,29 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { activityFeedItems } from "@/components/cms/common/activity";
 import { CmsRolePill } from "@/components/cms/common/status";
-import { dayMonthYear, istDayKey } from "@/lib/console-shared/format";
 import { listCmsAudit } from "@/lib/cms/audit";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { cmsEnrolmentChallenge, cmsTwoFactorPolicy } from "@/lib/cms/session";
 import { CMS_ROLE_DESCRIPTIONS, cmsCapsFor, type CmsMe } from "@/lib/cms/types";
 import { listCmsSessions, listCmsUsers } from "@/lib/cms/users";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { CmsMySessions, RenameForm, TwoFactorCard } from "./account-forms";
 
 export const metadata: Metadata = { title: "My account" };
 
-/** Everything the page shows about the signed-in person — and India's today, for the activity headings. */
+/** Everything the page shows about the signed-in person — and the console's clock, for its dates and the activity headings. */
 async function loadAccount(me: CmsMe, sessionId: string, enrolled: boolean) {
-  const [users, sessions, policy, challenge, recent] = await Promise.all([
+  const [users, sessions, policy, challenge, recent, clock] = await Promise.all([
     listCmsUsers(),
     listCmsSessions(me.id, sessionId),
     cmsTwoFactorPolicy(),
     // Their own authenticator's QR code and key, made once and kept sealed — for this page only.
     enrolled ? Promise.resolve(null) : cmsEnrolmentChallenge(),
     listCmsAudit({ actorId: me.id }),
+    consoleClock(),
   ]);
-  return { profile: users.find((u) => u.id === me.id) ?? null, sessions, policy, challenge, recent: recent.rows.slice(0, 15), todayKey: istDayKey(new Date()) };
+  return { profile: users.find((u) => u.id === me.id) ?? null, sessions, policy, challenge, recent: recent.rows.slice(0, 15), clock, todayKey: clock.today() };
 }
 
 /**
@@ -45,7 +46,7 @@ export default async function CmsAccountPage() {
   const me = session.user;
   const caps = cmsCapsFor(me.role);
   const data = await loadAccount(me, session.sessionId, session.enrolled);
-  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish, hideActor: true });
+  const feed = activityFeedItems(data.recent, { canOpenUsers: caps.admin, canOpenSecurity: caps.admin, canOpenRedirects: caps.publish, hideActor: true }, data.clock);
 
   return (
     <>
@@ -86,7 +87,7 @@ export default async function CmsAccountPage() {
                       </span>
                     ),
                   },
-                  ...(data.profile ? [{ term: "In the CMS since", value: dayMonthYear(data.profile.createdAt) }] : []),
+                  ...(data.profile ? [{ term: "In the CMS since", value: data.clock.date(data.profile.createdAt) }] : []),
                   ...(data.profile?.lastSignInAt ? [{ term: "Last sign-in", value: <RelativeTime at={data.profile.lastSignInAt} /> }] : []),
                 ]}
               />

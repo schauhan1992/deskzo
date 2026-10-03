@@ -4,9 +4,9 @@ import type { SiteRenderContext } from "@/components/site/blocks/types";
 import { SiteBlocks } from "@/components/site/blocks/render";
 import { safeSrc } from "@/components/site/links";
 import { Container, buttonClasses } from "@/components/site/ui";
-import { formatIstDate } from "@/lib/india-time";
 import { getSiteSettings, siteStatus, workspaceSuffix, type SitePost, type SitePostSummary, type SiteTermLink } from "@/lib/platform/site-content";
 import { shownUpdatedAt } from "@/lib/seo/schema";
+import { indiaClock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,6 +14,9 @@ import { cn } from "@/lib/utils";
  * /blog/tag/<slug>) and a post's draft preview (/preview/<token>): the render context blocks need,
  * the breadcrumb, the chips, a post's card, the grid, the pages and a post's article. Not a route —
  * colocated with them.
+ *
+ * A post's dates are India's days, as everything the public site dates is — the same for every reader,
+ * whatever zone the console keeps.
  */
 
 type Query = Record<string, string | string[] | undefined>;
@@ -143,7 +146,7 @@ export function PostCard({ post }: { post: SitePostSummary }) {
       )}
       <div className="flex flex-1 flex-col p-5">
         <p className="text-xs font-medium text-subtle">
-          <time dateTime={post.publishedAt.toISOString()}>{formatIstDate(post.publishedAt)}</time>
+          <time dateTime={post.publishedAt.toISOString()}>{indiaClock.date(post.publishedAt)}</time>
           <span aria-hidden="true"> · </span>
           {post.author}
         </p>
@@ -257,11 +260,11 @@ export async function PostArticle({ post, ctx }: { post: SitePost; ctx: SiteRend
             <h1 className="mt-6 text-4xl font-semibold tracking-tight text-text text-balance sm:text-5xl">{post.title}</h1>
             {post.excerpt && <p className="mt-5 text-lg leading-8 text-muted text-pretty">{post.excerpt}</p>}
             <p className="mt-6 text-sm text-subtle">
-              <time dateTime={post.publishedAt.toISOString()}>{formatIstDate(post.publishedAt)}</time>
+              <time dateTime={post.publishedAt.toISOString()}>{indiaClock.date(post.publishedAt)}</time>
               {updated && (
                 <>
                   <span aria-hidden="true"> · </span>
-                  Updated <time dateTime={updated.toISOString()}>{formatIstDate(updated)}</time>
+                  Updated <time dateTime={updated.toISOString()}>{indiaClock.date(updated)}</time>
                 </>
               )}
               <span aria-hidden="true"> · </span>

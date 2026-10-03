@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import { loadCreditSubjects } from "@/lib/credit/load";
 import { SUPPORT_VISIT_PURPOSES, type SupportFacts } from "@/lib/support/load";
 
@@ -12,11 +12,11 @@ import { SUPPORT_VISIT_PURPOSES, type SupportFacts } from "@/lib/support/load";
  * src/actions/support-load.ts decide who may ask.
  */
 
-/** The last `months` whole Indian months, the current one included: [from, to). */
-export function supportWindow(months: number, asOf = new Date()): { from: Date; to: Date } {
-  // Both helpers count months from 0, and `istMidnight` rolls a negative month back into last year.
-  const { year, month } = istDateParts(asOf);
-  return { from: istMidnight(year, month - (months - 1), 1), to: asOf };
+/** The last `months` whole months on the workspace's clock, the current one included: [from, to). */
+export function supportWindow(clock: Clock, months: number, asOf = new Date()): { from: Date; to: Date } {
+  // Both count months from 0, and `midnight` rolls a negative month back into last year.
+  const { year, month } = clock.parts(asOf);
+  return { from: clock.midnight(year, month - (months - 1), 1), to: asOf };
 }
 
 const LIVE_EXPENSE = ["SUBMITTED", "APPROVED", "REIMBURSED"] as const;

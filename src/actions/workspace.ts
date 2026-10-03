@@ -10,6 +10,7 @@ import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { buildWhere, countActiveFilters, type WorkbookFilters } from "@/lib/workspace/filters";
 import { notifyUser } from "@/lib/notify";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 const rowSelect = {
@@ -68,7 +69,7 @@ export async function runWorkbook(params: {
   const where: Prisma.CompanyWhereInput = {
     AND: [
       await companyScope(user.id),
-      buildWhere(params.filters),
+      buildWhere(params.filters, await workspaceClock()),
       ...(params.search ? [{ name: { contains: params.search, mode: "insensitive" as const } }] : []),
     ],
   };
@@ -92,7 +93,7 @@ export async function countWorkbook(filters: WorkbookFilters) {
   const user = await requireModuleUser("workspace");
   // The live count under the filter builder. Unscoped, it told somebody how many companies match
   // across the whole business — a smaller leak than the rows, and the same one.
-  return db.company.count({ where: { AND: [await companyScope(user.id), buildWhere(filters)] } });
+  return db.company.count({ where: { AND: [await companyScope(user.id), buildWhere(filters, await workspaceClock())] } });
 }
 
 export async function saveWorkbook(input: {

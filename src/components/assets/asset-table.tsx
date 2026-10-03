@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Laptop, Package } from "lucide-react";
 import type { listAssets } from "@/actions/it-asset";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { assetKindLabels, coverState, ownershipLabels, ownershipTone, statusLabels, statusTone } from "@/lib/assets/lifecycle";
 
 type Asset = Awaited<ReturnType<typeof listAssets>>[number];
@@ -71,7 +71,7 @@ export function AssetTable({ assets, emptyHint }: { assets: Asset[]; emptyHint?:
                     )}
                     {cover.key === "EXPIRED" && (a.warrantyEndsOn || a.amcEndsOn) && (
                       <span className="block text-[11px] text-subtle">
-                        since {formatDate(a.amcEndsOn ?? a.warrantyEndsOn!)}
+                        since {formatCalendarDay(a.amcEndsOn ?? a.warrantyEndsOn)}
                       </span>
                     )}
                   </td>

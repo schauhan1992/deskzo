@@ -6,7 +6,7 @@
  * here alone and the rest of the app keeps its own vocabulary.
  */
 import { gstNumberProblem } from "@/lib/document-numbering";
-import { istDateParts } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 export type EInvoiceParty = {
   gstin: string | null;
@@ -63,11 +63,12 @@ export type EInvoiceDocument = {
 };
 
 /**
- * The portal wants DD/MM/YYYY, not ISO — and the Indian day. Read from the host's calendar, an
- * invoice issued before 05:30 IST went to the IRP dated the day before on a UTC server (X6).
+ * The portal wants DD/MM/YYYY, not ISO — and the Indian day, whatever zone the workspace keeps. Read
+ * from the host's calendar, an invoice issued before 05:30 IST went to the IRP dated the day before on
+ * a UTC server (X6).
  */
 function irpDate(date: Date) {
-  const { year, month, day } = istDateParts(date);
+  const { year, month, day } = indiaClock.parts(date);
   return `${String(day).padStart(2, "0")}/${String(month + 1).padStart(2, "0")}/${year}`;
 }
 

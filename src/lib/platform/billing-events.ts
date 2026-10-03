@@ -2,7 +2,7 @@ import type { Prisma } from "@deskzo/control-client";
 import type { EventFilters } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { GatewayKey } from "@/lib/console-shared/types";
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 
 /**
@@ -72,14 +72,14 @@ async function eventWhere(f: EventFilters): Promise<Prisma.BillingEventWhereInpu
   // An event name or part of one; a trailing * ("customer.subscription.*") asks for names that start so.
   const typed = f.type?.replace(/\*+/g, "").trim();
   const type = typed ? (f.type!.trim().endsWith("*") ? { startsWith: typed, mode: "insensitive" as const } : { contains: typed, mode: "insensitive" as const }) : undefined;
-  const from = f.from ? startOfIndianDay(f.from) : null;
-  const to = f.to ? endOfIndianDay(f.to) : null;
+  // Whole days on the console's clock (Settings › Time zone), half-open.
+  const receivedAt = f.from || f.to ? (await consoleClock()).dayRange(f.from, f.to) : null;
   return {
     ...(f.gateway ? { gateway: f.gateway } : {}),
     ...(f.state ? STATE_WHERE[f.state] : {}),
     ...(type ? { type } : {}),
     ...(tenantId ? { tenantId } : {}),
-    ...(from || to ? { receivedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
+    ...(receivedAt ? { receivedAt } : {}),
   };
 }
 

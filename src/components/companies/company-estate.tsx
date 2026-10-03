@@ -14,7 +14,8 @@ import {
   movementLabels,
   statusLabels,
 } from "@/lib/assets/lifecycle";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * What we look after for one company, on that company's own page.
@@ -164,7 +165,8 @@ export async function CompanyEstate({ companyId, companyName }: { companyId: str
                         </td>
                         <td className="px-4 py-2.5 text-text">{a.name}</td>
                         <td className="px-4 py-2.5 text-muted">
-                          {last ? formatDate(last.occurredAt) : "—"}
+                          {/* The day it moved, as typed — held as midnight UTC. */}
+                          {last ? formatCalendarDay(last.occurredAt) : "—"}
                           {last && <span className="block text-xs text-subtle">{movementLabels[last.type]}</span>}
                         </td>
                         <td className="px-4 py-2.5 text-muted">{last?.toCompany?.name ?? last?.toLabel ?? "—"}</td>
@@ -234,14 +236,15 @@ export async function CompanyEstate({ companyId, companyName }: { companyId: str
                       {c.ewayBillNumber && <span className="block text-[11px] text-subtle">EWB {c.ewayBillNumber}</span>}
                     </td>
                     <td className="px-4 py-2.5 text-muted">
-                      {c.dispatchedOn ? `Sent ${formatDate(c.dispatchedOn)}` : "Not sent yet"}
+                      {/* Days, as typed on the consignment — held as midnight UTC. */}
+                      {c.dispatchedOn ? `Sent ${formatCalendarDay(c.dispatchedOn)}` : "Not sent yet"}
                       {c.deliveredOn ? (
                         <span className="block text-xs text-subtle">
-                          Received {formatDate(c.deliveredOn)}
+                          Received {formatCalendarDay(c.deliveredOn)}
                           {c.receivedBy ? ` by ${c.receivedBy}` : ""}
                         </span>
                       ) : (
-                        c.expectedOn && <span className="block text-xs text-subtle">Due {formatDate(c.expectedOn)}</span>
+                        c.expectedOn && <span className="block text-xs text-subtle">Due {formatCalendarDay(c.expectedOn)}</span>
                       )}
                     </td>
                     <td className="px-4 py-2.5">

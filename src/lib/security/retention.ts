@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getSecurityPolicy } from "@/lib/security/store";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Deleting activity rows older than the retention the admin set.
@@ -47,7 +48,8 @@ export async function purgeExpiredActivity(): Promise<{ deleted: number; cutoff:
   // Yesterday's screenshot counters are of no interest once the day is over — the evidence is the
   // activity row, which is subject to the retention above. Kept a fortnight so "how many did they
   // take last week" is still answerable directly.
-  const allowanceCutoff = new Date(Date.now() - 14 * 24 * 60 * 60_000).toISOString().slice(0, 10);
+  // Keyed by the workspace's day (allowanceDayKey in src/lib/security/policy.ts), so cut by it too.
+  const allowanceCutoff = (await workspaceClock()).dateKey(new Date(Date.now() - 14 * 24 * 60 * 60_000));
   await db.screenshotAllowance.deleteMany({ where: { day: { lt: allowanceCutoff } } });
 
   // Sign-ins carry where somebody was — personal data about staff — so they are kept exactly as

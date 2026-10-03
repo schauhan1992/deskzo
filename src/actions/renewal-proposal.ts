@@ -5,7 +5,8 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { renewalOrderDraft } from "@/lib/subscriptions/renewal-order";
-import { partyDetails, todayInIndia } from "@/lib/proposals/party";
+import { partyDetails } from "@/lib/proposals/party";
+import { workspaceClock } from "@/lib/time/workspace";
 import { formatOrderId } from "@/lib/order-id";
 import { createTradeDocument } from "@/actions/trade-document";
 import type { ActionResult } from "@/actions/company";
@@ -151,9 +152,13 @@ export async function createProposalFromRenewal(input: {
     reverseCharge: false,
     currency: "INR",
     exchangeRate: 1,
-    issueDate: todayInIndia(),
+    // Today on the workspace's calendar — toISOString() is UTC's, which before 05:30 in India is yesterday.
+    issueDate: (await workspaceClock()).today(),
     dueDate: "",
-    /** A renewal quote is only good until the thing it renews has lapsed. */
+    /**
+     * A renewal quote is only good until the thing it renews has lapsed. The end date is a calendar
+     * day held as midnight UTC, so its UTC date is the day.
+     */
     validUntil: product.endDate!.toISOString().slice(0, 10),
     reference: formatOrderId(product.orderSeq),
     salespersonId: "",

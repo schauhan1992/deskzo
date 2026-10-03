@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { companyFormResponses } from "@/actions/forms";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { categoryOf } from "@/lib/forms/categories";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Data = NonNullable<Awaited<ReturnType<typeof companyFormResponses>>>;
 
@@ -13,7 +13,8 @@ type Data = NonNullable<Awaited<ReturnType<typeof companyFormResponses>>>;
  * Only forms whose answers are shared with the viewer. The account being theirs is not enough; see
  * `companyFormResponses`.
  */
-export function CompanyForms({ data }: { data: Data }) {
+export async function CompanyForms({ data }: { data: Data }) {
+  const clock = await workspaceClock();
   return (
     <div className="space-y-4">
       <Card>
@@ -30,7 +31,7 @@ export function CompanyForms({ data }: { data: Data }) {
                       {r.form.name}
                     </Link>
                     <div className="text-xs text-muted">
-                      {categoryOf(r.form.category).label} · {r.name ?? "—"} · {formatIstDateTime(r.createdAt)}
+                      {categoryOf(r.form.category).label} · {r.name ?? "—"} · {clock.dateTime(r.createdAt)}
                     </div>
                   </div>
                   {r.form.category === "EVENT" && (
@@ -60,7 +61,7 @@ export function CompanyForms({ data }: { data: Data }) {
                     </Link>
                     <div className="text-xs text-muted">
                       {w.contact.name}
-                      {w.lastSentAt && ` · sent ${formatIstDateTime(w.lastSentAt)}`}
+                      {w.lastSentAt && ` · sent ${clock.dateTime(w.lastSentAt)}`}
                     </div>
                   </div>
                   <Badge>{categoryOf(w.form.category).label}</Badge>

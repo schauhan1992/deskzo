@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { ArrowUpRight, ChevronLeft, ChevronRight, ReceiptText } from "lucide-react";
 import { consoleExportInvoices } from "@/actions/platform/console-billing";
@@ -8,21 +10,22 @@ import { FilterBar, FilterChips } from "@/components/console/kit/filters";
 import { Panel } from "@/components/console/kit/panel";
 import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, TBody, TFoot, THead, Td, Th, Tr } from "@/components/console/kit/table";
+import { useClock } from "@/components/time/clock-provider";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { formatMoney } from "@/lib/billing/money";
-import { dayKeyLabel, dayMonth, dayMonthYear, plural, when } from "@/lib/console-shared/format";
+import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, gatewayLabel } from "@/lib/console-shared/labels";
 import { parseInvoiceFilters, withParams } from "@/lib/console-shared/params";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { InvoiceListRow, InvoicesPage } from "@/lib/platform/revenue";
-import { istDateTimeInput } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
  * The Billing hub's Invoices tab: every invoice the gateways sent, filtered in the URL, with the
  * totals for the whole filtered set — one line per currency, never added across currencies — and the
  * same set as CSV. Amounts are as the gateways recorded them; the books are the gateways' and the
- * accountant's.
+ * accountant's. A client component, as the other tabs are, for the console's clock (`useClock`).
  */
 
 const PATH = "/billing";
@@ -35,17 +38,6 @@ const GATEWAY_OPTIONS = [
 /** The currencies prices are set in today; any other the list holds is added from its totals. */
 const COMMON_CURRENCIES = ["INR", "USD"];
 
-/**
- * "27 Sep 2026, 6:30 pm" in India time, spelled out here rather than by Intl — whose en-IN month
- * and am/pm spellings differ between ICU versions — so a client table hydrates with the same text
- * the server rendered.
- */
-export function istStamp(at: Date): string {
-  const [, clock = ""] = istDateTimeInput(at).split("T");
-  const [hour = 0, minute = 0] = clock.split(":").map(Number);
-  return `${dayMonthYear(at)}, ${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}`;
-}
-
 /** "1 Sep 2026 – 30 Sep 2026", "from 1 Sep 2026", "until 30 Sep 2026". */
 export function rangeLabel(from: string | undefined, to: string | undefined): string {
   if (from && to) return from === to ? dayKeyLabel(from) : `${dayKeyLabel(from)} – ${dayKeyLabel(to)}`;
@@ -55,7 +47,7 @@ export function rangeLabel(from: string | undefined, to: string | undefined): st
 
 /**
  * Previous / Next for the billing lists, as links that keep the tab and its filters (the lists are
- * fifty to a page, set by the loaders). Server-safe, so the client tables use it too.
+ * fifty to a page, set by the loaders). The subscriptions and events tables use it too.
  */
 export function ListPager({ page, pageSize, total, params, noun }: { page: number; pageSize: number; total: number; params: Record<string, string>; noun: string }) {
   if (total === 0) return null;
@@ -98,17 +90,17 @@ export function ListPager({ page, pageSize, total, params, noun }: { page: numbe
   );
 }
 
-function IssuedCell({ at }: { at: Date }) {
+function IssuedCell({ at, clock }: { at: Date; clock: Clock }) {
   return (
-    <time dateTime={at.toISOString()} title={when(at)} className="whitespace-nowrap">
-      {dayMonthYear(at)}
+    <time dateTime={at.toISOString()} title={clock.dateTime(at)} className="whitespace-nowrap">
+      {clock.date(at)}
     </time>
   );
 }
 
-function period(row: InvoiceListRow): string {
+function period(row: InvoiceListRow, clock: Clock): string {
   if (!row.periodStart && !row.periodEnd) return "—";
-  return `${dayMonth(row.periodStart)} – ${dayMonthYear(row.periodEnd)}`;
+  return `${clock.dayMonth(row.periodStart)} – ${clock.date(row.periodEnd)}`;
 }
 
 function InvoiceLinks({ row }: { row: InvoiceListRow }) {
@@ -134,6 +126,7 @@ function InvoiceLinks({ row }: { row: InvoiceListRow }) {
 }
 
 export function InvoicesTab({ list, exportParams, caps }: { list: InvoicesPage; exportParams: Record<string, string>; caps: Caps }) {
+  const clock = useClock();
   const params = { ...exportParams, tab: "invoices" };
   const f = parseInvoiceFilters(params);
   const remove = (...keys: string[]) => withParams(PATH, params, Object.fromEntries(keys.map((k) => [k, null])));
@@ -191,7 +184,7 @@ export function InvoicesTab({ list, exportParams, caps }: { list: InvoicesPage; 
               {list.rows.map((row) => (
                 <Tr key={row.id}>
                   <Td muted>
-                    <IssuedCell at={row.issuedAt} />
+                    <IssuedCell at={row.issuedAt} clock={clock} />
                   </Td>
                   <Td>
                     <Link href={`/workspaces/${row.tenant.slug}`} className="font-medium text-text hover:text-brand hover:underline">
@@ -207,7 +200,7 @@ export function InvoicesTab({ list, exportParams, caps }: { list: InvoicesPage; 
                   </Td>
                   <Td nowrap>{gatewayLabel(row.gateway)}</Td>
                   <Td muted nowrap>
-                    {period(row)}
+                    {period(row, clock)}
                   </Td>
                   <Td numeric>{formatMoney(row.subtotal, row.currency)}</Td>
                   <Td numeric muted>

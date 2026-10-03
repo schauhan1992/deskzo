@@ -9,8 +9,9 @@ import { LogFollowUpButton } from "@/components/collections/log-follow-up-button
 import { formatCurrency } from "@/lib/utils";
 import { formatMoney, isBaseCurrency } from "@/lib/currency";
 import { AGING_BUCKETS } from "@/lib/receivables";
-import { followUpChannelLabels, istToday, longDay, shortDay, daysBetween } from "@/lib/collections/rules";
-import { formatIstDate } from "@/lib/india-time";
+import { followUpChannelLabels, longDay, shortDay, daysBetween } from "@/lib/collections/rules";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 const FILTERS: { value: CollectionsFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -37,7 +38,9 @@ export default async function CollectionsPage({
   const data = await listCollections({ filter: params.filter, q: params.q, sort: params.sort });
   if (!data) return <NoAccessNotice title="My collections" permission="collections.followUp" />;
 
-  const today = istToday();
+  // Today on the workspace's calendar, as a date column holds a day.
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(new Date());
   const query = (overrides: Record<string, string | undefined>) =>
     Object.fromEntries(
       Object.entries({ filter: data.filter === "all" ? undefined : data.filter, q: params.q, sort: data.sort === "overdue" ? undefined : data.sort, ...overrides }).filter(([, v]) => v),
@@ -171,7 +174,8 @@ export default async function CollectionsPage({
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5">
-                        <div className="text-muted">{formatIstDate(row.dueOn)}</div>
+                        {/* An invoice's due date is a typed day (midnight UTC); an order's, the moment its terms run out. */}
+                        <div className="text-muted">{row.kind === "invoice" ? formatCalendarDay(row.dueOn) : clock.date(row.dueOn)}</div>
                         {row.daysOverdue > 0 ? (
                           <Badge tone={row.daysOverdue > 90 ? "red" : "amber"}>
                             {row.daysOverdue}d overdue · {BUCKET_LABEL[row.bucket]}
@@ -188,7 +192,7 @@ export default async function CollectionsPage({
                         {row.lastFollowUp ? (
                           <>
                             <div className="text-muted">
-                              <span className="text-text">{formatIstDate(row.lastFollowUp.createdAt)}</span> ·{" "}
+                              <span className="text-text">{clock.date(row.lastFollowUp.createdAt)}</span> ·{" "}
                               {followUpChannelLabels[row.lastFollowUp.channel]}
                               {row.lastFollowUp.byName ? ` · ${row.lastFollowUp.byName}` : ""}
                             </div>

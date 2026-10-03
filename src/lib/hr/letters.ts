@@ -1,5 +1,5 @@
 import type { LetterType } from "@prisma/client";
-import { monthLabel } from "@/lib/hr/calendar";
+import { MONTH_NAMES, monthLabel } from "@/lib/hr/calendar";
 
 /**
  * The letters a company issues about its people.
@@ -148,11 +148,15 @@ export function letterNumberFor(type: LetterType, year: number, sequence: number
 const rupees = (value: number | null | undefined) =>
   value == null ? "—" : `₹${Math.round(value).toLocaleString("en-IN")}`;
 
+/**
+ * "2 October 2026" — the day a `@db.Date` holds, so read in UTC. Spelled here rather than asked of
+ * Intl, whose en-IN month words and commas vary between ICU versions, and a letter is a document.
+ */
 const longDate = (value: string | null | undefined) => {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 };
 
 export function subjectFor(type: LetterType, p: LetterPayload): string {

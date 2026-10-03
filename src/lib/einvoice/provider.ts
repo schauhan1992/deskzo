@@ -1,4 +1,5 @@
 import { buildEInvoicePayload, type EInvoiceDocument } from "@/lib/einvoice/payload";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The IRP behind one interface, so the app never talks to the portal directly.
@@ -51,7 +52,8 @@ class MockProvider implements EInvoiceProvider {
         BuyerGstin: doc.buyer.gstin ?? "URP",
         DocNo: doc.docNumber,
         DocTyp: doc.docType === "CREDIT_NOTE" ? "CRN" : "INV",
-        DocDt: doc.issueDate.toISOString().slice(0, 10),
+        // India's day, as the IRP dates a document — not the UTC one.
+        DocDt: indiaClock.dateKey(doc.issueDate),
         TotInvVal: doc.total,
         Irn: irn,
       }),
@@ -143,7 +145,7 @@ class NicProvider implements EInvoiceProvider {
         ok: true,
         irn: data.Irn,
         ackNo: String(data.AckNo),
-        ackDate: new Date(data.AckDt),
+        ackDate: irpTime(data.AckDt),
         signedQrCode: data.SignedQRCode,
       };
     } catch (err) {
@@ -169,6 +171,22 @@ class NicProvider implements EInvoiceProvider {
       return { ok: false, error: err instanceof Error ? err.message : "Couldn't reach the IRP." };
     }
   }
+}
+
+/**
+ * The IRP's acknowledgement time — "2026-10-02 18:30:00", India's, with no zone on it. `new Date()` read
+ * that in the server's zone: five and a half hours late on a UTC server, which stretched the 24-hour
+ * cancellation window past the portal's own. India's clock reads it to the minute and the seconds go
+ * on after; anything else is taken as `Date` reads it, as before.
+ */
+function irpTime(value: unknown): Date {
+  const text = String(value ?? "").trim();
+  const bare = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?$/.exec(text);
+  if (bare) {
+    const minute = indiaClock.parseInput(`${bare[1]}T${bare[2]}`);
+    if (minute) return new Date(minute.getTime() + Number(bare[3] ?? 0) * 1000);
+  }
+  return new Date(text);
 }
 
 export function createEInvoiceProvider(config: ProviderConfig): EInvoiceProvider {

@@ -5,16 +5,18 @@ import { listVisitAssignees } from "@/actions/visit";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { VisitForm } from "@/components/visits/visit-form";
-import { istDateTimeInput } from "@/lib/india-time";
-
-const HALF_HOUR_MS = 30 * 60_000;
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
- * "now, rounded to the next half hour" in India — a sensible default for a visit you're planning
- * today. India's offset is a whole half hour, so a half hour in UTC is a half hour there too.
+ * "now, rounded to the next half hour" on the workspace's clock — a sensible default for a visit you're
+ * planning today. Rounded on the wall clock rather than in UTC: some zones sit a quarter hour off it.
  */
-function defaultSlot() {
-  return istDateTimeInput(new Date(Math.ceil((Date.now() + 1) / HALF_HOUR_MS) * HALF_HOUR_MS));
+function defaultSlot(clock: Clock) {
+  const now = clock.parts(new Date());
+  // Minutes past midnight overflow into the next day as `at` normalises them.
+  const minutes = (Math.floor((now.hour * 60 + now.minute) / 30) + 1) * 30;
+  return clock.input(clock.at(now.year, now.month, now.day, 0, minutes));
 }
 
 export default async function NewVisitPage({
@@ -25,11 +27,12 @@ export default async function NewVisitPage({
   const enabled = await isModuleEnabled("visits");
   if (!enabled) return <ModuleDisabledNotice moduleKey="visits" />;
 
-  const [params, session, companies, assignees] = await Promise.all([
+  const [params, session, companies, assignees, clock] = await Promise.all([
     searchParams,
     auth(),
     listCompanyOptions(),
     listVisitAssignees(),
+    workspaceClock(),
   ]);
 
   return (
@@ -55,7 +58,7 @@ export default async function NewVisitPage({
           locationId: "",
           purpose: "INTRO_MEETING",
           agenda: "",
-          scheduledFor: defaultSlot(),
+          scheduledFor: defaultSlot(clock),
           address: "",
           distanceKm: "",
           userId: session!.user.id,

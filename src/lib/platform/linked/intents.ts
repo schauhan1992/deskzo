@@ -5,7 +5,6 @@ import type { LinkIntent } from "@deskzo/control-client";
 import { recordAudit } from "@/lib/audit";
 import { decryptSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
-import { formatIstDateTime } from "@/lib/india-time";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { HOUR_MS, siteAllowance } from "@/lib/platform/find-workspaces";
 import { joinGroup, linkAudit, linkedSignInEnabled, LinkRefused, memberOf, type JoinSide, type LinkRefusal } from "@/lib/platform/linked/groups";
@@ -33,6 +32,7 @@ import { SLUG_PATTERN, normaliseHost, protocolFor } from "@/lib/tenancy/host";
 import { tenantById, tenantBySlug, tenantForHost } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
+import { clockOfTenant } from "@/lib/time/workspace";
 import { verifyTotpCode } from "@/lib/totp";
 
 /**
@@ -419,27 +419,33 @@ export async function cancelLinkIntent(target: Tenant, targetSecret: string | nu
 
 // ─── L4: record, at the source ───────────────────────────────────────────────────────────────────
 
-/** The §4.9 notice, to each address once. A notice that can't be sent never undoes the link. */
-async function sendLinkedNotice(addresses: string[], a: Tenant, b: Tenant, at: Date): Promise<void> {
-  const text = [
-    "Your accounts in these two workspaces were linked:",
-    "",
-    `  ${a.name} (${a.primaryHost})`,
-    `  ${b.name} (${b.primaryHost})`,
-    "",
-    `When: ${formatIstDateTime(at)} IST`,
-    "",
-    "You can now switch between them from the workspace header.",
-    "",
-    "If this wasn't you, open Profile → Linked workspaces in either workspace, unlink them, and change your password.",
-  ].join("\n");
+/**
+ * The §4.9 notice, to each address once — its time on the clock of the workspace that address is an
+ * account in. A notice that can't be sent never undoes the link.
+ */
+async function sendLinkedNotice(recipients: { address: string; workspace: Tenant }[], a: Tenant, b: Tenant, at: Date): Promise<void> {
+  const textOn = (workspace: Tenant) => {
+    const clock = clockOfTenant(workspace);
+    return [
+      "Your accounts in these two workspaces were linked:",
+      "",
+      `  ${a.name} (${a.primaryHost})`,
+      `  ${b.name} (${b.primaryHost})`,
+      "",
+      `When: ${clock.dateTime(at)} ${clock.offsetLabel(at)}`,
+      "",
+      "You can now switch between them from the workspace header.",
+      "",
+      "If this wasn't you, open Profile → Linked workspaces in either workspace, unlink them, and change your password.",
+    ].join("\n");
+  };
   const seen = new Set<string>();
-  for (const address of addresses) {
+  for (const { address, workspace } of recipients) {
     const key = address.trim().toLowerCase();
     if (!key || seen.has(key) || isSupportAddress(key)) continue;
     seen.add(key);
     try {
-      await sendPlatformMail({ to: address.trim(), subject: "Your workspaces were linked", text });
+      await sendPlatformMail({ to: address.trim(), subject: "Your workspaces were linked", text: textOn(workspace) });
     } catch (err) {
       console.warn(`[linked] could not send a link notice: ${errorCode(err)}`);
     }
@@ -507,6 +513,6 @@ export async function completeLinkIntent(
   await runAsTenant(source, async () =>
     await recordAudit({ userId: user.id, action: "CREATE", entityType: "LinkedSignIn", entityId: mine?.id ?? user.id, entityLabel: "Linked this account with another workspace" }),
   );
-  await sendLinkedNotice([user.email, other.email], source, target, now);
+  await sendLinkedNotice([{ address: user.email, workspace: source }, { address: other.email, workspace: target }], source, target, now);
   return { workspace: target.name, memberId: joined.targetMemberId };
 }

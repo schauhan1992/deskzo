@@ -1,8 +1,9 @@
 import Link from "next/link";
 import type { myPayslips } from "@/actions/payroll";
 import { Badge, Card, CardHeader } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { monthLabel } from "@/lib/hr/calendar";
+import { indiaClock } from "@/lib/time/zone";
 
 type Slip = Awaited<ReturnType<typeof myPayslips>>[number];
 
@@ -47,8 +48,9 @@ export function MyPayslips({ payslips }: { payslips: Slip[] }) {
                   {formatCurrency(num(s.netPay))}
                 </td>
                 <td className="px-3 py-2.5">
+                  {/* Payroll is India's (statutory): the day it was paid is India's day, as on the payslip. */}
                   <Badge tone={s.run.status === "PAID" ? "green" : "blue"}>
-                    {s.run.status === "PAID" && s.run.paidAt ? `Paid ${formatDate(s.run.paidAt)}` : "Locked"}
+                    {s.run.status === "PAID" && s.run.paidAt ? `Paid ${indiaClock.date(s.run.paidAt)}` : "Locked"}
                   </Badge>
                 </td>
                 <td className="px-3 py-2.5 text-right">

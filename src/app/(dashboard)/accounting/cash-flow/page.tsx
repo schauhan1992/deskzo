@@ -8,7 +8,8 @@ import { Card } from "@/components/ui/card";
 import { financialYearBounds } from "@/lib/ledger/period";
 import { Amount, ReportHeader } from "@/components/accounting/report-chrome";
 import { DateParamInput } from "@/components/accounting/date-param-input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * Where the money went, as opposed to what was earned.
@@ -51,7 +52,8 @@ export default async function CashFlowPage({
     <div className="animate-fade-rise">
       <ReportHeader
         title="Cash flow"
-        subtitle={`${formatDate(flow.from)} to ${formatDate(flow.to)}`}
+        // The period's first and last moments, India's days: the books keep India's calendar.
+        subtitle={`${indiaClock.date(flow.from)} to ${indiaClock.date(flow.to)}`}
         organisation={org.legalName}
       >
         <div className="flex flex-wrap items-end gap-3">

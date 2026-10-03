@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { listCommissionPartyEarnings } from "@/actions/commission-party";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type Earning = Awaited<ReturnType<typeof listCommissionPartyEarnings>>[number];
 
 /** What this party has actually been paid, and which customer each payout came from. */
-export function CommissionPartyEarnings({ earnings }: { earnings: Earning[] }) {
+export async function CommissionPartyEarnings({ earnings }: { earnings: Earning[] }) {
   const total = earnings.reduce((sum, e) => sum + e.amount, 0);
 
   if (earnings.length === 0) {
@@ -17,6 +18,7 @@ export function CommissionPartyEarnings({ earnings }: { earnings: Earning[] }) {
     );
   }
 
+  const clock = await workspaceClock();
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted">
@@ -49,7 +51,7 @@ export function CommissionPartyEarnings({ earnings }: { earnings: Earning[] }) {
                 </td>
                 <td className="px-3 py-2 text-muted">{earning.payeeAccount?.label ?? "—"}</td>
                 <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(earning.amount)}</td>
-                <td className="px-3 py-2 text-muted">{formatDate(earning.createdAt)}</td>
+                <td className="px-3 py-2 text-muted">{clock.date(earning.createdAt)}</td>
               </tr>
             ))}
           </tbody>

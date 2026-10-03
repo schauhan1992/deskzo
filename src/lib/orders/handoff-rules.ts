@@ -1,9 +1,13 @@
+import { MONTH_NAMES, type Clock } from "@/lib/time/zone";
+
 /**
  * The rules of an order's hand-off to purchase, the salesperson's distributor price, and what purchase
  * saved against it — pure, so the form, the order page, the actions and check:order-handoff all read
  * the same answer.
  *
- * Dependency-free on purpose (no Prisma client, no database): client components import it.
+ * Dependency-free on purpose (no Prisma client, no database — the pure clock module only): client
+ * components import it. "Today" is the workspace's: the clock is passed in — `workspaceClock()` on the
+ * server, `useClock()` in a component.
  *
  * ## The hand-off
  *
@@ -30,13 +34,10 @@ export const handoffLabels: Record<Handoff, string> = {
   SCHEDULE: "Schedule on a date",
 };
 
-/** UTC+5:30 — the same constant as src/lib/india-time.ts, restated so this file imports nothing. */
-const IST_OFFSET_MS = 5.5 * 3600_000;
-
-/** Today in India as `yyyy-mm-dd`. */
-export function istTodayKey(now: Date): string {
-  return new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
-}
+/*
+ * Today as `yyyy-mm-dd` is `clock.today(now)` — the workspace's. This file's istTodayKey was India's,
+ * by a fixed offset.
+ */
 
 /** A `@db.Date` value (midnight UTC of its day) as `yyyy-mm-dd`. */
 export function dateKeyOf(value: Date | string): string {
@@ -55,14 +56,14 @@ export function calendarDay(key: string): Date | null {
 }
 
 /**
- * The go-ahead date a salesperson chose, checked: a real date, after today in India, and within a year
- * (a date years out is a typo, and would sit in the queue unnoticed).
+ * The go-ahead date a salesperson chose, checked: a real date, after today on the workspace's
+ * calendar, and within a year (a date years out is a typo, and would sit in the queue unnoticed).
  */
-export function checkReleaseDate(key: string | null | undefined, now: Date): { ok: true; day: Date } | { ok: false; error: string } {
+export function checkReleaseDate(key: string | null | undefined, now: Date, clock: Clock): { ok: true; day: Date } | { ok: false; error: string } {
   if (!key || !key.trim()) return { ok: false, error: "Choose the day it goes to purchase." };
   const day = calendarDay(key);
   if (!day) return { ok: false, error: "That isn't a date." };
-  const today = istTodayKey(now);
+  const today = clock.today(now);
   if (key.trim() <= today) {
     return { ok: false, error: "Choose a day after today — to send it today, send it to purchase now." };
   }
@@ -71,20 +72,24 @@ export function checkReleaseDate(key: string | null | undefined, now: Date): { o
   return { ok: true, day };
 }
 
-/** "12 Oct" or "12 Oct 2027" — a `@db.Date` day, read by its UTC parts (it is a calendar date). */
-export function shortDay(value: Date | string, now: Date = new Date()): string {
+/**
+ * "12 Oct" or "12 Oct 2027" — a `@db.Date` day, read by its UTC parts (it is a calendar date), with
+ * the year when it isn't this year on the workspace's calendar. In the clock's words: Intl's en-IN
+ * month names differ between Node and browsers ("Sept"), and the order list renders on both.
+ */
+export function shortDay(value: Date | string, clock: Clock, now: Date = new Date()): string {
   const d = new Date(value);
-  const sameYear = d.getUTCFullYear() === new Date(now.getTime() + IST_OFFSET_MS).getUTCFullYear();
-  return new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) }).format(d);
+  const sameYear = d.getUTCFullYear() === clock.parts(now).year;
+  return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]}${sameYear ? "" : ` ${d.getUTCFullYear()}`}`;
 }
 
 /**
  * The badge an order carries while purchase can't have it yet, or null once it can. Written for the
  * order list, the split pane and the order page alike.
  */
-export function handoffBadge(order: { purchaseRelease: ReleaseState; releaseOn: Date | string | null }, now: Date = new Date()): string | null {
+export function handoffBadge(order: { purchaseRelease: ReleaseState; releaseOn: Date | string | null }, clock: Clock, now: Date = new Date()): string | null {
   if (order.purchaseRelease === "HELD") return "In hand — not yet sent to purchase";
-  if (order.purchaseRelease === "SCHEDULED" && order.releaseOn) return `Goes to purchase on ${shortDay(order.releaseOn, now)}`;
+  if (order.purchaseRelease === "SCHEDULED" && order.releaseOn) return `Goes to purchase on ${shortDay(order.releaseOn, clock, now)}`;
   return null;
 }
 

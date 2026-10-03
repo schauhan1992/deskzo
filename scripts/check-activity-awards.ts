@@ -36,7 +36,7 @@ import {
   winnerCopy,
 } from "../src/lib/performance/awards";
 import { momentsFor } from "../src/lib/hr/celebrations";
-import { istMidnight } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 import { PEOPLE_ONLY } from "../src/lib/people";
 
 let actor = { id: "", name: "Zzprobe" };
@@ -134,24 +134,26 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("Fortnights, in India time");
 
-  const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(istMidnight(y, m, d).getTime() + h * HOUR + min * 60_000);
+  // Times on the workspace's clock, which is India's here.
+  const at =(y: number, m: number, d: number, h = 0, min = 0) => new Date(indiaClock.midnight(y, m, d).getTime() + h * HOUR + min * 60_000);
 
-  const a = fortnightContaining(at(2026, 8, 15, 23, 59));
-  const b = fortnightContaining(at(2026, 8, 16, 0, 0));
+  const clock = indiaClock;
+  const a = fortnightContaining(at(2026, 8, 15, 23, 59), clock);
+  const b = fortnightContaining(at(2026, 8, 16, 0, 0), clock);
   ok("the 15th at 23:59 is the first half, the 16th at midnight the second", a.key === "2026-09-A" && b.key === "2026-09-B", `${a.key} / ${b.key}`);
   ok("  the first half starts at India midnight on the 1st, not UTC midnight", a.from.toISOString() === "2026-08-31T18:30:00.000Z" && a.to.getTime() === b.from.getTime(), a.from.toISOString());
   ok("  and ends where the second begins — half-open, so no moment is in both", a.to.toISOString() === "2026-09-15T18:30:00.000Z");
-  ok("the second half runs to the month's end", b.label === "16–30 September 2026" && b.lastDay.toISOString().slice(0, 10) === "2026-09-30" && b.to.getTime() === istMidnight(2026, 9, 1).getTime(), b.label);
-  ok("  to the 29th in a leap February", fortnightContaining(at(2028, 1, 20)).label === "16–29 February 2028" && fortnightContaining(at(2027, 1, 20)).label === "16–28 February 2027");
+  ok("the second half runs to the month's end", b.label === "16–30 September 2026" && b.lastDay.toISOString().slice(0, 10) === "2026-09-30" && b.to.getTime() === indiaClock.midnight(2026, 9, 1).getTime(), b.label);
+  ok("  to the 29th in a leap February", fortnightContaining(at(2028, 1, 20), clock).label === "16–29 February 2028" && fortnightContaining(at(2027, 1, 20), clock).label === "16–28 February 2027");
   ok("  and its date-only days are calendar days, for date columns", a.firstDay.toISOString() === "2026-09-01T00:00:00.000Z" && a.lastDay.toISOString() === "2026-09-15T00:00:00.000Z");
-  ok("the one before the 16th is the 1st–15th; the one before the 1st is last month's second half", previousFortnight(at(2026, 8, 20)).key === "2026-09-A" && previousFortnight(at(2026, 8, 3)).key === "2026-08-B");
-  ok("  across the year's turn", previousFortnight(at(2027, 0, 1, 10)).key === "2026-12-B" && previousFortnight(at(2027, 0, 1, 10)).label === "16–31 December 2026");
+  ok("the one before the 16th is the 1st–15th; the one before the 1st is last month's second half", previousFortnight(at(2026, 8, 20), clock).key === "2026-09-A" && previousFortnight(at(2026, 8, 3), clock).key === "2026-08-B");
+  ok("  across the year's turn", previousFortnight(at(2027, 0, 1, 10), clock).key === "2026-12-B" && previousFortnight(at(2027, 0, 1, 10), clock).label === "16–31 December 2026");
   ok("the short label, for a notification", shortLabel(a) === "1–15 Sept" || shortLabel(a) === "1–15 Sep", shortLabel(a));
 
-  ok("announced from 9 am on the day after it closes", announcementDue(at(2026, 8, 16, 9))?.key === "2026-09-A" && announcementDue(at(2026, 9, 1, 9, 30))?.key === "2026-09-B");
-  ok("  not at 8:59 — nobody wakes to a leaderboard", announcementDue(at(2026, 8, 16, 8, 59)) === null);
-  ok("  still on the fourth day, not on the fifth", announcementDue(at(2026, 8, 19, 23, 59))?.key === "2026-09-A" && announcementDue(at(2026, 8, 20, 0, 0)) === null);
-  ok("  and not mid-fortnight — switched on on the 24th, the 1st–15th stays unannounced", announcementDue(at(2026, 8, 24, 12)) === null);
+  ok("announced from 9 am on the day after it closes", announcementDue(at(2026, 8, 16, 9), clock)?.key === "2026-09-A" && announcementDue(at(2026, 9, 1, 9, 30), clock)?.key === "2026-09-B");
+  ok("  not at 8:59 — nobody wakes to a leaderboard", announcementDue(at(2026, 8, 16, 8, 59), clock) === null);
+  ok("  still on the fourth day, not on the fifth", announcementDue(at(2026, 8, 19, 23, 59), clock)?.key === "2026-09-A" && announcementDue(at(2026, 8, 20, 0, 0), clock) === null);
+  ok("  and not mid-fortnight — switched on on the 24th, the 1st–15th stays unannounced", announcementDue(at(2026, 8, 24, 12), clock) === null);
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("Points");
@@ -310,7 +312,7 @@ async function main() {
     await db.userDailyActivity.create({ data: { userId: idle.id, date: new Date(Date.UTC(2099, 2, 7)), activeSeconds: 12 * 3600, lastHeartbeatAt: d(7) } });
     for (const i of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) await audit(gone.id, "CREATE", "Company", `${TAG}-g${i}`, d(4));
 
-    const march = fortnightContaining(d(5));
+    const march = fortnightContaining(d(5), indiaClock);
     const counts = await announce.activityCounts(march);
     const anaCounts = counts.get(ana.id);
     ok("records created — not a call's or a visit's audit row, not an admin's viewing as her, not outside the fortnight", anaCounts?.created === 3, anaCounts?.created);

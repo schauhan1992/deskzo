@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { normalizeCompanyName } from "@/lib/company-name";
 import { isFreeMailbox, parseEmailAddress } from "@/lib/email-verification";
 import { checkEmailAddress } from "@/lib/email-verification-lookup";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * An uploaded list of people for a mass mail.
@@ -210,7 +211,8 @@ export async function importMarketingList(input: {
   const contactIds = parsed.rows.map((r) => contactByEmail.get(r.email)).filter((id): id is string => !!id);
 
   // ── The list, and the consent it carries ───────────────────────────────────────────────
-  const today = new Date().toISOString().slice(0, 10);
+  // The day on the workspace's calendar, not UTC's.
+  const today = (await workspaceClock()).today();
   const list = await db.marketingList.create({
     data: {
       name: input.name,

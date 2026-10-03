@@ -7,11 +7,12 @@ import { CopyField } from "@/components/console/kit/copy-field";
 import { InsetBlock } from "@/components/console/kit/panel";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { TextField } from "@/components/partners/common/fields";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
-import { dayMonthYear, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { LinkRow } from "@/lib/partners/portal-data";
 
 /**
@@ -151,6 +152,7 @@ function NewLinkForm({ plans, action, onMade, onCancel }: { plans: { key: string
 }
 
 function MadeLink({ link, onDone }: { link: LinkRow; onDone: () => void }) {
+  const clock = useClock();
   const doneRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     // The form that had focus has just gone; put it where the next step is.
@@ -178,7 +180,7 @@ function MadeLink({ link, onDone }: { link: LinkRow; onDone: () => void }) {
         <p className="mt-2 text-xs text-muted">
           {`Code ${link.code}`}
           {link.planName ? ` · starts on ${link.planName}` : ""}
-          {link.expiresAt ? ` · works until ${dayMonthYear(link.expiresAt)}` : " · no end date"}
+          {link.expiresAt ? ` · works until ${clock.date(link.expiresAt)}` : " · no end date"}
         </p>
       </InsetBlock>
       <div className="flex justify-end">

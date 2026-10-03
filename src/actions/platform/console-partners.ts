@@ -2,7 +2,6 @@
 
 import type { PartnerApplicationStatus, PartnerStatus, StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
-import { istDayKey } from "@/lib/console-shared/format";
 import type { RawParams } from "@/lib/console-shared/params";
 import { parsePartnerDirectoryFilters } from "@/lib/console-shared/partner-params";
 import { PAYERS } from "@/lib/console-shared/roles";
@@ -20,6 +19,7 @@ import { createPartnerUser, deactivatePartnerUser, newPartnerSetupLink, partnerO
 import { MANAGERS, OWNERS, SELLERS, cleanText, consoleAudit, consoleAuditMany, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The console's partner programme (spec §9.4): partners, their status, terms and people, which
@@ -199,8 +199,9 @@ export async function consoleSetPartnerTerms(partnerId: string, terms: TermsInpu
     const pid = id(partnerId);
     const slug = await slugOf(pid);
     const row = await setPartnerTerms(pid, termsInput(terms), staff);
-    // Rates stay on the terms page: the platform log is read by roles that see no money.
-    await consoleAudit(staff, "partner.terms", { partner: slug, from: istDayKey(row.effectiveFrom) });
+    // Rates stay on the terms page: the platform log is read by roles that see no money. The day is
+    // India's, as the terms' own (the programme's money days, src/lib/partners/terms.ts).
+    await consoleAudit(staff, "partner.terms", { partner: slug, from: indiaClock.dateKey(row.effectiveFrom) });
     revalidateConsole();
     return { id: row.id, effectiveFrom: row.effectiveFrom };
   });

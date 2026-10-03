@@ -8,6 +8,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { accountScopeIds } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
+import { workspaceClock } from "@/lib/time/workspace";
 import { createNoteSchema, updateNoteSchema, reorderNotesSchema } from "@/lib/validation/note";
 import type { NoteColor, NoteVisibility } from "@/lib/validation/note";
 import type { ActionResult } from "@/actions/company";
@@ -55,12 +56,15 @@ import type { ActionResult } from "@/actions/company";
  * An unparseable value is treated as "no reminder" rather than refused. That is the safe
  * direction here and only here: the alternative is an edit to the note's text being rejected
  * because of a date field the person did not touch, and a note somebody cannot save is worse than
- * a reminder they have to set again. The picker only ever sends an ISO string or "".
+ * a reminder they have to set again.
+ *
+ * The picker sends what a `datetime-local` input holds, a time on the workspace's clock; the copilot
+ * and older callers a timestamp that states its zone. Both are read by `parseTyped` — a bare value
+ * through `new Date()` would have been the server's zone.
  */
-function parseRemindAt(value: string | undefined): Date | null {
+async function parseRemindAt(value: string | undefined): Promise<Date | null> {
   if (!value) return null;
-  const at = new Date(value);
-  return Number.isNaN(at.getTime()) ? null : at;
+  return (await workspaceClock()).parseTyped(value);
 }
 
 const NOTE_ORDER = [{ pinned: "desc" }, { position: "asc" }, { updatedAt: "desc" }] satisfies Prisma.StickyNoteOrderByWithRelationInput[];
@@ -243,7 +247,7 @@ export async function createNote(input: unknown): Promise<ActionResult<{ id: str
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const data = parsed.data;
-  const remindAt = parseRemindAt(data.remindAt);
+  const remindAt = await parseRemindAt(data.remindAt);
 
   if (data.visibility === "EVERYONE" && !(await can(user.id, "notes.broadcast"))) {
     return { ok: false, error: "You can't put a note on everybody's board." };
@@ -299,7 +303,7 @@ export async function updateNote(input: unknown): Promise<ActionResult<{ id: str
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const data = parsed.data;
-  const remindAt = parseRemindAt(data.remindAt);
+  const remindAt = await parseRemindAt(data.remindAt);
 
   const existing = await ownedNote(data.id, user.id);
   if (!existing) {

@@ -7,26 +7,19 @@ import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { ImpactList } from "@/components/console/kit/impact";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
-import { dayMonth } from "@/lib/console-shared/format";
-import { IST_OFFSET_MS } from "@/lib/india-time";
 import type { SupportPanel } from "@/lib/platform/workspace-data";
 
 /**
  * Asking a workspace's owner to let support in, when it has not: an email to its owner with a link
  * to its Security settings, where only its super admin can grant access. It grants nothing itself —
  * the owner chooses the level and how long, and can end it at any time. Once a day per workspace;
- * the last request and when the next one is allowed come from the loader.
+ * the last request and when the next one is allowed come from the loader. Times on the console's clock.
  */
 
-/** "2:05 pm" in India time, spelled out here rather than by Intl, so the server and the browser print it alike. */
-function istClock(at: Date | string): string {
-  const d = new Date(new Date(at).getTime() + IST_OFFSET_MS);
-  const hours = d.getUTCHours();
-  return `${hours % 12 || 12}:${String(d.getUTCMinutes()).padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
-}
-
 export function RequestAccess({ tenantId, lastRequest, canRequestAgainAt }: { tenantId: string; lastRequest: SupportPanel["lastRequest"]; canRequestAgainAt: Date | null }) {
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const { pending, error, run, reset } = useConsoleAction<{ at: string }>();
   const waiting = canRequestAgainAt !== null;
@@ -42,7 +35,7 @@ export function RequestAccess({ tenantId, lastRequest, canRequestAgainAt }: { te
         <p className="text-xs text-muted">
           {`Requested by ${lastRequest.byMe ? "you" : lastRequest.by} `}
           <RelativeTime at={lastRequest.at} />
-          {waiting && canRequestAgainAt ? ` — ask again after ${dayMonth(canRequestAgainAt)}, ${istClock(canRequestAgainAt)}.` : "."}
+          {waiting && canRequestAgainAt ? ` — ask again after ${clock.dayMonth(canRequestAgainAt)}, ${clock.time(canRequestAgainAt)}.` : "."}
         </p>
       )}
       {!waiting && (

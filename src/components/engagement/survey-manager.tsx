@@ -11,7 +11,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Row = {
   id: string;
@@ -34,6 +34,7 @@ export function SurveyManager({
   options: { users: { id: string; name: string }[]; departments: { id: string; name: string }[] };
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [building, setBuilding] = useState(false);
   const [results, setResults] = useState<SurveyResults | null>(null);
 
@@ -70,7 +71,8 @@ export function SurveyManager({
                 </div>
                 <p className="mt-0.5 text-xs text-muted">
                   {audienceLabels[r.audience]} · {r._count.questions} questions · {r._count.responses} answered
-                  {r.expiresAt && ` · closes ${formatDate(new Date(r.expiresAt))}`} · by {r.createdBy.name}
+                  {/* It closes at the last second of the day picked, in the workspace's zone. */}
+                  {r.expiresAt && ` · closes ${clock.date(r.expiresAt)}`} · by {r.createdBy.name}
                 </p>
               </div>
 

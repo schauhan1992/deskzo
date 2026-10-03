@@ -3,12 +3,13 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { useClock } from "@/components/time/clock-provider";
 import { cn } from "@/lib/utils";
 import {
   PRESETS,
   type PresetKey,
   computePreset,
-  indianToday,
+  todayOn,
   matchPreset,
   toISODate,
   fromISODate,
@@ -72,11 +73,13 @@ function MonthGrid({
   onHoverDay: (d: Date | null) => void;
   onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
+  const clock = useClock();
   const firstOfMonth = startOfMonth(month);
   const gridStart = startOfWeek(firstOfMonth);
   const weeks = Array.from({ length: 6 }, (_, w) => Array.from({ length: 7 }, (_, i) => addDays(gridStart, w * 7 + i)));
   const effectiveEnd = rangeEnd ?? previewEnd;
-  const today = indianToday();
+  // The workspace's today, as a day on the grid — not the browser's.
+  const today = todayOn(clock);
   const monthName = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   return (
@@ -157,6 +160,7 @@ export function DateRangePicker({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const clock = useClock();
   const urlFrom = fromISODate(searchParams.get(fromParam) ?? "");
   const urlTo = fromISODate(searchParams.get(toParam) ?? "");
 
@@ -174,7 +178,7 @@ export function DateRangePicker({
   const [draftTo, setDraftTo] = useState<Date | null>(urlTo);
   const [hoverDay, setHoverDay] = useState<Date | null>(null);
   const [selectingEnd, setSelectingEnd] = useState(false);
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(addMonths(urlTo ?? indianToday(), -1)));
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(addMonths(urlTo ?? todayOn(clock), -1)));
   const [focusedDay, setFocusedDay] = useState<Date | null>(null);
 
   const gridsRef = useRef<HTMLDivElement>(null);
@@ -219,18 +223,18 @@ export function DateRangePicker({
     setDraftFrom(urlFrom);
     setDraftTo(urlTo);
     setSelectingEnd(false);
-    setViewMonth(startOfMonth(addMonths(urlTo ?? indianToday(), -1)));
-    setFocusedDay(urlTo ?? urlFrom ?? indianToday());
+    setViewMonth(startOfMonth(addMonths(urlTo ?? todayOn(clock), -1)));
+    setFocusedDay(urlTo ?? urlFrom ?? todayOn(clock));
     setOpen(true);
   }
 
   function handlePreset(key: PresetKey) {
-    const { from, to } = computePreset(key);
+    const { from, to } = computePreset(key, clock);
     setDraftFrom(from);
     setDraftTo(to);
     setSelectingEnd(false);
-    setViewMonth(startOfMonth(addMonths(to ?? from ?? indianToday(), -1)));
-    setFocusedDay(to ?? from ?? indianToday());
+    setViewMonth(startOfMonth(addMonths(to ?? from ?? todayOn(clock), -1)));
+    setFocusedDay(to ?? from ?? todayOn(clock));
   }
 
   function handleSelectDay(d: Date) {
@@ -327,7 +331,7 @@ export function DateRangePicker({
     setOpen(false);
   }
 
-  const activePreset = matchPreset(urlFrom, urlTo);
+  const activePreset = matchPreset(urlFrom, urlTo, clock);
   const displayText =
     !urlFrom && !urlTo
       ? "All time"
@@ -369,11 +373,11 @@ export function DateRangePicker({
                 <button
                   key={p.key}
                   type="button"
-                  aria-current={matchPreset(draftFrom, draftTo) === p.key ? "true" : undefined}
+                  aria-current={matchPreset(draftFrom, draftTo, clock) === p.key ? "true" : undefined}
                   onClick={() => handlePreset(p.key)}
                   className={cn(
                     "block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-sunken",
-                    matchPreset(draftFrom, draftTo) === p.key
+                    matchPreset(draftFrom, draftTo, clock) === p.key
                       ? "bg-surface-sunken font-medium text-text"
                       : "text-muted",
                   )}

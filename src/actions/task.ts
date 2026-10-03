@@ -5,11 +5,12 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
-import { dateRangeFilter } from "@/lib/utils";
 import { pageSlice } from "@/lib/pagination";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { createTaskSchema, updateTaskSchema } from "@/lib/validation/task";
+import { workspaceClock } from "@/lib/time/workspace";
+import { calendarDayRange } from "@/lib/time/zone";
 import type { ActionResult } from "@/actions/company";
 
 function revalidateTaskPaths(task: { companyId: string | null; leadId: string | null; ticketId: string | null }) {
@@ -24,6 +25,22 @@ async function assertValidAssignee(userId: string) {
   return !!assignee && assignee.active;
 }
 
+/**
+ * A due date is a calendar day, held as a `@db.Date` would hold it — UTC midnight of the day picked —
+ * so it reads back as that day in every zone (formatCalendarDay). A callback's is the moment promised
+ * (src/actions/call.ts), which falls inside its own day. Null for a day that isn't one.
+ */
+function dueDateFrom(day: string | undefined): Date | null {
+  return day ? (calendarDayRange(day, null)?.gte ?? null) : null;
+}
+
+/** Due From and To as calendar days, the To day whole — a callback promised for 4 pm on it is in. */
+function dueDayRange(from?: string, to?: string): { gte?: Date; lt?: Date } | null {
+  const days = calendarDayRange(from, to);
+  if (!days) return null;
+  return { ...(days.gte ? { gte: days.gte } : {}), ...(days.lte ? { lt: new Date(days.lte.getTime() + 86_400_000) } : {}) };
+}
+
 export async function createTask(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("tasks");
   const parsed = createTaskSchema.safeParse(input);
@@ -35,12 +52,14 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   if (data.assignedToUserId && !(await assertValidAssignee(data.assignedToUserId))) {
     return { ok: false, error: "That person is not a valid, active user." };
   }
+  const dueDate = dueDateFrom(data.dueDate);
+  if (data.dueDate && !dueDate) return { ok: false, error: "That due date isn't a date." };
 
   const task = await db.task.create({
     data: {
       title: data.title,
       description: data.description || null,
-      dueDate: data.dueDate ? new Date(data.dueDate) : null,
+      dueDate,
       assignedToUserId: data.assignedToUserId || null,
       createdByUserId: user.id,
       companyId: data.companyId || null,
@@ -80,6 +99,8 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
   if (data.assignedToUserId && !(await assertValidAssignee(data.assignedToUserId))) {
     return { ok: false, error: "That person is not a valid, active user." };
   }
+  const dueDate = dueDateFrom(data.dueDate);
+  if (data.dueDate && !dueDate) return { ok: false, error: "That due date isn't a date." };
 
   const newAssignee = data.assignedToUserId || null;
   const task = await db.task.update({
@@ -87,7 +108,7 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
     data: {
       title: data.title,
       description: data.description || null,
-      dueDate: data.dueDate ? new Date(data.dueDate) : null,
+      dueDate,
       assignedToUserId: newAssignee,
     },
   });
@@ -153,7 +174,7 @@ type TaskListParams = {
 };
 
 function taskListWhere(params?: TaskListParams): Prisma.TaskWhereInput {
-  const dueDate = dateRangeFilter(params?.dueFrom, params?.dueTo);
+  const dueDate = dueDayRange(params?.dueFrom, params?.dueTo);
   return {
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
@@ -195,8 +216,9 @@ export type RailTask = {
  */
 export async function myOpenTasks(): Promise<RailTask[]> {
   const user = await requireModuleUser("tasks");
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  // Today on the workspace's calendar, as a due date holds a day — not the server's today, which on a
+  // server in UTC began at 05:30 in India.
+  const today = (await workspaceClock()).calendarDate(new Date());
 
   const rows = await db.task.findMany({
     where: { assignedToUserId: user.id, done: false },
@@ -211,7 +233,7 @@ export async function myOpenTasks(): Promise<RailTask[]> {
     title: t.title,
     dueDate: t.dueDate,
     companyName: t.company?.name ?? null,
-    overdue: t.dueDate !== null && t.dueDate < startOfToday,
+    overdue: t.dueDate !== null && t.dueDate < today,
   }));
 }
 
@@ -243,9 +265,12 @@ export async function listTasksPaged(params: TaskListParams & { page: number; pa
 export async function countTasks(params?: TaskListParams) {
   await requireModuleUser("tasks");
   const where = taskListWhere(params);
+  // Overdue is due before today on the workspace's calendar, as the list's badge and the rail say. Before
+  // now, a day held at UTC midnight was overdue from the evening before it west of UTC.
+  const today = (await workspaceClock()).calendarDate(new Date());
   const [open, overdue] = await Promise.all([
     db.task.count({ where: { ...where, done: false } }),
-    db.task.count({ where: { ...where, done: false, dueDate: { lt: new Date() } } }),
+    db.task.count({ where: { ...where, done: false, dueDate: { lt: today } } }),
   ]);
   return { open, overdue };
 }

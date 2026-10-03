@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { saveMaintenance, type MaintenanceInput } from "@/actions/maintenance";
 import { DEFAULT_MESSAGE, MESSAGE_MAX, maintenancePage, type MaintenanceState } from "@/lib/maintenance-state";
-import { formatIstDateTime, istDateTimeInput, parseIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -35,32 +35,35 @@ const DURATIONS = [
 
 export function MaintenanceForm({ settings }: { settings: MaintenanceSettings }) {
   const router = useRouter();
+  // Times are typed and shown on the workspace's clock; `saveMaintenance` reads them on the same one.
+  const clock = useClock();
+  const zoneName = clock.zone.replace(/_/g, " ");
   const live = settings.phase === "on" || settings.phase === "scheduled";
   const [mode, setMode] = useState<"now" | "schedule">(settings.phase === "scheduled" ? "schedule" : "now");
-  const [startsAt, setStartsAt] = useState(settings.phase === "scheduled" ? istDateTimeInput(settings.startsAt) : "");
+  const [startsAt, setStartsAt] = useState(settings.phase === "scheduled" ? clock.input(settings.startsAt) : "");
   const [duration, setDuration] = useState(settings.endsAt && live ? "at" : "60");
-  const [endsAt, setEndsAt] = useState(settings.endsAt && live ? istDateTimeInput(settings.endsAt) : "");
+  const [endsAt, setEndsAt] = useState(settings.endsAt && live ? clock.input(settings.endsAt) : "");
   const [message, setMessage] = useState(settings.message);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  /** The end, as India time for the form to send — worked out from the start and the duration. */
+  /** The end, as the workspace's time for the form to send — worked out from the start and the duration. */
   function endFor(start: Date | null): string {
     if (duration === "") return "";
     if (duration === "at") return endsAt;
-    return istDateTimeInput(new Date((start ?? settings.now).getTime() + Number(duration) * 60_000));
+    return clock.input(new Date((start ?? settings.now).getTime() + Number(duration) * 60_000));
   }
 
-  const previewStart = mode === "schedule" ? parseIstDateTime(startsAt) : settings.now;
-  const previewEnd = endFor(previewStart) ? parseIstDateTime(endFor(previewStart)) : null;
-  const preview = maintenancePage({ phase: "on", startsAt: previewStart, endsAt: previewEnd, message: message.trim() || DEFAULT_MESSAGE }, settings.appName);
+  const previewStart = mode === "schedule" ? clock.parseInput(startsAt) : settings.now;
+  const previewEnd = endFor(previewStart) ? clock.parseInput(endFor(previewStart)) : null;
+  const preview = maintenancePage({ phase: "on", startsAt: previewStart, endsAt: previewEnd, message: message.trim() || DEFAULT_MESSAGE }, clock, settings.appName);
 
   function save(next: MaintenanceInput["mode"]) {
     setNotice(null);
     setConfirming(false);
     startTransition(async () => {
-      const start = next === "schedule" ? parseIstDateTime(startsAt) : null;
+      const start = next === "schedule" ? clock.parseInput(startsAt) : null;
       const r = await saveMaintenance({ mode: next, startsAt: next === "schedule" ? startsAt : undefined, endsAt: next === "off" ? undefined : endFor(start), message });
       if (!r.ok) {
         setNotice({ tone: "error", text: r.error });
@@ -90,20 +93,20 @@ export function MaintenanceForm({ settings }: { settings: MaintenanceSettings })
           </p>
           {settings.phase === "on" && (
             <p className="text-muted">
-              {settings.endsAt ? `It comes back by itself at ${formatIstDateTime(settings.endsAt)}.` : "It stays down until somebody switches it off."}
+              {settings.endsAt ? `It comes back by itself at ${clock.dateTime(settings.endsAt)}.` : "It stays down until somebody switches it off."}
             </p>
           )}
           {settings.phase === "scheduled" && settings.startsAt && (
             <p className="text-muted">
-              From {formatIstDateTime(settings.startsAt)}
-              {settings.endsAt ? ` to ${formatIstDateTime(settings.endsAt)}` : ", until somebody switches it off"}. Everybody signed in sees a banner about it from a day
+              From {clock.dateTime(settings.startsAt)}
+              {settings.endsAt ? ` to ${clock.dateTime(settings.endsAt)}` : ", until somebody switches it off"}. Everybody signed in sees a banner about it from a day
               before.
             </p>
           )}
-          {settings.phase === "ended" && settings.endsAt && <p className="text-muted">The last window ended at {formatIstDateTime(settings.endsAt)}.</p>}
+          {settings.phase === "ended" && settings.endsAt && <p className="text-muted">The last window ended at {clock.dateTime(settings.endsAt)}.</p>}
           {settings.updatedAt && settings.updatedBy && (
             <p className="text-xs text-subtle">
-              Last changed by {settings.updatedBy}, {formatIstDateTime(settings.updatedAt)}.
+              Last changed by {settings.updatedBy}, {clock.dateTime(settings.updatedAt)}.
             </p>
           )}
           {live && (
@@ -128,7 +131,7 @@ export function MaintenanceForm({ settings }: { settings: MaintenanceSettings })
           <div className="grid gap-3 sm:grid-cols-2">
             {mode === "schedule" && (
               <div className="space-y-1">
-                <Label htmlFor="maintenance-start">Starts (India time)</Label>
+                <Label htmlFor="maintenance-start">Starts ({zoneName} time)</Label>
                 <Input id="maintenance-start" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
               </div>
             )}
@@ -144,7 +147,7 @@ export function MaintenanceForm({ settings }: { settings: MaintenanceSettings })
             </div>
             {duration === "at" && (
               <div className="space-y-1">
-                <Label htmlFor="maintenance-end">Ends (India time)</Label>
+                <Label htmlFor="maintenance-end">Ends ({zoneName} time)</Label>
                 <Input id="maintenance-end" type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
               </div>
             )}

@@ -6,11 +6,11 @@ import { consoleDecideDeal, consoleDecideRequest, consoleUpdateApplication } fro
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { OnceSecret } from "@/components/console/kit/once-secret";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { PARTNER_APPLICATION_STATUS } from "@/lib/console-shared/labels";
 import type { PartnerApplicationStatus, TermsInput } from "@/lib/partners/types";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ const NOTE = { label: "Note to the partner (optional, shown to them)", minLength
 // ─── Deals ───────────────────────────────────────────────────────────────────────────────────────
 
 export function DealDecisionButtons({ deal }: { deal: { id: string; companyName: string; domain: string; partnerName: string } }) {
+  const clock = useClock();
   const action = useConsoleAction<{ status: string; expiresAt: Date | null }>();
   const [open, setOpen] = useState<"APPROVE" | "DECLINE" | null>(null);
 
@@ -68,7 +69,7 @@ export function DealDecisionButtons({ deal }: { deal: { id: string; companyName:
         onConfirm={({ reason }) => {
           const decision = open ?? "APPROVE";
           action.run(() => consoleDecideDeal(deal.id, decision, reason || null), {
-            success: (d) => (decision === "APPROVE" ? `Deal registration approved — ${deal.domain} is ${deal.partnerName}'s until ${dayMonthYear(d.expiresAt)}.` : "Deal registration declined."),
+            success: (d) => (decision === "APPROVE" ? `Deal registration approved — ${deal.domain} is ${deal.partnerName}'s until ${clock.date(d.expiresAt)}.` : "Deal registration declined."),
             onDone: () => setOpen(null),
           });
         }}

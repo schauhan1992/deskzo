@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { AllocatePaymentButton } from "@/components/payments/allocate-payment-button";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { paymentMethodLabels } from "@/lib/gst";
 import { isBaseCurrency } from "@/lib/currency";
 
@@ -128,7 +129,7 @@ export function PaymentsReceivedTable({
                     </Link>
                   </td>
                   <td className="px-4 py-2.5 text-muted">{formatCurrency(String(p.amount), p.currency)}</td>
-                  <td className="px-4 py-2.5 text-muted">{formatDate(p.paidOn)}</td>
+                  <td className="px-4 py-2.5 text-muted">{formatCalendarDay(p.paidOn)}</td>
                   <td className="px-4 py-2.5 text-muted">
                     {paymentMethodLabels[p.method as keyof typeof paymentMethodLabels] ?? p.method}
                   </td>

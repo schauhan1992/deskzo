@@ -1,14 +1,16 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { istDaysBetween, plural } from "@/lib/console-shared/format";
-import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
+import { plural } from "@/lib/console-shared/format";
+import type { Clock } from "@/lib/time/zone";
 
 /**
- * "3 min ago" / "in 2 days", with the exact India time in the tooltip.
+ * "3 min ago" / "in 2 days", with the exact time in the tooltip — on the clock the layout provides,
+ * the console's (Settings › Time zone), in the console, the CMS and the partners' portal alike.
  *
- * The server does not know the reader's clock, so the server render (and the hydration render that
- * must match it) is the absolute IST text; the relative wording arrives after mount. The clock is one
+ * The server does not know the reader's now, so the server render (and the hydration render that
+ * must match it) is the absolute text; the relative wording arrives after mount. "Now" is one
  * module-level store that ticks once a minute for every `RelativeTime` on the page — a list of 200
  * rows runs one interval, not 200, and nothing reads `Date.now()` while rendering.
  */
@@ -65,9 +67,9 @@ function relativeText(at: number, now: number): string {
   return future ? `in ${amount}` : `${amount} ago`;
 }
 
-/** A calendar date counts in India's days: "today", "tomorrow", "in 3 days", "2 days ago". */
-function relativeDay(at: Date, now: number): string {
-  const days = istDaysBetween(new Date(now), at);
+/** A calendar date counts in the clock's days: "today", "tomorrow", "in 3 days", "2 days ago". */
+function relativeDay(at: Date, now: number, clock: Clock): string {
+  const days = clock.daysBetween(new Date(now), at);
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
   if (days === -1) return "yesterday";
@@ -76,17 +78,34 @@ function relativeDay(at: Date, now: number): string {
 }
 
 export function RelativeTime({ at, absolute = "datetime", className }: { at: Date | string; absolute?: "datetime" | "date"; className?: string }) {
+  const clock = useClock();
   const now = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const date = at instanceof Date ? at : new Date(at);
   if (Number.isNaN(date.getTime())) return <span className={className}>—</span>;
 
-  const exact = absolute === "date" ? formatIstDate(date) : formatIstDateTime(date);
-  const text = now === null ? exact : absolute === "date" ? relativeDay(date, now) : relativeText(date.getTime(), now);
+  const exact = absolute === "date" ? clock.date(date) : clock.dateTime(date);
+  const text = now === null ? exact : absolute === "date" ? relativeDay(date, now, clock) : relativeText(date.getTime(), now);
   return (
-    // The absolute text is replaced right after hydration, and Intl's month names can differ by a
-    // letter between the server's ICU and the browser's — not worth a hydration error.
+    // The absolute text is replaced right after hydration, and the server's zone data and the
+    // browser's can differ by an update for a zone that changed its rules — not worth a hydration error.
     <time dateTime={date.toISOString()} title={now === null ? undefined : exact} className={className} suppressHydrationWarning>
       {text}
+    </time>
+  );
+}
+
+/**
+ * "6:30 pm UTC+05:30": a time of day on the clock the layout provides, with its zone named — for a
+ * header drawn on the server (`PageHeader`'s "Updated …"), which has no clock of its own to ask.
+ */
+export function ClockTime({ at }: { at: Date | string }) {
+  const clock = useClock();
+  const date = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(date.getTime())) return <>—</>;
+  return (
+    // As `RelativeTime`: the server's zone data and the browser's can differ by an update.
+    <time dateTime={date.toISOString()} suppressHydrationWarning>
+      {`${clock.time(date)} ${clock.offsetLabel(date)}`}
     </time>
   );
 }

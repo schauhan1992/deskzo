@@ -1,7 +1,9 @@
 import type { PromiseStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { computeOrderFinancials } from "@/lib/orders/financials";
-import { istToday, promiseOutcome, type SettlementEvent } from "@/lib/collections/rules";
+import { promiseOutcome, type SettlementEvent } from "@/lib/collections/rules";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Whether the promises to pay were kept — the server half of Collections' promise rules (the pure
@@ -112,7 +114,7 @@ const promiseSelect = {
 } as const;
 
 /** "kept", "gone" (the invoice or order is cancelled or deleted), or "open" (not kept yet). */
-async function outcomeOf(p: PromiseRow, cache: Map<string, Target>): Promise<"kept" | "gone" | "open"> {
+async function outcomeOf(p: PromiseRow, cache: Map<string, Target>, clock: Clock): Promise<"kept" | "gone" | "open"> {
   if (!p.promisedOn) return "open";
   const target = p.documentId
     ? await loadTarget("doc", p.documentId, cache)
@@ -126,7 +128,7 @@ async function outcomeOf(p: PromiseRow, cache: Map<string, Target>): Promise<"ke
     promisedAmount: p.promisedAmount === null || p.promisedAmount === undefined ? null : Number(p.promisedAmount),
     total: target.total,
     events: target.events,
-  });
+  }, clock);
   return kept ? "kept" : "open";
 }
 
@@ -174,9 +176,10 @@ export async function settlePromisesFor(
       select: promiseSelect,
     });
     const cache = new Map<string, Target>();
+    const clock = await workspaceClock();
     const kept: string[] = [];
     for (const p of promises) {
-      if ((await outcomeOf(p, cache)) === "kept" && (await markKept(p.id, now))) kept.push(p.id);
+      if ((await outcomeOf(p, cache, clock)) === "kept" && (await markKept(p.id, now))) kept.push(p.id);
     }
     return { kept };
   } catch (err) {
@@ -194,14 +197,15 @@ const LATE_ENTRY_DAYS = 30;
  *   · OPEN, and the money has come in → KEPT;
  *   · OPEN, and its invoice or order was cancelled or deleted → SUPERSEDED: there is nothing left to
  *     pay, so it is neither kept nor broken;
- *   · OPEN, and its day (India) has passed unkept → BROKEN;
+ *   · OPEN, and its day (the workspace's) has passed unkept → BROKEN;
  *   · BROKEN in the last 30 days, and a receipt dated in time has since been entered → KEPT.
  *
  * Each change is a conditional update from the status read, so a payment recorded while this runs can't
  * be overwritten by it.
  */
 export async function resolvePromises(now: Date = new Date()): Promise<{ kept: string[]; broken: string[]; superseded: string[] }> {
-  const today = istToday(now);
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(now);
   const lateSince = new Date(today.getTime() - LATE_ENTRY_DAYS * 86_400_000);
   const promises = await db.paymentFollowUp.findMany({
     where: {
@@ -213,7 +217,7 @@ export async function resolvePromises(now: Date = new Date()): Promise<{ kept: s
   const cache = new Map<string, Target>();
   const out = { kept: [] as string[], broken: [] as string[], superseded: [] as string[] };
   for (const p of promises) {
-    const outcome = await outcomeOf(p, cache);
+    const outcome = await outcomeOf(p, cache, clock);
     if (outcome === "kept") {
       if (await markKept(p.id, now)) out.kept.push(p.id);
       continue;
@@ -227,7 +231,7 @@ export async function resolvePromises(now: Date = new Date()): Promise<{ kept: s
       if (count === 1) out.superseded.push(p.id);
       continue;
     }
-    // The column holds the day; `today` is India's, held the same way — compared by calendar day.
+    // The column holds the day; `today` is the workspace's, held the same way — compared by calendar day.
     if (p.promisedOn && p.promisedOn.getTime() < today.getTime()) {
       const { count } = await db.paymentFollowUp.updateMany({
         where: { id: p.id, promiseStatus: "OPEN" },

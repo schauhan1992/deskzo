@@ -10,15 +10,14 @@ import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { DocumentForm } from "@/components/documents/document-form";
 import { isEditable, tradeDocumentLabels } from "@/lib/trade-documents";
-import { istDateTimeInput } from "@/lib/india-time";
 import { periodKey } from "@/lib/documents/service-period";
 
 /**
- * A stored date as the Indian calendar day, for a date input. Right whether the date was saved at UTC
- * midnight (05:30 IST, the same day) or at India midnight (18:30 UTC the day before) — slicing the UTC
- * ISO string gave the previous day for the second.
+ * A stored date as the day it holds, for a date input. A document's dates are typed days kept as their
+ * midnight UTC, so their UTC date is the day, in every zone — read on the workspace's clock, west of
+ * UTC it would be the day before, and saving the form unchanged would move the date back a day.
  */
-const asDateInput = (value: Date | string | null | undefined) => (value ? istDateTimeInput(value).slice(0, 10) : "");
+const asDateInput = (value: Date | string | null | undefined) => periodKey(value);
 
 export default async function EditDocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

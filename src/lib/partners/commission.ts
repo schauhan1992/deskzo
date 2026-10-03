@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@deskzo/control-client";
 import { redactSecrets } from "@/lib/console-shared/redact";
-import { istDateParts } from "@/lib/india-time";
 import { attributionAt } from "@/lib/partners/attribution";
 import { partnerAudit } from "@/lib/partners/audit";
 import {
@@ -26,6 +25,7 @@ import { PartnerRefused } from "@/lib/partners/types";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { withPlatformLease } from "@/lib/platform/fanout";
 import type { Staff } from "@/lib/platform/staff-session";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The commission engine (spec §5): gateway invoices in, commission entries out.
@@ -586,7 +586,8 @@ export async function runPartnerChores(now: Date, opts: { daily: boolean }): Pro
           out.expiredDeals = await expireDeals(now);
         });
         await chore("statements", out, async () => {
-          if (istDateParts(now).day < (await statementDay())) return;
+          // Statements are India's months (src/lib/partners/statements.ts), so the day of the month is India's.
+          if (indiaClock.parts(now).day < (await statementDay())) return;
           const made = await generateStatements(now, { by: "tick" });
           out.statements = made.made;
           out.failed += made.failed;

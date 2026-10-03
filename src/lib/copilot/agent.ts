@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { adapterFor } from "@/lib/copilot/providers";
 import { copilotConfig, providerKey, recordUsage, usedToday, planStopsCopilot } from "@/lib/copilot/settings";
-import { indianToday, outputText, runTool, toolSpec, toolsFor } from "@/lib/copilot/tools";
+import { outputText, runTool, toolSpec, toolsFor } from "@/lib/copilot/tools";
+import { workspaceClock } from "@/lib/time/workspace";
 import { systemPrompt } from "@/lib/copilot/prompt";
 import type { ChatEvent, DisplayBlock, ToolCall, ToolResult, Turn } from "@/lib/copilot/types";
 
@@ -118,7 +119,9 @@ export async function runCopilot(input: RunInput): Promise<void> {
 
   const tools = await toolsFor();
   const specs = tools.map(toolSpec);
-  const system = systemPrompt({ userName: input.userName, role: input.role, today: indianToday(), appName: input.appName });
+  // Today and the zone are the workspace's: a time the model writes is read on the same clock.
+  const clock = await workspaceClock();
+  const system = systemPrompt({ userName: input.userName, role: input.role, today: clock.today(), timeZone: clock.zone, appName: input.appName });
   const ctx = { userId: input.userId, conversationId: conversation.id };
 
   try {

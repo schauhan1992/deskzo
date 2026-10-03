@@ -1,6 +1,6 @@
 import type { Prisma } from "@deskzo/control-client";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
 import type { CmsAuditAction, CmsAuditFilters, CmsAuditRow, CmsMe, Paged } from "@/lib/cms/types";
 
 /**
@@ -73,17 +73,19 @@ export async function refLabels(refs: (string | null | undefined)[]): Promise<Ma
 
 export const AUDIT_PAGE_SIZE = 50;
 
-/** The activity page: newest first, filtered by person, action (or an action prefix like "page."), thing and India dates. */
+/**
+ * The activity page: newest first, filtered by person, action (or an action prefix like "page."), thing
+ * and dates — days on the console's clock (Settings › Time zone).
+ */
 export async function listCmsAudit(filters: CmsAuditFilters = {}): Promise<Paged<CmsAuditRow>> {
   const page = Math.max(1, Math.floor(Number(filters.page) || 1));
   const action = typeof filters.action === "string" ? filters.action.trim().slice(0, 60) : "";
-  const from = filters.from ? startOfIndianDay(filters.from) : null;
-  const to = filters.to ? endOfIndianDay(filters.to) : null;
+  const days = filters.from || filters.to ? (await consoleClock()).dayRange(filters.from, filters.to) : null;
   const where: Prisma.CmsAuditLogWhereInput = {
     ...(filters.actorId ? { actorId: String(filters.actorId).slice(0, 40) } : {}),
     ...(action ? (action.endsWith(".") ? { action: { startsWith: action } } : { action }) : {}),
     ...(filters.entity ? { entity: String(filters.entity).slice(0, 40) } : {}),
-    ...(from || to ? { at: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
+    ...(days ? { at: days } : {}),
   };
   const [rows, total] = await Promise.all([
     controlDb().cmsAuditLog.findMany({ where, orderBy: [{ at: "desc" }, { id: "desc" }], skip: (page - 1) * AUDIT_PAGE_SIZE, take: AUDIT_PAGE_SIZE }),

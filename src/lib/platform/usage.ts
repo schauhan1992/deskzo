@@ -1,5 +1,5 @@
 import { parseEntitlements } from "@/lib/entitlements";
-import { istDateParts } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 
 /**
@@ -12,7 +12,7 @@ export type LatestUsage = { day: Date; seatsUsed: number; seatsLimit: number | n
 
 export type LeaderRow = {
   tenant: { id: string; slug: string; name: string };
-  /** The snapshot's day: a `@db.Date`, midnight UTC of the Indian calendar day. */
+  /** The snapshot's day: a `@db.Date`, midnight UTC of the day on the console's clock — the platform's daily work keeps its days there. */
   day: Date;
   seatsUsed: number;
   seatsLimit: number | null;
@@ -97,8 +97,9 @@ export async function usageLeaders(opts: { by: "seats" | "utilisation" | "copilo
  * allowance starts again on the 1st, so last month's figure says nothing about now.
  */
 export async function overLimit(now = new Date()): Promise<{ seats: LeaderRow[]; copilot: LeaderRow[] }> {
-  const rows = await openWorkspaceUsage();
-  const { year, month } = istDateParts(now);
+  const [rows, clock] = await Promise.all([openWorkspaceUsage(), consoleClock()]);
+  // This month on the console's clock, the one a snapshot's day is kept on.
+  const { year, month } = clock.parts(now);
   const thisMonth = (day: Date) => day.getUTCFullYear() === year && day.getUTCMonth() === month;
   const seats = rows.filter((r) => r.seatsLimit !== null && r.seatsUsed > r.seatsLimit);
   const copilot = rows.filter((r) => r.copilotLimit !== null && r.copilotTokens > r.copilotLimit && thisMonth(r.day));

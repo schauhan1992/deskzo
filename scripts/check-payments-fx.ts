@@ -187,7 +187,8 @@ async function run(scratchUrl: string) {
   const { findLedgerDrift } = require("../src/lib/ledger/drift") as typeof import("../src/lib/ledger/drift");
   const { loadTieOut, tieOut } = require("../src/lib/close/tieout") as typeof import("../src/lib/close/tieout");
   const months = require("../src/lib/close/months") as typeof import("../src/lib/close/months");
-  const { istDateKey } = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
+  // The books keep India's calendar in every workspace.
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
   const { can } = require("../src/lib/authz/resolve") as typeof import("../src/lib/authz/resolve");
   const { measure } = require("../src/lib/targets/measure") as typeof import("../src/lib/targets/measure");
   const receivable = require("../src/actions/receivable") as typeof import("../src/actions/receivable");
@@ -214,7 +215,7 @@ async function run(scratchUrl: string) {
 
   await runAsTenant(tenant, async () => {
     const tx = <T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) => db.$transaction(fn, { timeout: 60_000 });
-    const today = istDateKey(new Date());
+    const today = indiaClock.today();
 
     // ── Fixture ────────────────────────────────────────────────────────────────────────────────
     section("Fixture");
@@ -328,7 +329,7 @@ async function run(scratchUrl: string) {
     const postA = entA.find((e) => e.source === "PAYMENT");
     const fxA = entA.find((e) => e.source === "FX");
     ok("  the payment: Dr Bank 84,100 / Cr AR 84,100", line(postA, "BANK")?.debit === 84100 && line(postA, "AR")?.credit === 84100, postA?.entryNumber);
-    ok("  the exchange difference: Dr AR 1,100 / Cr FX gain 1,100, on the day it came in", line(fxA, "AR")?.debit === 1100 && line(fxA, "FX_GAIN_LOSS")?.credit === 1100 && !!fxA && istDateKey(fxA.date) === "2025-11-05", fxA?.narration);
+    ok("  the exchange difference: Dr AR 1,100 / Cr FX gain 1,100, on the day it came in", line(fxA, "AR")?.debit === 1100 && line(fxA, "FX_GAIN_LOSS")?.credit === 1100 && !!fxA && indiaClock.dateKey(fxA.date) === "2025-11-05", fxA?.narration);
     ok("  AR is nil: 83,000 − 84,100 + 1,100", (await AR(alpha.id)) === 0, await AR(alpha.id));
     ok("  the bank is up ₹84,100 and the gain is ₹1,100", round2((await bank()) - bank0) === 84100 && round2((await fxGain()) - fx0) === 1100);
     ok("  and the invoice reads PAID", (await status(invA.id)) === "PAID");
@@ -337,7 +338,7 @@ async function run(scratchUrl: string) {
 
     const delA = await payments.deletePayment(payA);
     const afterA = await db.journalEntry.findMany({ where: { id: { in: entA.map((e) => e.id) } }, select: { reversedBy: { select: { date: true } } } });
-    ok("deleting it reverses both entries, dated today", delA.ok && afterA.length === 2 && afterA.every((e) => !!e.reversedBy && istDateKey(e.reversedBy.date) === today));
+    ok("deleting it reverses both entries, dated today", delA.ok && afterA.length === 2 && afterA.every((e) => !!e.reversedBy && indiaClock.dateKey(e.reversedBy.date) === today));
     ok("  AR is back to ₹83,000, the bank and the gain to where they were", (await AR(alpha.id)) === 83000 && (await bank()) === bank0 && (await fxGain()) === fx0, `${await AR(alpha.id)} / ${await bank()} / ${await fxGain()}`);
     ok("  and the invoice is ISSUED again", (await status(invA.id)) === "ISSUED");
 
@@ -385,7 +386,7 @@ async function run(scratchUrl: string) {
     const allocCRow = await db.paymentAllocation.findUniqueOrThrow({ where: { id: allocC }, select: { amount: true, paymentAmount: true, exchangeRate: true } });
     ok("$1,000 at ₹84.10: the allocation settles $1,000 and takes ₹84,100, at 84.1", Number(allocCRow.amount) === 1000 && Number(allocCRow.paymentAmount) === 84100 && Number(allocCRow.exchangeRate) === 84.1);
     const fxC = (await entriesOf(onAccount)).find((e) => e.source === "FX");
-    ok("  gain 1,100: Dr AR / Cr FX, dated the invoice's day (it came after the money)", line(fxC, "AR")?.debit === 1100 && line(fxC, "FX_GAIN_LOSS")?.credit === 1100 && !!fxC && istDateKey(fxC.date) === "2025-11-15", fxC ? istDateKey(fxC.date) : "none");
+    ok("  gain 1,100: Dr AR / Cr FX, dated the invoice's day (it came after the money)", line(fxC, "AR")?.debit === 1100 && line(fxC, "FX_GAIN_LOSS")?.credit === 1100 && !!fxC && indiaClock.dateKey(fxC.date) === "2025-11-15", fxC ? indiaClock.dateKey(fxC.date) : "none");
     ok("  AR: 83,000 + 166,000 − 90,000 + 1,100 = 1,60,100 — the $2,000 open less ₹5,900 on account", (await AR(gamma.id)) === 160100, await AR(gamma.id));
     ok("  the invoice is PAID, the other still ISSUED", (await status(invC1.id)) === "PAID" && (await status(invC2.id)) === "ISSUED");
     const listedC = (await payments.listCompanyPayments(gamma.id)).find((p) => p.id === onAccount);

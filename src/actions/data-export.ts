@@ -8,6 +8,7 @@ import { exportDecision } from "@/lib/security/policy";
 import { getArea, PORTABLE_AREAS } from "@/lib/portability/areas";
 import { IMPLEMENTED_IMPORTS } from "@/lib/portability/import";
 import { areaRows, accountBundle, toWorkbookBuffer, toCsv } from "@/lib/portability/export";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -35,8 +36,9 @@ export type ExportPayload = {
   rows: number;
 };
 
-function stamp(): string {
-  return new Date().toISOString().slice(0, 10);
+/** Today on the workspace's clock, for the file's name — not UTC's, a day behind in India until 05:30. */
+async function stamp(): Promise<string> {
+  return (await workspaceClock()).today();
 }
 
 /** What the current user may export, for rendering the screen. */
@@ -88,7 +90,7 @@ export async function exportArea(areaKey: string, format: "csv" | "xlsx" = "xlsx
     return { ok: false, error: verdict.reason };
   }
 
-  const filename = `${areaKey}-${stamp()}`;
+  const filename = `${areaKey}-${await stamp()}`;
   const payload: ExportPayload =
     format === "csv"
       ? {
@@ -165,7 +167,7 @@ export async function exportAccount(companyId: string): Promise<ActionResult<Exp
   return {
     ok: true,
     data: {
-      filename: `${bundle.company.normalizedName.replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}-${stamp()}.xlsx`,
+      filename: `${bundle.company.normalizedName.replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}-${await stamp()}.xlsx`,
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       base64: buffer.toString("base64"),
       rows: total,

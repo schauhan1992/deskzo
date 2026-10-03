@@ -19,7 +19,8 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { Amount } from "@/components/accounting/report-chrome";
 
 type Account = Awaited<ReturnType<typeof listBankAccounts>>[number];
@@ -211,7 +212,8 @@ function ChequeRow({
   pending: boolean;
   run: (fn: () => Promise<{ ok: boolean; error?: string }>, onOk?: () => void) => void;
 }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  // Banking is the books', so every day on this screen is India's, in every workspace — today too.
+  const [date, setDate] = useState(() => indiaClock.today());
   const defaultAccount = accounts.find((a) => a.isDefault)?.id;
 
   return (
@@ -222,7 +224,7 @@ function ChequeRow({
           {cheque.reference && <span className="ml-1.5 font-mono text-xs text-subtle">#{cheque.reference}</span>}
         </span>
         <span className="block text-xs text-subtle">
-          {cheque.direction === "PAID" ? "Paid out" : "Received"} on {formatDate(cheque.paidOn)}
+          {cheque.direction === "PAID" ? "Paid out" : "Received"} on {indiaClock.date(cheque.paidOn)}
         </span>
       </span>
       <Amount value={Number(cheque.amount)} />
@@ -369,7 +371,7 @@ function Reconciliation({
 
           {view.lastReconciliation && (
             <p className="text-xs text-subtle">
-              Last reconciled to {formatDate(view.lastReconciliation.statementDate)} by{" "}
+              Last reconciled to {formatCalendarDay(view.lastReconciliation.statementDate)} by{" "}
               {view.lastReconciliation.completedBy.name}, difference{" "}
               {formatCurrency(Number(view.lastReconciliation.difference))}.
             </p>
@@ -448,7 +450,7 @@ function Reconciliation({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-text">{s.narration}</span>
                   <span className="block text-xs text-subtle">
-                    {formatDate(s.date)}
+                    {formatCalendarDay(s.date)}
                     {s.reference && ` · ${s.reference}`}
                   </span>
                 </span>
@@ -490,7 +492,7 @@ function Reconciliation({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-text">{b.narration}</span>
                   <span className="block text-xs text-subtle">
-                    {formatDate(b.date)}
+                    {indiaClock.date(b.date)}
                     {b.reference && ` · ${b.reference}`}
                   </span>
                 </span>
@@ -522,7 +524,8 @@ function Reconciliation({
                 () =>
                   completeReconciliation({
                     bankAccountId: view.account.id,
-                    statementDate: new Date(view.asAt).toISOString().slice(0, 10),
+                    // The India day the view runs to, not the UTC day of its last moment.
+                    statementDate: indiaClock.dateKey(new Date(view.asAt)),
                     statementBalance: Number(statementBalance),
                   }),
                 () => setMessage("Reconciliation recorded."),

@@ -24,7 +24,8 @@ import { ProjectPeople } from "@/components/projects/project-people";
 import { ProjectLog } from "@/components/projects/project-log";
 import { ProjectFiles } from "@/components/projects/project-files";
 import { ProjectVault } from "@/components/projects/project-vault";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * One project.
@@ -126,10 +127,11 @@ export default async function ProjectPage({
       )}
 
       <div className="mt-4 grid grid-cols-2 gap-3 @2xl:grid-cols-4">
-        <Stat label="Starts" value={project.startDate ? formatDate(new Date(project.startDate)) : "—"} />
+        {/* Typed days, held at UTC midnight (src/actions/project.ts): the days themselves. */}
+        <Stat label="Starts" value={formatCalendarDay(project.startDate)} />
         <Stat
           label="Promised by"
-          value={project.targetEndDate ? formatDate(new Date(project.targetEndDate)) : "—"}
+          value={formatCalendarDay(project.targetEndDate)}
           hint={late !== null ? `${late} days late` : undefined}
         />
         <Stat

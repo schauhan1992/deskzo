@@ -142,7 +142,7 @@ async function main() {
   const { PERMISSIONS, permissionGroup } = require("../src/lib/permissions") as typeof import("../src/lib/permissions");
   const { MODULE_REGISTRY } = require("../src/lib/modules") as typeof import("../src/lib/modules");
   const { noPasswordYet, AWAITING_SETUP } = require("../src/lib/no-password") as typeof import("../src/lib/no-password");
-  const { istDateParts, istMidnight } = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
   const { staffFacts } = require("../src/lib/staff/roster") as typeof import("../src/lib/staff/roster");
   const { staffStatus, relativeAgo } = require("../src/lib/staff/status") as typeof import("../src/lib/staff/status");
   const { permissionModules, moduleNote } = require("../src/lib/staff/permission-modules") as typeof import("../src/lib/staff/permission-modules");
@@ -204,8 +204,9 @@ async function main() {
     const chetan = await mk(`${TAG} Chetan`, "chetan", "SALES", { active: false });
 
     const now = new Date();
-    const today = istDateParts(now);
-    const startOfToday = istMidnight(today.year, today.month, today.day);
+    // Today on the workspace's clock, which is India's here.
+    const today = indiaClock.parts(now);
+    const startOfToday = indiaClock.midnight(today.year, today.month, today.day);
     const company = await db.company.create({
       data: { name: `${TAG} Leads Co`, normalizedName: `${TAG.toLowerCase()} leads co`, createdById: admin.id, ownerUserId: akash.id },
       select: { id: true },

@@ -22,6 +22,7 @@ import { actorContext } from "@/lib/authz/guards";
 import { sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
 import { noPasswordYet } from "@/lib/no-password";
 import { isSystemAddress } from "@/lib/people";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -192,12 +193,14 @@ export async function setCandidateStatus(
     return { ok: false, error: "They have already joined — change the employee record instead." };
   }
 
+  // Today on the workspace's calendar, not UTC's.
+  const today = (await workspaceClock()).calendarDate(new Date());
   await db.candidate.update({
     where: { id },
     data: {
       status,
-      ...(status === "OFFERED" ? { offeredOn: dateOnly(new Date()) } : {}),
-      ...(status === "ACCEPTED" ? { acceptedOn: dateOnly(new Date()) } : {}),
+      ...(status === "OFFERED" ? { offeredOn: today } : {}),
+      ...(status === "ACCEPTED" ? { acceptedOn: today } : {}),
       ...(status === "DECLINED" ? { declinedReason: reason?.trim() || null } : {}),
     },
   });
@@ -478,7 +481,10 @@ export async function draftCandidateLetter(
 
   const org = await getOrganisation();
   const annualCtc = Number(candidate.offeredCtc);
+  // The day the column holds.
   const joining = candidate.expectedJoining?.toISOString().slice(0, 10) ?? null;
+  const clock = await workspaceClock();
+  const now = clock.parts(new Date());
 
   const payload: LetterPayload = {
     employeeName: candidate.name,
@@ -495,7 +501,7 @@ export async function draftCandidateLetter(
     reportingTo: candidate.manager?.name ?? null,
     workLocation: candidate.workLocation,
     // An open-ended offer is a liability — it can be accepted six months later at last year's terms.
-    offerValidUntil: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    offerValidUntil: clock.dateKey(clock.midnight(now.year, now.month, now.day + 14)),
     signatoryName: org.letterSignatoryName || user.name,
     signatoryTitle: org.letterSignatoryTitle || "For " + (org.legalName || "the company"),
     stipend: type === "INTERNSHIP" ? Math.round(annualCtc / 12) : null,
@@ -504,7 +510,7 @@ export async function draftCandidateLetter(
     noticePeriodDays: 30,
   };
 
-  const year = new Date().getUTCFullYear();
+  const year = now.year;
   const sequence =
     (await db.employeeLetter.count({ where: { type, issuedOn: { gte: new Date(Date.UTC(year, 0, 1)) } } })) + 1;
 
@@ -514,7 +520,7 @@ export async function draftCandidateLetter(
       type,
       letterNumber: letterNumberFor(type, year, sequence, org.letterNumberPrefix),
       subject: subjectFor(type, payload),
-      issuedOn: dateOnly(new Date()),
+      issuedOn: clock.calendarDate(new Date()),
       payload: payload as unknown as Prisma.InputJsonValue,
       body: renderLetter(type, payload),
       issuedById: user.id,

@@ -11,9 +11,9 @@ import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/component
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { BUILTIN_PAGE_SLUGS } from "@/lib/cms/types";
 import { cmsAdminCount, cmsOrigin, listCmsUsers } from "@/lib/cms/users";
-import { when } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { controlDb } from "@/lib/platform/control-db";
 import { InviteCmsAdminButton } from "./invite-cms-admin";
@@ -44,7 +44,7 @@ async function websiteCounts(now = new Date()) {
 export default async function ConsoleWebsitePage() {
   const staff = await consoleStaff(PAGE_ROLES.website);
   const caps = capsFor(staff.role);
-  const [admins, activeAdmins, counts] = await Promise.all([listCmsUsers({ role: "ADMIN" }), cmsAdminCount(), websiteCounts()]);
+  const [admins, activeAdmins, counts, clock] = await Promise.all([listCmsUsers({ role: "ADMIN" }), cmsAdminCount(), websiteCounts(), consoleClock()]);
   const origin = cmsOrigin();
   const host = origin.replace(/^https?:\/\//, "");
 
@@ -132,7 +132,7 @@ export default async function ConsoleWebsitePage() {
                       )}
                     </Td>
                     <Td muted nowrap>
-                      {admin.lastSignInAt ? when(admin.lastSignInAt) : "Never"}
+                      {admin.lastSignInAt ? clock.dateTime(admin.lastSignInAt) : "Never"}
                     </Td>
                     <RowActionsCell>
                       {admin.active && (

@@ -33,6 +33,7 @@ import {
   submissionDate,
   summarise,
 } from "../src/lib/engagement/anonymity";
+import { indiaClock } from "../src/lib/time/zone";
 
 const PREFIX = "ZZEngage";
 const EMAIL = "zzengage.";
@@ -122,7 +123,7 @@ async function main() {
   section("The rules, without a database");
 
   const now = new Date("2026-09-19T14:32:17.482Z");
-  const coarse = submissionDate(now);
+  const coarse = submissionDate(now, indiaClock);
   ok(
     "A submission date carries no time",
     coarse.getUTCHours() === 0 && coarse.getUTCMinutes() === 0 && coarse.getUTCSeconds() === 0,

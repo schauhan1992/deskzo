@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import {
   documentDirection,
   documentOriginLabels,
@@ -199,7 +200,7 @@ export function DocumentRows({
                   </td>
                 )}
                 {cols.show("date") && (
-                  <td className="px-4 py-2.5 whitespace-nowrap text-muted">{formatDate(doc.issueDate)}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap text-muted">{formatCalendarDay(doc.issueDate)}</td>
                 )}
                 {cols.show("number") && (
                   <td className="px-4 py-2.5 font-mono text-xs">

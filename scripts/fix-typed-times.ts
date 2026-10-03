@@ -27,13 +27,17 @@
 import "dotenv/config";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { formatIstDate, formatIstDateTime } from "../src/lib/india-time";
+import { formatCalendarDay, indiaClock } from "../src/lib/time/zone";
 import { formatVisitId } from "../src/lib/visits";
 
 /** The first migration of the release that brought the fix: when it started is when the fix went live. */
 export const RELEASE_MIGRATION = "20261018100000_workplace_sign_in_and_mail";
 /** The audit log's record that this workspace's times were moved. */
 export const FIX_ID = "typed-times-2026-10";
+/**
+ * India's offset, a constant: these times were typed when every workspace kept India's clock, whatever
+ * zone it has chosen since, and India has no daylight saving. The report reads India's clock too.
+ */
 const IST_MINUTES = 330;
 
 type Kind = "visit" | "callback" | "task" | "visitor" | "correction" | "attendance" | "campaign";
@@ -125,7 +129,7 @@ export async function planTypedTimesFix(db: PrismaClient, cutoff: Date, shift: S
     select: { id: true, userId: true, date: true, status: true, requestedCheckIn: true, requestedCheckOut: true, user: { select: { name: true } } },
   });
   for (const r of corrections) {
-    const what = `${r.user.name}, ${formatIstDate(r.date)}`;
+    const what = `${r.user.name}, ${formatCalendarDay(r.date)}`;
     if (r.requestedCheckIn) plan.moves.push({ kind: "correction", id: r.id, what, field: "requestedCheckIn", from: r.requestedCheckIn, to: moved(r.requestedCheckIn, -IST_MINUTES) });
     if (r.requestedCheckOut) plan.moves.push({ kind: "correction", id: r.id, what, field: "requestedCheckOut", from: r.requestedCheckOut, to: moved(r.requestedCheckOut, -IST_MINUTES) });
   }
@@ -141,7 +145,7 @@ export async function planTypedTimesFix(db: PrismaClient, cutoff: Date, shift: S
     if (rewrittenSince.has(key)) continue;
     const day = await db.attendanceDay.findUnique({ where: { userId_date: { userId: r.userId, date: r.date } }, select: { id: true, checkInAt: true, checkOutAt: true } });
     if (!day) continue;
-    const what = `${r.user.name}, ${formatIstDate(r.date)}`;
+    const what = `${r.user.name}, ${formatCalendarDay(r.date)}`;
     if (!sameMoment(day.checkInAt, r.requestedCheckIn) || !sameMoment(day.checkOutAt, r.requestedCheckOut)) {
       plan.held.push({ kind: "attendance", id: day.id, what, at: day.checkInAt, why: "its times changed after the correction was approved — check them" });
       continue;
@@ -171,7 +175,7 @@ export async function planTypedTimesFix(db: PrismaClient, cutoff: Date, shift: S
 
 /** Moves each one only while it still says what the plan read, and records the fix. One transaction. */
 export async function applyTypedTimesFix(db: PrismaClient, plan: Plan): Promise<{ moved: number; changedMeanwhile: Move[] }> {
-  if (plan.done) throw new Error(`These times were already moved, on ${formatIstDateTime(plan.done)}.`);
+  if (plan.done) throw new Error(`These times were already moved, on ${indiaClock.dateTime(plan.done)}.`);
   const owner = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
   if (!owner) throw new Error("This workspace has no super admin to record the fix against.");
   return db.$transaction(
@@ -180,7 +184,7 @@ export async function applyTypedTimesFix(db: PrismaClient, plan: Plan): Promise<
       // both go through.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${FIX_ID}))`;
       const already = await tx.auditLog.findFirst({ where: { entityType: "DataFix", entityId: FIX_ID }, select: { createdAt: true } });
-      if (already) throw new Error(`These times were already moved, on ${formatIstDateTime(already.createdAt)}.`);
+      if (already) throw new Error(`These times were already moved, on ${indiaClock.dateTime(already.createdAt)}.`);
       const changedMeanwhile: Move[] = [];
       for (const m of plan.moves) if ((await moveOne(tx, m)) === 0) changedMeanwhile.push(m);
       const count = plan.moves.length - changedMeanwhile.length;
@@ -235,18 +239,18 @@ const HEADINGS: Record<Kind, string> = {
 
 /** The plan, as a person reads it: every change in India time, then what is left to check. */
 export function describe(plan: Plan): string[] {
-  if (plan.done) return [`  Already moved on ${formatIstDateTime(plan.done)} — nothing to do.`];
+  if (plan.done) return [`  Already moved on ${indiaClock.dateTime(plan.done)} — nothing to do.`];
   const lines: string[] = [];
   for (const kind of Object.keys(HEADINGS) as Kind[]) {
     const moves = plan.moves.filter((m) => m.kind === kind);
     if (moves.length === 0) continue;
     lines.push(`  ${HEADINGS[kind]}: ${moves.length}`);
-    for (const m of moves) lines.push(`    ${m.what} — ${formatIstDateTime(m.from)} → ${formatIstDateTime(m.to)}`);
+    for (const m of moves) lines.push(`    ${m.what} — ${indiaClock.dateTime(m.from)} → ${indiaClock.dateTime(m.to)}`);
   }
   if (plan.moves.length === 0) lines.push("  Nothing to move.");
   if (plan.held.length > 0) {
     lines.push(`  Left as they are — check by hand: ${plan.held.length}`);
-    for (const h of plan.held) lines.push(`    ${HEADINGS[h.kind]}: ${h.what}${h.at ? ` (${formatIstDateTime(h.at)})` : ""} — ${h.why}`);
+    for (const h of plan.held) lines.push(`    ${HEADINGS[h.kind]}: ${h.what}${h.at ? ` (${indiaClock.dateTime(h.at)})` : ""} — ${h.why}`);
   }
   return lines;
 }
@@ -301,7 +305,7 @@ async function main() {
         continue;
       }
       const plan = await planTypedTimesFix(db, cutoff);
-      console.log(`\n${tenant.slug} — the fix went live ${formatIstDateTime(cutoff)}`);
+      console.log(`\n${tenant.slug} — the fix went live ${indiaClock.dateTime(cutoff)}`);
       for (const line of describe(plan)) console.log(line);
       total += plan.moves.length;
       if (apply && !plan.done && plan.moves.length > 0) {

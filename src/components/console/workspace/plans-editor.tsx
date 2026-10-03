@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { DiffChips, ImpactList } from "@/components/console/kit/impact";
 import { StatusPill } from "@/components/console/kit/status";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
@@ -356,6 +357,7 @@ export function EntitlementImpact({
   moduleLabels?: Record<string, string>;
   scope?: "all" | "limits";
 }) {
+  const clock = useClock();
   let body: ReactNode = null;
   if (pending) {
     body = (
@@ -371,7 +373,7 @@ export function EntitlementImpact({
     const seats = limitChange(preview.diff.seats, seatsText);
     const tokens = limitChange(preview.diff.copilotTokens, tokensText);
     const domains = limitChange(preview.diff.customDomains, tokensText);
-    const standing = standingLabel(preview.standingAfter, null, "");
+    const standing = standingLabel(preview.standingAfter, null, "", clock);
     body = (
       <div className="space-y-3">
         {preview.refusal && (

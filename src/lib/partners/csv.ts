@@ -3,13 +3,15 @@ import type { CommissionKind, CommissionStatus } from "@deskzo/control-client";
 import { csvFilename } from "@/lib/console-shared/format";
 import { COMMISSION_KIND, COMMISSION_STATUS } from "@/lib/console-shared/labels";
 import type { CsvExport } from "@/lib/console-shared/types";
-import { istDateTimeInput } from "@/lib/india-time";
 import { PartnerRefused, type TaxLine } from "@/lib/partners/types";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * Commission and statement exports as CSV (spec §6.7) — for the console (with a Partner column) and
  * the portal (without). The loaders pick the rows; this only writes them.
  *
+ *   · Times and the file's date are India's, whatever zone the console keeps: commission is counted in
+ *     India's months, as its statements are (src/lib/partners/statements.ts).
  *   · Amounts are in each currency's main unit (1499.00 rupees, not 149900 paise), beside their
  *     currency, as numbers — never added across currencies.
  *   · Text a spreadsheet would read as a formula is escaped; lines end in CRLF.
@@ -74,7 +76,7 @@ function majorUnits(): (minor: number | bigint, currency: string) => number {
 }
 
 /** A time as India's wall clock, sortable: "2026-09-27 18:30". */
-const istStamp = (at: Date) => istDateTimeInput(at).replace("T", " ");
+const istStamp = (at: Date) => indiaClock.input(at).replace("T", " ");
 
 const ratePercent = (bp: number) => Number((bp / 100).toFixed(2));
 
@@ -113,7 +115,7 @@ export function commissionCsv(rows: CommissionCsvRow[], opts: { withPartner: boo
   const major = majorUnits();
   const fields = opts.withPartner ? ["Partner", ...COMMISSION_FIELDS] : COMMISSION_FIELDS;
   const data = rows.map((r) => (opts.withPartner ? [r.partner ?? "", ...cells(r, major)] : cells(r, major)));
-  return { filename: csvFilename(opts.filenamePrefix || "commissions", now), csv: unparse(fields, data), rows: data.length };
+  return { filename: csvFilename(opts.filenamePrefix || "commissions", now, indiaClock), csv: unparse(fields, data), rows: data.length };
 }
 
 /**
@@ -140,5 +142,5 @@ export function statementCsv(statement: StatementCsvHead, entries: CommissionCsv
     ...taxLines.map((l) => summary(`${l.label} (${l.kind === "ADD" ? "added" : "withheld"})`, l.kind === "ADD" ? l.amount : -l.amount, l.rateBp)),
     summary("Net payable", statement.netPayable),
   ];
-  return { filename: csvFilename(`statement-${statement.number}`, now), csv: unparse(COMMISSION_FIELDS, data), rows: entries.length };
+  return { filename: csvFilename(`statement-${statement.number}`, now, indiaClock), csv: unparse(COMMISSION_FIELDS, data), rows: entries.length };
 }

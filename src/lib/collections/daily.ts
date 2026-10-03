@@ -8,11 +8,12 @@ import { formatMoney } from "@/lib/currency";
 import { formatOrderId } from "@/lib/order-id";
 import { peopleHolding } from "@/lib/orders/handoff";
 import { resolvePromises } from "@/lib/collections/promises";
-import { addDays, dayKey, istToday, shortDay } from "@/lib/collections/rules";
+import { addDays, dayKey, shortDay } from "@/lib/collections/rules";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Collections' daily job, for the workspace in hand — called from the five-minute heartbeat
- * (src/lib/marketing/heartbeat.ts), which runs it once per workspace per India day:
+ * (src/lib/marketing/heartbeat.ts), which runs it once per workspace per day of its own (its clock):
  *
  *   1. Promises resolved (./promises.ts `resolvePromises`): kept ones marked KEPT, ones whose day has
  *      passed unkept marked BROKEN, ones whose invoice or order was cancelled set aside.
@@ -22,7 +23,7 @@ import { addDays, dayKey, istToday, shortDay } from "@/lib/collections/rules";
  *   3. That morning's next-follow-up reminders, for the follow-ups that have no task — the tasks module
  *      was off when they were logged. (With it on, the task is the reminder, and the tasks sweep says so.)
  *
- * **Once per India day.** The claim is a `DailyJobRun (collections, day)` row, as src/lib/close/nightly.ts
+ * **Once per day of the workspace's.** The claim is a `DailyJobRun (collections, day)` row, as src/lib/close/nightly.ts
  * and the order release claim theirs: the first heartbeat to insert it runs, and every later one leaves.
  * Every notification also carries a dedupe key, so even a second run could not send one twice.
  *
@@ -172,12 +173,12 @@ async function announceBroken(now: Date, report: CollectionsDailyReport) {
  * off when they were logged. Told to whoever logged it, once (the dedupe key is the follow-up).
  */
 async function sendReminders(now: Date, report: CollectionsDailyReport) {
-  const today = istToday(now);
+  const today = (await workspaceClock()).calendarDate(now);
   const due = await db.paymentFollowUp.findMany({
     where: {
       taskId: null,
       byUserId: { not: null },
-      // A date column against today's Indian date, held the same way: exact by calendar day.
+      // A date column against the workspace's today, held the same way: exact by calendar day.
       nextFollowUpOn: { gte: addDays(today, -REMINDER_GRACE_DAYS), lte: today },
     },
     select: {
@@ -207,7 +208,7 @@ async function sendReminders(now: Date, report: CollectionsDailyReport) {
 }
 
 export async function runCollectionsDaily(now: Date = new Date()): Promise<CollectionsDailyReport> {
-  const day = istToday(now);
+  const day = (await workspaceClock()).calendarDate(now);
   const report: CollectionsDailyReport = { ran: false, day: dayKey(day), kept: 0, broken: 0, superseded: 0, notified: 0, summaryTo: 0, reminders: 0, errors: [] };
   if (!(await moduleAvailableForTenant("receivables"))) return { ...report, reason: "the receivables module is off" };
 

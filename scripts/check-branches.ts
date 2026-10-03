@@ -51,7 +51,7 @@ import {
 } from "../src/lib/gst-engine";
 import { buildDocumentNumber, derivedSeriesPrefix, expandPrefix, gstNumberProblem } from "../src/lib/document-numbering";
 import { mergeIdentity } from "../src/lib/branches/format";
-import { istDateParts, istDateTimeInput } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {
@@ -304,11 +304,12 @@ function pure() {
   ok("  and 23:59 IST on 30 September is 30/09/2026", portalDate(new Date("2026-09-30T23:59:00+05:30")) === "30/09/2026");
 
   const { emptyDefaults } = load("../src/lib/document-draft") as typeof import("../src/lib/document-draft");
-  const early = atClock("2026-10-01T01:30:00+05:30", () => emptyDefaults().issueDate);
+  // Dated today on the workspace's clock — India's here.
+  const early = atClock("2026-10-01T01:30:00+05:30", () => emptyDefaults(indiaClock).issueDate);
   ok("a new document at 01:30 IST on 1 October defaults to 1 October, not 30 September", early === "2026-10-01", early);
-  const beforeDawn = atClock("2026-10-01T05:29:00+05:30", () => emptyDefaults().issueDate);
+  const beforeDawn = atClock("2026-10-01T05:29:00+05:30", () => emptyDefaults(indiaClock).issueDate);
   ok("  and still at 05:29 IST", beforeDawn === "2026-10-01", beforeDawn);
-  const lateNight = atClock("2026-09-30T23:59:00+05:30", () => emptyDefaults().issueDate);
+  const lateNight = atClock("2026-09-30T23:59:00+05:30", () => emptyDefaults(indiaClock).issueDate);
   ok("  and 23:59 IST on 30 September is still the 30th", lateNight === "2026-09-30", lateNight);
 }
 
@@ -780,7 +781,7 @@ async function database() {
     });
     created.companies.push(vendor.id);
 
-    const today = istDateTimeInput(new Date()).slice(0, 10);
+    const today = indiaClock.today();
     const docInput = (over: Record<string, unknown>) => ({
       docType: "INVOICE",
       companyId: customer.id,
@@ -918,7 +919,7 @@ async function database() {
     const issuedHo = invHo ? await docs.issueTradeDocument({ id: invHo.id }) : null;
     ok("the head office invoice issues", Boolean(issuedHo?.ok), issuedHo && !issuedHo.ok ? issuedHo.error : "");
     if (!invB2R) throw new Error("the B2 invoice under per-registration numbering was not created");
-    const { year, month } = istDateParts(invB2R.issueDate);
+    const { year, month } = indiaClock.parts(invB2R.issueDate);
     const baseline = await tax.gstr3b({ month: month + 1, year, gstRegistrationId: r2.id });
     const issuedB2 = await docs.issueTradeDocument({ id: invB2R.id });
     ok("the B2 invoice issues", issuedB2.ok, issuedB2.ok ? invB2R.docNumber : issuedB2.error);
@@ -1115,7 +1116,7 @@ async function database() {
     const newPage = (await NewDocumentPage({ searchParams: Promise.resolve({ type: "INVOICE" }) })) as ReactElement;
     const form = findElements(newPage, DocumentForm)[0];
     const defaults = (form?.props as { defaults?: { issueDate: string; branchId: string } } | undefined)?.defaults;
-    const indiaToday = istDateTimeInput(new Date()).slice(0, 10);
+    const indiaToday = indiaClock.today();
     const defaultBranch = await identity.defaultBranchIdFor(actor.id);
     ok("the new invoice form's date is today in India", defaults?.issueDate === indiaToday, `${defaults?.issueDate} vs ${indiaToday}`);
     ok("  and its branch is the writer's default", defaults?.branchId === defaultBranch, defaults?.branchId ?? "");

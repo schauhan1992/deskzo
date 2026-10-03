@@ -10,12 +10,13 @@ import { Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNotice, ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { dayMonth, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { NoteView } from "@/lib/platform/workspace-data";
 import { cn } from "@/lib/utils";
@@ -144,6 +145,7 @@ function AddNote({ tenantId, pinFull }: { tenantId: string; pinFull: boolean }) 
 // ─── One note ────────────────────────────────────────────────────────────────────────────────────
 
 function NoteItem({ note, caps }: { note: NoteView; caps: Caps }) {
+  const clock = useClock();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note.body);
   const [deleting, setDeleting] = useState(false);
@@ -154,7 +156,7 @@ function NoteItem({ note, caps }: { note: NoteView; caps: Caps }) {
 
   const canChange = caps.write && (note.mine || caps.manage);
   const whose = note.mine ? "your" : `${note.author}'s`;
-  const which = `${whose} note from ${dayMonth(note.createdAt)}`;
+  const which = `${whose} note from ${clock.dayMonth(note.createdAt)}`;
   const changed = draft.trim() !== "" && draft.trim() !== note.body.trim();
 
   function startEdit() {

@@ -1,4 +1,4 @@
-import { formatIstDateTime } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The parts of maintenance mode with no database in them — what state a row means, and the page
@@ -45,10 +45,12 @@ const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").rep
 /**
  * Served straight from the proxy: plain HTML with nothing to load, because whatever the app is down
  * for may well be the thing a normal page would need. It asks `/api/maintenance/status` every half
- * minute and reloads when the answer changes, so nobody has to keep refreshing.
+ * minute and reloads when the answer changes, so nobody has to keep refreshing. The end is given on
+ * the workspace's clock, and the page says which zone that is: nothing else on it does.
  */
-export function maintenancePage(state: MaintenanceState, appName = "Deskzo One"): string {
-  const back = state.endsAt ? `<p class="when">Expected back by <strong>${escape(formatIstDateTime(state.endsAt))}</strong> (India time).</p>` : "";
+export function maintenancePage(state: MaintenanceState, clock: Clock, appName = "Deskzo One"): string {
+  const zone = clock.zone.replace(/_/g, " ");
+  const back = state.endsAt ? `<p class="when">Expected back by <strong>${escape(clock.dateTime(state.endsAt))}</strong> (${escape(zone)} time).</p>` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

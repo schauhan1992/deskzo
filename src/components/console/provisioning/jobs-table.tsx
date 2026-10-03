@@ -12,9 +12,10 @@ import { RowMenu } from "@/components/console/kit/row-menu";
 import { JobStatusPill, TenantStatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { SidePane } from "@/components/ui/side-pane";
-import { durationText, when } from "@/lib/console-shared/format";
+import { durationText } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { JobRow } from "@/lib/platform/console-data";
 
@@ -187,6 +188,7 @@ export function JobsTable({ rows, caps }: { rows: JobRow[]; caps: Caps }) {
 
 /** The side pane's body: the error first (it is why anybody opens this), then the signup and the timings. */
 function JobDetails({ job, canRetry, onRetry }: { job: JobRow; canRetry: boolean; onRetry: () => void }) {
+  const clock = useClock();
   return (
     <div className="space-y-5 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -230,10 +232,10 @@ function JobDetails({ job, canRetry, onRetry }: { job: JobRow; canRetry: boolean
           { term: "Country", value: job.country || "—" },
           { term: "Plan", value: job.planKey ? <span className="font-mono text-xs">{job.planKey}</span> : "The default plan" },
           { term: "Step", value: job.step || "—", wide: true },
-          { term: "Queued", value: when(job.createdAt) },
-          { term: "Run after", value: when(job.runAfter) },
-          { term: "Started", value: when(job.startedAt) },
-          { term: "Finished", value: when(job.finishedAt) },
+          { term: "Queued", value: clock.dateTime(job.createdAt) },
+          { term: "Run after", value: clock.dateTime(job.runAfter) },
+          { term: "Started", value: clock.dateTime(job.startedAt) },
+          { term: "Finished", value: clock.dateTime(job.finishedAt) },
           { term: "Took", value: took(job) },
           { term: "Attempts", value: attempts(job) },
         ]}

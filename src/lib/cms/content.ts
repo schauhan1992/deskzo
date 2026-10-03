@@ -49,9 +49,10 @@ import {
   TERM_SLUG,
   type ValidationMode,
 } from "@/lib/cms/validate";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
-import { parseIstDateTime } from "@/lib/india-time";
 import { invalidateSiteContent, mergeSiteSettings, sitePath } from "@/lib/platform/site-content";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The website's content, as the CMS edits it: pages (draft and published copies, versions), posts
@@ -712,11 +713,14 @@ function postSaved(row: PostRowModel, now = new Date()): PostSaved {
   return { id: row.id, slug: row.slug, version: row.updatedAt.toISOString(), status: row.status, live: postLive(row, now), publishAt: row.publishAt, updatedAt: row.updatedAt };
 }
 
-/** "yyyy-mm-ddThh:mm" (India time, from a datetime-local input) or a full ISO time with its offset. */
-function parseWhen(raw: unknown): Date | null {
+/**
+ * "yyyy-mm-ddThh:mm" (a datetime-local input's, read on `clock` — the console's, as the editor showed
+ * it) or a full ISO time with its offset.
+ */
+function parseWhen(raw: unknown, clock: Clock): Date | null {
   const value = String(raw ?? "").trim();
   if (!value) return null;
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return parseIstDateTime(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return clock.parseInput(value);
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(value)) {
     const at = new Date(value);
     return Number.isNaN(at.getTime()) ? null : at;
@@ -737,7 +741,7 @@ export async function publishPost(id: string, input: { publishAt?: string | null
     "publish",
   );
   await assertPostMedia(post, true);
-  const requested = input?.publishAt ? parseWhen(input.publishAt) : null;
+  const requested = input?.publishAt ? parseWhen(input.publishAt, await consoleClock()) : null;
   if (input?.publishAt && !requested) throw new CmsRefused("Choose a valid date and time.", { issues: [{ path: "publishAt", message: "Not a date and time." }] });
   const scheduled = !!requested && requested.getTime() > now.getTime() + 60_000;
   const publishAt = requested ?? now;

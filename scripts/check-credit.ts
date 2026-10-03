@@ -18,7 +18,6 @@
  */
 import "dotenv/config";
 import Module from "node:module";
-import type { ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   assessCredit,
@@ -29,6 +28,9 @@ import {
   termsExceed,
   type Bill,
 } from "../src/lib/credit/engine";
+// The engine's days are the workspace's; the fixtures here are Indian days.
+import { indiaClock } from "../src/lib/time/zone";
+import { renderHtml } from "./lib/render-html";
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -124,7 +126,7 @@ async function main() {
   section("The engine, on histories written out by hand");
 
   const asOf = new Date("2026-09-23T12:00:00+05:30");
-  const fresh = assessCredit([], { asOf });
+  const fresh = assessCredit([], { asOf, clock: indiaClock });
   ok("no history is New, gets Advance and no credit", fresh.rating === "NEW" && fresh.recommendedTerms === "ADVANCE" && fresh.limit === 0);
 
   // Six ₹1L invoices a quarter apart, each paid on its due date.
@@ -133,9 +135,9 @@ async function main() {
     const due = new Date(issued.getTime() + 30 * DAY);
     return bill(`INV-P${i}`, issued.toISOString(), due.toISOString(), 100_000, [[due.toISOString(), 100_000]]);
   });
-  const two = assessCredit(punctual.slice(0, 2), { asOf });
+  const two = assessCredit(punctual.slice(0, 2), { asOf, clock: indiaClock });
   ok("two paid bills are still New — three are needed", two.rating === "NEW" && two.recommendedTerms === "ADVANCE");
-  const reliable = assessCredit(punctual, { asOf });
+  const reliable = assessCredit(punctual, { asOf, clock: indiaClock });
   ok("a customer who always pays on time is Reliable, on Net 30", reliable.rating === "RELIABLE" && reliable.recommendedTerms === "NET_30", `${reliable.rating} ${reliable.score}`);
   ok("  with a limit of 1.5× the most they have cleared at once", reliable.suggestedLimit === 150_000, reliable.suggestedLimit);
 
@@ -144,7 +146,7 @@ async function main() {
     const due = new Date(issued.getTime() + 30 * DAY);
     return bill(`INV-M${i}`, issued.toISOString(), due.toISOString(), 50_000, [[due.toISOString(), 50_000]]);
   }).filter((b) => b.dueOn.getTime() < asOf.getTime());
-  ok("a year and more of it, a dozen bills, earns Net 45", assessCredit(monthly, { asOf }).recommendedTerms === "NET_45");
+  ok("a year and more of it, a dozen bills, earns Net 45", assessCredit(monthly, { asOf, clock: indiaClock }).recommendedTerms === "NET_45");
 
   const late = (days: number) =>
     Array.from({ length: 4 }, (_, i) => {
@@ -152,32 +154,32 @@ async function main() {
       const due = new Date(issued.getTime() + 15 * DAY);
       return bill(`INV-L${i}`, issued.toISOString(), due.toISOString(), 100_000, [[new Date(due.getTime() + days * DAY).toISOString(), 100_000]]);
     });
-  const fair = assessCredit(late(20), { asOf });
+  const fair = assessCredit(late(20), { asOf, clock: indiaClock });
   ok("paying three weeks late is Fair, on Net 15", fair.rating === "FAIR" && fair.recommendedTerms === "NET_15", `${fair.rating} ${fair.score}`);
-  const risky = assessCredit(late(45), { asOf });
+  const risky = assessCredit(late(45), { asOf, clock: indiaClock });
   ok("six weeks late is Risky, on Advance, with no limit", risky.rating === "RISKY" && risky.recommendedTerms === "ADVANCE" && risky.limit === 0, `${risky.rating} ${risky.score}`);
   ok("  and says why, in words", risky.reasons.some((r) => r.tone === "bad" && r.text.includes("late on average")));
 
-  const ninetyOver = assessCredit([...punctual, bill("INV-OLD", "2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z", 80_000)], { asOf });
+  const ninetyOver = assessCredit([...punctual, bill("INV-OLD", "2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z", 80_000)], { asOf, clock: indiaClock });
   ok("anything over 90 days overdue is Risky, whatever the history", ninetyOver.rating === "RISKY" && ninetyOver.oldestOverdueDays > 90, ninetyOver.oldestOverdueDays);
-  const seventyOver = assessCredit([...punctual, bill("INV-70", "2026-06-15T00:00:00Z", "2026-07-15T00:00:00Z", 80_000)], { asOf });
+  const seventyOver = assessCredit([...punctual, bill("INV-70", "2026-06-15T00:00:00Z", "2026-07-15T00:00:00Z", 80_000)], { asOf, clock: indiaClock });
   ok("  and over 60 caps a good history at Fair", seventyOver.rating === "FAIR", `${seventyOver.rating} ${seventyOver.score} ${seventyOver.oldestOverdueDays}d`);
 
   // Grace, and Indian days.
   const due = "2026-09-01T00:00:00Z"; // 1 Sep, as a date-only field is stored
   ok("paid 3 days late is on time; 4 days is not", assessCredit(
     ["2026-09-04T12:00:00+05:30", "2026-09-04T12:00:00+05:30", "2026-09-04T12:00:00+05:30"].map((p, i) => bill(`G${i}`, "2026-08-01T00:00:00Z", due, 10, [[p, 10]])),
-    { asOf },
+    { asOf, clock: indiaClock },
   ).metrics.onTimeBills === 3 && assessCredit(
     ["2026-09-05T12:00:00+05:30"].map((p, i) => bill(`H${i}`, "2026-08-01T00:00:00Z", due, 10, [[p, 10]])),
-    { asOf },
+    { asOf, clock: indiaClock },
   ).metrics.onTimeBills === 0);
-  const halfPastMidnight = billOutcome(bill("TZ", "2026-08-01T00:00:00Z", due, 10, [["2026-09-02T00:30:00+05:30", 10]]), asOf);
+  const halfPastMidnight = billOutcome(bill("TZ", "2026-08-01T00:00:00Z", due, 10, [["2026-09-02T00:30:00+05:30", 10]]), asOf, indiaClock);
   ok("a payment at 00:30 IST on 2 Sep is one day late, not zero — it is 1 Sep in UTC", halfPastMidnight.daysLate === 1, halfPastMidnight.daysLate);
 
-  const partial = billOutcome(bill("PART", "2026-08-01T00:00:00Z", due, 100, [["2026-08-20T10:00:00+05:30", 40], ["2026-09-10T10:00:00+05:30", 60]]), asOf);
+  const partial = billOutcome(bill("PART", "2026-08-01T00:00:00Z", due, 100, [["2026-08-20T10:00:00+05:30", 40], ["2026-09-10T10:00:00+05:30", 60]]), asOf, indiaClock);
   ok("a bill paid in parts is settled on the day the last part arrives", partial.paidOn?.toISOString() === new Date("2026-09-10T10:00:00+05:30").toISOString() && partial.daysLate === 9);
-  const unpaid = billOutcome(bill("OPEN", "2026-08-01T00:00:00Z", due, 100, [["2026-08-20T10:00:00+05:30", 40]]), asOf);
+  const unpaid = billOutcome(bill("OPEN", "2026-08-01T00:00:00Z", due, 100, [["2026-08-20T10:00:00+05:30", 40]]), asOf, indiaClock);
   ok("  and one still part-paid is owed, and overdue", unpaid.paidOn === null && unpaid.outstanding === 60 && unpaid.overdueDays === 22, `${unpaid.outstanding} ${unpaid.overdueDays}`);
 
   const overlap = largestBalanceCleared(
@@ -191,7 +193,7 @@ async function main() {
   ok("the limit rests on balances that overlapped and were cleared, not one still owed", overlap === 120_000, overlap);
   ok("limits round down to a figure people say", roundLimit(99_999) === 95_000 && roundLimit(149_999) === 140_000 && roundLimit(1_234_567) === 1_230_000 && roundLimit(-5) === 0);
   ok("Due on receipt is more credit than Advance; Net 15 less than Net 30", termsExceed("DUE_ON_RECEIPT", "ADVANCE") && !termsExceed("NET_15", "NET_30"));
-  const manual = assessCredit(punctual, { asOf, manualLimit: 400_000 });
+  const manual = assessCredit(punctual, { asOf, manualLimit: 400_000, clock: indiaClock });
   ok("a limit set by hand replaces the suggestion", manual.limit === 400_000 && manual.limitSource === "manual" && manual.suggestedLimit === 150_000);
   const concern = (terms: Parameters<typeof creditConcerns>[1]["terms"], amount: number) =>
     creditConcerns({ rating: "FAIR", recommendedTerms: "NET_15", limit: 100_000, outstanding: 60_000 }, { terms, amount }).map((c) => c.kind);
@@ -201,7 +203,6 @@ async function main() {
   );
 
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
   const companyActions = require("../src/actions/company") as typeof import("../src/actions/company");
   const orderActions = require("../src/actions/order") as typeof import("../src/actions/order");
   const creditActions = require("../src/actions/credit") as typeof import("../src/actions/credit");
@@ -357,12 +358,12 @@ async function main() {
     section("The screens");
 
     actorId = controller.id;
-    const html = renderToStaticMarkup((await CompanyDetail({ id: customer.id, tab: "credit" })) as ReactElement);
+    const html = await renderHtml(CompanyDetail({ id: customer.id, tab: "credit" }));
     ok("the customer page has a Credit card and tab", html.includes(">Credit</a>") && html.includes("Credit rating"));
     ok("  the tab shows the bills behind it and the decisions made", html.includes(`${TAG}-INV-0`) && html.includes("MD approved Net 30") && html.includes("Bank guarantee"));
     ok("  and offers the limit form to someone who can override", html.includes("Set the limit by hand"));
     actorId = sales.id;
-    const salesHtml = renderToStaticMarkup((await CompanyDetail({ id: customer.id, tab: "credit" })) as ReactElement);
+    const salesHtml = await renderHtml(CompanyDetail({ id: customer.id, tab: "credit" }));
     ok("  but not to someone who can't", salesHtml.includes("Credit rating") && !salesHtml.includes("Set the limit by hand"));
 
     // As the account manager, whose scope is only the probe accounts — the list rates what it shows.

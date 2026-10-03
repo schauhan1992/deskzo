@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
+import { workspaceClock } from "@/lib/time/workspace";
 import {
   isAcceptingResponses,
   isTargeted,
@@ -155,6 +156,7 @@ export async function submitResponse(input: {
     select: { id: true, respondedAt: true },
   });
   if (existing?.respondedAt) return { ok: false, error: "You've already answered this one." };
+  const submittedOn = submissionDate(now, await workspaceClock());
 
   const given = new Map(input.answers.map((a) => [a.questionId, a]));
   for (const q of survey.questions) {
@@ -169,7 +171,7 @@ export async function submitResponse(input: {
       data: {
         surveyId: survey.id,
         // Date only. No time, no identity — see the model comment.
-        submittedOn: submissionDate(now),
+        submittedOn,
         answers: {
           create: input.answers
             .filter((a) => survey.questions.some((q) => q.id === a.questionId))
@@ -279,6 +281,11 @@ export async function saveSurvey(input: {
     };
   }
 
+  // The days picked are the workspace's: open from the first one's midnight there, closed after the
+  // last second of the last one. They were UTC's days, which closed a survey at 05:29 the next
+  // morning in India.
+  const clock = await workspaceClock();
+  const closesBy = input.expiresAt ? clock.endOfDay(input.expiresAt) : null;
   const scalars = {
     kind: input.kind,
     title,
@@ -287,8 +294,8 @@ export async function saveSurvey(input: {
     mandatory: input.mandatory,
     audience: input.audience,
     status: input.status,
-    opensAt: input.opensAt ? new Date(`${input.opensAt}T00:00:00.000Z`) : null,
-    expiresAt: input.expiresAt ? new Date(`${input.expiresAt}T23:59:59.000Z`) : null,
+    opensAt: input.opensAt ? clock.startOfDay(input.opensAt) : null,
+    expiresAt: closesBy ? new Date(closesBy.getTime() - 1000) : null,
   };
 
   const survey = input.id

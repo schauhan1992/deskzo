@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import { DOCUMENT_SOURCES } from "@/lib/ledger/journal";
-import { istDateKey } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import { dayKey, monthEnd, monthLabel, monthWindow } from "@/lib/close/months";
 import { detailOf, inr, round2, type CheckDetail, type CheckOutcome, type DetailItem } from "@/lib/close/checks";
 
@@ -125,9 +125,10 @@ export function expectedPosting(doc: TieOutDocument): number {
   return isCreditNote(doc) ? -amount : amount;
 }
 
+// The entry's day in the books: India's, in every workspace.
 const entryItem = (e: TieOutEntry): DetailItem => ({
   id: e.id,
-  label: `${e.entryNumber} · ${istDateKey(e.date)}`,
+  label: `${e.entryNumber} · ${indiaClock.dateKey(e.date)}`,
   href: `/accounting/journal?q=${encodeURIComponent(e.entryNumber)}`,
   amount: e.amount,
   note: e.narration,

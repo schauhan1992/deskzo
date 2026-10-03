@@ -9,7 +9,7 @@ import { inviteMessage } from "@/lib/visitors/invite-code";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Invite = {
   id: string;
@@ -131,6 +131,7 @@ export function ExpectedVisitors({
 
 function InviteCard({ invite, companyName }: { invite: Invite; companyName: string }) {
   const router = useRouter();
+  const clock = useClock();
   const [copied, setCopied] = useState(false);
   const when = new Date(invite.expectedAt);
 
@@ -140,7 +141,7 @@ function InviteCard({ invite, companyName }: { invite: Invite; companyName: stri
     hostName: invite.host.name,
     companyName,
     expectedAt: when,
-    formatWhen: (d) => formatDateTime(d),
+    formatWhen: (d) => clock.dateTimeShort(d),
   });
 
   return (
@@ -158,14 +159,14 @@ function InviteCard({ invite, companyName }: { invite: Invite; companyName: stri
             </p>
             <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-subtle">
               <CalendarClock className="h-3 w-3" />
-              {formatDateTime(when)} · to see {invite.host.name}
+              {clock.dateTimeShort(when)} · to see {invite.host.name}
               {invite.expectedCompanions > 0 && ` · with ${invite.expectedCompanions} other${invite.expectedCompanions === 1 ? "" : "s"}`}
               {invite.createdBy && ` · booked by ${invite.createdBy.name}`}
             </p>
             {invite.note && <p className="mt-1 text-xs text-muted">{invite.note}</p>}
             {invite.entry && (
               <p className="mt-1 text-xs text-success">
-                Signed in {formatDateTime(new Date(invite.entry.checkedInAt))}
+                Signed in {clock.dateTimeShort(invite.entry.checkedInAt)}
               </p>
             )}
           </div>
@@ -226,6 +227,8 @@ function InviteForm({
   companyName: string;
   onDone: () => void;
 }) {
+  // "When" is typed on the workspace's clock, whatever the browser's is: `createInvite` reads it on the same one.
+  const clock = useClock();
   const [f, setF] = useState({
     name: "",
     phone: "",
@@ -248,8 +251,9 @@ function InviteForm({
       code: created.code,
       hostName: people.find((p) => p.id === hostUserId)?.name ?? "your host",
       companyName,
-      expectedAt: new Date(f.expectedAt),
-      formatWhen: (d) => formatDateTime(d),
+      // The server has read this already and accepted it, so it parses; "—" if it somehow didn't.
+      expectedAt: clock.parseInput(f.expectedAt) ?? new Date(Number.NaN),
+      formatWhen: (d) => clock.dateTimeShort(d),
     });
     return (
       <Card>
@@ -291,7 +295,7 @@ function InviteForm({
             <Input id="i-name" value={f.name} onChange={(e) => set("name", e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="i-when">When</Label>
+            <Label htmlFor="i-when">When ({clock.zone.replace(/_/g, " ")} time)</Label>
             <Input id="i-when" type="datetime-local" value={f.expectedAt} onChange={(e) => set("expectedAt", e.target.value)} />
           </div>
         </div>

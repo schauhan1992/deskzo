@@ -7,6 +7,7 @@ import { viewerHas } from "@/actions/permission";
 import { isCustomerRelationshipType } from "@/lib/validation/company";
 import { compareToPeers, summariseSupport, type SupportFacts } from "@/lib/support/load";
 import { companiesWithSupport, loadSupportFacts, supportPeers, supportWindow } from "@/lib/support/data";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * How much support customers take, for the screens that show it.
@@ -54,7 +55,7 @@ export async function getSupportLoad(companyId: string, months = 12) {
   if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
   if (!(await canSeeCompany(user.id, company.ownerUserId))) return null;
 
-  const window = supportWindow(months);
+  const window = supportWindow(await workspaceClock(), months);
   const facts = (await loadSupportFacts([companyId], window)).get(companyId)!;
   return { months, from: window.from, ...(await present(facts, window, months, parts)) };
 }
@@ -73,7 +74,7 @@ export async function listSupportLoad(params: { months: number; sort: SupportSor
   const parts = await viewerParts();
   if (!parts.tickets) return { rows: [], total: 0 };
   const months = [3, 6, 12, 24].includes(params.months) ? params.months : 12;
-  const window = supportWindow(months);
+  const window = supportWindow(await workspaceClock(), months);
 
   const ids = await companiesWithSupport(await companyScope(user.id), window);
   const [facts, companies] = await Promise.all([

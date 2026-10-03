@@ -8,9 +8,10 @@ import { DefinitionList } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { SidePane } from "@/components/ui/side-pane";
-import { durationText, plural, when } from "@/lib/console-shared/format";
+import { durationText, plural } from "@/lib/console-shared/format";
 import { runOutcome, schemaLabel } from "@/lib/console-shared/labels";
 import type { RunGroup } from "@/lib/platform/console-data";
 import { cn } from "@/lib/utils";
@@ -257,6 +258,7 @@ function RunDetail({ run, onOutput }: { run: RunGroup; onOutput: (row: RunRow) =
 }
 
 function OutputPane({ run, row }: { run: RunGroup; row: RunRow }) {
+  const clock = useClock();
   const text = row.output?.trimEnd() ?? "";
   const lines = text ? text.split("\n").length : 0;
   return (
@@ -267,7 +269,7 @@ function OutputPane({ run, row }: { run: RunGroup; row: RunRow }) {
       </div>
       <DefinitionList
         items={[
-          { term: "Started", value: when(row.startedAt) },
+          { term: "Started", value: clock.dateTime(row.startedAt) },
           { term: "Took", value: row.finishedAt ? durationText(row.finishedAt.getTime() - row.startedAt.getTime()) : "Still running" },
           { term: "From", value: <span title={row.fromVersion ?? undefined}>{row.fromVersion ? schemaLabel(row.fromVersion) : "—"}</span> },
           { term: "To", value: <span title={row.toVersion ?? undefined}>{schemaLabel(row.toVersion)}</span> },

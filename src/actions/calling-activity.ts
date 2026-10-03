@@ -11,6 +11,8 @@ import { toPlain } from "@/lib/serialize";
 import { notifyUser } from "@/lib/notify";
 import { buildWhere, type WorkbookFilters } from "@/lib/workspace/filters";
 import { allocate, trackedGap } from "@/lib/workspace/allocation";
+import { workspaceClock } from "@/lib/time/workspace";
+import { calendarDayRange, formatCalendarDay } from "@/lib/time/zone";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -45,11 +47,12 @@ export async function startCallingActivity(input: {
   const callerIds = [...new Set(input.callerIds.filter(Boolean))];
   if (callerIds.length === 0) return { ok: false, error: "Pick at least one caller." };
 
-  const dueAt = input.dueAt ? new Date(input.dueAt) : null;
-  if (dueAt && Number.isNaN(dueAt.getTime())) return { ok: false, error: "That deadline isn't a valid date." };
+  // The day picked, held as a calendar day (UTC midnight), as a task's due date is.
+  const dueAt = input.dueAt ? (calendarDayRange(input.dueAt, null)?.gte ?? null) : null;
+  if (input.dueAt && !dueAt) return { ok: false, error: "That deadline isn't a valid date." };
 
   const companies = await db.company.findMany({
-    where: buildWhere((workbook.filters ?? {}) as WorkbookFilters),
+    where: buildWhere((workbook.filters ?? {}) as WorkbookFilters, await workspaceClock()),
     orderBy: { name: "asc" },
     select: { id: true, ownerUserId: true },
   });
@@ -113,7 +116,7 @@ export async function startCallingActivity(input: {
       userId,
       type: "TASK_ASSIGNED",
       title: "Calling list assigned to you",
-      message: `${workbook.name} — ${share} to call${dueAt ? ` by ${dueAt.toLocaleDateString("en-IN")}` : ""}`,
+      message: `${workbook.name} — ${share} to call${dueAt ? ` by ${formatCalendarDay(dueAt)}` : ""}`,
       link: `/workspace/${workbook.id}/call`,
     });
   }
@@ -442,11 +445,12 @@ export async function activityReport(workbookId: string) {
     })
     .sort((a, b) => b.worked - a.worked);
 
-  // Per-day, so "how did Tuesday go" is answerable without exporting anything.
+  // Per-day, so "how did Tuesday go" is answerable without exporting anything. The workspace's days.
+  const clock = await workspaceClock();
   const byDay = new Map<string, { date: string; worked: number; talkSeconds: number }>();
   for (const r of records) {
     if (!r.completedAt) continue;
-    const key = r.completedAt.toISOString().slice(0, 10);
+    const key = clock.dateKey(r.completedAt);
     const row = byDay.get(key) ?? { date: key, worked: 0, talkSeconds: 0 };
     row.worked++;
     row.talkSeconds += r.handleSeconds ?? 0;

@@ -8,7 +8,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
 import { currentUser } from "@/lib/session";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 import { formatOrderId } from "@/lib/order-id";
 import {
   formatTicketId,
@@ -32,12 +32,13 @@ import { CategoryChip } from "@/components/customers/category-chip";
 export async function TicketDetail({ id }: { id: string }) {
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
-  const [ticket, users, canDelete, tasksEnabled, canDeleteAnyTask] = await Promise.all([
+  const [ticket, users, canDelete, tasksEnabled, canDeleteAnyTask, clock] = await Promise.all([
     getTicket(id),
     listSupportAgents(),
     hasEffectivePermission(userId, "tickets.delete"),
     isModuleEnabled("tasks"),
     hasEffectivePermission(userId, "tasks.delete"),
+    workspaceClock(),
   ]);
   if (!ticket) notFound();
 
@@ -46,7 +47,7 @@ export async function TicketDetail({ id }: { id: string }) {
     tasksEnabled ? listAssignableUsers() : Promise.resolve([]),
   ]);
 
-  const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt);
+  const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt, clock);
 
   return (
     <div className="@container space-y-6">
@@ -165,18 +166,18 @@ export async function TicketDetail({ id }: { id: string }) {
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Created on</span>
-                <span className="text-text">{formatDate(ticket.createdAt)}</span>
+                <span className="text-text">{clock.date(ticket.createdAt)}</span>
               </div>
               {ticket.resolvedAt && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Resolved on</span>
-                  <span className="text-text">{formatDate(ticket.resolvedAt)}</span>
+                  <span className="text-text">{clock.date(ticket.resolvedAt)}</span>
                 </div>
               )}
               {ticket.closedAt && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Closed on</span>
-                  <span className="text-text">{formatDate(ticket.closedAt)}</span>
+                  <span className="text-text">{clock.date(ticket.closedAt)}</span>
                 </div>
               )}
             </CardContent>

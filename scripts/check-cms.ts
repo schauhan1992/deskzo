@@ -57,6 +57,7 @@ import { cloneElement, createElement, isValidElement, type ReactElement, type Re
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RichInline, SiteBlock, SiteRenderContext } from "../src/components/site/blocks/types";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { indiaClock } from "../src/lib/time/zone";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -1068,7 +1069,7 @@ async function main() {
     const search = await act(leadActions.cmsListLeads({ q: "visitor2" }));
     ok("  and searches", search.ok && search.data.total === 1);
     const exported = await act(leadActions.cmsExportLeads({}));
-    ok("the inbox exports as CSV, guarded against formulas", exported.ok && exported.data.rows === 4 && exported.data.csv.includes("'=HYPERLINK(evil)") && exported.data.csv.startsWith('"Received (India time)"'));
+    ok("the inbox exports as CSV, guarded against formulas", exported.ok && exported.data.rows === 4 && exported.data.csv.includes("'=HYPERLINK(evil)") && exported.data.csv.startsWith('"Received (Asia/Kolkata)"'));
     ok("  and the export is in the activity log", (await control.cmsAuditLog.count({ where: { action: "lead.export" } })) === 1);
 
     // ─── The console's page ───────────────────────────────────────────────────────────────────
@@ -1585,6 +1586,8 @@ async function main() {
         const items = activityWords.activityFeedItems(
           newRows.map((r) => ({ ...r, detail: (r.detail as Record<string, unknown> | null) ?? null })),
           { canOpenUsers: true, canOpenSecurity: true, canOpenRedirects: true },
+          // The console clock, India's here: no console zone is set.
+          indiaClock,
         );
         feedProblem = items.filter((i) => !i.title || newActions.some((a) => i.title.startsWith(a))).map((i) => i.title).join(" | ");
       } catch (err) {

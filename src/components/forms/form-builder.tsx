@@ -21,7 +21,7 @@ import {
 import { FORM_CATEGORIES, FILL_MODES, categoryOf } from "@/lib/forms/categories";
 import { slugFromName } from "@/lib/forms/settings";
 import { TOPICS } from "@/lib/marketing/topics";
-import { formatIstDateTime, parseIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/bulk-select";
@@ -42,7 +42,7 @@ export type BuilderSettings = {
   createsLead: boolean;
   topic: MarketingTopic;
   assignToUserId: string | null;
-  /** India time, as a `datetime-local` input holds it. */
+  /** The workspace's time, as a `datetime-local` input holds it. */
   closesAt: string;
   eventStartsAt: string;
   eventEndsAt: string;
@@ -113,6 +113,7 @@ export function FormBuilder({
   hasResponses?: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [settings, setSettings] = useState<BuilderSettings>(initial);
   const [drafts, setDrafts] = useState<Draft[]>(() => toDrafts(initialFields));
@@ -167,7 +168,7 @@ export function FormBuilder({
     ]);
 
   const preview = useMemo<RenderableForm>(() => {
-    const starts = parseIstDateTime(settings.eventStartsAt);
+    const starts = clock.parseInput(settings.eventStartsAt);
     return {
       id: "preview",
       slug: settings.slug || "preview",
@@ -178,15 +179,15 @@ export function FormBuilder({
       topic: settings.topic,
       category: settings.category,
       eventStartsAt: starts,
-      eventEndsAt: parseIstDateTime(settings.eventEndsAt),
+      eventEndsAt: clock.parseInput(settings.eventEndsAt),
       venue: settings.venue || null,
-      eventWhen: starts ? formatIstDateTime(starts) : null,
+      eventWhen: starts ? clock.dateTime(starts) : null,
       fields: parseFields(withKeys(drafts).map((f) => ({ ...f, options: savedOptions(f) }))),
       ourName: "",
       closedMessage: null,
       full: false,
     };
-  }, [settings, drafts]);
+  }, [settings, drafts, clock]);
 
   const save = () => {
     setNotice(null);
@@ -335,7 +336,10 @@ export function FormBuilder({
           </Section>
 
           {event && (
-            <Section title="The event" note="Shown at the top of the form and in every invitation. Times are India time.">
+            <Section
+              title="The event"
+              note={`Shown at the top of the form and in every invitation. Times are ${clock.zone.replace(/_/g, " ")} time.`}
+            >
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="fb-starts">Starts</Label>
@@ -398,7 +402,9 @@ export function FormBuilder({
               <div className="space-y-1.5">
                 <Label htmlFor="fb-closes">Stop taking answers at (optional)</Label>
                 <Input id="fb-closes" type="datetime-local" value={settings.closesAt} onChange={(e) => set("closesAt", e.target.value)} />
-                <p className="text-xs text-subtle">{event ? "An event also stops taking RSVPs once it starts." : "India time."}</p>
+                <p className="text-xs text-subtle">
+                  {event ? "An event also stops taking RSVPs once it starts." : `${clock.zone.replace(/_/g, " ")} time.`}
+                </p>
               </div>
               <div className="flex items-center gap-2 self-center pt-4">
                 <Checkbox id="fb-active" checked={settings.active} onChange={(e) => set("active", e.target.checked)} />

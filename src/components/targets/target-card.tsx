@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Info } from "lucide-react";
 import type { listTargets } from "@/actions/target";
 import { Badge, Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatMetric, metricByKey, whatIsNeeded } from "@/lib/targets/metrics";
 import { SchemePicker } from "@/components/targets/scheme-picker";
 
@@ -86,7 +86,7 @@ export function TargetCard({
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 text-xs">
         <span className="tabular-nums text-muted">{Math.round(p.percent)}% done</span>
         <span className="tabular-nums text-subtle">
-          {p.daysLeft > 0 ? `${p.daysLeft} of ${p.daysTotal} days left` : `Ended ${formatDate(target.toDate)}`}
+          {p.daysLeft > 0 ? `${p.daysLeft} of ${p.daysTotal} days left` : `Ended ${formatCalendarDay(target.toDate)}`}
         </span>
       </div>
 

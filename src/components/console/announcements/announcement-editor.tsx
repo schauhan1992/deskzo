@@ -11,16 +11,17 @@ import { InsetBlock, Panel } from "@/components/console/kit/panel";
 import { TONE_TEXT } from "@/components/console/kit/status";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { AnnouncementBanner } from "@/components/platform/announcement-banner";
+import { useClock } from "@/components/time/clock-provider";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { OptionCombobox, type ComboOption } from "@/components/ui/option-combobox";
-import { durationText, plural, when } from "@/lib/console-shared/format";
+import { durationText, plural } from "@/lib/console-shared/format";
 import { ANNOUNCEMENT_TONE } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
-import { istDateTimeInput, parseIstDateTime } from "@/lib/india-time";
 import type { AnnouncementAudienceKey, AnnouncementRow, AnnouncementTargets, AnnouncementToneKey } from "@/lib/platform/announcements";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,9 +36,9 @@ import { cn } from "@/lib/utils";
  * again. The checks here mirror the save's (src/lib/platform/announcements.ts `validateAnnouncement`)
  * only to point at the field early; the save's refusal is what the dialog shows.
  *
- * Times are India wall-clock `datetime-local` values; the server reads them as IST. Only managers are
- * given this component — everybody else gets the page's read-only view — and "All workspaces" is only
- * drawn for an owner.
+ * Times are `datetime-local` values on the console's clock (Settings › Time zone), as the server reads
+ * them. Only managers are given this component — everybody else gets the page's read-only view — and
+ * "All workspaces" is only drawn for an owner.
  */
 
 type Mode = "create" | "edit" | "duplicate";
@@ -53,7 +54,7 @@ type Draft = {
   countries: string[];
   plans: string[];
   tenants: string[];
-  /** `yyyy-mm-ddThh:mm`, India time; "" for none. */
+  /** `yyyy-mm-ddThh:mm` on the console's clock; "" for none. */
   startsAt: string;
   endsAt: string;
   dismissible: boolean;
@@ -106,7 +107,7 @@ const QUICK_ENDS: { label: string; ms: number }[] = [
   { label: "1 week", ms: 7 * DAY_MS },
 ];
 
-function draftOf(initial: AnnouncementRow | null, mode: Mode, caps: Caps): Draft {
+function draftOf(initial: AnnouncementRow | null, mode: Mode, caps: Caps, clock: Clock): Draft {
   if (!initial) {
     return { title: "", body: "", tone: "INFO", audience: caps.announceAll ? "ALL" : "COUNTRIES", countries: [], plans: [], tenants: [], startsAt: "", endsAt: "", dismissible: true };
   }
@@ -121,8 +122,8 @@ function draftOf(initial: AnnouncementRow | null, mode: Mode, caps: Caps): Draft
     plans: picks("PLANS"),
     tenants: picks("TENANTS"),
     // A copy runs when it is told to: the original's window is usually over.
-    startsAt: mode === "edit" ? istDateTimeInput(initial.startsAt) : "",
-    endsAt: mode === "edit" ? istDateTimeInput(initial.endsAt) : "",
+    startsAt: mode === "edit" ? clock.input(initial.startsAt) : "",
+    endsAt: mode === "edit" ? clock.input(initial.endsAt) : "",
     dismissible: initial.tone !== "CRITICAL" && initial.dismissible,
   };
 }
@@ -168,7 +169,7 @@ const signature = (input: SaveInput) => JSON.stringify({ ...input, targets: [...
  * What stops a save. `now` is the moment Save was pressed (state, never the render's clock): the
  * checks that need the time — an end already past, a window counted from "now" — wait for it.
  */
-function problemsOf(d: Draft, savedStart: Date | null, now: number | null): Problem[] {
+function problemsOf(d: Draft, savedStart: Date | null, now: number | null, clock: Clock): Problem[] {
   const out: Problem[] = [];
   const title = charCount(oneLine(d.title));
   if (title < TITLE_MIN) out.push({ field: "title", message: `Give it a title of at least ${TITLE_MIN} characters.` });
@@ -184,8 +185,8 @@ function problemsOf(d: Draft, savedStart: Date | null, now: number | null): Prob
     else if (n > TARGETS_MAX) out.push({ field: "targets", message: `Choose at most ${TARGETS_MAX} — use countries or plans for more.` });
   }
 
-  const start = d.startsAt ? parseIstDateTime(d.startsAt) : null;
-  const end = d.endsAt ? parseIstDateTime(d.endsAt) : null;
+  const start = d.startsAt ? clock.parseInput(d.startsAt) : null;
+  const end = d.endsAt ? clock.parseInput(d.endsAt) : null;
   if (d.startsAt && !start) out.push({ field: "startsAt", message: "Enter the start as a date and time." });
   if (d.endsAt && !end) out.push({ field: "endsAt", message: "Enter the end as a date and time." });
   if (d.tone === "CRITICAL" && !d.endsAt) out.push({ field: "endsAt", message: "A critical announcement can't be dismissed, so it needs an end time." });
@@ -198,10 +199,13 @@ function problemsOf(d: Draft, savedStart: Date | null, now: number | null): Prob
   return out;
 }
 
-/** "Thu, 1 Oct 2026, 10:00 am" for a valid input value, else null. */
-function stampOf(value: string): string | null {
-  const at = value ? parseIstDateTime(value) : null;
-  return at ? when(at) : null;
+/** "Thu, 1 Oct 2026, 10:00 am UTC+05:30" — on the console's clock, saying which. */
+const zoned = (at: Date, clock: Clock) => `${clock.dateTime(at)} ${clock.offsetLabel(at)}`;
+
+/** `zoned` for a valid input value, else null. */
+function stampOf(value: string, clock: Clock): string | null {
+  const at = value ? clock.parseInput(value) : null;
+  return at ? zoned(at, clock) : null;
 }
 
 /** The wall clock — for event handlers only; a render reads the time Save was pressed from state. */
@@ -240,11 +244,12 @@ export function AnnouncementEditor({
   mode: Mode;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const uid = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   /** The draft the page came with, and its audience as the reach preview identifies it — never set again. */
   const [opening] = useState(() => {
-    const first = draftOf(initial, mode, caps);
+    const first = draftOf(initial, mode, caps, clock);
     const list = targetsOf(first);
     return { draft: first, audience: first.audience, targets: list, key: reachKey(first.audience, list), counts: first.audience === "ALL" || list.length > 0 };
   });
@@ -257,7 +262,7 @@ export function AnnouncementEditor({
   const initialInput = useMemo(() => inputOf(opening.draft, editId), [opening, editId]);
   const input = inputOf(draft, editId);
   const dirty = mode !== "edit" || signature(input) !== signature(initialInput);
-  const problems = problemsOf(draft, savedStart, attemptedAt);
+  const problems = problemsOf(draft, savedStart, attemptedAt, clock);
   const errors: Partial<Record<Field, string>> = {};
   if (attemptedAt !== null) for (const p of problems) errors[p.field] ??= p.message;
 
@@ -323,9 +328,9 @@ export function AnnouncementEditor({
 
   /** "End after 1 day": counted from the start typed, or from now for one that starts when published. */
   function quickEnd(ms: number) {
-    const start = draft.startsAt ? parseIstDateTime(draft.startsAt) : savedStart;
+    const start = draft.startsAt ? clock.parseInput(draft.startsAt) : savedStart;
     const from = start ? start.getTime() : clockNow();
-    update("endsAt", istDateTimeInput(new Date(from + ms)));
+    update("endsAt", clock.input(new Date(from + ms)));
   }
 
   // ─── Saving ────────────────────────────────────────────────────────────────────────────────────
@@ -336,15 +341,15 @@ export function AnnouncementEditor({
   function requestSave() {
     const now = clockNow();
     setAttemptedAt(now);
-    const found = problemsOf(draft, savedStart, now);
+    const found = problemsOf(draft, savedStart, now, clock);
     if (found.length > 0) {
       rootRef.current?.querySelector<HTMLElement>(`[data-announcement-field="${found[0]!.field}"]`)?.focus();
       return;
     }
-    const start = draft.startsAt ? parseIstDateTime(draft.startsAt) : savedStart;
+    const start = draft.startsAt ? clock.parseInput(draft.startsAt) : savedStart;
     const scheduled = start !== null && start.getTime() > now;
     save.reset();
-    setSnapshot({ input, scheduled, startText: start && scheduled ? when(start) : "" });
+    setSnapshot({ input, scheduled, startText: start && scheduled ? zoned(start, clock) : "" });
     setSaveOpen(true);
   }
 
@@ -389,15 +394,15 @@ export function AnnouncementEditor({
 
   const titleCount = charCount(oneLine(draft.title));
   const bodyCount = charCount(draft.body.trim());
-  const startText = stampOf(draft.startsAt);
-  const endText = stampOf(draft.endsAt);
-  const startAt = draft.startsAt ? parseIstDateTime(draft.startsAt) : savedStart;
-  const endAt = draft.endsAt ? parseIstDateTime(draft.endsAt) : null;
+  const startText = stampOf(draft.startsAt, clock);
+  const endText = stampOf(draft.endsAt, clock);
+  const startAt = draft.startsAt ? clock.parseInput(draft.startsAt) : savedStart;
+  const endAt = draft.endsAt ? clock.parseInput(draft.endsAt) : null;
   const span = startAt && endAt && endAt.getTime() > startAt.getTime() ? spanText(endAt.getTime() - startAt.getTime()) : null;
 
-  const savedStartText = mode === "edit" && savedStart ? when(savedStart) : null;
-  const shows = startText ? `${startText} IST` : savedStartText ? `${savedStartText} IST` : "As soon as it's published";
-  const until = endText ? `${endText} IST` : "Until someone ends it";
+  const savedStartText = mode === "edit" && savedStart ? zoned(savedStart, clock) : null;
+  const shows = startText ?? savedStartText ?? "As soon as it's published";
+  const until = endText ?? "Until someone ends it";
 
   return (
     <div ref={rootRef} className="space-y-6">
@@ -548,7 +553,7 @@ export function AnnouncementEditor({
             </div>
           </Panel>
 
-          <Panel title="Schedule" description="India time (IST). An announcement runs for at most 90 days.">
+          <Panel title="Schedule" description={`Times in ${clock.zone.replace(/_/g, " ")}, the console's time zone. An announcement runs for at most 90 days.`}>
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
@@ -731,7 +736,7 @@ export function AnnouncementEditor({
               {mode === "edit"
                 ? "Workspaces it reaches see the change on their next page."
                 : snapshot.scheduled
-                  ? `It goes up ${snapshot.startText} IST.`
+                  ? `It goes up ${snapshot.startText}.`
                   : "It goes up as soon as you publish."}{" "}
               Other servers pick it up within a minute.
             </p>

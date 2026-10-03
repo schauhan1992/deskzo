@@ -2,8 +2,9 @@ import Link from "next/link";
 import { listCompanyCommissions, listCompanyCommissionParties } from "@/actions/commission-party";
 import { LinkedCompaniesManager } from "@/components/companies/linked-companies-manager";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
+import { workspaceClock } from "@/lib/time/workspace";
 
 type CommissionParty = Awaited<ReturnType<typeof listCompanyCommissionParties>>[number];
 type Commission = Awaited<ReturnType<typeof listCompanyCommissions>>[number];
@@ -13,7 +14,7 @@ type Commission = Awaited<ReturnType<typeof listCompanyCommissions>>[number];
  * been paid out on their orders. Both were previously only visible from the commission party's own
  * page, which meant you couldn't answer "what does this account really cost us" from the account.
  */
-export function CompanyCommission({
+export async function CompanyCommission({
   companyId,
   commissionParties,
   commissions,
@@ -24,6 +25,7 @@ export function CompanyCommission({
   commissions: Commission[];
   partyOptions: { id: string; name: string }[];
 }) {
+  const clock = await workspaceClock();
   const totalPaid = commissions.reduce((sum, c) => sum + c.amount, 0);
 
   // A payout is recorded against an order, but what matters here is who it went to, so the same
@@ -112,7 +114,7 @@ export function CompanyCommission({
                           : <span className="text-subtle">—</span>}
                       </td>
                       <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(commission.amount)}</td>
-                      <td className="px-3 py-2 text-muted">{formatDate(commission.createdAt)}</td>
+                      <td className="px-3 py-2 text-muted">{clock.date(commission.createdAt)}</td>
                       <td className="px-3 py-2 text-subtle">{commission.notes ?? "—"}</td>
                     </tr>
                   ))}

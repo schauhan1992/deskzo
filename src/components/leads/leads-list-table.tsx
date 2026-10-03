@@ -10,7 +10,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { useClock } from "@/components/time/clock-provider";
 import { formatLeadId } from "@/lib/order-id";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { useColumns } from "@/components/ui/table-columns";
@@ -62,6 +64,7 @@ export function LeadsListTable({
   // The fields this person shows, worked out once: the header and every row draw this one list.
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   const router = useRouter();
+  const clock = useClock();
   const selection = useRowSelection(leads);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -209,10 +212,10 @@ export function LeadsListTable({
                     <td className="px-4 py-2.5 text-muted">{formatCurrency(lead.estimatedValue?.toString())}</td>
                   )}
                   {cols.show("expectedClose") && (
-                    <td className="px-4 py-2.5 text-muted">{formatDate(lead.expectedCloseDate)}</td>
+                    <td className="px-4 py-2.5 text-muted">{formatCalendarDay(lead.expectedCloseDate)}</td>
                   )}
                   {cols.show("updated") && (
-                    <td className="px-4 py-2.5 text-muted">{formatDate(lead.updatedAt)}</td>
+                    <td className="px-4 py-2.5 text-muted">{clock.date(lead.updatedAt)}</td>
                   )}
                   <CustomFieldBodyCells columns={fieldColumns} texts={customColumns.texts[lead.id]} className="px-4 py-2.5 text-muted" />
                 </tr>

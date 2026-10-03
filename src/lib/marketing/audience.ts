@@ -1,5 +1,6 @@
 import type { Prisma, MarketingTopic, MessageChannel } from "@prisma/client";
 import { buildWhere, type WorkbookFilters } from "@/lib/workspace/filters";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Who a campaign goes to.
@@ -41,8 +42,8 @@ export const DEFAULT_CONTACT_FILTERS: ContactFilters = {
  * Nothing added on top of `buildWhere` — the reseller exclusion lives in there now, so an audience
  * and a calling list cannot disagree about who may be reached.
  */
-export function audienceCompanyWhere(filters: WorkbookFilters): Prisma.CompanyWhereInput {
-  return buildWhere(filters);
+export function audienceCompanyWhere(filters: WorkbookFilters, clock: Clock): Prisma.CompanyWhereInput {
+  return buildWhere(filters, clock);
 }
 
 /**

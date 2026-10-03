@@ -1,5 +1,5 @@
 import { monthlyCharge, type AssetForDepreciation } from "@/lib/ledger/depreciation";
-import { istDateKey } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 import type { AutoCheckKey } from "@/lib/close/catalogue";
 import { dayKey, monthEnd, monthEndPostingDate, monthKeyOf, monthLabel, monthOfDate, sameDay } from "@/lib/close/months";
 
@@ -324,7 +324,8 @@ export function checkDeliveredNotInvoiced(input: DeliveredCheckInput): CheckOutc
     label: s.label,
     href: `/projects/${s.projectId}`,
     amount: s.amount,
-    note: `Delivered ${istDateKey(s.deliveredAt)}, billing ${s.status.toLowerCase()}`,
+    // India's day, as the month end it is checked against is.
+    note: `Delivered ${indiaClock.dateKey(s.deliveredAt)}, billing ${s.status.toLowerCase()}`,
   }));
   const amount = round2(items.reduce((t, i) => t + i.amount, 0));
   const summary = items.length === 0

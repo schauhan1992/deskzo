@@ -19,7 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
 import { Checkbox } from "@/components/ui/bulk-select";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Milestone = {
   id: string;
@@ -81,6 +83,7 @@ export function ProjectPlan({
   now: number;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const progress = milestoneProgress(milestones.map((m) => ({ completedAt: asDate(m.completedAt) })));
 
   return (
@@ -120,7 +123,8 @@ export function ProjectPlan({
               {milestones.map((m) => {
                 const done = asDate(m.completedAt);
                 const due = asDate(m.dueDate);
-                const overdue = !done && due && due.getTime() < now;
+                // The due day is typed (midnight UTC): overdue once that day has passed on the workspace's calendar.
+                const overdue = !done && due && due.toISOString().slice(0, 10) < clock.today(new Date(now));
                 return (
                   <div key={m.id} className="flex items-start gap-2.5 border-b border-line pb-2.5 last:border-0 last:pb-0">
                     <span className="pt-0.5">
@@ -136,8 +140,9 @@ export function ProjectPlan({
                     <div className="min-w-0 flex-1">
                       <div className={`text-sm ${done ? "text-muted line-through" : "text-text"}`}>{m.name}</div>
                       <div className="mt-0.5 text-xs text-subtle">
-                        {due && <span className={overdue ? "text-danger" : ""}>Due {formatDate(due)}</span>}
-                        {done && <span> · done {formatDate(done)}{m.completedBy ? ` by ${m.completedBy.name}` : ""}</span>}
+                        {/* The due day as typed, held as midnight UTC; when it was done is a moment. */}
+                        {due && <span className={overdue ? "text-danger" : ""}>Due {formatCalendarDay(due)}</span>}
+                        {done && <span> · done {clock.date(done)}{m.completedBy ? ` by ${m.completedBy.name}` : ""}</span>}
                       </div>
                       {m.note && <p className="mt-0.5 text-xs text-muted">{m.note}</p>}
                     </div>
@@ -268,6 +273,7 @@ function BillingStage({
         label: stage.label,
         amount: String(stage.amount),
         percent: stage.percent !== null ? String(stage.percent) : undefined,
+        // Held as midnight UTC of the day typed, so its UTC day is that day, in any zone.
         dueOn: stage.dueOn ? new Date(stage.dueOn).toISOString().slice(0, 10) : undefined,
         deliveryMilestoneId,
       });
@@ -299,7 +305,7 @@ function BillingStage({
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-subtle">
             <Badge tone={billingStatusTone[stage.status]}>{billingStatusLabels[stage.status]}</Badge>
-            {stage.dueOn && <span>due {formatDate(asDate(stage.dueOn)!)}</span>}
+            {stage.dueOn && <span>due {formatCalendarDay(stage.dueOn)}</span>}
             {stage.document && (
               <Link href={`/documents/${stage.document.id}`} className="text-brand hover:underline">
                 {stage.document.docNumber}

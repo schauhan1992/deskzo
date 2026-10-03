@@ -1,5 +1,5 @@
-import { istDayKey } from "@/lib/console-shared/format";
 import { isoDateOrUndefined, one, parseCurrency, type RawParams } from "@/lib/console-shared/params";
+import { indiaClock } from "@/lib/time/zone";
 import type { CommissionKind, CommissionStatus, PartnerKind, PartnerStatus, StatementStatus } from "@deskzo/control-client";
 
 /**
@@ -8,6 +8,8 @@ import type { CommissionKind, CommissionStatus, PartnerKind, PartnerStatus, Stat
  * page's — enums whitelisted (in whatever case was typed), text trimmed and cut to 100 characters, dates
  * real `yyyy-mm-dd` days on India's calendar, pages from 1 — so a hand-edited or stale URL can only ever
  * produce a known filter, and anything unknown falls back to the default rather than failing the page.
+ * The days are India's whatever zone the console keeps: commission is counted in India's months, as its
+ * statements are (src/lib/partners/statements.ts).
  * The export actions run the same parsers on the server (`exportParams` → `parse…`), which is why an
  * exported CSV matches the list on screen.
  *
@@ -134,7 +136,7 @@ export type CommissionFilters = {
   status?: CommissionStatus;
   currency?: string;
   kind?: CommissionKind;
-  /** When it was earned: IST days, the earlier first. */
+  /** When it was earned: India's days, the earlier first. */
   from?: string;
   to?: string;
   /** Only the entries flagged for a look; left out when off. */
@@ -160,7 +162,7 @@ export type StatementFilters = {
   partner?: string;
   status?: StatementStatus;
   currency?: string;
-  /** The IST month a statement is for: "2026-09". */
+  /** India's month a statement is for: "2026-09". */
   period?: string;
   page: number;
 };
@@ -177,7 +179,7 @@ export function parseStatementFilters(raw: RawParams): StatementFilters {
   });
 }
 
-/** The Reports tab's window: IST days. Without them it is the current IST year to date (`reportRange`). */
+/** The Reports tab's window: India's days. Without them it is India's current year to date (`reportRange`). */
 export type ReportFilters = { from?: string; to?: string };
 
 /** URL keys: `from`, `to`. Only what the URL says — `reportRange` fills in the default, so this stays free of the clock. */
@@ -186,12 +188,13 @@ export function parseReportFilters(raw: RawParams): ReportFilters {
 }
 
 /**
- * The window a report covers: the days asked for, the missing ends filled with the current IST year to
- * date (1 January to today, India's calendar), the earlier first. The page and the loader both call it,
- * with the loader's `now`, so the heading and the numbers describe the same days.
+ * The window a report covers: the days asked for, the missing ends filled with the current year to
+ * date (1 January to today, India's calendar — the programme's days, whatever zone the console keeps),
+ * the earlier first. The page and the loader both call it, with the loader's `now`, so the heading and
+ * the numbers describe the same days.
  */
 export function reportRange(f: ReportFilters, now = new Date()): { from: string; to: string } {
-  const today = istDayKey(now);
+  const today = indiaClock.dateKey(now);
   const from = f.from ?? `${today.slice(0, 4)}-01-01`;
   const to = f.to ?? today;
   return from <= to ? { from, to } : { from: to, to: from };

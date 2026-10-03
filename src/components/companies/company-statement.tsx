@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { customerStatement } from "@/actions/receivable";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { AGING_BUCKETS } from "@/lib/receivables";
 import { FollowUpHistory } from "@/components/collections/follow-up-history";
 import { LogFollowUpButton } from "@/components/collections/log-follow-up-button";
@@ -127,8 +128,8 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
                         {invoice.docNumber}
                       </Link>
                     </td>
-                    <td className="px-3 py-2 text-muted">{formatDate(invoice.issueDate)}</td>
-                    <td className="px-3 py-2 text-muted">{invoice.dueDate ? formatDate(invoice.dueDate) : "—"}</td>
+                    <td className="px-3 py-2 text-muted">{formatCalendarDay(invoice.issueDate)}</td>
+                    <td className="px-3 py-2 text-muted">{formatCalendarDay(invoice.dueDate)}</td>
                     <td className="px-3 py-2">
                       {invoice.daysOverdue > 0 ? (
                         <Badge tone={invoice.daysOverdue > 90 ? "red" : "amber"}>{invoice.daysOverdue}d overdue</Badge>
@@ -198,7 +199,7 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
               <tbody>
                 {statement.ledger.map((entry) => (
                   <tr key={`${entry.kind}-${entry.id}`} className="border-b border-line last:border-0">
-                    <td className="px-5 py-2 text-muted">{formatDate(entry.date)}</td>
+                    <td className="px-5 py-2 text-muted">{formatCalendarDay(entry.date)}</td>
                     <td className="px-3 py-2">
                       <Badge tone={KIND_TONE[entry.kind]}>{KIND_LABEL[entry.kind]}</Badge>
                     </td>

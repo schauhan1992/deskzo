@@ -2,10 +2,11 @@ import Link from "next/link";
 import { LabelPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { formatMoney } from "@/lib/billing/money";
-import { dayMonth, istDayKey, monthLabel, when } from "@/lib/console-shared/format";
+import { monthLabel } from "@/lib/console-shared/format";
 import { STATEMENT_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { ConsoleStatementRow } from "@/lib/partners/commission-data";
+import { indiaClock, type Clock } from "@/lib/time/zone";
 import { partnerHref, statementHref } from "./format";
 import { ApproveStatementButton, MarkPaidButton, VoidStatementButton, type StatementTarget } from "./statement-actions";
 
@@ -14,6 +15,9 @@ import { ApproveStatementButton, MarkPaidButton, VoidStatementButton, type State
  * Server-safe. "View" opens the statement's drawer on /commissions; PAYERS (OWNER, BILLING) also get
  * the next step for each row — Approve a draft, Mark paid an approved one — and Void. Nobody else is
  * drawn those controls at all, and the server refuses them anyway.
+ *
+ * The day it was paid is India's, as its month is (src/lib/partners/statements.ts), whatever zone the
+ * console keeps; when it was generated, approved or voided is on the console's clock, handed in.
  */
 
 /** Whoever approved a statement cannot also record its payment while the two-person rule is on (owner decision O4). */
@@ -41,6 +45,7 @@ export function StatementRowActions({
   caps: Caps;
   viewerId?: string | null;
   twoPersonPayout: boolean;
+  /** India's today, from the loader's `asOf`: the latest "paid on" day. */
   todayKey: string;
 }) {
   if (!caps.payPartners || (row.status !== "DRAFT" && row.status !== "APPROVED")) return null;
@@ -51,7 +56,8 @@ export function StatementRowActions({
       {row.status === "APPROVED" && (
         <MarkPaidButton
           statement={target}
-          approvedDayKey={row.approvedAt ? istDayKey(row.approvedAt) : null}
+          // The earliest "paid on" day: the India day it was approved, as the server checks it.
+          approvedDayKey={row.approvedAt ? indiaClock.dateKey(row.approvedAt) : null}
           todayKey={todayKey}
           blockedReason={twoPersonBlock(row, twoPersonPayout, viewerId)}
         />
@@ -61,24 +67,24 @@ export function StatementRowActions({
   );
 }
 
-function HistoryCell({ row }: { row: ConsoleStatementRow }) {
+function HistoryCell({ row, clock }: { row: ConsoleStatementRow; clock: Clock }) {
   const line = "block text-[11px] leading-4 whitespace-nowrap";
   return (
     <span className="block">
-      <span className={`${line} text-muted`} title={`${when(row.generatedAt)} · ${row.generatedByName}`}>{`Generated ${dayMonth(row.generatedAt)}`}</span>
+      <span className={`${line} text-muted`} title={`${clock.dateTime(row.generatedAt)} · ${row.generatedByName}`}>{`Generated ${clock.dayMonth(row.generatedAt)}`}</span>
       {row.approvedAt && (
-        <span className={`${line} text-muted`} title={when(row.approvedAt)}>
-          {`Approved ${dayMonth(row.approvedAt)}${row.approvedByName ? ` · ${row.approvedByName}` : ""}`}
+        <span className={`${line} text-muted`} title={clock.dateTime(row.approvedAt)}>
+          {`Approved ${clock.dayMonth(row.approvedAt)}${row.approvedByName ? ` · ${row.approvedByName}` : ""}`}
         </span>
       )}
       {row.paidAt && (
         <span className={`${line} text-success`} title={row.paymentReference ? `Reference ${row.paymentReference}` : undefined}>
-          {`Paid ${dayMonth(row.paidAt)}${row.paidByName ? ` · ${row.paidByName}` : ""}`}
+          {`Paid ${indiaClock.dayMonth(row.paidAt)}${row.paidByName ? ` · ${row.paidByName}` : ""}`}
         </span>
       )}
       {row.voidedAt && (
         <span className={`${line} text-muted`} title={row.voidReason ?? undefined}>
-          {`Voided ${dayMonth(row.voidedAt)}${row.voidedByName ? ` · ${row.voidedByName}` : ""}`}
+          {`Voided ${clock.dayMonth(row.voidedAt)}${row.voidedByName ? ` · ${row.voidedByName}` : ""}`}
         </span>
       )}
     </span>
@@ -93,16 +99,19 @@ export function StatementsTable({
   todayKey,
   showPartner,
   listParams = {},
+  clock,
 }: {
   rows: ConsoleStatementRow[];
   caps: Caps;
   viewerId?: string | null;
   twoPersonPayout: boolean;
-  /** Today on India's calendar, from the loader's clock: the latest "paid on" day. */
+  /** India's today, from the loader's `asOf`: the latest "paid on" day. */
   todayKey: string;
   showPartner: boolean;
   /** The Statements list's filters, kept under a statement's drawer. */
   listParams?: Record<string, string>;
+  /** The console's clock, for when it was generated, approved or voided. */
+  clock: Clock;
 }) {
   return (
     <DataTable caption="Statements" stickyHeader minWidth={showPartner ? 1220 : 1080}>
@@ -149,7 +158,7 @@ export function StatementsTable({
               {row.partnerInvoiceNumber ?? "—"}
             </Td>
             <Td>
-              <HistoryCell row={row} />
+              <HistoryCell row={row} clock={clock} />
             </Td>
             <RowActionsCell>
               <span className="flex flex-wrap items-center justify-end gap-1.5">

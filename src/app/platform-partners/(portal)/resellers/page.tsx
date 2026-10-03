@@ -10,6 +10,7 @@ import { ResellerRequestsTable, ResellersTable } from "@/components/partners/res
 import { partnerPage } from "@/lib/partners/guard";
 import { PARTNER_PAGE_ROLES } from "@/lib/partners/nav";
 import { portalResellers } from "@/lib/partners/portal-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 
 export const metadata: Metadata = { title: "Resellers" };
 
@@ -24,7 +25,7 @@ const num = (n: number) => n.toLocaleString("en-IN");
  */
 export default async function PartnerResellersPage() {
   const session = await partnerPage(PARTNER_PAGE_ROLES.resellers, { distributorOnly: true });
-  const data = await portalResellers(session.user, new Date());
+  const [data, clock] = await Promise.all([portalResellers(session.user, new Date()), consoleClock()]);
   const customers = data.resellers.reduce((sum, r) => sum + r.customers, 0);
   const newThisMonth = data.resellers.reduce((sum, r) => sum + r.newThisMonth, 0);
   const live = data.resellers.filter((r) => r.status !== "TERMINATED").length;
@@ -61,7 +62,7 @@ export default async function PartnerResellersPage() {
 
       {data.requests.length > 0 && (
         <Panel title="Waiting for review" description="Resellers you have proposed. Platform staff set each one up once they approve it." padded={false}>
-          <ResellerRequestsTable rows={data.requests} canWithdraw={data.canRequest} />
+          <ResellerRequestsTable rows={data.requests} canWithdraw={data.canRequest} clock={clock} />
         </Panel>
       )}
     </PortalPage>

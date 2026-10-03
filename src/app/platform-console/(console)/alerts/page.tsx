@@ -15,6 +15,7 @@ import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { ALERT_CATEGORIES, ALERT_SEVERITIES, parseAlertFilters, withParams, type AlertFilters } from "@/lib/console-shared/params";
 import { capsFor } from "@/lib/console-shared/roles";
 import { alerts, filterAlerts } from "@/lib/platform/alerts";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 
 export const metadata: Metadata = { title: "Alerts" };
@@ -37,7 +38,7 @@ export default async function ConsoleAlertsPage({ searchParams }: PageProps<"/pl
   // A billing category in the URL means nothing to staff who do not sell — they have no billing alerts.
   const f: AlertFilters = !caps.viewBilling && parsed.category === "billing" ? { ...parsed, category: undefined } : parsed;
 
-  const list = await alerts(staff.role);
+  const [list, clock] = await Promise.all([alerts(staff.role), consoleClock()]);
   const shown = filterAlerts(list, f);
   // The severity tabs count what each would show with every other filter kept.
   const across = filterAlerts(list, { ...f, severity: undefined });
@@ -103,7 +104,7 @@ export default async function ConsoleAlertsPage({ searchParams }: PageProps<"/pl
       )}
 
       {shown.length > 0 ? (
-        <AlertList alerts={shown} caps={caps} asOf={list.asOf} />
+        <AlertList alerts={shown} caps={caps} asOf={list.asOf} clock={clock} />
       ) : (
         <Panel padded={false}>
           {narrowed ? (

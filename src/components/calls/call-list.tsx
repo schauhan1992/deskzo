@@ -8,7 +8,7 @@ import type { CallDirection, CallOutcome } from "@prisma/client";
 import { completeFollowUp } from "@/actions/call";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 import { callOutcomeLabels, callOutcomeTones, formatDuration } from "@/lib/calls";
 import { formatTicketId } from "@/lib/tickets";
 
@@ -60,6 +60,7 @@ export function CallList({
 
 function CallRow({ call, showCompany }: { call: Call; showCompany: boolean }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -102,7 +103,7 @@ function CallRow({ call, showCompany }: { call: Call; showCompany: boolean }) {
             {showCompany && call.contact && <span>{call.contact.name}</span>}
             <span className="font-mono">{call.phoneNumber}</span>
             <span>·</span>
-            <span>{formatDateTime(call.startedAt)}</span>
+            <span>{clock.dateTimeShort(call.startedAt)}</span>
             <span>·</span>
             <span>{call.user.name}</span>
           </div>
@@ -137,7 +138,7 @@ function CallRow({ call, showCompany }: { call: Call; showCompany: boolean }) {
             ) : (
               <>
                 <Badge tone={overdue ? "red" : "amber"}>
-                  {overdue ? "Callback overdue" : "Call back"} {formatDate(call.followUpAt)}
+                  {overdue ? "Callback overdue" : "Call back"} {clock.date(call.followUpAt)}
                 </Badge>
                 <Button size="sm" variant="ghost" disabled={pending} onClick={done} title="Mark the callback done">
                   <Check className="h-3.5 w-3.5" />

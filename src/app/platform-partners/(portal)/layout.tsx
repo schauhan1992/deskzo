@@ -1,4 +1,6 @@
 import { PartnerShell } from "@/components/partners/shell/portal-shell";
+import { ClockProvider } from "@/components/time/clock-provider";
+import { consoleZone } from "@/lib/platform/console-clock";
 import { partnerPage } from "@/lib/partners/guard";
 import { partnerPagesFor } from "@/lib/partners/nav";
 import { platformEnv } from "@/lib/platform/console-page";
@@ -19,9 +21,11 @@ export default async function PartnerPortalLayout({ children }: LayoutProps<"/pl
   const { user } = await partnerPage();
   const visibleKeys = partnerPagesFor(user.role, user.partner.kind).map((page) => page.key);
   const url = siteOrigin();
-  const settings = await getSiteSettings();
+  const [settings, zone] = await Promise.all([getSiteSettings(), consoleZone()]);
 
   return (
+    // The console's clock (Settings › Time zone): the partner programme is the platform's.
+    <ClockProvider zone={zone}>
     <PartnerShell
       me={{ id: user.id, name: user.name, email: user.email, role: user.role }}
       partner={{ displayName: user.partner.displayName, kind: user.partner.kind, status: user.partner.status }}
@@ -31,5 +35,6 @@ export default async function PartnerPortalLayout({ children }: LayoutProps<"/pl
     >
       {children}
     </PartnerShell>
+    </ClockProvider>
   );
 }

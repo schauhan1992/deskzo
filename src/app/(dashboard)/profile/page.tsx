@@ -10,7 +10,7 @@ import { myAccess } from "@/actions/access-control";
 import { MyAccess } from "@/components/access/my-access";
 import { DEVICE_KIND_LABEL } from "@/lib/access/device";
 import { placeText } from "@/lib/access/geo";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { getMailConnection } from "@/actions/document-mail";
 import { MailboxConnection } from "@/components/profile/mailbox-connection";
 import { isModuleEntitled } from "@/lib/modules-access";
@@ -25,7 +25,7 @@ export default async function ProfilePage({
   /** `mailbox` and `via`: how connecting a mailbox went, and with which provider. `outlook` is the same, from before Gmail and Zoho. */
   searchParams: Promise<{ mailbox?: string; via?: string; outlook?: string; link?: string }>;
 }) {
-  const [profile, security, access, mail, linked, { mailbox, via, outlook, link }] = await Promise.all([
+  const [profile, security, access, mail, linked, { mailbox, via, outlook, link }, clock] = await Promise.all([
     getOwnProfile(),
     getCachedSecuritySettings(),
     myAccess(),
@@ -33,6 +33,7 @@ export default async function ProfilePage({
     // One card on this page, never a reason for the page to fail: a control plane out of reach just hides it.
     myLinkedWorkspaces().catch(() => null),
     searchParams,
+    workspaceClock(),
   ]);
   if (!profile) notFound();
 
@@ -173,12 +174,12 @@ export default async function ProfilePage({
               kindLabel: DEVICE_KIND_LABEL[d.kind],
               statusLabel: d.status === "APPROVED" ? "Approved" : d.status === "PENDING" ? "Waiting for approval" : d.status === "REJECTED" ? "Rejected" : "Revoked",
               tone: d.status === "APPROVED" ? "green" : d.status === "PENDING" ? "amber" : "red",
-              lastText: formatIstDateTime(d.lastSeenAt),
+              lastText: clock.dateTime(d.lastSeenAt),
               place: d.lastPlace,
             }))}
             signIns={access.signIns.map((s) => ({
               id: s.id,
-              atText: formatIstDateTime(s.at),
+              atText: clock.dateTime(s.at),
               place: placeText(s),
               ip: s.ip,
               device: s.device?.label ?? null,

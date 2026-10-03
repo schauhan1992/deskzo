@@ -13,6 +13,7 @@ import { plural } from "@/lib/console-shared/format";
 import { partnerPage } from "@/lib/partners/guard";
 import { PARTNER_PAGE_ROLES, PARTNER_ROUTES, canOpenPartnerPage } from "@/lib/partners/nav";
 import { portalDashboard } from "@/lib/partners/portal-data";
+import { consoleClock } from "@/lib/platform/console-clock";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -28,12 +29,15 @@ const LINK = "inline-flex h-8 items-center rounded-base border border-line-stron
  * The money roles (admin, finance) also see the commission tiles; for everyone else the loader reads
  * no commission at all, and nothing here mentions it. A distributor sees its resellers. While the
  * partner account is being set up, a checklist leads the page.
+ *
+ * "This month" is India's, as the statements' months are (src/lib/partners/statements.ts); the dates in
+ * the lists are the console's clock's (Settings › Time zone), as every time the portal shows.
  */
 export default async function PartnerDashboardPage() {
   const session = await partnerPage(PARTNER_PAGE_ROLES.dashboard);
   const me = session.user;
   const now = new Date();
-  const d = await portalDashboard(me, now);
+  const [d, clock] = await Promise.all([portalDashboard(me, now), consoleClock()]);
   const canOpen = (key: Parameters<typeof canOpenPartnerPage>[2]) => canOpenPartnerPage(me.role, me.partner.kind, key);
   const c = d.customers;
   const trouble = [c.held > 0 ? `${num(c.held)} held` : null, c.pastDue > 0 ? `${num(c.pastDue)} past due` : null].filter(Boolean).join(" · ");
@@ -119,9 +123,9 @@ export default async function PartnerDashboardPage() {
         </Panel>
       ) : (
         <div className="grid gap-6 xl:grid-cols-3">
-          <TrialsEndingPanel rows={d.trialsEnding} asOf={d.asOf} />
-          <RenewalsPanel rows={d.renewals} asOf={d.asOf} />
-          <LatestCustomersPanel rows={d.latest} action={invitationsLink} />
+          <TrialsEndingPanel rows={d.trialsEnding} asOf={d.asOf} clock={clock} />
+          <RenewalsPanel rows={d.renewals} asOf={d.asOf} clock={clock} />
+          <LatestCustomersPanel rows={d.latest} action={invitationsLink} clock={clock} />
         </div>
       )}
     </PortalPage>

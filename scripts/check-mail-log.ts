@@ -19,6 +19,7 @@ import type { ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { MAIL_STATUS_GROUPS, mailPreviewDocument, mailSender, mailSource } from "../src/lib/mail-log";
 import { MODULE_REGISTRY } from "../src/lib/modules";
+import { renderHtml } from "./lib/render-html";
 
 let actorId = "";
 let sendAttempts = 0;
@@ -113,7 +114,6 @@ async function main() {
   ok("  and whose links open nowhere, and would name no referrer if they did", html.includes('<base target="_blank">') && html.includes('name="referrer" content="no-referrer"'));
 
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
   const mailActions = require("../src/actions/mail-log") as typeof import("../src/actions/mail-log");
   const { queueCustomerNotice } = require("../src/lib/marketing/order-notice") as typeof import("../src/lib/marketing/order-notice");
   const { CompanyDetail } = require("../src/components/companies/company-detail") as typeof import("../src/components/companies/company-detail");
@@ -206,16 +206,16 @@ async function main() {
     section("The screens");
 
     actorId = agent.id;
-    const tab = renderToStaticMarkup((await CompanyDetail({ id: customer.id, tab: "emails" })) as ReactElement);
+    const tab = await renderHtml(CompanyDetail({ id: customer.id, tab: "emails" }));
     ok("the customer page has an Emails tab listing what was sent", tab.includes(">Emails</a>") && tab.includes("Emails sent") && tab.includes(`${TAG} Welcome aboard`));
     ok("  with the reason beside what didn't arrive", tab.includes("550 mailbox unavailable") && tab.includes("Unsubscribed from offers"));
     actorId = blind.id;
-    const blindTab = renderToStaticMarkup((await CompanyDetail({ id: customer.id, tab: "emails" })) as ReactElement);
+    const blindTab = await renderHtml(CompanyDetail({ id: customer.id, tab: "emails" }));
     ok("  and no Emails tab without the view", !blindTab.includes(">Emails</a>"));
     actorId = agent.id;
-    const log = renderToStaticMarkup(await LogPage({ searchParams: Promise.resolve({ companyId: customer.id }) }));
+    const log = await renderHtml(LogPage({ searchParams: Promise.resolve({ companyId: customer.id }) }));
     ok("the Mail log page, narrowed to the customer", log.includes(`${TAG} Customer`) && log.includes("show every customer") && log.includes(`${TAG} Price update`));
-    const page = renderToStaticMarkup(await MessagePage({ params: Promise.resolve({ id: opened.id }) }));
+    const page = await renderHtml(MessagePage({ params: Promise.resolve({ id: opened.id }) }));
     ok("a message page shows it in a frame that allows nothing", page.includes('sandbox=""') && page.includes("default-src") && page.includes("Opened"));
     ok("the Mail log is in the sidebar, behind the emails view", MODULE_REGISTRY.flatMap((m) => m.navItems).find((n) => n.href === "/mail-log")?.permission === "emails.view");
   } finally {

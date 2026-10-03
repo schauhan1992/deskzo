@@ -8,7 +8,7 @@ import { foreignCountry } from "@/lib/organisation";
 import { branchIdentity, isMultiBranch } from "@/lib/branches/identity";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { formatMoney, formatRate, isBaseCurrency, toBase } from "@/lib/currency";
 import { GST_STATE_CODES, amountInWords } from "@/lib/gst-engine";
 import { documentDirection, tradeDocumentLabels } from "@/lib/trade-documents";
@@ -221,7 +221,8 @@ export default async function PrintDocumentPage({
               {tradeDocumentLabels[document.docType]}
             </div>
             <div className="mt-1 font-mono text-neutral-700">{document.docNumber}</div>
-            <div className="text-neutral-600">Dated {formatDate(document.issueDate)}</div>
+            {/* A document's dates are typed days, kept as their midnight UTC: the day itself, in any zone. */}
+            <div className="text-neutral-600">Dated {formatCalendarDay(document.issueDate)}</div>
             {/**
               * A draft says so, on the paper.
               *
@@ -260,8 +261,8 @@ export default async function PrintDocumentPage({
             <div className="text-[11px] uppercase tracking-wide text-neutral-500">Details</div>
             <DetailRow label="Place of supply" value={placeOfSupplyLabel} />
             {document.reference && <DetailRow label={isSales ? "Your reference" : "Our reference"} value={document.reference} />}
-            {document.dueDate && <DetailRow label="Payment due" value={formatDate(document.dueDate)} />}
-            {document.validUntil && <DetailRow label="Valid until" value={formatDate(document.validUntil)} />}
+            {document.dueDate && <DetailRow label="Payment due" value={formatCalendarDay(document.dueDate)} />}
+            {document.validUntil && <DetailRow label="Valid until" value={formatCalendarDay(document.validUntil)} />}
             <DetailRow label="GST treatment" value={gstTreatmentLabels[document.gstTreatment]} />
             <DetailRow label="Reverse charge" value={document.reverseCharge ? "Yes" : "No"} />
             {document.dispatchFromAddress && (
@@ -270,7 +271,7 @@ export default async function PrintDocumentPage({
             {document.againstDocument && (
               <DetailRow
                 label="Against invoice"
-                value={`${document.againstDocument.docNumber} — ${formatDate(document.againstDocument.issueDate)}`}
+                value={`${document.againstDocument.docNumber} — ${formatCalendarDay(document.againstDocument.issueDate)}`}
               />
             )}
           </div>
@@ -365,7 +366,8 @@ export default async function PrintDocumentPage({
                   <div className="font-medium text-neutral-800">e-Invoice</div>
                   <div className="break-all">IRN: {document.irn}</div>
                   <div>Ack no: {document.ackNo}</div>
-                  <div>Ack date: {formatDate(document.ackDate)}</div>
+                  {/* The IRP's acknowledgement: an e-invoice date, so India's (statutory, every workspace). */}
+                  <div>Ack date: {indiaClock.date(document.ackDate)}</div>
                 </div>
               </div>
             )}

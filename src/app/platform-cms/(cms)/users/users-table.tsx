@@ -23,11 +23,12 @@ import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { CmsRolePill } from "@/components/cms/common/status";
 import { useCmsAction } from "@/components/cms/common/use-cms-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { SidePane } from "@/components/ui/side-pane";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { Tone } from "@/lib/console-shared/types";
 import { CMS_ROUTES } from "@/lib/cms/nav";
 import { CMS_ROLE_DESCRIPTIONS, CMS_ROLE_LABELS, type CmsRole, type CmsSessionRow, type CmsTwoFactorMode, type CmsUserRow } from "@/lib/cms/types";
@@ -463,6 +464,7 @@ function LinkDialog({ row, mode, onClose }: { row: CmsUserRow; mode: "link" | "r
 }
 
 function EndSessionDialog({ row, session, onClose }: { row: CmsUserRow; session: CmsSessionRow; onClose: () => void }) {
+  const clock = useClock();
   const action = useCmsAction<null>();
   const close = () => {
     if (!action.pending) onClose();
@@ -478,7 +480,7 @@ function EndSessionDialog({ row, session, onClose }: { row: CmsUserRow; session:
       onConfirm={() => action.run(() => cmsEndUserSession(row.id, session.handle), { success: `Signed ${row.name} out on ${session.device}.`, onDone: onClose })}
     >
       <p>
-        {row.name}&apos;s session on <strong className="font-medium">{session.device}</strong>, last used {when(session.lastSeenAt)}, ends now. Whoever is using it is sent to the
+        {row.name}&apos;s session on <strong className="font-medium">{session.device}</strong>, last used {clock.dateTime(session.lastSeenAt)}, ends now. Whoever is using it is sent to the
         sign-in page at their next click.
       </p>
     </ConfirmDialog>

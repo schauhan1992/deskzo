@@ -35,11 +35,12 @@ import {
   calendarDay,
   checkReleaseDate,
   handoffBadge,
-  istTodayKey,
   needsSalesApproval,
   priceCeiling,
   savingAmount,
 } from "../src/lib/orders/handoff-rules";
+// The rules take the workspace's clock; this suite's workspace, and its fixtures, are India's.
+import { indiaClock } from "../src/lib/time/zone";
 
 // ── Who the actions think is calling ───────────────────────────────────────────────────────────
 
@@ -186,14 +187,14 @@ async function main() {
   const at = (s: string) => new Date(s);
   ok(
     "today in India turns at midnight IST, not UTC",
-    istTodayKey(at("2026-09-30T23:59:00+05:30")) === "2026-09-30" && istTodayKey(at("2026-10-01T00:01:00+05:30")) === "2026-10-01",
+    indiaClock.today(at("2026-09-30T23:59:00+05:30")) === "2026-09-30" && indiaClock.today(at("2026-10-01T00:01:00+05:30")) === "2026-10-01",
   );
-  const r1 = checkReleaseDate("2026-10-01", at("2026-09-30T23:59:00+05:30"));
-  const r2 = checkReleaseDate("2026-10-01", at("2026-10-01T00:01:00+05:30"));
+  const r1 = checkReleaseDate("2026-10-01", at("2026-09-30T23:59:00+05:30"), indiaClock);
+  const r2 = checkReleaseDate("2026-10-01", at("2026-10-01T00:01:00+05:30"), indiaClock);
   ok("a go-ahead day must be after today in India: 1 Oct is fine at 23:59 IST on 30 Sep", r1.ok);
   ok("  and refused two minutes later, at 00:01 IST on 1 Oct (18:31 UTC on 30 Sep)", !r2.ok, r2.ok ? "accepted" : r2.error);
-  ok("  a date that isn't one is refused", !checkReleaseDate("2026-02-30", at("2026-01-01T10:00:00+05:30")).ok);
-  ok("  and so is one more than a year out", !checkReleaseDate("2027-12-01", at("2026-09-30T10:00:00+05:30")).ok);
+  ok("  a date that isn't one is refused", !checkReleaseDate("2026-02-30", at("2026-01-01T10:00:00+05:30"), indiaClock).ok);
+  ok("  and so is one more than a year out", !checkReleaseDate("2027-12-01", at("2026-09-30T10:00:00+05:30"), indiaClock).ok);
   ok("a saving is (quoted − actual) × quantity, to the paisa", savingAmount(800, 750, 3) === 150 && savingAmount(0.3, 0.1, 3) === 0.6);
   ok("  and negative when more was paid", savingAmount(800, 900, 2) === -200);
   const quoted = { quotedPurchasePrice: 800, quotedById: "sales", orderStatus: "APPROVED", purchasePrice: null };
@@ -205,9 +206,9 @@ async function main() {
   );
   ok(
     "the badge says when it goes, read as a calendar day",
-    handoffBadge({ purchaseRelease: "SCHEDULED", releaseOn: new Date("2026-10-12T00:00:00Z") }, at("2026-09-30T12:00:00+05:30")) === "Goes to purchase on 12 Oct" &&
-      handoffBadge({ purchaseRelease: "HELD", releaseOn: null }) === "In hand — not yet sent to purchase" &&
-      handoffBadge({ purchaseRelease: "RELEASED", releaseOn: null }) === null,
+    handoffBadge({ purchaseRelease: "SCHEDULED", releaseOn: new Date("2026-10-12T00:00:00Z") }, indiaClock, at("2026-09-30T12:00:00+05:30")) === "Goes to purchase on 12 Oct" &&
+      handoffBadge({ purchaseRelease: "HELD", releaseOn: null }, indiaClock) === "In hand — not yet sent to purchase" &&
+      handoffBadge({ purchaseRelease: "RELEASED", releaseOn: null }, indiaClock) === null,
   );
 
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -285,11 +286,11 @@ async function main() {
       "a distributor price is kept with who, where, the contact and the remarks",
       Number(heldRow?.quotedPurchasePrice) === 800 && heldRow?.quoteVendorName === `${TAG} Offline Distributor` && heldRow.quoteContact === "Ravi Kumar" && heldRow.quoteRemarks === "Valid till Friday; 2 in stock" && heldRow.quotedById === sales.id,
     );
-    ok("  dated today in India when no date was given", heldRow?.quotedOn?.toISOString().slice(0, 10) === istTodayKey(new Date()), heldRow?.quotedOn?.toISOString());
+    ok("  dated today in India when no date was given", heldRow?.quotedOn?.toISOString().slice(0, 10) === indiaClock.today(new Date()), heldRow?.quotedOn?.toISOString());
     const quotedEvent = held.ok ? await db.orderPriceChange.findFirst({ where: { companyProductId: held.data.id } }) : null;
     ok("  and starts the price history", quotedEvent?.event === "QUOTED" && Number(quotedEvent.toPrice) === 800 && quotedEvent.byUserId === sales.id && quotedEvent.reason === "Valid till Friday; 2 in stock");
 
-    const today = istTodayKey(new Date());
+    const today = indiaClock.today(new Date());
     const bad1 = await punch({ handoff: "SCHEDULE", releaseOn: today });
     ok("scheduling for today is refused — that's sending it now", !bad1.ok, errorOf(bad1));
     const bad2 = await punch({ quotedPurchasePrice: 800 });
@@ -396,7 +397,7 @@ async function main() {
     const saving1 = await db.purchaseSaving.findUnique({ where: { companyProductId: lowerId } });
     ok("bought below the distributor price, it is processed as always", pr1.ok && !pr1.data.awaitingSales && lowerRow.orderStatus === "PROCESSING" && Number(lowerRow.purchasePrice) === 750, errorOf(pr1));
     ok("  and the saving is recorded to the rupee: (800 − 750) × 3 = ₹150", Number(saving1?.amount) === 150 && saving1?.purchaserId === buyer.id && saving1.quantity === 3, saving1?.amount?.toString());
-    ok("  on today's date in India", saving1?.recordedOn.toISOString().slice(0, 10) === istTodayKey(new Date()));
+    ok("  on today's date in India", saving1?.recordedOn.toISOString().slice(0, 10) === indiaClock.today(new Date()));
     const purchased = await db.orderPriceChange.findFirst({ where: { companyProductId: lowerId, event: "PURCHASED" } });
     ok("  with a PURCHASED step in the price history", Number(purchased?.fromPrice) === 800 && Number(purchased?.toPrice) === 750 && purchased?.vendorId === vendor.id);
     const resave = await orderActions.processOrder({ orderId: lowerId, vendorId: vendor.id, purchasePrice: 750, ourPoNumber: `${TAG}-PO-1B` });
@@ -487,7 +488,7 @@ async function main() {
     ok("September takes its first and last days and nothing either side, and not a cancelled order's", september === 23, september);
     const q3 = await measure(db as never, "PURCHASE_SAVINGS", { from: new Date("2026-07-01T00:00:00Z"), to: new Date("2026-09-30T00:00:00Z"), userIds: [buyer2.id] });
     ok("  a quarter adds up the months in it", q3 === 1023, q3);
-    const month = istTodayKey(new Date()).slice(0, 7);
+    const month = indiaClock.today(new Date()).slice(0, 7);
     const monthEnd = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0));
     const mine = await measure(db as never, "PURCHASE_SAVINGS", { from: new Date(`${month}-01T00:00:00Z`), to: monthEnd, userIds: [buyer.id] });
     ok("the purchaser's month nets the saving and the accepted increase: 150 − 200", mine === -50, mine);
@@ -669,7 +670,7 @@ async function main() {
     save("orders-in-hand", list);
     ok("the Orders list filters to in-hand orders, with the badge", text(list).includes("In hand — not yet sent to purchase") && text(list).includes("In hand"));
     as(buyer);
-    const savingsHtml = renderToStaticMarkup((await resolveAsync(await SavingsPage({ searchParams: Promise.resolve({ from: `${month}-01`, to: istTodayKey(new Date()) }) }))) as ReactElement);
+    const savingsHtml = renderToStaticMarkup((await resolveAsync(await SavingsPage({ searchParams: Promise.resolve({ from: `${month}-01`, to: indiaClock.today(new Date()) }) }))) as ReactElement);
     save("purchase-savings-purchaser", savingsHtml);
     const savingsText = text(savingsHtml);
     ok("the purchaser's savings report: their own, with the cancelled line struck through", savingsText.includes("Zzprobe buyer") && !savingsText.includes("Zzprobe buyer2") && savingsHtml.includes("line-through") && savingsText.includes("Yours."));

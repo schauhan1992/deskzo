@@ -1,43 +1,33 @@
 import { formatMoney } from "@/lib/currency";
 import { monthLabel, parseMonthKey } from "@/lib/close/months";
-import { istDateParts } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * How the close screens write dates, months and money.
  *
- * Every date here is India's, whatever the browser's clock says: a task due on 3 October is due on
+ * Every date here is India's, whatever the browser's clock says and whatever zone the workspace keeps:
+ * the close is the books', and the books keep India's calendar. A task due on 3 October is due on
  * 3 October in Pune, and a calendar day stored as UTC midnight read in New York would be the 2nd.
  * Pure, so the server pages and the client components share it.
+ *
+ * The words are India's clock's (src/lib/time/zone.ts), for an instant or for a calendar day stored as
+ * UTC midnight, which is 05:30 the same day in India. Month names are the app's own ("Sep"), not the
+ * locale's ("Sept").
  */
-
-const IST = "Asia/Kolkata";
-const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/**
- * The Indian calendar day of an instant — or of a calendar day stored as UTC midnight, which is 05:30
- * the same day in India. Month names are the app's own ("Sep"), not the locale's ("Sept").
- */
-function istDay(at: Date | string): { year: number; month: number; day: number } {
-  const { year, month, day } = istDateParts(new Date(at));
-  return { year, month, day };
-}
 
 /** "3 Oct" — a due date inside a month everybody can see. */
 export function dayShort(at: Date | string): string {
-  const d = istDay(at);
-  return `${d.day} ${SHORT[d.month]}`;
+  return indiaClock.dayMonth(at);
 }
 
 /** "3 Oct 2026". */
 export function dayLong(at: Date | string): string {
-  const d = istDay(at);
-  return `${d.day} ${SHORT[d.month]} ${d.year}`;
+  return indiaClock.date(at);
 }
 
 /** "3 Oct 2026, 10:15 am" — when something happened. */
 export function whenLong(at: Date | string): string {
-  const time = new Intl.DateTimeFormat("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit" }).format(new Date(at));
-  return `${dayLong(at)}, ${time}`;
+  return indiaClock.dateTimeShort(at);
 }
 
 /** "Sep 2026" from "2026-09" (or the long form, "September 2026"). */

@@ -15,12 +15,13 @@ import { OrderHandoffPanel, OrderPriceReview, OrderQuoteEditor, VendorPoSettle }
 import { CallButton } from "@/components/calls/call-button";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
 import { canAnnounceFulfilment } from "@/lib/marketing/customer-notices";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
 import { calculateOrderAmount, calculateOrderMargin, getPaymentStatus, paymentTermsLabels } from "@/lib/gst";
 import { orderExpenseTypeLabels, orderBusinessTypeLabels } from "@/lib/validation/order";
 import { handoffBadge, impliedMargin, priceCeiling, priceEventLabels, vendorPoLabels } from "@/lib/orders/handoff-rules";
-import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
 import { CategoryChip } from "@/components/customers/category-chip";
 import { followUpPanel } from "@/actions/collections";
@@ -127,8 +128,9 @@ export async function OrderDetail({
 
   // ── The hand-off to purchase, the distributor price, and any price waiting for sales ──────────────
   const now = new Date();
+  const clock = await workspaceClock();
   const closed = order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED";
-  const handoffNote = closed ? null : handoffBadge(order, now);
+  const handoffNote = closed ? null : handoffBadge(order, clock, now);
   /** The salesperson who punched it, or an approver: who decides when it goes and what it may cost. */
   const speaksForSales = order.addedBy.id === userId || canApprove;
   const quotePrice = order.quotedPurchasePrice;
@@ -285,7 +287,7 @@ export async function OrderDetail({
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Subscription period</span>
                   <span className="text-text">
-                    {formatDate(order.startDate)} – {formatDate(order.endDate)}
+                    {formatCalendarDay(order.startDate)} – {formatCalendarDay(order.endDate)}
                   </span>
                 </div>
               )}
@@ -351,7 +353,7 @@ export async function OrderDetail({
                 <span className="text-text">
                   {order.purchaseRelease === "RELEASED"
                     ? order.releasedAt
-                      ? `With purchase since ${formatIstDate(order.releasedAt)}`
+                      ? `With purchase since ${clock.date(order.releasedAt)}`
                       : "With purchase"
                     : (handoffNote ?? "Never sent to purchase")}
                 </span>
@@ -407,7 +409,7 @@ export async function OrderDetail({
                     </div>
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="text-muted">Quoted on</span>
-                      <span className="text-text">{order.quotedOn ? formatIstDate(order.quotedOn) : "—"}</span>
+                      <span className="text-text">{formatCalendarDay(order.quotedOn)}</span>
                     </div>
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="text-muted">Entered by</span>
@@ -432,7 +434,7 @@ export async function OrderDetail({
                 >
                   <span className="text-muted">{saving.amount >= 0 ? "Purchase saving" : "Accepted increase"}</span>
                   <span className={saving.cancelledAt ? "" : saving.amount >= 0 ? "font-medium text-success" : "font-medium text-danger"}>
-                    {formatCurrency(String(saving.amount))} · {saving.purchaser.name} · {formatIstDate(saving.recordedOn)}
+                    {formatCurrency(String(saving.amount))} · {saving.purchaser.name} · {formatCalendarDay(saving.recordedOn)}
                   </span>
                 </div>
               )}
@@ -501,7 +503,7 @@ export async function OrderDetail({
                   {order.dealRegValidTo && (
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="text-muted">Valid until</span>
-                      <span className="text-text">{formatIstDate(order.dealRegValidTo)}</span>
+                      <span className="text-text">{formatCalendarDay(order.dealRegValidTo)}</span>
                     </div>
                   )}
                   {order.dealPrice !== null && (
@@ -519,7 +521,7 @@ export async function OrderDetail({
               )}
               {order.lossApprovedAt && (
                 <p className="border-t border-line pt-2 text-xs text-muted">
-                  Selling below cost approved by {order.lossApprovedBy?.name ?? "a manager"} on {formatIstDate(order.lossApprovedAt)}, at{" "}
+                  Selling below cost approved by {order.lossApprovedBy?.name ?? "a manager"} on {clock.date(order.lossApprovedAt)}, at{" "}
                   {formatCurrency(String(order.lossApprovedCost))} a unit{order.lossApprovalNote ? `: “${order.lossApprovalNote}”` : ""}
                 </p>
               )}
@@ -551,7 +553,7 @@ export async function OrderDetail({
                     <li key={c.id} className="border-l-2 border-line pl-3">
                       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                         <span className="font-medium text-text">{priceEventLabels[c.event]}</span>
-                        <span className="text-xs text-muted">{formatIstDateTime(c.at)}</span>
+                        <span className="text-xs text-muted">{clock.dateTime(c.at)}</span>
                       </div>
                       <p className="text-muted">
                         {c.fromPrice !== null && c.toPrice !== null
@@ -737,13 +739,13 @@ export async function OrderDetail({
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Created on</span>
-                <span className="text-text">{formatDate(order.createdAt)}</span>
+                <span className="text-text">{clock.date(order.createdAt)}</span>
               </div>
               {order.accountsApprovedBy && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Reviewed by</span>
                   <span className="text-text">
-                    {order.accountsApprovedBy.name} · {formatDate(order.accountsApprovedAt)}
+                    {order.accountsApprovedBy.name} · {clock.date(order.accountsApprovedAt)}
                   </span>
                 </div>
               )}
@@ -753,14 +755,14 @@ export async function OrderDetail({
                   <span className="text-muted">Sent to purchase</span>
                   <span className="text-text">
                     {order.releasedBy ? `${order.releasedBy.name} · ` : "On its scheduled day · "}
-                    {formatIstDate(order.releasedAt)}
+                    {clock.date(order.releasedAt)}
                   </span>
                 </div>
               )}
               {order.fulfilledAt && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Fulfilled on</span>
-                  <span className="text-text">{formatDate(order.fulfilledAt)}</span>
+                  <span className="text-text">{clock.date(order.fulfilledAt)}</span>
                 </div>
               )}
               {order.cancelledAt && (
@@ -768,7 +770,7 @@ export async function OrderDetail({
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                     <span className="text-muted">Cancelled</span>
                     <span className="text-text">
-                      {order.cancelledBy?.name ?? "—"} · {formatIstDateTime(order.cancelledAt)}
+                      {order.cancelledBy?.name ?? "—"} · {clock.dateTime(order.cancelledAt)}
                     </span>
                   </div>
                   {order.cancelReason && <p className="text-text">&ldquo;{order.cancelReason}&rdquo;</p>}
@@ -777,7 +779,7 @@ export async function OrderDetail({
                       <span className="text-muted">{vendorPoLabels[order.vendorPoCancel]}</span>
                       <span className="text-text">
                         {order.vendorPoSettledAt
-                          ? `${order.vendorPoSettledBy?.name ?? "—"} · ${formatIstDate(order.vendorPoSettledAt)}`
+                          ? `${order.vendorPoSettledBy?.name ?? "—"} · ${clock.date(order.vendorPoSettledAt)}`
                           : "Waiting for purchase"}
                       </span>
                     </div>

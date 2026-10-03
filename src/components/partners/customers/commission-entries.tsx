@@ -3,11 +3,11 @@ import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { Amount } from "@/components/partners/common/money";
 import { CommissionStatusPill } from "@/components/partners/common/pills";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { COMMISSION_KIND } from "@/lib/console-shared/labels";
 import { PARTNER_ROUTES } from "@/lib/partners/nav";
 import type { CommissionRow } from "@/lib/partners/portal-data";
 import { bpToPercent } from "@/lib/partners/types";
+import { indiaClock } from "@/lib/time/zone";
 
 const PHASE: Record<"NEW" | "RENEWAL", string> = { NEW: "New-customer rate", RENEWAL: "Renewal rate" };
 
@@ -15,7 +15,8 @@ const PHASE: Record<"NEW" | "RENEWAL", string> = { NEW: "New-customer rate", REN
  * The commission entries for one customer (money roles only): when each was earned, on which
  * invoice (its number — never a link to it), what kind, the base it was worked out on, the rate, the
  * amount — a clawback carries its minus sign and says so — its status, and the statement it is on
- * once that statement is approved.
+ * once that statement is approved. The day it was earned is India's, as the statements' months are
+ * (src/lib/partners/statements.ts), whatever zone the console keeps.
  *
  * Server-safe: no hooks, no directive.
  */
@@ -38,7 +39,7 @@ export function CommissionEntriesTable({ entries, canOpenStatements }: { entries
           return (
             <Tr key={entry.id}>
               <Td muted nowrap>
-                {dayMonthYear(entry.earnedAt)}
+                {indiaClock.date(entry.earnedAt)}
               </Td>
               <Td mono nowrap>
                 {entry.invoiceNumber ?? <span className="font-sans text-sm text-muted">—</span>}

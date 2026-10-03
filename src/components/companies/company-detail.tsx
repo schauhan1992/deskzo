@@ -54,7 +54,9 @@ import { Button } from "@/components/ui/button";
 import { TabNav } from "@/components/ui/tab-nav";
 import { CompanyPortalPanel } from "@/components/portal/company-portal-panel";
 import { portalLogins, portalStatusFor } from "@/actions/portal";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 import { ContactsList, type ContactCustomFields } from "@/components/companies/contacts-list";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
@@ -396,6 +398,7 @@ export async function CompanyDetail({
       })),
     )
     .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  const clock = await workspaceClock();
 
   return (
     <div className="@container space-y-6">
@@ -523,7 +526,7 @@ export async function CompanyDetail({
           )}
           <Card className="p-4">
             <div className="text-xs uppercase tracking-wide text-subtle">Added on</div>
-            <div className="mt-1 text-xl font-semibold text-text">{formatDate(company.createdAt)}</div>
+            <div className="mt-1 text-xl font-semibold text-text">{clock.date(company.createdAt)}</div>
           </Card>
         </div>
       ) : (
@@ -610,7 +613,7 @@ export async function CompanyDetail({
           {canSeeLeads && (
             <Card className="p-4">
               <div className="text-xs uppercase tracking-wide text-subtle">Last activity</div>
-              <div className="mt-1 text-lg font-semibold text-text">{formatDate(timeline[0]?.occurredAt ?? null)}</div>
+              <div className="mt-1 text-lg font-semibold text-text">{clock.date(timeline[0]?.occurredAt ?? null)}</div>
               <div className="mt-0.5 text-xs text-muted">{timeline.length} logged total</div>
             </Card>
           )}
@@ -905,7 +908,7 @@ export async function CompanyDetail({
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                     <span className="text-muted">Caller assigned by</span>
                     <span className="text-text">
-                      {company.assignedBy.name} · {formatDate(company.assignedAt)}
+                      {company.assignedBy.name} · {clock.date(company.assignedAt)}
                     </span>
                   </div>
                 )}
@@ -915,7 +918,7 @@ export async function CompanyDetail({
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Added on</span>
-                  <span className="text-text">{formatDate(company.createdAt)}</span>
+                  <span className="text-text">{clock.date(company.createdAt)}</span>
                 </div>
               </CardContent>
             </Card>
@@ -1112,8 +1115,9 @@ export async function CompanyDetail({
                             )}
                           </td>
                           <td className="px-4 py-2.5 text-muted">{p.poNumber ?? "—"}</td>
-                          <td className="px-4 py-2.5 text-muted">{formatDate(p.startDate)}</td>
-                          <td className="px-4 py-2.5 text-muted">{formatDate(p.endDate)}</td>
+                          {/* Typed days, held as midnight UTC: the day itself, whatever the zone. */}
+                          <td className="px-4 py-2.5 text-muted">{formatCalendarDay(p.startDate)}</td>
+                          <td className="px-4 py-2.5 text-muted">{formatCalendarDay(p.endDate)}</td>
                           <td className="px-4 py-2.5">
                             <Badge tone={status.tone}>{status.label}</Badge>
                             {p.renewedBy && (

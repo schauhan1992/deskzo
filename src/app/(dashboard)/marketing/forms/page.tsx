@@ -9,7 +9,7 @@ import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { FORM_CATEGORIES, FILL_MODES, categoryOf } from "@/lib/forms/categories";
 import { seatsText } from "@/lib/forms/invites";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { cn } from "@/lib/utils";
 
 export default async function FormsPage({
@@ -19,7 +19,7 @@ export default async function FormsPage({
 }) {
   if (!(await isModuleEnabled("forms"))) return <ModuleDisabledNotice moduleKey="forms" />;
   const params = await searchParams;
-  const data = await listForms(params);
+  const [data, clock] = await Promise.all([listForms(params), workspaceClock()]);
   if (!data) return <ModuleDisabledNotice moduleKey="forms" />;
 
   const total = Object.values(data.byCategory).reduce((a, b) => a + b, 0);
@@ -107,7 +107,7 @@ export default async function FormsPage({
                     {form.category === "EVENT" && form.eventStartsAt && (
                       <span className="mr-3 inline-flex items-center gap-1">
                         <CalendarDays className="h-3 w-3" aria-hidden />
-                        {formatIstDateTime(form.eventStartsAt)}
+                        {clock.dateTime(form.eventStartsAt)}
                         {form.venue ? ` · ${form.venue}` : ""}
                       </span>
                     )}

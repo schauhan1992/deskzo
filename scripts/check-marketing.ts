@@ -33,7 +33,8 @@ import {
   shouldExit,
   NO_SIGNALS,
 } from "../src/lib/marketing/journey";
-import { TRIGGERS, daysToFinancialYearEnd, triggerByKey } from "../src/lib/marketing/triggers";
+import { TRIGGERS, daysToFinancialYearEnd, financialYearEndYear, triggerByKey } from "../src/lib/marketing/triggers";
+import { clockFor, indiaClock } from "../src/lib/time/zone";
 import { capPerCompany, describeContactFilters, parseContactFilters } from "../src/lib/marketing/audience";
 import {
   DEFAULT_FIELDS,
@@ -243,7 +244,7 @@ console.log("\n— When it may go out —\n");
 
 // Quiet 20:00–09:00 IST. 2026-09-19 is a Saturday, 21st the Monday.
 const QUIET = { startMinute: 1200, endMinute: 540 };
-const RULES: ScheduleRules = { quiet: QUIET, skipNonWorkingDays: true, holidays: new Set<string>() };
+const RULES: ScheduleRules = { quiet: QUIET, skipNonWorkingDays: true, holidays: new Set<string>(), clock: indiaClock };
 
 const blocks = allowedBlocks({ quiet: QUIET });
 eq("Quiet hours across midnight leave one block", blocks.length, 1);
@@ -294,7 +295,14 @@ ok(
     quiet: { startMinute: 0, endMinute: 0 },
     window: { startMinute: 600, endMinute: 600 },
     skipNonWorkingDays: false,
+    clock: indiaClock,
   }) instanceof Date,
+);
+eq(
+  "Quiet hours are the workspace's: Saturday in New York waits for Monday 9am there",
+  iso(nextSendTime(new Date("2026-11-07T19:00:00.000Z"), { ...RULES, clock: clockFor("America/New_York") })),
+  "2026-11-09T14:00:00.000Z",
+  "09:00 EST, after the clocks went back",
 );
 
 eq("Minutes read as clock times", formatMinute(540), "9:00 am");
@@ -446,16 +454,21 @@ ok(
 );
 ok("  and some hand a person a job rather than mailing", TRIGGERS.some((t) => t.suits === "TASK"));
 
-eq("The financial year ends in March", daysToFinancialYearEnd(new Date("2026-09-19T00:00:00Z")), 193);
+eq("The financial year ends in March", daysToFinancialYearEnd(new Date("2026-09-19T00:00:00Z"), indiaClock), 193);
 ok(
   "  and April counts to the following March",
-  daysToFinancialYearEnd(new Date("2026-04-01T00:00:00Z")) > 300,
-  `${daysToFinancialYearEnd(new Date("2026-04-01T00:00:00Z"))} days`,
+  daysToFinancialYearEnd(new Date("2026-04-01T00:00:00Z"), indiaClock) > 300,
+  `${daysToFinancialYearEnd(new Date("2026-04-01T00:00:00Z"), indiaClock)} days`,
 );
 ok(
   "  while February counts to the one weeks away",
-  daysToFinancialYearEnd(new Date("2027-02-01T00:00:00Z")) < 70,
-  `${daysToFinancialYearEnd(new Date("2027-02-01T00:00:00Z"))} days`,
+  daysToFinancialYearEnd(new Date("2027-02-01T00:00:00Z"), indiaClock) < 70,
+  `${daysToFinancialYearEnd(new Date("2027-02-01T00:00:00Z"), indiaClock)} days`,
+);
+eq(
+  "  on the workspace's calendar: 31 March 23:00 UTC is already April in India",
+  financialYearEndYear(new Date("2027-03-31T23:00:00Z"), indiaClock),
+  2028,
 );
 
 console.log("\n— The renewal reminder —\n");

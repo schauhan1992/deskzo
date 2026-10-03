@@ -6,7 +6,7 @@ import { getCampaign } from "@/actions/marketing";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmailFrame } from "@/components/marketing/email-frame";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export const metadata = { title: "Campaign report" };
 
@@ -44,7 +44,7 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
 export default async function CampaignReportPage({ params }: { params: Promise<{ id: string }> }) {
   if (!(await isModuleEnabled("marketing"))) return <ModuleDisabledNotice moduleKey="marketing" />;
   const { id } = await params;
-  const report = await getCampaign(id);
+  const [report, clock] = await Promise.all([getCampaign(id), workspaceClock()]);
   if (!report) notFound();
   const { campaign, totals } = report;
 
@@ -61,8 +61,8 @@ export default async function CampaignReportPage({ params }: { params: Promise<{
         </div>
         <p className="mt-1 text-sm text-muted">
           “{campaign.template.name}” to {report.recipients}
-          {campaign.startedAt && ` · started ${formatIstDateTime(campaign.startedAt)}`}
-          {campaign.finishedAt && ` · finished ${formatIstDateTime(campaign.finishedAt)}`}
+          {campaign.startedAt && ` · started ${clock.dateTime(campaign.startedAt)}`}
+          {campaign.finishedAt && ` · finished ${clock.dateTime(campaign.finishedAt)}`}
           {` · built by ${campaign.createdBy.name}`}
           {campaign.approvedBy && ` · approved by ${campaign.approvedBy.name}`}
         </p>

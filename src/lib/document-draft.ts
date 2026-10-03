@@ -137,7 +137,8 @@ export function blankLine(): LineDraft {
   };
 }
 
-export function emptyDefaults(): DocumentFormDefaults {
+/** A new document's form. `clock` is the workspace's (`workspaceClock()`): the document is dated its today. */
+export function emptyDefaults(clock: Clock): DocumentFormDefaults {
   return {
     docNumber: "",
     companyId: "",
@@ -149,8 +150,8 @@ export function emptyDefaults(): DocumentFormDefaults {
     branchId: "",
     currency: BASE_CURRENCY,
     exchangeRate: 1,
-    // Today in India. toISOString() is today in UTC, which before 05:30 IST is yesterday.
-    issueDate: istDateTimeInput(new Date()).slice(0, 10),
+    // Today on the workspace's calendar. toISOString() is today in UTC, which before 05:30 IST is yesterday.
+    issueDate: clock.today(),
     dueDate: "",
     validUntil: "",
     reference: "",
@@ -198,5 +199,5 @@ export function formatAddress(parts: {
     .filter(Boolean) as string[];
 }
 import { BASE_CURRENCY } from "@/lib/currency";
-import { istDateTimeInput } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 import type { LinePeriodSource } from "@/lib/documents/service-period";

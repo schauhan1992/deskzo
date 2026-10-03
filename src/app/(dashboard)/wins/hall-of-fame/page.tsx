@@ -5,17 +5,18 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { HandoverToggle } from "@/components/wins/handover-toggle";
 import { inrSpoken } from "@/lib/wins/copy";
 import { RACE_LABEL } from "@/lib/wins/prizes";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 export const metadata = { title: "Hall of fame" };
 
 const MEDAL: Record<string, string> = { "1": "#f59e0b", "2": "#94a3b8", "3": "#b45309" };
-const DAY = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
 
 function score(r: HallOfFameRow): string {
   return r.race === "TOP_SELLERS" ? `${inrSpoken(r.score)} booked` : `${Math.round(r.score)} points`;
 }
 
-function Winner({ row, canManage }: { row: HallOfFameRow; canManage: boolean }) {
+function Winner({ row, canManage, clock }: { row: HallOfFameRow; canManage: boolean; clock: Clock }) {
   return (
     <li className="flex flex-wrap items-center gap-3 py-2.5">
       <Medal className="h-4 w-4 shrink-0 text-subtle" style={MEDAL[row.slot] ? { color: MEDAL[row.slot] } : undefined} aria-hidden />
@@ -44,7 +45,7 @@ function Winner({ row, canManage }: { row: HallOfFameRow; canManage: boolean }) 
         (canManage ? (
           <HandoverToggle id={row.id} handedOverAt={row.handedOverAt} />
         ) : row.handedOverAt ? (
-          <Badge tone="green">Handed over {DAY.format(new Date(row.handedOverAt))}</Badge>
+          <Badge tone="green">Handed over {clock.dayMonth(row.handedOverAt)}</Badge>
         ) : (
           <Badge tone="amber">On its way</Badge>
         ))}
@@ -59,6 +60,7 @@ function Winner({ row, canManage }: { row: HallOfFameRow; canManage: boolean }) 
 export default async function HallOfFamePage() {
   const hall = await getHallOfFame();
   if (!hall) return <ModuleDisabledNotice moduleKey="wins" />;
+  const clock = await workspaceClock();
 
   // One card per result, newest first — the rows already come in that order.
   const groups: { key: string; title: string; rows: HallOfFameRow[] }[] = [];
@@ -95,7 +97,7 @@ export default async function HallOfFamePage() {
               <CardContent>
                 <ul className="divide-y divide-line">
                   {g.rows.map((r) => (
-                    <Winner key={r.id} row={r} canManage={hall.canManage} />
+                    <Winner key={r.id} row={r} canManage={hall.canManage} clock={clock} />
                   ))}
                 </ul>
               </CardContent>

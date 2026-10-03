@@ -1,5 +1,4 @@
 import type { SiteAction, SiteLink, SiteRenderContext } from "@/components/site/blocks/types";
-import { startOfIndianDay } from "@/lib/india-time";
 
 /**
  * What the site's content may link to and show — checked when rendered, because content comes from
@@ -97,10 +96,21 @@ export function sourceSite(raw: string | null | undefined): { href: string; name
   }
 }
 
-/** "2026-09-29" as "29 September 2026" — the day in India's calendar; null when it is not a date. */
+const LONG_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
+
+/**
+ * "2026-09-29" as "29 September 2026" — the calendar day it names, the same in every zone; null when it
+ * is not a date. Spelled here rather than asked of Intl, so the CMS's preview in a browser reads as the
+ * site does.
+ */
 export function calendarDateLabel(value: string | null | undefined): string | null {
-  const at = startOfIndianDay(String(value ?? "").trim());
-  return at ? new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "long", year: "numeric" }).format(at) : null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return null;
+  const [year, month, day] = [Number(match[1]), Number(match[2]) - 1, Number(match[3])];
+  // 31 February is not a date, and Date.UTC would quietly make it 3 March.
+  const probe = new Date(Date.UTC(year, month, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month || probe.getUTCDate() !== day) return null;
+  return `${day} ${LONG_MONTHS[month]} ${year}`;
 }
 
 /** An action as the link it is now: `signup` follows whether signing up is open. */

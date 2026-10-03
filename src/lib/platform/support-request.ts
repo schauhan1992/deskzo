@@ -1,6 +1,6 @@
-import { when } from "@/lib/console-shared/format";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { TenantStatusKey } from "@/lib/console-shared/types";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { cleanText } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { COMPANY_NAME } from "@/lib/brand-names";
@@ -60,7 +60,11 @@ export async function requestSupportAccess(staff: Staff, tenantId: string, reaso
     orderBy: { at: "desc" },
     select: { at: true },
   });
-  if (last) throw new ConsoleRefused(`Asked already at ${when(last.at)}; ask again after ${when(new Date(last.at.getTime() + SUPPORT_REQUEST_EVERY_MS))}.`);
+  if (last) {
+    // Said to staff, so on the console's clock.
+    const clock = await consoleClock();
+    throw new ConsoleRefused(`Asked already at ${clock.dateTime(last.at)}; ask again after ${clock.dateTime(new Date(last.at.getTime() + SUPPORT_REQUEST_EVERY_MS))}.`);
+  }
 
   const host = tenant.domains[0]?.host ?? subdomainHost(tenant.slug);
   const workspace = cleanText(tenant.name, 120).replace(/\s+/g, " ") || tenant.slug;

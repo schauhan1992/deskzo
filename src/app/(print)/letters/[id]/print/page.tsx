@@ -3,7 +3,7 @@ import { getLetter } from "@/actions/employee-docs";
 import { getOrganisation, foreignCountry } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { letterTypeLabels, type LetterPayload } from "@/lib/hr/letters";
 
 /**
@@ -79,7 +79,7 @@ export default async function PrintLetterPage({
 
       <div className="mt-6 flex items-start justify-between text-xs">
         <span className="font-mono text-neutral-600">{letter.letterNumber}</span>
-        <span className="text-neutral-600">{formatDate(letter.issuedOn)}</span>
+        <span className="text-neutral-600">{formatCalendarDay(letter.issuedOn)}</span>
       </div>
 
       <p className="mt-6 text-sm font-semibold underline">{letter.subject}</p>

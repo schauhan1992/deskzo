@@ -9,10 +9,11 @@ import { PortalPage } from "@/components/partners/common/page";
 import { StatementStatusPill } from "@/components/partners/common/pills";
 import { InvoiceNumberForm } from "@/components/partners/statements/invoice-number-form";
 import { RecordedDetails, StatementTotals } from "@/components/partners/statements/statement-parts";
-import { dayMonthYear, monthLabel, plural } from "@/lib/console-shared/format";
+import { monthLabel, plural } from "@/lib/console-shared/format";
 import { partnerPage } from "@/lib/partners/guard";
 import { PARTNER_PAGE_ROLES, PARTNER_ROUTES } from "@/lib/partners/nav";
 import { portalStatement } from "@/lib/partners/portal-data";
+import { indiaClock } from "@/lib/time/zone";
 
 export const metadata: Metadata = { title: "Statement" };
 
@@ -32,6 +33,8 @@ export default async function PartnerStatementPage({ params }: PageProps<"/platf
   const month = monthLabel(statement.period);
   const paid = statement.status === "PAID";
   const shown = statement.entries.length;
+  // The day it was paid is kept as India's day, as the statement's month is (src/lib/partners/statements.ts).
+  const paidOn = indiaClock.date(statement.paidAt);
 
   return (
     <PortalPage
@@ -42,7 +45,7 @@ export default async function PartnerStatementPage({ params }: PageProps<"/platf
       actions={<ExportCsvButton action={partnerExportStatement.bind(null, statement.number)} />}
     >
       {paid ? (
-        <Banner tone="success" title={`Paid on ${dayMonthYear(statement.paidAt)}`}>
+        <Banner tone="success" title={`Paid on ${paidOn}`}>
           {statement.paymentReference ? `Payment reference ${statement.paymentReference}.` : "The platform recorded the payment without a reference."}
         </Banner>
       ) : (
@@ -62,7 +65,7 @@ export default async function PartnerStatementPage({ params }: PageProps<"/platf
               columns={1}
               items={[
                 { term: "Your invoice number", value: statement.partnerInvoiceNumber ? <span className="font-mono">{statement.partnerInvoiceNumber}</span> : <span className="text-muted">None given</span> },
-                { term: "Paid on", value: dayMonthYear(statement.paidAt) },
+                { term: "Paid on", value: paidOn },
                 { term: "Payment reference", value: statement.paymentReference ? <span className="font-mono break-all">{statement.paymentReference}</span> : <span className="text-muted">—</span> },
               ]}
             />

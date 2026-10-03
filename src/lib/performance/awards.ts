@@ -1,4 +1,4 @@
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Most active of the fortnight — the arithmetic, with no database in it.
@@ -119,7 +119,10 @@ export type Fortnight = {
   /** "2026-09-A" — the 1st to the 15th; "2026-09-B" — the 16th to the month's end. */
   key: string;
   label: string;
-  /** India midnight the fortnight begins, and India midnight the next one begins. Half-open. */
+  /**
+   * Midnight the fortnight begins, and midnight the next one begins, on the workspace's clock (passed
+   * in — `workspaceClock()`). Half-open.
+   */
   from: Date;
   to: Date;
   /** The same days as calendar dates, for date-only columns. Both inclusive. */
@@ -130,7 +133,7 @@ export type Fortnight = {
 const MONTH = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", month: "long", year: "numeric" });
 const SHORT_MONTH = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", month: "short" });
 
-function fortnightOf(year: number, month: number, second: boolean): Fortnight {
+function fortnightOf(year: number, month: number, second: boolean, clock: Clock): Fortnight {
   // Normalise a month that ran off either end of the year.
   const norm = new Date(Date.UTC(year, month, 1));
   const y = norm.getUTCFullYear();
@@ -141,28 +144,28 @@ function fortnightOf(year: number, month: number, second: boolean): Fortnight {
   return {
     key: `${y}-${String(m + 1).padStart(2, "0")}-${second ? "B" : "A"}`,
     label: `${startDay}–${endDay} ${MONTH.format(new Date(Date.UTC(y, m, 15)))}`,
-    from: istMidnight(y, m, startDay),
-    to: istMidnight(y, m, endDay + 1),
+    from: clock.midnight(y, m, startDay),
+    to: clock.midnight(y, m, endDay + 1),
     firstDay: new Date(Date.UTC(y, m, startDay)),
     lastDay: new Date(Date.UTC(y, m, endDay)),
   };
 }
 
 /** "2026-10-A" back into its fortnight, or null when it is not one. */
-export function fortnightByKey(key: string): Fortnight | null {
+export function fortnightByKey(key: string, clock: Clock): Fortnight | null {
   const m = /^(\d{4})-(0[1-9]|1[0-2])-([AB])$/.exec(key);
-  return m ? fortnightOf(Number(m[1]), Number(m[2]) - 1, m[3] === "B") : null;
+  return m ? fortnightOf(Number(m[1]), Number(m[2]) - 1, m[3] === "B", clock) : null;
 }
 
-export function fortnightContaining(at: Date): Fortnight {
-  const { year, month, day } = istDateParts(at);
-  return fortnightOf(year, month, day > 15);
+export function fortnightContaining(at: Date, clock: Clock): Fortnight {
+  const { year, month, day } = clock.parts(at);
+  return fortnightOf(year, month, day > 15, clock);
 }
 
-export function previousFortnight(at: Date): Fortnight {
-  const { year, month, day } = istDateParts(at);
+export function previousFortnight(at: Date, clock: Clock): Fortnight {
+  const { year, month, day } = clock.parts(at);
   // In the second half, the first half of this month; in the first half, the second half of last.
-  return day > 15 ? fortnightOf(year, month, false) : fortnightOf(year, month - 1, true);
+  return day > 15 ? fortnightOf(year, month, false, clock) : fortnightOf(year, month - 1, true, clock);
 }
 
 /** "1–15 Sep" — for a notification title, where the year is noise. */
@@ -179,12 +182,15 @@ export function shortLabel(f: Pick<Fortnight, "firstDay" | "lastDay">): string {
 export const ANNOUNCE_FROM_HOUR = 9;
 export const ANNOUNCE_FOR_DAYS = 4;
 
-export function announcementDue(now: Date): Fortnight | null {
-  const current = fortnightContaining(now);
-  const opens = current.from.getTime() + ANNOUNCE_FROM_HOUR * 3_600_000;
-  const closes = current.from.getTime() + ANNOUNCE_FOR_DAYS * 86_400_000;
+export function announcementDue(now: Date, clock: Clock): Fortnight | null {
+  const current = fortnightContaining(now, clock);
+  // Nine on the workspace's clock, and midnight four days on — read off its calendar rather than
+  // added as hours, which a clock change in between would move.
+  const [y, m, d] = [current.firstDay.getUTCFullYear(), current.firstDay.getUTCMonth(), current.firstDay.getUTCDate()];
+  const opens = clock.at(y, m, d, ANNOUNCE_FROM_HOUR).getTime();
+  const closes = clock.midnight(y, m, d + ANNOUNCE_FOR_DAYS).getTime();
   if (now.getTime() < opens || now.getTime() >= closes) return null;
-  return previousFortnight(now);
+  return previousFortnight(now, clock);
 }
 
 // ─── Words ───────────────────────────────────────────────────────────────────

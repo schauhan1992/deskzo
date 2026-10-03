@@ -20,6 +20,8 @@ import {
   renderMarkdown,
   type OwnFieldGroup,
 } from "@/lib/lead-capture/spec";
+import { useClock } from "@/components/time/clock-provider";
+import type { Clock } from "@/lib/time/zone";
 
 type Key = {
   id: string;
@@ -35,8 +37,8 @@ type Key = {
   createdBy: string | null;
 };
 
-const when = (v: Date | string | null) =>
-  v ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(v)) : "Never";
+/** When a key was last used, on the workspace's clock — or "Never". */
+const when = (v: Date | string | null, clock: Clock) => (v ? clock.dateTimeShort(v) : "Never");
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -148,6 +150,7 @@ function OwnFields({ groups }: { groups: OwnFieldGroup[] }) {
 
 export function LeadCaptureManager({ keys, baseUrl, ownFields }: { keys: Key[]; baseUrl: string; ownFields: OwnFieldGroup[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -213,7 +216,7 @@ export function LeadCaptureManager({ keys, baseUrl, ownFields }: { keys: Key[]; 
                       </td>
                       <td className="py-2 pr-4 font-mono text-xs text-muted">{k.keyId}</td>
                       <td className="py-2 pr-4 tabular-nums text-muted">{k.leads}</td>
-                      <td className="py-2 pr-4 text-muted">{when(k.lastUsedAt)}</td>
+                      <td className="py-2 pr-4 text-muted">{when(k.lastUsedAt, clock)}</td>
                       <td className="py-2 pr-4">{k.revokedAt ? <Badge tone="red">Revoked</Badge> : <Badge tone="green">Active</Badge>}</td>
                       <td className="py-2 text-right">
                         {!k.revokedAt && (

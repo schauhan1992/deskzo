@@ -21,7 +21,8 @@ import { cloneElement, isValidElement, type ReactElement, type ReactNode } from 
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { dealWonCopy, firstOrderCopy, inrSpoken, splashes, targetHitCopy, topPerformerCopy } from "../src/lib/wins/copy";
 import { momentsFor } from "../src/lib/hr/celebrations";
-import { istDateParts, istMidnight } from "../src/lib/india-time";
+// Times on the workspace's clock, which is India's here.
+import { indiaClock } from "../src/lib/time/zone";
 
 let actor = { id: "", name: "Zzprobe" };
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -252,7 +253,7 @@ async function main() {
     await db.companyProduct.create({ data: { companyId: returning.id, locationId: oldLocation.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "FULFILLED", accountsApprovedAt: new Date(now.getTime() - 60 * DAY), createdAt: new Date(now.getTime() - 60 * DAY), bookedAt: new Date(now.getTime() - 60 * DAY), quantity: 1, unitPrice: 1000 } as never });
     await db.companyProduct.create({ data: { companyId: returning.id, locationId: oldLocation.id, itemId: item.id, addedByUserId: rep.id, orderStatus: "APPROVED", accountsApprovedAt: now, quantity: 5, unitPrice: 1000 } as never });
 
-    const { year, month } = istDateParts(now);
+    const { year, month } = indiaClock.parts(now);
     const monthStart = new Date(Date.UTC(year, month, 1));
     const monthEnd = new Date(Date.UTC(year, month + 1, 0));
     const reached = await db.target.create({ data: { metric: "ORDER_VALUE", period: "MONTH", fromDate: monthStart, toDate: monthEnd, label: "This month", scope: "USER", userId: rep.id, value: 10_000, createdById: boss.id } });
@@ -273,12 +274,12 @@ async function main() {
     // ───────────────────────────────────────────────────────────────────────────
     section("Top performer");
 
-    const nextMonthDay2 = istMidnight(year, month + 1, 2);
+    const nextMonthDay2 = indiaClock.midnight(year, month + 1, 2);
     const monthKey = `top:${year}-${String(month + 1).padStart(2, "0")}`;
     const hadTop = (await db.celebration.count({ where: { occasionKey: monthKey } })) > 0;
     ok("before the month is over nobody is named", (await db.celebration.count({ where: { occasionKey: monthKey } })) === (hadTop ? 1 : 0));
     if (!hadTop) {
-      await detect.detectSalesWins(new Date(istMidnight(year, month + 1, 20).getTime() + 10 * 3_600_000));
+      await detect.detectSalesWins(new Date(indiaClock.midnight(year, month + 1, 20).getTime() + 10 * 3_600_000));
       ok("  nor in the middle of next month — only in its first week", (await db.celebration.count({ where: { occasionKey: monthKey } })) === 0);
     }
     // A prize for this month's top seller, planned for this month alone — standing in for any real one.
@@ -308,7 +309,7 @@ async function main() {
     }
     const topRow = await db.celebration.findUnique({ where: { occasionKey: monthKey } });
     const ranking = (topRow?.details as { ranking?: { userId: string; value: number }[] } | null)?.ranking ?? [];
-    const actual = await detect.bookingsByPerson(istMidnight(year, month, 1), istMidnight(year, month + 1, 1));
+    const actual = await detect.bookingsByPerson(indiaClock.midnight(year, month, 1), indiaClock.midnight(year, month + 1, 1));
     ok("on the 2nd of next month, this month's top performer is announced", topRow?.source === "TOP_PERFORMER" && ranking.length >= 1 && ranking.length <= 3, topRow?.title);
     ok("  ranked by what they booked, highest first, as the bookings say", ranking.every((r, i) => i === 0 || r.value <= ranking[i - 1]!.value) && ranking[0]?.userId === actual[0]?.userId && ranking[0]?.value === actual[0]?.value);
     ok("  and the salesperson's bookings are counted in it", actual.find((a) => a.userId === rep.id)?.value === 13_000);

@@ -15,17 +15,12 @@ import {
 } from "@/actions/eway";
 import { CANCEL_REASONS, VEHICLE_UPDATE_REASONS } from "@/lib/eway/provider";
 import { THRESHOLD, lastValidDay } from "@/lib/eway/rules";
-
-/** A Date as the `yyyy-mm-dd` a date input wants, in the reader's own timezone. */
-function localDay(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { TransporterCombobox } from "@/components/logistics/transporter-combobox";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The e-way bill for one document.
@@ -101,7 +96,8 @@ export function EwayPanel({
       }
       setAssociate({
         number: result.data.ewayBillNumber,
-        date: localDay(new Date(result.data.ewayBillDate)),
+        // India's day, as the portal and the law count it — not the reader's, which can be another day.
+        date: indiaClock.dateKey(new Date(result.data.ewayBillDate)),
         // The last day it covers, not the midnight it expires at — see `lastValidDay`.
         until: lastValidDay(new Date(result.data.validUntil)),
       });
@@ -175,11 +171,12 @@ export function EwayPanel({
             </div>
             <div className="flex gap-2">
               <dt className="text-muted">Raised</dt>
-              <dd className="text-text">{bill.ewayBillDate ? formatDateTime(bill.ewayBillDate) : "—"}</dd>
+              {/* India time, in every workspace: an e-way bill's times are India's by law. */}
+              <dd className="text-text">{bill.ewayBillDate ? indiaClock.dateTimeShort(bill.ewayBillDate) : "—"}</dd>
             </div>
             <div className="flex gap-2">
               <dt className="text-muted">Valid until</dt>
-              <dd className="text-text">{bill.validUntil ? formatDateTime(bill.validUntil) : "—"}</dd>
+              <dd className="text-text">{bill.validUntil ? indiaClock.dateTimeShort(bill.validUntil) : "—"}</dd>
             </div>
             {bill.vehicleNumber && (
               <div className="flex gap-2">

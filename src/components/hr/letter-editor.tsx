@@ -8,7 +8,7 @@ import type { getLetter } from "@/actions/employee-docs";
 import { issueLetter, revokeLetter, updateLetterBody } from "@/actions/employee-docs";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { letterTypeLabels } from "@/lib/hr/letters";
 
 type Letter = NonNullable<Awaited<ReturnType<typeof getLetter>>>;
@@ -63,7 +63,7 @@ export function LetterEditor({ letter, canManage }: { letter: Letter; canManage:
             </Badge>
           </div>
           <p className="mt-0.5 font-mono text-xs text-subtle">
-            {letter.letterNumber} · {letterTypeLabels[letter.type]} · {formatDate(letter.issuedOn)}
+            {letter.letterNumber} · {letterTypeLabels[letter.type]} · {formatCalendarDay(letter.issuedOn)}
           </p>
         </div>
 

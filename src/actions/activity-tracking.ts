@@ -2,10 +2,7 @@
 
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-
-function utcMidnight(d: Date) {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Called every ~30s by `HeartbeatTracker` while a tab is open and visible — accumulates a rough
@@ -16,7 +13,9 @@ function utcMidnight(d: Date) {
 export async function recordHeartbeat(): Promise<void> {
   const user = await requireUser();
   const now = new Date();
-  const today = utcMidnight(now);
+  // The day on the workspace's calendar, held as the `@db.Date` column holds it. It was UTC's, which in
+  // India credited the hours before 05:30 to the day before.
+  const today = (await workspaceClock()).calendarDate(now);
 
   /**
    * A session can outlive the account it names.

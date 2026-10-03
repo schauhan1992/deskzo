@@ -5,7 +5,8 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { profitAndLoss } from "@/actions/ledger-reports";
 import { getOrganisation } from "@/lib/organisation";
 import { Card } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { indiaClock } from "@/lib/time/zone";
 import { ReportHeader, StatementRow, TotalRow, asTree, withMovement } from "@/components/accounting/report-chrome";
 import { DateParamInput } from "@/components/accounting/date-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -78,7 +79,8 @@ export default async function ProfitLossPage({
     <div className="animate-fade-rise">
       <ReportHeader
         title="Profit &amp; loss"
-        subtitle={`${formatDate(report.from)} to ${formatDate(report.to)}${shownBranch ? ` · ${shownBranch}` : ""}`}
+        // The period's first and last moments, India's days: the books keep India's calendar.
+        subtitle={`${indiaClock.date(report.from)} to ${indiaClock.date(report.to)}${shownBranch ? ` · ${shownBranch}` : ""}`}
         organisation={org.legalName}
       >
         <div className="flex flex-wrap items-center gap-3">

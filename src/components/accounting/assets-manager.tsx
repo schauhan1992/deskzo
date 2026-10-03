@@ -10,7 +10,8 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { Amount } from "@/components/accounting/report-chrome";
 import { depreciationMethodLabels } from "@/lib/ledger/depreciation";
 import { monthName } from "@/lib/ledger/period";
@@ -200,7 +201,7 @@ export function AssetsManager({
                     <span className="text-text">{a.name}</span>
                     {a.department && <span className="block text-xs text-subtle">{a.department.name}</span>}
                   </td>
-                  <td className="px-4 py-2.5 text-muted">{formatDate(a.purchasedOn)}</td>
+                  <td className="px-4 py-2.5 text-muted">{formatCalendarDay(a.purchasedOn)}</td>
                   <td className="px-4 py-2.5 text-muted">
                     {depreciationMethodLabels[a.method]}
                     <span className="block text-xs text-subtle">
@@ -216,7 +217,7 @@ export function AssetsManager({
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     {a.disposedOn ? (
-                      <Badge tone="default">Disposed {formatDate(a.disposedOn)}</Badge>
+                      <Badge tone="default">Disposed {formatCalendarDay(a.disposedOn)}</Badge>
                     ) : (
                       <button
                         type="button"
@@ -277,7 +278,8 @@ function NewAssetDialog({
     tag: "",
     name: "",
     description: "",
-    purchasedOn: new Date().toISOString().slice(0, 10),
+    // Today in India, not UTC's today: the register and its depreciation keep India's calendar.
+    purchasedOn: indiaClock.today(),
     cost: "",
     salvageValue: "",
     usefulLifeYears: "3",
@@ -426,7 +428,8 @@ function DisposeDialog({
   setMessage: (m: string) => void;
 }) {
   const [proceeds, setProceeds] = useState("0");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  // A disposal is posted to the books, so today is India's.
+  const [date, setDate] = useState(() => indiaClock.today());
   const [note, setNote] = useState("");
 
   if (!asset) return null;

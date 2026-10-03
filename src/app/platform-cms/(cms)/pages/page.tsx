@@ -15,7 +15,7 @@ import { listPages } from "@/lib/cms/content";
 import { cmsPage } from "@/lib/cms/guard";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { cmsCapsFor, type PageListRow } from "@/lib/cms/types";
-import { formatIstDate, formatIstDateTime } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { siteOrigin } from "@/lib/platform/site-content";
 
 export const metadata: Metadata = { title: "Pages" };
@@ -70,7 +70,7 @@ export default async function CmsPagesPage({ searchParams }: PageProps<"/platfor
   const viewRaw = one(sp.view);
   const view: View = VIEWS.some((v) => v.key === viewRaw) ? (viewRaw as View) : "all";
 
-  const [current, archived] = await Promise.all([listPages({ q: q || undefined }), listPages({ q: q || undefined, archived: true })]);
+  const [current, archived, clock] = await Promise.all([listPages({ q: q || undefined }), listPages({ q: q || undefined, archived: true }), consoleClock()]);
   const rows = view === "archived" ? archived : current.filter((r) => inView(r, view));
   const counts: Record<View, number> = {
     all: current.length,
@@ -118,7 +118,7 @@ export default async function CmsPagesPage({ searchParams }: PageProps<"/platfor
               )}
             </Td>
             <Td muted nowrap>
-              {row.publishedAt ? <time dateTime={row.publishedAt.toISOString()} title={formatIstDateTime(row.publishedAt)}>{formatIstDate(row.publishedAt)}</time> : "—"}
+              {row.publishedAt ? <time dateTime={row.publishedAt.toISOString()} title={clock.dateTime(row.publishedAt)}>{clock.date(row.publishedAt)}</time> : "—"}
             </Td>
             <RowActionsCell>
               {(row.status === "PUBLISHED" || row.status === "DEFAULT") && !row.archived && (

@@ -1,4 +1,6 @@
 import { CmsShell } from "@/components/cms/shell/cms-shell";
+import { ClockProvider } from "@/components/time/clock-provider";
+import { consoleZone } from "@/lib/platform/console-clock";
 import type { CmsNavBadges } from "@/components/cms/shell/sidebar";
 import { cmsPage } from "@/lib/cms/guard";
 import { listLeads } from "@/lib/cms/leads";
@@ -31,10 +33,12 @@ export default async function CmsLayout({ children }: LayoutProps<"/platform-cms
   const caps = cmsCapsFor(user.role);
   const visibleKeys = cmsPagesFor(user.role).map((page) => page.key);
   const url = siteOrigin();
-  const [settings, leads] = await Promise.all([getSiteSettings(), visibleKeys.includes("leads") ? newLeads() : Promise.resolve(0)]);
+  const [settings, leads, zone] = await Promise.all([getSiteSettings(), visibleKeys.includes("leads") ? newLeads() : Promise.resolve(0), consoleZone()]);
   const badges: CmsNavBadges = leads > 0 ? { leads: { count: leads, label: `${leads.toLocaleString("en-IN")} new` } } : {};
 
   return (
+    // The console's clock (Settings › Time zone) — the website's editors are platform staff.
+    <ClockProvider zone={zone}>
     <CmsShell
       me={{ id: user.id, name: user.name, email: user.email, role: user.role }}
       env={platformEnv()}
@@ -45,5 +49,6 @@ export default async function CmsLayout({ children }: LayoutProps<"/platform-cms
     >
       {children}
     </CmsShell>
+    </ClockProvider>
   );
 }

@@ -10,7 +10,7 @@ import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { callOutcomeValues, isConnected } from "@/lib/calls";
 import type { ActionResult } from "@/actions/company";
 import { viewerHas } from "@/actions/permission";
-import { parseTypedTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 const callSelect = {
   id: true,
@@ -71,12 +71,13 @@ export async function logCall(input: {
   }
 
   const duration = Math.max(0, Math.round(Number(input.durationSeconds) || 0));
-  // A time typed into the dialog is India time, wherever the server is; one a page worked out and sent
-  // with its zone is taken as it says.
-  const startedAt = input.startedAt ? parseTypedTime(input.startedAt) : new Date();
+  // A time typed into the dialog is the workspace's time, wherever the server is; one a page worked out
+  // and sent with its zone is taken as it says.
+  const clock = await workspaceClock();
+  const startedAt = input.startedAt ? clock.parseTyped(input.startedAt) : new Date();
   if (!startedAt) return { ok: false, error: "That start time isn't a valid date." };
 
-  const followUpAt = input.followUpAt ? parseTypedTime(input.followUpAt) : null;
+  const followUpAt = input.followUpAt ? clock.parseTyped(input.followUpAt) : null;
   if (input.followUpAt && !followUpAt) {
     return { ok: false, error: "That callback time isn't a valid date." };
   }
@@ -239,6 +240,8 @@ export async function listCalls(params: {
   const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return { rows: [], total: 0 };
 
+  // From and To are the workspace's days.
+  const days = (await workspaceClock()).dayRange(params.from, params.to);
   const where: Prisma.CallLogWhereInput = {
     /**
      * Scoped by the account, not by the caller.
@@ -255,14 +258,7 @@ export async function listCalls(params: {
       : {}),
     ...(params.userId ? { userId: params.userId } : {}),
     ...(params.view === "due" ? { followUpAt: { not: null }, followUpDone: false } : {}),
-    ...(params.from || params.to
-      ? {
-          startedAt: {
-            ...(params.from ? { gte: startOfDay(params.from) } : {}),
-            ...(params.to ? { lte: endOfDay(params.to) } : {}),
-          },
-        }
-      : {}),
+    ...(days ? { startedAt: days } : {}),
     ...(params.search
       ? {
           OR: [
@@ -294,8 +290,11 @@ export async function listCalls(params: {
 export async function callSummary(params?: { from?: string; to?: string; userId?: string }) {
   const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return { total: 0, connected: 0, connectRate: 0, talkTimeSeconds: 0, companiesReached: 0, dueCallbacks: 0 };
-  const from = params?.from ? startOfDay(params.from) : startOfDay(new Date().toISOString());
-  const to = params?.to ? endOfDay(params.to) : endOfDay(new Date().toISOString());
+  // Today unless told otherwise — the workspace's today, not the server's: on a server in UTC, a team in
+  // India had a day that began at 05:30.
+  const clock = await workspaceClock();
+  const today = clock.today();
+  const days = clock.dayRange(params?.from || today, params?.to || today) ?? {};
 
   // Both queries, not just the first. The overdue-callback tally is a second read of the same table
   // and counts the whole business unless it is scoped too — a number nobody would think to doubt,
@@ -304,7 +303,7 @@ export async function callSummary(params?: { from?: string; to?: string; userId?
 
   const [calls, dueCount] = await Promise.all([
     db.callLog.findMany({
-      where: { ...scope, startedAt: { gte: from, lte: to }, ...(params?.userId ? { userId: params.userId } : {}) },
+      where: { ...scope, startedAt: days, ...(params?.userId ? { userId: params.userId } : {}) },
       select: { outcome: true, durationSeconds: true, companyId: true },
     }),
     db.callLog.count({ where: { ...scope, followUpAt: { not: null, lte: new Date() }, followUpDone: false } }),
@@ -351,16 +350,4 @@ export async function listCallers() {
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
-}
-
-function startOfDay(value: string) {
-  const d = new Date(value);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function endOfDay(value: string) {
-  const d = new Date(value);
-  d.setHours(23, 59, 59, 999);
-  return d;
 }

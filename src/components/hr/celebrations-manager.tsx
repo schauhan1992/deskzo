@@ -10,7 +10,9 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { toKey } from "@/lib/hr/calendar";
 
 type Celebration = Awaited<ReturnType<typeof listCelebrations>>[number];
 type Upcoming = Awaited<ReturnType<typeof upcomingOccasions>>[number];
@@ -58,6 +60,7 @@ export function CelebrationsManager({
   people: { id: string; name: string }[];
 }) {
   const router = useRouter();
+  const today = useClock().today();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Celebration | null>(null);
@@ -99,7 +102,9 @@ export function CelebrationsManager({
             ) : (
               <ul className="divide-y divide-line">
                 {celebrations.map((c) => {
-                  const over = new Date(c.endsOn) < new Date(new Date().toDateString());
+                  // Days, compared as days: its last day before the workspace's today. The browser's
+                  // midnight called one finished on its last day west of UTC.
+                  const over = toKey(c.endsOn) < today;
                   return (
                     <li key={c.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
                       <span
@@ -117,8 +122,8 @@ export function CelebrationsManager({
                         </div>
                         {c.message && <p className="mt-0.5 text-sm text-muted">{c.message}</p>}
                         <p className="mt-0.5 text-xs text-subtle">
-                          {formatDate(c.startsOn)}
-                          {c.startsOn !== c.endsOn && ` – ${formatDate(c.endsOn)}`}
+                          {formatCalendarDay(c.startsOn)}
+                          {toKey(c.startsOn) !== toKey(c.endsOn) && ` – ${formatCalendarDay(c.endsOn)}`}
                           {" · "}
                           {c.audience === "EVERYONE"
                             ? "everyone"
@@ -183,7 +188,7 @@ export function CelebrationsManager({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-text">{u.name}</span>
                     <span className="block text-xs text-subtle">
-                      {u.kind === "BIRTHDAY" ? "Birthday" : `${u.years} years`} · {formatDate(u.on)}
+                      {u.kind === "BIRTHDAY" ? "Birthday" : `${u.years} years`} · {formatCalendarDay(u.on)}
                     </span>
                   </span>
                   <span className="shrink-0 text-xs text-muted">
@@ -232,7 +237,7 @@ function CelebrationDialog({
   const fileRef = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = useClock().today();
 
   const [form, setForm] = useState({
     kind: (celebration?.kind ?? "ACHIEVEMENT") as CelebrationKind,
@@ -242,8 +247,9 @@ function CelebrationDialog({
     accent: celebration?.accent ?? "",
     subjectUserId: celebration?.subjectUserId ?? "",
     departmentId: celebration?.departmentId ?? "",
-    startsOn: celebration ? String(celebration.startsOn).slice(0, 10) : today,
-    endsOn: celebration ? String(celebration.endsOn).slice(0, 10) : today,
+    // The days the columns hold. They arrive as Dates, and String() of one is "Fri Oct 02 …", not a date.
+    startsOn: celebration ? toKey(celebration.startsOn) : today,
+    endsOn: celebration ? toKey(celebration.endsOn) : today,
   });
   const [image, setImage] = useState<{ name: string; fileDataUrl: string; mimeType: string } | null | undefined>(
     undefined,

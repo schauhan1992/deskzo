@@ -12,8 +12,9 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { monthLabel } from "@/lib/hr/calendar";
+import { indiaClock } from "@/lib/time/zone";
 
 type Run = NonNullable<Awaited<ReturnType<typeof getPayrollRun>>>;
 type Slip = Run["payslips"][number];
@@ -74,7 +75,8 @@ export function PayrollRegister({
           </div>
           {run.lockedAt && (
             <p className="mt-0.5 text-xs text-subtle">
-              Locked {formatDate(run.lockedAt)}
+              {/* Payroll is India's (statutory): its dates are India's in every workspace. */}
+              Locked {indiaClock.date(run.lockedAt)}
               {run.lockedBy && ` by ${run.lockedBy.name}`}
             </p>
           )}

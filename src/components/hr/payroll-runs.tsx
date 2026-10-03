@@ -9,8 +9,8 @@ import { runPayroll } from "@/actions/payroll";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
 import { MONTH_NAMES, monthLabel } from "@/lib/hr/calendar";
+import { indiaClock } from "@/lib/time/zone";
 
 type Run = Awaited<ReturnType<typeof listPayrollRuns>>[number];
 
@@ -22,9 +22,11 @@ const STATUS_TONE: Record<string, "default" | "green" | "amber" | "blue"> = {
 
 export function PayrollRuns({ runs }: { runs: Run[] }) {
   const router = useRouter();
-  const now = new Date();
-  const [month, setMonth] = useState(now.getUTCMonth() + 1);
-  const [year, setYear] = useState(now.getUTCFullYear());
+  // Payroll is India's (statutory), so this month is India's in every workspace. UTC's calendar kept
+  // last month until 05:30 on the 1st.
+  const now = indiaClock.parts(new Date());
+  const [month, setMonth] = useState(now.month + 1);
+  const [year, setYear] = useState(now.year);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ count: number; skipped: string[] } | null>(null);
@@ -126,8 +128,8 @@ export function PayrollRuns({ runs }: { runs: Run[] }) {
                 <td className="px-4 py-2.5">
                   <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
                 </td>
-                <td className="px-4 py-2.5 text-xs text-muted">{r.lockedAt ? formatDate(r.lockedAt) : "—"}</td>
-                <td className="px-4 py-2.5 text-xs text-muted">{r.paidAt ? formatDate(r.paidAt) : "—"}</td>
+                <td className="px-4 py-2.5 text-xs text-muted">{r.lockedAt ? indiaClock.date(r.lockedAt) : "—"}</td>
+                <td className="px-4 py-2.5 text-xs text-muted">{r.paidAt ? indiaClock.date(r.paidAt) : "—"}</td>
               </tr>
             ))}
             {runs.length === 0 && (

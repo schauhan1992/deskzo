@@ -7,7 +7,7 @@ import type { VisitorPurpose, VisitorStatus } from "@prisma/client";
 import { checkOut, closeStaleVisits } from "@/actions/visitor";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Entry = {
   id: string;
@@ -50,9 +50,12 @@ const statusTone: Record<VisitorStatus, "green" | "default" | "amber"> = {
  */
 export function VisitorBook({ entries }: { entries: Entry[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const onSite = entries.filter((e) => e.status === "IN");
-  const stale = onSite.filter((e) => new Date(e.checkedInAt).toDateString() !== new Date().toDateString());
+  // An earlier day on the workspace's calendar — not the browser's, which may be in another zone.
+  const today = clock.today();
+  const stale = onSite.filter((e) => clock.dateKey(new Date(e.checkedInAt)) !== today);
 
   return (
     <div className="space-y-4">
@@ -118,8 +121,8 @@ export function VisitorBook({ entries }: { entries: Entry[] }) {
                   <p className="mt-0.5 text-xs text-subtle">
                     {e.host ? `To see ${e.host.name}` : e.department ? `For ${e.department.name}` : "No host recorded"}
                     {e.kiosk && ` · ${e.kiosk.name}`}
-                    {` · in ${formatDateTime(new Date(e.checkedInAt))}`}
-                    {e.checkedOutAt && ` · out ${formatDateTime(new Date(e.checkedOutAt))}`}
+                    {` · in ${clock.dateTimeShort(e.checkedInAt)}`}
+                    {e.checkedOutAt && ` · out ${clock.dateTimeShort(e.checkedOutAt)}`}
                   </p>
                   {e.companions.length > 0 && (
                     <p className="mt-0.5 text-xs text-muted">

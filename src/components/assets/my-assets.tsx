@@ -8,7 +8,8 @@ import type { assetsHeldBy } from "@/actions/it-asset";
 import { acknowledgeMovement } from "@/actions/it-asset";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { assetKindLabels, coverState, statusLabels, statusTone } from "@/lib/assets/lifecycle";
 
 type Asset = Awaited<ReturnType<typeof assetsHeldBy>>[number];
@@ -22,6 +23,7 @@ type Asset = Awaited<ReturnType<typeof assetsHeldBy>>[number];
  */
 export function MyAssets({ assets }: { assets: Asset[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +64,8 @@ export function MyAssets({ assets }: { assets: Asset[] }) {
 
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                 <Badge tone={cover.tone}>{cover.label}</Badge>
-                {handover && <span className="text-subtle">Given to you {formatDate(handover.occurredAt)}</span>}
+                {/* The day it was handed over, as typed — held as midnight UTC. */}
+                {handover && <span className="text-subtle">Given to you {formatCalendarDay(handover.occurredAt)}</span>}
               </div>
 
               {handover && !handover.acknowledgedAt && (
@@ -89,7 +92,7 @@ export function MyAssets({ assets }: { assets: Asset[] }) {
               {handover?.acknowledgedAt && (
                 <p className="mt-3 flex items-center gap-1.5 text-xs text-success">
                   <Check className="h-3.5 w-3.5" />
-                  Confirmed {formatDate(handover.acknowledgedAt)}
+                  Confirmed {clock.date(handover.acknowledgedAt)}
                 </p>
               )}
             </Card>

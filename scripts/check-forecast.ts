@@ -21,7 +21,7 @@ import { directClient } from "../src/lib/tenancy/direct-client";
 import { AFTER, BEFORE, UNDATED, bucketFor, monthsIn, periodContaining, periodsFrom, yearEarlier } from "../src/lib/forecast/periods";
 import { DEFAULT_WEIGHTS, MIN_SAMPLE, furthestOpenStage, learnWeights, parseStageChange } from "../src/lib/forecast/stages";
 import { expectedOn, forecastAmc, forecastCollections, forecastRenewals, forecastSales, learnRenewalRates } from "../src/lib/forecast/compute";
-import { istMidnight } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -98,21 +98,22 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("Periods, in India time");
 
+  // Periods on the workspace's clock, which is India's here.
   const at = new Date("2026-09-24T06:00:00Z");
-  const sep = periodContaining(at, "month");
+  const sep = periodContaining(at, "month", indiaClock);
   ok("September is September, from its first instant in India", sep.key === "2026-09" && sep.label.includes("Sept") && sep.from.toISOString() === "2026-08-31T18:30:00.000Z", `${sep.label} ${sep.from.toISOString()}`);
   ok("  11:30 pm on 30 September is still September", bucketFor(new Date("2026-09-30T18:00:00Z"), [sep]) === "2026-09");
   ok("  and midnight on 1 October is not", bucketFor(new Date("2026-09-30T18:30:00Z"), [sep]) === AFTER);
-  const q = periodContaining(at, "quarter");
+  const q = periodContaining(at, "quarter", indiaClock);
   ok("September is Q2 of the financial year, July to September", q.key === "FY2026-Q2" && q.label === "Q2 2026-27" && q.from.toISOString() === "2026-06-30T18:30:00.000Z");
-  const q4 = periodContaining(new Date("2027-02-10T06:00:00Z"), "quarter");
+  const q4 = periodContaining(new Date("2027-02-10T06:00:00Z"), "quarter", indiaClock);
   ok("February 2027 is Q4 2026-27, which ends on 31 March", q4.key === "FY2026-Q4" && q4.to.toISOString() === "2027-03-31T18:30:00.000Z");
-  const fy = periodContaining(new Date("2027-01-15T06:00:00Z"), "year");
+  const fy = periodContaining(new Date("2027-01-15T06:00:00Z"), "year", indiaClock);
   ok("January 2027 belongs to FY 2026-27", fy.key === "FY2026" && fy.label === "FY 2026-27");
-  const six = periodsFrom(at, "month", 6);
+  const six = periodsFrom(at, "month", 6, indiaClock);
   ok("six months ahead run September to February, each starting where the last ended", six.map((p) => p.key).join() === "2026-09,2026-10,2026-11,2026-12,2027-01,2027-02" && six.every((p, i) => i === 0 || p.from.getTime() === six[i - 1]!.to.getTime()));
-  ok("a quarter holds its three months", monthsIn(q).join() === "2026-07,2026-08,2026-09");
-  ok("last year's September is last September", yearEarlier(sep).from.toISOString() === "2025-08-31T18:30:00.000Z");
+  ok("a quarter holds its three months", monthsIn(q, indiaClock).join() === "2026-07,2026-08,2026-09");
+  ok("last year's September is last September", yearEarlier(sep, indiaClock).from.toISOString() === "2025-08-31T18:30:00.000Z");
   ok("before, after and undated are told apart", bucketFor(new Date("2026-01-01"), six) === BEFORE && bucketFor(new Date("2030-01-01"), six) === AFTER && bucketFor(null, six) === UNDATED);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -147,8 +148,8 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("The arithmetic");
 
-  const months = periodsFrom(at, "month", 3);
-  const today = istMidnight(2026, 8, 24);
+  const months = periodsFrom(at, "month", 3, indiaClock);
+  const today = indiaClock.midnight(2026, 8, 24);
   const weights = { NEW: 10, CONTACTED: 10, QUALIFYING: 20, QUALIFIED: 30, PROPOSAL_SENT: 50, NEGOTIATION: 80 };
   const sales = forecastSales(
     [
@@ -242,8 +243,8 @@ async function main() {
     const boss = await make("boss", { "companies.viewAll": true, "forecast.manage": true });
 
     const now = new Date();
-    const thisMonth = periodContaining(now, "month");
-    const nextMonth = periodContaining(thisMonth.to, "month");
+    const thisMonth = periodContaining(now, "month", indiaClock);
+    const nextMonth = periodContaining(thisMonth.to, "month", indiaClock);
     const inThisMonth = new Date(Math.max(now.getTime() + 60_000, thisMonth.to.getTime() - 3_600_000));
     const inNextMonth = new Date(nextMonth.from.getTime() + 10 * DAY);
 
@@ -254,9 +255,11 @@ async function main() {
     const brand = await db.brand.create({ data: { name: `${TAG} Brand` } });
     const item = await db.item.create({ data: { name: `${TAG} Suite`, sku: `${TAG}-1`, type: "SUBSCRIPTION", sellingPrice: 1000, brandId: brand.id, createdById: rep.id } });
 
+    // A close date is a typed day, saved as the lead form saves it — its midnight UTC — so the day it
+    // names here is the day in India that the moment falls on.
     const lead = (title: string, status: string, value: number | null, close: Date | null) =>
       db.lead.create({
-        data: { companyId: company.id, title: `${TAG} ${title}`, status: status as never, estimatedValue: value, expectedCloseDate: close, ownerUserId: rep.id },
+        data: { companyId: company.id, title: `${TAG} ${title}`, status: status as never, estimatedValue: value, expectedCloseDate: close ? indiaClock.calendarDate(close) : null, ownerUserId: rep.id },
       });
     const negotiating = await lead("Negotiating", "NEGOTIATION", 100_000, inThisMonth);
     const proposed = await lead("Proposed", "PROPOSAL_SENT", 50_000, inNextMonth);
@@ -277,12 +280,12 @@ async function main() {
     const renewedOld = await order({ quantity: 5, unitPrice: 2000, fullTermUnitPrice: 2000, endDate: inNextMonth });
     await order({ quantity: 1, unitPrice: 12_000, renewedFromId: renewedOld.id, endDate: new Date(inNextMonth.getTime() + 365 * DAY) });
     await order({ quantity: 3, unitPrice: 3000, fullTermUnitPrice: 3000, endDate: inNextMonth, renewalStage: "LOST" });
-    await order({ quantity: 1, unitPrice: 7000, createdAt: yearEarlier(thisMonth).from.getTime() + DAY > now.getTime() ? now : new Date(yearEarlier(thisMonth).from.getTime() + DAY), endDate: null });
+    await order({ quantity: 1, unitPrice: 7000, createdAt: yearEarlier(thisMonth, indiaClock).from.getTime() + DAY > now.getTime() ? now : new Date(yearEarlier(thisMonth, indiaClock).from.getTime() + DAY), endDate: null });
 
     await db.asset.create({ data: { assetTag: `${TAG}-A1`, name: `${TAG} Laptop`, ownership: "CLIENT_OWNED", ownerCompanyId: company.id, warrantyEndsOn: inNextMonth, createdById: rep.id } as never });
     // Not approved yet: an order is not booked until it is.
     await order({ quantity: 1, unitPrice: 99_000, orderStatus: "PENDING_APPROVAL", endDate: null });
-    const thisQuarter = periodContaining(now, "quarter");
+    const thisQuarter = periodContaining(now, "quarter", indiaClock);
     await db.target.create({
       data: { metric: "ORDER_VALUE", period: "QUARTER", fromDate: new Date(thisQuarter.from.getTime() + 6 * 3_600_000), toDate: new Date(thisQuarter.to.getTime() - 18 * 3_600_000), label: thisQuarter.label, scope: "USER", userId: rep.id, value: 1_200_000, createdById: boss.id },
     });
@@ -292,7 +295,7 @@ async function main() {
 
     // A target ending on the last day of the last month shown: a date column compared by calendar
     // day, which a strict bound at India midnight used to drop.
-    const lastMonth3 = periodContaining(new Date(nextMonth.to.getTime() + DAY), "month");
+    const lastMonth3 = periodContaining(new Date(nextMonth.to.getTime() + DAY), "month", indiaClock);
     await db.target.create({
       data: { metric: "ORDER_VALUE", period: "MONTH", fromDate: new Date(lastMonth3.from.getTime() + 6 * 3_600_000), toDate: new Date(lastMonth3.to.getTime() - 18 * 3_600_000), label: lastMonth3.label, scope: "USER", userId: rep.id, value: 300_000, createdById: boss.id },
     });
@@ -323,7 +326,7 @@ async function main() {
     ok("the machine coming out of warranty with no AMC is an opportunity next month", data!.amc.buckets.periods[nextMonth.key]!.machines === 1 && data!.amc.buckets.periods[nextMonth.key]!.customers === 1);
     ok("the target for this month is the salesperson's own", data!.targets[thisMonth.key] === 500_000, data!.targets[thisMonth.key]);
     ok("  and a target ending on the last day shown is not dropped", data!.targets[data!.periods[2]!.key] === 300_000, data!.targets[data!.periods[2]!.key]);
-    const bookedThisMonth = 10 * 1000 + 5 * 2000 + 12_000 + 3 * 3000 + (yearEarlier(thisMonth).from.getTime() + DAY > now.getTime() ? 7000 : 0);
+    const bookedThisMonth = 10 * 1000 + 5 * 2000 + 12_000 + 3 * 3000 + (yearEarlier(thisMonth, indiaClock).from.getTime() + DAY > now.getTime() ? 7000 : 0);
     ok("booked this month is the orders they punched, at the price charged", near(data!.booked[thisMonth.key]!, bookedThisMonth), `${data!.booked[thisMonth.key]} vs ${bookedThisMonth}`);
     ok("last year is the same month a year earlier", data!.lastYear[thisMonth.key] === 7000, data!.lastYear[thisMonth.key]);
 
@@ -349,7 +352,7 @@ async function main() {
     ok("  a weight outside 0–100, or on a closed stage, is refused", !(await (actorId = boss.id, forecast.saveStageWeight("NEGOTIATION", 140))).ok && !(await forecast.saveStageWeight("WON", 50)).ok);
 
     actorId = rep.id;
-    const lastMonth = periodContaining(new Date(thisMonth.from.getTime() - DAY), "month").key;
+    const lastMonth = periodContaining(new Date(thisMonth.from.getTime() - DAY), "month", indiaClock).key;
     ok("a salesperson commits this month", (await forecast.saveCommit({ month: thisMonth.key, commit: 300_000, bestCase: 400_000, note: "if Acme signs" })).ok);
     ok("  but not a month that's over", !(await forecast.saveCommit({ month: lastMonth, commit: 1 })).ok);
     ok("  nor a best case below the commit", !(await forecast.saveCommit({ month: nextMonth.key, commit: 50_000, bestCase: 10_000 })).ok);

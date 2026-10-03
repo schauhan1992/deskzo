@@ -14,6 +14,7 @@ import { CreditBadge } from "@/components/credit/credit-badge";
 import { MIN_OVERRIDE_REASON, type CreditRating, type TermsKey } from "@/lib/credit/engine";
 import { formatCurrency } from "@/lib/utils";
 import { MIN_INCREASE_REASON, needsSalesApproval, savingAmount, shortDay, type ReleaseState } from "@/lib/orders/handoff-rules";
+import { useClock } from "@/components/time/clock-provider";
 
 type VendorOption = { id: string; name: string; paymentTerms: PaymentTerms };
 
@@ -72,6 +73,7 @@ export function OrderActionsPanel({
   credit?: OrderCredit | null;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [approveNotes, setApproveNotes] = useState("");
@@ -228,7 +230,7 @@ export function OrderActionsPanel({
           <p className="text-sm text-muted">
             {purchase.purchaseRelease === "HELD"
               ? "Sales is holding this order — it hasn't been sent to purchase yet."
-              : `This order comes to purchase on ${purchase.releaseOn ? shortDay(purchase.releaseOn) : "its scheduled day"}.`}
+              : `This order comes to purchase on ${purchase.releaseOn ? shortDay(purchase.releaseOn, clock) : "its scheduled day"}.`}
           </p>
         </div>
       )}

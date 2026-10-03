@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/bulk-select";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { annualCtcOf, monthlyGross } from "@/lib/hr/payroll";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 
 type Structure = Awaited<ReturnType<typeof salaryHistory>>[number];
 
@@ -77,7 +78,7 @@ export function SalaryCard({
             {num(current.otherAllowance) > 0 && <Row label="Other" value={num(current.otherAllowance)} />}
 
             <div className="border-t border-line pt-2 text-xs text-subtle">
-              Effective {formatDate(current.effectiveFrom)}
+              Effective {formatCalendarDay(current.effectiveFrom)}
               {current.createdBy && ` · set by ${current.createdBy.name}`}
               <div className="mt-0.5">
                 {current.pfApplicable ? "PF" : "no PF"} · {current.esiApplicable ? "ESI" : "no ESI"} ·{" "}
@@ -91,7 +92,7 @@ export function SalaryCard({
                 <div className="mt-2 space-y-1">
                   {structures.slice(1).map((s) => (
                     <div key={s.id} className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
-                      <span className="text-muted">{formatDate(s.effectiveFrom)}</span>
+                      <span className="text-muted">{formatCalendarDay(s.effectiveFrom)}</span>
                       <span className="text-text">
                         {formatCurrency(
                           monthlyGross({
@@ -144,7 +145,9 @@ function StructureDialog({
   const [ctc, setCtc] = useState("");
 
   const [form, setForm] = useState({
-    effectiveFrom: new Date().toISOString().slice(0, 10),
+    // Today on payroll's clock, which is India's (statutory) in every workspace; UTC's was yesterday
+    // until 05:30.
+    effectiveFrom: indiaClock.today(),
     basic: current ? String(num(current.basic)) : "",
     hra: current ? String(num(current.hra)) : "",
     conveyance: current ? String(num(current.conveyance)) : "0",

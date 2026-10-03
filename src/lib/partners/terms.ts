@@ -1,11 +1,10 @@
 import { Prisma, type PartnerKind } from "@deskzo/control-client";
-import { istDayKey } from "@/lib/console-shared/format";
 import { COUNTRIES } from "@/lib/geo/countries";
-import { istDateParts, istMidnight, startOfIndianDay } from "@/lib/india-time";
 import { partnerAudit, type PartnerActor } from "@/lib/partners/audit";
 import { PartnerRefused, percentToBp, type TermsInput, type TermsRates } from "@/lib/partners/types";
 import { controlDb } from "@/lib/platform/control-db";
 import type { Staff } from "@/lib/platform/staff-session";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * A partner's commission terms (partner_terms) — its rates from a day on.
@@ -53,19 +52,22 @@ type TermsRecord = Prisma.PartnerTermsGetPayload<{ select: typeof TERMS_SELECT }
 const staffActor = (staff: Staff): PartnerActor => ({ kind: "staff", id: staff.id, name: staff.name });
 
 // ─── India days ──────────────────────────────────────────────────────────────────────────────────
+//
+// The programme's money days — the day terms start, the day an adjustment counts from, the day a
+// statement was paid — are India's, whatever zone the console keeps (Settings › Time zone): commission
+// is worked out on the platform's own invoices, net of their GST, in India's calendar months
+// (src/lib/partners/rates.ts), and statements are India's months (src/lib/partners/statements.ts). The
+// days already stored are India's midnights; a console zone must not move them.
 
 /** "yyyy-mm-dd" → the instant that India day begins; null for anything else, 31 February included. */
 export function istDayStart(raw: string): Date | null {
-  const text = String(raw ?? "").trim();
-  const at = startOfIndianDay(text);
-  // startOfIndianDay rolls 31 February over into March; a real date reads back as itself.
-  return at && istDayKey(at) === text ? at : null;
+  return indiaClock.startOfDay(String(raw ?? "").trim());
 }
 
 /** The instant today began in India. */
 export function startOfIstToday(now: Date): Date {
-  const { year, month, day } = istDateParts(now);
-  return istMidnight(year, month, day);
+  const { year, month, day } = indiaClock.parts(now);
+  return indiaClock.midnight(year, month, day);
 }
 
 // ─── Checking ────────────────────────────────────────────────────────────────────────────────────
@@ -282,7 +284,7 @@ export async function setPartnerTerms(partnerId: string, input: TermsInput, staf
   try {
     row = await controlDb().$transaction(async (tx) => {
       const made = await writeTerms(tx, partner.id, terms, `staff:${staff.id}`);
-      await partnerAudit(staffActor(staff), partner.id, "terms.set", "terms", made.id, { from: istDayKey(made.effectiveFrom) }, { tx });
+      await partnerAudit(staffActor(staff), partner.id, "terms.set", "terms", made.id, { from: indiaClock.dateKey(made.effectiveFrom) }, { tx });
       return made;
     });
   } catch (err) {

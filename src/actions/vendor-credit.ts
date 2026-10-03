@@ -9,7 +9,8 @@ import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { formatOrderId } from "@/lib/order-id";
-import { calendarDay, istTodayKey } from "@/lib/orders/handoff-rules";
+import { calendarDay } from "@/lib/orders/handoff-rules";
+import { workspaceClock } from "@/lib/time/workspace";
 import { isVendorRelationshipType } from "@/lib/validation/company";
 import { cancelVendorCreditSchema, settleVendorCreditSchema, vendorCreditSchema } from "@/lib/validation/rebate";
 import { postVendorCreditToLedger, reverseVendorCreditPosting } from "@/lib/ledger/journal";
@@ -297,7 +298,7 @@ export async function createVendorCredit(input: unknown): Promise<ActionResult<{
   if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) return { ok: false, error: "Choose a distributor or an OEM from your vendors." };
   const date = calendarDay(data.date);
   if (!date) return { ok: false, error: "Enter its date." };
-  if (data.date > istTodayKey(new Date())) return { ok: false, error: "Its date can't be in the future." };
+  if (data.date > (await workspaceClock()).today()) return { ok: false, error: "Its date can't be in the future." };
   if (await db.vendorCredit.findUnique({ where: { vendorId_reference: { vendorId: vendor.id, reference: data.reference } }, select: { id: true } })) {
     return { ok: false, error: `${data.reference} from ${vendor.name} is recorded already.` };
   }

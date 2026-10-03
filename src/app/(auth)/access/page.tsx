@@ -3,7 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Fingerprint, Globe, Laptop, Lock, RefreshCw } from "lucide-react";
 import { lockNoticeFor, type LockNotice } from "@/lib/access/lock";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { auth } from "@/lib/auth";
 import { evaluateAccess } from "@/lib/access/gate";
 import { requestFacts } from "@/lib/access/request";
@@ -53,7 +54,7 @@ export default async function AccessPage({ searchParams }: { searchParams: Promi
   });
   if (verdict.ok) redirect(target);
   if (verdict.reason === "LOCKED") {
-    return <LockedSplash notice={await lockNoticeFor(session.user.id)} target={target} who={session.user.name ?? session.user.email ?? ""} />;
+    return <LockedSplash notice={await lockNoticeFor(session.user.id)} target={target} who={session.user.name ?? session.user.email ?? ""} clock={await workspaceClock()} />;
   }
 
   const message = HOLD_MESSAGE[verdict.reason];
@@ -125,7 +126,7 @@ export default async function AccessPage({ searchParams }: { searchParams: Promi
  * the server sends instead of the app, not a layer over it, so there is nothing underneath to reach.
  * Only two ways out: check again (for when the lock has been lifted), and sign out.
  */
-function LockedSplash({ notice, target, who }: { notice: LockNotice | null; target: string; who: string }) {
+function LockedSplash({ notice, target, who, clock }: { notice: LockNotice | null; target: string; who: string; clock: Clock }) {
   const company = notice?.scope === "company";
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4 py-12">
@@ -140,12 +141,12 @@ function LockedSplash({ notice, target, who }: { notice: LockNotice | null; targ
           </div>
           {notice?.until && (
             <p className="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-text">
-              Access returns on <span className="font-medium">{formatIstDateTime(notice.until)}</span> (India time).
+              Access returns on <span className="font-medium">{clock.dateTime(notice.until)}</span> ({clock.zone.replace(/_/g, " ")} time).
             </p>
           )}
           {notice?.lockedAt && (
             <p className="text-xs text-subtle">
-              Locked {notice.lockedBy ? `by ${notice.lockedBy} ` : ""}on {formatIstDateTime(notice.lockedAt)}.
+              Locked {notice.lockedBy ? `by ${notice.lockedBy} ` : ""}on {clock.dateTime(notice.lockedAt)}.
             </p>
           )}
           <div className="space-y-2">

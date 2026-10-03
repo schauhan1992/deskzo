@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
-import { formatIstDateTime, parseIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { forgetMaintenanceCache, maintenanceState, MESSAGE_MAX } from "@/lib/maintenance";
 import type { ActionResult } from "@/actions/company";
 
@@ -45,7 +45,7 @@ export async function getMaintenanceSettings() {
 export type MaintenanceInput = {
   /** now — down from this moment; schedule — down from `startsAt`; off — back up. */
   mode: "now" | "schedule" | "off";
-  /** India time, as a `datetime-local` input gives it. */
+  /** The workspace's time, as a `datetime-local` input gives it. */
   startsAt?: string;
   endsAt?: string;
   message?: string;
@@ -59,15 +59,16 @@ export async function saveMaintenance(input: MaintenanceInput): Promise<ActionRe
   const message = (input.message ?? "").trim();
   if (message.length > MESSAGE_MAX) return { ok: false, error: `Keep the message under ${MESSAGE_MAX} characters — it has to be read at a glance.` };
   const now = new Date();
+  const clock = await workspaceClock();
 
   let data: { enabled: boolean; startsAt: Date | null; endsAt: Date | null };
   if (input.mode === "off") {
     data = { enabled: false, startsAt: null, endsAt: null };
   } else {
-    const startsAt = input.mode === "schedule" ? parseIstDateTime(input.startsAt ?? "") : null;
+    const startsAt = input.mode === "schedule" ? clock.parseInput(input.startsAt ?? "") : null;
     if (input.mode === "schedule" && !startsAt) return { ok: false, error: "Pick when it starts." };
     if (startsAt && startsAt.getTime() <= now.getTime()) return { ok: false, error: "That start time has passed — switch it on now instead, or pick a later time." };
-    const endsAt = input.endsAt?.trim() ? parseIstDateTime(input.endsAt) : null;
+    const endsAt = input.endsAt?.trim() ? clock.parseInput(input.endsAt) : null;
     if (input.endsAt?.trim() && !endsAt) return { ok: false, error: "That end time isn't a date and time." };
     if (endsAt && endsAt.getTime() <= (startsAt ?? now).getTime()) return { ok: false, error: "It has to end after it starts." };
     data = { enabled: true, startsAt, endsAt };
@@ -80,13 +81,13 @@ export async function saveMaintenance(input: MaintenanceInput): Promise<ActionRe
   });
   forgetMaintenanceCache();
 
-  const until = data.endsAt ? ` until ${formatIstDateTime(data.endsAt)}` : " until switched off";
+  const until = data.endsAt ? ` until ${clock.dateTime(data.endsAt)}` : " until switched off";
   const label =
     input.mode === "off"
       ? "Maintenance mode switched off"
       : input.mode === "now"
         ? `Maintenance mode switched on${until}`
-        : `Maintenance scheduled from ${formatIstDateTime(data.startsAt!)}${until}`;
+        : `Maintenance scheduled from ${clock.dateTime(data.startsAt!)}${until}`;
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "MaintenanceMode", entityId: "global", entityLabel: label });
 
   // The banner is in the layout every page shares.

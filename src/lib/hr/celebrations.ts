@@ -1,4 +1,5 @@
 import type { CelebrationAudience, CelebrationKind } from "@prisma/client";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * What to put on somebody's screen today, and — more importantly — what not to.
@@ -225,10 +226,9 @@ export function momentsFor(input: {
 }
 
 /** The one-line greeting above the dashboard, which is not an occasion and never interrupts. */
-export function greeting(now: Date, firstName: string) {
-  // Local hours: this is about whether it is morning where the person is sitting, and everybody
-  // using this app sits in one country.
-  const hour = now.getHours();
+export function greeting(now: Date, firstName: string, clock: Clock) {
+  // Whether it is morning where the workspace is — not on the server, which keeps UTC.
+  const hour = clock.parts(now).hour;
   const part = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   return `${part}, ${firstName}`;
 }

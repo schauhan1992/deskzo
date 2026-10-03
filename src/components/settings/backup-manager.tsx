@@ -12,7 +12,7 @@ import { BackupScheduleForm } from "@/components/settings/backup-schedule-form";
 import { DownloadDialog } from "@/components/backups/download-dialog";
 import { RestoreRowButton } from "@/components/backups/restore-row-button";
 import { RowActions } from "@/components/ui/icon-button";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The backup screen.
@@ -99,6 +99,7 @@ export function BackupManager({
   /** Whether to offer putting one back. A separate, larger permission again — see the registry. */
   canRestore: boolean;
 }) {
+  const clock = useClock();
   const [, startTransition] = useTransition();
   /**
    * Which kind is running, not merely that one is.
@@ -251,7 +252,7 @@ export function BackupManager({
             <div className="flex gap-2">
               <dt className="shrink-0 text-muted">Last good</dt>
               <dd className="text-text">
-                {overview.lastSucceededAt ? formatDateTime(overview.lastSucceededAt) : "never"}
+                {overview.lastSucceededAt ? clock.dateTimeShort(overview.lastSucceededAt) : "never"}
               </dd>
             </div>
           </dl>
@@ -306,7 +307,7 @@ export function BackupManager({
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.id} className="border-b border-line last:border-0 align-top">
-                      <td className="whitespace-nowrap px-5 py-2.5 text-text">{formatDateTime(row.startedAt)}</td>
+                      <td className="whitespace-nowrap px-5 py-2.5 text-text">{clock.dateTimeShort(row.startedAt)}</td>
                       {/*
                         Which kind, and what it cost, both fold in here. Neither earns a column of
                         its own: this table already scrolls sideways on a laptop and somebody has

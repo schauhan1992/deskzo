@@ -7,7 +7,7 @@ import type { getPerson } from "@/actions/hr";
 import type { BalanceRow } from "@/actions/leave";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { EmployeeForm } from "@/components/hr/employee-form";
 import { ExitDialog } from "@/components/hr/exit-dialog";
 import { employmentTypeLabels, exitTypeLabels } from "@/lib/validation/hr";
@@ -49,7 +49,7 @@ export function EmployeeRecord({
             <h1 className="text-xl font-semibold text-text">{person.name}</h1>
             {p?.exitedOn ? (
               <Badge tone="red">
-                {p.exitType ? exitTypeLabels[p.exitType] : "Exited"} · {formatDate(p.exitedOn)}
+                {p.exitType ? exitTypeLabels[p.exitType] : "Exited"} · {formatCalendarDay(p.exitedOn)}
               </Badge>
             ) : person.active ? (
               <Badge tone="green">Active</Badge>
@@ -109,13 +109,13 @@ export function EmployeeRecord({
               <Row label="Designation" value={p?.designation} />
               <Row label="Type" value={p ? employmentTypeLabels[p.employmentType] : null} />
               <Row label="Work location" value={p?.workLocation} />
-              <Row label="Joined" value={p?.joinedOn ? formatDate(p.joinedOn) : null} />
-              <Row label="Probation ends" value={p?.probationEndsOn ? formatDate(p.probationEndsOn) : null} />
-              <Row label="Confirmed" value={p?.confirmedOn ? formatDate(p.confirmedOn) : null} />
+              <Row label="Joined" value={p?.joinedOn ? formatCalendarDay(p.joinedOn) : null} />
+              <Row label="Probation ends" value={p?.probationEndsOn ? formatCalendarDay(p.probationEndsOn) : null} />
+              <Row label="Confirmed" value={p?.confirmedOn ? formatCalendarDay(p.confirmedOn) : null} />
               <Row label="Reports to" value={person.manager?.name} />
               {p?.exitedOn && (
                 <>
-                  <Row label="Last working day" value={formatDate(p.exitedOn)} />
+                  <Row label="Last working day" value={formatCalendarDay(p.exitedOn)} />
                   <Row label="Reason" value={p.exitReason} />
                 </>
               )}
@@ -125,7 +125,7 @@ export function EmployeeRecord({
           <Card>
             <CardHeader className="text-sm font-medium text-text">Personal</CardHeader>
             <CardContent className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              <Row label="Date of birth" value={p?.dateOfBirth ? formatDate(p.dateOfBirth) : null} />
+              <Row label="Date of birth" value={p?.dateOfBirth ? formatCalendarDay(p.dateOfBirth) : null} />
               <Row label="Gender" value={p?.gender ? p.gender.toLowerCase() : null} />
               <Row label="Blood group" value={p?.bloodGroup} />
               <Row label="Marital status" value={p?.maritalStatus} />

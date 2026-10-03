@@ -5,7 +5,7 @@ import Link from "next/link";
 import { SidePane } from "@/components/ui/side-pane";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type TimelineEntry = {
   id: string;
@@ -19,6 +19,7 @@ type TimelineEntry = {
 
 export function ActivityPanelButton({ timeline }: { timeline: TimelineEntry[] }) {
   const [open, setOpen] = useState(false);
+  const clock = useClock();
 
   return (
     <>
@@ -40,7 +41,7 @@ export function ActivityPanelButton({ timeline }: { timeline: TimelineEntry[] })
                 </Link>
               </div>
               <div className="mt-0.5 text-xs text-subtle">
-                {a.user.name} · {formatDate(a.occurredAt)}
+                {a.user.name} · {clock.date(a.occurredAt)}
               </div>
               <p className="mt-1 text-text">{a.notes}</p>
             </div>

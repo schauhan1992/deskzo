@@ -19,7 +19,7 @@ import type { UsagePanel, UsagePoint } from "@/lib/platform/workspace-data";
 
 const INTEGER = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-/** A snapshot's calendar day: the column holds the Indian date itself, so its UTC date is that date. */
+/** A snapshot's calendar day: the column holds the date itself (the console's day it was taken on), so its UTC date is that date. */
 const dayKeyOf = (p: UsagePoint) => p.day.toISOString().slice(0, 10);
 
 const seatLimitText = (n: number | null) => (n === null ? "No limit" : INTEGER.format(n));

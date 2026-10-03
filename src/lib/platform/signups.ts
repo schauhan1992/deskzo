@@ -1,10 +1,10 @@
 import type { Prisma } from "@deskzo/control-client";
-import { istDayKey } from "@/lib/console-shared/format";
 import { STUCK_STAGES, isoDateOrUndefined, type StuckStage } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { TenantStatusKey } from "@/lib/console-shared/types";
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The signups page (/signups): how far people get between "start" and "paying", and who got stuck on
@@ -18,7 +18,7 @@ import { controlDb } from "@/lib/platform/control-db";
  */
 
 export type SignupFunnel = {
-  /** The effective range, IST days: what was asked for, or the last 30 days ending today. */
+  /** The effective range, days on the console's clock: what was asked for, or the last 30 days ending today. */
   from: string;
   to: string;
   started: number;
@@ -151,10 +151,11 @@ async function payingTenants(tenantIds: string[]): Promise<Set<string>> {
 
 // ─── The funnel ──────────────────────────────────────────────────────────────────────────────────
 
-/** How far the signups started in a range of IST days got. Without a range: the last 30 days, today included. */
+/** How far the signups started in a range of days on the console's clock got. Without a range: the last 30 days, today included. */
 export async function signupFunnel(range: { from?: string; to?: string }, now = new Date()): Promise<SignupFunnel> {
-  const { from, to } = effectiveRange(range, now);
-  const signups = await loadSignups({ createdAt: { gte: startOfIndianDay(from)!, lt: endOfIndianDay(to)! } }, false);
+  const clock = await consoleClock();
+  const { from, to } = effectiveRange(range, now, clock);
+  const signups = await loadSignups({ createdAt: { gte: clock.startOfDay(from)!, lt: clock.endOfDay(to)! } }, false);
   const tenantIds = [...new Set(signups.flatMap((s) => (s.tenantId ? [s.tenantId] : [])))];
   const [tenants, jobs, paying] = await Promise.all([tenantsById(tenantIds), latestJobs(tenantIds), payingTenants(tenantIds)]);
 
@@ -187,7 +188,7 @@ export async function signupFunnel(range: { from?: string; to?: string }, now = 
     else funnel.byInvite.open += 1;
     const country = s.country.trim().toUpperCase() || "—";
     countries.set(country, (countries.get(country) ?? 0) + 1);
-    const day = istDayKey(s.createdAt);
+    const day = clock.dateKey(s.createdAt);
     days.set(day, (days.get(day) ?? 0) + 1);
   }
   funnel.byCountry = [...countries].map(([country, n]) => ({ country, n })).sort((a, b) => b.n - a.n || a.country.localeCompare(b.country));
@@ -205,9 +206,9 @@ function isReady(tenant: TenantBrief | undefined, job: JobBrief | undefined): bo
   return !!tenant && (tenant.status === "ACTIVE" || tenant.status === "SUSPENDED" || tenant.status === "MIGRATING");
 }
 
-/** The range the funnel reads, as whole IST days, earlier first, at most MAX_DAYS long. */
-function effectiveRange(range: { from?: string; to?: string }, now: Date): { from: string; to: string } {
-  const today = istDayKey(now);
+/** The range the funnel reads, as whole days on `clock`, earlier first, at most MAX_DAYS long. */
+function effectiveRange(range: { from?: string; to?: string }, now: Date, clock: Clock): { from: string; to: string } {
+  const today = clock.today(now);
   let from = isoDateOrUndefined(range.from);
   let to = isoDateOrUndefined(range.to);
   if (!to) to = from && from > today ? from : today;

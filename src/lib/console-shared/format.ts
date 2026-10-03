@@ -1,9 +1,11 @@
-import { formatIstDateTime, istDateParts } from "@/lib/india-time";
 import type { GatewayMode } from "@/lib/console-shared/types";
+import type { Clock } from "@/lib/time/zone";
 
 /**
- * Small, pure formatters the console shares between server pages and client components. Dates are
- * India's (src/lib/india-time.ts); month and weekday names are spelled out here rather than asked of
+ * Small, pure formatters the console shares between server pages and client components. A moment is the
+ * console's clock's to show (Settings › Time zone): `clock.dateTime`, `clock.date`, `clock.dayMonth`,
+ * `clock.dateKey`, `clock.monthKey`, `clock.daysBetween` — from `consoleClock()` on the server and
+ * `useClock()` in a client component. Month and weekday names are spelled out here rather than asked of
  * Intl, whose en-IN data writes September as "Sept" in some ICU versions and not in others — a page
  * rendered on the server and hydrated in a browser must read the same.
  */
@@ -12,32 +14,6 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const DAY_MS = 86_400_000;
 
-const pad = (n: number) => String(n).padStart(2, "0");
-
-function validDate(at: Date | string | null | undefined): Date | null {
-  if (at === null || at === undefined || at === "") return null;
-  const d = at instanceof Date ? at : new Date(at);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** "Thu, 15 Oct 2026, 6:30 pm" (IST), or "—" for nothing. */
-export function when(at: Date | string | null | undefined): string {
-  const d = validDate(at);
-  return d ? formatIstDateTime(d) : "—";
-}
-
-/** The Indian calendar day an instant falls on: "2026-09-27". */
-export function istDayKey(at: Date): string {
-  const { year, month, day } = istDateParts(at);
-  return `${year}-${pad(month + 1)}-${pad(day)}`;
-}
-
-/** The Indian calendar month: "2026-09". */
-export function istMonthKey(at: Date): string {
-  const { year, month } = istDateParts(at);
-  return `${year}-${pad(month + 1)}`;
-}
-
 /** "2026-09" → "Sep 2026"; anything else comes back as it was. */
 export function monthLabel(key: string): string {
   const match = /^(\d{4})-(\d{2})$/.exec(key);
@@ -45,35 +21,11 @@ export function monthLabel(key: string): string {
   return match && month >= 1 && month <= 12 ? `${MONTHS[month - 1]} ${match[1]}` : key;
 }
 
-/** "10 Oct" (IST) — a date close enough that the year goes without saying. "—" for nothing. */
-export function dayMonth(at: Date | string | null | undefined): string {
-  const d = validDate(at);
-  if (!d) return "—";
-  const { month, day } = istDateParts(d);
-  return `${day} ${MONTHS[month]}`;
-}
-
-/** "28 Sep 2026" (IST). "—" for nothing. */
-export function dayMonthYear(at: Date | string | null | undefined): string {
-  const d = validDate(at);
-  if (!d) return "—";
-  const { year, month, day } = istDateParts(d);
-  return `${day} ${MONTHS[month]} ${year}`;
-}
-
 /** A `yyyy-mm-dd` day as "1 Sep 2026" (or "1 Sep"), read as the calendar date it names; anything else as it was. */
 export function dayKeyLabel(dayKey: string, withYear = true): string {
   const parts = dayKeyParts(dayKey);
   if (!parts) return dayKey;
   return withYear ? `${parts.day} ${MONTHS[parts.month]} ${parts.year}` : `${parts.day} ${MONTHS[parts.month]}`;
-}
-
-/** Indian calendar days from one instant's day to another's: 0 on the same day, negative when `to` is earlier. */
-export function istDaysBetween(from: Date, to: Date): number {
-  const a = istDateParts(from);
-  const b = istDateParts(to);
-  const days = Math.round((Date.UTC(b.year, b.month, b.day) - Date.UTC(a.year, a.month, a.day)) / DAY_MS);
-  return days === 0 ? 0 : days;
 }
 
 function dayKeyParts(dayKey: string): { year: number; month: number; day: number; weekday: number; time: number } | null {
@@ -181,10 +133,10 @@ export function deviceFromUserAgent(ua: string | null): string {
   return browser ?? (os ? `A browser on ${os}` : "Unknown device");
 }
 
-/** "workspaces-2026-09-27.csv", dated in IST. */
-export function csvFilename(prefix: string, at: Date): string {
+/** "workspaces-2026-09-27.csv", dated on the console's clock. */
+export function csvFilename(prefix: string, at: Date, clock: Clock): string {
   const safe = prefix.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "export";
-  return `${safe}-${istDayKey(at)}.csv`;
+  return `${safe}-${clock.dateKey(at)}.csv`;
 }
 
 /** Where to look something up in the gateway's own dashboard (test mode where the keys are test keys). */

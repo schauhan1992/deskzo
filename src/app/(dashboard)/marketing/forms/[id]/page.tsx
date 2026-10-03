@@ -18,7 +18,7 @@ import { FIELD_TYPES } from "@/lib/marketing/form-fields";
 import { FILL_MODES, allowsInvites, allowsLink, categoryOf } from "@/lib/forms/categories";
 import { seatsText } from "@/lib/forms/invites";
 import { TOPICS } from "@/lib/marketing/topics";
-import { formatIstDateTime, formatIstTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 
 type Params = { tab?: string; page?: string; pageSize?: string; q?: string; rsvp?: string; attendance?: string; status?: string };
@@ -27,7 +27,7 @@ export default async function FormDetailPage({ params, searchParams }: { params:
   if (!(await isModuleEnabled("forms"))) return <ModuleDisabledNotice moduleKey="forms" />;
   const { id } = await params;
   const query = await searchParams;
-  const detail = await getFormDetail(id);
+  const [detail, clock] = await Promise.all([getFormDetail(id), workspaceClock()]);
   if (!detail) notFound();
   const { form, access, counts, funnel, open } = detail;
   const event = form.category === "EVENT";
@@ -67,8 +67,8 @@ export default async function FormDetailPage({ params, searchParams }: { params:
             <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text">
               <span className="inline-flex items-center gap-1.5">
                 <CalendarDays className="h-4 w-4 text-muted" aria-hidden />
-                {formatIstDateTime(form.eventStartsAt)}
-                {form.eventEndsAt && ` – ${formatIstTime(form.eventEndsAt)}`}
+                {clock.dateTime(form.eventStartsAt)}
+                {form.eventEndsAt && ` – ${clock.time(form.eventEndsAt)}`}
               </span>
               {form.venue && (
                 <span className="inline-flex items-center gap-1.5">
@@ -129,12 +129,12 @@ export default async function FormDetailPage({ params, searchParams }: { params:
                   <dl className="space-y-2.5 text-sm">
                     <Detail label="Who can fill it in" value={FILL_MODES.find((m) => m.key === form.fillMode)?.blurb ?? ""} />
                     {allowsLink(form.fillMode) && <Detail label="Public link" value={`/forms/${form.slug}`} />}
-                    <Detail label="Stops taking answers" value={form.closesAt ? formatIstDateTime(form.closesAt) : event ? "When the event starts" : "When somebody closes it"} />
+                    <Detail label="Stops taking answers" value={form.closesAt ? clock.dateTime(form.closesAt) : event ? "When the event starts" : "When somebody closes it"} />
                     {event && <Detail label="Seats" value={form.capacity ? String(form.capacity) : "No limit"} />}
                     <Detail label="New answers go to" value={form.assignTo?.name ?? "Whoever invited them, else the lead assignment rules"} />
                     <Detail label="Makes a lead" value={form.createsLead ? "Yes, from each new answer" : "No"} />
                     <Detail label="Topic" value={TOPICS.find((t) => t.key === form.topic)?.label ?? form.topic} />
-                    <Detail label="Built by" value={`${form.createdBy?.name ?? "—"} on ${formatIstDateTime(form.createdAt)}`} />
+                    <Detail label="Built by" value={`${form.createdBy?.name ?? "—"} on ${clock.dateTime(form.createdAt)}`} />
                   </dl>
                 </CardContent>
               </Card>
@@ -188,7 +188,10 @@ export default async function FormDetailPage({ params, searchParams }: { params:
 }
 
 async function ResponsesTab({ formId, event, query, page, pageSize }: { formId: string; event: boolean; query: Params; page: number; pageSize: number }) {
-  const data = await listFormResponses(formId, { page, pageSize, q: query.q, rsvp: query.rsvp, attendance: query.attendance });
+  const [data, clock] = await Promise.all([
+    listFormResponses(formId, { page, pageSize, q: query.q, rsvp: query.rsvp, attendance: query.attendance }),
+    workspaceClock(),
+  ]);
   if (!data) return null;
   return (
     <div className="space-y-3">
@@ -220,7 +223,7 @@ async function ResponsesTab({ formId, event, query, page, pageSize }: { formId: 
         formId={formId}
         event={event}
         fields={data.fields}
-        rows={data.rows.map((r) => ({ ...r, answeredAt: formatIstDateTime(r.createdAt) }))}
+        rows={data.rows.map((r) => ({ ...r, answeredAt: clock.dateTime(r.createdAt) }))}
       />
       <Pagination page={page} pageSize={pageSize} total={data.total} totalPages={totalPages(data.total, pageSize)} pageSizes={PAGE_SIZES} label="answers" />
     </div>
@@ -244,9 +247,10 @@ async function InvitesTab({
   page: number;
   pageSize: number;
 }) {
-  const [data, waiting] = await Promise.all([
+  const [data, waiting, clock] = await Promise.all([
     listFormInvites(formId, { page, pageSize, status: query.status, q: query.q }),
     listFormInvites(formId, { status: "waiting", pageSize: 500 }),
+    workspaceClock(),
   ]);
   if (!data) return null;
   return (
@@ -284,9 +288,9 @@ async function InvitesTab({
           id: r.id,
           email: r.email,
           status: r.status,
-          sentText: r.lastSentAt ? `Sent ${formatIstDateTime(r.lastSentAt)}` : "Not sent",
+          sentText: r.lastSentAt ? `Sent ${clock.dateTime(r.lastSentAt)}` : "Not sent",
           sendCount: r.sendCount,
-          openedText: r.openedAt ? formatIstDateTime(r.openedAt) : null,
+          openedText: r.openedAt ? clock.dateTime(r.openedAt) : null,
           contact: r.contact,
           company: r.company,
           invitedBy: r.invitedBy,

@@ -14,6 +14,7 @@ import { ProvisioningRefused } from "@/lib/platform/provisioning";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { StaffChangeRefused } from "@/lib/platform/staff";
 import { StaffRefused, type Staff } from "@/lib/platform/staff-session";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * What every console action and loader shares on the server: the role sets, the caps on bulk work and
@@ -207,10 +208,14 @@ export async function staffNameMap(ids?: string[]): Promise<Map<string, string>>
   return names;
 }
 
-/** Audit rows as the console shows them: a past-tense title, a redacted one-line summary, who, where it leads. */
+/**
+ * Audit rows as the console shows them: a past-tense title, a redacted one-line summary, who, where it
+ * leads. `clock` is the console's (`consoleClock()`), for a date in a summary.
+ */
 export function toActivityItems(
   rows: { id: string; at: Date; actorKind: "STAFF" | "SCRIPT" | "SYSTEM"; actor: string; action: string; detail: unknown; tenant: { slug: string } | null }[],
   names: ReadonlyMap<string, string>,
+  clock: Clock,
 ): ActivityItem[] {
   return rows.map((row) => {
     const { title, tone, category } = auditLabel(row.action, row.detail);
@@ -222,7 +227,7 @@ export function toActivityItems(
       code: row.action,
       tone,
       category,
-      detail: redactSecrets(auditSummary(row.action, row.detail)),
+      detail: redactSecrets(auditSummary(row.action, row.detail, clock)),
       actor: actorLabel(row.actorKind, row.actor, names),
       actorKind: row.actorKind,
       workspace: slug ? { slug } : null,

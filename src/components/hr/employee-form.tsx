@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { AddressFields } from "@/components/ui/address-fields";
 import { employmentTypeLabels, employmentTypeValues, genderValues } from "@/lib/validation/hr";
+import { toKey } from "@/lib/hr/calendar";
 
 type Person = NonNullable<Awaited<ReturnType<typeof getPerson>>>;
 
@@ -46,10 +47,12 @@ export function EmployeeForm({
     designation: p?.designation ?? "",
     employmentType: p?.employmentType ?? "FULL_TIME",
     workLocation: p?.workLocation ?? "",
-    joinedOn: p?.joinedOn ? String(p.joinedOn).slice(0, 10) : "",
-    probationEndsOn: p?.probationEndsOn ? String(p.probationEndsOn).slice(0, 10) : "",
-    confirmedOn: p?.confirmedOn ? String(p.confirmedOn).slice(0, 10) : "",
-    dateOfBirth: p?.dateOfBirth ? String(p.dateOfBirth).slice(0, 10) : "",
+    // The day each @db.Date holds. String() of a Date is "Fri Oct 02 2026 …": the inputs showed nothing,
+    // and saving untouched stored 2001.
+    joinedOn: p?.joinedOn ? toKey(p.joinedOn) : "",
+    probationEndsOn: p?.probationEndsOn ? toKey(p.probationEndsOn) : "",
+    confirmedOn: p?.confirmedOn ? toKey(p.confirmedOn) : "",
+    dateOfBirth: p?.dateOfBirth ? toKey(p.dateOfBirth) : "",
     gender: p?.gender ?? "",
     bloodGroup: p?.bloodGroup ?? "",
     maritalStatus: p?.maritalStatus ?? "",

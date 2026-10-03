@@ -7,8 +7,8 @@ import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import type { PartnerKind, TermsInput } from "@/lib/partners/types";
+import { indiaClock } from "@/lib/time/zone";
 import { TermsFields, draftFromTerms, termsFromDraft, termsProblem, type TermsDraft } from "./terms-fields";
 
 /**
@@ -29,6 +29,7 @@ export function NewTermsButton({
   partner: { id: string; displayName: string; kind: PartnerKind };
   defaults: TermsInput;
   plans: { key: string; name: string }[];
+  /** Today in India ("yyyy-mm-dd"): terms start on India days, and the server refuses one before it. */
   todayKey: string;
 }) {
   const isClient = useSyncExternalStore(noSubscribe, () => true, () => false);
@@ -84,7 +85,8 @@ function TermsForm({
     e.preventDefault();
     if (!ready) return;
     action.run(() => consoleSetPartnerTerms(partner.id, termsFromDraft(draft, partner.kind)), {
-      success: (d) => `New terms set — in force from ${dayMonthYear(d.effectiveFrom)}.`,
+      // Terms start on an India day, as the programme's money days are kept (src/lib/partners/terms.ts).
+      success: (d) => `New terms set — in force from ${indiaClock.date(d.effectiveFrom)}.`,
       onDone: onClose,
     });
   }

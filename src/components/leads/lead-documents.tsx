@@ -3,7 +3,9 @@ import { FileText } from "lucide-react";
 import type { listLeadDocuments } from "@/actions/trade-document";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 import { statusTone, tradeDocumentLabels, tradeDocumentStatusLabels } from "@/lib/trade-documents";
 
 type Row = Awaited<ReturnType<typeof listLeadDocuments>>[number];
@@ -15,7 +17,7 @@ type Row = Awaited<ReturnType<typeof listLeadDocuments>>[number];
  * which is the point: "what did we actually send them, and where did it get to" is one question,
  * not two, and answering it from the deal saves going to the company and filtering by hand.
  */
-export function LeadDocuments({
+export async function LeadDocuments({
   documents,
   leadId,
   canCreate,
@@ -25,6 +27,8 @@ export function LeadDocuments({
   canCreate: boolean;
 }) {
   const newProposalHref = `/documents/new?type=PROPOSAL&leadId=${leadId}`;
+  // The workspace's today, held as a typed day is (midnight UTC), to set a validity day against.
+  const today = (await workspaceClock()).calendarDate(new Date());
 
   return (
     <Card>
@@ -71,9 +75,9 @@ export function LeadDocuments({
                 {documents.map((doc) => {
                   // Nothing sweeps issued quotations into EXPIRED when their date passes, so one
                   // that has run out still reads as "Issued". Flagged here rather than left for
-                  // someone to work out from a date in a column they may not read.
-                  const lapsed =
-                    doc.validUntil && doc.status === "ISSUED" && new Date(doc.validUntil) < new Date();
+                  // someone to work out from a date in a column they may not read. Valid through its
+                  // last day: lapsed once that day is before the workspace's today.
+                  const lapsed = doc.validUntil && doc.status === "ISSUED" && new Date(doc.validUntil) < today;
                   return (
                     <tr key={doc.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                       <td className="px-4 py-2.5">
@@ -82,10 +86,8 @@ export function LeadDocuments({
                         </Link>
                       </td>
                       <td className="px-4 py-2.5 text-muted">{tradeDocumentLabels[doc.docType]}</td>
-                      <td className="px-4 py-2.5 text-muted">{formatDate(doc.issueDate)}</td>
-                      <td className="px-4 py-2.5 text-muted">
-                        {doc.validUntil ? formatDate(doc.validUntil) : "—"}
-                      </td>
+                      <td className="px-4 py-2.5 text-muted">{formatCalendarDay(doc.issueDate)}</td>
+                      <td className="px-4 py-2.5 text-muted">{formatCalendarDay(doc.validUntil)}</td>
                       <td className="px-4 py-2.5 text-muted">{doc.salesperson?.name ?? "—"}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-text">
                         {formatCurrency(doc.total?.toString())}

@@ -15,7 +15,7 @@ import {
 import { notificationLabel } from "@/lib/notifications/catalogue";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The history, with the actions the bell never had.
@@ -33,6 +33,7 @@ export function NotificationList({
   view: "inbox" | "archived";
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -123,7 +124,7 @@ export function NotificationList({
                       {/* The catalogue label, never the raw enum — nobody reads REGULARISATION_DECIDED. */}
                       <Badge tone="default">{notificationLabel(n.type as NotificationType)}</Badge>
                       {!n.read && <span className="text-xs font-medium text-brand">Unread</span>}
-                      <span className="text-xs text-subtle">{formatDateTime(n.createdAt)}</span>
+                      <span className="text-xs text-subtle">{clock.dateTimeShort(n.createdAt)}</span>
                     </div>
 
                     <p className="mt-1 text-sm font-medium text-text">

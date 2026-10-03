@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { logActivity, alertAdmins } from "@/lib/activity";
 import { getSecurityPolicy } from "@/lib/security/store";
-import { dlpApplies, screenshotDecision, istDayKey } from "@/lib/security/policy";
+import { dlpApplies, screenshotDecision, allowanceDayKey } from "@/lib/security/policy";
+import { workspaceClock } from "@/lib/time/workspace";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { throttle } from "@/lib/security/throttle";
 
@@ -101,7 +102,7 @@ export async function reportScreenshot(input: { path?: string } = {}): Promise<S
     return { allowed: true, remaining: null, reason: "", enforced: false };
   }
 
-  const day = istDayKey();
+  const day = allowanceDayKey(await workspaceClock());
   const row = await db.screenshotAllowance.upsert({
     where: { userId_day: { userId: user.id, day } },
     create: { userId: user.id, day, count: 1 },

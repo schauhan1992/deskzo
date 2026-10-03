@@ -21,14 +21,14 @@ import {
   MIN_INCREASE_REASON,
   calendarDay,
   checkReleaseDate,
-  istTodayKey,
   needsSalesApproval,
   priceCeiling,
   savingAmount,
   shortDay,
 } from "@/lib/orders/handoff-rules";
 import { peopleHolding, releaseDueOrders, tellPurchase } from "@/lib/orders/handoff";
-import { istCalendarDate } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 import { isCustomerRelationshipType, isVendorRelationshipType } from "@/lib/validation/company";
 import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { inStepWhere, orderSteps } from "@/lib/pipeline/order-steps-server";
@@ -161,9 +161,10 @@ type QuoteData = {
 
 /**
  * The distributor price as it will be stored, checked: the distributor a vendor in the CRM (or a name
- * typed for one that isn't), the date a real one no later than today in India — blank is today.
+ * typed for one that isn't), the date a real one no later than today on the workspace's calendar —
+ * blank is today.
  */
-async function resolveQuote(data: QuoteData, now: Date) {
+async function resolveQuote(data: QuoteData, now: Date, clock: Clock) {
   if (data.quotedPurchasePrice === undefined) return { ok: true as const, quote: null };
   const quoteVendorId = data.quoteVendorId || null;
   if (quoteVendorId) {
@@ -172,7 +173,7 @@ async function resolveQuote(data: QuoteData, now: Date) {
       return { ok: false as const, error: "That distributor isn't a vendor in the CRM — pick one, or type their name." };
     }
   }
-  const today = istTodayKey(now);
+  const today = clock.today(now);
   const onKey = data.quotedOn || today;
   const quotedOn = calendarDay(onKey);
   if (!quotedOn) return { ok: false as const, error: "The date quoted isn't a date." };
@@ -256,9 +257,10 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
    * `bookedAt` starts empty.
    */
   const now = new Date();
+  const clock = await workspaceClock();
   let handoff: Pick<Prisma.CompanyProductUncheckedCreateInput, "purchaseRelease" | "releaseOn" | "releasedAt" | "releasedById" | "bookedAt">;
   if (data.handoff === "SCHEDULE") {
-    const day = checkReleaseDate(data.releaseOn, now);
+    const day = checkReleaseDate(data.releaseOn, now, clock);
     if (!day.ok) return { ok: false, error: day.error };
     handoff = { purchaseRelease: "SCHEDULED", releaseOn: day.day, bookedAt: null };
   } else if (data.handoff === "HOLD") {
@@ -266,7 +268,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
   } else {
     handoff = { purchaseRelease: "RELEASED", releasedAt: now, releasedById: user.id };
   }
-  const quoted = await resolveQuote(data, now);
+  const quoted = await resolveQuote(data, now, clock);
   if (!quoted.ok) return { ok: false, error: quoted.error };
   const quote = quoted.quote;
 
@@ -343,7 +345,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
     handoff.purchaseRelease === "HELD"
       ? " — held, not yet sent to purchase"
       : handoff.purchaseRelease === "SCHEDULED"
-        ? ` — goes to purchase on ${shortDay(handoff.releaseOn as Date, now)}`
+        ? ` — goes to purchase on ${shortDay(handoff.releaseOn as Date, clock, now)}`
         : "";
   await recordAudit({
     userId: user.id,
@@ -548,6 +550,7 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
 
   // Purchase's queue releases a scheduled order whose day has come, whether or not the job has run yet.
   const now = new Date();
+  const clock = await workspaceClock();
   await releaseDueOrders(now, [orderId]);
   const order = await visibleOrder(user.id, orderId);
   if (!order) {
@@ -562,7 +565,7 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
       error:
         order.purchaseRelease === "HELD"
           ? "Sales is holding this order — it hasn't been sent to purchase yet."
-          : `This order goes to purchase on ${order.releaseOn ? shortDay(order.releaseOn, now) : "its scheduled day"} — it can't be processed before then.`,
+          : `This order goes to purchase on ${order.releaseOn ? shortDay(order.releaseOn, clock, now) : "its scheduled day"} — it can't be processed before then.`,
     };
   }
   const vendor = await db.company.findUnique({ where: { id: vendorId } });
@@ -685,7 +688,7 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
           quantity: order.quantity,
           amount: new Prisma.Decimal(savingAmount(benchmark, purchasePrice, order.quantity)),
           recordedAt: now,
-          recordedOn: istCalendarDate(now),
+          recordedOn: clock.calendarDate(now),
           cancelledAt: null,
         };
         await tx.purchaseSaving.upsert({ where: { companyProductId: orderId }, create: { companyProductId: orderId, ...saving }, update: saving });
@@ -737,6 +740,7 @@ export async function acceptPriceIncrease(orderId: string): Promise<ActionResult
   const purchaserId = order.priceReviewRequestedById;
   const vendorId = order.pendingVendorId;
   const now = new Date();
+  const clock = await workspaceClock();
   // At the higher price the order may sell below cost: that is a manager's call, not the salesperson's.
   const lossNeed = await lossNeeded(order, { cost: price, from: "PURCHASE" });
   if (lossNeed && (order.addedByUserId === user.id || !(await hasEffectivePermission(user.id, "orders.approveLoss")))) {
@@ -779,7 +783,7 @@ export async function acceptPriceIncrease(orderId: string): Promise<ActionResult
         quantity: order.quantity,
         amount: new Prisma.Decimal(savingAmount(quote, price, order.quantity)),
         recordedAt: now,
-        recordedOn: istCalendarDate(now),
+        recordedOn: clock.calendarDate(now),
         cancelledAt: null,
       };
       await tx.purchaseSaving.upsert({ where: { companyProductId: orderId }, create: { companyProductId: orderId, ...saving }, update: saving });
@@ -869,7 +873,7 @@ export async function setOrderQuote(input: unknown): Promise<ActionResult<{ id: 
   if (order.pendingPurchasePrice !== null) {
     return { ok: false, error: "Purchase is waiting on a decision about a higher price — accept it or send it back first." };
   }
-  const resolved = await resolveQuote(parsed.data, new Date());
+  const resolved = await resolveQuote(parsed.data, new Date(), await workspaceClock());
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const quote = resolved.quote;
   const cleared = {
@@ -952,13 +956,14 @@ export async function releaseOrder(orderId: string): Promise<ActionResult<{ id: 
   return { ok: true, data: { id: orderId } };
 }
 
-/** Schedules a held (or already scheduled) order to go to purchase on a day after today, in India. */
+/** Schedules a held (or already scheduled) order to go to purchase on a day after today, on the workspace's calendar. */
 export async function scheduleRelease(orderId: string, date: string): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("orders");
   const access = await handOffAccess(user.id, orderId);
   if (!access.ok) return { ok: false, error: access.error };
   const now = new Date();
-  const day = checkReleaseDate(date, now);
+  const clock = await workspaceClock();
+  const day = checkReleaseDate(date, now, clock);
   if (!day.ok) return { ok: false, error: day.error };
 
   const moved = await db.companyProduct.updateMany({
@@ -971,7 +976,7 @@ export async function scheduleRelease(orderId: string, date: string): Promise<Ac
     action: "UPDATE",
     entityType: "Order",
     entityId: orderId,
-    entityLabel: `${formatOrderId(access.order.orderSeq)} — goes to purchase on ${shortDay(day.day, now)}`,
+    entityLabel: `${formatOrderId(access.order.orderSeq)} — goes to purchase on ${shortDay(day.day, clock, now)}`,
   });
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
@@ -1586,8 +1591,8 @@ export async function hasExistingOrderForItem(companyId: string, itemId: string)
  * a purchaser who saves on most orders and gives it all back on one.
  *
  * Everyone's to anybody who can see team performance or approves orders; a purchaser sees their own.
- * `from`/`to` are Indian calendar days (`yyyy-mm-dd`), matched against the day each saving was recorded
- * on — a `@db.Date`, so compared by calendar day, both ends included; either left out is open, as the
+ * `from`/`to` are calendar days (`yyyy-mm-dd`), matched against the workspace's day each saving was
+ * recorded on — a `@db.Date`, so compared by calendar day, both ends included; either left out is open, as the
  * date-range picker's "All time" is. A saving on a cancelled order is listed, struck through, and
  * counted nowhere.
  */

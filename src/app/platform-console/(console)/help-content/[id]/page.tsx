@@ -7,10 +7,11 @@ import { Banner } from "@/components/console/kit/banner";
 import { PageHeader } from "@/components/console/kit/page-header";
 import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { LabelPill, StatusPill } from "@/components/console/kit/status";
-import { when } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
+import type { Clock } from "@/lib/time/zone";
 import { helpEditorChoices, helpItemById } from "../load";
 
 /** The address holds an id, not a name, so the title says what the page is and nothing more. */
@@ -27,7 +28,7 @@ export default async function ConsoleHelpItemPage({ params }: PageProps<"/platfo
   const staff = await consoleStaff(PAGE_ROLES.help);
   const caps = capsFor(staff.role);
   const { id } = await params;
-  const [detail, choices] = await Promise.all([helpItemById(String(id)), caps.manage ? helpEditorChoices() : Promise.resolve(null)]);
+  const [detail, choices, clock] = await Promise.all([helpItemById(String(id)), caps.manage ? helpEditorChoices() : Promise.resolve(null), consoleClock()]);
   if (!detail) notFound();
   const { item, editor, createdByName } = detail;
 
@@ -60,7 +61,7 @@ export default async function ConsoleHelpItemPage({ params }: PageProps<"/platfo
         }
         subtitle={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>{`Updated by ${item.updatedByName}, ${when(item.updatedAt)} IST`}</span>
+            <span>{`Updated by ${item.updatedByName}, ${zoned(clock, item.updatedAt)}`}</span>
             {reachLine(item.state, item.reach) && (
               <>
                 <span aria-hidden="true">·</span>
@@ -89,14 +90,17 @@ export default async function ConsoleHelpItemPage({ params }: PageProps<"/platfo
               Restore it as a draft to change it or publish it again.
             </Banner>
           )}
-          <ReadOnlyView item={item} createdByName={createdByName} />
+          <ReadOnlyView item={item} createdByName={createdByName} clock={clock} />
         </div>
       )}
     </HelpItemScope>
   );
 }
 
-function ReadOnlyView({ item, createdByName }: { item: HelpListItem; createdByName: string }) {
+/** A time on the console's clock with its zone named — it goes live in every workspace at once, whatever their zones. */
+const zoned = (clock: Clock, at: Date) => `${clock.dateTime(at)} ${clock.offsetLabel(at)}`;
+
+function ReadOnlyView({ item, createdByName, clock }: { item: HelpListItem; createdByName: string; clock: Clock }) {
   const names = moduleNames(item.modules);
   const post = item.kind === "POST";
   return (
@@ -108,7 +112,7 @@ function ReadOnlyView({ item, createdByName }: { item: HelpListItem; createdByNa
             { term: "Status", value: <LabelPill map={HELP_STATE} value={item.state} /> },
             {
               term: item.state === "scheduled" ? "Goes live" : "Published",
-              value: item.publishedAt ? `${when(item.publishedAt)} IST` : "Not yet — a draft",
+              value: item.publishedAt ? zoned(clock, item.publishedAt) : "Not yet — a draft",
             },
             ...(post ? [{ term: "Pinned", value: item.pinned ? "Yes" : "No" }] : []),
             { term: post ? "Read more" : "Link", value: item.url ? <span className="font-mono text-xs break-all">{linkText(item.url)}</span> : "None", wide: true },

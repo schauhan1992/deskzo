@@ -18,7 +18,8 @@ import { Button } from "@/components/ui/button";
 import { ActionNoticeRegion, type NoticeTone } from "@/components/ui/action-notice";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { clockFor } from "@/lib/time/zone";
 import { PUNCH_TYPE_LABELS, VERIFY_MODE_LABELS } from "@/lib/hr/iclock";
 
 type Device = Awaited<ReturnType<typeof listBiometricDevices>>[number];
@@ -42,6 +43,7 @@ export function BiometricDevices({
   serverUrl: string;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null);
 
@@ -103,9 +105,16 @@ export function BiometricDevices({
                 </td>
                 <td className="px-4 py-2.5 font-mono text-xs text-muted">{d.serialNumber}</td>
                 <td className="px-4 py-2.5 text-xs text-muted">
-                  {d.lastSeenAt ? formatDateTime(d.lastSeenAt) : <span className="text-warning">never</span>}
+                  {d.lastSeenAt ? clock.dateTimeShort(d.lastSeenAt) : <span className="text-warning">never</span>}
                 </td>
-                <td className="px-4 py-2.5 text-xs text-muted">{d.lastPunchAt ? formatDateTime(d.lastPunchAt) : "—"}</td>
+                {/*
+                  A punch is stored as the terminal's own wall-clock reading labelled UTC (src/lib/hr/iclock.ts),
+                  so its UTC reading is the time the terminal showed — as under Recent punches. The workspace's
+                  clock would move it by the offset a second time.
+                */}
+                <td className="px-4 py-2.5 text-xs text-muted">
+                  {d.lastPunchAt ? clockFor("UTC").dateTimeShort(d.lastPunchAt) : "—"}
+                </td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted">{d._count.punches}</td>
                 <td className="px-4 py-2.5">
                   <button
@@ -344,10 +353,12 @@ function MapRow({ row, people }: { row: Unmapped; people: { id: string; name: st
 
 function DeviceDialog() {
   const router = useRouter();
+  // A terminal keeps the time of the office it is bolted to — the workspace's zone unless told otherwise.
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ serialNumber: "", name: "", location: "", timezone: "Asia/Kolkata" });
+  const [form, setForm] = useState({ serialNumber: "", name: "", location: "", timezone: clock.zone });
 
   function save() {
     setError(null);
@@ -358,7 +369,7 @@ function DeviceDialog() {
         return;
       }
       setOpen(false);
-      setForm({ serialNumber: "", name: "", location: "", timezone: "Asia/Kolkata" });
+      setForm({ serialNumber: "", name: "", location: "", timezone: clock.zone });
       router.refresh();
     });
   }

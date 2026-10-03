@@ -13,7 +13,7 @@ import { getDashboardSummary } from "@/actions/dashboard";
 import { reportOptions, runAnalyticsReport } from "@/actions/analytics";
 import { formatCompanyId, formatLeadId, formatOrderId, parseSeqQuery } from "@/lib/order-id";
 import { formatTicketId } from "@/lib/tickets";
-import { formatIstDateTime, istDateParts, parseIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { PEOPLE_ONLY } from "@/lib/people";
 import type { DisplayBlock, ToolSpec } from "@/lib/copilot/types";
 
@@ -59,6 +59,11 @@ const MAX_OUTPUT_CHARS = 12_000;
 export const MAX_REPORT_ROWS = 40;
 
 const money = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+/**
+ * `yyyy-mm-dd` for a column holding a typed calendar day — an order's end, a lead's close, a task's due
+ * date — which is kept at UTC midnight: the day it holds, whatever the zone. A moment is the workspace's
+ * day instead: `clock.dateKey`.
+ */
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 const limitField = z.number().int().min(1).max(25).optional().describe("How many to return, at most 25. Default 10.");
 
@@ -254,6 +259,7 @@ const TOOLS: CopilotTool[] = [
         page: 1,
         pageSize: input.limit ?? 10,
       });
+      const clock = await workspaceClock();
       return {
         output: {
           total,
@@ -264,7 +270,8 @@ const TOOLS: CopilotTool[] = [
             status: t.status,
             priority: t.priority,
             assignedTo: t.assignedTo?.name ?? null,
-            opened: day(t.createdAt),
+            // A moment, so the workspace's day.
+            opened: clock.dateKey(t.createdAt),
           })),
         },
         activity: `Looked up tickets — ${total} match`,
@@ -446,7 +453,7 @@ const TOOLS: CopilotTool[] = [
     schema: z.object({
       body: z.string().trim().min(1).max(2000),
       title: z.string().trim().max(80).optional(),
-      remindAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).optional().describe("India time, YYYY-MM-DDTHH:mm"),
+      remindAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).optional().describe("The workspace's local time, YYYY-MM-DDTHH:mm"),
       companyRef: z.string().max(60).optional(),
       leadRef: z.string().max(60).optional(),
       ticketRef: z.string().max(60).optional(),
@@ -454,7 +461,8 @@ const TOOLS: CopilotTool[] = [
     async run(ctx, input) {
       const attached = await attachments(ctx.userId, input);
       if ("error" in attached) return { output: { error: attached.error }, activity: "Couldn't draft the note" };
-      const remindAt = input.remindAt ? parseIstDateTime(input.remindAt) : null;
+      const clock = await workspaceClock();
+      const remindAt = input.remindAt ? clock.parseInput(input.remindAt) : null;
       if (input.remindAt && !remindAt) return { output: { error: "That reminder time isn't valid." }, activity: "Couldn't draft the note" };
       const payload = {
         title: input.title ?? "",
@@ -468,7 +476,7 @@ const TOOLS: CopilotTool[] = [
         leadId: attached.leadId ?? "",
         ticketId: attached.ticketId ?? "",
       };
-      const summary = `${input.title ? `${input.title}: ` : ""}${input.body.slice(0, 140)}${input.body.length > 140 ? "…" : ""}${remindAt ? ` — reminder ${formatIstDateTime(remindAt)}` : ""}${attached.label ? ` — on ${attached.label}` : ""}`;
+      const summary = `${input.title ? `${input.title}: ` : ""}${input.body.slice(0, 140)}${input.body.length > 140 ? "…" : ""}${remindAt ? ` — reminder ${clock.dateTime(remindAt)}` : ""}${attached.label ? ` — on ${attached.label}` : ""}`;
       const proposal = await db.copilotProposal.create({
         data: { conversationId: ctx.conversationId, userId: ctx.userId, kind: "NOTE", payload, summary },
         select: { id: true },
@@ -542,11 +550,4 @@ export async function runTool(offered: CopilotTool[], ctx: ToolContext, name: st
 export function outputText(output: unknown): string {
   const text = JSON.stringify(output);
   return text.length > MAX_OUTPUT_CHARS ? `${text.slice(0, MAX_OUTPUT_CHARS)}… (cut short — narrow the question)` : text;
-}
-
-/** Today as India writes it, for the system prompt. */
-export function indianToday(now = new Date()): string {
-  const { year, month, day: d } = istDateParts(now);
-  // `month` is 0-based, as Date has it.
-  return `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }

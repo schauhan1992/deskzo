@@ -15,55 +15,45 @@ import { noteColorClasses, noteColorLabel } from "@/components/notes/note-card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { useClock } from "@/components/time/clock-provider";
 import { cn } from "@/lib/utils";
+import type { Clock } from "@/lib/time/zone";
 
-/**
- * A Date as `datetime-local` wants it: the wall-clock time here, with no timezone on the end.
- *
- * `toISOString()` would be UTC, so a reminder set for 9am in India would come back into the field
- * reading 03:30 — and anybody who then saved the note would move it five and a half hours earlier
- * without touching the control. The offset is subtracted so the value round-trips as typed.
+/*
+ * The reminder field holds a time on the workspace's clock — `clock.input` fills it, and it is sent as
+ * typed for `createNote`/`updateNote` to read on the same clock. It used the browser's offset both
+ * ways, so somebody whose computer was in another zone set reminders hours away from what they typed.
  */
-function toLocalInput(value: Date | string | null | undefined): string {
-  if (!value) return "";
-  const at = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(at.getTime())) return "";
-  return new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-}
 
 /**
- * The three answers people actually give.
+ * The three answers people actually give, on the workspace's clock.
  *
  * Evaluated on click rather than when the module loads, so "tomorrow" stays tomorrow in a tab that
  * has been open overnight.
  */
-const QUICK_REMINDERS: { label: string; at: () => Date }[] = [
+const QUICK_REMINDERS: { label: string; at: (clock: Clock) => Date }[] = [
   {
     label: "This evening",
-    at: () => {
-      const d = new Date();
-      d.setHours(18, 0, 0, 0);
+    at: (clock) => {
+      const now = new Date();
+      const { year, month, day } = clock.parts(now);
+      const evening = clock.at(year, month, day, 18);
       // Already past six: the useful reading of "this evening" is then tomorrow evening.
-      if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
-      return d;
+      return evening.getTime() <= now.getTime() ? clock.at(year, month, day + 1, 18) : evening;
     },
   },
   {
     label: "Tomorrow 9am",
-    at: () => {
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      d.setHours(9, 0, 0, 0);
-      return d;
+    at: (clock) => {
+      const { year, month, day } = clock.parts(new Date());
+      return clock.at(year, month, day + 1, 9);
     },
   },
   {
     label: "Next Monday",
-    at: () => {
-      const d = new Date();
-      d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
-      d.setHours(9, 0, 0, 0);
-      return d;
+    at: (clock) => {
+      const { year, month, day, weekday } = clock.parts(new Date());
+      return clock.at(year, month, day + ((8 - weekday) % 7 || 7), 9);
     },
   },
 ];
@@ -112,12 +102,13 @@ export function NoteDialog({
   canBroadcast?: boolean;
   onSaved?: () => void;
 }) {
+  const clock = useClock();
   const [title, setTitle] = useState(note?.title ?? "");
   const [body, setBody] = useState(note?.body ?? "");
   const [color, setColor] = useState<NoteColor>(note?.color ?? "YELLOW");
   const [visibility, setVisibility] = useState<NoteVisibility>(note?.visibility ?? "PRIVATE");
   const [pinned, setPinned] = useState(note?.pinned ?? false);
-  const [remindAt, setRemindAt] = useState(toLocalInput(note?.remindAt));
+  const [remindAt, setRemindAt] = useState(clock.input(note?.remindAt));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -135,7 +126,7 @@ export function NoteDialog({
     setColor(note?.color ?? "YELLOW");
     setVisibility(note?.visibility ?? "PRIVATE");
     setPinned(note?.pinned ?? false);
-    setRemindAt(toLocalInput(note?.remindAt));
+    setRemindAt(clock.input(note?.remindAt));
     setError(null);
   }
 
@@ -161,8 +152,9 @@ export function NoteDialog({
       visibility,
       pinned,
       // Always sent, never omitted. The action replaces the row rather than patching it, so a
-      // missing value here would cancel a reminder as a side effect of editing the text.
-      remindAt: remindAt ? new Date(remindAt).toISOString() : "",
+      // missing value here would cancel a reminder as a side effect of editing the text. Sent as
+      // typed: the action reads it on the workspace's clock.
+      remindAt,
     };
     const result = note
       ? await updateNote({ id: note.id, ...fields })
@@ -285,7 +277,7 @@ export function NoteDialog({
         </label>
 
         <div className="space-y-1.5">
-          <Label htmlFor="note-remind">Remind me</Label>
+          <Label htmlFor="note-remind">Remind me ({clock.zone.replace(/_/g, " ")} time)</Label>
           <div className="flex flex-wrap items-center gap-2">
             <Input
               id="note-remind"
@@ -295,7 +287,7 @@ export function NoteDialog({
               className="w-auto"
             />
             {QUICK_REMINDERS.map((q) => (
-              <Button key={q.label} type="button" variant="ghost" size="sm" onClick={() => setRemindAt(toLocalInput(q.at()))}>
+              <Button key={q.label} type="button" variant="ghost" size="sm" onClick={() => setRemindAt(clock.input(q.at(clock)))}>
                 {q.label}
               </Button>
             ))}

@@ -10,6 +10,7 @@ import { parseAttlog } from "@/lib/hr/iclock";
 import { linkPunchesToUsers, rollupPunches } from "@/lib/hr/punch-rollup";
 import { dateOnly } from "@/lib/hr/calendar";
 import { claimDeviceSerial, releaseDeviceSerial } from "@/lib/platform/device-routes";
+import { workspaceZone } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -58,7 +59,8 @@ export async function saveBiometricDevice(input: {
     serialNumber,
     name,
     location: input.location?.trim() || null,
-    timezone: input.timezone?.trim() || "Asia/Kolkata",
+    // A terminal keeps the office's time, which is the workspace's unless HR says otherwise.
+    timezone: input.timezone?.trim() || (await workspaceZone()),
     active: input.active ?? true,
   };
 

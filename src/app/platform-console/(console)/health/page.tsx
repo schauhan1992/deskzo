@@ -12,6 +12,7 @@ import { durationText, plural } from "@/lib/console-shared/format";
 import { HEALTH_STATUS } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { staffNameMap } from "@/lib/platform/console-guard";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { failingJobsSummary, platformLeases, systemHealth, type HealthCheck, type HealthStatus } from "@/lib/platform/health";
@@ -34,7 +35,7 @@ export default async function ConsoleHealthPage() {
   const staff = await consoleStaff(PAGE_ROLES.health);
   const caps = capsFor(staff.role);
 
-  const [health, jobs, leases, tick] = await Promise.all([systemHealth(), failingJobsSummary(), platformLeases(), lastTick()]);
+  const [health, jobs, leases, tick, clock] = await Promise.all([systemHealth(), failingJobsSummary(), platformLeases(), lastTick(), consoleClock()]);
   const startedBy = tick && tick.by !== "tick" ? tick.by : null;
   const tickBy = startedBy ? ((await staffNameMap([startedBy])).get(startedBy) ?? null) : null;
 
@@ -86,7 +87,7 @@ export default async function ConsoleHealthPage() {
 
         {/* Full width: six columns of times and holders scroll sideways in anything narrower. */}
         <Panel id="platform-leases" title="Platform leases" description="The platform's own jobs: which process holds each, and how its last run ended" padded={false}>
-          <LeasesTable rows={leases} />
+          <LeasesTable rows={leases} clock={clock} />
         </Panel>
       </div>
     </>
@@ -141,7 +142,7 @@ function LastTickPanel({ tick, by, check, showRevenue }: { tick: TickSummary | n
           </StatusPill>
         ) : undefined
       }
-      footer="The first run of each Indian day also does the daily chores."
+      footer="The first run of each day also does the daily chores."
     >
       {tick ? (
         <DefinitionList

@@ -10,7 +10,8 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 type Settlement = NonNullable<Awaited<ReturnType<typeof getSettlement>>>;
 
@@ -119,7 +120,7 @@ export function SettlementView({
             </Badge>
           </div>
           <p className="mt-0.5 text-xs text-subtle">
-            Last working day {formatDate(settlement.lastWorkingDay)} · {num(settlement.serviceYears)} completed year(s)
+            Last working day {formatCalendarDay(settlement.lastWorkingDay)} · {num(settlement.serviceYears)} completed year(s)
             {settlement.approvedBy && ` · approved by ${settlement.approvedBy.name}`}
           </p>
         </div>

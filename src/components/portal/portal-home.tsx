@@ -12,7 +12,9 @@ import {
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 /**
  * What the customer actually sees.
@@ -44,6 +46,7 @@ export function PortalHome({
   invoices: PortalInvoice[];
   tickets: PortalTicket[];
 }) {
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState<{ kind: "renewal" | "seats"; id: string; name: string } | null>(null);
@@ -133,7 +136,7 @@ export function PortalHome({
                             {/* "1 licence" is wrong for a meeting-room bar. A term is what makes
                                 something a licence; without one it is just a quantity. */}
                             {s.endDate
-                              ? `${s.quantity} ${s.quantity === 1 ? "licence" : "licences"} · until ${formatDate(s.endDate)}`
+                              ? `${s.quantity} ${s.quantity === 1 ? "licence" : "licences"} · until ${formatCalendarDay(s.endDate)}`
                               : `Quantity ${s.quantity}`}
                           </p>
                         </div>
@@ -231,9 +234,9 @@ export function PortalHome({
                     {invoices.map((i) => (
                       <tr key={i.id} className="border-b border-line last:border-0">
                         <td className="whitespace-nowrap px-5 py-2.5 font-medium text-text">{i.number}</td>
-                        <td className="whitespace-nowrap px-5 py-2.5 text-muted">{formatDate(i.date)}</td>
+                        <td className="whitespace-nowrap px-5 py-2.5 text-muted">{formatCalendarDay(i.date)}</td>
                         <td className="whitespace-nowrap px-5 py-2.5 text-muted">
-                          {i.dueDate ? formatDate(i.dueDate) : "—"}
+                          {i.dueDate ? formatCalendarDay(i.dueDate) : "—"}
                         </td>
                         <td className="whitespace-nowrap px-5 py-2.5 text-text">{formatCurrency(i.total)}</td>
                         <td className="px-5 py-2.5">
@@ -275,7 +278,7 @@ export function PortalHome({
                       <p className="text-sm text-text">
                         <span className="font-mono text-xs text-muted">{t.reference}</span> {t.title}
                       </p>
-                      <p className="text-xs text-muted">Raised {formatDate(t.createdAt)}</p>
+                      <p className="text-xs text-muted">Raised {clock.date(t.createdAt)}</p>
                     </div>
                     <Badge tone={t.status === "CLOSED" || t.status === "RESOLVED" ? "green" : "amber"}>
                       {t.status.toLowerCase().replace(/_/g, " ")}

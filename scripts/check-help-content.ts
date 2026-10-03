@@ -450,7 +450,7 @@ async function run(ctx: { scratchUrl: string; controlUrl: string; controlName: s
   const { controlDb, closeControlDb } = require("../src/lib/platform/control-db") as typeof import("../src/lib/platform/control-db");
   const staffLib = require("../src/lib/platform/staff") as typeof import("../src/lib/platform/staff");
   const hc = require("../src/lib/platform/help-content") as typeof import("../src/lib/platform/help-content");
-  const { istDateKey } = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
   const A = require("../src/actions/platform/console-help") as typeof import("../src/actions/platform/console-help");
   const help = require("../src/actions/help") as typeof import("../src/actions/help");
   const onb = require("../src/actions/onboarding") as typeof import("../src/actions/onboarding");
@@ -640,8 +640,9 @@ async function run(ctx: { scratchUrl: string; controlUrl: string; controlName: s
     const ownerPost = keep("post", await A.consoleSaveHelpPost({ title: `${TAG} rule owner post`, body: "From the owner.", publish: "now" }));
     const ownerSched = keep("post", await A.consoleSaveHelpPost({ title: `${TAG} rule owner scheduled`, body: "Later.", publish: "at", publishAt: tomorrow }));
     ok("the owner publishes and schedules for every workspace without typing anything", ownerLink.ok && ownerPost.ok && ownerSched.ok && ownerSched.data.state === "scheduled", [ownerLink, ownerPost, ownerSched].map(why));
-    // The editor's datetime-local value is India's wall clock, wherever the server runs (run this under TZ=UTC too).
-    const dayKey = istDateKey(new Date(Date.now() + 2 * DAY));
+    // The editor's datetime-local value is the console's wall clock — India's, the scratch control plane choosing
+    // no zone — wherever the server runs (run this under TZ=UTC too).
+    const dayKey = indiaClock.dateKey(new Date(Date.now() + 2 * DAY));
     const local = keep("post", await A.consoleSaveHelpPost({ title: `${TAG} rule India time`, body: "At half past nine.", modules: ["hr"], publish: "at", publishAt: `${dayKey}T09:30` }));
     const localRow = local.ok ? await control.platformUpdate.findUnique({ where: { id: local.data.id }, select: { publishedAt: true } }) : null;
     ok("a time from the editor is India time: 09:30 there is 04:00 UTC, whatever this machine's zone", localRow?.publishedAt?.toISOString() === `${dayKey}T04:00:00.000Z`, localRow?.publishedAt?.toISOString() ?? why(local));
@@ -1182,8 +1183,8 @@ async function run(ctx: { scratchUrl: string; controlUrl: string; controlName: s
     const entry = audit.find((a) => a.action === "help.article.create");
     ok(
       "  summed up by its title, and leading to the item's page",
-      !!entry && (labels.auditSummary(entry.action, entry.detail) ?? "").includes("“") && labels.auditHref(entry.action, entry.detail, null)?.startsWith("/help-content/") === true,
-      entry ? `${labels.auditSummary(entry.action, entry.detail)} → ${labels.auditHref(entry.action, entry.detail, null)}` : "none",
+      !!entry && (labels.auditSummary(entry.action, entry.detail, indiaClock) ?? "").includes("“") && labels.auditHref(entry.action, entry.detail, null)?.startsWith("/help-content/") === true,
+      entry ? `${labels.auditSummary(entry.action, entry.detail, indiaClock)} → ${labels.auditHref(entry.action, entry.detail, null)}` : "none",
     );
   });
 }

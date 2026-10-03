@@ -10,8 +10,9 @@ import { Amount, ReportHeader } from "@/components/accounting/report-chrome";
 import { MonthPicker } from "@/components/accounting/month-picker";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { monthName } from "@/lib/ledger/period";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { previousIstMonth } from "@/lib/india-time";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 
 /** Money to the paisa, so a sum of three heads can't show a floating-point tail. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -64,7 +65,8 @@ export default async function GstPage({
     );
   }
 
-  const filingDue = new Date(Date.UTC(year, month, 11)).toISOString().slice(0, 10);
+  // The 11th of the month after: a calendar day, built and shown as the day itself.
+  const filingDue = new Date(Date.UTC(year, month, 11));
   const unsupported = threeB.discrepancies.filter((d) => d.direction === "UNSUPPORTED");
   const underClaimed = threeB.discrepancies.filter((d) => d.direction === "UNDER_CLAIMED");
   const otherCredit = round2(
@@ -83,7 +85,7 @@ export default async function GstPage({
     <div className="animate-fade-rise">
       <ReportHeader
         title="GST returns"
-        subtitle={`${monthName(month)} ${year} · GSTR-1 due ${formatDate(filingDue)}, GSTR-3B by the 20th`}
+        subtitle={`${monthName(month)} ${year} · GSTR-1 due ${formatCalendarDay(filingDue)}, GSTR-3B by the 20th`}
         // The GSTIN these figures are for, from the return itself — not the organisation's, which is
         // only the head office's and says nothing about the registration picked here.
         organisation={`${org.legalName}${one.registration ? ` · GSTIN ${one.registration.gstin}` : ""}`}
@@ -308,7 +310,8 @@ export default async function GstPage({
                       </Badge>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-muted">{formatDate(inv.issueDate)}</td>
+                  {/* The day the return reports it on: India's, in every workspace. */}
+                  <td className="px-4 py-2 text-muted">{indiaClock.date(inv.issueDate)}</td>
                   <td className="px-4 py-2 text-muted">{inv.placeOfSupplyCode ?? "—"}</td>
                   <td className="px-4 py-2 text-right">
                     <Amount value={inv.taxableValue} />

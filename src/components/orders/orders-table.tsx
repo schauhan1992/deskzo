@@ -14,6 +14,8 @@ import { Badge, Card } from "@/components/ui/card";
 import { useColumns } from "@/components/ui/table-columns";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { handoffBadge, vendorPoLabels, type ReleaseState } from "@/lib/orders/handoff-rules";
+import { useClock } from "@/components/time/clock-provider";
+import type { Clock } from "@/lib/time/zone";
 import type { StageColor } from "@/lib/pipeline/rules";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
@@ -54,12 +56,13 @@ type OrderRow = {
 
 /**
  * What an order is waiting on besides its status: sales holding it back from purchase, a higher price
- * waiting for sales, or a cancelled order's vendor PO. Shared with the split list.
+ * waiting for sales, or a cancelled order's vendor PO. Shared with the split list. `clock` is the
+ * workspace's (`useClock()`): a scheduled day says its year when it isn't this one there.
  */
-export function orderFlags(o: Pick<OrderRow, "orderStatus" | "purchaseRelease" | "releaseOn" | "pendingPurchasePrice" | "vendorPoCancel">): string[] {
+export function orderFlags(o: Pick<OrderRow, "orderStatus" | "purchaseRelease" | "releaseOn" | "pendingPurchasePrice" | "vendorPoCancel">, clock: Clock): string[] {
   const flags: string[] = [];
   const open = o.orderStatus !== "CANCELLED" && o.orderStatus !== "REJECTED" && o.orderStatus !== "FULFILLED";
-  const handoff = open ? handoffBadge(o) : null;
+  const handoff = open ? handoffBadge(o, clock) : null;
   if (handoff) flags.push(handoff);
   if (open && o.pendingPurchasePrice !== null) flags.push("Waiting for sales approval");
   if (o.vendorPoCancel === "PENDING") flags.push(vendorPoLabels.PENDING);
@@ -89,6 +92,7 @@ export function OrdersTable({
   const cols = useColumns("orders");
   // The workspace's own names for the statuses (Settings → Wording).
   const wording = useWording();
+  const clock = useClock();
   // The fields this person shows, worked out once: the header and every row draw this one list.
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   // The Step column counts as shown by the picker even where there are no steps to show in it.
@@ -132,7 +136,7 @@ export function OrdersTable({
                 {cols.show("status") && (
                   <td className="px-4 py-2.5">
                     <Badge tone={ORDER_STATUS_TONE[o.orderStatus]}>{statusSlot(wording, o.orderStatus, o.orderStatus.replaceAll("_", " "))}</Badge>
-                    {orderFlags(o).map((flag) => (
+                    {orderFlags(o, clock).map((flag) => (
                       <div key={flag} className="mt-1">
                         <Badge tone={flag === vendorPoLabels.PENDING ? "red" : "amber"}>{flag}</Badge>
                       </div>

@@ -4,19 +4,19 @@ import { Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PartnerUsersView } from "@/lib/partners/console-data";
 import { PARTNER_ROLE_LABELS } from "@/lib/partners/types";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { PartnerUserMenu } from "./user-menu";
 
 /**
  * Partner 360 › Users (spec §9.2): the partner's portal accounts — never a password, a link or a
  * secret — with MANAGERS' actions on each (a new set-password link, reset two-factor, switch off or
  * back on). New admins come from "Invite partner admin" at the top of the page; the partner's own
- * admins invite everyone else from the portal. Server-safe.
+ * admins invite everyone else from the portal. A server component: its days are on the console's clock.
  */
-export function PartnerUsersTab({ data, caps, partnerName }: { data: PartnerUsersView; caps: Caps; partnerName: string }) {
+export async function PartnerUsersTab({ data, caps, partnerName }: { data: PartnerUsersView; caps: Caps; partnerName: string }) {
   if (data.users.length === 0) {
     return (
       <Panel>
@@ -25,6 +25,7 @@ export function PartnerUsersTab({ data, caps, partnerName }: { data: PartnerUser
     );
   }
   const manage = caps.managePartners;
+  const clock = await consoleClock();
   return (
     <Panel padded={false} title="Portal users" description={`${data.activeUsers} of at most ${data.limit} active · ${data.activeAdmins === 1 ? "1 active admin" : `${data.activeAdmins} active admins`}`}>
       <DataTable caption="Portal users" minWidth={900}>
@@ -58,7 +59,7 @@ export function PartnerUsersTab({ data, caps, partnerName }: { data: PartnerUser
               </Td>
               <Td numeric>{u.liveSessions}</Td>
               <Td nowrap muted>
-                {`${dayMonthYear(u.createdAt)} · ${u.createdBy}`}
+                {`${clock.date(u.createdAt)} · ${u.createdBy}`}
               </Td>
               {manage && (
                 <RowActionsCell>

@@ -11,8 +11,8 @@ import { PageHeader } from "@/components/console/kit/page-header";
 import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { RolePill, StatusPill } from "@/components/console/kit/status";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { accountOverview } from "@/lib/platform/staff";
 import { currentStaffSession } from "@/lib/platform/staff-session";
@@ -30,7 +30,7 @@ export const metadata: Metadata = { title: "My account" };
  */
 export default async function ConsoleAccountPage() {
   const staff = await consoleStaff(PAGE_ROLES.account);
-  const session = await currentStaffSession();
+  const [session, clock] = await Promise.all([currentStaffSession(), consoleClock()]);
   const data = await accountOverview(staff.id, session?.sessionId ?? null);
   const { profile } = data;
   const required = session?.twoFactorRequired ?? false;
@@ -67,7 +67,7 @@ export default async function ConsoleAccountPage() {
                 { term: "Name", value: profile.name },
                 { term: "Email", value: profile.email },
                 { term: "Role", value: <RolePill role={profile.role} /> },
-                { term: "On the staff since", value: dayMonthYear(profile.createdAt) },
+                { term: "On the staff since", value: clock.date(profile.createdAt) },
                 { term: "Last sign-in", value: profile.lastSignInAt ? <RelativeTime at={profile.lastSignInAt} /> : "—" },
               ]}
             />
@@ -80,7 +80,7 @@ export default async function ConsoleAccountPage() {
                 title="Authenticator app"
                 status={
                   profile.totpEnabledAt ? (
-                    <StatusPill tone="success">{`Set up on ${dayMonthYear(profile.totpEnabledAt)}`}</StatusPill>
+                    <StatusPill tone="success">{`Set up on ${clock.date(profile.totpEnabledAt)}`}</StatusPill>
                   ) : (
                     <StatusPill tone={required ? "warning" : "neutral"}>Not set up</StatusPill>
                   )

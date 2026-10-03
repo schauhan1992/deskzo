@@ -4,10 +4,10 @@ import { randomUUID } from "node:crypto";
 import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { applyStanding } from "@/lib/billing/lifecycle";
-import { dayMonthYear } from "@/lib/console-shared/format";
 import { parseDirectoryFilters, type DirectoryFilters, type RawParams } from "@/lib/console-shared/params";
 import type { BulkItemResult, BulkResult, CsvExport } from "@/lib/console-shared/types";
 import { BULK_CAPS, extendDays, previewApplyStanding, previewExtendTrial, type ApplyStandingPreview, type ExtendTrialPreview } from "@/lib/platform/bulk";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { MANAGERS, SELLERS, WRITERS, clampInt, consoleAudit, consoleAuditMany, consoleRefusal, idList, revalidateConsole } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { setTrialEnd } from "@/lib/platform/plans";
@@ -181,7 +181,7 @@ export async function consoleBulkExtendTrial(ids: string[], days: number): Promi
     const length = trialLength(days);
     const wanted = selection(ids, BULK_CAPS.extendTrial);
     const now = new Date();
-    const preview = await previewExtendTrial(wanted, length, now);
+    const [preview, clock] = await Promise.all([previewExtendTrial(wanted, length, now), consoleClock()]);
     const batchId = randomUUID();
     const planned = new Map(preview.items.map((i) => [i.tenantId, i]));
     const items: BulkItemResult[] = [];
@@ -199,7 +199,7 @@ export async function consoleBulkExtendTrial(ids: string[], days: number): Promi
         // The lib records `tenant.trial` for each, with the batch.
         await setTrialEnd(tenantId, item.to, `staff:${staff.id}`, { days: length, from: item.from.toISOString(), batchId });
         const outcome = await applyStanding(tenantId, now);
-        items.push({ tenantId, slug: item.slug, ok: true, outcome: `Ends ${dayMonthYear(item.to)}${outcome.action === "lifted" ? " · hold lifted" : ""}` });
+        items.push({ tenantId, slug: item.slug, ok: true, outcome: `Ends ${clock.date(item.to)}${outcome.action === "lifted" ? " · hold lifted" : ""}` });
       } catch (err) {
         items.push({ tenantId, slug: item.slug, ok: false, error: failure(err, "extending a trial", tenantId) });
       }

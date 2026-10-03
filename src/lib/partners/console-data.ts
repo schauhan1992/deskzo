@@ -18,7 +18,6 @@ import { isoDateOrUndefined, one, type RawParams } from "@/lib/console-shared/pa
 import type { PartnerDirectoryFilters, RequestTab } from "@/lib/console-shared/partner-params";
 import type { CsvExport } from "@/lib/console-shared/types";
 import { COUNTRIES } from "@/lib/geo/countries";
-import { istDateParts, istDateTimeInput, istMidnight } from "@/lib/india-time";
 import { attributionHistory, type AttributionFlags } from "@/lib/partners/attribution";
 import { listPartnerAudit, refLabels } from "@/lib/partners/audit";
 import { attributedMrr, customerFacts, type StandingKind } from "@/lib/partners/customers";
@@ -38,7 +37,9 @@ import {
   type PayoutMask,
 } from "@/lib/partners/types";
 import { listPartnerUsers } from "@/lib/partners/users";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * What the console shows about partners (spec §9.2–§9.3): the /partners directory and its CSV, a
@@ -348,20 +349,23 @@ const DIRECTORY_CSV_FIELDS = [
   "Contact phone",
   "Customers",
   "Active users",
-  "Created (IST)",
 ];
 
 /**
  * The directory as the filters say, as CSV — every match, up to 5,000 (more is refused). The partners'
- * contacts, for MANAGERS (spec §12.5); no money, no tax id, no bank detail. Formulae are escaped.
+ * contacts, for MANAGERS (spec §12.5); no money, no tax id, no bank detail. Formulae are escaped. When
+ * each was created, and the file's date, on the console's clock (Settings › Time zone), named in the header.
  */
 export async function partnerDirectoryCsv(f: PartnerDirectoryFilters, now = new Date()): Promise<CsvExport> {
-  const rows = await controlDb().partner.findMany({
-    where: directoryWhere(f),
-    orderBy: [{ displayName: "asc" }, { slug: "asc" }],
-    take: DIRECTORY_EXPORT_CAP + 1,
-    select: { ...DIRECTORY_SELECT, country: true, contactName: true, contactEmail: true, contactPhone: true },
-  });
+  const [rows, clock] = await Promise.all([
+    controlDb().partner.findMany({
+      where: directoryWhere(f),
+      orderBy: [{ displayName: "asc" }, { slug: "asc" }],
+      take: DIRECTORY_EXPORT_CAP + 1,
+      select: { ...DIRECTORY_SELECT, country: true, contactName: true, contactEmail: true, contactPhone: true },
+    }),
+    consoleClock(),
+  ]);
   if (rows.length > DIRECTORY_EXPORT_CAP) throw new PartnerRefused(`Narrow it down — at most ${new Intl.NumberFormat("en-IN").format(DIRECTORY_EXPORT_CAP)} partners in one export.`);
   const data = rows.map((r) => [
     r.slug,
@@ -377,9 +381,10 @@ export async function partnerDirectoryCsv(f: PartnerDirectoryFilters, now = new 
     r.contactPhone ?? "",
     r._count.tenants,
     r._count.users,
-    istDateTimeInput(r.createdAt).replace("T", " "),
+    clock.input(r.createdAt).replace("T", " "),
   ]);
-  return { filename: csvFilename("partners", now), csv: Papa.unparse({ fields: DIRECTORY_CSV_FIELDS, data }, { escapeFormulae: true }), rows: data.length };
+  const fields = [...DIRECTORY_CSV_FIELDS, `Created (${clock.zone})`];
+  return { filename: csvFilename("partners", now, clock), csv: Papa.unparse({ fields, data }, { escapeFormulae: true }), rows: data.length };
 }
 
 // ─── A partner's 360: the header ─────────────────────────────────────────────────────────────────
@@ -549,7 +554,8 @@ export async function partnerOverview(partnerId: string, withMoney: boolean, now
       })
     : null;
   if (!p) return null;
-  const { year } = istDateParts(now);
+  // India's year: commission is counted in India's months, as its statements are (src/lib/partners/statements.ts).
+  const { year } = indiaClock.parts(now);
   const [resellers, tenants, flagged, requests, names, money] = await Promise.all([
     control.partner.findMany({
       where: { parentId: p.id },
@@ -570,7 +576,7 @@ export async function partnerOverview(partnerId: string, withMoney: boolean, now
           control.partner.findUnique({ where: { id: p.id }, select: { taxIds: true, payoutMask: true, payoutUpdatedAt: true } }),
           control.commissionEntry.groupBy({
             by: ["currency"],
-            where: { partnerId: p.id, status: { not: "VOID" }, earnedAt: { gte: istMidnight(year, 0, 1), lte: now } },
+            where: { partnerId: p.id, status: { not: "VOID" }, earnedAt: { gte: indiaClock.midnight(year, 0, 1), lte: now } },
             _sum: { amount: true },
           }),
         ])
@@ -1008,7 +1014,7 @@ export async function partnerTermsView(partnerId: string, withMoney: boolean, no
 /** Actions whose detail holds money (amounts, rates, references, the payout's country and currency). */
 const MONEY_ACTIONS = /^(terms|payout|commission|statement|export)\./;
 
-/** The Activity tab's filters from the URL: `action` (a catalogue name, or a prefix ending "."), `from`, `to` (IST days), `page` — each after `prefix`. */
+/** The Activity tab's filters from the URL: `action` (a catalogue name, or a prefix ending "."), `from`, `to` (days on the console's clock), `page` — each after `prefix`. */
 export function parseActivityFilters(raw: RawParams, prefix = ""): PartnerAuditFilters {
   const action = one(raw, `${prefix}action`, 60);
   const known = action && ((PARTNER_AUDIT_ACTIONS as readonly string[]).includes(action) || /^[a-z-]+\.$/.test(action));

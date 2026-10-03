@@ -1,4 +1,4 @@
-import { istDateParts, istMidnight, istCalendarDate } from "@/lib/india-time";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The month-end close's calendar: months, their bounds, and the working days a checklist falls due on.
@@ -14,8 +14,9 @@ import { istDateParts, istMidnight, istCalendarDate } from "@/lib/india-time";
  *     is its last day (`LedgerLock.lockedUntil`, a task's `dueOn`). Their weekday and parts are read
  *     with the UTC getters, which is exactly the calendar day they name — no zone is involved.
  *   · **Instants**, for comparing timestamps: a month's window is 1st 00:00 IST up to, not including,
- *     the next 1st 00:00 IST (half-open, india-time.ts). An invoice at 23:30 IST on 30 September is
- *     September's; one at 00:10 IST on 1 October is not.
+ *     the next 1st 00:00 IST (half-open, on `indiaClock`). An invoice at 23:30 IST on 30 September is
+ *     September's; one at 00:10 IST on 1 October is not. India's in every workspace, whatever zone it
+ *     keeps: the close is the books', and the books keep India's calendar.
  *
  * Entries the close posts are dated 12:00 UTC (17:30 IST) on their day — the month's last, or an
  * accrual reversal's 1st — which is that day whichever clock reads it, as payroll and depreciation are.
@@ -51,7 +52,7 @@ export function monthOfDate(date: Date): Date {
 
 /** The Indian month an instant falls in, as its 1st. 00:10 IST on 1 October is October's. */
 export function monthOfInstant(at: Date): Date {
-  const { year, month } = istDateParts(at);
+  const { year, month } = indiaClock.parts(at);
   return monthStart(year, month);
 }
 
@@ -69,7 +70,7 @@ export function monthsBetween(a: Date, b: Date): number {
 export function monthWindow(month: Date): { from: Date; to: Date } {
   const y = month.getUTCFullYear();
   const m = month.getUTCMonth();
-  return { from: istMidnight(y, m, 1), to: istMidnight(y, m + 1, 1) };
+  return { from: indiaClock.midnight(y, m, 1), to: indiaClock.midnight(y, m + 1, 1) };
 }
 
 /** The month's last calendar day, as a `@db.Date` holds it — what the lock is set to when it closes. */
@@ -94,7 +95,7 @@ export function monthFirstPostingDate(month: Date): Date {
 
 /** Today in India, as a calendar day. */
 export function indiaToday(now: Date): Date {
-  return istCalendarDate(now);
+  return indiaClock.calendarDate(now);
 }
 
 /** The month India is in now. */
@@ -163,7 +164,7 @@ export function monthName(month: Date): string {
   return LONG[month.getUTCMonth()]!;
 }
 
-/** `yyyy-mm-dd` of a calendar day. */
+/** `yyyy-mm-dd` of a calendar day, held as midnight UTC — its UTC date is the day it names, not "today". */
 export function dayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }

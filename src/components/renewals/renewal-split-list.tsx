@@ -4,7 +4,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/card";
 import { SplitRow } from "@/components/ui/split-list";
 import { SELECTED_PARAM } from "@/lib/view-mode";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 import { getRenewalStatus } from "@/lib/renewals";
 
@@ -42,7 +42,7 @@ export function RenewalSplitList({ renewals, selectedId }: { renewals: RenewalRo
             href={hrefFor(renewal.id)}
             active={renewal.id === selectedId}
             title={renewal.company.name}
-            trailing={renewal.endDate ? formatDate(renewal.endDate) : "—"}
+            trailing={formatCalendarDay(renewal.endDate)}
             subtitle={`${renewal.item.name} · ${renewal.quantity}${renewal.item.unit ? ` ${renewal.item.unit}` : ""}`}
             badges={
               <>

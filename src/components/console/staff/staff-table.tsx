@@ -16,15 +16,17 @@ import { LabelPill, RolePill, StatusPill } from "@/components/console/kit/status
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { RoleCards } from "@/components/console/staff/add-staff-dialog";
+import { useClock } from "@/components/time/clock-provider";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { SidePane } from "@/components/ui/side-pane";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { ROLE_LABEL, STAFF_STATE, twoFactorLabel } from "@/lib/console-shared/labels";
 import { ROLE_DESCRIPTIONS } from "@/lib/console-shared/roles";
 import type { ConsoleRole } from "@/lib/console-shared/types";
 import type { StaffRow, StaffSessionView } from "@/lib/platform/staff";
+import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -58,6 +60,7 @@ function consequence(name: string, role: ConsoleRole): string {
 }
 
 export function StaffTable({ rows, sessions, me, owner, policy }: { rows: StaffRow[]; sessions: StaffSessionView[]; me: string; owner: boolean; policy: Policy }) {
+  const clock = useClock();
   const [paneFor, setPaneFor] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
 
@@ -104,7 +107,7 @@ export function StaffTable({ rows, sessions, me, owner, policy }: { rows: StaffR
         <TBody>
           {rows.map((row) => {
             const self = row.id === me;
-            const factor = twoFactorLabel(row.totpEnabledAt, policy === "required");
+            const factor = twoFactorLabel(row.totpEnabledAt, policy === "required", clock);
             return (
               <Tr key={row.id}>
                 <Td>
@@ -125,7 +128,7 @@ export function StaffTable({ rows, sessions, me, owner, policy }: { rows: StaffR
                   <RolePill role={row.role} />
                 </Td>
                 <Td nowrap>
-                  <StatusPill tone={factor.tone} title={row.totpEnabledAt ? `Authenticator set up ${when(row.totpEnabledAt)}` : undefined}>
+                  <StatusPill tone={factor.tone} title={row.totpEnabledAt ? `Authenticator set up ${clock.dateTime(row.totpEnabledAt)}` : undefined}>
                     {factor.label}
                   </StatusPill>
                 </Td>
@@ -332,7 +335,7 @@ function ChangeRoleDialog({ row, onClose }: { row: StaffRow; onClose: () => void
 type Spec = { title: string; confirmLabel: string; tone: "primary" | "danger"; body: ReactNode; run: () => Promise<ConsoleResult<unknown>>; success: string };
 
 /** The T1 confirmations: what each does to whom, in one sentence, and the verb. */
-function specFor(pending: Exclude<Pending, { kind: "role" | "link" | "switch-on" }>): Spec {
+function specFor(pending: Exclude<Pending, { kind: "role" | "link" | "switch-on" }>, clock: Clock): Spec {
   const { row } = pending;
   const name = <strong className="font-medium">{row.name}</strong>;
   switch (pending.kind) {
@@ -382,7 +385,7 @@ function specFor(pending: Exclude<Pending, { kind: "role" | "link" | "switch-on"
         tone: "primary",
         body: (
           <p>
-            {name}&apos;s session on <strong className="font-medium">{pending.session.device}</strong>, last used {when(pending.session.lastSeenAt)}, ends now. Their
+            {name}&apos;s session on <strong className="font-medium">{pending.session.device}</strong>, last used {clock.dateTime(pending.session.lastSeenAt)}, ends now. Their
             other sessions stay signed in.
           </p>
         ),
@@ -393,8 +396,9 @@ function specFor(pending: Exclude<Pending, { kind: "role" | "link" | "switch-on"
 }
 
 function RowConfirmDialog({ pending, onClose }: { pending: Exclude<Pending, { kind: "role" | "link" | "switch-on" }>; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<unknown>();
-  const spec = specFor(pending);
+  const spec = specFor(pending, clock);
   const close = () => {
     if (!action.pending) onClose();
   };

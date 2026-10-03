@@ -323,7 +323,8 @@ async function run(scratchUrl: string) {
   const { SYSTEM_ACCOUNTS } = require("../src/lib/ledger/chart") as typeof import("../src/lib/ledger/chart");
   const { loadTieOut, tieOut } = require("../src/lib/close/tieout") as typeof import("../src/lib/close/tieout");
   const months = require("../src/lib/close/months") as typeof import("../src/lib/close/months");
-  const { istDateKey, istDateParts } = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
+  // The workspace sets no zone, so its today is India's — and GSTR-3B's month is India's in every workspace.
+  const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
   const { measure } = require("../src/lib/targets/measure") as typeof import("../src/lib/targets/measure");
   const orders = require("../src/actions/order") as typeof import("../src/actions/order");
   const rebates = require("../src/actions/rebate") as typeof import("../src/actions/rebate");
@@ -351,7 +352,7 @@ async function run(scratchUrl: string) {
   };
 
   await runAsTenant(tenant, async () => {
-    const today = istDateKey(new Date());
+    const today = indiaClock.today();
 
     // ── Fixture ────────────────────────────────────────────────────────────────────────────────
     section("Fixture");
@@ -573,7 +574,7 @@ async function run(scratchUrl: string) {
       return round2(Number(s._sum.debit ?? 0) - Number(s._sum.credit ?? 0));
     };
     const statusOf = async (id: string) => (await db.tradeDocument.findUniqueOrThrow({ where: { id }, select: { status: true } })).status;
-    const { year, month } = istDateParts(new Date());
+    const { year, month } = indiaClock.parts(new Date());
     as(owner);
     const before3b = await tax.gstr3b({ month: month + 1, year });
 

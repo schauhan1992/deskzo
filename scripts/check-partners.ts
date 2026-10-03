@@ -41,11 +41,11 @@ import os from "node:os";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { createElement, type ReactNode } from "react";
 import type { CommissionKind, CommissionStatus, InvoiceStatus, PartnerKind, PartnerRole, PartnerStatus, Prisma, StaffRole } from "@deskzo/control-client";
 import type { PartnerMe } from "../src/lib/partners/types";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { renderHtml } from "./lib/render-html";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 // Emptied, not deleted: a Prisma client imported later reloads .env and would put a deleted value back.
@@ -224,23 +224,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 // ─── Rendering server pages ──────────────────────────────────────────────────────────────────────
 type Page = (props: never) => Promise<unknown>;
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 async function renderPage(page: Page, params: Record<string, unknown> = {}, searchParams: Record<string, string> = {}, extra: Record<string, unknown> = {}): Promise<string> {
   searchParamsNow = new URLSearchParams(searchParams);
   const el = await page({ params: Promise.resolve(params), searchParams: Promise.resolve(searchParams), ...extra } as never);
-  return renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
+  return renderHtml(el);
 }
 /** A render, or what it threw — "THREW redirect /login", "THREW notFound". */
 async function outcome(work: () => Promise<string>): Promise<string> {
@@ -319,9 +306,9 @@ async function main() {
     const kek = require("../src/lib/platform/kek") as typeof import("../src/lib/platform/kek");
     const { resetLockouts, MAX_FAILURES } = require("../src/lib/security/lockout") as typeof import("../src/lib/security/lockout");
     const finder = require("../src/lib/platform/find-workspaces") as typeof import("../src/lib/platform/find-workspaces");
-    const india = require("../src/lib/india-time") as typeof import("../src/lib/india-time");
+    // The scratch control plane chooses no console zone: the console's clock, and the statements' months, are India's.
+    const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
     const { formatMoney } = require("../src/lib/billing/money") as typeof import("../src/lib/billing/money");
-    const { istDayKey } = require("../src/lib/console-shared/format") as typeof import("../src/lib/console-shared/format");
     const tickSummary = require("../src/lib/platform/tick-summary") as typeof import("../src/lib/platform/tick-summary");
     const types = require("../src/lib/partners/types") as typeof import("../src/lib/partners/types");
     const pSettings = require("../src/lib/partners/settings") as typeof import("../src/lib/partners/settings");
@@ -643,8 +630,8 @@ async function main() {
           partnerId: s.partnerId,
           currency: s.currency,
           period: s.period,
-          periodStart: india.istMidnight(y!, m! - 1, 1),
-          periodEnd: india.istMidnight(y!, m!, 1),
+          periodStart: indiaClock.midnight(y!, m! - 1, 1),
+          periodEnd: indiaClock.midnight(y!, m!, 1),
           status: s.status,
           entryCount: s.entryCount,
           earned: BigInt(s.total),
@@ -1973,7 +1960,7 @@ async function main() {
       }
       ok("  each look written to the platform log (partner.payout.reveal) and to the partner's, visible to it", (await control.platformAuditLog.count({ where: { action: "partner.payout.reveal" } })) === 2 && (await control.partnerAuditLog.count({ where: { partnerId: f.d1.id, action: "payout.reveal", visibleToPartner: true } })) === 2);
       const partnerToken = await asPartner(f.u.d1Admin);
-      const fromPortal = [await cc.consoleRevealPayout(f.d1.id), await cc.consoleMarkStatementPaid(f.s1.id, { reference: "UTR-ZZP-PORTAL", paidOn: istDayKey(new Date()) })];
+      const fromPortal = [await cc.consoleRevealPayout(f.d1.id), await cc.consoleMarkStatementPaid(f.s1.id, { reference: "UTR-ZZP-PORTAL", paidOn: indiaClock.today() })];
       at(CONSOLE);
       jar.set("deskzo-console", partnerToken);
       const asConsoleCookie = await cc.consoleRevealPayout(f.d1.id);
@@ -2250,9 +2237,9 @@ async function main() {
       const blockedPage = await as("billing", Commissions, {}, { tab: "statements" });
       ok("O4 on: the statements page tells the payer who approved it why they cannot mark it paid", o4Approved.ok && blockedPage.includes("You approved it. With the two-person rule on, another payer records the payment.") && blockedPage.includes("The two-person rule is on"), why(o4Approved));
       await asStaff("billing");
-      const o4Same = await act(cc.consoleMarkStatementPaid(o4.id, { reference: "UTR-ZZP-O4", paidOn: istDayKey(new Date()) }));
+      const o4Same = await act(cc.consoleMarkStatementPaid(o4.id, { reference: "UTR-ZZP-O4", paidOn: indiaClock.today() }));
       await asStaff("owner");
-      const o4Other = await act(cc.consoleMarkStatementPaid(o4.id, { reference: "UTR-ZZP-O4", paidOn: istDayKey(new Date()) }));
+      const o4Other = await act(cc.consoleMarkStatementPaid(o4.id, { reference: "UTR-ZZP-O4", paidOn: indiaClock.today() }));
       ok("  and the console's action refuses them, while another payer may", !o4Same.ok && why(o4Same) === "A different person must mark this statement paid." && o4Other.ok, `${why(o4Same)} / ${why(o4Other)}`);
       await pSettings.setPartnerSettings({ twoPersonPayout: false }, staffIds.owner);
       const programme = await consoleData.programmeSettingsView();
@@ -2277,7 +2264,7 @@ async function main() {
       ok("  a reseller outside its distributor's territories is refused, naming them", why(await create({ parentSlug: f.d1.slug, territories: ["IN", "NP"] })) === "Outside Zzp Distribution's territories: NP.");
       ok("  a GSTIN of the wrong shape is refused", /GSTIN is not in the right format/.test(why(await create({ taxIds: [{ kind: "GSTIN", value: "27ABCDE1234" }] }))));
       ok("  a reseller with an override rate is refused", why(await create({ terms: { ...types.DEFAULT_TERMS.RESELLER, overrideRate: "5" } })) === "Only a distributor has an override rate.");
-      ok("  terms starting yesterday (IST) are refused: never backdated", /can't start in the past/.test(why(await create({ terms: { ...types.DEFAULT_TERMS.RESELLER, effectiveFrom: istDayKey(new Date(Date.now() - DAY)) } }))));
+      ok("  terms starting yesterday (IST) are refused: never backdated", /can't start in the past/.test(why(await create({ terms: { ...types.DEFAULT_TERMS.RESELLER, effectiveFrom: indiaClock.dateKey(new Date(Date.now() - DAY)) } }))));
       ok("  an internal plan cannot carry a plan rate", /internal plan/.test(why(await create({ terms: { ...types.DEFAULT_TERMS.RESELLER, planRates: [{ planKey: "zzp-internal", rate: "5" }] } }))));
       ok("  nothing was made by any of them", !(await control.partner.findUnique({ where: { slug: "zzp-rules" } })));
       const shrink = await act(cp.consoleUpdatePartner(f.d1.id, { territories: ["IN", "LK"] }));
@@ -2356,7 +2343,7 @@ async function main() {
       await asStaff("billing");
       const billingApprove = await act(cc.consoleApproveStatement(draft.id, { taxLines: [] }));
       await asStaff("owner");
-      const ownerPaid = await act(cc.consoleMarkStatementPaid(draft.id, { reference: "UTR-ZZP-CONSOLE", paidOn: istDayKey(new Date()) }));
+      const ownerPaid = await act(cc.consoleMarkStatementPaid(draft.id, { reference: "UTR-ZZP-CONSOLE", paidOn: indiaClock.today() }));
       ok("  BILLING approves, OWNER marks it paid — each audited once", billingApprove.ok && ownerPaid.ok && (await auditCount("partner.statement.approve", staffIds.billing)) === 1 && (await auditCount("partner.statement.paid", staffIds.owner)) === 1, `${why(billingApprove)} / ${why(ownerPaid)}`);
 
       section("L. Owner decision O1 — the default terms the forms start from");
@@ -2568,7 +2555,7 @@ async function main() {
       };
       const billingHtml = async (tenantId: string) => {
         billingTenantId = tenantId;
-        return outcome(async () => renderToStaticMarkup((await BillingPage()) as ReactElement));
+        return outcome(async () => renderHtml(BillingPage()));
       };
       const withPartner = await billingHtml(f.tD1a.id);
       ok("the workspace's Billing page: 'Sold and supported by Zzp Distribution.' as plain text", withPartner.includes('<p class="text-muted">Sold and supported by Zzp Distribution.</p>'), withPartner.slice(0, 200));

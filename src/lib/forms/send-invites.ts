@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { render } from "@/lib/marketing/merge";
 import { marketingSettings, mergeValuesFor, newToken, sendQueued } from "@/lib/marketing/pipeline";
 import type { RecipientState } from "@/lib/marketing/suppression";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { inviteLink, inviteVerdict, tooSoonToResend } from "@/lib/forms/invites";
 import type { ActionResult } from "@/actions/company";
 
@@ -136,7 +136,7 @@ export async function queueFormInvites(input: {
     return { ok: false, error: "The message has to include {{formLink}} — it is each person's own link to the form." };
   }
 
-  const [candidates, settings] = await Promise.all([inviteCandidates(input.form, input.contactIds), marketingSettings()]);
+  const [candidates, settings, clock] = await Promise.all([inviteCandidates(input.form, input.contactIds), marketingSettings(), workspaceClock()]);
   if (candidates.length === 0) return { ok: false, error: "Those people aren't in the address book." };
 
   const skipped: { name: string; reason: string }[] = [];
@@ -174,7 +174,8 @@ export async function queueFormInvites(input: {
       {
         formName: input.form.name,
         formLink: inviteLink(input.origin, input.form.slug, inviteToken),
-        eventDate: input.form.eventStartsAt ? formatIstDateTime(input.form.eventStartsAt) : null,
+        // The event's start on the workspace's clock — where the event is.
+        eventDate: input.form.eventStartsAt ? clock.dateTime(input.form.eventStartsAt) : null,
         eventVenue: input.form.venue,
         inviterName: input.inviterName,
         unsubscribeUrl: `${input.origin.replace(/\/+$/, "")}/preferences/${messageToken}`,

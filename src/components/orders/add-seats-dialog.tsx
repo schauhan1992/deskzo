@@ -9,8 +9,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { istTodayKey } from "@/lib/orders/handoff-rules";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { useClock } from "@/components/time/clock-provider";
 
 type Quote = NonNullable<Awaited<ReturnType<typeof quoteAddon>>>;
 
@@ -29,13 +30,14 @@ export function AddSeatsDialog({
   label?: string;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const [quantity, setQuantity] = useState("1");
-  // Today in India: before 05:30 IST the UTC day is still yesterday.
-  const [startDate, setStartDate] = useState(() => istTodayKey(new Date()));
+  // Today in the workspace's zone, not in UTC's, which can be a day either side of it.
+  const [startDate, setStartDate] = useState(() => clock.today());
   const [annualOverride, setAnnualOverride] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [poNumber, setPoNumber] = useState("");
@@ -71,7 +73,7 @@ export function AddSeatsDialog({
         <div className="space-y-4">
           <p className="text-sm text-muted">
             The extra seats expire with the original
-            {subscription.endDate && <> on {formatDate(subscription.endDate)}</>}, so the customer keeps one renewal
+            {subscription.endDate && <> on {formatCalendarDay(subscription.endDate)}</>}, so the customer keeps one renewal
             date — and they are charged for the remaining days only.
           </p>
 

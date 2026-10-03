@@ -8,7 +8,7 @@ import { requireUser } from "@/lib/session";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { surveyKindLabels } from "@/lib/engagement/anonymity";
-import { formatDate } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * What is waiting for this person.
@@ -20,9 +20,10 @@ export default async function SurveysPage() {
   if (!(await isModuleEnabled("engagement"))) return <ModuleDisabledNotice moduleKey="engagement" />;
 
   const user = await requireUser();
-  const [surveys, canManage] = await Promise.all([
+  const [surveys, canManage, clock] = await Promise.all([
     myOpenSurveys(),
     hasEffectivePermission(user.id, "engagement.manage"),
+    workspaceClock(),
   ]);
 
   const todo = surveys.filter((s) => !s.answered);
@@ -72,7 +73,8 @@ export default async function SurveysPage() {
                   </div>
                   <div className="shrink-0 text-right text-xs text-subtle">
                     {s.questions} question{s.questions === 1 ? "" : "s"}
-                    {s.expiresAt && <div>Closes {formatDate(new Date(s.expiresAt))}</div>}
+                    {/* The last second of its last day on the workspace's clock (src/actions/survey.ts). */}
+                    {s.expiresAt && <div>Closes {clock.date(s.expiresAt)}</div>}
                   </div>
                 </CardContent>
               </Card>

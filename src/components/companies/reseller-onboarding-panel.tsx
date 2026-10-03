@@ -46,6 +46,7 @@ type CreditSummary = {
   overLimit: boolean;
 };
 
+/** A typed day as stored (midnight UTC) back into a date input: its UTC date is the day, in any zone. */
 function toDateInput(d: Date | string | null) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
 }

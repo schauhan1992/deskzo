@@ -10,7 +10,7 @@ import { Input, Label } from "@/components/ui/input";
 import { IconButton } from "@/components/ui/icon-button";
 import { Checkbox } from "@/components/ui/bulk-select";
 import { OutboundLink } from "@/components/ui/outbound-link";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Kiosk = {
   id: string;
@@ -82,6 +82,7 @@ export function KioskManager({ kiosks, origin }: { kiosks: Kiosk[]; origin: stri
 
 function KioskCard({ kiosk, origin }: { kiosk: Kiosk; origin: string }) {
   const router = useRouter();
+  const clock = useClock();
   const [token, setToken] = useState(kiosk.token);
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -98,7 +99,7 @@ function KioskCard({ kiosk, origin }: { kiosk: Kiosk; origin: string }) {
             </div>
             <p className="text-xs text-subtle">
               {kiosk._count.entries} sign-ins
-              {kiosk.lastUsedAt ? ` · last used ${formatDateTime(new Date(kiosk.lastUsedAt))}` : " · never used"}
+              {kiosk.lastUsedAt ? ` · last used ${clock.dateTimeShort(kiosk.lastUsedAt)}` : " · never used"}
             </p>
           </div>
           <div className="flex items-center gap-2">

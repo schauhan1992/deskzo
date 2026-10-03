@@ -143,8 +143,11 @@ async function main() {
   const { CompanyDetail } = require("../src/components/companies/company-detail") as typeof import("../src/components/companies/company-detail");
   const LoadPage = (require("../src/app/(dashboard)/tickets/load/page") as { default: (p: unknown) => Promise<ReactElement> }).default;
 
-  const w = supportWindow(3, new Date("2026-01-15T12:00:00+05:30"));
+  const { clockFor, indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
+  const w = supportWindow(indiaClock, 3, new Date("2026-01-15T12:00:00+05:30"));
   ok("a 3-month window starts at midnight IST on the first of the month, two months back", w.from.toISOString() === new Date("2025-11-01T00:00:00+05:30").toISOString(), w.from.toISOString());
+  const ny = supportWindow(clockFor("America/New_York"), 3, new Date("2026-01-15T12:00:00Z"));
+  ok("  and on a workspace's own clock elsewhere", ny.from.toISOString() === new Date("2025-11-01T00:00:00-04:00").toISOString(), ny.from.toISOString());
 
   await cleanup();
   try {

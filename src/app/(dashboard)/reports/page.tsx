@@ -3,7 +3,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { reportOptions } from "@/actions/analytics";
 import { workbookFilterOptions } from "@/actions/workspace";
 import { ReportExplorer } from "@/components/reports/report-explorer";
-import { istDateKey, istMonthWindow } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 export default async function ReportsPage() {
   /**
@@ -17,7 +17,7 @@ export default async function ReportsPage() {
    */
   if (!(await isModuleEnabled("reports"))) return <ModuleDisabledNotice moduleKey="reports" />;
 
-  const [{ sources, grains }, filterOptions] = await Promise.all([reportOptions(), workbookFilterOptions()]);
+  const [{ sources, grains }, filterOptions, clock] = await Promise.all([reportOptions(), workbookFilterOptions(), workspaceClock()]);
 
   // The clock is read here rather than in the explorer: a client component that reads it during
   // render is non-deterministic, and the React compiler refuses it outright.
@@ -35,9 +35,9 @@ export default async function ReportsPage() {
         sources={sources}
         grains={grains}
         filterOptions={filterOptions}
-        // India's date and month, not the server's: in UTC before 05:30 IST those are still yesterday's.
-        today={istDateKey(now)}
-        monthStart={istDateKey(istMonthWindow(now).from)}
+        // The workspace's date and month, not the server's: in UTC those can still be yesterday's.
+        today={clock.today(now)}
+        monthStart={`${clock.monthKey(now)}-01`}
       />
     </div>
   );

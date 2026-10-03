@@ -12,12 +12,12 @@ import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { useCmsAction } from "@/components/cms/common/use-cms-action";
 import { formatBytes } from "@/components/cms/media/use-uploads";
+import { useClock } from "@/components/time/clock-provider";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { SidePane } from "@/components/ui/side-pane";
 import type { CmsCaps, MediaRow, MediaUsage } from "@/lib/cms/types";
-import { formatIstDateTime } from "@/lib/india-time";
 
 /** What each kind of place that uses an image is called in "Used in". */
 const USAGE_KIND: Record<MediaUsage["kind"], string> = { page: "Page", post: "Post", settings: "Site settings", category: "Category", tag: "Tag" };
@@ -37,6 +37,7 @@ export function MediaDetails({ row, usage, caps, siteOrigin, onClose }: { row: M
 
 function DetailsBody({ row, usage, caps, siteOrigin, onClose }: { row: MediaRow; usage: MediaUsage[]; caps: CmsCaps; siteOrigin: string; onClose: () => void }) {
   const router = useRouter();
+  const clock = useClock();
   const { show } = useConsoleNotice();
   const [alt, setAlt] = useState(row.alt);
   const [confirming, setConfirming] = useState(false);
@@ -70,7 +71,7 @@ function DetailsBody({ row, usage, caps, siteOrigin, onClose }: { row: MediaRow;
         </div>
         <div>
           <dt className="text-xs text-muted">Uploaded</dt>
-          <dd className="text-text" title={formatIstDateTime(row.createdAt)}>
+          <dd className="text-text" title={clock.dateTime(row.createdAt)}>
             <RelativeTime at={row.createdAt} />
             <span className="block text-xs text-muted">{row.createdBy}</span>
           </dd>

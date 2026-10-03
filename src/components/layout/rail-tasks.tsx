@@ -8,7 +8,8 @@ import { createTask, myOpenTasks, toggleTaskDone, type RailTask } from "@/action
 import { Checkbox } from "@/components/ui/bulk-select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { taskDue } from "@/lib/task-due";
 
 /**
  * What is on this person's plate, without leaving the page.
@@ -21,6 +22,7 @@ import { formatDate } from "@/lib/utils";
  */
 export function RailTasks() {
   const router = useRouter();
+  const clock = useClock();
   const [rows, setRows] = useState<RailTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -89,36 +91,42 @@ export function RailTasks() {
 
       {rows && rows.length > 0 && (
         <ul className="space-y-1">
-          {rows.map((task) => (
-            <li key={task.id} className="flex items-start gap-2 rounded-base px-1 py-1.5 hover:bg-surface-sunken">
-              <Checkbox
-                className="mt-0.5"
-                checked={false}
-                aria-label={`Mark "${task.title}" done`}
-                onChange={() => {
-                  startTransition(async () => {
-                    await toggleTaskDone(task.id);
-                    await refresh();
-                  });
-                }}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm text-text">{task.title}</div>
-                {(task.dueDate || task.companyName) && (
-                  <div className="text-xs text-subtle">
-                    {task.companyName}
-                    {task.companyName && task.dueDate ? " · " : ""}
-                    {task.dueDate && (
-                      <span className={task.overdue ? "text-danger" : undefined}>
-                        {task.overdue ? "Overdue " : "Due "}
-                        {formatDate(new Date(task.dueDate))}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </li>
-          ))}
+          {rows.map((task) => {
+            // A typed day or a callback's promised moment (taskDue), overdue by the workspace's calendar —
+            // a callback due later today is not overdue yet.
+            const due = task.dueDate ? taskDue(task.dueDate, clock) : null;
+            const overdue = due !== null && due.key < clock.today();
+            return (
+              <li key={task.id} className="flex items-start gap-2 rounded-base px-1 py-1.5 hover:bg-surface-sunken">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={false}
+                  aria-label={`Mark "${task.title}" done`}
+                  onChange={() => {
+                    startTransition(async () => {
+                      await toggleTaskDone(task.id);
+                      await refresh();
+                    });
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-text">{task.title}</div>
+                  {(due || task.companyName) && (
+                    <div className="text-xs text-subtle">
+                      {task.companyName}
+                      {task.companyName && due ? " · " : ""}
+                      {due && (
+                        <span className={overdue ? "text-danger" : undefined}>
+                          {overdue ? "Overdue " : "Due "}
+                          {due.label}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 

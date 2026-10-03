@@ -13,7 +13,7 @@ import { getDownlineUserIds } from "@/lib/org-chart";
 import { dateOnly, toKey } from "@/lib/hr/calendar";
 import { attendanceStatusValues } from "@/lib/validation/hr";
 import type { ActionResult } from "@/actions/company";
-import { parseIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * Asking for a day of your own attendance to be corrected.
@@ -72,8 +72,10 @@ export async function requestRegularisation(input: unknown): Promise<ActionResul
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const data = parsed.data;
 
+  // The workspace's today, not UTC's: before 05:30 in India, UTC's still said yesterday.
+  const clock = await workspaceClock();
   const date = dateOnly(data.date);
-  if (date > dateOnly(new Date())) {
+  if (date > clock.calendarDate(new Date())) {
     return { ok: false, error: "That day hasn't happened yet." };
   }
 
@@ -93,9 +95,10 @@ export async function requestRegularisation(input: unknown): Promise<ActionResul
     return { ok: false, error: "That day is approved leave. Withdraw the leave instead, or ask HR to correct it." };
   }
 
-  // The times typed are India times on that day — read as UTC they came back five and a half hours on.
-  const requestedCheckIn = data.checkIn ? parseIstDateTime(`${data.date}T${data.checkIn}`) : null;
-  const requestedCheckOut = data.checkOut ? parseIstDateTime(`${data.date}T${data.checkOut}`) : null;
+  // The times typed are the workspace's times on that day — read in the server's zone (UTC) they came
+  // back shifted by the workspace's offset.
+  const requestedCheckIn = data.checkIn ? clock.parseInput(`${data.date}T${data.checkIn}`) : null;
+  const requestedCheckOut = data.checkOut ? clock.parseInput(`${data.date}T${data.checkOut}`) : null;
   if ((data.checkIn && !requestedCheckIn) || (data.checkOut && !requestedCheckOut)) {
     return { ok: false, error: "Enter the times as hh:mm." };
   }

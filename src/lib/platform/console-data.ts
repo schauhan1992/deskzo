@@ -8,12 +8,12 @@ import { consoleOrigin } from "@/lib/platform/staff";
 import { autoDeprovision, gatewayModes, getSetting, secretsSet, signupOpen, trialDays } from "@/lib/platform/settings";
 import { subdomainHost } from "@/lib/tenancy/registry";
 import { PLATFORM_DOMAIN, protocolFor } from "@/lib/tenancy/host";
-import { dayKeyLabel, istDayKey } from "@/lib/console-shared/format";
+import { dayKeyLabel } from "@/lib/console-shared/format";
 import { actorLabel } from "@/lib/console-shared/labels";
 import type { InviteFilters, InviteState, MigrationFilters, ProvisioningFilters, TerminalFilters, TerminalState } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { ActivityItem, TenantStatusKey } from "@/lib/console-shared/types";
-import { istDateParts, istMidnight } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 import { JOB_SAFE_SELECT, TENANT_SAFE_SELECT, WARM_SAFE_SELECT, staffNameMap, toActivityItems } from "@/lib/platform/console-guard";
 import { normaliseSerial } from "@/lib/platform/device-routes";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
@@ -21,6 +21,7 @@ import { WARM_POOL_SIZE } from "@/lib/platform/provisioning";
 import { readPinDirectory, readWorldPlaces } from "@/lib/platform/reference-sync";
 import { behindBy, workspaceMigrationNames } from "@/lib/platform/schema-info";
 import { lastTick } from "@/lib/platform/tick-summary";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * What the console shows — read from the control plane only. The console never opens a workspace's
@@ -629,7 +630,7 @@ export type OverviewData = {
     grants: number;
     failingWebhooks: number;
   };
-  /** 12 weeks, oldest first; weeks start on Monday, in India. */
+  /** 12 weeks, oldest first; weeks start on Monday, on the console's clock. */
   newByWeek: { weekStart: string; label: string; n: number }[];
   /** Workspaces not closed at each of those weeks' ends. */
   openByWeek: number[];
@@ -643,15 +644,14 @@ export type OverviewData = {
   todayKey: string;
 };
 
-/** The last `count` weeks (Monday to Monday, India), oldest first — this week last. */
-function mondayWeeks(now: Date, count: number): { start: Date; end: Date; key: string }[] {
-  const { year, month, day } = istDateParts(now);
-  const weekday = new Date(Date.UTC(year, month, day)).getUTCDay(); // 0 is Sunday
+/** The last `count` weeks (Monday to Monday, on `clock`), oldest first — this week last. */
+function mondayWeeks(now: Date, count: number, clock: Clock): { start: Date; end: Date; key: string }[] {
+  const { year, month, day, weekday } = clock.parts(now); // weekday 0 is Sunday
   const monday = day - ((weekday + 6) % 7);
   return Array.from({ length: count }, (_, i) => {
     const first = monday - 7 * (count - 1 - i);
-    const start = istMidnight(year, month, first);
-    return { start, end: istMidnight(year, month, first + 7), key: istDayKey(start) };
+    const start = clock.midnight(year, month, first);
+    return { start, end: clock.midnight(year, month, first + 7), key: clock.dateKey(start) };
   });
 }
 
@@ -669,7 +669,8 @@ async function referenceState(read: () => Promise<{ sync: { status: string; stal
 export async function consoleOverview(now = new Date()): Promise<OverviewData> {
   const control = controlDb();
   const latest = latestMigrationName();
-  const weeks = mondayWeeks(now, 12);
+  const clock = await consoleClock();
+  const weeks = mondayWeeks(now, 12, clock);
   const since = weeks[0].start;
   const liveGrant = { revokedAt: null, expiresAt: { gt: now } } satisfies Prisma.SupportAccessGrantWhereInput;
   const [
@@ -784,7 +785,7 @@ export async function consoleOverview(now = new Date()): Promise<OverviewData> {
     openByWeek,
     createdThisWeek: newByWeek[newByWeek.length - 1]?.n ?? 0,
     liveGrants,
-    recent: toActivityItems(recentRows, names),
+    recent: toActivityItems(recentRows, names, clock),
     tick: {
       lastStartedAt: tickLease?.lastStartedAt ?? null,
       lastFinishedAt: tickLease?.lastFinishedAt ?? null,
@@ -794,7 +795,7 @@ export async function consoleOverview(now = new Date()): Promise<OverviewData> {
     },
     dailyRanOn,
     reference: { pin, world },
-    todayKey: istDayKey(now),
+    todayKey: clock.dateKey(now),
   };
 }
 
@@ -837,7 +838,7 @@ export type ProvisioningBoard = {
     ready: { id: string; dbName: string; schemaVersion: string | null; current: boolean; createdAt: Date }[];
     taken: { id: string; dbName: string; claimedAt: Date; tenant: { slug: string } | null }[];
   };
-  /** 14 days in India, oldest first. */
+  /** 14 days on the console's clock, oldest first. */
   byDay: { day: string; succeeded: number; failed: number }[];
 };
 
@@ -875,8 +876,9 @@ export async function provisioningBoard(f: ProvisioningFilters, now = new Date()
     ? { OR: [{ companyName: { contains: q, mode: "insensitive" } }, { tenant: { slug: { contains: q, mode: "insensitive" } } }, { tenant: { name: { contains: q, mode: "insensitive" } } }] }
     : {};
   const where: Prisma.ProvisioningJobWhereInput = { AND: [jobFilterWhere(f.filter, now), search] };
-  const { year, month, day } = istDateParts(now);
-  const firstDay = istMidnight(year, month, day - 13);
+  const clock = await consoleClock();
+  const { year, month, day } = clock.parts(now);
+  const firstDay = clock.midnight(year, month, day - 13);
   const [everyStatus, staleRunning, latePending, doneToday, lastFinished, filteredStatus, ready, taken, finished] = await Promise.all([
     control.provisioningJob.groupBy({ by: ["status"], _count: { _all: true } }),
     control.provisioningJob.count({ where: { status: "RUNNING", startedAt: { lt: new Date(now.getTime() - STALE_RUNNING_MS) } } }),
@@ -926,10 +928,10 @@ export async function provisioningBoard(f: ProvisioningFilters, now = new Date()
   const count = (status: (typeof JOB_ORDER)[number]) => everyStatus.find((r) => r.status === status)?._count._all ?? 0;
   const [failed, running, waiting, succeeded] = JOB_ORDER.map(count);
   const slugOf = new Map(takers.map((t) => [t.id, t.slug]));
-  const days = Array.from({ length: 14 }, (_, i) => istDayKey(istMidnight(year, month, day - 13 + i)));
+  const days = Array.from({ length: 14 }, (_, i) => clock.dateKey(clock.midnight(year, month, day - 13 + i)));
   const byDay = days.map((key) => ({ day: key, succeeded: 0, failed: 0 }));
   for (const job of finished) {
-    const bucket = job.finishedAt ? byDay.find((d) => d.day === istDayKey(job.finishedAt!)) : undefined;
+    const bucket = job.finishedAt ? byDay.find((d) => d.day === clock.dateKey(job.finishedAt!)) : undefined;
     if (bucket) bucket[job.status === "SUCCEEDED" ? "succeeded" : "failed"] += 1;
   }
 

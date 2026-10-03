@@ -10,7 +10,7 @@ import { cmsPage } from "@/lib/cms/guard";
 import { getLead } from "@/lib/cms/leads";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { CmsRefused, LEAD_STATUS_LABELS, LEAD_TOPIC_LABELS, cmsCapsFor, type LeadDetail } from "@/lib/cms/types";
-import { formatIstDateTime } from "@/lib/india-time";
+import { consoleClock } from "@/lib/platform/console-clock";
 
 export const metadata: Metadata = { title: "Lead" };
 
@@ -37,6 +37,7 @@ export default async function CmsLeadPage({ params }: PageProps<"/platform-cms/l
     throw err;
   }
 
+  const clock = await consoleClock();
   const subject = encodeURIComponent(`Re: your ${topicLabel(lead.topic).toLowerCase()} request`);
 
   return (
@@ -47,7 +48,7 @@ export default async function CmsLeadPage({ params }: PageProps<"/platform-cms/l
         chips={<LeadStatusPill status={lead.status} />}
         subtitle={
           <>
-            {topicLabel(lead.topic)} · received <RelativeTime at={lead.createdAt} /> ({formatIstDateTime(lead.createdAt)})
+            {topicLabel(lead.topic)} · received <RelativeTime at={lead.createdAt} /> ({clock.dateTime(lead.createdAt)})
           </>
         }
         actions={
@@ -106,7 +107,7 @@ export default async function CmsLeadPage({ params }: PageProps<"/platform-cms/l
                   ),
                 },
                 { term: "Topic", value: topicLabel(lead.topic) },
-                { term: "Received", value: formatIstDateTime(lead.createdAt) },
+                { term: "Received", value: clock.dateTime(lead.createdAt) },
                 { term: "Sent from", value: lead.ip ?? <span className="text-subtle">Not recorded</span> },
               ]}
             />
@@ -116,7 +117,7 @@ export default async function CmsLeadPage({ params }: PageProps<"/platform-cms/l
         <div className="space-y-6">
           <Panel
             title={caps.workLeads ? "Work this lead" : "Status and notes"}
-            description={lead.handledBy ? `Last changed by ${lead.handledBy}, ${formatIstDateTime(lead.updatedAt)}.` : "Nobody has changed it yet."}
+            description={lead.handledBy ? `Last changed by ${lead.handledBy}, ${clock.dateTime(lead.updatedAt)}.` : "Nobody has changed it yet."}
           >
             {caps.workLeads ? (
               <LeadWorkPanel lead={lead} />

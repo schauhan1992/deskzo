@@ -52,6 +52,7 @@ function useAction() {
 }
 
 const money = (n: number) => formatCurrency(String(n));
+/** A `@db.Date` day (held as midnight UTC) back into a date input: its UTC date is the day, in any zone. */
 const dayKey = (d: Date | string | null) => (d ? new Date(d).toISOString().slice(0, 10) : "");
 
 // ─── Deal registration ───────────────────────────────────────────────────────────────────────────

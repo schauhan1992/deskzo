@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { calculateOrderAmount, getPaymentStatus, paymentMethodValues, paymentMethodLabels } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
 
@@ -51,6 +53,7 @@ export function PaymentsDialog({
   companyName?: string;
 }) {
   const router = useRouter();
+  const clock = useClock();
   // A dialog can be mounted once per order on a page of orders, so the ids are generated rather
   // than written — two "Amount" labels pointing at one box is worse than no label at all.
   const fieldId = useId();
@@ -69,7 +72,7 @@ export function PaymentsDialog({
       companyId,
       allocateToOrderId: order?.id ?? "",
       method: "BANK_TRANSFER",
-      paidOn: new Date().toISOString().slice(0, 10),
+      paidOn: clock.today(),
     },
   });
 
@@ -98,7 +101,7 @@ export function PaymentsDialog({
       allocateToOrderId: order!.id,
       method: "BANK_TRANSFER",
       amount: undefined,
-      paidOn: new Date().toISOString().slice(0, 10),
+      paidOn: clock.today(),
       reference: "",
       notes: "",
     });
@@ -159,7 +162,7 @@ export function PaymentsDialog({
                   {paymentMethodLabels[a.payment.method as keyof typeof paymentMethodLabels] ?? a.payment.method}
                 </div>
                 <div className="text-muted">
-                  {formatDate(a.payment.paidOn)}
+                  {formatCalendarDay(a.payment.paidOn)}
                   {a.payment.reference ? ` · Ref: ${a.payment.reference}` : ""} · Applied by {a.allocatedBy.name}
                 </div>
               </div>

@@ -1,7 +1,6 @@
 import type { AnnouncementAudience, AnnouncementTone, Prisma } from "@deskzo/control-client";
 import type { AnnouncementTab } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
-import { parseIstDateTime } from "@/lib/india-time";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { ConsoleRefused } from "@/lib/platform/refused";
@@ -301,7 +300,10 @@ function pick<K extends string>(value: unknown, allowed: readonly K[]): K | null
   return (allowed as readonly string[]).includes(v) ? (v as K) : null;
 }
 
-/** A Date, an India wall-clock "yyyy-mm-ddThh:mm" (a `datetime-local` value) or an ISO time with its zone; undefined when blank. */
+/**
+ * A Date, or an ISO time with its zone; undefined when blank. A `datetime-local` value names no zone: the
+ * action reads it on the console's clock first (src/actions/platform/console-announcements.ts).
+ */
 function dateOf(value: unknown, what: "start" | "end"): Date | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (value instanceof Date) {
@@ -311,8 +313,6 @@ function dateOf(value: unknown, what: "start" | "end"): Date | undefined {
   if (typeof value !== "string") refuse(`Enter the ${what} as a date and time.`);
   const v = value.trim();
   if (!v) return undefined;
-  const local = parseIstDateTime(v);
-  if (local) return local;
   // An instant with its zone written on it — what a script or the check suite passes.
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(v)) {
     const at = new Date(v);
@@ -352,7 +352,8 @@ function targetList(audience: Exclude<AnnouncementAudienceKey, "ALL">, input: un
  *   · starts now unless given; ends after it starts, within 90 days of the start, and not already
  *     past; CRITICAL must end, and is never dismissible.
  *
- * Dates may be Dates, India wall-clock `datetime-local` values, or ISO times with a zone.
+ * Dates may be Dates, or ISO times with a zone — never a bare wall-clock time, whose zone only the
+ * caller knows.
  */
 export function validateAnnouncement(input: unknown, now: Date): Omit<AnnouncementRow, "id"> {
   if (!input || typeof input !== "object") refuse("Nothing to save.");

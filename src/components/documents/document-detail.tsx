@@ -26,7 +26,8 @@ import { BillSettlementPanel } from "@/components/documents/bill-settlement";
 import { followUpPanel } from "@/actions/collections";
 import { FollowUpPanel } from "@/components/collections/follow-up-panel";
 import { getBillSettlement } from "@/actions/payable";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
+import { workspaceClock } from "@/lib/time/workspace";
 import { formatMoney, formatRate, isBaseCurrency, toBase } from "@/lib/currency";
 import { GST_STATE_CODES, amountInWords } from "@/lib/gst-engine";
 import { gstTreatmentLabels } from "@/lib/gst";
@@ -56,7 +57,13 @@ import {
  * already provides.
  */
 export async function DocumentDetail({ id, embedded = false }: { id: string; embedded?: boolean }) {
-  const [document, org, session, multiBranch] = await Promise.all([getTradeDocument(id), getOrganisation(), auth(), isMultiBranch()]);
+  const [document, org, session, multiBranch, clock] = await Promise.all([
+    getTradeDocument(id),
+    getOrganisation(),
+    auth(),
+    isMultiBranch(),
+    workspaceClock(),
+  ]);
   if (!document) notFound();
 
   /**
@@ -175,7 +182,7 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
               {document.company.name}
             </Link>
             {" · "}
-            {formatDate(document.issueDate)}
+            {formatCalendarDay(document.issueDate)}
             {document.reference ? ` · Ref ${document.reference}` : ""}
           </p>
         </div>
@@ -507,10 +514,11 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
                   <p className="mt-0.5 break-all font-mono text-xs text-muted">{document.irn}</p>
                 </div>
                 <Row label="Ack no." value={document.ackNo ?? "—"} />
-                <Row label="Ack date" value={formatDate(document.ackDate)} />
+                {/* The IRP's dates are statutory: India's, in every workspace. */}
+                <Row label="Ack date" value={indiaClock.date(document.ackDate)} />
                 {document.einvoiceCancelledAt && (
                   <>
-                    <Row label="Cancelled" value={formatDate(document.einvoiceCancelledAt)} />
+                    <Row label="Cancelled" value={indiaClock.date(document.einvoiceCancelledAt)} />
                     {document.einvoiceCancelReason && (
                       <p className="text-xs text-subtle">{document.einvoiceCancelReason}</p>
                     )}
@@ -536,10 +544,11 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
                 />
               )}
               <Row label="Created by" value={document.createdBy.name} />
-              <Row label="Created" value={formatDate(document.createdAt)} />
-              <Row label="Issued" value={document.issuedAt ? formatDate(document.issuedAt) : "Not yet issued"} />
-              {document.dueDate && <Row label="Due" value={formatDate(document.dueDate)} />}
-              {document.validUntil && <Row label="Valid until" value={formatDate(document.validUntil)} />}
+              <Row label="Created" value={clock.date(document.createdAt)} />
+              <Row label="Issued" value={document.issuedAt ? clock.date(document.issuedAt) : "Not yet issued"} />
+              {/* The days typed on the document, held as midnight UTC. */}
+              {document.dueDate && <Row label="Due" value={formatCalendarDay(document.dueDate)} />}
+              {document.validUntil && <Row label="Valid until" value={formatCalendarDay(document.validUntil)} />}
             </CardContent>
           </Card>
         </div>

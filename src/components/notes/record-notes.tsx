@@ -8,7 +8,8 @@ import { noteColorClasses } from "@/components/notes/note-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { IconButton } from "@/components/ui/icon-button";
-import { cn, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { cn } from "@/lib/utils";
 import type { NoteVisibility } from "@/lib/validation/note";
 
 /**
@@ -61,6 +62,7 @@ export function RecordNotes({
   /** Whether to offer "Everyone" in the composer at all, rather than offering it and failing. */
   canBroadcast: boolean;
 }) {
+  const clock = useClock();
   // `null` is "not loaded yet" and is the only state that shows a loading line. A reload after a
   // change leaves the notes on screen while it runs, so a pin toggle doesn't blank the panel.
   const [notes, setNotes] = useState<NoteListItem[] | null>(null);
@@ -213,7 +215,7 @@ export function RecordNotes({
                   <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted">
                     <span className="truncate">{note.ownerName}</span>
                     <span aria-hidden>·</span>
-                    <span>{formatDate(note.updatedAt)}</span>
+                    <span>{clock.date(note.updatedAt)}</span>
                     {shared && (
                       <>
                         <span aria-hidden>·</span>

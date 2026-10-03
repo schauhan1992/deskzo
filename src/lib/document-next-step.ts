@@ -1,5 +1,7 @@
 import type { TradeDocumentType, TradeDocumentStatus } from "@prisma/client";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+// A document's dates are typed days kept as their midnight UTC: shown as the day itself, in any zone.
+import { formatCalendarDay } from "@/lib/time/zone";
 import { daysOverdue } from "@/lib/receivables";
 
 export type NextStep = {
@@ -80,7 +82,7 @@ export function nextStepFor({
       return {
         headline: "Sent — waiting on the customer.",
         detail: validUntil
-          ? `Mark it accepted or rejected as you hear back. It expires ${formatDate(validUntil)}.`
+          ? `Mark it accepted or rejected as you hear back. It expires ${formatCalendarDay(validUntil)}.`
           : "Mark it accepted or rejected as you hear back.",
         tone: "info",
       };
@@ -107,7 +109,7 @@ export function nextStepFor({
       }
       return {
         headline: `${amount} is outstanding.`,
-        detail: dueDate ? `Due ${formatDate(dueDate)}. Record the payment when it arrives.` : "Record the payment when it arrives.",
+        detail: dueDate ? `Due ${formatCalendarDay(dueDate)}. Record the payment when it arrives.` : "Record the payment when it arrives.",
         tone: "info",
       };
     }

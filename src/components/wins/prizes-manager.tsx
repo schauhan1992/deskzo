@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { shrinkImage } from "@/lib/shrink-image";
-import { formatIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { cn } from "@/lib/utils";
 
 type Notice = { tone: "success" | "error"; text: string } | null;
@@ -41,6 +41,7 @@ export function PrizesManager({
   lastAnnounced: Date | string | null;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [period, setPeriod] = useState("");
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<Notice>(null);
@@ -94,7 +95,7 @@ export function PrizesManager({
               : race === "TOP_SELLERS"
                 ? "The month's top performer is switched off above, so these prizes aren't announced or shown."
                 : "The most-active awards are off or told to managers only, so these prizes aren't announced or shown."}
-            {lastAnnounced ? ` Last announced ${formatIstDateTime(new Date(lastAnnounced))}.` : ""}
+            {lastAnnounced ? ` Last announced ${clock.dateTime(lastAnnounced)}.` : ""}
           </p>
           <Button
             variant="secondary"

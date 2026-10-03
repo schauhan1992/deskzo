@@ -32,7 +32,8 @@ import { chooseOwner } from "@/lib/leads/assign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { allowsLink } from "@/lib/forms/categories";
 import { formOpenState, hasSeat } from "@/lib/forms/invites";
-import { formatIstDateTime, formatIstTime, istDateParts } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The customer-facing half: the preference centre, and the forms that turn a stranger into a lead.
@@ -94,7 +95,8 @@ export async function updatePreferences(input: {
   const chosen = new Set(input.topics);
   const now = new Date();
 
-  const stamp = now.toISOString().slice(0, 10);
+  // The day on the workspace's calendar, not UTC's.
+  const stamp = (await workspaceClock()).today(now);
   for (const topic of TOPICS) {
     const subscribed = chosen.has(topic.key);
     // The evidence has to describe the status it sits beside. A row reading SUBSCRIBED while its
@@ -216,6 +218,7 @@ async function presentForm(form: {
   capacity: number | null;
 }) {
   const org = await getOrganisation();
+  const clock = await workspaceClock();
   const open = formOpenState(form, new Date());
   const coming =
     form.category === "EVENT" && form.capacity !== null
@@ -233,8 +236,8 @@ async function presentForm(form: {
     eventStartsAt: form.eventStartsAt,
     eventEndsAt: form.eventEndsAt,
     venue: form.venue,
-    /** Written out on the server, in India time, so the page and the browser cannot disagree. */
-    eventWhen: form.eventStartsAt ? eventWhenText(form.eventStartsAt, form.eventEndsAt) : null,
+    /** Written out on the server, on the workspace's clock, so the page and the browser cannot disagree. */
+    eventWhen: form.eventStartsAt ? eventWhenText(clock, form.eventStartsAt, form.eventEndsAt) : null,
     fields: forThePage(await askedQuestions(form.fields)),
     ourName: org.tradeName || org.legalName || "us",
     /** Why it isn't taking answers, or null when it is. */
@@ -245,10 +248,10 @@ async function presentForm(form: {
 }
 
 /** "Thu, 15 Oct 2026, 6:30 pm – 9:00 pm", or both dates in full when it runs past midnight. */
-function eventWhenText(starts: Date, ends: Date | null): string {
-  if (!ends) return formatIstDateTime(starts);
-  const sameDay = istDateParts(starts).day === istDateParts(ends).day && ends.getTime() - starts.getTime() < 86_400_000;
-  return `${formatIstDateTime(starts)} – ${sameDay ? formatIstTime(ends) : formatIstDateTime(ends)}`;
+function eventWhenText(clock: Clock, starts: Date, ends: Date | null): string {
+  if (!ends) return clock.dateTime(starts);
+  const sameDay = clock.dateKey(starts) === clock.dateKey(ends);
+  return `${clock.dateTime(starts)} – ${sameDay ? clock.time(ends) : clock.dateTime(ends)}`;
 }
 
 const publicFormSelect = {

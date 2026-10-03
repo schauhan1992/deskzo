@@ -6,7 +6,7 @@ import { myCallingQueue } from "@/actions/calling-activity";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CallingStation } from "@/components/workspace/calling-station";
-import { formatDate } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { isModuleEntitled } from "@/lib/modules-access";
 
 /**
@@ -32,7 +32,8 @@ export default async function CallingPage({ params }: { params: Promise<{ id: st
           <h1 className="text-xl font-semibold text-text">Calling</h1>
           <p className="mt-1 text-sm text-muted">
             {queue.workbook.description ?? "Your share of this list."}
-            {queue.workbook.dueAt && ` · due ${formatDate(queue.workbook.dueAt)}`}
+            {/* A typed day, held at UTC midnight (src/actions/calling-activity.ts): the day itself. */}
+            {queue.workbook.dueAt && ` · due ${formatCalendarDay(queue.workbook.dueAt)}`}
           </p>
         </div>
       </div>

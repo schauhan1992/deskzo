@@ -10,8 +10,9 @@ import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
-import { plural, when } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import type { StaffSessionView } from "@/lib/platform/staff";
 
 /**
@@ -32,6 +33,7 @@ export function DeviceIcon({ device, className = "h-4 w-4" }: { device: string; 
 }
 
 export function MySessions({ sessions }: { sessions: MySession[] }) {
+  const clock = useClock();
   const [ending, setEnding] = useState<MySession | null>(null);
   const [endingOthers, setEndingOthers] = useState(false);
   const others = sessions.filter((s) => !s.current).length;
@@ -93,7 +95,7 @@ export function MySessions({ sessions }: { sessions: MySession[] }) {
                 </Td>
                 <RowActionsCell>
                   {!s.current && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setEnding(s)} aria-label={`Sign out ${s.device}, last seen ${when(s.lastSeenAt)}`}>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setEnding(s)} aria-label={`Sign out ${s.device}, last seen ${clock.dateTime(s.lastSeenAt)}`}>
                       Sign out
                     </Button>
                   )}
@@ -113,6 +115,7 @@ export function MySessions({ sessions }: { sessions: MySession[] }) {
 
 /** One other device signed out (T1). */
 function EndMySessionDialog({ session, onClose }: { session: MySession; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
   const close = () => {
     if (!action.pending) onClose();
@@ -128,7 +131,7 @@ function EndMySessionDialog({ session, onClose }: { session: MySession; onClose:
       onConfirm={() => action.run(() => consoleEndMySession(session.id), { success: `Signed out of ${session.device}.`, onDone: onClose })}
     >
       <p>
-        Your session on <strong className="font-medium">{session.device}</strong>, last used {when(session.lastSeenAt)}, ends now. Whoever is using it is sent to the
+        Your session on <strong className="font-medium">{session.device}</strong>, last used {clock.dateTime(session.lastSeenAt)}, ends now. Whoever is using it is sent to the
         sign-in page at their next click.
       </p>
     </ConfirmDialog>

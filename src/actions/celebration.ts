@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly } from "@/lib/hr/calendar";
 import { checkUpload } from "@/lib/hr/document-upload";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -176,7 +177,9 @@ export async function upcomingOccasions(days = 30) {
   const { allowed } = await requireHr();
   if (!allowed) return [];
 
-  const today = dateOnly(new Date());
+  // The workspace's today, as a `@db.Date` holds it — the days below are counted from it. UTC's was a
+  // day behind in India until 05:30.
+  const today = (await workspaceClock()).calendarDate(new Date());
   const people = await db.employeeProfile.findMany({
     where: { exitedOn: null, user: { active: true } },
     select: { userId: true, designation: true, dateOfBirth: true, joinedOn: true, user: { select: { name: true } } },

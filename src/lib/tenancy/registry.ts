@@ -58,6 +58,7 @@ function environmentDefault(): Tenant | null {
     isDefault: true,
     keyBundleCipher: null,
     country: "IN",
+    timezone: "Asia/Kolkata",
     // The installation as it was before plans: nothing it had is taken away.
     entitlements: UNRESTRICTED,
     holdReason: null,
@@ -70,7 +71,7 @@ function environmentExtras(): Tenant[] {
     const m = key.match(/^TENANT_DB_([A-Z0-9_]+)$/);
     if (!m || !url) continue;
     const slug = m[1].toLowerCase().replace(/_/g, "-");
-    tenants.push({ id: slug, slug, name: slug, status: "ACTIVE", dbUrl: url, primaryHost: subdomainHost(slug), hosts: [subdomainHost(slug)], source: "env", isDefault: false, keyBundleCipher: null, country: "IN", entitlements: UNRESTRICTED, holdReason: null });
+    tenants.push({ id: slug, slug, name: slug, status: "ACTIVE", dbUrl: url, primaryHost: subdomainHost(slug), hosts: [subdomainHost(slug)], source: "env", isDefault: false, keyBundleCipher: null, country: "IN", timezone: "Asia/Kolkata", entitlements: UNRESTRICTED, holdReason: null });
   }
   return tenants;
 }
@@ -86,6 +87,7 @@ type ControlRow = {
   dbUrlCipher: string | null;
   keyBundleCipher: string;
   country: string;
+  timezone: string;
   entitlements: unknown;
   suspendedFor: "STAFF" | "BILLING" | null;
   domains: { host: string; isPrimary: boolean }[];
@@ -100,6 +102,7 @@ const SELECT = {
   dbUrlCipher: true,
   keyBundleCipher: true,
   country: true,
+  timezone: true,
   entitlements: true,
   suspendedFor: true,
   // Only addresses that are served: a PENDING one has not been proved, a BROKEN one stopped checking out.
@@ -122,6 +125,7 @@ function fromControl(row: ControlRow): Tenant {
     isDefault: row.isDefault,
     keyBundleCipher: row.keyBundleCipher,
     country: row.country,
+    timezone: row.timezone,
     // Malformed or never worked out: the core only.
     entitlements: parseEntitlements(row.entitlements),
     holdReason: row.status === "SUSPENDED" ? (row.suspendedFor ?? "STAFF") : null,

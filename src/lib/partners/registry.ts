@@ -1,5 +1,4 @@
 import { Prisma, type PartnerKind, type PartnerRole, type PartnerStatus } from "@deskzo/control-client";
-import { istDayKey } from "@/lib/console-shared/format";
 import { parseEmailAddress } from "@/lib/email-verification";
 import { COUNTRIES } from "@/lib/geo/countries";
 import { actorRef, partnerAudit, type PartnerActor } from "@/lib/partners/audit";
@@ -9,6 +8,7 @@ import { revokePartnerSessions } from "@/lib/partners/users";
 import { controlDb } from "@/lib/platform/control-db";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import type { Staff } from "@/lib/platform/staff-session";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The partners themselves (partners): creating and editing them, their status, and the public
@@ -323,7 +323,8 @@ export async function createPartnerWith(
       const made = await tx.partner.create({ data: { ...partnerData(clean), parentId, status: "ONBOARDING", createdBy: actorRef(actor) }, select: { id: true, slug: true } });
       const row = await writeTerms(tx, made.id, terms, actorRef(actor));
       await partnerAudit(actor, made.id, "partner.create", "partner", made.id, { partner: made.slug, kind: clean.kind }, { tx });
-      await partnerAudit(actor, made.id, "terms.set", "terms", row.id, { from: istDayKey(row.effectiveFrom) }, { tx });
+      // The day terms start is India's, as src/lib/partners/terms.ts reads it.
+      await partnerAudit(actor, made.id, "terms.set", "terms", row.id, { from: indiaClock.dateKey(row.effectiveFrom) }, { tx });
       if (within) await within(tx, made);
       return made;
     });

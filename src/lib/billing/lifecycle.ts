@@ -5,6 +5,7 @@ import { sendPlatformMail } from "@/lib/platform/mailer";
 import { autoDeprovision } from "@/lib/platform/settings";
 import { protocolFor } from "@/lib/tenancy/host";
 import { subdomainHost } from "@/lib/tenancy/registry";
+import { clockFor, type Clock } from "@/lib/time/zone";
 
 /**
  * Where each workspace stands with paying, and what follows from it — run by the platform tick
@@ -190,10 +191,11 @@ function billingUrl(slug: string): string {
   return `${protocolFor(host)}://${host}/settings/billing`;
 }
 
-const dateText = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+/** "15 October 2026" — on the workspace's own clock, since it is written to its own people. */
+const dateText = (d: Date, clock: Clock) => d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: clock.zone });
 
 /** The reminder due now, if one is: the tightest of 7/3/1 days the date has come within, once. */
-async function remind(tenant: { id: string; slug: string; name: string; to: string | null }, what: "trial" | "hold", at: Date, now: Date): Promise<boolean> {
+async function remind(tenant: { id: string; slug: string; name: string; to: string | null; timezone: string | null }, what: "trial" | "hold", at: Date, now: Date): Promise<boolean> {
   if (!tenant.to) return false;
   const due = reminderStep(at, now);
   if (!due) return false;
@@ -204,11 +206,13 @@ async function remind(tenant: { id: string; slug: string; name: string; to: stri
     return false; // Sent already.
   }
   const when = due.daysLeft === 1 ? "tomorrow" : `in ${due.daysLeft} days`;
+  // The workspace's zone, from its control-plane row (src/lib/time/workspace.ts says the same of a Tenant).
+  const clock = clockFor(tenant.timezone);
   const subject = what === "trial" ? `Your trial of ${tenant.name} ends ${when}` : `${tenant.name} will be held ${when}`;
   const body =
     what === "trial"
-      ? [`Your free trial ends on ${dateText(at)}.`, "", "Choose a plan to keep everything as it is:", billingUrl(tenant.slug)]
-      : [`${tenant.name} will be held on ${dateText(at)} unless the subscription is paid — nothing is deleted, but nobody can work in it until it is.`, "", "Settle it here:", billingUrl(tenant.slug)];
+      ? [`Your free trial ends on ${dateText(at, clock)}.`, "", "Choose a plan to keep everything as it is:", billingUrl(tenant.slug)]
+      : [`${tenant.name} will be held on ${dateText(at, clock)} unless the subscription is paid — nothing is deleted, but nobody can work in it until it is.`, "", "Settle it here:", billingUrl(tenant.slug)];
   await sendPlatformMail({ to: tenant.to, subject, text: body.join("\n") });
   return true;
 }
@@ -220,10 +224,10 @@ export async function applyStanding(tenantId: string, now = new Date()): Promise
   const control = controlDb();
   const tenant = await control.tenant.findUniqueOrThrow({
     where: { id: tenantId },
-    select: { id: true, slug: true, name: true, status: true, suspendedFor: true, suspendedAt: true, billingEmail: true, ownerEmail: true },
+    select: { id: true, slug: true, name: true, status: true, suspendedFor: true, suspendedAt: true, billingEmail: true, ownerEmail: true, timezone: true },
   });
   const standing = await billingStanding(tenantId, now);
-  const who = { id: tenant.id, slug: tenant.slug, name: tenant.name, to: tenant.billingEmail ?? tenant.ownerEmail };
+  const who = { id: tenant.id, slug: tenant.slug, name: tenant.name, to: tenant.billingEmail ?? tenant.ownerEmail, timezone: tenant.timezone };
   const out: LifecycleOutcome = { tenantId, slug: tenant.slug, standing: standing.kind, action: "none", reminded: false };
 
   let plan = plannedAction(tenant, standing, now, true);

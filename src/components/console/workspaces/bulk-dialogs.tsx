@@ -13,8 +13,9 @@ import { BulkRunDialog } from "@/components/console/kit/bulk-run-dialog";
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { AffectedList, ImpactList } from "@/components/console/kit/impact";
 import { SubHeading } from "@/components/console/kit/panel";
+import { useClock } from "@/components/time/clock-provider";
 import { Input, Label } from "@/components/ui/input";
-import { dayMonth, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { STANDING_KIND_LABEL } from "@/lib/console-shared/labels";
 import type { BulkResult, Tone } from "@/lib/console-shared/types";
 import type { ApplyStandingPreview, ExtendTrialPreview } from "@/lib/platform/bulk";
@@ -227,6 +228,7 @@ export function BulkStandingDialog({ open, onClose, rows, onFinished }: BulkDial
 // ─── Extend trials ───────────────────────────────────────────────────────────────────────────────
 
 export function BulkTrialDialog({ open, onClose, rows, onFinished }: BulkDialogProps) {
+  const clock = useClock();
   const ids = rows.map((r) => r.id);
   const preview = usePreview(open, ids, previewTrials);
   const title = `Extend trials by ${BULK_TRIAL_DAYS} days`;
@@ -250,7 +252,7 @@ export function BulkTrialDialog({ open, onClose, rows, onFinished }: BulkDialogP
       if (!data) return { id: r.id, label: r.name, order: 0, index };
       if (!item) return { id: r.id, label: r.name, note: "No longer exists", order: 2, index };
       if (!item.eligible || !item.to) return { id: r.id, label: r.name, note: item.why ?? "No trial to extend", order: 1, index };
-      const dates = `${dayMonth(item.from)} → ${dayMonth(item.to)}`;
+      const dates = `${clock.dayMonth(item.from)} → ${clock.dayMonth(item.to)}`;
       return { id: r.id, label: r.name, note: item.liftsHold ? `${dates} · reopens` : dates, tone: item.liftsHold ? ("success" as const) : undefined, order: 0, index };
     })
     .sort((a, b) => a.order - b.order || a.index - b.index);

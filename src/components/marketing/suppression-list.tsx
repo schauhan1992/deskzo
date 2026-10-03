@@ -8,7 +8,7 @@ import { addSuppression, removeSuppression } from "@/actions/marketing";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 type Suppression = Awaited<ReturnType<typeof listSuppressions>>[number];
 
@@ -149,6 +149,7 @@ export function SuppressionList({ rows, canManage }: { rows: Suppression[]; canM
 
 function SuppressionRow({ row, canManage }: { row: Suppression; canManage: boolean }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -162,7 +163,7 @@ function SuppressionRow({ row, canManage }: { row: Suppression; canManage: boole
         {error && <span className="block text-[11px] text-danger">{error}</span>}
       </td>
       <td className="px-4 py-2.5 text-xs text-muted">
-        {formatDate(row.createdAt)}
+        {clock.date(row.createdAt)}
         {row.createdBy && <span className="block text-[11px] text-subtle">{row.createdBy.name}</span>}
       </td>
       {canManage && (

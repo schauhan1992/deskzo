@@ -13,6 +13,8 @@ import {
   type Schedule,
   type ScheduleState,
 } from "@/lib/backup/schedule";
+import { workspaceClock } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The schedule as stored, and the one function that acts on it.
@@ -104,7 +106,8 @@ export async function runScheduledBackup(now = new Date()): Promise<ScheduledRun
 
   const schedule = await loadSchedule();
   const state = await scheduleState();
-  const verdict: Due = dueNow(schedule, state, now);
+  // The hour typed in Settings is the workspace's.
+  const verdict: Due = dueNow(schedule, state, now, await workspaceClock());
 
   if (!verdict.due) {
     return { ran: false, reason: verdict.reason, nextRunAt: verdict.nextRunAt };
@@ -120,9 +123,9 @@ export async function runScheduledBackup(now = new Date()): Promise<ScheduledRun
   return { ran: true, reason: verdict.reason, outcome };
 }
 
-/** For the settings page: when the next one is expected, or null if it never is. */
-export function nextRunFor(schedule: Schedule, now = new Date()): Date | null {
-  return schedule.enabled ? nextRunAfter(now, schedule) : null;
+/** For the settings page: when the next one is expected, or null if it never is — at the workspace's hour. */
+export function nextRunFor(schedule: Schedule, clock: Clock, now = new Date()): Date | null {
+  return schedule.enabled ? nextRunAfter(now, schedule, clock) : null;
 }
 
 /** Exported so the page can explain a stuck `RUNNING` row in the same words the scheduler uses. */

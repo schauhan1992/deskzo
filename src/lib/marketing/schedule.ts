@@ -7,13 +7,14 @@
  * thing standing between four separate campaigns and one customer hearing from us four times in a
  * morning.
  *
- * All arithmetic is done in explicit minutes-from-midnight at a fixed UTC offset rather than via
- * the server's local time. A container running UTC and an office running IST would otherwise
- * disagree about when 9am is, and only one of them would be right.
+ * All arithmetic is done in minutes-from-midnight on the workspace's own clock (`rules.clock`, from
+ * src/lib/time/zone.ts) rather than via the server's local time. A container running UTC and an
+ * office running IST would otherwise disagree about when 9am is, and only one of them would be right.
+ * It used to be a fixed +05:30 — right in India, and a whole offset out for any other workspace; the
+ * clock also keeps daylight saving where the zone has it.
  */
 
-/** India. The default rather than a constant, so this stays usable elsewhere. */
-export const IST_OFFSET_MINUTES = 330;
+import type { Clock } from "@/lib/time/zone";
 
 export const DEFAULT_WEEK_OFFS = [0, 6]; // Sunday, Saturday
 
@@ -28,19 +29,16 @@ export type ScheduleRules = {
   /** `yyyy-mm-dd` keys, from `closedDates()` in src/lib/hr/calendar.ts. */
   holidays?: Set<string>;
   weekOffs?: number[];
-  offsetMinutes?: number;
+  /** The workspace's clock: the quiet hours, windows, week-offs and holidays are its wall time and days. */
+  clock: Clock;
 };
 
-const DAY = 86400000;
-
-function localParts(at: Date, offsetMinutes: number) {
-  const shifted = new Date(at.getTime() + offsetMinutes * 60000);
+function localParts(at: Date, clock: Clock) {
+  const p = clock.parts(at);
   return {
-    dayKey: shifted.toISOString().slice(0, 10),
-    weekday: shifted.getUTCDay(),
-    minute: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
-    /** Midnight of that local day, as a real instant. */
-    dayStart: new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - offsetMinutes * 60000),
+    dayKey: clock.dateKey(at),
+    weekday: p.weekday,
+    minute: p.hour * 60 + p.minute,
   };
 }
 
@@ -80,20 +78,23 @@ function isWorkingDay(dayKey: string, weekday: number, rules: ScheduleRules): bo
  * spin, and returning `from` unchanged makes that visible as an early send rather than a hang.
  */
 export function nextSendTime(from: Date, rules: ScheduleRules): Date {
-  const offset = rules.offsetMinutes ?? IST_OFFSET_MINUTES;
+  const { clock } = rules;
   const blocks = allowedBlocks(rules);
   if (blocks.length === 0) return from;
+  const first = clock.parts(from);
 
   for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
-    const probe = new Date(from.getTime() + dayOffset * DAY);
-    const { dayKey, weekday, dayStart } = localParts(probe, offset);
+    // That day on the workspace's calendar, looked at from its noon, well clear of a night-time clock change.
+    const probe = clock.at(first.year, first.month, first.day + dayOffset, 12);
+    const { dayKey, weekday } = localParts(probe, clock);
     if (!isWorkingDay(dayKey, weekday, rules)) continue;
+    const day = clock.parts(probe);
 
     // Only the first day is constrained by the time we're starting from; later days start fresh.
-    const floor = dayOffset === 0 ? localParts(from, offset).minute : 0;
+    const floor = dayOffset === 0 ? first.hour * 60 + first.minute : 0;
     for (const [start, end] of blocks) {
       if (end <= floor) continue;
-      return new Date(dayStart.getTime() + Math.max(start, floor) * 60000);
+      return clock.at(day.year, day.month, day.day, 0, Math.max(start, floor));
     }
   }
   return from;
@@ -101,8 +102,7 @@ export function nextSendTime(from: Date, rules: ScheduleRules): Date {
 
 /** Whether this instant is already inside an allowed stretch — the tick's own check. */
 export function isSendableNow(at: Date, rules: ScheduleRules): boolean {
-  const offset = rules.offsetMinutes ?? IST_OFFSET_MINUTES;
-  const { dayKey, weekday, minute } = localParts(at, offset);
+  const { dayKey, weekday, minute } = localParts(at, rules.clock);
   if (!isWorkingDay(dayKey, weekday, rules)) return false;
   return allowedBlocks(rules).some(([a, b]) => minute >= a && minute < b);
 }

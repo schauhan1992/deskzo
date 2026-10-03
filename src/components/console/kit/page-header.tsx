@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { formatIstTime } from "@/lib/india-time";
 import { PageNotice } from "./notice";
 import { AutoRefresh, RefreshButton } from "./refresh";
+import { ClockTime } from "./relative-time";
 
 export type Crumb = { label: string; href?: string };
 
@@ -12,8 +12,9 @@ export type Crumb = { label: string; href?: string };
  * page's actions, one factual subtitle line with how fresh the figures are, and the page's outcome
  * region (`PageNotice`) — so "Workspace reopened." always appears in the same place.
  *
- * `asOf` is the loaders' clock, printed rather than implied: a board read at 10:02 says so, and the
- * refresh button next to it is how you get 10:05.
+ * `asOf` is the loaders' now, printed rather than implied: a board read at 10:02 says so, and the
+ * refresh button next to it is how you get 10:05. The time is on the clock the layout provides (the
+ * console's), through `ClockTime` — this header is drawn on the server.
  */
 export function PageHeader({
   title,
@@ -77,7 +78,7 @@ export function PageHeader({
               {subtitle && <div className="min-w-0">{subtitle}</div>}
               {asOf && (
                 <span className="inline-flex items-center gap-0.5 text-xs text-subtle">
-                  {`Updated ${formatIstTime(asOf)} IST`}
+                  Updated <ClockTime at={asOf} />
                   <RefreshButton />
                 </span>
               )}

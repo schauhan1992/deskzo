@@ -34,9 +34,12 @@ import "dotenv/config";
 import Module from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { createElement, type ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { addDays, checkFutureDay, dayKey, istToday, promiseOutcome, promiseState } from "../src/lib/collections/rules";
+import { addDays, checkFutureDay, dayKey, promiseOutcome, promiseState } from "../src/lib/collections/rules";
+// The rules take the workspace's clock; the fixtures here are Indian days and times.
+import { indiaClock } from "../src/lib/time/zone";
+import { renderHtml } from "./lib/render-html";
 
 // ── Who the actions think is calling ───────────────────────────────────────────────────────────
 
@@ -135,22 +138,8 @@ const section = (t: string) => console.log(`\n— ${t} —\n`);
 const errorOf = (r: { ok: boolean; error?: string }) => (r.ok ? "ok" : r.error);
 const ist = (s: string) => new Date(`${s}+05:30`);
 /** A day `n` days from today in India, as the date inputs send it. */
-const plusDays = (n: number) => dayKey(addDays(istToday(new Date()), n));
+const plusDays = (n: number) => dayKey(addDays(indiaClock.calendarDate(new Date()), n));
 
-/** Awaits every async server component in a tree, so a static render can take it. */
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 const text = (html: string) =>
   html
     .replace(/<[^>]+>/g, " ")
@@ -212,14 +201,14 @@ async function main() {
   // ── The rules ────────────────────────────────────────────────────────────────────────────────
   section("The rules, without a database");
 
-  const c1 = checkFutureDay("2026-09-30", ist("2026-09-30T23:59:00"), "promised date");
-  const c2 = checkFutureDay("2026-09-30", ist("2026-10-01T00:01:00"), "promised date");
+  const c1 = checkFutureDay("2026-09-30", ist("2026-09-30T23:59:00"), "promised date", indiaClock);
+  const c2 = checkFutureDay("2026-09-30", ist("2026-10-01T00:01:00"), "promised date", indiaClock);
   ok("a promised date may be today in India: 30 Sep is fine at 23:59 IST on 30 Sep", c1.ok);
   ok("  and refused two minutes later, at 00:01 IST on 1 Oct (18:31 UTC on 30 Sep)", !c2.ok, c2.ok ? "accepted" : c2.error);
-  ok("  a date that isn't one is refused, and so is one more than a year out", !checkFutureDay("2026-02-30", ist("2026-01-01T10:00:00"), "d").ok && !checkFutureDay("2027-12-01", ist("2026-09-30T10:00:00"), "d").ok);
+  ok("  a date that isn't one is refused, and so is one more than a year out", !checkFutureDay("2026-02-30", ist("2026-01-01T10:00:00"), "d", indiaClock).ok && !checkFutureDay("2027-12-01", ist("2026-09-30T10:00:00"), "d", indiaClock).ok);
 
   const due = (promisedOn: string, at: string, status: "OPEN" | "BROKEN" | "KEPT" | "SUPERSEDED" = "OPEN") =>
-    promiseState({ promiseStatus: status, promisedOn: new Date(`${promisedOn}T00:00:00Z`) }, ist(at));
+    promiseState({ promiseStatus: status, promisedOn: new Date(`${promisedOn}T00:00:00Z`) }, indiaClock, ist(at));
   ok("a promise three days out reads 'Due in 3 days', in amber", due("2026-10-03", "2026-09-30T10:00:00").text === "Due in 3 days" && due("2026-10-03", "2026-09-30T10:00:00").tone === "amber");
   ok("  on its day, 'Due today' — until midnight IST", due("2026-09-30", "2026-09-30T23:30:00").text === "Due today");
   ok(
@@ -232,18 +221,18 @@ async function main() {
   const ev = (amount: number, recorded: string, effective = recorded) => ({ amount, recordedAt: ist(recorded), effectiveAt: ist(effective) });
   const base = { loggedAt: ist("2026-10-01T10:00:00"), promisedOn: new Date("2026-10-15T00:00:00Z"), promisedAmount: 5000, total: 10000 };
   const before = ev(2000, "2026-09-20T10:00:00");
-  ok("money entered before the promise doesn't count toward it", !promiseOutcome({ ...base, events: [before, ev(3000, "2026-10-05T10:00:00")] }).kept);
-  const lastMinute = promiseOutcome({ ...base, events: [before, ev(3000, "2026-10-05T10:00:00"), ev(2000, "2026-10-15T23:00:00")] });
+  ok("money entered before the promise doesn't count toward it", !promiseOutcome({ ...base, events: [before, ev(3000, "2026-10-05T10:00:00")] }, indiaClock).kept);
+  const lastMinute = promiseOutcome({ ...base, events: [before, ev(3000, "2026-10-05T10:00:00"), ev(2000, "2026-10-15T23:00:00")] }, indiaClock);
   ok("  ₹3,000 then ₹2,000 at 23:00 IST on the promised day keeps a ₹5,000 promise", lastMinute.kept, JSON.stringify(lastMinute));
-  const late = promiseOutcome({ ...base, events: [before, ev(3000, "2026-10-05T10:00:00"), ev(2000, "2026-10-16T00:10:00")] });
+  const late = promiseOutcome({ ...base, events: [before, ev(3000, "2026-10-05T10:00:00"), ev(2000, "2026-10-16T00:10:00")] }, indiaClock);
   ok("  the same ₹2,000 at 00:10 IST the next day (still the 15th in UTC) does not", !late.kept, JSON.stringify(late));
   ok(
     "  a receipt entered on the 20th but received on the 14th counts: the client kept their word",
-    promiseOutcome({ ...base, events: [before, ev(5000, "2026-10-20T10:00:00", "2026-10-14T00:00:00")] }).kept,
+    promiseOutcome({ ...base, events: [before, ev(5000, "2026-10-20T10:00:00", "2026-10-14T00:00:00")] }, indiaClock).kept,
   );
-  const whole = promiseOutcome({ ...base, promisedAmount: null, events: [before, ev(7000, "2026-10-10T10:00:00")] });
+  const whole = promiseOutcome({ ...base, promisedAmount: null, events: [before, ev(7000, "2026-10-10T10:00:00")] }, indiaClock);
   ok("with no amount, the promise is to clear what was owed when it was made (₹8,000)", !whole.kept && whole.needed === 8000, JSON.stringify(whole));
-  ok("  a promise of more than was owed is kept by settling it in full", promiseOutcome({ ...base, promisedAmount: 9000, events: [before, ev(8000, "2026-10-10T10:00:00")] }).kept);
+  ok("  a promise of more than was owed is kept by settling it in full", promiseOutcome({ ...base, promisedAmount: 9000, events: [before, ev(8000, "2026-10-10T10:00:00")] }, indiaClock).kept);
 
   /* eslint-disable @typescript-eslint/no-require-imports */
   const collections = require("../src/actions/collections") as typeof import("../src/actions/collections");
@@ -638,7 +627,7 @@ async function main() {
     const save = (name: string, html: string) => writeFileSync(path.join(RENDERS, `${name}.html`), html);
     const page = async (who: Actor, name: string, fn: PageFn, searchParams: Record<string, string> = {}) => {
       as(who);
-      const html = renderToStaticMarkup((await resolveAsync(await fn({ searchParams: Promise.resolve(searchParams), params: Promise.resolve({}) }))) as ReactElement);
+      const html = await renderHtml(fn({ searchParams: Promise.resolve(searchParams), params: Promise.resolve({}) }));
       save(name, html);
       return { html, text: text(html) };
     };
@@ -673,7 +662,7 @@ async function main() {
     /** The words, plus the markup (as `.html`) for asserting on a button that is or isn't there. */
     const render = async (who: Actor, name: string, el: ReactElement) => {
       as(who);
-      const html = renderToStaticMarkup((await resolveAsync(el)) as ReactElement);
+      const html = await renderHtml(el);
       save(name, html);
       return Object.assign(text(html), { html });
     };

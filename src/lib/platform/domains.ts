@@ -38,6 +38,8 @@ import {
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { legacyHosts, protocolFor } from "@/lib/tenancy/host";
 import { forgetRegistry, subdomainHost } from "@/lib/tenancy/registry";
+import { clockOfTenant } from "@/lib/time/workspace";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * Custom domains: a workspace reached at an address of its own (erp.acme.com) as well as its
@@ -440,20 +442,25 @@ async function mailOwner(domain: DomainRow, problems: string[], brand: string): 
   const key = `${kind}:${domain.host}:${domain.failingSince.toISOString()}`;
   const told = await control.platformAuditLog.findFirst({ where: { tenantId: domain.tenantId, action: "tenant.domain.mail", detail: { path: ["key"], equals: key } }, select: { id: true } });
   if (told) return false;
-  const tenant = await control.tenant.findUnique({ where: { id: domain.tenantId }, select: { slug: true, name: true, ownerEmail: true } });
+  const tenant = await control.tenant.findUnique({ where: { id: domain.tenantId }, select: { slug: true, name: true, ownerEmail: true, timezone: true } });
   if (!tenant) return false;
   const to = tenant.ownerEmail?.trim() || null;
   if (to) {
     const own = subdomainHost(tenant.slug);
-    const mail = domainMail(kind, {
-      host: domain.host,
-      workspace: tenant.name,
-      ownAddress: own,
-      failingSince: domain.failingSince,
-      problems,
-      settingsUrl: `${protocolFor(own)}://${own}/settings/domain`,
-      brand,
-    });
+    // Its days on the workspace's own clock — the owner reads them there.
+    const mail = domainMail(
+      kind,
+      {
+        host: domain.host,
+        workspace: tenant.name,
+        ownAddress: own,
+        failingSince: domain.failingSince,
+        problems,
+        settingsUrl: `${protocolFor(own)}://${own}/settings/domain`,
+        brand,
+      },
+      clockOfTenant(tenant),
+    );
     await sendPlatformMail({ to, subject: mail.subject, text: mail.text });
   }
   // Written even without an owner's address, so the next day does not try again.
@@ -500,9 +507,10 @@ export type WorkspaceDomains = {
   domains: DomainView[];
 };
 
-export function domainView(row: DomainRow, slug: string): DomainView {
+/** `clock`: the workspace's own — the status text names days as its Settings › Domain page reads them. */
+export function domainView(row: DomainRow, slug: string, clock: Clock): DomainView {
   const state = { status: row.status, failingSince: row.failingSince };
-  const words = domainStatusText(state);
+  const words = domainStatusText(state, clock);
   return {
     id: row.id,
     host: row.host,
@@ -524,11 +532,14 @@ export function domainView(row: DomainRow, slug: string): DomainView {
   };
 }
 
-/** A workspace's addresses as its Settings › Domain page and the console show them, oldest first. */
+/**
+ * A workspace's addresses as its Settings › Domain page and the console show them, oldest first. The
+ * status text is on the workspace's clock; the console words it again on its own.
+ */
 export async function workspaceDomains(tenantId: string): Promise<WorkspaceDomains> {
   const control = controlDb();
   const [tenant, rows] = await Promise.all([
-    control.tenant.findUnique({ where: { id: tenantId }, select: { slug: true, entitlements: true } }),
+    control.tenant.findUnique({ where: { id: tenantId }, select: { slug: true, entitlements: true, timezone: true } }),
     control.tenantDomain.findMany({ where: { tenantId }, orderBy: { createdAt: "asc" }, select: DOMAIN_SELECT }),
   ]);
   if (!tenant) throw new DomainRefused(WORKSPACE_GONE);
@@ -544,6 +555,6 @@ export async function workspaceDomains(tenantId: string): Promise<WorkspaceDomai
     used,
     canAdd: allowanceLeft(limit, used),
     allowanceText: allowanceText(limit, used),
-    domains: rows.map((r) => domainView(r, tenant.slug)),
+    domains: rows.map((r) => domainView(r, tenant.slug, clockOfTenant(tenant))),
   };
 }

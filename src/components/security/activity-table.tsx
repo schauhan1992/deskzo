@@ -8,7 +8,9 @@ import { exportActivity, type ActivityFilters } from "@/actions/activity";
 import { activityKind, SEVERITY_TONE } from "@/lib/security/activity-kinds";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useClock } from "@/components/time/clock-provider";
 import { csvFilename } from "@/lib/csv";
+import { MONTH_NAMES, type Clock } from "@/lib/time/zone";
 
 /**
  * The log itself.
@@ -18,16 +20,12 @@ import { csvFilename } from "@/lib/csv";
  * the row underneath is for when it isn't.
  */
 
-function when(value: Date | string) {
-  return new Date(value).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+/** "02 Oct 26, 06:30:45 pm" on the workspace's clock — to the second, which a security log is read by. */
+function when(value: Date | string, clock: Clock) {
+  const p = clock.parts(new Date(value));
+  const two = (n: number) => String(n).padStart(2, "0");
+  const hour = p.hour % 12 === 0 ? 12 : p.hour % 12;
+  return `${two(p.day)} ${MONTH_NAMES[p.month]} ${two(p.year % 100)}, ${two(hour)}:${two(p.minute)}:${two(p.second)} ${p.hour < 12 ? "am" : "pm"}`;
 }
 
 function Detail({ row }: { row: ActivityRow }) {
@@ -86,6 +84,7 @@ export function ActivityTable({
   canExport: boolean;
   scoped: boolean;
 }) {
+  const clock = useClock();
   const [open, setOpen] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -103,7 +102,7 @@ export function ActivityTable({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = csvFilename("activity-log");
+    link.download = csvFilename("activity-log", new Date(), clock);
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -153,7 +152,7 @@ export function ActivityTable({
                         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted">
-                        {when(row.createdAt)}
+                        {when(row.createdAt, clock)}
                       </td>
                       <td className="px-4 py-2.5">
                         {row.userId ? (

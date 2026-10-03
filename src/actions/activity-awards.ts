@@ -16,6 +16,7 @@ import {
   type Standing,
 } from "@/lib/performance/awards";
 import { awardSettings, standingsFor, type AwardSettings, type StoredAreas, type StoredAward } from "@/lib/performance/announce";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -60,9 +61,10 @@ export async function getActivityAwards(): Promise<{
     db.activityAward.findMany({ orderBy: { from: "desc" }, take: 12 }),
   ]);
 
-  const fortnight = fortnightContaining(now);
+  const clock = await workspaceClock();
+  const fortnight = fortnightContaining(now, clock);
   const standings = await standingsFor(fortnight);
-  const announcesOn = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "long" }).format(fortnight.to);
+  const announcesOn = new Intl.DateTimeFormat("en-IN", { timeZone: clock.zone, day: "numeric", month: "long" }).format(fortnight.to);
 
   const history = rows.flatMap((row): AwardView[] => {
     const overall = row.overall as unknown as StoredAward;

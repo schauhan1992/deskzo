@@ -8,7 +8,13 @@
 /** Days the office is closed every week. Saturday/Sunday; 0 = Sunday, 6 = Saturday. */
 export const DEFAULT_WEEK_OFFS = [0, 6];
 
-/** A date reduced to its calendar day, at UTC midnight, matching how `@db.Date` stores it. */
+/**
+ * A date reduced to its calendar day, at UTC midnight, matching how `@db.Date` stores it.
+ *
+ * The UTC day: right for a `@db.Date` value or a "yyyy-mm-dd" string, wrong for "today". Today is the
+ * workspace's day, `clock.calendarDate(new Date())` (src/lib/time/zone.ts) — `dateOnly(new Date())` put
+ * a clock-in in India before 05:30 on yesterday.
+ */
 export function dateOnly(value: Date | string): Date {
   const d = typeof value === "string" ? new Date(value) : value;
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));

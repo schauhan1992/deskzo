@@ -18,7 +18,7 @@
  */
 import "dotenv/config";
 import Module from "node:module";
-import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { type ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   DEFAULT_FIELDS,
@@ -37,10 +37,11 @@ import { cleanGrants, formAccessFor, formsWhere, type FormGrant } from "../src/l
 import { eventFunnel, formOpenState, hasSeat, inviteStatus, inviteVerdict, seatsText, tooSoonToResend } from "../src/lib/forms/invites";
 import { fieldsUsed, render } from "../src/lib/marketing/merge";
 import { mailSource } from "../src/lib/mail-log";
-import { istDateTimeInput, parseIstDateTime } from "../src/lib/india-time";
+import { indiaClock } from "../src/lib/time/zone";
 import { MODULE_REGISTRY } from "../src/lib/modules";
 import { PERMISSIONS } from "../src/lib/permissions";
 import type { RecipientState } from "../src/lib/marketing/suppression";
+import { renderHtml } from "./lib/render-html";
 
 let actorId = "";
 let actorRole = "PROFILE";
@@ -99,20 +100,6 @@ const ok = (label: string, pass: boolean, detail: unknown = "") => {
   if (!pass) failures += 1;
 };
 const section = (t: string) => console.log(`\n— ${t} —\n`);
-
-async function resolveAsync(node: unknown): Promise<unknown> {
-  if (Array.isArray(node)) return Promise.all(node.map(resolveAsync));
-  if (!isValidElement(node)) return node;
-  const el = node as ReactElement<{ children?: unknown }>;
-  if (typeof el.type === "function" && el.type.constructor.name === "AsyncFunction") {
-    return resolveAsync(await (el.type as (p: unknown) => Promise<unknown>)(el.props));
-  }
-  if (el.props && "children" in el.props) {
-    const kids = await resolveAsync(el.props.children);
-    return Array.isArray(kids) ? cloneElement(el, undefined, ...(kids as ReactNode[])) : cloneElement(el, undefined, kids as ReactNode);
-  }
-  return el;
-}
 
 async function cleanup() {
   const users = await db.user.findMany({ where: { email: { endsWith: MAIL } }, select: { id: true } });
@@ -229,12 +216,13 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────────────────
   section("Settings, in India time");
 
-  const at = parseIstDateTime("2026-10-15T18:30");
+  // Times on the workspace's clock, which is India's here.
+  const at = indiaClock.parseInput("2026-10-15T18:30");
   ok("an event at 6:30 pm is 6:30 pm in India, wherever the server is", at?.toISOString() === "2026-10-15T13:00:00.000Z", at?.toISOString());
-  ok("  and goes back into the input as it came out", istDateTimeInput(at) === "2026-10-15T18:30");
-  ok("  31 February is refused rather than rolled into March", parseIstDateTime("2026-02-31T10:00") === null);
+  ok("  and goes back into the input as it came out", indiaClock.input(at) === "2026-10-15T18:30");
+  ok("  31 February is refused rather than rolled into March", indiaClock.parseInput("2026-02-31T10:00") === null);
   const settings = (over: Record<string, unknown> = {}) =>
-    checkFormSettings({ name: "Roundtable", slug: "pune-roundtable", category: "EVENT", fillMode: "BOTH", createsLead: false, topic: "EVENTS", eventStartsAt: "2026-10-15T18:30", ...over } as never);
+    checkFormSettings({ name: "Roundtable", slug: "pune-roundtable", category: "EVENT", fillMode: "BOTH", createsLead: false, topic: "EVENTS", eventStartsAt: "2026-10-15T18:30", ...over } as never, indiaClock);
   ok("an event with a date saves", settings().ok);
   ok("  without one it does not", !settings({ eventStartsAt: "" }).ok);
   ok("  nor one that finishes before it starts", !settings({ eventEndsAt: "2026-10-15T18:00" }).ok);
@@ -321,7 +309,6 @@ async function main() {
 
   // ─────────────────────────────────────────────────────────────────────────────
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
   const forms = require("../src/actions/forms") as typeof import("../src/actions/forms");
   // Links are built on the workspace's own address — never on whatever host a request claimed.
   const { tenantOrigin } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");
@@ -336,7 +323,7 @@ async function main() {
   const EditPage = page("../src/app/(dashboard)/marketing/forms/[id]/edit/page");
   const PublicPage = page("../src/app/(public)/forms/[slug]/page");
   const InvitedPage = page("../src/app/(public)/forms/[slug]/[token]/page");
-  const html = async (el: Promise<ReactElement>) => renderToStaticMarkup((await resolveAsync(await el)) as ReactElement);
+  const html = async (el: Promise<ReactElement>) => renderHtml(el);
 
   await cleanup();
   try {
@@ -392,7 +379,7 @@ async function main() {
     // ───────────────────────────────────────────────────────────────────────────
     section("Building a form");
 
-    const starts = istDateTimeInput(new Date(Date.now() + 10 * DAY));
+    const starts = indiaClock.input(new Date(Date.now() + 10 * DAY));
     const eventInput = {
       name: `${TAG} Pune roundtable`,
       slug: `${SLUG}-pune`,
@@ -416,7 +403,7 @@ async function main() {
     ok("the owner builds an event from the starter", created.ok, created.ok ? "" : created.error);
     const formId = created.ok ? created.data.id : "";
     const stored = await db.inboundForm.findUnique({ where: { id: formId } });
-    ok("  owned and built by them, in India time", stored?.ownerUserId === owner.id && stored.createdById === owner.id && istDateTimeInput(stored.eventStartsAt) === starts);
+    ok("  owned and built by them, in India time", stored?.ownerUserId === owner.id && stored.createdById === owner.id && indiaClock.input(stored.eventStartsAt) === starts);
     ok("  a second form cannot take the same address", !(await forms.saveForm({ ...eventInput, name: `${TAG} Clash` })).ok);
 
     act(outsider);
@@ -687,7 +674,7 @@ async function main() {
     ok("  and a withdrawn one says it isn't available", deadLink.includes("This invitation isn"));
 
     act(admin);
-    const companyTab = renderToStaticMarkup((await CompanyDetail({ id: customer.id, tab: "forms" })) as ReactElement);
+    const companyTab = await renderHtml(CompanyDetail({ id: customer.id, tab: "forms" }));
     ok("the company page has a Forms tab with what they answered", companyTab.includes(">Forms</a>") && companyTab.includes(`${TAG} Pune roundtable`) && companyTab.includes("Came"));
   } finally {
     await cleanup();

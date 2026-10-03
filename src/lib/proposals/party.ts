@@ -118,13 +118,8 @@ export function partyDetails(
   };
 }
 
-/**
- * Today in India, not today in UTC.
- *
- * `toISOString()` on the server dates a document raised at nine in the morning IST to the previous
- * day, because it is still yesterday in UTC until half past five.
+/*
+ * A document raised from a record is dated today on the workspace's calendar: `(await
+ * workspaceClock()).today()`. Not `toISOString()`, which is UTC's today — yesterday until half past
+ * five in the morning in India. This module's todayInIndia was India's, by a fixed offset.
  */
-export function todayInIndia(now: Date = new Date()): string {
-  const ist = new Date(now.getTime() + 5.5 * 3600_000);
-  return ist.toISOString().slice(0, 10);
-}

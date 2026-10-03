@@ -11,7 +11,9 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 import {
   assetKindLabels,
   canMove,
@@ -49,6 +51,7 @@ export function AssetRecord({
   companies: { id: string; name: string }[];
 }) {
   const router = useRouter();
+  const clock = useClock();
   const [pending] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<AssetMovementType | null>(null);
@@ -102,7 +105,7 @@ export function AssetRecord({
                 value={asset.siteCompany?.name ?? (asset.status === "IN_STOCK" ? "Our office" : "—")}
               />
               <Fact label="Site" value={asset.location?.label ?? "—"} />
-              <Fact label="Bought" value={asset.purchasedOn ? formatDate(asset.purchasedOn) : "—"} />
+              <Fact label="Bought" value={asset.purchasedOn ? formatCalendarDay(asset.purchasedOn) : "—"} />
               <Fact
                 label="Cost"
                 value={asset.purchaseCost ? formatCurrency(Number(asset.purchaseCost)) : "—"}
@@ -151,7 +154,8 @@ export function AssetRecord({
                 <li key={m.id} className="px-4 py-2.5">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium text-text">{movementLabels[m.type]}</span>
-                    <span className="text-xs text-subtle">{formatDate(m.occurredAt)}</span>
+                    {/* The day it moved, as typed — held as midnight UTC. */}
+                    <span className="text-xs text-subtle">{formatCalendarDay(m.occurredAt)}</span>
                     {m.acknowledgedAt && (
                       <Badge tone="green">
                         <Check className="h-3 w-3" />
@@ -190,15 +194,15 @@ export function AssetRecord({
               <Badge tone={cover.tone}>{cover.label}</Badge>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <Fact label="Warranty" value={asset.warrantyEndsOn ? formatDate(asset.warrantyEndsOn) : "Not recorded"} />
-              <Fact label="AMC" value={asset.amcEndsOn ? formatDate(asset.amcEndsOn) : "Not recorded"} />
+              <Fact label="Warranty" value={asset.warrantyEndsOn ? formatCalendarDay(asset.warrantyEndsOn) : "Not recorded"} />
+              <Fact label="AMC" value={asset.amcEndsOn ? formatCalendarDay(asset.amcEndsOn) : "Not recorded"} />
               {asset.amc && (
                 <p className="text-xs text-muted">
                   Under{" "}
                   <Link href={`/renewals`} className="text-brand hover:underline">
                     {asset.amc.item?.name ?? "an AMC"}
                   </Link>
-                  {asset.amc.endDate && `, to ${formatDate(asset.amc.endDate)}`}
+                  {asset.amc.endDate && `, to ${formatCalendarDay(asset.amc.endDate)}`}
                 </p>
               )}
               {cover.key === "NONE" && (
@@ -262,7 +266,7 @@ export function AssetRecord({
                       <span className="min-w-0">
                         <span className="block truncate text-text">{t.title}</span>
                         <span className="block text-xs text-subtle">
-                          #{t.ticketSeq} · {formatDate(t.createdAt)}
+                          #{t.ticketSeq} · {clock.date(t.createdAt)}
                         </span>
                       </span>
                     </Link>
@@ -309,6 +313,7 @@ function MoveDialog({
   onDone: () => void;
   setError: (e: string | null) => void;
 }) {
+  const clock = useClock();
   const [pending, startTransition] = useTransition();
   // Held with the company it was loaded for, so the list can be *derived* during render rather than
   // cleared from inside an effect — which also stops a previous company's sites flashing up while
@@ -318,7 +323,7 @@ function MoveDialog({
     rows: { id: string; label: string; city: string | null }[];
   } | null>(null);
   const [form, setForm] = useState({
-    occurredAt: new Date().toISOString().slice(0, 10),
+    occurredAt: clock.today(),
     toUserId: "",
     toCompanyId: "",
     toLocationId: "",

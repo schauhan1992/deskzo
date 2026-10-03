@@ -9,7 +9,7 @@ import { SETTABLE_RENEWAL_STAGES, type RenewalStageKey, type RenewalStageTone } 
 import { Badge } from "@/components/ui/card";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { Input } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 export type RenewalStageCellData = {
   key: RenewalStageKey;
@@ -45,6 +45,7 @@ export function RenewalStageCell({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const clock = useClock();
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -132,7 +133,7 @@ export function RenewalStageCell({
       {stage.source === "manual" && stage.setBy && (
         <span className="mt-0.5 block truncate text-[11px] text-subtle" title={stage.note ?? undefined}>
           {stage.setBy.name}
-          {stage.setAt ? `, ${formatDate(stage.setAt)}` : ""}
+          {stage.setAt ? `, ${clock.date(stage.setAt)}` : ""}
           {stage.note ? ` — ${stage.note}` : ""}
         </span>
       )}

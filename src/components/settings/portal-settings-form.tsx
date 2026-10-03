@@ -6,7 +6,7 @@ import { savePortalSettings, type PortalSettingsView } from "@/actions/portal";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * The two decisions, kept visibly apart.
@@ -34,6 +34,7 @@ const ACTIONS: { key: keyof Draft; label: string; blurb: string }[] = [
 ];
 
 export function PortalSettingsForm({ settings }: { settings: PortalSettingsView }) {
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ text: string; bad?: boolean } | null>(null);
@@ -105,7 +106,7 @@ export function PortalSettingsForm({ settings }: { settings: PortalSettingsView 
             <div className="mt-0.5 text-xs text-muted">
               {settings.activeLogins} active link{settings.activeLogins === 1 ? "" : "s"} ·{" "}
               {settings.grantedCompanies} compan{settings.grantedCompanies === 1 ? "y" : "ies"} granted individually
-              {settings.updatedAt && ` · last changed ${formatDateTime(settings.updatedAt)}`}
+              {settings.updatedAt && ` · last changed ${clock.dateTimeShort(settings.updatedAt)}`}
               {settings.updatedByName ? ` by ${settings.updatedByName}` : ""}
             </div>
           </div>

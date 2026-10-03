@@ -1,9 +1,9 @@
 import { Prisma } from "@deskzo/control-client";
-import { formatIstDateTime } from "@/lib/india-time";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { MAX_LINKED_WORKSPACES, originOf } from "@/lib/platform/linked/keys";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { subdomainHost, tenantById } from "@/lib/tenancy/registry";
+import { clockOfTenant } from "@/lib/time/workspace";
 import { isSystemAddress } from "@/lib/people";
 
 /**
@@ -395,11 +395,14 @@ async function sendUnlinkNotice(member: Removed, why: string, closed: boolean): 
   try {
     const tenant = await tenantById(member.tenantId);
     if (!tenant) return;
+    // On that workspace's clock: the notice names it, and its own account reads it.
+    const clock = clockOfTenant(tenant);
+    const now = new Date();
     const text = [
       `${tenant.name} (${tenant.primaryHost}) is no longer linked with your other workspaces, so you can't switch into it or out of it from the workspace header.`,
       "",
       `Why: ${why}`,
-      `When: ${formatIstDateTime(new Date())} IST`,
+      `When: ${clock.dateTime(now)} ${clock.offsetLabel(now)}`,
       "",
       closed
         ? `If you didn't expect this, ask an administrator of ${tenant.name}.`

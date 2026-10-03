@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { formatCompanyId } from "@/lib/order-id";
-import { formatIstDateTime } from "@/lib/india-time";
+import { workspaceClock } from "@/lib/time/workspace";
 import { mergedInto, mergedNotice } from "@/lib/companies/merge";
 import { CompanyDetail } from "@/components/companies/company-detail";
 import { ActionNotice } from "@/components/ui/action-notice";
@@ -54,12 +54,13 @@ export default async function CompanyDetailPage({
   canonicalise(id, "/companies", formatCompanyId(company.companySeq), query);
 
   const merged = await mergedNotice(company.id, typeof query.merged === "string" ? query.merged : undefined);
+  const clock = await workspaceClock();
 
   return (
     <>
       {merged && (
         <ActionNotice tone="info" className="mb-3">
-          {merged.ref} {merged.name} was merged into this company on {formatIstDateTime(merged.mergedAt)}
+          {merged.ref} {merged.name} was merged into this company on {clock.dateTime(merged.mergedAt)}
           {merged.by ? ` by ${merged.by}` : ""} — the link you followed now opens it here.
         </ActionNotice>
       )}

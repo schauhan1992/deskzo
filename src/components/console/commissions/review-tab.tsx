@@ -12,6 +12,7 @@ import { COMMISSION_KIND, COMMISSION_STATUS } from "@/lib/console-shared/labels"
 import { COMMISSION_KINDS, parseCommissionFilters } from "@/lib/console-shared/partner-params";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { CommissionReview } from "@/lib/partners/commission-data";
+import type { Clock } from "@/lib/time/zone";
 import { AddAdjustmentButton } from "./adjustment-dialog";
 import { COMMISSIONS_PATH, currencyOptions, hrefWith } from "./format";
 import { EntriesTable } from "./entries-table";
@@ -38,6 +39,7 @@ export function ReviewTab({
   exportArgs,
   caps,
   todayKey,
+  clock,
 }: {
   data: CommissionReview;
   /** The Review tab's own query string (empty while another tab is the one open). */
@@ -45,7 +47,10 @@ export function ReviewTab({
   /** The same, as `exportParams` gives it, for the CSV. */
   exportArgs: Record<string, string>;
   caps: Caps;
+  /** India's today: the latest day an adjustment may be dated. */
   todayKey: string;
+  /** The console's clock, for when an entry was voided. */
+  clock: Clock;
 }) {
   const f = parseCommissionFilters(params);
   const base = { ...params };
@@ -118,7 +123,7 @@ export function ReviewTab({
             />
           )
         ) : (
-          <EntriesTable rows={data.rows} caps={caps} showPartner totals={data.totals} statementParams={f.partner ? { partner: f.partner } : {}} />
+          <EntriesTable rows={data.rows} caps={caps} showPartner totals={data.totals} statementParams={f.partner ? { partner: f.partner } : {}} clock={clock} />
         )}
       </Panel>
       <Pager page={data.page} pageSize={data.pageSize} total={data.total} noun="entry" nouns="entries" path={COMMISSIONS_PATH} params={base} />

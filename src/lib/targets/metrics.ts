@@ -240,7 +240,12 @@ export function yearWindow(financialYearStart: number): PeriodWindow {
   };
 }
 
-/** The windows somebody would reasonably set a target for, around a given date. */
+/**
+ * The windows somebody would reasonably set a target for, around a given date. `now` is read by its
+ * UTC parts, so pass the day as a date column holds it — the workspace's today is
+ * `clock.calendarDate(new Date())`, not the moment, whose UTC month is the last one for the first
+ * hours of a month in India.
+ */
 export function suggestedWindows(now: Date): PeriodWindow[] {
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth() + 1;

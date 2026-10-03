@@ -7,7 +7,8 @@ import { can } from "@/lib/authz/resolve";
 import { STATE_LABELS, type ReconcileState } from "@/lib/reconcile/match";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { ExceptionList, type ExceptionRow } from "@/components/reconcile/exception-list";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +83,8 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
       <div className="mt-3">
         <h1 className="text-xl font-semibold text-text">{statement.label}</h1>
         <p className="mt-1 text-sm text-muted">
-          {statement.vendor.name} · {formatDate(statement.periodStart)} – {formatDate(statement.periodEnd)} · billed{" "}
+          {/* Typed days, held at UTC midnight (src/actions/reconcile.ts): the days themselves. */}
+          {statement.vendor.name} · {formatCalendarDay(statement.periodStart)} – {formatCalendarDay(statement.periodEnd)} · billed{" "}
           {BILLING_LABEL[statement.billing]} · {statement.lineCount} lines,{" "}
           {formatCurrency(Number(statement.totalBilled))}
           {statement.filename ? "" : " · entered by hand"}

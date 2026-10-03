@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { Lock, Unlock } from "lucide-react";
 import { lockCompany, lockUser, unlockCompany, unlockUser } from "@/actions/access-lock";
 import { COMPANY_LOCK_PHRASE, DEFAULT_LOCK_MESSAGE, LOCK_MESSAGE_MAX } from "@/lib/access/lock-rules";
-import { formatIstDateTime } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -30,6 +30,9 @@ export type AccessLocksView = {
 
 export function AccessLocksManager({ view }: { view: AccessLocksView }) {
   const router = useRouter();
+  const clock = useClock();
+  // The times typed below are read on the workspace's clock (`untilFrom` in actions/access-lock).
+  const zoneName = clock.zone.replace(/_/g, " ");
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -73,8 +76,8 @@ export function AccessLocksManager({ view }: { view: AccessLocksView }) {
               <p className="whitespace-pre-line rounded-base border border-line bg-surface-sunken px-3 py-2 text-text">{view.company?.message || DEFAULT_LOCK_MESSAGE}</p>
               <p className="text-xs text-subtle">
                 Locked{view.company?.lockedBy ? ` by ${view.company.lockedBy}` : ""}
-                {view.company?.lockedAt ? ` on ${formatIstDateTime(view.company.lockedAt)}` : ""}
-                {view.company?.until ? ` · lifts itself ${formatIstDateTime(view.company.until)}` : " · until lifted"}
+                {view.company?.lockedAt ? ` on ${clock.dateTime(view.company.lockedAt)}` : ""}
+                {view.company?.until ? ` · lifts itself ${clock.dateTime(view.company.until)}` : " · until lifted"}
               </p>
               {view.isSuperAdmin && (
                 <Button variant="secondary" disabled={pending} onClick={() => run(() => unlockCompany(), "The company lock is lifted — everybody can use the CRM again.")}>
@@ -94,7 +97,7 @@ export function AccessLocksManager({ view }: { view: AccessLocksView }) {
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label htmlFor="company-until">Lifts itself at (optional, India time)</Label>
+                  <Label htmlFor="company-until">Lifts itself at (optional, {zoneName} time)</Label>
                   <Input id="company-until" type="datetime-local" value={companyUntil} onChange={(e) => setCompanyUntil(e.target.value)} />
                 </div>
                 <div className="space-y-1">
@@ -144,7 +147,7 @@ export function AccessLocksManager({ view }: { view: AccessLocksView }) {
             <Textarea id="lock-message" rows={3} maxLength={LOCK_MESSAGE_MAX} value={personMessage} onChange={(e) => setPersonMessage(e.target.value)} placeholder={DEFAULT_LOCK_MESSAGE} />
           </div>
           <div className="max-w-xs space-y-1">
-            <Label htmlFor="lock-until">Lifts itself at (optional, India time)</Label>
+            <Label htmlFor="lock-until">Lifts itself at (optional, {zoneName} time)</Label>
             <Input id="lock-until" type="datetime-local" value={personUntil} onChange={(e) => setPersonUntil(e.target.value)} />
           </div>
           <Button
@@ -192,10 +195,10 @@ export function AccessLocksManager({ view }: { view: AccessLocksView }) {
                   </td>
                   <td className="max-w-xs px-4 py-2 text-xs text-muted">{p.lockMessage || "The standard notice"}</td>
                   <td className="px-4 py-2 text-xs text-muted">
-                    {p.lockedAt ? formatIstDateTime(p.lockedAt) : ""}
+                    {p.lockedAt ? clock.dateTime(p.lockedAt) : ""}
                     {p.lockedBy ? <span className="block">by {p.lockedBy}</span> : null}
                   </td>
-                  <td className="px-4 py-2 text-xs text-muted">{p.lockedUntil ? formatIstDateTime(p.lockedUntil) : "Until unlocked"}</td>
+                  <td className="px-4 py-2 text-xs text-muted">{p.lockedUntil ? clock.dateTime(p.lockedUntil) : "Until unlocked"}</td>
                   <td className="px-4 py-2 text-right">
                     <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => unlockUser(p.id), `${p.name} can use the CRM again.`)}>
                       <Unlock className="h-3.5 w-3.5" /> Unlock

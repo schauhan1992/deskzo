@@ -19,7 +19,9 @@ import {
   daysLeftPhrase,
   type NoticeKind,
 } from "@/lib/marketing/customer-notices";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { workspaceClock } from "@/lib/time/workspace";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 import type { ActionResult } from "@/actions/company";
 
@@ -127,7 +129,7 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
   const domains = [...new Set(addresses.map((a) => a.split("@")[1]).filter(Boolean))];
   const now = new Date();
 
-  const [suppressions, feedback, invoices, tickets] = await Promise.all([
+  const [suppressions, feedback, invoices, tickets, clock] = await Promise.all([
     db.suppression.findMany({
       where: {
         OR: [
@@ -156,10 +158,11 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
       where: { companyId: recipientCompanyId, status: { notIn: ["RESOLVED", "CLOSED"] } },
       select: { priority: true, status: true, createdAt: true },
     }),
+    workspaceClock(),
   ]);
 
   const overdue = invoices.reduce((worst, i) => Math.max(worst, daysOverdue(i.dueDate, i.issueDate, now)), 0);
-  const breached = tickets.filter((t) => getTicketSlaStatus(t.priority, t.status, t.createdAt, now).key === "overdue").length;
+  const breached = tickets.filter((t) => getTicketSlaStatus(t.priority, t.status, t.createdAt, clock, now).key === "overdue").length;
 
   const rows = contacts.map((contact) => {
     const address = contact.email?.trim().toLowerCase() ?? null;
@@ -275,6 +278,7 @@ export async function queueCustomerNotice(input: {
   const body = (input.note?.trim() ? `${input.note.trim()}\n\n` : "") + (template?.body ?? notice.body);
 
   const origin = input.origin;
+  const clock = await workspaceClock();
   const days = product.endDate
     ? Math.ceil((new Date(product.endDate).getTime() - Date.now()) / 86400000)
     : null;
@@ -312,12 +316,13 @@ export async function queueCustomerNotice(input: {
         // The group's numbers, not the parent's — "20 seats" is the renewal, not "10 and separately 10".
         quantity: group.totalQuantity,
         renewalValue: group.renewalValue > 0 ? formatCurrency(group.renewalValue) : null,
-        expiryDate: product.endDate ? formatDate(product.endDate) : null,
+        // The end date is a typed day kept as its midnight UTC; the fulfilment, a moment on the workspace's clock.
+        expiryDate: product.endDate ? formatCalendarDay(product.endDate) : null,
         daysLeft: days,
         daysLeftPhrase: daysLeftPhrase(days),
         orderId: formatOrderId(product.orderSeq),
         poNumber: product.poNumber,
-        fulfilledDate: product.fulfilledAt ? formatDate(product.fulfilledAt) : null,
+        fulfilledDate: product.fulfilledAt ? clock.date(product.fulfilledAt) : null,
         unsubscribeUrl: `${origin}/preferences/${token}`,
       },
     );

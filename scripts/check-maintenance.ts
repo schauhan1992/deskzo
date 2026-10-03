@@ -19,7 +19,8 @@ import Module from "node:module";
 import type { ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { announced, maintenancePage, maintenanceState, DEFAULT_MESSAGE, type MaintenanceState } from "../src/lib/maintenance-state";
-import { istDateTimeInput, parseIstDateTime } from "../src/lib/india-time";
+// Times on the workspace's clock, which is India's here.
+import { indiaClock } from "../src/lib/time/zone";
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -91,11 +92,11 @@ async function main() {
   section("The page people see");
 
   const onState = (over: Partial<MaintenanceState> = {}): MaintenanceState => ({ phase: "on", startsAt: null, endsAt: null, message: DEFAULT_MESSAGE, ...over });
-  const html = maintenancePage(onState({ message: `Upgrading <script>alert("x")</script> & more`, endsAt: new Date("2026-10-01T18:30:00Z") }), "Acme <ERP>");
+  const html = maintenancePage(onState({ message: `Upgrading <script>alert("x")</script> & more`, endsAt: new Date("2026-10-01T18:30:00Z") }), indiaClock, "Acme <ERP>");
   ok("the message is shown as text, never as markup", html.includes("Upgrading &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; more") && !html.includes("<script>alert"));
   ok("  and so is the app's name", html.includes("Acme &lt;ERP&gt; is down for maintenance"));
-  ok("the end is in India time", /Expected back by <strong>Fri, 2 Oct,? 2026, 12:00\s?am<\/strong>/i.test(html), html.match(/Expected back by <strong>[^<]+/)?.[0]);
-  ok("  and not mentioned when there isn't one", !maintenancePage(onState()).includes("Expected back"));
+  ok("the end is in India time", /Expected back by <strong>Fri, 2 Oct 2026, 12:00 am<\/strong>/.test(html), html.match(/Expected back by <strong>[^<]+/)?.[0]);
+  ok("  and not mentioned when there isn't one", !maintenancePage(onState(), indiaClock).includes("Expected back"));
   ok("it checks whether the app is back, and reloads when it is", html.includes("/api/maintenance/status") && html.includes("location.reload()"));
   ok("admins are shown the way in", html.includes('href="/login"'));
   ok("it isn't indexed", html.includes('name="robots" content="noindex"'));
@@ -149,7 +150,7 @@ async function main() {
     ok("  nor change it", !(await actions.saveMaintenance({ mode: "off" })).ok);
 
     actorId = admin.id;
-    const inHours = (h: number) => istDateTimeInput(new Date(Date.now() + h * 3_600_000));
+    const inHours = (h: number) => indiaClock.input(new Date(Date.now() + h * 3_600_000));
     const refused = async (input: Parameters<typeof actions.saveMaintenance>[0]) => {
       const r = await actions.saveMaintenance(input);
       return r.ok ? "SAVED" : r.error;
@@ -173,7 +174,7 @@ async function main() {
     const saved = await actions.saveMaintenance({ mode: "schedule", startsAt: start, endsAt: end, message: "  Moving to the new server.  " });
     ok("it saves as scheduled", saved.ok && saved.data.phase === "scheduled", saved.ok ? saved.data.phase : saved.error);
     const stored = await db.maintenanceMode.findUnique({ where: { id: "global" } });
-    ok("the times typed are India time", stored?.startsAt?.getTime() === parseIstDateTime(start)?.getTime() && stored?.endsAt?.getTime() === parseIstDateTime(end)?.getTime());
+    ok("the times typed are India time", stored?.startsAt?.getTime() === indiaClock.parseInput(start)?.getTime() && stored?.endsAt?.getTime() === indiaClock.parseInput(end)?.getTime());
     ok("  the message trimmed, and who set it", stored?.message === "Moving to the new server." && stored?.updatedById === admin.id && stored?.enabled === true);
     ok("it is audited", (await db.auditLog.count({ where: { userId: admin.id, entityType: "MaintenanceMode", entityLabel: { startsWith: "Maintenance scheduled from" } } })) === 1);
     ok("the proxy sees it straight away on this server — scheduled, so nobody is held yet", (await lib.currentMaintenance()).phase === "scheduled" && (await lib.maintenanceVerdict({ pathname: "/dashboard", userId: rep.id, state: await lib.currentMaintenance(), mayBypass: lib.mayBypassMaintenance })) === "serve");

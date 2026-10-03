@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
-import { formatIstDateTime, istDateTimeInput } from "@/lib/india-time";
+import { useClock } from "@/components/time/clock-provider";
 
 type Post = {
   id: string;
@@ -31,6 +31,8 @@ const EMPTY: Draft = { title: "", body: "", linkUrl: "", pinned: false, publishA
  */
 export function UpdatesManager({ posts }: { posts: Post[] }) {
   const router = useRouter();
+  // "Publish at" is typed and shown on the workspace's clock; `saveUpdate` reads it on the same one.
+  const clock = useClock();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -111,7 +113,7 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="update-at">Publish at (India time)</Label>
+                <Label htmlFor="update-at">Publish at ({clock.zone.replace(/_/g, " ")} time)</Label>
                 <Input id="update-at" type="datetime-local" value={draft.publishAt} onChange={(e) => setDraft({ ...draft, publishAt: e.target.value })} />
                 <p className="text-xs text-subtle">{draft.id ? "Leave as it is to keep the original time." : "Leave empty to post it now."}</p>
               </div>
@@ -158,7 +160,7 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
                     </p>
                     <p className="text-xs text-subtle">
                       {post.scheduled ? "Goes out " : ""}
-                      {formatIstDateTime(post.publishedAt)}
+                      {clock.dateTime(post.publishedAt)}
                       {post.author ? ` · ${post.author}` : ""}
                     </p>
                     <p className="mt-1 line-clamp-2 whitespace-pre-line text-xs text-muted">{post.body}</p>
@@ -172,7 +174,7 @@ export function UpdatesManager({ posts }: { posts: Post[] }) {
                         body: post.body,
                         linkUrl: post.linkUrl ?? "",
                         pinned: post.pinned,
-                        publishAt: istDateTimeInput(post.publishedAt),
+                        publishAt: clock.input(post.publishedAt),
                       })
                     }
                     aria-label={`Edit ${post.title}`}

@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { closedDates, dateOnly, eachDay, isWeekOff, monthRange, toKey } from "@/lib/hr/calendar";
+import { workspaceClock } from "@/lib/time/workspace";
 import { attendanceMarkSchema } from "@/lib/validation/hr";
 import type { ActionResult } from "@/actions/company";
 
@@ -38,10 +39,15 @@ function minutesBetween(from: Date, to: Date) {
 
 // ─── Clocking ─────────────────────────────────────────────────────────────────
 
-/** Today's row for the signed-in user, or null before they have clocked in. */
+/**
+ * Today's row for the signed-in user, or null before they have clocked in.
+ *
+ * "Today" is the workspace's day. It was UTC's (`dateOnly(new Date())`), so in India a clock-in before
+ * 05:30 landed on yesterday's row.
+ */
 export async function myToday() {
   const user = await requireModuleUser("hr");
-  const today = dateOnly(new Date());
+  const today = (await workspaceClock()).calendarDate(new Date());
   const row = await db.attendanceDay.findUnique({
     where: { userId_date: { userId: user.id, date: today } },
   });
@@ -50,8 +56,8 @@ export async function myToday() {
 
 export async function clockIn(): Promise<ActionResult<{ at: string }>> {
   const user = await requireModuleUser("hr");
-  const today = dateOnly(new Date());
   const now = new Date();
+  const today = (await workspaceClock()).calendarDate(now);
 
   const existing = await db.attendanceDay.findUnique({ where: { userId_date: { userId: user.id, date: today } } });
   if (existing?.checkInAt) {
@@ -74,8 +80,8 @@ export async function clockIn(): Promise<ActionResult<{ at: string }>> {
 
 export async function clockOut(): Promise<ActionResult<{ minutes: number }>> {
   const user = await requireModuleUser("hr");
-  const today = dateOnly(new Date());
   const now = new Date();
+  const today = (await workspaceClock()).calendarDate(now);
 
   const existing = await db.attendanceDay.findUnique({ where: { userId_date: { userId: user.id, date: today } } });
   if (!existing?.checkInAt) return { ok: false, error: "You haven't clocked in today." };
@@ -114,8 +120,14 @@ export async function markAttendance(input: unknown): Promise<ActionResult<null>
     };
   }
 
-  const checkInAt = data.checkInAt ? new Date(`${data.date}T${data.checkInAt}:00`) : null;
-  const checkOutAt = data.checkOutAt ? new Date(`${data.date}T${data.checkOutAt}:00`) : null;
+  // The times are the workspace's wall clock on that day. Built as a bare string they were read in the
+  // server's zone, which is UTC in production.
+  const clock = await workspaceClock();
+  const checkInAt = data.checkInAt ? clock.parseInput(`${data.date}T${data.checkInAt}`) : null;
+  const checkOutAt = data.checkOutAt ? clock.parseInput(`${data.date}T${data.checkOutAt}`) : null;
+  if ((data.checkInAt && !checkInAt) || (data.checkOutAt && !checkOutAt)) {
+    return { ok: false, error: "Enter the times as hh:mm." };
+  }
   const worked = checkInAt && checkOutAt ? minutesBetween(checkInAt, checkOutAt) : null;
 
   const isCorrection = user.id !== data.userId || !!existing;
@@ -234,6 +246,7 @@ export async function attendanceMonth(params: {
   }
 
   const days = eachDay(from, to);
+  const today = (await workspaceClock()).calendarDate(new Date());
   const rows: MonthRow[] = people.map((person) => {
     const own = byUser.get(person.id) ?? new Map();
     let present = 0;
@@ -251,7 +264,7 @@ export async function attendanceMonth(params: {
         else if (record.status === "HALF_DAY") { present += 0.5; leave += 0.5; }
         else if (record.status === "ON_LEAVE") leave += 1;
         else if (record.status === "ABSENT") absent += 1;
-      } else if (!offDay && day <= dateOnly(new Date())) {
+      } else if (!offDay && day <= today) {
         // Only days that have actually happened count as unrecorded — the rest of the month is
         // simply the future, not a gap anybody has to explain.
         unrecorded += 1;

@@ -8,7 +8,7 @@ import { setPortalRequestStatus, type PortalRequestRow } from "@/actions/portal"
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatDateTime } from "@/lib/utils";
+import { useClock } from "@/components/time/clock-provider";
 
 /**
  * What customers have asked for.
@@ -28,6 +28,7 @@ const STATUS_TONE = { NEW: "red", IN_PROGRESS: "amber", DONE: "green", DECLINED:
 
 export function RequestInbox({ rows }: { rows: PortalRequestRow[] }) {
   const router = useRouter();
+  const clock = useClock();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [closing, setClosing] = useState<{ id: string; status: "DONE" | "DECLINED" } | null>(null);
@@ -87,7 +88,7 @@ export function RequestInbox({ rows }: { rows: PortalRequestRow[] }) {
                         {kind.label}
                       </Badge>
                       <Badge tone={STATUS_TONE[r.status]}>{r.status.toLowerCase().replace("_", " ")}</Badge>
-                      <span className="text-xs text-muted">{formatDateTime(r.createdAt)}</span>
+                      <span className="text-xs text-muted">{clock.dateTimeShort(r.createdAt)}</span>
                     </div>
                     <p className="mt-1 text-sm font-medium text-text">
                       <Link href={`/companies/${r.companyId}`} className="text-brand hover:underline">
@@ -110,7 +111,7 @@ export function RequestInbox({ rows }: { rows: PortalRequestRow[] }) {
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-base bg-surface-sunken px-3 py-2">
                     <p className="text-xs text-muted">
                       {r.handledByName ? `${r.handledByName}` : "Closed"}
-                      {r.handledAt ? ` · ${formatDateTime(r.handledAt)}` : ""}
+                      {r.handledAt ? ` · ${clock.dateTimeShort(r.handledAt)}` : ""}
                       {r.response ? ` — ${r.response}` : ""}
                     </p>
                     <Button variant="ghost" size="sm" disabled={busy === r.id} onClick={() => move(r.id, "NEW")}>

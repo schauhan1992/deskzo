@@ -13,22 +13,25 @@ import { RowMenu, type RowMenuItem } from "@/components/console/kit/row-menu";
 import { StatusPill, TenantStatusPill } from "@/components/console/kit/status";
 import { DataTable, RowActionsCell, RowLink, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
+import { useClock } from "@/components/time/clock-provider";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { dayKeyLabel, dayMonth, dayMonthYear, istDayKey, istDaysBetween, plural, when } from "@/lib/console-shared/format";
+import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { Tone } from "@/lib/console-shared/types";
 import type { ExtendTrialPreview } from "@/lib/platform/bulk";
 import type { TrialRow } from "@/lib/platform/trials";
+import type { Clock } from "@/lib/time/zone";
 
 /**
  * The trials board's table (spec §3.5): each workspace on a free trial, when it ends, how far into it
  * the reminders have got, and — for the staff who sell — the ways to give it more time.
  *
- * Every date here is counted from the loader's `asOf`, never the reader's clock, so "in 2 days" is
- * the same on the server render and after hydration. `caps` only chooses what is drawn; each action
- * checks the role again on the server, and a control a role cannot use is not drawn at all.
+ * Every date here is counted from the loader's `asOf`, never the reader's now, in the console's days
+ * (`useClock()`), so "in 2 days" is the same on the server render and after hydration. `caps` only
+ * chooses what is drawn; each action checks the role again on the server, and a control a role cannot
+ * use is not drawn at all.
  *
  * Extending is always from the trial's own end, or from today for one that has ended — and extending
  * an ended trial reopens it, lifting a billing hold. The confirmations say so before anything runs.
@@ -52,6 +55,7 @@ type BulkState = { rows: TrialRow[]; result: ConsoleResult<ExtendTrialPreview> |
 const ended = (row: TrialRow, asOf: Date) => new Date(row.trialEndsAt).getTime() <= new Date(asOf).getTime();
 
 export function TrialsTable({ rows, caps, asOf }: { rows: TrialRow[]; caps: Caps; asOf: Date }) {
+  const clock = useClock();
   const items = rows.map((row) => ({ id: row.tenant.id, row }));
   const selection = useRowSelection(items);
   const action = useConsoleAction<unknown>();
@@ -103,7 +107,7 @@ export function TrialsTable({ rows, caps, asOf }: { rows: TrialRow[]; caps: Caps
         ...done,
         success: (data) => {
           const d = data as { endsAt?: string; action?: string } | null;
-          const end = d?.endsAt ? ` — it now ends ${dayMonthYear(d.endsAt)}` : "";
+          const end = d?.endsAt ? ` — it now ends ${clock.date(d.endsAt)}` : "";
           return `${row.tenant.name}'s trial is extended${end}${d?.action === "lifted" ? ", and its hold is lifted" : ""}.`;
         },
       });
@@ -251,12 +255,13 @@ export function TrialsTable({ rows, caps, asOf }: { rows: TrialRow[]; caps: Caps
 }
 
 /**
- * The end date, with how far away it is in India's calendar days: "in 2 days" (amber from three days
- * out), "Ended 3 days ago" with the day the hold falls, or "Held for billing".
+ * The end date, with how far away it is in the console's calendar days: "in 2 days" (amber from three
+ * days out), "Ended 3 days ago" with the day the hold falls, or "Held for billing".
  */
 function EndsCell({ row, asOf }: { row: TrialRow; asOf: Date }) {
+  const clock = useClock();
   const end = new Date(row.trialEndsAt);
-  const days = istDaysBetween(new Date(asOf), end);
+  const days = clock.daysBetween(new Date(asOf), end);
   let chip: { label: string; tone: Tone };
   let note: string | null = null;
   if (row.bucket === "held") {
@@ -264,14 +269,14 @@ function EndsCell({ row, asOf }: { row: TrialRow; asOf: Date }) {
     note = "Extending reopens it";
   } else if (ended(row, asOf)) {
     chip = { label: days === 0 ? "Ended today" : days === -1 ? "Ended yesterday" : `Ended ${plural(-days, "day")} ago`, tone: "warning" };
-    note = row.holdAt ? `Held on ${dayMonth(row.holdAt)} unless it pays` : null;
+    note = row.holdAt ? `Held on ${clock.dayMonth(row.holdAt)} unless it pays` : null;
   } else {
     chip = { label: days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${plural(days, "day")}`, tone: days <= 3 ? "warning" : days <= 7 ? "info" : "neutral" };
   }
   return (
     <div>
       <div className="flex items-center gap-1.5">
-        <span className="tabular-nums text-text">{dayMonthYear(end)}</span>
+        <span className="tabular-nums text-text">{clock.date(end)}</span>
         <StatusPill tone={chip.tone}>{chip.label}</StatusPill>
       </div>
       {note && <p className="mt-0.5 text-[11px] text-muted">{note}</p>}
@@ -284,17 +289,18 @@ function EndsCell({ row, asOf }: { row: TrialRow; asOf: Date }) {
  * an earlier end — the trial has been extended since — are counted beside them.
  */
 function Reminders({ row }: { row: TrialRow }) {
+  const clock = useClock();
   const earlier = row.reminders.filter((r) => r.step === null);
   return (
     <div className="flex items-center gap-1.5">
       <ul aria-label="Reminders" className="flex items-center gap-1">
         {STEPS.map((step) => {
           const sent = row.reminders.find((r) => r.step === step);
-          const title = sent ? `${sent.label} — sent ${when(sent.sentAt)}` : `${step}-day reminder not sent yet`;
+          const title = sent ? `${sent.label} — sent ${clock.dateTime(sent.sentAt)}` : `${step}-day reminder not sent yet`;
           return (
             <li key={step}>
               <StatusPill tone={sent ? "success" : "neutral"} title={title} icon={sent ? <Check className="h-3 w-3" /> : undefined} className={sent ? undefined : "opacity-70"}>
-                {step}d<span className="sr-only">{sent ? ` reminder sent ${when(sent.sentAt)}` : " reminder not sent yet"}</span>
+                {step}d<span className="sr-only">{sent ? ` reminder sent ${clock.dateTime(sent.sentAt)}` : " reminder not sent yet"}</span>
               </StatusPill>
             </li>
           );
@@ -309,17 +315,17 @@ function Reminders({ row }: { row: TrialRow }) {
   );
 }
 
-/** What an extension does to one trial — worked out from the row itself, with no clock read. */
-function extensionImpact(row: TrialRow, days: number, asOf: Date) {
+/** What an extension does to one trial, in the console's days — worked out from the row itself, never from the reader's now. */
+function extensionImpact(row: TrialRow, days: number, asOf: Date, clock: Clock) {
   const isEnded = ended(row, asOf);
   const end = new Date(row.trialEndsAt);
   const impact: { label: string; value: string; tone?: Tone }[] = [
-    { label: isEnded ? "Ended" : "Ends now", value: dayMonthYear(end) },
+    { label: isEnded ? "Ended" : "Ends now", value: clock.date(end) },
     // A running trial moves from its own end; one that has ended starts again from today.
-    { label: "Will end", value: isEnded ? `${plural(days, "day")} from today` : dayMonthYear(new Date(end.getTime() + days * DAY_MS)), tone: "success" },
+    { label: "Will end", value: isEnded ? `${plural(days, "day")} from today` : clock.date(new Date(end.getTime() + days * DAY_MS)), tone: "success" },
   ];
   if (row.bucket === "held") impact.push({ label: "Billing hold", value: "Lifted — it reopens", tone: "success" });
-  else if (isEnded && row.holdAt) impact.push({ label: `Hold due ${dayMonth(row.holdAt)}`, value: "Called off", tone: "success" });
+  else if (isEnded && row.holdAt) impact.push({ label: `Hold due ${clock.dayMonth(row.holdAt)}`, value: "Called off", tone: "success" });
   return impact;
 }
 
@@ -339,6 +345,7 @@ function RowActionDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const clock = useClock();
   let title = "";
   let confirmLabel = "";
   let body: ReactNode = null;
@@ -354,7 +361,7 @@ function RowActionDialog({
           {isEnded ? " from today, since it has already ended." : " from its current end."}
           {isEnded && " Extending an ended trial reopens it, and lifts a billing hold if it has one."}
         </p>
-        <ImpactList items={extensionImpact(row, days, asOf)} />
+        <ImpactList items={extensionImpact(row, days, asOf, clock)} />
       </>
     );
   } else if (action?.kind === "give") {
@@ -385,14 +392,16 @@ function RowActionDialog({
 }
 
 /**
- * A trial's last day, picked (T1). The trial ends at 23:59 India time on that day; a day before today
- * is refused by the server. Setting a date on an ended trial reopens it, like an extension.
+ * A trial's last day, picked (T1), on the console's calendar. The trial ends at 23:59 on that day in
+ * the console's time zone (`consoleSetTrialEnd`); a day before today is refused by the server. Setting
+ * a date on an ended trial reopens it, like an extension.
  */
 function SetDateDialog({ row, asOf, onClose }: { row: TrialRow; asOf: Date; onClose: () => void }) {
+  const clock = useClock();
   const action = useConsoleAction<null>();
   const dateId = useId();
-  const today = istDayKey(new Date(asOf));
-  const current = istDayKey(new Date(row.trialEndsAt));
+  const today = clock.dateKey(new Date(asOf));
+  const current = clock.dateKey(new Date(row.trialEndsAt));
   const [day, setDay] = useState(current > today ? current : today);
   const isEnded = ended(row, asOf);
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= today;
@@ -413,8 +422,8 @@ function SetDateDialog({ row, asOf, onClose }: { row: TrialRow; asOf: Date; onCl
       onConfirm={() => action.run(() => consoleSetTrialEnd(row.tenant.id, day), { success: `${row.tenant.name}'s trial now ends ${dayKeyLabel(day)}.`, onDone: onClose })}
     >
       <p>
-        <strong className="font-medium">{row.tenant.name}</strong>&apos;s trial {isEnded ? "ended" : "ends"} on {dayMonthYear(row.trialEndsAt)}. Pick
-        its new last day — it ends at 23:59 India time.
+        <strong className="font-medium">{row.tenant.name}</strong>&apos;s trial {isEnded ? "ended" : "ends"} on {clock.date(row.trialEndsAt)}. Pick
+        its new last day — it ends at 23:59 that day, in the console&apos;s time zone.
         {isEnded && " Setting a date reopens it, and lifts a billing hold if it has one."}
       </p>
       <div className="space-y-1.5">
@@ -444,6 +453,7 @@ function BulkExtendDialog({
   onRetry: () => void;
   onFinished: () => void;
 }) {
+  const clock = useClock();
   const title = `Extend trials by ${BULK_DAYS} days`;
   const confirmLabel = `Extend by ${BULK_DAYS} days`;
   const description = `Each selected trial is extended by ${BULK_DAYS} days from its current end — or from today, for one that has already ended. Extending an ended trial reopens it and lifts its billing hold.`;
@@ -467,7 +477,7 @@ function BulkExtendDialog({
       if (!data) return { id: r.tenant.id, label: r.tenant.name, order: 0, index };
       if (!item) return { id: r.tenant.id, label: r.tenant.name, note: "No longer exists", order: 2, index };
       if (!item.eligible || !item.to) return { id: r.tenant.id, label: r.tenant.name, note: item.why ?? "No trial to extend", order: 1, index };
-      const dates = `${dayMonth(item.from)} → ${dayMonth(item.to)}`;
+      const dates = `${clock.dayMonth(item.from)} → ${clock.dayMonth(item.to)}`;
       return {
         id: r.tenant.id,
         label: r.tenant.name,

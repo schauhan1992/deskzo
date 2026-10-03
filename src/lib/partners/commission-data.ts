@@ -5,7 +5,6 @@ import { PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import { reportRange, type CommissionFilters, type ReportFilters, type StatementFilters } from "@/lib/console-shared/partner-params";
 import type { CsvExport } from "@/lib/console-shared/types";
 import { COUNTRIES } from "@/lib/geo/countries";
-import { endOfIndianDay, startOfIndianDay } from "@/lib/india-time";
 import { moneyOf, mrrByGroup, refNamer, type PartnerRef } from "@/lib/partners/console-data";
 import { attributedMrr } from "@/lib/partners/customers";
 import { CSV_MAX_ROWS, commissionCsv, statementCsv, type CommissionCsvRow } from "@/lib/partners/csv";
@@ -15,6 +14,7 @@ import { twoPersonPayout } from "@/lib/partners/settings";
 import { previousIstMonth } from "@/lib/partners/statements";
 import { PartnerRefused, type Money, type Paged, type PayoutMask, type TaxLine } from "@/lib/partners/types";
 import { controlDb } from "@/lib/platform/control-db";
+import { indiaClock } from "@/lib/time/zone";
 
 /**
  * The console's partner money (spec §9.2–§9.3): the /commissions page — the Review queue, every
@@ -24,7 +24,9 @@ import { controlDb } from "@/lib/platform/control-db";
  * nothing here takes `withMoney`. Plain async functions with explicit selects (console spec §5.0);
  * the sealed bank details are never read — a statement carries the payout mask it was approved with.
  * Amounts are minor units per currency, never added across currencies; statement sums, stored as
- * BigInt, come back as numbers (a page's props must serialise). Days are India's, half-open.
+ * BigInt, come back as numbers (a page's props must serialise). Days are India's, half-open, whatever
+ * zone the console keeps: commission is counted in India's months, as its statements are
+ * (src/lib/partners/statements.ts).
  *
  * The Review queue puts first what deserves a second look (spec §9.2): an entry whose customer's
  * current attribution was flagged at signup and nobody has reviewed, or whose amount is more than
@@ -54,10 +56,7 @@ const num = (v: bigint | number | null | undefined): number => Number(v ?? 0);
 
 /** A half-open IST window from "yyyy-mm-dd" days (either end may be missing). */
 function istWindow(from: string | undefined, to: string | undefined): { gte?: Date; lt?: Date } | null {
-  const start = from ? startOfIndianDay(from) : null;
-  const end = to ? endOfIndianDay(to) : null;
-  if (!start && !end) return null;
-  return { ...(start ? { gte: start } : {}), ...(end ? { lt: end } : {}) };
+  return indiaClock.dayRange(from, to);
 }
 
 // ─── Entries ─────────────────────────────────────────────────────────────────────────────────────
@@ -783,5 +782,5 @@ export async function partnerReportCsv(f: ReportFilters, now = new Date()): Prom
     for (const cur of currencies) data.push([c.name, c.country, c.partnerCustomers, c.directCustomers, cur, amountIn(c.partnerMrr, cur), amountIn(c.directMrr, cur)]);
   }
   const csv = Papa.unparse({ fields: REPORT_FIELDS, data }, { escapeFormulae: true, newline: "\r\n" });
-  return { filename: csvFilename(`partner-report-${report.from}-to-${report.to}`, now), csv, rows: partnerRows };
+  return { filename: csvFilename(`partner-report-${report.from}-to-${report.to}`, now, indiaClock), csv, rows: partnerRows };
 }

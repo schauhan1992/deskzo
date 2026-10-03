@@ -15,7 +15,7 @@ import { COUNTRY_OPTIONS, PARTNERS_PATH, REQUESTS_PATH, countryName } from "@/co
 import { NewPartnerButton } from "@/components/console/partners/new-partner-dialog";
 import { LinkPager } from "@/components/console/partners/pager";
 import { ProgrammeSettingsButton } from "@/components/console/partners/programme-settings";
-import { istDayKey, plural } from "@/lib/console-shared/format";
+import { plural } from "@/lib/console-shared/format";
 import { PARTNER_KIND, PARTNER_STATUS } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { exportParams, withParams, type RawParams } from "@/lib/console-shared/params";
@@ -25,6 +25,7 @@ import { partnerDirectory, programmeSettingsView } from "@/lib/partners/console-
 import { DEFAULT_TERMS, PARTNER_SETTING_RANGES, TAX_ID_KINDS } from "@/lib/partners/types";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { plansList } from "@/lib/platform/console-data";
+import { indiaClock } from "@/lib/time/zone";
 
 export const metadata: Metadata = { title: "Partners" };
 
@@ -68,7 +69,8 @@ export default async function ConsolePartnersPage({ searchParams }: PageProps<"/
     plans: plans.filter((p) => p.active && p.kind !== "INTERNAL").map((p) => ({ key: p.key, name: p.name })),
     taxIdKinds: TAX_ID_KINDS,
     defaults: DEFAULT_TERMS,
-    todayKey: istDayKey(directory.asOf),
+    // The earliest day terms may start: India's today, as the server checks it (src/lib/partners/terms.ts).
+    todayKey: indiaClock.dateKey(directory.asOf),
   };
 
   const requestsLink = caps.partnerMoney ? (
