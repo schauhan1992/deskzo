@@ -38,6 +38,7 @@ import { CategoryChip } from "@/components/customers/category-chip";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
+import { companyPath } from "@/lib/record-links";
 
 /**
  * A lead's full detail — the requirement, its timeline, and the controls that move it along.
@@ -113,7 +114,7 @@ export async function LeadDetail({ id }: { id: string }) {
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <Link href={`/companies/${company.id}`} className="font-medium text-text hover:underline">
+            <Link href={companyPath(company.companySeq)} className="font-medium text-text hover:underline">
               {company.name}
             </Link>
             <CompanyStageBadge stage={company.stage} />

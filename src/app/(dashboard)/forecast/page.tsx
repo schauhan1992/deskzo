@@ -12,6 +12,7 @@ import { CommitsPanel } from "@/components/forecast/commits-panel";
 import { AFTER, BEFORE, UNDATED } from "@/lib/forecast/periods";
 import { STAGE_LABEL } from "@/lib/forecast/stages";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, leadPath } from "@/lib/record-links";
 import { formatCurrency, cn } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
@@ -233,7 +234,7 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
                       {items.map((i) => (
                         <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm">
                           <div className="min-w-0">
-                            <Link href={`/companies/${i.company.id}?tab=renewals`} className="font-medium text-text hover:underline">
+                            <Link href={`${companyPath(i.company.companySeq)}?tab=renewals`} className="font-medium text-text hover:underline">
                               {i.company.name}
                             </Link>
                             <div className="text-xs text-muted">
@@ -350,7 +351,7 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
                       {bills.map((bill) => (
                         <li key={bill.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm">
                           <div className="min-w-0">
-                            <Link href={`/companies/${bill.company.id}?tab=payments`} className="font-medium text-text hover:underline">
+                            <Link href={`${companyPath(bill.company.companySeq)}?tab=payments`} className="font-medium text-text hover:underline">
                               {bill.company.name}
                             </Link>
                             <div className="text-xs text-muted">
@@ -373,9 +374,9 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
           const b = data.amc.buckets;
           const pick = selected ?? data.periods[0]!.key;
           const assets = data.amc.assets.filter((a) => a.bucket === pick);
-          const byCompany = new Map<string, { name: string; machines: typeof assets }>();
+          const byCompany = new Map<string, { name: string; companySeq: number; machines: typeof assets }>();
           for (const a of assets) {
-            if (!byCompany.has(a.company.id)) byCompany.set(a.company.id, { name: a.company.name, machines: [] });
+            if (!byCompany.has(a.company.id)) byCompany.set(a.company.id, { name: a.company.name, companySeq: a.company.companySeq, machines: [] });
             byCompany.get(a.company.id)!.machines.push(a);
           }
           return (
@@ -419,7 +420,7 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
                         .map(([id, c]) => (
                           <li key={id} className="px-5 py-2.5 text-sm">
                             <div className="flex items-center justify-between gap-2">
-                              <Link href={`/companies/${id}?tab=assets`} className="font-medium text-text hover:underline">
+                              <Link href={`${companyPath(c.companySeq)}?tab=assets`} className="font-medium text-text hover:underline">
                                 {c.name}
                               </Link>
                               <span className="text-xs text-muted">
@@ -508,7 +509,7 @@ function DealList({
             {deals.slice(0, 50).map((deal) => (
               <li key={deal.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm">
                 <div className="min-w-0">
-                  <Link href={`/leads/${deal.id}`} className="font-medium text-text hover:underline">
+                  <Link href={leadPath(deal.ref)} className="font-medium text-text hover:underline">
                     {deal.title}
                   </Link>
                   <div className="text-xs text-muted">

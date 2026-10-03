@@ -237,9 +237,9 @@ const inv: TieOutDocument = { ...docBase, id: "i1", docNumber: "INV-1", docType:
 const usd: TieOutDocument = { ...docBase, id: "i2", docNumber: "INV-2", docType: "INVOICE", currency: "USD", rate: 83.47, total: 118.44, allocated: 50, posted: 9886.19 };
 const cn: TieOutDocument = { ...docBase, id: "c1", docNumber: "CN-1", docType: "CREDIT_NOTE", currency: "INR", rate: 1, total: 1180, applied: 1180, posted: -1180 };
 const payments = [
-  { id: "p1", label: "Payment #1", companyId: "c", companyName: "Acme", currency: "INR", rate: 1, amount: 5000, applied: 5000 },
-  { id: "p2", label: "Payment #2", companyId: "c", companyName: "Acme", currency: "INR", rate: 1, amount: 2000, applied: 0 },
-  { id: "p3", label: "Payment #3", companyId: "c", companyName: "Acme", currency: "USD", rate: 85, amount: 50, applied: 50 },
+  { id: "p1", label: "Payment #1", companyId: "c", companySeq: 1, companyName: "Acme", currency: "INR", rate: 1, amount: 5000, applied: 5000 },
+  { id: "p2", label: "Payment #2", companyId: "c", companySeq: 1, companyName: "Acme", currency: "INR", rate: 1, amount: 2000, applied: 0 },
+  { id: "p3", label: "Payment #3", companyId: "c", companySeq: 1, companyName: "Acme", currency: "USD", rate: 85, amount: 50, applied: 50 },
 ];
 // Ledger: +11,800 +9,886.19 −5,000 −2,000 −4,250 (the $50 at 85) +76.50 (FX: 4,250 − 4,173.50) −1,180 = 9,332.69.
 const base = { side: "AR" as const, month: jun, documents: [inv, usd, cn], payments, manualInMonth: [], manualBefore: { count: 0, amount: 0 }, partyless: { count: 0, amount: 0, items: [] }, orphanPayments: { count: 0, amount: 0, items: [] } };

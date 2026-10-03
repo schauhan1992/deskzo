@@ -10,6 +10,7 @@ import { updateItem } from "@/actions/item";
 import { Button } from "@/components/ui/button";
 import { ItemDetailFields, type BrandOption } from "@/components/items/item-fields";
 import type { Item } from "@prisma/client";
+import { itemPath } from "@/lib/record-links";
 
 type FormValues = z.input<typeof updateItemSchema>;
 
@@ -87,7 +88,7 @@ export function EditItemForm({
       setServerError(result.error);
       return;
     }
-    router.push(`/items/${result.data.id}`);
+    router.push(itemPath(item.itemSeq));
   }
 
   return (

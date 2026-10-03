@@ -50,6 +50,7 @@ import {
   tradeDocumentLabels,
   tradeDocumentStatusLabels,
 } from "@/lib/trade-documents";
+import { companyPath, leadPath } from "@/lib/record-links";
 
 /**
  * A document's full detail. Rendered on its own page and again inside the split view on a document
@@ -178,7 +179,7 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             {document.reverseCharge && <Badge tone="amber">Reverse charge</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted">
-            <Link href={`/companies/${document.company.id}`} className="hover:underline">
+            <Link href={companyPath(document.company.companySeq)} className="hover:underline">
               {document.company.name}
             </Link>
             {" · "}
@@ -393,7 +394,7 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             <Card>
               <CardHeader className="text-sm font-medium text-text">Raised from</CardHeader>
               <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3">
-                <Link href={`/leads/${document.lead.id}`} className="text-sm text-text hover:underline">
+                <Link href={leadPath(document.lead.leadSeq)} className="text-sm text-text hover:underline">
                   {document.lead.title}
                 </Link>
                 <Badge tone="default">{document.lead.status.replaceAll("_", " ")}</Badge>

@@ -23,6 +23,7 @@ export async function findTradeDocumentFor(userId: string, id: string) {
         id: true,
         name: true,
         relationshipType: true,
+        companySeq: true,
         // The fallback contact for a document nobody was named on — see `contact` in the print
         // page. Matches what creation does and what the form's blank option says it will do.
         owner: { select: { name: true, email: true, phone: true } },
@@ -40,7 +41,7 @@ export async function findTradeDocumentFor(userId: string, id: string) {
     againstDocument: { select: { id: true, docNumber: true, docType: true, issueDate: true } },
     conversions: { select: { id: true, docNumber: true, docType: true, status: true } },
     creditNotes: { select: { id: true, docNumber: true, docType: true, status: true } },
-    lead: { select: { id: true, title: true, status: true } },
+    lead: { select: { id: true, title: true, status: true, leadSeq: true } },
     // Who "we" were on it: the branch it was raised from (null = written before branches, the head
     // office's) and the registration its GSTIN snapshot came from.
     branch: { select: { id: true, name: true, code: true, isHeadOffice: true, active: true } },

@@ -8,6 +8,7 @@ import { indiaClock } from "@/lib/time/zone";
 import { accountTypeLabels } from "@/lib/ledger/chart";
 import { Amount, ReportHeader, accountTypeTone } from "@/components/accounting/report-chrome";
 import { DateParamInput } from "@/components/accounting/date-param-input";
+import { companyPath } from "@/lib/record-links";
 
 export default async function AccountLedgerPage({
   params,
@@ -99,7 +100,7 @@ export default async function AccountLedgerPage({
                 </td>
                 <td className="px-4 py-1.5 text-muted">
                   {row.party ? (
-                    <Link href={`/companies/${row.party.id}`} className="hover:underline">{row.party.name}</Link>
+                    <Link href={companyPath(row.party.companySeq)} className="hover:underline">{row.party.name}</Link>
                   ) : (
                     "—"
                   )}

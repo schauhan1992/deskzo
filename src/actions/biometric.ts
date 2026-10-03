@@ -217,7 +217,7 @@ export async function mappedEnrolments() {
         userId: true,
         biometricId: true,
         employeeCode: true,
-        user: { select: { id: true, name: true, active: true } },
+        user: { select: { id: true, userSeq: true, name: true, active: true } },
       },
       orderBy: { user: { name: "asc" } },
     }),
@@ -322,7 +322,7 @@ export async function recentPunches(limit = 25) {
       take: limit,
       include: {
         device: { select: { name: true } },
-        user: { select: { id: true, name: true } },
+        user: { select: { id: true, userSeq: true, name: true } },
       },
     }),
   );

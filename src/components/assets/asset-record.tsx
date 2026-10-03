@@ -14,6 +14,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { useClock } from "@/components/time/clock-provider";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { companyPath, ticketPath } from "@/lib/record-links";
 import {
   assetKindLabels,
   canMove,
@@ -87,7 +88,10 @@ export function AssetRecord({
         <Card className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm text-muted">
           <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-subtle" />
           This belongs to{" "}
-          <Link href={`/companies/${asset.ownerCompany?.id}`} className="text-brand hover:underline">
+          <Link
+            href={asset.ownerCompany ? companyPath(asset.ownerCompany.companySeq) : "/companies"}
+            className="text-brand hover:underline"
+          >
             {asset.ownerCompany?.name}
           </Link>
           . We look after it — it carries no financial record and never appears on our balance sheet.
@@ -261,7 +265,7 @@ export function AssetRecord({
               <ul className="divide-y divide-line">
                 {asset.tickets.map((t) => (
                   <li key={t.id} className="px-4 py-2">
-                    <Link href={`/tickets/${t.id}`} className="flex items-start gap-2 text-sm hover:underline">
+                    <Link href={ticketPath(t.ticketSeq)} className="flex items-start gap-2 text-sm hover:underline">
                       <TicketIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-subtle" />
                       <span className="min-w-0">
                         <span className="block truncate text-text">{t.title}</span>

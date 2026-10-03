@@ -1,4 +1,5 @@
 import type { CandidateStatus, LetterType } from "@prisma/client";
+import { personPath } from "@/lib/record-links";
 
 /**
  * What still has to happen for somebody joining, and for somebody leaving.
@@ -29,6 +30,7 @@ export type ChecklistItem = {
 
 export type OnboardingInputs = {
   userId: string;
+  userSeq: number;
   joinedOn: Date | string | null;
   employeeCode: string | null;
   designation: string | null;
@@ -57,6 +59,7 @@ export type OnboardingInputs = {
  * zero; no bank details and the pay has nowhere to go.
  */
 export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
+  const record = personPath(i.userSeq);
   return [
     {
       key: "joined",
@@ -64,14 +67,14 @@ export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
       done: Boolean(i.joinedOn),
       hint: "Everything else — probation, gratuity, leave accrual — is measured from this date.",
       blocking: true,
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "identity",
       label: "Employee code & designation",
       done: Boolean(i.employeeCode) && Boolean(i.designation),
       hint: "The code appears on their payslip and every letter.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "salary",
@@ -79,7 +82,7 @@ export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
       done: i.hasSalaryStructure,
       hint: "Without one, payroll skips this person entirely — silently.",
       blocking: true,
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "statutory",
@@ -87,7 +90,7 @@ export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
       done: Boolean(i.panNumber),
       hint: "Needed for TDS and for Form 16 at the end of the year.",
       blocking: true,
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "bank",
@@ -95,7 +98,7 @@ export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
       done: Boolean(i.bankAccountNumber) && Boolean(i.bankIfsc),
       hint: "Where the salary actually goes.",
       blocking: true,
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "state",
@@ -103,28 +106,28 @@ export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
       done: Boolean(i.state),
       hint: "Drives the professional tax slab. Left blank, nothing is deducted and it goes unnoticed.",
       blocking: true,
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "contact",
       label: "Personal phone & emergency contact",
       done: Boolean(i.personalPhone) && Boolean(i.emergencyContactPhone),
       hint: "The one thing on the record you will need at the worst possible moment.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "documents",
       label: "CV and ID proof on file",
       done: i.documentTypes.includes("CV") && (i.documentTypes.includes("PAN_CARD") || i.documentTypes.includes("AADHAAR")),
       hint: "Upload the CV you hired on and at least one identity document.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "letter",
       label: "Appointment letter issued",
       done: i.hasAppointmentLetter,
       hint: "Draft it from the personnel file — it reads the salary and dates off the record.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "equipment",
@@ -154,6 +157,7 @@ export function onboardingChecklist(i: OnboardingInputs): ChecklistItem[] {
 
 export type OffboardingInputs = {
   userId: string;
+  userSeq: number;
   exitedOn: Date | string | null;
   loginActive: boolean;
   hasSettlement: boolean;
@@ -178,6 +182,7 @@ export type OffboardingInputs = {
  */
 export function offboardingChecklist(i: OffboardingInputs): ChecklistItem[] {
   const settled = i.settlementStatus === "PAID" || (i.settlementStatus === "APPROVED" && i.netPayable <= 0);
+  const record = personPath(i.userSeq);
 
   return [
     {
@@ -186,7 +191,7 @@ export function offboardingChecklist(i: OffboardingInputs): ChecklistItem[] {
       done: Boolean(i.exitedOn),
       hint: "Last working day, how they left, and why.",
       blocking: true,
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "access",
@@ -238,14 +243,14 @@ export function offboardingChecklist(i: OffboardingInputs): ChecklistItem[] {
       label: "Relieving letter issued",
       done: i.letterTypes.includes("RELIEVING"),
       hint: "Confirms the date they were relieved. The next employer will ask for it.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "experience",
       label: "Experience certificate issued",
       done: i.letterTypes.includes("EXPERIENCE"),
       hint: "Dates and the position held.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
     {
       key: "nodues",
@@ -254,7 +259,7 @@ export function offboardingChecklist(i: OffboardingInputs): ChecklistItem[] {
       hint: settled
         ? "Everything is clear — this can go out."
         : "Hold this until the settlement is closed; it certifies that nothing is outstanding.",
-      href: `/people/${i.userId}`,
+      href: record,
     },
   ];
 }

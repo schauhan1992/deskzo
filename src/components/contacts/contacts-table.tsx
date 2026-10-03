@@ -17,6 +17,7 @@ import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select"
 import { EmailAddress, type VerifiableContact } from "@/components/contacts/email-address";
 import { OutboundLink, whatsappHref } from "@/components/ui/outbound-link";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
+import { companyPath } from "@/lib/record-links";
 
 type ContactRow = VerifiableContact & {
   name: string;
@@ -25,6 +26,7 @@ type ContactRow = VerifiableContact & {
   isPrimary: boolean;
   company: {
     id: string;
+    companySeq: number;
     name: string;
     relationshipType: CompanyRelationshipType;
     industry: { id: string; name: string } | null;
@@ -174,7 +176,7 @@ export function ContactsTable({
                   </td>
                   <td className="px-4 py-2.5 text-muted">{c.designation.replaceAll("_", " ")}</td>
                   <td className="px-4 py-2.5">
-                    <Link href={`/companies/${c.company.id}?tab=contacts`} className="text-text hover:underline">
+                    <Link href={`${companyPath(c.company.companySeq)}?tab=contacts`} className="text-text hover:underline">
                       {c.company.name}
                     </Link>
                     {c.company.industry && <div className="text-xs text-subtle">{c.company.industry.name}</div>}

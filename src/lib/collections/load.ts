@@ -210,6 +210,7 @@ export type DueRow = {
   /** INV-0012 / ORD-000034. */
   label: string;
   companyId: string;
+  companySeq: number;
   companyName: string;
   /** The account manager's name, when there is one. */
   ownerName: string | null;
@@ -263,7 +264,7 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
         total: true,
         currency: true,
         exchangeRate: true,
-        company: { select: { id: true, name: true, ownerUserId: true, owner: { select: { name: true } } } },
+        company: { select: { id: true, companySeq: true, name: true, ownerUserId: true, owner: { select: { name: true } } } },
         payments: { select: { amount: true } },
         creditsReceived: { select: { amount: true } },
         lines: { where: { companyProductId: { not: null } }, select: { companyProductId: true, companyProduct: { select: { addedBy: { select: { id: true, name: true } } } } } },
@@ -292,7 +293,7 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
         item: { select: { name: true, sellingPrice: true, taxRatePercent: true } },
         allocations: { select: { amount: true } },
         addedBy: { select: { id: true, name: true } },
-        company: { select: { id: true, name: true, ownerUserId: true, paymentTerms: true, owner: { select: { name: true } } } },
+        company: { select: { id: true, companySeq: true, name: true, ownerUserId: true, paymentTerms: true, owner: { select: { name: true } } } },
       },
     }),
   ]);
@@ -318,6 +319,7 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
       id: inv.id,
       label: inv.docNumber,
       companyId: inv.company.id,
+      companySeq: inv.company.companySeq,
       companyName: inv.company.name,
       ownerName: inv.company.owner?.name ?? null,
       onTheirAccount: onTheirAccount(inv.company.ownerUserId),
@@ -353,6 +355,7 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
       id: order.id,
       label: formatOrderId(order.orderSeq),
       companyId: order.company.id,
+      companySeq: order.company.companySeq,
       companyName: order.company.name,
       ownerName: order.company.owner?.name ?? null,
       onTheirAccount: onTheirAccount(order.company.ownerUserId),

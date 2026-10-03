@@ -1068,7 +1068,7 @@ async function database() {
     const row = {
       id: "zzbr-row", docNumber: `${PREFIX}/ROW/1`, status: "ISSUED" as const, issueDate: new Date("2026-09-15T12:00:00+05:30"), total: 1180,
       currency: "INR", reference: null, einvoiceStatus: "NOT_APPLICABLE" as const, irn: null,
-      company: { id: "c", name: `${PREFIX} Customer Pvt Ltd`, relationshipType: "CLIENT" as const }, createdBy: { name: "Probe" }, salesperson: null,
+      company: { id: "c", name: `${PREFIX} Customer Pvt Ltd`, relationshipType: "CLIENT" as const, companySeq: 1 }, createdBy: { name: "Probe" }, salesperson: null,
       branch: { id: b2.id, name: b2.name, code: b2.code },
     };
     /** Somebody's stored column choices around `child`, as the layout provides them. */

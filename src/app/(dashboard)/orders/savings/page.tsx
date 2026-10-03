@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
+import { orderPath } from "@/lib/record-links";
 
 const MONTH = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", month: "long", year: "numeric" });
 const DAY = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
@@ -129,7 +130,7 @@ export default async function PurchaseSavingsPage({ searchParams }: { searchPara
                   <tr key={l.id} className={`border-b border-line last:border-0 ${l.cancelled ? "text-subtle line-through" : ""}`}>
                     <td className="px-4 py-2.5">{DAY.format(new Date(`${l.recordedOn}T00:00:00Z`))}</td>
                     <td className="px-4 py-2.5 font-mono text-xs">
-                      <Link href={`/orders/${l.orderId}`} className="hover:underline">
+                      <Link href={orderPath(l.orderSeq)} className="hover:underline">
                         {formatOrderId(l.orderSeq)}
                       </Link>
                       {l.cancelled && <span className="ml-1.5 font-sans no-underline">(cancelled)</span>}

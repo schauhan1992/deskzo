@@ -11,6 +11,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { cn } from "@/lib/utils";
+import { companyPath, leadPath } from "@/lib/record-links";
 
 export type ResponseRow = {
   id: string;
@@ -20,8 +21,8 @@ export type ResponseRow = {
   email: string | null;
   phone: string | null;
   companyName: string | null;
-  company: { id: string; name: string } | null;
-  lead: { id: string; title: string } | null;
+  company: { id: string; companySeq: number; name: string } | null;
+  lead: { id: string; leadSeq: number; title: string } | null;
   attending: boolean | null;
   attendance: FormAttendance | null;
   viaInvite: boolean;
@@ -145,7 +146,7 @@ export function ResponseTable({
                         <div className="font-medium text-text">{row.name ?? "—"}</div>
                         <div className="text-xs text-muted">
                           {row.company ? (
-                            <Link href={`/companies/${row.company.id}`} className="hover:underline">
+                            <Link href={companyPath(row.company.companySeq)} className="hover:underline">
                               {row.company.name}
                             </Link>
                           ) : (
@@ -226,7 +227,7 @@ export function ResponseTable({
                               <>
                                 {" "}
                                 Lead:{" "}
-                                <Link href={`/leads/${row.lead.id}`} className="underline">
+                                <Link href={leadPath(row.lead.leadSeq)} className="underline">
                                   {row.lead.title}
                                 </Link>
                               </>

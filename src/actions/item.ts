@@ -51,7 +51,7 @@ async function validateBrandFamily(brandId?: string, productFamilyId?: string): 
   return null;
 }
 
-export async function createItem(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createItem(input: unknown): Promise<ActionResult<{ id: string; itemSeq: number }>> {
   const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
@@ -116,7 +116,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
     });
 
     revalidatePath("/items");
-    return { ok: true, data: { id: item.id } };
+    return { ok: true, data: { id: item.id, itemSeq: item.itemSeq } };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "An item with this SKU already exists." };

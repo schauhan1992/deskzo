@@ -19,6 +19,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { formatLeadId } from "../src/lib/order-id";
 import { LEAD_FIELDS, RATE_LIMIT_PER_MINUTE, renderMarkdown } from "../src/lib/lead-capture/spec";
 import { ACCEPTED_FIELDS, companyNameFor, designationFromTitle } from "../src/lib/lead-capture/intake";
 
@@ -46,8 +47,9 @@ async function cleanup() {
   const keys = await db.leadCaptureKey.findMany({ where: { name: { startsWith: TAG } }, select: { id: true } });
   const keyIds = keys.map((k) => k.id);
   const companies = await db.company.findMany({ where: { name: { startsWith: TAG } }, select: { id: true } });
-  const leads = await db.lead.findMany({ where: { OR: [{ captureKeyId: { in: keyIds } }, { companyId: { in: companies.map((c) => c.id) } }] }, select: { id: true } });
-  await db.notification.deleteMany({ where: { OR: [{ link: { in: leads.map((l) => `/leads/${l.id}`) } }, { title: { contains: TAG } }] } });
+  const leads = await db.lead.findMany({ where: { OR: [{ captureKeyId: { in: keyIds } }, { companyId: { in: companies.map((c) => c.id) } }] }, select: { id: true, leadSeq: true } });
+  const leadLinks = leads.flatMap((l) => [`/leads/${formatLeadId(l.leadSeq)}`, `/leads/${l.id}`]);
+  await db.notification.deleteMany({ where: { OR: [{ link: { in: leadLinks } }, { title: { contains: TAG } }] } });
   await db.auditLog.deleteMany({
     where: {
       OR: [

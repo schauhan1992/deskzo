@@ -6,6 +6,7 @@ import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { MAIL_STATUS_LABEL, MAIL_STATUS_TONE, mailPreviewDocument } from "@/lib/mail-log";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
 
 const EVENT_LABEL: Record<string, string> = {
@@ -36,7 +37,7 @@ export default async function MailMessagePage({ params }: { params: Promise<{ id
     ["To", `${m.contact?.name ?? ""} ${m.toEmail ? `<${m.toEmail}>` : (m.toPhone ?? "")}`.trim()],
     [
       "Customer",
-      <Link key="c" href={`/companies/${m.company.id}?tab=emails`} className="text-text hover:underline">
+      <Link key="c" href={`${companyPath(m.company.companySeq)}?tab=emails`} className="text-text hover:underline">
         {m.company.name}
       </Link>,
     ],
@@ -46,7 +47,7 @@ export default async function MailMessagePage({ params }: { params: Promise<{ id
       m.companyProduct ? (
         <span key="w">
           {m.source.replace(formatOrderId(m.companyProduct.orderSeq), "")}
-          <Link href={`/orders/${m.companyProduct.id}`} className="text-text hover:underline">
+          <Link href={orderPath(m.companyProduct.orderSeq)} className="text-text hover:underline">
             {formatOrderId(m.companyProduct.orderSeq)}
           </Link>
         </span>

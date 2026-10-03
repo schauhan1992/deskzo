@@ -13,6 +13,7 @@ import { clientRelationshipTypeValues } from "@/lib/validation/company";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { formSetup } from "@/lib/custom-fields/server";
+import { companyPath } from "@/lib/record-links";
 
 export default async function NewEndCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const enabled = await isModuleEnabled("resellers");
@@ -42,7 +43,7 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
       <h1 className="text-xl font-semibold text-text">New end customer</h1>
       <p className="mt-1 text-sm text-muted">
         A customer of{" "}
-        <Link href={`/companies/${reseller.id}`} className="text-text hover:underline">
+        <Link href={companyPath(reseller.companySeq)} className="text-text hover:underline">
           {reseller.name}
         </Link>
         . Orders for them are still placed and invoiced against the reseller.

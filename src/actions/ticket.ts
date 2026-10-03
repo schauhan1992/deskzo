@@ -10,6 +10,7 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatTicketId } from "@/lib/tickets";
+import { ticketPath } from "@/lib/record-links";
 import { pageSlice } from "@/lib/pagination";
 import {
   createTicketSchema,
@@ -40,7 +41,7 @@ export async function listSupportAgents() {
   });
 }
 
-export async function createTicket(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createTicket(input: unknown): Promise<ActionResult<{ id: string; ticketSeq: number }>> {
   const user = await requireModuleUser("helpdesk");
   if (!(await hasEffectivePermission(user.id, "tickets.create"))) {
     return { ok: false, error: "You don't have permission to create tickets." };
@@ -95,7 +96,7 @@ export async function createTicket(input: unknown): Promise<ActionResult<{ id: s
 
   revalidatePath("/tickets");
   revalidatePath(`/companies/${data.companyId}`);
-  return { ok: true, data: { id: ticket.id } };
+  return { ok: true, data: { id: ticket.id, ticketSeq: ticket.ticketSeq } };
 }
 
 /** Lightweight order list for the ticket "which order is this support for?" picker — no Decimal fields, so it's safe to pass straight to a Client Component. */
@@ -152,7 +153,7 @@ async function ticketListWhere(userId: string, params?: TicketListParams): Promi
 }
 
 const ticketListInclude = {
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, name: true, companySeq: true } },
   contact: { select: { id: true, name: true } },
   companyProduct: { select: { id: true, orderSeq: true } },
   assignedTo: { select: { id: true, name: true } },
@@ -196,7 +197,7 @@ export async function getTicket(id: string) {
   return db.ticket.findFirst({
     where: { id, ...(await viaCompanyScope(user.id)) },
     include: {
-      company: { select: { id: true, name: true, customerCategory: { select: CATEGORY_SELECT } } },
+      company: { select: { id: true, name: true, companySeq: true, customerCategory: { select: CATEGORY_SELECT } } },
       contact: { select: { id: true, name: true, email: true, phone: true, designation: true } },
       companyProduct: { select: { id: true, orderSeq: true, item: { select: { name: true } } } },
       assignedTo: { select: { id: true, name: true } },
@@ -237,7 +238,7 @@ export async function updateTicketStatus(input: unknown): Promise<ActionResult<{
       type: "TICKET_STATUS_CHANGED",
       title: "Your ticket's status changed",
       message: `${formatTicketId(ticket.ticketSeq)} — now ${status.replaceAll("_", " ")}`,
-      link: `/tickets/${ticketId}`,
+      link: ticketPath(ticket.ticketSeq),
     });
   }
 
@@ -299,7 +300,7 @@ export async function assignTicket(input: unknown): Promise<ActionResult<{ id: s
       type: "TICKET_ASSIGNED",
       title: "A ticket was assigned to you",
       message: `${formatTicketId(ticket.ticketSeq)} — ${ticket.title}`,
-      link: `/tickets/${ticketId}`,
+      link: ticketPath(ticket.ticketSeq),
     });
   }
 
@@ -330,7 +331,7 @@ export async function addTicketComment(input: unknown): Promise<ActionResult<{ i
       type: "TICKET_COMMENT",
       title: "New comment on your ticket",
       message: `${formatTicketId(ticket.ticketSeq)} — ${body}`,
-      link: `/tickets/${ticketId}`,
+      link: ticketPath(ticket.ticketSeq),
     });
   }
 

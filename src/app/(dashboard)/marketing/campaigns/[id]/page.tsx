@@ -7,6 +7,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmailFrame } from "@/components/marketing/email-frame";
 import { workspaceClock } from "@/lib/time/workspace";
+import { companyPath } from "@/lib/record-links";
 
 export const metadata = { title: "Campaign report" };
 
@@ -128,7 +129,7 @@ export default async function CampaignReportPage({ params }: { params: Promise<{
                       <td className="px-4 py-2">
                         <div className="text-text">{m.contact?.name ?? m.toEmail ?? "—"}</div>
                         <div className="text-xs text-subtle">
-                          {m.toEmail} · <Link href={`/companies/${m.company.id}`} className="hover:underline">{m.company.name}</Link>
+                          {m.toEmail} · <Link href={companyPath(m.company.companySeq)} className="hover:underline">{m.company.name}</Link>
                         </div>
                       </td>
                       <td className="px-4 py-2">

@@ -8,6 +8,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { formatOrderId } from "@/lib/order-id";
+import { orderPath } from "@/lib/record-links";
 import { orderSteps, stepIdsOf } from "@/lib/pipeline/order-steps-server";
 import { stepOfOrder, stepsOf, takesSteps } from "@/lib/pipeline/order-steps";
 import type { ActionResult } from "@/actions/company";
@@ -58,7 +59,7 @@ export async function setOrderStep(orderId: string, stepId: string, note?: strin
       type: "ORDER_STATUS_CHANGED",
       title: `${ref} is at ${target.label}`,
       message: `${order.company.name}${text ? ` — ${text}` : ""}`,
-      link: `/orders/${order.id}`,
+      link: orderPath(order.orderSeq),
     });
   }
   revalidatePath("/orders");

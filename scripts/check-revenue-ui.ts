@@ -464,7 +464,7 @@ async function run(scratchName: string) {
   as(manager);
   const detailManager = await renderPage(SchedulePage, {}, { id: sa.id });
   const tdm = text(detailManager);
-  ok("its customer, invoice, line, period and amount", detailManager.includes(`href="/companies/${acme.id}"`) && detailManager.includes(`href="/documents/${a.id}"`) && tdm.includes("Zz Cloud suite, a year") && tdm.includes(rupees(120000)));
+  ok("its customer, invoice, line, period and amount", detailManager.includes(`href="/companies/${formatCompanyId(acme.companySeq)}"`) && detailManager.includes(`href="/documents/${a.id}"`) && tdm.includes("Zz Cloud suite, a year") && tdm.includes(rupees(120000)));
   ok("  its months: three posted with their entries, the rest planned", count(tdm, " Posted ") === 3 && posted.every((p) => tdm.includes(p.entry!.entryNumber)) && tdm.includes("Planned"), posted.map((p) => p.entry!.entryNumber).join(", "));
   ok("  who made it (authorLabel), and that it needed no approval", tdm.includes(`Made by ${owner.name}`) && tdm.includes("started active without approval"));
   ok("  who posted each month", tdm.includes(`by ${manager.name}`));

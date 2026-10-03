@@ -8,6 +8,7 @@ import { recordRsvp, revokeInvite } from "@/actions/forms";
 import { INVITE_STATUS, type InviteStatusKey } from "@/lib/forms/invites";
 import { Badge, Card } from "@/components/ui/card";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { companyPath } from "@/lib/record-links";
 
 export type InviteRow = {
   id: string;
@@ -18,7 +19,7 @@ export type InviteRow = {
   sendCount: number;
   openedText: string | null;
   contact: { id: string; name: string; designation: string | null };
-  company: { id: string; name: string };
+  company: { id: string; companySeq: number; name: string };
   invitedBy: { name: string } | null;
   link: string | null;
 };
@@ -64,7 +65,7 @@ export function InviteTable({ rows, canInvite, event }: { rows: InviteRow[]; can
                   <Badge tone={status.tone}>{status.label}</Badge>
                 </div>
                 <div className="text-xs text-muted">
-                  <Link href={`/companies/${row.company.id}`} className="hover:underline">
+                  <Link href={companyPath(row.company.companySeq)} className="hover:underline">
                     {row.company.name}
                   </Link>
                   {row.contact.designation && ` · ${row.contact.designation}`} · {row.email}

@@ -141,7 +141,8 @@ export async function CompanyCredit({ companyId, profile }: { companyId: string;
             {profile.bills.map((b) => (
               <tr key={b.id} className="border-b border-line last:border-0">
                 <td className="px-4 py-2.5">
-                  <Link href={b.kind === "INVOICE" ? `/documents/${b.id}` : `/orders/${b.id}`} className="font-mono text-xs text-text hover:underline">
+                  {/* An order's ref is its ORD- reference, the order page's own address. */}
+                  <Link href={b.kind === "INVOICE" ? `/documents/${b.id}` : `/orders/${b.ref}`} className="font-mono text-xs text-text hover:underline">
                     {b.ref}
                   </Link>
                 </td>

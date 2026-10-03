@@ -212,7 +212,7 @@ export async function listCreditRisks(params: { rating?: CreditRating; q?: strin
       where,
       // Lowest score first — Risky, then Fair, then Reliable; New (no score) last.
       orderBy: [{ creditScore: { sort: "asc", nulls: "last" } }, { name: "asc" }],
-      select: { id: true, name: true, paymentTerms: true, relationshipType: true },
+      select: { id: true, companySeq: true, name: true, paymentTerms: true, relationshipType: true },
       ...pageSlice(params.page, params.pageSize),
     }),
     db.company.count({ where }),
@@ -227,7 +227,7 @@ export async function listCreditRisks(params: { rating?: CreditRating; q?: strin
   return toPlain({
     rows: page.map((c) => {
       const a = live.get(c.id)!;
-      return { id: c.id, name: c.name, isReseller: c.relationshipType === "RESELLER", ...summary(a, c.paymentTerms), reasons: a.reasons.slice(0, 2) };
+      return { id: c.id, companySeq: c.companySeq, name: c.name, isReseller: c.relationshipType === "RESELLER", ...summary(a, c.paymentTerms), reasons: a.reasons.slice(0, 2) };
     }),
     total,
     counts,

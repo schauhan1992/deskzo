@@ -16,6 +16,7 @@ import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@
 import { computeGratuity, serviceYears } from "@/lib/hr/settlement";
 import { getOrganisation } from "@/lib/organisation";
 import { workspaceClock } from "@/lib/time/workspace";
+import { personPath } from "@/lib/record-links";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -424,7 +425,7 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
 export async function getLetter(id: string) {
   const letter = await db.employeeLetter.findUnique({
     where: { id },
-    include: { user: { select: { id: true, name: true } }, issuedBy: { select: { name: true } } },
+    include: { user: { select: { id: true, userSeq: true, name: true } }, issuedBy: { select: { name: true } } },
   });
   if (!letter) return null;
   const { manage, canRead } = await access(letter.userId);
@@ -457,7 +458,7 @@ export async function updateLetterBody(id: string, body: string): Promise<Action
 export async function issueLetter(id: string): Promise<ActionResult<null>> {
   const letter = await db.employeeLetter.findUnique({
     where: { id },
-    select: { id: true, userId: true, candidateId: true, type: true, letterNumber: true, subject: true, status: true },
+    select: { id: true, userId: true, candidateId: true, type: true, letterNumber: true, subject: true, status: true, user: { select: { userSeq: true } } },
   });
   if (!letter) return { ok: false, error: "That letter no longer exists." };
   const { user, manage } = await access(letter.userId);
@@ -489,13 +490,13 @@ export async function issueLetter(id: string): Promise<ActionResult<null>> {
 
   // Only an employee gets told. An offer letter is issued to somebody who has no account yet —
   // it reaches them by email from HR, which is the point of it being an offer.
-  if (letter.userId) {
+  if (letter.userId && letter.user) {
     await notifyUser({
       userId: letter.userId,
       type: "LETTER_ISSUED",
       title: letter.subject,
       message: `${letter.letterNumber} is on your file.`,
-      link: `/people/${letter.userId}?tab=documents`,
+      link: `${personPath(letter.user.userSeq)}?tab=documents`,
     });
   }
 

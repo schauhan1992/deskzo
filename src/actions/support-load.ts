@@ -79,10 +79,10 @@ export async function listSupportLoad(params: { months: number; sort: SupportSor
   const ids = await companiesWithSupport(await companyScope(user.id), window);
   const [facts, companies] = await Promise.all([
     loadSupportFacts(ids, window),
-    db.company.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, relationshipType: true } }),
+    db.company.findMany({ where: { id: { in: ids } }, select: { id: true, companySeq: true, name: true, relationshipType: true } }),
   ]);
   const rows = await Promise.all(
-    companies.map(async (c) => ({ id: c.id, name: c.name, isReseller: c.relationshipType === "RESELLER", ...(await present(facts.get(c.id)!, window, months, parts)) })),
+    companies.map(async (c) => ({ id: c.id, companySeq: c.companySeq, name: c.name, isReseller: c.relationshipType === "RESELLER", ...(await present(facts.get(c.id)!, window, months, parts)) })),
   );
 
   // Intensity: support with nothing billed first, then by tickets per ₹1 lakh. Without the payments

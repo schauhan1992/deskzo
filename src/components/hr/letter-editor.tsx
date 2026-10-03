@@ -10,6 +10,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { letterTypeLabels } from "@/lib/hr/letters";
+import { personPath } from "@/lib/record-links";
 
 type Letter = NonNullable<Awaited<ReturnType<typeof getLetter>>>;
 
@@ -51,7 +52,7 @@ export function LetterEditor({ letter, canManage }: { letter: Letter; canManage:
         <div>
           {/* A letter drafted for a candidate has no employee page to go back to yet. */}
           <Link
-            href={letter.user ? `/people/${letter.user.id}` : "/people/hiring"}
+            href={letter.user ? personPath(letter.user.userSeq) : "/people/hiring"}
             className="text-sm text-muted hover:text-text"
           >
             ← {letter.user?.name ?? "Hiring"}

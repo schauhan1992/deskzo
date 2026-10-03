@@ -7,6 +7,7 @@ import { isResellerManaged } from "@/lib/reseller";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatLeadId } from "@/lib/order-id";
+import { companyPath, leadPath } from "@/lib/record-links";
 import { chooseOwner } from "@/lib/leads/assign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { LEAD_SOURCE_VALUES } from "@/lib/leads/source";
@@ -208,7 +209,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
   const normalizedName = normalizeCompanyName(companyName);
   const existingCompany = await db.company.findUnique({
     where: { normalizedName },
-    select: { id: true, name: true, ownerUserId: true, managedByResellerId: true, managedByReseller: { select: { name: true, ownerUserId: true } } },
+    select: { id: true, companySeq: true, name: true, ownerUserId: true, managedByResellerId: true, managedByReseller: { select: { name: true, ownerUserId: true } } },
   });
 
   if (existingCompany && isResellerManaged(existingCompany)) {
@@ -218,7 +219,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
       type: "LEAD_ASSIGNED",
       title: `A website enquiry for ${existingCompany.name} — a customer of ${existingCompany.managedByReseller?.name ?? "a reseller"}`,
       message: [p.name, p.email, p.phone, p.message].filter(Boolean).join(" · ").slice(0, 500),
-      link: `/companies/${existingCompany.id}`,
+      link: companyPath(existingCompany.companySeq),
     });
     return { status: "reseller" };
   }
@@ -374,7 +375,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
       type: "LEAD_ASSIGNED",
       title: "A website lead was assigned to you",
       message: `${p.product_interest || "Website enquiry"} — ${companyName}`,
-      link: `/leads/${created.id}`,
+      link: leadPath(created.leadSeq),
     });
   }
   await recordAudit({

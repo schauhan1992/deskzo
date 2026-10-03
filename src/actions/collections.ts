@@ -87,11 +87,11 @@ export async function listCollections(params: { filter?: string; q?: string; sor
   );
 
   // Grouped by client, in the order their first (most pressing) due came in the sort.
-  const groups = new Map<string, { companyId: string; companyName: string; ownerName: string | null; onTheirAccount: boolean; total: number; rows: DueRow[] }>();
+  const groups = new Map<string, { companyId: string; companySeq: number; companyName: string; ownerName: string | null; onTheirAccount: boolean; total: number; rows: DueRow[] }>();
   for (const row of shown) {
     const group =
       groups.get(row.companyId) ??
-      { companyId: row.companyId, companyName: row.companyName, ownerName: row.ownerName, onTheirAccount: row.onTheirAccount, total: 0, rows: [] };
+      { companyId: row.companyId, companySeq: row.companySeq, companyName: row.companyName, ownerName: row.ownerName, onTheirAccount: row.onTheirAccount, total: 0, rows: [] };
     group.rows.push(row);
     group.total = Math.round((group.total + row.balanceInr) * 100) / 100;
     groups.set(row.companyId, group);

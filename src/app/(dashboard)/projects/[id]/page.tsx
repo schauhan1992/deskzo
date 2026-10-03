@@ -26,6 +26,7 @@ import { ProjectFiles } from "@/components/projects/project-files";
 import { ProjectVault } from "@/components/projects/project-vault";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { companyPath } from "@/lib/record-links";
 
 /**
  * One project.
@@ -105,7 +106,7 @@ export default async function ProjectPage({
             )}
           </div>
           <p className="mt-1 text-sm text-muted">
-            <Link href={`/companies/${project.company.id}`} className="hover:underline">
+            <Link href={companyPath(project.company.companySeq)} className="hover:underline">
               {project.company.name}
             </Link>
             {project.type && ` · ${project.type.name}`}

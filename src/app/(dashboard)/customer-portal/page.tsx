@@ -6,6 +6,7 @@ import { portalRoster } from "@/actions/portal";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { workspaceClock } from "@/lib/time/workspace";
+import { companyPath } from "@/lib/record-links";
 
 /**
  * Everyone who can open a portal.
@@ -114,7 +115,7 @@ export default async function CustomerPortalPage({
                 {grantedWithoutLinks.slice(0, 8).map((c, i) => (
                   <span key={c.companyId}>
                     {i > 0 && " · "}
-                    <Link href={`/companies/${c.companyId}?tab=portal`} className="text-brand hover:underline">
+                    <Link href={`${companyPath(c.companySeq)}?tab=portal`} className="text-brand hover:underline">
                       {c.companyName}
                     </Link>
                   </span>
@@ -162,7 +163,7 @@ export default async function CustomerPortalPage({
                     >
                       <td className="px-5 py-2.5">
                         <Link
-                          href={`/companies/${r.companyId}?tab=portal`}
+                          href={`${companyPath(r.companySeq)}?tab=portal`}
                           className="font-medium text-brand hover:underline"
                         >
                           {r.companyName}

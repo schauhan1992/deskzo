@@ -12,6 +12,7 @@ import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { useColumns } from "@/components/ui/table-columns";
 import { formatCompanyId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import { PORTAL_STATE_LABEL, type PortalState } from "@/lib/portal/state-labels";
 import { CategoryIcon } from "@/components/customers/category-chip";
 import type { CategoryWithParent } from "@/lib/customers/categories";
@@ -261,7 +262,7 @@ export function CompaniesTable({
                     <td className="px-4 py-2.5">
                       <span className="inline-flex items-center gap-1.5">
                         <CategoryIcon category={c.customerCategory} />
-                        <Link href={`/companies/${c.id}`} className="font-medium text-text hover:underline">
+                        <Link href={companyPath(c.companySeq)} className="font-medium text-text hover:underline">
                           {c.name}
                         </Link>
                       </span>

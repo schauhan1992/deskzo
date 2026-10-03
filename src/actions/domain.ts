@@ -211,6 +211,7 @@ export async function listDomainProfiles(params: {
       take: params.pageSize,
       select: {
         id: true,
+        companySeq: true,
         name: true,
         website: true,
         relationshipType: true,

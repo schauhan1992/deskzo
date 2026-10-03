@@ -13,6 +13,7 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { RatingStars } from "@/components/feedback/feedback-summary";
 import { linkState, ratingLabels, ratingTone, subjectOf } from "@/lib/feedback/rating";
 import { useClock } from "@/components/time/clock-provider";
+import { companyPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof listFeedback>>["rows"][number];
 
@@ -73,7 +74,7 @@ function FeedbackRow({ row, origin, showCompany }: { row: Row; origin: string; s
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             {showCompany && (
-              <Link href={`/companies/${row.company.id}`} className="text-sm font-medium text-brand hover:underline">
+              <Link href={companyPath(row.company.companySeq)} className="text-sm font-medium text-brand hover:underline">
                 {row.company.name}
               </Link>
             )}

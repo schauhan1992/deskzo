@@ -20,6 +20,7 @@ import {
   isPayable,
 } from "@/lib/expenses";
 import { formatVisitId } from "@/lib/visits";
+import { companyPath, expensePath, visitPath } from "@/lib/record-links";
 
 type ExpenseRow = {
   id: string;
@@ -35,7 +36,7 @@ type ExpenseRow = {
   approverUserId: string | null;
   user: { id: string; name: string };
   approver: { id: string; name: string } | null;
-  company: { id: string; name: string } | null;
+  company: { id: string; name: string; companySeq: number } | null;
   visit: { id: string; visitSeq: number; company: { name: string } } | null;
 };
 
@@ -167,7 +168,7 @@ export function ExpensesTable({
                   />
                 </td>
                 <td className="px-4 py-2.5 font-mono text-xs">
-                  <Link href={`/expenses/${e.id}`} className="text-text hover:underline">
+                  <Link href={expensePath(e.expenseSeq)} className="text-text hover:underline">
                     {formatExpenseId(e.expenseSeq)}
                   </Link>
                   <div className="max-w-xs truncate font-sans text-xs text-subtle">{e.description}</div>
@@ -184,11 +185,11 @@ export function ExpensesTable({
                 <td className="px-4 py-2.5 text-right font-medium text-text">{formatCurrency(e.amount)}</td>
                 <td className="px-4 py-2.5 text-muted">
                   {e.visit ? (
-                    <Link href={`/visits/${e.visit.id}`} className="text-text hover:underline">
+                    <Link href={visitPath(e.visit.visitSeq)} className="text-text hover:underline">
                       {formatVisitId(e.visit.visitSeq)}
                     </Link>
                   ) : e.company ? (
-                    <Link href={`/companies/${e.company.id}`} className="text-text hover:underline">
+                    <Link href={companyPath(e.company.companySeq)} className="text-text hover:underline">
                       {e.company.name}
                     </Link>
                   ) : (

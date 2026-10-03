@@ -15,6 +15,7 @@ import type { ActionResult } from "@/actions/company";
 
 const rowSelect = {
   id: true,
+  companySeq: true,
   name: true,
   relationshipType: true,
   stage: true,

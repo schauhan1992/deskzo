@@ -11,6 +11,7 @@ import { meetingRecordFor, readMeetingRecordRef, type MeetingRecordRef } from "@
 import { cancelMeeting, rescheduleMeeting, scheduleMeeting } from "@/lib/calendar/meetings";
 import { syncCalendarFor } from "@/lib/calendar/sync";
 import { toPlain } from "@/lib/serialize";
+import { companyPath, leadPath, ticketPath, visitPath } from "@/lib/record-links";
 import type { MeetingDraft } from "@/lib/calendar/types";
 import type { WorkplaceProvider } from "@/lib/workplace/providers";
 import type { ActionResult } from "@/actions/company";
@@ -78,17 +79,17 @@ export type MyEvent = {
 };
 
 const RECORD_SELECT = {
-  company: { select: { id: true, name: true } },
-  lead: { select: { id: true, title: true } },
+  company: { select: { id: true, companySeq: true, name: true } },
+  lead: { select: { id: true, leadSeq: true, title: true } },
   ticket: { select: { id: true, ticketSeq: true, title: true } },
-  visit: { select: { id: true } },
+  visit: { select: { id: true, visitSeq: true } },
 } as const;
 
-function recordOf(e: { company: { id: string; name: string } | null; lead: { id: string; title: string } | null; ticket: { id: string; title: string } | null; visit: { id: string } | null }) {
-  if (e.visit) return { label: `Visit${e.company ? ` · ${e.company.name}` : ""}`, href: `/visits/${e.visit.id}` };
-  if (e.lead) return { label: `Lead · ${e.lead.title}`, href: `/leads/${e.lead.id}` };
-  if (e.ticket) return { label: `Ticket · ${e.ticket.title}`, href: `/tickets/${e.ticket.id}` };
-  if (e.company) return { label: e.company.name, href: `/companies/${e.company.id}` };
+function recordOf(e: { company: { companySeq: number; name: string } | null; lead: { leadSeq: number; title: string } | null; ticket: { ticketSeq: number; title: string } | null; visit: { visitSeq: number } | null }) {
+  if (e.visit) return { label: `Visit${e.company ? ` · ${e.company.name}` : ""}`, href: visitPath(e.visit.visitSeq) };
+  if (e.lead) return { label: `Lead · ${e.lead.title}`, href: leadPath(e.lead.leadSeq) };
+  if (e.ticket) return { label: `Ticket · ${e.ticket.title}`, href: ticketPath(e.ticket.ticketSeq) };
+  if (e.company) return { label: e.company.name, href: companyPath(e.company.companySeq) };
   return null;
 }
 

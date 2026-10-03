@@ -3,6 +3,7 @@ import type { ScheduleListRow } from "@/lib/revenue/reports";
 import type { ScheduleApprovalVerdict } from "@/lib/revenue/schedules";
 import { monthLabel } from "@/lib/revenue/periods";
 import { formatCurrency } from "@/lib/utils";
+import { companyPath } from "@/lib/record-links";
 import { Badge, Card } from "@/components/ui/card";
 import { Amount } from "@/components/accounting/report-chrome";
 import { ApproveButton } from "@/components/revenue/approve-button";
@@ -66,7 +67,7 @@ export function ScheduleTable({
             return (
               <tr key={row.id} className="border-b border-line align-top last:border-0 hover:bg-surface-sunken">
                 <td className="px-4 py-2">
-                  <Link href={`/companies/${row.companyId}`} className="text-text hover:underline">
+                  <Link href={companyPath(row.companySeq)} className="text-text hover:underline">
                     {row.companyName}
                   </Link>
                 </td>

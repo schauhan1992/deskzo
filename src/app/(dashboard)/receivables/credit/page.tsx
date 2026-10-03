@@ -11,6 +11,7 @@ import { paymentTermsLabels } from "@/lib/gst";
 import { RATING_LABELS } from "@/lib/credit/engine";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { formatCurrency } from "@/lib/utils";
+import { companyPath } from "@/lib/record-links";
 
 const FILTERS: (CreditRating | undefined)[] = [undefined, "RISKY", "FAIR", "NEW", "RELIABLE"];
 
@@ -88,7 +89,7 @@ export default async function CustomerCreditPage({
               return (
                 <tr key={r.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-4 py-2.5">
-                    <Link href={`/companies/${r.id}?tab=credit`} className="font-medium text-text hover:underline">
+                    <Link href={`${companyPath(r.companySeq)}?tab=credit`} className="font-medium text-text hover:underline">
                       {r.name}
                     </Link>
                     {r.isReseller && <span className="ml-1.5 text-xs text-subtle">reseller</span>}

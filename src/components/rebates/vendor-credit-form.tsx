@@ -66,7 +66,7 @@ function SettlementPicker({
             options.rebates.map((r) => (
               <div key={r.orderRebateId} className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-2 last:border-0">
                 <div className="min-w-0">
-                  <a href={`/orders/${r.orderId}`} className="font-medium text-text hover:underline">
+                  <a href={`/orders/${r.orderLabel}`} className="font-medium text-text hover:underline">
                     {r.orderLabel}
                   </a>{" "}
                   <span className="text-muted">

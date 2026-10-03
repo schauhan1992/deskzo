@@ -39,6 +39,7 @@ import { checkLink, youtubeId, LINK_MAX } from "../src/lib/help/links";
 import { gettingStartedSteps, progressOf, type GettingStartedFacts } from "../src/lib/help/getting-started";
 import { SEARCH_SCOPES, refShortcut, searchListHref, searchScope } from "../src/lib/search/scopes";
 import { indiaClock } from "../src/lib/time/zone";
+import { formatCompanyId } from "../src/lib/order-id";
 
 const db = directClient();
 const MAIL = "@zzprobe-help.invalid";
@@ -312,7 +313,7 @@ async function main() {
     const mineIds = mine.ok ? mine.hits.map((h) => h.id) : [];
     ok("a salesperson finds their own company", mineIds.includes(alpha.id), JSON.stringify(mine));
     ok("…and not somebody else's", !mineIds.includes(beta.id));
-    ok("a hit opens the company page", mine.ok && mine.hits.find((h) => h.id === alpha.id)?.href === `/companies/${alpha.id}`);
+    ok("a hit opens the company page", mine.ok && mine.hits.find((h) => h.id === alpha.id)?.href === `/companies/${formatCompanyId(alpha.companySeq)}`);
     as(other);
     const theirs = await searchRecords("companies", TAG);
     ok("the other salesperson sees the reverse", theirs.ok && theirs.hits.some((h) => h.id === beta.id) && !theirs.hits.some((h) => h.id === alpha.id));

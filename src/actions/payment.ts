@@ -442,7 +442,7 @@ export async function listOrdersWithPayments(params?: {
       ],
     },
     include: {
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       item: { select: orderItemSelect },
       allocations: {
         orderBy: { createdAt: "desc" },
@@ -520,7 +520,7 @@ export async function listPayments(params?: {
       ],
     },
     include: {
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       recordedBy: { select: { id: true, name: true } },
       allocations: {
         include: {

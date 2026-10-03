@@ -21,6 +21,7 @@ import { formatTicketId, SLA_HOURS } from "../../../src/lib/tickets";
 import { formatVisitId } from "../../../src/lib/visits";
 import { tradeDocumentLabels } from "../../../src/lib/trade-documents";
 import { expenseCategoryLabels, formatExpenseId } from "../../../src/lib/expenses";
+import { expensePath, personPath } from "../../../src/lib/record-links";
 import { checkLink } from "../../../src/lib/help/links";
 import { generateCode } from "../../../src/lib/visitors/invite-code";
 import { normaliseCompany } from "../../../src/lib/visitors/company-name";
@@ -123,6 +124,8 @@ const FEMALE = new Set([
 
 type Person = {
   id: string;
+  /** USR-000123 — what links to their record carry (src/lib/record-links.ts). */
+  userSeq: number;
   name: string;
   first: string;
   email: string;
@@ -154,6 +157,7 @@ async function loadPeople(db: PrismaClient): Promise<Person[]> {
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
+      userSeq: true,
       name: true,
       email: true,
       role: true,
@@ -170,6 +174,7 @@ async function loadPeople(db: PrismaClient): Promise<Person[]> {
     const p = u.employeeProfile;
     return {
       id: u.id,
+      userSeq: u.userSeq,
       name: u.name,
       first: u.name.split(" ")[0]!,
       email: u.email,
@@ -1991,7 +1996,7 @@ async function paperwork(run: Run) {
       });
     }
     audit(run, run.hr.id, "UPDATE", "EmployeeLetter", letter.id, `Issued ${letterNumber} — ${subject}`, issuedAt);
-    notify(run, p.id, "LETTER_ISSUED", subject, `${letterNumber} is on your file.`, `/people/${p.id}?tab=documents`, issuedAt);
+    notify(run, p.id, "LETTER_ISSUED", subject, `${letterNumber} is on your file.`, `${personPath(p.userSeq)}?tab=documents`, issuedAt);
     if (status === "REVOKED") audit(run, run.hr.id, "UPDATE", "EmployeeLetter", letter.id, `Revoked ${letterNumber}`, new Date(issuedAt.getTime() + int(2, 30) * 3_600_000));
     issued += 1;
     return letter;
@@ -2217,7 +2222,7 @@ async function hiring(run: Run) {
       });
       tasks += 1;
     }
-    if (p.managerId) notify(run, p.managerId, "TASK_ASSIGNED", `${p.name} joins on ${toKey(p.joinedOn)}`, "Onboarding tasks have been raised — first-week plan is yours.", `/people/${p.id}`, convertedAt);
+    if (p.managerId) notify(run, p.managerId, "TASK_ASSIGNED", `${p.name} joins on ${toKey(p.joinedOn)}`, "Onboarding tasks have been raised — first-week plan is yours.", personPath(p.userSeq), convertedAt);
     // The CV they were hired on moved across with them.
     await db.employeeDocument.create({ data: { userId: p.id, type: "CV", name: `${p.name} — CV.pdf`, fileDataUrl: PDF_STUB, mimeType: "application/pdf", sizeBytes: stubSize(PDF_STUB), uploadedById: owner.id, createdAt: candidate.createdAt } });
     converted += 1;
@@ -2540,11 +2545,11 @@ async function expenses(run: Run) {
     });
     const ref = formatExpenseId(row.expenseSeq);
     audit(run, p.id, "CREATE", "Expense", row.id, ref, createdAt);
-    if (submittedAt) notify(run, approver.id, "EXPENSE_SUBMITTED", "An expense claim needs your approval", `${expenseCategoryLabels[category]} — ₹${amount.toFixed(2)}`, `/expenses/${row.id}`, submittedAt);
+    if (submittedAt) notify(run, approver.id, "EXPENSE_SUBMITTED", "An expense claim needs your approval", `${expenseCategoryLabels[category]} — ₹${amount.toFixed(2)}`, expensePath(row.expenseSeq), submittedAt);
     if (decidedAt) {
       const ok = status !== "REJECTED";
       audit(run, approver.id, "UPDATE", "Expense", row.id, `${ref} ${ok ? "approved" : "rejected"}`, decidedAt);
-      notify(run, p.id, "EXPENSE_DECIDED", ok ? "Your expense claim was approved" : "Your expense claim was rejected", `${ref} — ${expenseCategoryLabels[category]}${note ? `: ${note}` : ""}`, `/expenses/${row.id}`, decidedAt);
+      notify(run, p.id, "EXPENSE_DECIDED", ok ? "Your expense claim was approved" : "Your expense claim was rejected", `${ref} — ${expenseCategoryLabels[category]}${note ? `: ${note}` : ""}`, expensePath(row.expenseSeq), decidedAt);
     }
     if (status === "APPROVED" || status === "REIMBURSED") {
       if (await postExpenseToLedger(db, row.id, run.controller.id)) posted += 1;
@@ -3075,7 +3080,7 @@ async function trails(run: Run) {
       if (!c || !employedOn(c, day)) continue;
       if (pr.dateOfBirth && pr.dateOfBirth.getUTCMonth() === day.getUTCMonth() && pr.dateOfBirth.getUTCDate() === day.getUTCDate()) {
         for (const [userId, when] of present) {
-          systemNote(userId, "BIRTHDAY_TODAY", userId === c.id ? "Happy birthday!" : `It's ${c.name}'s birthday`, userId === c.id ? "From everyone at the company." : pr.designation, `/people/${c.id}`, when, `birthday:${c.id}:${year}`);
+          systemNote(userId, "BIRTHDAY_TODAY", userId === c.id ? "Happy birthday!" : `It's ${c.name}'s birthday`, userId === c.id ? "From everyone at the company." : pr.designation, personPath(c.userSeq), when, `birthday:${c.id}:${year}`);
           systemNotes += 1;
         }
       }
@@ -3083,7 +3088,7 @@ async function trails(run: Run) {
       if (pr.joinedOn && years >= 1 && pr.joinedOn.getUTCMonth() === day.getUTCMonth() && pr.joinedOn.getUTCDate() === day.getUTCDate()) {
         for (const [userId, when] of present) {
           if (userId === c.id) continue;
-          systemNote(userId, "WORK_ANNIVERSARY", `${c.name} — ${years} year${years === 1 ? "" : "s"} today`, pr.designation, `/people/${c.id}`, when, `anniversary:${c.id}:${year}`);
+          systemNote(userId, "WORK_ANNIVERSARY", `${c.name} — ${years} year${years === 1 ? "" : "s"} today`, pr.designation, personPath(c.userSeq), when, `anniversary:${c.id}:${year}`);
           systemNotes += 1;
         }
       }

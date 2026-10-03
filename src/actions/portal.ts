@@ -420,6 +420,7 @@ export async function revokePortalLogin(input: { loginId: string }): Promise<Act
 export type PortalRequestRow = {
   id: string;
   companyId: string;
+  companySeq: number;
   companyName: string;
   personName: string;
   personEmail: string | null;
@@ -443,7 +444,7 @@ export async function listPortalRequests(status?: string): Promise<ActionResult<
     orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     take: 200,
     include: {
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       handledBy: { select: { name: true } },
       companyProduct: { select: { item: { select: { name: true } } } },
     },
@@ -454,6 +455,7 @@ export async function listPortalRequests(status?: string): Promise<ActionResult<
     data: rows.map((r) => ({
       id: r.id,
       companyId: r.company.id,
+      companySeq: r.company.companySeq,
       companyName: r.company.name,
       personName: r.personName,
       personEmail: r.personEmail,
@@ -503,6 +505,7 @@ export async function setPortalRequestStatus(input: {
 
 export type PortalAccessRow = {
   companyId: string;
+  companySeq: number;
   companyName: string;
   /** Why they have access: granted on their own record, or riding the global default. */
   via: "granted" | "default";
@@ -526,7 +529,7 @@ export type PortalRoster = {
    * Switching a customer on and never sending them a link is the commonest half-finished state in
    * this module, and it is invisible from the customer's own page because that page says "allowed".
    */
-  grantedWithoutLinks: { companyId: string; companyName: string }[];
+  grantedWithoutLinks: { companyId: string; companySeq: number; companyName: string }[];
   /** Only meaningful under ALL: how many more customers could be given a link today. */
   eligibleWithoutLinks: number;
 };
@@ -553,6 +556,7 @@ export async function portalRoster(search?: string): Promise<ActionResult<Portal
     },
     select: {
       id: true,
+      companySeq: true,
       name: true,
       portalEnabled: true,
       relationshipType: true,
@@ -567,7 +571,7 @@ export async function portalRoster(search?: string): Promise<ActionResult<Portal
   });
 
   const rows: PortalAccessRow[] = [];
-  const grantedWithoutLinks: { companyId: string; companyName: string }[] = [];
+  const grantedWithoutLinks: { companyId: string; companySeq: number; companyName: string }[] = [];
   const now = new Date();
 
   for (const c of companies) {
@@ -584,7 +588,7 @@ export async function portalRoster(search?: string): Promise<ActionResult<Portal
     if (c.portalLogins.length === 0) {
       // Granted and unreachable. Listed separately rather than as a row with zeroes, because it is
       // a different thing to do about it: send them a link.
-      if (verdict.ok) grantedWithoutLinks.push({ companyId: c.id, companyName: c.name });
+      if (verdict.ok) grantedWithoutLinks.push({ companyId: c.id, companySeq: c.companySeq, companyName: c.name });
       continue;
     }
 
@@ -592,6 +596,7 @@ export async function portalRoster(search?: string): Promise<ActionResult<Portal
 
     rows.push({
       companyId: c.id,
+      companySeq: c.companySeq,
       companyName: c.name,
       via: c.portalEnabled === true ? "granted" : "default",
       allowed: verdict.ok,

@@ -14,6 +14,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { useClock } from "@/components/time/clock-provider";
 import { formatLeadId } from "@/lib/order-id";
+import { companyPath, leadPath } from "@/lib/record-links";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { useColumns } from "@/components/ui/table-columns";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
@@ -33,7 +34,7 @@ type LeadRow = {
   estimatedValue: string | null;
   expectedCloseDate: Date | string | null;
   updatedAt: Date | string;
-  company: { id: string; name: string };
+  company: { id: string; name: string; companySeq: number };
   owner: { id: string; name: string } | null;
   /** 0–100, or null for a closed lead — see src/lib/leads/score.ts. */
   score: number | null;
@@ -178,14 +179,14 @@ export function LeadsListTable({
                   )}
                   {cols.show("title") && (
                     <td className="px-4 py-2.5">
-                      <Link href={`/leads/${lead.id}`} className="font-medium text-text hover:underline">
+                      <Link href={leadPath(lead.leadSeq)} className="font-medium text-text hover:underline">
                         {lead.title}
                       </Link>
                     </td>
                   )}
                   {cols.show("company") && (
                     <td className="px-4 py-2.5">
-                      <Link href={`/companies/${lead.company.id}`} className="text-muted hover:underline">
+                      <Link href={companyPath(lead.company.companySeq)} className="text-muted hover:underline">
                         {lead.company.name}
                       </Link>
                     </td>

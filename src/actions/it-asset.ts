@@ -50,7 +50,7 @@ const assetSelect = {
   retiredOn: true,
   createdAt: true,
   item: { select: { id: true, name: true } },
-  ownerCompany: { select: { id: true, name: true } },
+  ownerCompany: { select: { id: true, name: true, companySeq: true } },
   siteCompany: { select: { id: true, name: true } },
   location: { select: { id: true, label: true, city: true } },
   custodian: { select: { id: true, name: true } },

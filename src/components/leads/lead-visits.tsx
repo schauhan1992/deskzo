@@ -12,6 +12,7 @@ import {
   visitStatusTone,
 } from "@/lib/visits";
 import { workspaceClock } from "@/lib/time/workspace";
+import { visitPath } from "@/lib/record-links";
 
 type Visit = Awaited<ReturnType<typeof listLeadVisits>>[number];
 
@@ -64,7 +65,7 @@ export async function LeadVisits({
           visits.map((v) => (
             <div key={v.id} className="border-b border-line pb-3 last:border-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Link href={`/visits/${v.id}`} className="font-mono text-xs text-text hover:underline">
+                <Link href={visitPath(v.visitSeq)} className="font-mono text-xs text-text hover:underline">
                   {formatVisitId(v.visitSeq)}
                 </Link>
                 <Badge tone={visitStatusTone[v.status]}>{visitStatusLabels[v.status]}</Badge>

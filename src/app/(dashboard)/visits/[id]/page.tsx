@@ -24,6 +24,7 @@ import { viewerHas } from "@/actions/permission";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { companyPath, expensePath, leadPath } from "@/lib/record-links";
 
 export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
@@ -71,7 +72,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
             <Badge tone="brand">{visitPurposeLabels[visit.purpose]}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted">
-            <Link href={`/companies/${visit.company.id}`} className="hover:underline">
+            <Link href={companyPath(visit.company.companySeq)} className="hover:underline">
               {visit.company.name}
             </Link>
             {visit.contact ? ` · ${visit.contact.name}` : ""}
@@ -131,7 +132,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
                     {visit.expenses.map((expense) => (
                       <tr key={expense.id} className="border-b border-line last:border-0">
                         <td className="px-5 py-2">
-                          <Link href={`/expenses/${expense.id}`} className="font-mono text-xs text-text hover:underline">
+                          <Link href={expensePath(expense.expenseSeq)} className="font-mono text-xs text-text hover:underline">
                             {formatExpenseId(expense.expenseSeq)}
                           </Link>
                           <div className="text-xs text-subtle">{expense.description}</div>
@@ -197,7 +198,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
             <Card>
               <CardHeader className="text-sm font-medium text-text">Against lead</CardHeader>
               <CardContent className="text-sm">
-                <Link href={`/leads/${visit.lead.id}`} className="text-text hover:underline">
+                <Link href={leadPath(visit.lead.leadSeq)} className="text-text hover:underline">
                   {visit.lead.title}
                 </Link>
                 <div className="mt-1 text-xs text-subtle">{visit.lead.status.replaceAll("_", " ")}</div>

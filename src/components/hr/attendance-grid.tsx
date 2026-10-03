@@ -12,6 +12,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { useClock } from "@/components/time/clock-provider";
 import { attendanceStatusLabels, attendanceStatusValues } from "@/lib/validation/hr";
+import { personPath } from "@/lib/record-links";
 
 type Month = Awaited<ReturnType<typeof attendanceMonth>>;
 type Cell = Month["rows"][number]["cells"][number];
@@ -81,7 +82,7 @@ export function AttendanceGrid({
               {month.rows.map((row) => (
                 <tr key={row.userId} className="border-b border-line last:border-0">
                   <td className="sticky left-0 z-10 bg-surface px-3 py-1.5 whitespace-nowrap">
-                    <Link href={`/people/${row.userId}`} className="text-text hover:underline">
+                    <Link href={personPath(row.userSeq)} className="text-text hover:underline">
                       {row.name}
                     </Link>
                     {row.designation && <div className="text-[11px] text-subtle">{row.designation}</div>}

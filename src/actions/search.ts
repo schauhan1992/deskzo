@@ -15,6 +15,7 @@ import { listTradeDocuments } from "@/actions/trade-document";
 import { formatCompanyId, formatItemId, formatLeadId, formatOrderId } from "@/lib/order-id";
 import { formatTicketId } from "@/lib/tickets";
 import { documentPath } from "@/lib/trade-documents";
+import { companyPath, itemPath, leadPath, orderPath, ticketPath } from "@/lib/record-links";
 import { formatCalendarDay } from "@/lib/time/zone";
 import {
   SEARCH_MAX_LENGTH,
@@ -84,7 +85,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         id: c.id,
         title: c.name,
         subtitle: joined(formatCompanyId(c.companySeq), c.industry?.name, c.owner?.name),
-        href: `/companies/${c.id}`,
+        href: companyPath(c.companySeq),
       }));
     }
     case "contacts": {
@@ -94,7 +95,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         title: c.name,
         subtitle: joined(c.company?.name, c.designation),
         // Contacts have no page of their own; they live on their company's.
-        href: c.company ? `/companies/${c.company.id}?tab=contacts` : `/contacts?q=${encodeURIComponent(c.name)}`,
+        href: c.company ? `${companyPath(c.company.companySeq)}?tab=contacts` : `/contacts?q=${encodeURIComponent(c.name)}`,
       }));
     }
     case "leads": {
@@ -103,7 +104,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         id: l.id,
         title: l.title,
         subtitle: joined(formatLeadId(l.leadSeq), l.company?.name),
-        href: `/leads/${l.id}`,
+        href: leadPath(l.leadSeq),
       }));
     }
     case "orders": {
@@ -112,7 +113,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         id: o.id,
         title: o.company?.name ?? formatOrderId(o.orderSeq),
         subtitle: joined(formatOrderId(o.orderSeq), o.item?.name),
-        href: `/orders/${o.id}`,
+        href: orderPath(o.orderSeq),
       }));
     }
     case "renewals": {
@@ -123,7 +124,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         title: r.company?.name ?? formatOrderId(r.orderSeq),
         subtitle: joined(r.item?.name, r.endDate ? `renews ${formatCalendarDay(r.endDate)}` : null),
         // A renewal is an order record, so it opens as one.
-        href: `/orders/${r.id}`,
+        href: orderPath(r.orderSeq),
       }));
     }
     case "proposals":
@@ -143,7 +144,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         id: t.id,
         title: t.title,
         subtitle: joined(formatTicketId(t.ticketSeq), t.company?.name),
-        href: `/tickets/${t.id}`,
+        href: ticketPath(t.ticketSeq),
       }));
     }
     case "projects": {
@@ -162,7 +163,7 @@ async function run(key: SearchScopeKey, search: string, page: { page: number; pa
         id: i.id,
         title: i.name,
         subtitle: joined(formatItemId(i.itemSeq), i.sku),
-        href: `/items/${i.id}`,
+        href: itemPath(i.itemSeq),
       }));
     }
   }

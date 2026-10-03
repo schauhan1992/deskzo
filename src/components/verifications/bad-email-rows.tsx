@@ -11,6 +11,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { emailStatusLabels } from "@/lib/email-verification";
 import { useClock } from "@/components/time/clock-provider";
+import { companyPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof badEmailContacts>>["rows"][number];
 
@@ -57,7 +58,7 @@ export function BadEmailRows({ rows }: { rows: Row[] }) {
         <Card key={row.id} className="flex flex-wrap items-start justify-between gap-3 p-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Link href={`/companies/${row.company.id}?tab=contacts`} className="font-medium text-text hover:underline">
+              <Link href={`${companyPath(row.company.companySeq)}?tab=contacts`} className="font-medium text-text hover:underline">
                 {row.name}
               </Link>
               <span className="text-sm text-muted">{row.company.name}</span>

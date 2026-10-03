@@ -6,6 +6,7 @@ import { getPerson } from "@/actions/hr";
 import { handoverInventory } from "@/actions/handover";
 import { HandoverPlanner } from "@/components/people/handover-planner";
 import { Card, CardContent } from "@/components/ui/card";
+import { personPath } from "@/lib/record-links";
 
 /**
  * Moving one person's live work to colleagues.
@@ -26,7 +27,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="animate-fade-rise">
-      <Link href={`/people/${id}`} className="text-sm text-muted hover:text-text">
+      <Link href={personPath(person.userSeq)} className="text-sm text-muted hover:text-text">
         ← {person.name}
       </Link>
 

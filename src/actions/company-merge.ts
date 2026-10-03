@@ -13,6 +13,7 @@ import { notifyUser } from "@/lib/notify";
 import { toPlain } from "@/lib/serialize";
 import { parseRecordRef } from "@/lib/record-url";
 import { formatCompanyId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import { normalizeCompanyName } from "@/lib/company-name";
 import { isFreeMailbox } from "@/lib/email-verification";
 import { checkTerms, recordDecision } from "@/lib/credit/guard";
@@ -158,7 +159,7 @@ export async function mergeCompanies(input: unknown): Promise<ActionResult<{ ref
       type: "ACCOUNT_MANAGER_ASSIGNED",
       title: `${dropRef} ${drop.name} was merged into ${keepRef} ${label}`,
       message: `${dropRef} was a duplicate of ${keepRef}. Its contacts, leads, orders, invoices, tickets and everything else are under ${label} now, and its old links open it.`,
-      link: `/companies/${keepRef}`,
+      link: companyPath(keep.companySeq),
     });
   }
 

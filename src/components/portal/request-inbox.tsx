@@ -9,6 +9,7 @@ import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useClock } from "@/components/time/clock-provider";
+import { companyPath } from "@/lib/record-links";
 
 /**
  * What customers have asked for.
@@ -91,7 +92,7 @@ export function RequestInbox({ rows }: { rows: PortalRequestRow[] }) {
                       <span className="text-xs text-muted">{clock.dateTimeShort(r.createdAt)}</span>
                     </div>
                     <p className="mt-1 text-sm font-medium text-text">
-                      <Link href={`/companies/${r.companyId}`} className="text-brand hover:underline">
+                      <Link href={companyPath(r.companySeq)} className="text-brand hover:underline">
                         {r.companyName}
                       </Link>
                       <span className="font-normal text-muted"> · {r.personName}</span>

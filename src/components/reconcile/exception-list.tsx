@@ -10,6 +10,7 @@ import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
+import { companyPath } from "@/lib/record-links";
 import { useClock } from "@/components/time/clock-provider";
 
 /**
@@ -33,6 +34,7 @@ export type ExceptionRow = {
   variance: number;
   note: string | null;
   matchedCompanyId: string | null;
+  matchedCompanySeq: number | null;
   matchedCompanyName: string | null;
   orderLabel: string | null;
   orderQuantity: number | null;
@@ -129,8 +131,8 @@ export function ExceptionList({ rows }: { rows: ExceptionRow[] }) {
                         {row.source === "OURS" && <span className="text-xs text-subtle">not on the statement</span>}
                       </div>
                       <div className="mt-1 text-sm font-medium text-text">
-                        {row.matchedCompanyId ? (
-                          <Link href={`/companies/${row.matchedCompanyId}`} className="text-brand hover:underline">
+                        {row.matchedCompanySeq !== null ? (
+                          <Link href={companyPath(row.matchedCompanySeq)} className="text-brand hover:underline">
                             {row.matchedCompanyName ?? row.customerRef}
                           </Link>
                         ) : (

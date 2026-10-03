@@ -4,6 +4,7 @@ import type { listMailLog } from "@/actions/mail-log";
 import { Badge } from "@/components/ui/card";
 import { MAIL_STATUS_LABEL, MAIL_STATUS_TONE } from "@/lib/mail-log";
 import { workspaceClock } from "@/lib/time/workspace";
+import { companyPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof listMailLog>>["rows"][number];
 
@@ -33,7 +34,7 @@ export async function MailLogTable({ rows, showCompany = true }: { rows: Row[]; 
             <td className="whitespace-nowrap px-4 py-2.5 text-muted">{clock.dateTimeShort(m.sentAt ?? m.createdAt)}</td>
             {showCompany && (
               <td className="px-4 py-2.5">
-                <Link href={`/companies/${m.company.id}?tab=emails`} className="text-text hover:underline">
+                <Link href={`${companyPath(m.company.companySeq)}?tab=emails`} className="text-text hover:underline">
                   {m.company.name}
                 </Link>
               </td>

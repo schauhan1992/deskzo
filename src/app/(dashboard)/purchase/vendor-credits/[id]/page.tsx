@@ -10,6 +10,7 @@ import { formatCurrency } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 
 const KIND_LABEL = { REBATE: "Backend rebate", PRICE_DIFFERENCE: "Bill above the deal price", OTHER: "Other" } as const;
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -43,7 +44,7 @@ export default async function VendorCreditPage({ params }: { params: Promise<{ i
           </h1>
           <p className="mt-1 text-sm text-muted">
             From{" "}
-            <Link href={`/companies/${credit.vendor.id}`} className="hover:underline">
+            <Link href={companyPath(credit.vendor.companySeq)} className="hover:underline">
               {credit.vendor.name}
             </Link>{" "}
             on {formatCalendarDay(credit.date)} · {KIND_LABEL[credit.kind]}
@@ -104,7 +105,7 @@ export default async function VendorCreditPage({ params }: { params: Promise<{ i
           {credit.allocations.map((a) => (
             <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-2 last:border-0">
               <span>
-                <Link href={`/orders/${a.orderRebate.companyProduct.id}`} className="font-medium text-text hover:underline">
+                <Link href={orderPath(a.orderRebate.companyProduct.orderSeq)} className="font-medium text-text hover:underline">
                   {formatOrderId(a.orderRebate.companyProduct.orderSeq)}
                 </Link>{" "}
                 <span className="text-muted">

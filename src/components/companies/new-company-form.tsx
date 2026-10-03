@@ -14,6 +14,7 @@ import {
   relationshipTypeValues,
 } from "@/lib/validation/company";
 import { createCompany } from "@/actions/company";
+import { companyPath } from "@/lib/record-links";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { AddressFields } from "@/components/ui/address-fields";
@@ -103,7 +104,7 @@ export function NewCompanyForm({
       setServerError(result.error);
       return;
     }
-    router.push(`/companies/${result.data.id}`);
+    router.push(companyPath(result.data.companySeq));
   }
 
   return (

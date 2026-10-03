@@ -11,6 +11,7 @@ import { formatCalendarDay } from "@/lib/time/zone";
 import { EmployeeForm } from "@/components/hr/employee-form";
 import { ExitDialog } from "@/components/hr/exit-dialog";
 import { employmentTypeLabels, exitTypeLabels } from "@/lib/validation/hr";
+import { personPath } from "@/lib/record-links";
 
 type Person = NonNullable<Awaited<ReturnType<typeof getPerson>>>;
 
@@ -196,7 +197,7 @@ export function EmployeeRecord({
               </CardHeader>
               <CardContent className="space-y-1.5 text-sm">
                 {person.directReports.map((r) => (
-                  <Link key={r.id} href={`/people/${r.id}`} className="block text-text hover:underline">
+                  <Link key={r.id} href={personPath(r.userSeq)} className="block text-text hover:underline">
                     {r.name}
                   </Link>
                 ))}

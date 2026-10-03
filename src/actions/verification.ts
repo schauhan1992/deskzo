@@ -211,7 +211,7 @@ const verificationSelect = {
   note: true,
   verifiedAt: true,
   appliedAt: true,
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, companySeq: true, name: true } },
   contact: { select: { id: true, name: true, email: true, phone: true } },
   verifiedBy: { select: { name: true } },
   appliedBy: { select: { name: true } },

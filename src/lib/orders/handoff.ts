@@ -5,6 +5,7 @@ import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { formatOrderId } from "@/lib/order-id";
+import { orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { automationUserId } from "@/lib/automation-user";
@@ -48,7 +49,7 @@ export async function tellPurchase(
         type: "ORDER_STATUS_CHANGED",
         title: `${formatOrderId(order.orderSeq)} is ready for purchase`,
         message: `${order.companyName} — ${why}`,
-        link: `/orders/${order.id}`,
+        link: orderPath(order.orderSeq),
       }),
     ),
   );

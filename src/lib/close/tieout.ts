@@ -6,6 +6,7 @@ import { DOCUMENT_SOURCES } from "@/lib/ledger/journal";
 import { indiaClock } from "@/lib/time/zone";
 import { dayKey, monthEnd, monthLabel, monthWindow } from "@/lib/close/months";
 import { detailOf, inr, round2, type CheckDetail, type CheckOutcome, type DetailItem } from "@/lib/close/checks";
+import { companyPath } from "@/lib/record-links";
 
 /**
  * Receivables and payables tied to the ledger (checklist tasks 9 and 10).
@@ -63,6 +64,7 @@ export type TieOutPayment = {
   id: string;
   label: string;
   companyId: string;
+  companySeq: number;
   companyName: string;
   currency: string;
   rate: number;
@@ -173,7 +175,7 @@ export function tieOut(input: TieOutInput): CheckOutcome<TieOutDetail> {
     unapplied.push({
       id: p.id,
       label: `${p.label} · ${p.companyName}`,
-      href: `/companies/${p.companyId}`,
+      href: companyPath(p.companySeq),
       amount: rupees,
       note: p.currency === "INR" ? "Not set against any document" : `${p.currency} ${left.toFixed(2)} not set against any document`,
     });
@@ -374,7 +376,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     where: { direction: side === "AR" ? "RECEIVED" : "PAID", paidOn: { lt: to } },
     select: {
       id: true, paymentSeq: true, companyId: true, currency: true, exchangeRate: true, amount: true,
-      company: { select: { name: true } },
+      company: { select: { companySeq: true, name: true } },
       allocations: { where: { documentId: { not: null } }, select: { documentId: true, amount: true, paymentAmount: true } },
     },
   });
@@ -382,6 +384,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     id: p.id,
     label: `Payment #${p.paymentSeq}`,
     companyId: p.companyId,
+    companySeq: p.company.companySeq,
     companyName: p.company.name,
     currency: p.currency,
     // As its posting converts it (postPaymentToLedger).

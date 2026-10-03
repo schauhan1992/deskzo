@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { useClock } from "@/components/time/clock-provider";
+import { companyPath } from "@/lib/record-links";
 
 const STATUS_TONE: Record<ResellerOnboardingStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   ONBOARDING: "amber",
@@ -26,6 +27,7 @@ const STATUS_TONE: Record<ResellerOnboardingStatus, "default" | "green" | "blue"
 
 type ResellerRow = {
   id: string;
+  companySeq: number;
   name: string;
   source: string;
   createdAt: string | Date;
@@ -134,7 +136,7 @@ export function ResellersTable({ resellers }: { resellers: ResellerRow[] }) {
                     />
                   </td>
                   <td className="px-4 py-2.5">
-                    <Link href={`/companies/${r.id}`} className="font-medium text-text hover:underline">
+                    <Link href={companyPath(r.companySeq)} className="font-medium text-text hover:underline">
                       {r.name}
                     </Link>
                   </td>

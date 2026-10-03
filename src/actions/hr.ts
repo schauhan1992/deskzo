@@ -53,6 +53,7 @@ function dateOrNull(value: string | null | undefined) {
 
 const directorySelect = {
   id: true,
+  userSeq: true,
   name: true,
   email: true,
   role: true,
@@ -164,7 +165,7 @@ export async function getPerson(userId: string) {
       // The short reference — USR-000123 — which is what the person's URL canonicalises to.
       userSeq: true,
       employeeProfile: true,
-      directReports: { where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } },
+      directReports: { where: { active: true }, select: { id: true, userSeq: true, name: true }, orderBy: { name: "asc" } },
     },
   });
   return person ? toPlain(person) : null;
@@ -442,7 +443,7 @@ export async function personChecklist(userId: string) {
   const [person, structures, letters, documents, tasks, settlement, assets] = await Promise.all([
     db.user.findUnique({
       where: { id: userId },
-      select: { active: true, employeeProfile: true },
+      select: { active: true, userSeq: true, employeeProfile: true },
     }),
     db.salaryStructure.count({ where: { userId } }),
     db.employeeLetter.findMany({ where: { userId, status: "ISSUED" }, select: { type: true } }),
@@ -473,6 +474,7 @@ export async function personChecklist(userId: string) {
       stage: "OFFBOARDING" as const,
       items: offboardingChecklist({
         userId,
+        userSeq: person.userSeq,
         exitedOn: profile.exitedOn,
         loginActive: person.active,
         hasSettlement: !!settlement,
@@ -489,6 +491,7 @@ export async function personChecklist(userId: string) {
     stage: "ONBOARDING" as const,
     items: onboardingChecklist({
       userId,
+      userSeq: person.userSeq,
       joinedOn: profile?.joinedOn ?? null,
       employeeCode: profile?.employeeCode ?? null,
       designation: profile?.designation ?? null,

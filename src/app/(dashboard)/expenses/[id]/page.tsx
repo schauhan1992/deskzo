@@ -18,6 +18,7 @@ import {
   formatExpenseId,
 } from "@/lib/expenses";
 import { formatVisitId } from "@/lib/visits";
+import { companyPath, leadPath, visitPath } from "@/lib/record-links";
 
 export default async function ExpenseDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
@@ -144,7 +145,7 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
               {expense.visit ? (
                 <div className="flex items-start justify-between gap-3 text-muted">
                   <span>Visit</span>
-                  <Link href={`/visits/${expense.visit.id}`} className="text-right text-text hover:underline">
+                  <Link href={visitPath(expense.visit.visitSeq)} className="text-right text-text hover:underline">
                     {formatVisitId(expense.visit.visitSeq)}
                     <div className="text-xs text-subtle">{expense.visit.company.name}</div>
                   </Link>
@@ -152,7 +153,7 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
               ) : expense.company ? (
                 <div className="flex items-start justify-between gap-3 text-muted">
                   <span>Company</span>
-                  <Link href={`/companies/${expense.company.id}`} className="text-right text-text hover:underline">
+                  <Link href={companyPath(expense.company.companySeq)} className="text-right text-text hover:underline">
                     {expense.company.name}
                   </Link>
                 </div>
@@ -162,7 +163,7 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
               {expense.lead && (
                 <div className="flex items-start justify-between gap-3 text-muted">
                   <span>Lead</span>
-                  <Link href={`/leads/${expense.lead.id}`} className="text-right text-text hover:underline">
+                  <Link href={leadPath(expense.lead.leadSeq)} className="text-right text-text hover:underline">
                     {expense.lead.title}
                   </Link>
                 </div>

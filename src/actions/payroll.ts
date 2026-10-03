@@ -368,7 +368,7 @@ export async function getPayrollRun(
             : {}),
         },
         orderBy,
-        include: { user: { select: { id: true, name: true, employeeProfile: { select: { employeeCode: true, designation: true } } } } },
+        include: { user: { select: { id: true, userSeq: true, name: true, employeeProfile: { select: { employeeCode: true, designation: true } } } } },
       },
     },
   });

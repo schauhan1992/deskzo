@@ -730,7 +730,7 @@ export async function agingReport(params?: { search?: string; promise?: string }
       issueDate: true,
       dueDate: true,
       total: true,
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       ...invoiceSettlementInclude,
       lines: { where: { companyProductId: { not: null } }, select: { companyProductId: true } },
     },
@@ -738,7 +738,7 @@ export async function agingReport(params?: { search?: string; promise?: string }
 
   const byCompany = new Map<
     string,
-    { id: string; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; invoiceCount: number }
+    { id: string; companySeq: number; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; invoiceCount: number }
   >();
   const open: { id: string; companyId: string; orderIds: string[] }[] = [];
 
@@ -751,7 +751,7 @@ export async function agingReport(params?: { search?: string; promise?: string }
 
     const row =
       byCompany.get(invoice.company.id) ??
-      { id: invoice.company.id, name: invoice.company.name, buckets: emptyAging(), total: 0, oldest: 0, invoiceCount: 0 };
+      { id: invoice.company.id, companySeq: invoice.company.companySeq, name: invoice.company.name, buckets: emptyAging(), total: 0, oldest: 0, invoiceCount: 0 };
     row.buckets[bucket] += settlement.balance;
     row.total += settlement.balance;
     row.oldest = Math.max(row.oldest, overdue);

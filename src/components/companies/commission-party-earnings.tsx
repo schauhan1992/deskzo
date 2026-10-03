@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listCommissionPartyEarnings } from "@/actions/commission-party";
 import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
 
 type Earning = Awaited<ReturnType<typeof listCommissionPartyEarnings>>[number];
@@ -39,12 +40,12 @@ export async function CommissionPartyEarnings({ earnings }: { earnings: Earning[
             {earnings.map((earning) => (
               <tr key={earning.id} className="border-b border-line last:border-0">
                 <td className="px-3 py-2">
-                  <Link href={`/companies/${earning.order.company.id}`} className="text-text hover:underline">
+                  <Link href={companyPath(earning.order.company.companySeq)} className="text-text hover:underline">
                     {earning.order.company.name}
                   </Link>
                 </td>
                 <td className="px-3 py-2">
-                  <Link href={`/orders/${earning.order.id}`} className="font-mono text-xs text-text hover:underline">
+                  <Link href={orderPath(earning.order.orderSeq)} className="font-mono text-xs text-text hover:underline">
                     {formatOrderId(earning.order.orderSeq)}
                   </Link>
                   <div className="text-xs text-subtle">{earning.order.itemName}</div>

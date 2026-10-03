@@ -270,7 +270,7 @@ export async function accountLedger(params: { accountId: string; from?: string; 
     orderBy: [{ entry: { date: "asc" } }, { entry: { entryNumber: "asc" } }, { sortOrder: "asc" }],
     select: {
       id: true, debit: true, credit: true, narration: true,
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       entry: {
         select: {
           id: true, entryNumber: true, date: true, narration: true, source: true,
@@ -352,7 +352,7 @@ export async function listJournalEntries(params: {
         id: true, entryNumber: true, date: true, narration: true, source: true, documentId: true,
         reversesId: true,
         reversedBy: { select: { id: true, entryNumber: true } },
-        company: { select: { id: true, name: true } },
+        company: { select: { id: true, companySeq: true, name: true } },
         // `kind`, so an entry by the Automation account reads "Posted automatically" (src/lib/people.ts).
         createdBy: { select: { name: true, kind: true } },
         lines: {

@@ -8,6 +8,7 @@ import { getSchedule } from "@/actions/revenue";
 import { schedulePeople } from "@/actions/revenue-screens";
 import { monthLabel } from "@/lib/revenue/periods";
 import { formatCurrency } from "@/lib/utils";
+import { companyPath } from "@/lib/record-links";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Amount } from "@/components/accounting/report-chrome";
 import { ScheduleActions } from "@/components/revenue/schedule-actions";
@@ -55,7 +56,7 @@ export default async function RevenueSchedulePage({ params }: { params: Promise<
             {schedule.opening && <Badge>Opening</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted">
-            <Link href={`/companies/${schedule.companyId}`} className="hover:underline">
+            <Link href={companyPath(schedule.companySeq)} className="hover:underline">
               {schedule.companyName}
             </Link>
             {schedule.document && (

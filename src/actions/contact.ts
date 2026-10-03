@@ -88,6 +88,7 @@ const contactListInclude = {
   company: {
     select: {
       id: true,
+      companySeq: true,
       name: true,
       relationshipType: true,
       managedByResellerId: true,

@@ -12,6 +12,7 @@ import {
   formatDuration,
 } from "@/lib/visits";
 import { workspaceClock } from "@/lib/time/workspace";
+import { visitPath } from "@/lib/record-links";
 
 type Visit = Awaited<ReturnType<typeof listCompanyVisits>>[number];
 
@@ -58,7 +59,7 @@ export async function CompanyVisits({
               {visits.map((v) => (
                 <tr key={v.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-3 py-2 font-mono text-xs">
-                    <Link href={`/visits/${v.id}`} className="text-text hover:underline">
+                    <Link href={visitPath(v.visitSeq)} className="text-text hover:underline">
                       {formatVisitId(v.visitSeq)}
                     </Link>
                     {v.contact && <div className="font-sans text-xs text-subtle">{v.contact.name}</div>}

@@ -7,6 +7,7 @@ import type { ItemType } from "@prisma/client";
 import { bulkUpdateItems } from "@/actions/item";
 import { itemTypeValues, itemTypeLabels } from "@/lib/validation/item";
 import { formatItemId } from "@/lib/order-id";
+import { itemPath } from "@/lib/record-links";
 import { formatCurrency } from "@/lib/utils";
 import { Badge, Card } from "@/components/ui/card";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
@@ -196,7 +197,7 @@ export function ItemsTable({
                     </td>
                     <td className="px-4 py-2.5 font-mono text-xs text-muted">{formatItemId(item.itemSeq)}</td>
                     <td className="px-4 py-2.5">
-                      <Link href={`/items/${item.id}`} className="font-medium text-text hover:underline">
+                      <Link href={itemPath(item.itemSeq)} className="font-medium text-text hover:underline">
                         {item.name}
                       </Link>
                     </td>

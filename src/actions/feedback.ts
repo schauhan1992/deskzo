@@ -75,7 +75,7 @@ const requestSelect = {
   sentToEmail: true,
   sentToPhone: true,
   createdAt: true,
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, companySeq: true, name: true } },
   contact: { select: { id: true, name: true, email: true, phone: true } },
   aboutUser: { select: { id: true, name: true } },
   requestedBy: { select: { id: true, name: true } },

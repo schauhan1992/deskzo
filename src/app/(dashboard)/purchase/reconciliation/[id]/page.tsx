@@ -28,7 +28,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
       uploadedBy: { select: { name: true } },
       lines: {
         include: {
-          matchedCompany: { select: { id: true, name: true } },
+          matchedCompany: { select: { id: true, companySeq: true, name: true } },
           resolvedBy: { select: { name: true } },
           matchedOrder: { select: { orderSeq: true, quantity: true, item: { select: { name: true } } } },
         },
@@ -53,6 +53,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
       variance: Number(l.variance ?? 0),
       note: l.note,
       matchedCompanyId: l.matchedCompany?.id ?? null,
+      matchedCompanySeq: l.matchedCompany?.companySeq ?? null,
       matchedCompanyName: l.matchedCompany?.name ?? null,
       orderLabel: l.matchedOrder ? `#${l.matchedOrder.orderSeq} · ${l.matchedOrder.item.name}` : null,
       orderQuantity: l.matchedOrder?.quantity ?? null,

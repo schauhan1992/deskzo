@@ -180,6 +180,7 @@ export type MonthCell = {
 
 export type MonthRow = {
   userId: string;
+  userSeq: number;
   name: string;
   designation: string | null;
   cells: MonthCell[];
@@ -226,7 +227,7 @@ export async function attendanceMonth(params: {
   const people = await db.user.findMany({
     where,
     orderBy: { name: "asc" },
-    select: { id: true, name: true, employeeProfile: { select: { designation: true } } },
+    select: { id: true, userSeq: true, name: true, employeeProfile: { select: { designation: true } } },
   });
 
   const [records, holidays] = await Promise.all([
@@ -282,6 +283,7 @@ export async function attendanceMonth(params: {
 
     return {
       userId: person.id,
+      userSeq: person.userSeq,
       name: person.name,
       designation: person.employeeProfile?.designation ?? null,
       cells,

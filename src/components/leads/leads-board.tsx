@@ -10,11 +10,13 @@ import { updateLeadStatus } from "@/actions/lead";
 import type { LeadStatus } from "@prisma/client";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
 import type { LeadStageDef } from "@/lib/pipeline/rules";
+import { leadPath } from "@/lib/record-links";
 
 const NEEDS_REASON: LeadStatus[] = ["LOST", "DISQUALIFIED"];
 
 type BoardLead = {
   id: string;
+  leadSeq: number;
   title: string;
   status: LeadStatus;
   /** The workspace's own stage it is at (`stageOfLead`): which column it sits in. */
@@ -126,7 +128,7 @@ export function LeadsBoard({ leads, stages }: { leads: BoardLead[]; stages: Lead
                       setDragOverStage(null);
                     }}
                   >
-                    <Link href={`/leads/${lead.id}`}>
+                    <Link href={leadPath(lead.leadSeq)}>
                       <Card
                         className={`cursor-grab p-3 hover:border-line-strong active:cursor-grabbing ${
                           draggedId === lead.id ? "opacity-40" : ""

@@ -6,8 +6,9 @@ import { useRouter } from "next/navigation";
 import { linkCommissionPartyToCompany, unlinkCommissionPartyFromCompany } from "@/actions/commission-party";
 import { Button } from "@/components/ui/button";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
+import { companyPath } from "@/lib/record-links";
 
-export type LinkedCompany = { linkId: string; id: string; name: string };
+export type LinkedCompany = { linkId: string; id: string; companySeq: number; name: string };
 
 /**
  * A `CommissionPartyLink` read from whichever end you're standing on. On a commission party's page
@@ -78,7 +79,7 @@ export function LinkedCompaniesManager({
       )}
       {links.map((l) => (
         <div key={l.linkId} className="flex items-center justify-between text-sm">
-          <Link href={`/companies/${l.id}`} className="font-medium text-text hover:underline">
+          <Link href={companyPath(l.companySeq)} className="font-medium text-text hover:underline">
             {l.name}
           </Link>
           <Button

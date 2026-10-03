@@ -12,6 +12,7 @@ import { currentUser } from "@/lib/session";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import {
   formatTicketId,
   getTicketSlaStatus,
@@ -64,7 +65,7 @@ export async function TicketDetail({ id }: { id: string }) {
           </div>
           <p className="mt-1 text-base font-medium text-text">{ticket.title}</p>
           <p className="mt-1 text-sm text-muted">
-            <Link href={`/companies/${ticket.company.id}`} className="hover:underline">
+            <Link href={companyPath(ticket.company.companySeq)} className="hover:underline">
               {ticket.company.name}
             </Link>
             <CategoryChip category={ticket.company.customerCategory} className="ml-1.5 align-middle" />
@@ -144,7 +145,7 @@ export async function TicketDetail({ id }: { id: string }) {
             <CardContent className="space-y-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Company</span>
-                <Link href={`/companies/${ticket.company.id}`} className="text-text hover:underline">
+                <Link href={companyPath(ticket.company.companySeq)} className="text-text hover:underline">
                   {ticket.company.name}
                 </Link>
               </div>
@@ -159,7 +160,7 @@ export async function TicketDetail({ id }: { id: string }) {
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Order</span>
                 {ticket.companyProduct ? (
-                  <Link href={`/companies/${ticket.company.id}?tab=products`} className="text-text hover:underline">
+                  <Link href={`${companyPath(ticket.company.companySeq)}?tab=products`} className="text-text hover:underline">
                     {formatOrderId(ticket.companyProduct.orderSeq)} · {ticket.companyProduct.item.name}
                   </Link>
                 ) : (

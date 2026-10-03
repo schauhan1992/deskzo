@@ -15,6 +15,7 @@ import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { formatCurrency } from "@/lib/utils";
 import { monthLabel } from "@/lib/hr/calendar";
 import { indiaClock } from "@/lib/time/zone";
+import { personPath } from "@/lib/record-links";
 
 type Run = NonNullable<Awaited<ReturnType<typeof getPayrollRun>>>;
 type Slip = Run["payslips"][number];
@@ -177,7 +178,7 @@ export function PayrollRegister({
               {run.payslips.map((s) => (
                 <tr key={s.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-4 py-2.5">
-                    <Link href={`/people/${s.user.id}`} className="text-text hover:underline">
+                    <Link href={personPath(s.user.userSeq)} className="text-text hover:underline">
                       {s.user.name}
                     </Link>
                     <div className="text-[11px] text-subtle">

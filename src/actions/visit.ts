@@ -13,6 +13,7 @@ import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatVisitId, visitPurposeLabels } from "@/lib/visits";
+import { visitPath } from "@/lib/record-links";
 import { createVisitSchema, updateVisitSchema, completeVisitSchema, setVisitStatusSchema } from "@/lib/validation/visit";
 import { followVisitCancel, followVisitMove } from "@/lib/calendar/meetings";
 import type { ActionResult } from "@/actions/company";
@@ -83,7 +84,7 @@ async function visitListWhere(viewerId: string, params?: VisitListParams): Promi
 }
 
 const visitListInclude = {
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, name: true, companySeq: true } },
   contact: { select: { id: true, name: true } },
   lead: { select: { id: true, title: true } },
   user: { select: { id: true, name: true } },
@@ -136,7 +137,7 @@ export async function getVisit(id: string) {
   const visit = await db.visit.findUnique({
     where: { id },
     include: {
-      company: { select: { id: true, name: true, relationshipType: true } },
+      company: { select: { id: true, companySeq: true, name: true, relationshipType: true } },
       contact: {
         select: {
           id: true, name: true, email: true, phone: true,
@@ -144,7 +145,7 @@ export async function getVisit(id: string) {
           emailCheckMethod: true, emailCheckDetail: true,
         },
       },
-      lead: { select: { id: true, title: true, status: true } },
+      lead: { select: { id: true, leadSeq: true, title: true, status: true } },
       location: true,
       user: { select: { id: true, name: true } },
       expenses: {
@@ -160,7 +161,7 @@ export async function getVisit(id: string) {
   return toPlain(visit);
 }
 
-export async function createVisit(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createVisit(input: unknown): Promise<ActionResult<{ id: string; visitSeq: number }>> {
   const user = await requireModuleUser("visits");
   const parsed = createVisitSchema.safeParse(input);
   if (!parsed.success) {
@@ -221,7 +222,7 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
       type: "VISIT_SCHEDULED",
       title: "A visit was scheduled for you",
       message: `${visitPurposeLabels[data.purpose]} at ${company.name}`,
-      link: `/visits/${visit.id}`,
+      link: visitPath(visit.visitSeq),
     });
   }
   await recordAudit({
@@ -234,10 +235,10 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
 
   revalidatePath("/visits");
   revalidatePath(`/companies/${data.companyId}`);
-  return { ok: true, data: { id: visit.id } };
+  return { ok: true, data: { id: visit.id, visitSeq: visit.visitSeq } };
 }
 
-export async function updateVisit(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function updateVisit(input: unknown): Promise<ActionResult<{ id: string; visitSeq: number }>> {
   const user = await requireModuleUser("visits");
   const parsed = updateVisitSchema.safeParse(input);
   if (!parsed.success) {
@@ -245,7 +246,7 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
   }
   const { id, ...data } = parsed.data;
 
-  const existing = await db.visit.findUnique({ where: { id }, select: { userId: true, companyId: true } });
+  const existing = await db.visit.findUnique({ where: { id }, select: { userId: true, companyId: true, visitSeq: true } });
   if (!existing) return { ok: false, error: "That visit no longer exists." };
   if (!(await canActFor(user.id, existing.userId))) {
     return { ok: false, error: "You can only edit your own visits, or your team's." };
@@ -275,7 +276,7 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
   revalidatePath("/visits");
   revalidatePath(`/visits/${id}`);
   revalidatePath(`/companies/${existing.companyId}`);
-  return { ok: true, data: { id } };
+  return { ok: true, data: { id, visitSeq: existing.visitSeq } };
 }
 
 /** Stamps arrival. Kept separate from the write-up so it can be tapped on a phone at the door. */

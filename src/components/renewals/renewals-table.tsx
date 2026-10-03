@@ -10,6 +10,7 @@ import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import { getRenewalStatus } from "@/lib/renewals";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
 import { RenewButton } from "@/components/renewals/renew-button";
@@ -27,12 +28,13 @@ type RenewalRow = {
   endDate: Date | string | null;
   company: {
     id: string;
+    companySeq: number;
     name: string;
     owner?: { id: string; name: string } | null;
     /** The person to ring, so the call button opens on them rather than a picker. */
     contacts?: { id: string; name: string; phone: string | null }[];
   };
-  endCustomer: { id: string; name: string } | null;
+  endCustomer: { id: string; companySeq: number; name: string } | null;
   item: { id: string; name: string; unit: string | null };
   /**
    * The parent and everything co-terminating with it, because "15 seats expiring on the 9th" is the
@@ -158,7 +160,7 @@ export function RenewalsTable({
                     {cols.show("company") && (
                       <td className="px-4 py-2.5">
                         <Link
-                          href={`/companies/${(r.endCustomer ?? r.company).id}?tab=renewals`}
+                          href={`${companyPath((r.endCustomer ?? r.company).companySeq)}?tab=renewals`}
                           className="font-medium text-text hover:underline"
                         >
                           {(r.endCustomer ?? r.company).name}
@@ -166,7 +168,7 @@ export function RenewalsTable({
                         {r.endCustomer && (
                           <div className="mt-0.5 text-xs text-info">
                             Renew via{" "}
-                            <Link href={`/companies/${r.company.id}`} className="hover:underline">
+                            <Link href={companyPath(r.company.companySeq)} className="hover:underline">
                               {r.company.name}
                             </Link>
                           </div>

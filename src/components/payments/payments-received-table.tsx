@@ -13,6 +13,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { paymentMethodLabels } from "@/lib/gst";
 import { isBaseCurrency } from "@/lib/currency";
+import { companyPath } from "@/lib/record-links";
 
 type PaymentRow = {
   id: string;
@@ -24,7 +25,7 @@ type PaymentRow = {
   reference: string | null;
   allocated: number;
   unallocated: number;
-  company: { id: string; name: string };
+  company: { id: string; companySeq: number; name: string };
   recordedBy: { id: string; name: string };
 };
 
@@ -124,7 +125,7 @@ export function PaymentsReceivedTable({
                     />
                   </td>
                   <td className="px-4 py-2.5">
-                    <Link href={`/companies/${p.company.id}?tab=payments`} className="font-medium text-text hover:underline">
+                    <Link href={`${companyPath(p.company.companySeq)}?tab=payments`} className="font-medium text-text hover:underline">
                       {p.company.name}
                     </Link>
                   </td>

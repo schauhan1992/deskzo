@@ -7,6 +7,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { Card } from "@/components/ui/card";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { formatCurrency } from "@/lib/utils";
+import { companyPath } from "@/lib/record-links";
 
 const PERIODS = [3, 6, 12, 24];
 const SORTS: { key: SupportSort; label: string }[] = [
@@ -86,7 +87,7 @@ export default async function SupportLoadPage({
             {result.rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 <td className="px-4 py-2.5">
-                  <Link href={`/companies/${r.id}?tab=tickets`} className="font-medium text-text hover:underline">
+                  <Link href={`${companyPath(r.companySeq)}?tab=tickets`} className="font-medium text-text hover:underline">
                     {r.name}
                   </Link>
                   {r.isReseller && <span className="ml-1.5 text-xs text-subtle">reseller</span>}

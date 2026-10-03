@@ -14,6 +14,7 @@ import { recordAudit } from "@/lib/audit";
 import { changedLabel, customFieldsForCreate, customSearchWhere, saveCustomFields } from "@/lib/custom-fields/server";
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 import { createOrderSchema, approveOrderSchema, processOrderSchema, orderQuoteSchema, orderDealSchema, approveLossSchema } from "@/lib/validation/order";
 import { COST_SOURCE_LABELS, needsLossApproval, unitCostOf, type CostSource } from "@/lib/rebates/rules";
 import { resolveRebateInput } from "@/lib/rebates/server";
@@ -81,7 +82,7 @@ const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionD
 async function visibleOrder(userId: string, id: string) {
   const order = await db.companyProduct.findUnique({
     where: { id },
-    include: { company: { select: { id: true, name: true, ownerUserId: true } } },
+    include: { company: { select: { id: true, companySeq: true, name: true, ownerUserId: true } } },
   });
   if (!order || !(await canSeeCompany(userId, order.company.ownerUserId))) return null;
   return order;
@@ -144,7 +145,7 @@ async function askForLossApproval(order: { id: string; orderSeq: number; addedBy
         type: "ORDER_STATUS_CHANGED",
         title: `${label}: sold below cost — needs your approval`,
         message: `It sells at ${rupees(need.unitPrice)} a unit against ${rupees(need.cost)} — ${COST_SOURCE_LABELS[need.from]}.`,
-        link: `/orders/${order.id}`,
+        link: orderPath(order.orderSeq),
       }),
     ),
   );
@@ -374,7 +375,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
           type: "ORDER_WATCHER_ADDED",
           title: "You were added as a watcher on an order",
           message: `${formatOrderId(order.orderSeq)} — ${company.name}`,
-          link: `/orders/${order.id}`,
+          link: orderPath(order.orderSeq),
         }),
       ),
   );
@@ -490,7 +491,7 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
       type: "ORDER_STATUS_CHANGED",
       title: approved ? "Your order was approved" : "Your order was rejected",
       message: `${formatOrderId(order.orderSeq)} — ${order.company.name}`,
-      link: `/orders/${orderId}`,
+      link: orderPath(order.orderSeq),
     });
   }
 
@@ -627,7 +628,7 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
         type: "ORDER_STATUS_CHANGED",
         title: `${label}: purchase needs a higher price`,
         message: `Purchase can get this at ${rupees(purchasePrice)}, ${rupees(over)} above ${ceiling === quote ? "your distributor's price" : "the price you accepted"}: ${reason}`,
-        link: `/orders/${orderId}`,
+        link: orderPath(order.orderSeq),
       });
     }
     revalidatePath("/orders");
@@ -797,7 +798,7 @@ export async function acceptPriceIncrease(orderId: string): Promise<ActionResult
     type: "ORDER_STATUS_CHANGED",
     title: `${label}: higher price accepted`,
     message: `${rupees(price)} was accepted — go ahead with the purchase.`,
-    link: `/orders/${orderId}`,
+    link: orderPath(order.orderSeq),
   });
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
@@ -845,7 +846,7 @@ export async function sendBackPriceIncrease(orderId: string, note: string): Prom
       type: "ORDER_STATUS_CHANGED",
       title: `${label}: ${rupees(price)} sent back`,
       message: why,
-      link: `/orders/${orderId}`,
+      link: orderPath(order.orderSeq),
     });
   }
   revalidatePath("/orders");
@@ -1050,7 +1051,7 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
         type: "ORDER_STATUS_CHANGED",
         title: "Order fulfilled",
         message: `${formatOrderId(order.orderSeq)} — ${order.company.name}`,
-        link: `/orders/${orderId}`,
+        link: orderPath(order.orderSeq),
       }),
     ),
   );
@@ -1155,13 +1156,13 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
       type: "ORDER_STATUS_CHANGED",
       title: `${label} was cancelled — cancel our vendor PO`,
       message: `${order.company.name}${said} Mark on the order what became of the PO.`,
-      link: `/orders/${orderId}`,
+      link: orderPath(order.orderSeq),
     });
   } else if (withPurchase && order.orderStatus === "APPROVED") {
     const holders = await peopleHolding("orders.process", [user.id]);
     await Promise.all(
       holders.map((userId) =>
-        notifyUser({ userId, type: "ORDER_STATUS_CHANGED", title: `${label} was cancelled`, message: `${order.company.name}${said}`, link: `/orders/${orderId}` }),
+        notifyUser({ userId, type: "ORDER_STATUS_CHANGED", title: `${label} was cancelled`, message: `${order.company.name}${said}`, link: orderPath(order.orderSeq) }),
       ),
     );
   }
@@ -1171,7 +1172,7 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
       type: "ORDER_STATUS_CHANGED",
       title: "Your order was cancelled",
       message: `${label} — ${order.company.name}${said}`,
-      link: `/orders/${orderId}`,
+      link: orderPath(order.orderSeq),
     });
   }
   if (moved > 0) {
@@ -1183,7 +1184,7 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
           type: "ORDER_STATUS_CHANGED",
           title: `${rupees(moved)} is on account for ${order.company.name}`,
           message: `${label} was cancelled with payment against it. Refund it, or apply it to another order.`,
-          link: `/companies/${order.companyId}?tab=payments`,
+          link: `${companyPath(order.company.companySeq)}?tab=payments`,
         }),
       ),
     );
@@ -1305,7 +1306,7 @@ async function orderListWhere(
 }
 
 const orderListInclude = {
-  company: { select: { id: true, name: true, relationshipType: true } },
+  company: { select: { id: true, companySeq: true, name: true, relationshipType: true } },
   endCustomer: { select: { id: true, name: true } },
   item: { select: { id: true, name: true, sku: true, unit: true, sellingPrice: true, taxRatePercent: true } },
   vendor: { select: { id: true, name: true } },
@@ -1413,7 +1414,7 @@ export async function approveOrderLoss(input: unknown): Promise<ActionResult<{ i
         type: "ORDER_STATUS_CHANGED",
         title: `${label}: selling below cost approved`,
         message: `Approved at ${rupees(need.cost)} a unit — it can go ahead.`,
-        link: `/orders/${order.id}`,
+        link: orderPath(order.orderSeq),
       }),
     ),
   );
@@ -1503,13 +1504,13 @@ export async function getOrder(id: string) {
   const order = await db.companyProduct.findFirst({
     where: { id, ...(await viaCompanyScope(user.id)) },
     include: {
-      company: { select: { id: true, name: true, paymentTerms: true, relationshipType: true, customerCategory: { select: CATEGORY_SELECT } } },
-      endCustomer: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true, paymentTerms: true, relationshipType: true, customerCategory: { select: CATEGORY_SELECT } } },
+      endCustomer: { select: { id: true, companySeq: true, name: true } },
       location: { select: { id: true, label: true } },
       item: {
         select: { id: true, name: true, sku: true, unit: true, sellingPrice: true, taxRatePercent: true, costPrice: true, type: true },
       },
-      vendor: { select: { id: true, name: true, paymentTerms: true } },
+      vendor: { select: { id: true, companySeq: true, name: true, paymentTerms: true } },
       proposal: { select: { id: true, status: true } },
       addedBy: { select: { id: true, name: true } },
       accountsApprovedBy: { select: { id: true, name: true } },
@@ -1527,7 +1528,7 @@ export async function getOrder(id: string) {
         },
       },
       releasedBy: { select: { id: true, name: true } },
-      quoteVendor: { select: { id: true, name: true } },
+      quoteVendor: { select: { id: true, companySeq: true, name: true } },
       quotedBy: { select: { id: true, name: true } },
       pendingVendor: { select: { id: true, name: true } },
       priceReviewRequestedBy: { select: { id: true, name: true } },

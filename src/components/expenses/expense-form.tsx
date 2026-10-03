@@ -16,10 +16,13 @@ import {
   ALLOWED_RECEIPT_TYPES,
 } from "@/lib/expenses";
 import { formatVisitId } from "@/lib/visits";
+import { expensePath } from "@/lib/record-links";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 
 export type ExpenseFormDefaults = {
   id?: string;
+  /** With `id`: where Cancel goes back to. */
+  expenseSeq?: number;
   category: string;
   amount: string;
   taxAmount: string;
@@ -101,7 +104,7 @@ export function ExpenseForm({
         setError(result.error);
         return;
       }
-      router.push(`/expenses/${result.data.id}`);
+      router.push(expensePath(result.data.expenseSeq));
       router.refresh();
     });
   }
@@ -272,7 +275,7 @@ export function ExpenseForm({
             Save as draft
           </Button>
         )}
-        <Button type="button" variant="ghost" onClick={() => router.push(defaults.id ? `/expenses/${defaults.id}` : "/expenses")}>
+        <Button type="button" variant="ghost" onClick={() => router.push(defaults.expenseSeq ? expensePath(defaults.expenseSeq) : "/expenses")}>
           Cancel
         </Button>
       </div>

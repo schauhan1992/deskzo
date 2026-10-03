@@ -4,6 +4,7 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { isResellerManaged } from "@/lib/reseller";
 import { formatTicketId } from "@/lib/tickets";
+import { companyPath, leadPath, ticketPath, visitPath } from "@/lib/record-links";
 import { MEETING_RECORD_KINDS, type MeetingRecordKind, type MeetingRecordRef } from "@/lib/calendar/kinds";
 
 /**
@@ -40,7 +41,7 @@ export function readMeetingRecordRef(value: unknown): MeetingRecordRef | null {
 }
 
 type CompanyBits = { id: string; name: string; ownerUserId: string | null; managedByResellerId: string | null };
-const COMPANY = { select: { id: true, name: true, ownerUserId: true, managedByResellerId: true } } as const;
+const COMPANY = { select: { id: true, companySeq: true, name: true, ownerUserId: true, managedByResellerId: true } } as const;
 const NO_LINKS: MeetingLinks = { companyId: null, contactId: null, leadId: null, ticketId: null, visitId: null };
 
 async function contactsOf(userId: string, company: CompanyBits) {
@@ -63,12 +64,12 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
   switch (ref.kind) {
     case "lead": {
       if (!(await can(userId, "leads.view"))) return null;
-      const lead = await db.lead.findUnique({ where: { id: ref.id }, select: { id: true, title: true, contactId: true, company: COMPANY } });
+      const lead = await db.lead.findUnique({ where: { id: ref.id }, select: { id: true, leadSeq: true, title: true, contactId: true, company: COMPANY } });
       if (!lead || !(await canSeeCompany(userId, lead.company.ownerUserId))) return null;
       return {
         ref,
         label: `Lead · ${lead.company.name} — ${lead.title}`,
-        href: `/leads/${lead.id}`,
+        href: leadPath(lead.leadSeq),
         links: { ...NO_LINKS, companyId: lead.company.id, leadId: lead.id, contactId: lead.contactId },
         ...around(lead.company),
         contacts: await contactsOf(userId, lead.company),
@@ -82,7 +83,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
       return {
         ref,
         label: company.name,
-        href: `/companies/${company.id}`,
+        href: companyPath(company.companySeq),
         links: { ...NO_LINKS, companyId: company.id },
         ...around(company),
         contacts: await contactsOf(userId, company),
@@ -96,7 +97,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
       return {
         ref,
         label: `${contact.name} · ${contact.company.name}`,
-        href: `/companies/${contact.company.id}?tab=contacts`,
+        href: `${companyPath(contact.company.companySeq)}?tab=contacts`,
         links: { ...NO_LINKS, companyId: contact.company.id, contactId: contact.id },
         ...around(contact.company),
         contacts: await contactsOf(userId, contact.company),
@@ -112,7 +113,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
       return {
         ref,
         label: `Ticket ${number} · ${ticket.company.name}`,
-        href: `/tickets/${ticket.id}`,
+        href: ticketPath(ticket.ticketSeq),
         links: { ...NO_LINKS, companyId: ticket.company.id, ticketId: ticket.id, contactId: ticket.contactId },
         ...around(ticket.company),
         contacts: await contactsOf(userId, ticket.company),
@@ -125,13 +126,13 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
       if (!(await moduleAvailableForTenant("visits"))) return null;
       const visit = await db.visit.findUnique({
         where: { id: ref.id },
-        select: { id: true, userId: true, status: true, scheduledFor: true, address: true, agenda: true, contactId: true, leadId: true, company: COMPANY },
+        select: { id: true, visitSeq: true, userId: true, status: true, scheduledFor: true, address: true, agenda: true, contactId: true, leadId: true, company: COMPANY },
       });
       if (!visit || visit.userId !== userId || visit.status !== "PLANNED") return null;
       return {
         ref,
         label: `Visit · ${visit.company.name}`,
-        href: `/visits/${visit.id}`,
+        href: visitPath(visit.visitSeq),
         links: { ...NO_LINKS, companyId: visit.company.id, visitId: visit.id, contactId: visit.contactId, leadId: visit.leadId },
         ...around(visit.company),
         contacts: await contactsOf(userId, visit.company),

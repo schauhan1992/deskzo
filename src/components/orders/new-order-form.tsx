@@ -9,6 +9,7 @@ import { createOrderSchema, type CreateOrderInput } from "@/lib/validation/order
 import { createOrder } from "@/actions/order";
 import { punchCustomerContext, punchItemContext, type PunchCustomerContext, type PunchItemContext } from "@/actions/order-punch";
 import { formatOrderId } from "@/lib/order-id";
+import { orderPath } from "@/lib/record-links";
 import { Card } from "@/components/ui/card";
 import type { CompanyComboOption } from "@/components/ui/company-combobox";
 import type { ItemComboOption } from "@/components/items/item-combobox";
@@ -436,7 +437,7 @@ export function NewOrderForm({
     const ref = formatOrderId(result.data.orderSeq);
     if (!another) {
       setLeaving(true);
-      router.push(`/orders/${ref}`);
+      router.push(orderPath(result.data.orderSeq));
       return;
     }
     reset(nextOrderValues(getValues()));

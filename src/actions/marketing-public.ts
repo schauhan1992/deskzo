@@ -27,6 +27,7 @@ import { TOPICS } from "@/lib/marketing/topics";
 // Whichever kind of token arrived — a message's, or the contact's own long-lived one.
 import { contactForToken, unsubscribeByToken } from "@/lib/marketing/unsubscribe";
 import { notifyUser } from "@/lib/notify";
+import { leadPath } from "@/lib/record-links";
 import type { ActionResult } from "@/actions/company";
 import { chooseOwner } from "@/lib/leads/assign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
@@ -548,7 +549,7 @@ export async function submitForm(input: {
               sourceDetail: `Form: ${form.name}`,
               assignmentNote: ruled?.note ?? null,
             },
-            select: { id: true },
+            select: { id: true, leadSeq: true },
           })
         : null;
 
@@ -644,7 +645,7 @@ export async function submitForm(input: {
         : `${name} (${companyName}) can't make ${form.name}`
       : `New answer from ${companyName}`,
     message: `${name} filled in "${form.name}".`,
-    link: result.lead ? `/leads/${result.lead.id}` : `/marketing/forms/${form.id}?tab=responses`,
+    link: result.lead ? leadPath(result.lead.leadSeq) : `/marketing/forms/${form.id}?tab=responses`,
   });
 
   return { ok: true, data: { thankYou } };

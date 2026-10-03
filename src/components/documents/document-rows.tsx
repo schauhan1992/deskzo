@@ -30,6 +30,7 @@ import type {
   DocumentApprovalStatus,
 } from "@prisma/client";
 import { approvalStatusLabels, approvalStatusTone } from "@/lib/documents/approval";
+import { companyPath } from "@/lib/record-links";
 
 /** Declared structurally rather than derived from one query, since both list screens feed this. */
 type DocumentRow = {
@@ -42,7 +43,7 @@ type DocumentRow = {
   reference: string | null;
   einvoiceStatus: EInvoiceStatus;
   irn: string | null;
-  company: { id: string; name: string; relationshipType: CompanyRelationshipType };
+  company: { id: string; name: string; relationshipType: CompanyRelationshipType; companySeq: number };
   createdBy: { name: string };
   salesperson: { id: string; name: string } | null;
   /** Where it has got to in sign-off. Only shown where the type actually requires approval. */
@@ -214,7 +215,7 @@ export function DocumentRows({
                 )}
                 {cols.show("party") && (
                   <td className="px-4 py-2.5">
-                    <Link href={`/companies/${doc.company.id}`} className="text-text hover:underline">
+                    <Link href={companyPath(doc.company.companySeq)} className="text-text hover:underline">
                       {doc.company.name}
                     </Link>
                     {doc.company.relationshipType === "RESELLER" && (

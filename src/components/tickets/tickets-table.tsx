@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { useClock } from "@/components/time/clock-provider";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, ticketPath } from "@/lib/record-links";
 import {
   formatTicketId,
   getTicketSlaStatus,
@@ -29,7 +30,7 @@ type TicketRow = {
   ticketType: TicketType;
   createdAt: string | Date;
   updatedAt: string | Date;
-  company: { id: string; name: string };
+  company: { id: string; name: string; companySeq: number };
   companyProduct: { id: string; orderSeq: number } | null;
   assignedTo: { id: string; name: string } | null;
 };
@@ -165,14 +166,14 @@ export function TicketsTable({
                   </td>
                 )}
                 <td className="px-4 py-2.5">
-                  <Link href={`/tickets/${t.id}`} className="font-medium text-text hover:underline">
+                  <Link href={ticketPath(t.ticketSeq)} className="font-medium text-text hover:underline">
                     {formatTicketId(t.ticketSeq)}
                   </Link>
                   <div className="text-muted">{t.title}</div>
                 </td>
                 {showCompany && (
                   <td className="px-4 py-2.5 text-muted">
-                    <Link href={`/companies/${t.company.id}`} className="hover:underline">
+                    <Link href={companyPath(t.company.companySeq)} className="hover:underline">
                       {t.company.name}
                     </Link>
                   </td>

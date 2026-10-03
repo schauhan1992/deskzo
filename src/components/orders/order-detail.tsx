@@ -17,6 +17,7 @@ import { CustomerNoticeButton } from "@/components/marketing/customer-notice-but
 import { canAnnounceFulfilment } from "@/lib/marketing/customer-notices";
 import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import { calculateOrderAmount, calculateOrderMargin, getPaymentStatus, paymentTermsLabels } from "@/lib/gst";
 import { orderExpenseTypeLabels, orderBusinessTypeLabels } from "@/lib/validation/order";
 import { handoffBadge, impliedMargin, priceCeiling, priceEventLabels, vendorPoLabels } from "@/lib/orders/handoff-rules";
@@ -207,14 +208,14 @@ export async function OrderDetail({
       {viaReseller && (
         <div className="rounded-md border border-info bg-info-bg px-4 py-3 text-sm text-info">
           <span className="font-medium">Reseller order.</span> Placed by{" "}
-          <Link href={`/companies/${order.company.id}`} className="font-medium underline">
+          <Link href={companyPath(order.company.companySeq)} className="font-medium underline">
             {order.company.name}
           </Link>
           {order.endCustomer ? (
             <>
               {" "}
               for their customer{" "}
-              <Link href={`/companies/${order.endCustomer.id}`} className="font-medium underline">
+              <Link href={companyPath(order.endCustomer.companySeq)} className="font-medium underline">
                 {order.endCustomer.name}
               </Link>
               . Deal with the reseller only — don&apos;t contact the end customer directly.
@@ -237,7 +238,7 @@ export async function OrderDetail({
             {order.vendorPoCancel && <Badge tone={order.vendorPoCancel === "PENDING" ? "red" : "default"}>{vendorPoLabels[order.vendorPoCancel]}</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted">
-            <Link href={`/companies/${order.company.id}`} className="hover:underline">
+            <Link href={companyPath(order.company.companySeq)} className="hover:underline">
               {order.company.name}
             </Link>
             <CategoryChip category={order.company.customerCategory} className="ml-1.5 align-middle" />
@@ -266,7 +267,7 @@ export async function OrderDetail({
                   <span className="text-muted">End customer</span>
                   <span className="text-text">
                     {order.endCustomer ? (
-                      <Link href={`/companies/${order.endCustomer.id}`} className="hover:underline">
+                      <Link href={companyPath(order.endCustomer.companySeq)} className="hover:underline">
                         {order.endCustomer.name}
                       </Link>
                     ) : (
@@ -328,7 +329,7 @@ export async function OrderDetail({
                 <span className="text-muted">Vendor</span>
                 <span className="text-text">
                   {order.vendor ? (
-                    <Link href={`/companies/${order.vendor.id}`} className="hover:underline">
+                    <Link href={companyPath(order.vendor.companySeq)} className="hover:underline">
                       {order.vendor.name}
                     </Link>
                   ) : (
@@ -395,7 +396,7 @@ export async function OrderDetail({
                       <span className="text-muted">Distributor</span>
                       <span className="text-text">
                         {order.quoteVendor ? (
-                          <Link href={`/companies/${order.quoteVendor.id}`} className="hover:underline">
+                          <Link href={companyPath(order.quoteVendor.companySeq)} className="hover:underline">
                             {order.quoteVendor.name}
                           </Link>
                         ) : (

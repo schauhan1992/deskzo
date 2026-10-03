@@ -10,6 +10,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { indiaClock } from "@/lib/time/zone";
 import { authorLabel } from "@/lib/people";
+import { companyPath } from "@/lib/record-links";
 import { Amount } from "@/components/accounting/report-chrome";
 
 const SOURCE_LABEL: Record<JournalSource, string> = {
@@ -55,7 +56,7 @@ type Entry = {
   documentId: string | null;
   reversesId: string | null;
   reversedBy: { id: string; entryNumber: string } | null;
-  company: { id: string; name: string } | null;
+  company: { id: string; companySeq: number; name: string } | null;
   createdBy: { name: string; kind?: string | null };
   amount: number;
   lines: {
@@ -136,7 +137,7 @@ function EntryCard({ entry, canReverse }: { entry: Entry; canReverse: boolean })
             )}
           </p>
           {entry.company && (
-            <Link href={`/companies/${entry.company.id}`} className="text-xs text-subtle hover:underline">
+            <Link href={companyPath(entry.company.companySeq)} className="text-xs text-subtle hover:underline">
               {entry.company.name}
             </Link>
           )}

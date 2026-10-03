@@ -210,6 +210,7 @@ export async function loadExpensesCheck(month: Date): Promise<ExpensesCheckInput
     month,
     claims: claims.map((c) => ({
       id: c.id,
+      expenseSeq: c.expenseSeq,
       label: `${formatExpenseId(c.expenseSeq)} · ${c.user.name} · ${c.description}`.slice(0, 160),
       amount: Number(c.amount),
     })),

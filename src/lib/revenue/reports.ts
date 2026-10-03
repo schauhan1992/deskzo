@@ -55,7 +55,7 @@ const rowSelect = {
   itemId: true,
   createdAt: true,
   approvedAt: true,
-  company: { select: { name: true } },
+  company: { select: { companySeq: true, name: true } },
   document: { select: { docNumber: true, docType: true, status: true, issueDate: true } },
   line: { select: { name: true } },
   item: { select: { name: true } },
@@ -71,6 +71,7 @@ export type ScheduleListRow = {
   status: RevenueScheduleStatus;
   opening: boolean;
   companyId: string;
+  companySeq: number;
   companyName: string;
   documentId: string | null;
   docNumber: string | null;
@@ -104,6 +105,7 @@ function toRow(r: Row): ScheduleListRow {
     status: s.status,
     opening: s.opening,
     companyId: s.companyId,
+    companySeq: r.company.companySeq,
     companyName: r.company.name,
     documentId: s.documentId,
     docNumber: r.document?.docNumber ?? null,

@@ -23,6 +23,7 @@ import { NewContactDialog, type CreatedContact } from "@/components/companies/ne
 import { ItemCombobox } from "@/components/items/item-combobox";
 import { PersonCombobox, type PersonOption } from "@/components/ui/person-combobox";
 import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
+import { leadPath } from "@/lib/record-links";
 
 type ItemOption = {
   id: string;
@@ -122,7 +123,7 @@ export function NewLeadForm({
       setServerError(result.error);
       return;
     }
-    router.push(`/leads/${result.data.id}`);
+    router.push(leadPath(result.data.leadSeq));
   }
 
   return (

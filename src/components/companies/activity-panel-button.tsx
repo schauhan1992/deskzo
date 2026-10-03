@@ -6,6 +6,7 @@ import { SidePane } from "@/components/ui/side-pane";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { useClock } from "@/components/time/clock-provider";
+import { leadPath } from "@/lib/record-links";
 
 type TimelineEntry = {
   id: string;
@@ -13,6 +14,7 @@ type TimelineEntry = {
   notes: string;
   occurredAt: Date | string;
   leadId: string;
+  leadSeq: number;
   leadTitle: string;
   user: { id: string; name: string };
 };
@@ -33,7 +35,7 @@ export function ActivityPanelButton({ timeline }: { timeline: TimelineEntry[] })
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>{a.type.replaceAll("_", " ")}</Badge>
                 <Link
-                  href={`/leads/${a.leadId}`}
+                  href={leadPath(a.leadSeq)}
                   className="text-xs font-medium text-muted hover:underline"
                   onClick={() => setOpen(false)}
                 >

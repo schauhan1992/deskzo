@@ -136,8 +136,8 @@ export default async function RebatesPage({ searchParams }: { searchParams: Prom
             {report.rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0">
                 <td className="px-4 py-2.5">
-                  <Link href={`/orders/${r.id}`} className="font-medium text-text hover:underline">
-                    {r.orderId}
+                  <Link href={`/orders/${r.orderRef}`} className="font-medium text-text hover:underline">
+                    {r.orderRef}
                   </Link>
                   {r.writtenOff && (
                     <span className="ml-2">

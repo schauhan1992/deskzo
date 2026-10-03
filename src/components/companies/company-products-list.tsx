@@ -23,6 +23,7 @@ import { formatCalendarDay } from "@/lib/time/zone";
 import { useClock } from "@/components/time/clock-provider";
 import { getRenewalStatus } from "@/lib/renewals";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 import { calculateOrderAmount, getPaymentStatus, paymentTermsLabels } from "@/lib/gst";
 import { orderBusinessTypeLabels } from "@/lib/validation/order";
 import { AddSeatsDialog } from "@/components/orders/add-seats-dialog";
@@ -61,12 +62,12 @@ type Product = PayableOrder & {
   /** Live addons hanging off this subscription, for the combined seat count. */
   addons?: { id: string; quantity: number; startDate: Date | string | null; unitPrice: string | number | null }[];
   location: { id: string; label: string; gstNumber: string | null; state: string | null };
-  vendor: { id: string; name: string; paymentTerms: PaymentTerms } | null;
+  vendor: { id: string; companySeq: number; name: string; paymentTerms: PaymentTerms } | null;
   item: PayableOrder["item"] & { id: string; sku: string; type: string; unit: string | null };
   /** Set on a reseller's own rows: the customer this was bought for. */
-  endCustomer?: { id: string; name: string } | null;
+  endCustomer?: { id: string; companySeq: number; name: string } | null;
   /** Set on an end customer's rows: the reseller who placed and pays for it. */
-  company?: { id: string; name: string };
+  company?: { id: string; companySeq: number; name: string };
 };
 
 type EditFormValues = z.input<typeof updateCompanyProductSchema>;
@@ -284,7 +285,7 @@ export function CompanyProductsList({
               return (
                 <tr key={p.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-3 py-2.5 font-mono text-xs">
-                    <Link href={`/orders/${p.id}`} className="text-muted hover:underline">
+                    <Link href={orderPath(p.orderSeq)} className="text-muted hover:underline">
                       {formatOrderId(p.orderSeq)}
                     </Link>
                   </td>
@@ -306,7 +307,7 @@ export function CompanyProductsList({
                     {p.endCustomer && (
                       <div className="mt-0.5 text-xs text-info">
                         For end customer:{" "}
-                        <Link href={`/companies/${p.endCustomer.id}`} className="hover:underline">
+                        <Link href={companyPath(p.endCustomer.companySeq)} className="hover:underline">
                           {p.endCustomer.name}
                         </Link>
                       </div>
@@ -314,7 +315,7 @@ export function CompanyProductsList({
                     {p.company && (
                       <div className="mt-0.5 text-xs text-info">
                         Bought via reseller:{" "}
-                        <Link href={`/companies/${p.company.id}`} className="hover:underline">
+                        <Link href={companyPath(p.company.companySeq)} className="hover:underline">
                           {p.company.name}
                         </Link>
                       </div>
@@ -323,7 +324,7 @@ export function CompanyProductsList({
                   <td className="px-3 py-2.5">
                     {p.vendor ? (
                       <>
-                        <Link href={`/companies/${p.vendor.id}`} className="font-medium text-text hover:underline">
+                        <Link href={companyPath(p.vendor.companySeq)} className="font-medium text-text hover:underline">
                           {p.vendor.name}
                         </Link>
                         <div className="text-xs text-subtle">{paymentTermsLabels[p.vendor.paymentTerms]}</div>

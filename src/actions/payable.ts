@@ -232,14 +232,14 @@ export async function payablesAging(params?: { search?: string }) {
       issueDate: true,
       dueDate: true,
       total: true,
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       ...billSettlementInclude,
     },
   });
 
   const byVendor = new Map<
     string,
-    { id: string; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; billCount: number }
+    { id: string; companySeq: number; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; billCount: number }
   >();
 
   for (const bill of bills) {
@@ -247,7 +247,7 @@ export async function payablesAging(params?: { search?: string }) {
     if (settlement.balance < 0.01) continue;
     const row =
       byVendor.get(bill.company.id) ??
-      { id: bill.company.id, name: bill.company.name, buckets: emptyAging(), total: 0, oldest: 0, billCount: 0 };
+      { id: bill.company.id, companySeq: bill.company.companySeq, name: bill.company.name, buckets: emptyAging(), total: 0, oldest: 0, billCount: 0 };
     row.buckets[agingBucket(bill.dueDate, bill.issueDate, asOf)] += settlement.balance;
     row.total += settlement.balance;
     row.oldest = Math.max(row.oldest, daysOverdue(bill.dueDate, bill.issueDate, asOf));

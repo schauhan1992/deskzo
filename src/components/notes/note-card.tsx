@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/card";
 import { useClock } from "@/components/time/clock-provider";
 import { cn } from "@/lib/utils";
 import { formatTicketId } from "@/lib/tickets";
+import { companyPath, leadPath, ticketPath } from "@/lib/record-links";
 import type { Clock } from "@/lib/time/zone";
 
 /**
@@ -69,7 +70,7 @@ function VisibilityBadge({ note }: { note: NoteListItem }) {
 function AttachedRecord({ note }: { note: NoteListItem }) {
   if (note.company) {
     return (
-      <Link href={`/companies/${note.company.id}`} className="inline-flex items-center gap-1 hover:underline">
+      <Link href={companyPath(note.company.companySeq)} className="inline-flex items-center gap-1 hover:underline">
         <Building2 className="h-3 w-3 shrink-0" />
         <span className="truncate">{note.company.name}</span>
       </Link>
@@ -77,7 +78,7 @@ function AttachedRecord({ note }: { note: NoteListItem }) {
   }
   if (note.lead) {
     return (
-      <Link href={`/leads/${note.lead.id}`} className="inline-flex items-center gap-1 hover:underline">
+      <Link href={leadPath(note.lead.leadSeq)} className="inline-flex items-center gap-1 hover:underline">
         <Target className="h-3 w-3 shrink-0" />
         <span className="truncate">{note.lead.title}</span>
       </Link>
@@ -85,7 +86,7 @@ function AttachedRecord({ note }: { note: NoteListItem }) {
   }
   if (note.ticket) {
     return (
-      <Link href={`/tickets/${note.ticket.id}`} className="inline-flex items-center gap-1 hover:underline">
+      <Link href={ticketPath(note.ticket.ticketSeq)} className="inline-flex items-center gap-1 hover:underline">
         <Ticket className="h-3 w-3 shrink-0" />
         <span className="truncate">{formatTicketId(note.ticket.ticketSeq)}</span>
       </Link>

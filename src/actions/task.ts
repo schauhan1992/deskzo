@@ -193,8 +193,8 @@ function taskListWhere(params?: TaskListParams): Prisma.TaskWhereInput {
 const taskListInclude = {
   assignedTo: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
-  company: { select: { id: true, name: true } },
-  lead: { select: { id: true, title: true } },
+  company: { select: { id: true, name: true, companySeq: true } },
+  lead: { select: { id: true, title: true, leadSeq: true } },
   ticket: { select: { id: true, ticketSeq: true, title: true } },
 } as const;
 

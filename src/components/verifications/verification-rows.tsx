@@ -8,6 +8,7 @@ import { applyVerification, dismissVerification, type pendingVerifications } fro
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useClock } from "@/components/time/clock-provider";
+import { companyPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof pendingVerifications>>["rows"][number];
 
@@ -60,7 +61,7 @@ function VerificationRow({ row }: { row: Row }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Link href={`/companies/${row.company.id}`} className="font-medium text-text hover:underline">
+            <Link href={companyPath(row.company.companySeq)} className="font-medium text-text hover:underline">
               {row.company.name}
             </Link>
             {row.contact && <span className="text-sm text-muted">{row.contact.name}</span>}

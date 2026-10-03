@@ -13,6 +13,7 @@ import { blankLine, emptyDefaults } from "@/lib/document-draft";
 import { workspaceClock } from "@/lib/time/workspace";
 import { defaultServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
 import { viewerHas } from "@/actions/permission";
+import { leadPath } from "@/lib/record-links";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import {
   documentListPath,
@@ -108,7 +109,7 @@ export default async function NewDocumentPage({
     <div>
       <div className="mb-5">
         <Link
-          href={fromLead ? `/leads/${fromLead.id}` : documentListPath[docType]}
+          href={fromLead ? leadPath(fromLead.leadSeq) : documentListPath[docType]}
           className="text-sm text-muted hover:text-text"
         >
           ← {fromLead ? fromLead.title : `${tradeDocumentLabels[docType]}s`}

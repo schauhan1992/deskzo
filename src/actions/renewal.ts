@@ -74,6 +74,7 @@ const renewalInclude = {
   company: {
     select: {
       id: true,
+      companySeq: true,
       name: true,
       stage: true,
       relationshipType: true,
@@ -93,7 +94,7 @@ const renewalInclude = {
   renewalStageBy: { select: { id: true, name: true } },
   // On a reseller's order this is whose subscription it actually is — renew through the
   // reseller, but the seats and expiry belong to the end customer.
-  endCustomer: { select: { id: true, name: true } },
+  endCustomer: { select: { id: true, companySeq: true, name: true } },
   item: { select: { id: true, name: true, sku: true, unit: true, billingCycle: true } },
   addedBy: { select: { id: true, name: true } },
   addons: {

@@ -3,6 +3,7 @@ import type { allLeaveRequests } from "@/actions/leave";
 import { Badge, Card } from "@/components/ui/card";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { leaveStatusTone } from "@/lib/validation/hr";
+import { personPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof allLeaveRequests>>["rows"][number];
 
@@ -50,7 +51,7 @@ export function LeaveRegister({ rows, total }: { rows: Row[]; total: number }) {
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 <td className="px-4 py-2.5">
-                  <Link href={`/people/${r.user.id}`} className="text-text hover:underline">
+                  <Link href={personPath(r.user.userSeq)} className="text-text hover:underline">
                     {r.user.name}
                   </Link>
                 </td>

@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { CompanyDetailFields, type TermsAdvice } from "@/components/companies/company-fields";
 import type { Company, CompanyRelationshipType } from "@prisma/client";
 import { bandForCount } from "@/lib/company-size";
+import { companyPath } from "@/lib/record-links";
 
 type FormValues = z.input<typeof updateCompanySchema>;
 type IndustryOption = { id: string; name: string };
@@ -81,7 +82,7 @@ export function EditCompanyForm({
       setServerError(result.error);
       return;
     }
-    router.push(`/companies/${result.data.id}`);
+    router.push(companyPath(company.companySeq));
   }
 
   return (

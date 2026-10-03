@@ -174,7 +174,7 @@ export async function getForecast(params: ForecastParams = {}) {
         fullTermUnitPrice: true,
         startDate: true,
         renewalStage: true,
-        company: { select: { id: true, name: true, owner: { select: { name: true } } } },
+        company: { select: { id: true, companySeq: true, name: true, owner: { select: { name: true } } } },
         item: { select: { name: true, brand: { select: { name: true } } } },
         renewedBy: { select: { id: true } },
         addons: {
@@ -192,7 +192,7 @@ export async function getForecast(params: ForecastParams = {}) {
         OR: [{ amcEndsOn: null }, { amcEndsOn: { lt: db.asset.fields.warrantyEndsOn } }],
         ownerCompany: accountWhere,
       },
-      select: { id: true, warrantyEndsOn: true, ownerCompany: { select: { id: true, name: true } }, name: true, serialNumber: true },
+      select: { id: true, warrantyEndsOn: true, ownerCompany: { select: { id: true, companySeq: true, name: true } }, name: true, serialNumber: true },
     }),
     v.scope === null
       ? db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true } })
@@ -224,7 +224,7 @@ export async function getForecast(params: ForecastParams = {}) {
     };
   });
 
-  const renewalItems: (RenewalItem & { bucket: string; ref: number; product: string; company: { id: string; name: string }; accountManager: string | null; incomplete: boolean })[] = renewals.map((p) => {
+  const renewalItems: (RenewalItem & { bucket: string; ref: number; product: string; company: { id: string; companySeq: number; name: string }; accountManager: string | null; incomplete: boolean })[] = renewals.map((p) => {
     const group = renewalGroup([
       { id: p.id, quantity: p.quantity, unitPrice: p.unitPrice === null ? null : Number(p.unitPrice), fullTermUnitPrice: p.fullTermUnitPrice === null ? null : Number(p.fullTermUnitPrice), startDate: p.startDate, isAddon: false },
       ...p.addons.map((a, i) => ({
@@ -314,12 +314,15 @@ async function loadCollections(accountWhere: Prisma.CompanyWhereInput, periods: 
   const companyIds = [...new Set([...withInvoices, ...withOrders].map((r) => r.companyId).filter((id): id is string => !!id))];
   const [subjects, names] = await Promise.all([
     loadCreditSubjects(companyIds),
-    db.company.findMany({ where: { id: { in: companyIds } }, select: { id: true, name: true } }),
+    db.company.findMany({ where: { id: { in: companyIds } }, select: { id: true, companySeq: true, name: true } }),
   ]);
-  const nameOf = new Map(names.map((c) => [c.id, c.name]));
+  const companyOf = new Map(names.map((c) => [c.id, c]));
 
-  const bills: (OpenBill & { ref: string; company: { id: string; name: string }; kind: string; expected: Date; bucket: string })[] = [];
+  const bills: (OpenBill & { ref: string; company: { id: string; companySeq: number; name: string }; kind: string; expected: Date; bucket: string })[] = [];
   for (const [companyId, subject] of subjects) {
+    // Read beside the subjects from the same table, so only a company deleted in between is missing.
+    const company = companyOf.get(companyId);
+    if (!company) continue;
     const assessment = assessCredit(subject.bills, { asOf: now, manualLimit: subject.manualLimit, clock });
     for (const bill of subject.bills) {
       const settled = bill.settlements.reduce((t, s) => t + s.amount, 0);
@@ -340,7 +343,7 @@ async function loadCollections(accountWhere: Prisma.CompanyWhereInput, periods: 
         expected,
         // Past due is its own list: when it arrives is the one thing nobody knows.
         bucket: dueOn.getTime() < now.getTime() ? "OVERDUE" : bucketFor(expected, periods),
-        company: { id: companyId, name: nameOf.get(companyId) ?? "—" },
+        company,
       });
     }
   }

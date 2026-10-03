@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useClock } from "@/components/time/clock-provider";
 import { callOutcomeLabels, callOutcomeTones, formatDuration } from "@/lib/calls";
 import { formatTicketId } from "@/lib/tickets";
+import { companyPath, leadPath, orderPath, ticketPath } from "@/lib/record-links";
 
 type Call = {
   id: string;
@@ -22,9 +23,9 @@ type Call = {
   notes: string | null;
   followUpAt: Date | string | null;
   followUpDone: boolean;
-  company: { id: string; name: string };
+  company: { id: string; name: string; companySeq: number };
   contact: { id: string; name: string; designation: string } | null;
-  lead: { id: string; title: string } | null;
+  lead: { id: string; title: string; leadSeq: number } | null;
   ticket: { id: string; ticketSeq: number; title: string } | null;
   companyProduct: { id: string; orderSeq: number; item: { name: string } } | null;
   user: { id: string; name: string };
@@ -87,7 +88,7 @@ function CallRow({ call, showCompany }: { call: Call; showCompany: boolean }) {
           <div className="flex flex-wrap items-center gap-2">
             <Icon className={`h-3.5 w-3.5 shrink-0 ${call.direction === "INBOUND" ? "text-brand" : "text-subtle"}`} />
             {showCompany ? (
-              <Link href={`/companies/${call.company.id}`} className="text-sm font-medium text-text hover:underline">
+              <Link href={companyPath(call.company.companySeq)} className="text-sm font-medium text-text hover:underline">
                 {call.company.name}
               </Link>
             ) : (
@@ -111,17 +112,17 @@ function CallRow({ call, showCompany }: { call: Call; showCompany: boolean }) {
           {(call.lead || call.ticket || call.companyProduct) && (
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
               {call.lead && (
-                <Link href={`/leads/${call.lead.id}`} className="text-brand hover:underline">
+                <Link href={leadPath(call.lead.leadSeq)} className="text-brand hover:underline">
                   Lead: {call.lead.title}
                 </Link>
               )}
               {call.ticket && (
-                <Link href={`/tickets/${call.ticket.id}`} className="text-brand hover:underline">
+                <Link href={ticketPath(call.ticket.ticketSeq)} className="text-brand hover:underline">
                   {formatTicketId(call.ticket.ticketSeq)}: {call.ticket.title}
                 </Link>
               )}
               {call.companyProduct && (
-                <Link href={`/orders/${call.companyProduct.id}`} className="text-brand hover:underline">
+                <Link href={orderPath(call.companyProduct.orderSeq)} className="text-brand hover:underline">
                   Subscription: {call.companyProduct.item.name}
                 </Link>
               )}

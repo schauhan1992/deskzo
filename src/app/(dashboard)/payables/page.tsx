@@ -6,6 +6,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { formatCurrency } from "@/lib/utils";
 import { AGING_BUCKETS } from "@/lib/receivables";
+import { companyPath } from "@/lib/record-links";
 
 /**
  * Accounts payable, aged. One row per vendor we still owe, bucketed by how long past due each of
@@ -77,7 +78,7 @@ export default async function PayablesPage({ searchParams }: { searchParams: Pro
             {rows.map((row) => (
               <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 <td className="px-4 py-2.5">
-                  <Link href={`/companies/${row.id}`} className="text-text hover:underline">
+                  <Link href={companyPath(row.companySeq)} className="text-text hover:underline">
                     {row.name}
                   </Link>
                   <div className="mt-0.5 text-xs text-subtle">

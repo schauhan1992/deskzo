@@ -426,7 +426,7 @@ const requestSelect = {
   decisionNote: true,
   createdAt: true,
   type: { select: { id: true, code: true, name: true, paid: true } },
-  user: { select: { id: true, name: true } },
+  user: { select: { id: true, userSeq: true, name: true } },
   approver: { select: { id: true, name: true } },
 } satisfies Prisma.LeaveRequestSelect;
 

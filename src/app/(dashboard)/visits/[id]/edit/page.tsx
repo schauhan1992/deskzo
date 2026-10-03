@@ -6,6 +6,7 @@ import { listCompanyOptions } from "@/actions/company";
 import { VisitForm } from "@/components/visits/visit-form";
 import { isVisitOpen } from "@/lib/visits";
 import { workspaceClock } from "@/lib/time/workspace";
+import { visitPath } from "@/lib/record-links";
 
 export default async function EditVisitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,7 +20,7 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
         <p className="mt-2 text-sm text-muted">
           A completed or cancelled visit is a record of what happened, so it can&apos;t be rescheduled.
         </p>
-        <Link href={`/visits/${id}`} className="mt-3 inline-block text-sm text-brand hover:underline">
+        <Link href={visitPath(visit.visitSeq)} className="mt-3 inline-block text-sm text-brand hover:underline">
           ← Back to the visit
         </Link>
       </div>
@@ -31,7 +32,7 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
   return (
     <div>
       <div className="mb-5">
-        <Link href={`/visits/${id}`} className="text-sm text-muted hover:text-text">
+        <Link href={visitPath(visit.visitSeq)} className="text-sm text-muted hover:text-text">
           ← Back to the visit
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-text">Edit visit</h1>
@@ -43,6 +44,7 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
         currentUserId={session!.user.id}
         defaults={{
           id: visit.id,
+          visitSeq: visit.visitSeq,
           companyId: visit.companyId,
           contactId: visit.contactId ?? "",
           leadId: visit.leadId ?? "",

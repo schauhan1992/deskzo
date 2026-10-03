@@ -23,6 +23,7 @@ import { sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
 import { noPasswordYet } from "@/lib/no-password";
 import { isSystemAddress } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
+import { personPath } from "@/lib/record-links";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -101,6 +102,7 @@ export async function getCandidate(id: string) {
     where: { id },
     select: {
       ...candidateSelect,
+      convertedUser: { select: { userSeq: true } },
       intakeData: true,
       documents: {
         orderBy: { createdAt: "desc" },
@@ -289,7 +291,7 @@ export async function revokeIntakeLink(id: string): Promise<ActionResult<null>> 
 export async function convertCandidate(
   id: string,
   input: { joinedOn: string; employeeCode?: string; probationMonths?: number },
-): Promise<ActionResult<{ userId: string; tasks: number } & SetupInvitation>> {
+): Promise<ActionResult<{ userId: string; userSeq: number; tasks: number } & SetupInvitation>> {
   const { user, allowed } = await requireHr();
   if (!allowed) return { ok: false, error: "Only HR can convert a candidate." };
 
@@ -333,7 +335,7 @@ export async function convertCandidate(
         departmentId: candidate.departmentId,
         managerId: candidate.managerId,
       },
-      select: { id: true, name: true, email: true },
+      select: { id: true, userSeq: true, name: true, email: true },
     });
 
     await tx.employeeProfile.create({
@@ -432,7 +434,7 @@ export async function convertCandidate(
       type: "TASK_ASSIGNED",
       title: `${candidate.name} joins on ${input.joinedOn}`,
       message: "Onboarding tasks have been raised — first-week plan is yours.",
-      link: `/people/${created.id}`,
+      link: personPath(created.userSeq),
     });
   }
 
@@ -445,7 +447,7 @@ export async function convertCandidate(
   });
   revalidatePath("/people");
   revalidatePath("/people/hiring");
-  return { ok: true, data: { userId: created.id, tasks: taskCount, ...invitation } };
+  return { ok: true, data: { userId: created.id, userSeq: created.userSeq, tasks: taskCount, ...invitation } };
 }
 
 // ─── Letters before employment ────────────────────────────────────────────────

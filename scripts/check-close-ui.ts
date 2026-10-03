@@ -478,9 +478,9 @@ async function run(scratchUrl: string) {
     const pay = checks.checkPayrollPosted({ month: M2, inUse: true, run: { id: "p1", status: "DRAFT", posted: false } });
     const payHtml = await render(pay.detail, pay.ok);
     ok("payroll: the run not locked, linked", payHtml.includes('href="/people/payroll/p1"') && text(payHtml).includes("isn't locked"));
-    const exp = checks.checkExpensesPosted({ month: M2, claims: [{ id: "e1", label: "EXP-1 · Travel", amount: 2500 }] });
+    const exp = checks.checkExpensesPosted({ month: M2, claims: [{ id: "e1", expenseSeq: 1, label: "EXP-1 · Travel", amount: 2500 }] });
     const expHtml = await render(exp.detail, exp.ok);
-    ok("expenses: the claim not posted, linked", expHtml.includes('href="/expenses/e1"') && text(expHtml).includes("Claims not posted 1") && text(expHtml).includes("₹2,500.00"));
+    ok("expenses: the claim not posted, linked", expHtml.includes('href="/expenses/EXP-000001"') && text(expHtml).includes("Claims not posted 1") && text(expHtml).includes("₹2,500.00"));
     const del = checks.checkDeliveredNotInvoiced({ month: M2, stages: [{ id: "m1", label: "Go-live", projectId: "pr1", amount: 40000, deliveredAt: midMonth(M2), status: "DUE" }] });
     const delHtml = await render(del.detail, del.ok);
     ok("delivered, not invoiced: the milestone, linked to its project", delHtml.includes('href="/projects/pr1"') && text(delHtml).includes("Milestones waiting 1"));

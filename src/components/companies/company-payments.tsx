@@ -8,6 +8,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { paymentMethodLabels } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
+import { orderPath } from "@/lib/record-links";
 import { isBaseCurrency } from "@/lib/currency";
 
 type Payment = Awaited<ReturnType<typeof listCompanyPayments>>[number];
@@ -94,7 +95,7 @@ export function CompanyPayments({
                               </Link>
                             ) : allocation.companyProduct ? (
                               <>
-                                <Link href={`/orders/${allocation.companyProduct.id}`} className="text-text hover:underline">
+                                <Link href={orderPath(allocation.companyProduct.orderSeq)} className="text-text hover:underline">
                                   {formatOrderId(allocation.companyProduct.orderSeq)}
                                 </Link>
                                 <span className="text-subtle"> {allocation.companyProduct.item.name}</span>

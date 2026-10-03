@@ -44,6 +44,7 @@ import {
 import { reconcile, type SoldOrder, type StatementRow } from "../src/lib/reconcile/match";
 import { postVendorCredit } from "../src/lib/ledger/posting";
 import { openInRupees, type TieOutDocument } from "../src/lib/close/tieout";
+import { formatOrderId } from "../src/lib/order-id";
 
 let failures = 0;
 let passes = 0;
@@ -497,6 +498,7 @@ async function run(scratchUrl: string) {
     section("Selling below cost");
     as(exec);
     const orderB = idOf(await punch(acrobat.id, { dealRegStatus: "APPLIED", dealPrice: "1100" }));
+    const orderBLink = `/orders/${formatOrderId((await db.companyProduct.findUniqueOrThrow({ where: { id: orderB }, select: { orderSeq: true } })).orderSeq)}`;
     ok("an executive punches one at ₹1,000 against a ₹1,100 deal price — punched, not stopped", !!orderB);
     as(approver);
     const plainApprove = await orders.approveOrder({ orderId: orderB, approved: true, creditOverrideReason: "Advance PO on file" });
@@ -521,7 +523,7 @@ async function run(scratchUrl: string) {
     );
     ok(
       "  and the executive is told",
-      (await db.notification.count({ where: { userId: exec.id, link: `/orders/${orderB}`, title: { contains: "below cost approved" } } })) === 1,
+      (await db.notification.count({ where: { userId: exec.id, link: orderBLink, title: { contains: "below cost approved" } } })) === 1,
     );
     as(approver);
     idOf(await orders.approveOrder({ orderId: orderB, approved: true, creditOverrideReason: "Advance PO on file" }));
@@ -536,7 +538,7 @@ async function run(scratchUrl: string) {
     );
     ok(
       "  the manager is asked",
-      (await db.notification.count({ where: { userId: manager.id, link: `/orders/${orderB}`, title: { contains: "needs your approval" } } })) >= 1,
+      (await db.notification.count({ where: { userId: manager.id, link: orderBLink, title: { contains: "needs your approval" } } })) >= 1,
     );
     as(manager);
     const again = await orders.approveOrderLoss({ orderId: orderB, note: "Still worth it at ₹1,150" });

@@ -140,7 +140,7 @@ export async function getProject(id: string) {
   const project = await db.project.findFirst({
     where: { AND: [{ id }, visibleProjectsWhere(user.id, viewAll)] },
     include: {
-      company: { select: { id: true, name: true } },
+      company: { select: { id: true, companySeq: true, name: true } },
       type: { select: { id: true, name: true } },
       manager: { select: { id: true, name: true, email: true, phone: true } },
       createdBy: { select: { id: true, name: true } },

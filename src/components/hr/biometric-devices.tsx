@@ -21,6 +21,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { useClock } from "@/components/time/clock-provider";
 import { clockFor } from "@/lib/time/zone";
 import { PUNCH_TYPE_LABELS, VERIFY_MODE_LABELS } from "@/lib/hr/iclock";
+import { personPath } from "@/lib/record-links";
 
 type Device = Awaited<ReturnType<typeof listBiometricDevices>>[number];
 type Unmapped = Awaited<ReturnType<typeof unmappedEnrolments>>[number];
@@ -168,7 +169,7 @@ export function BiometricDevices({
             {mapped.length === 0 && <p className="text-sm text-subtle">Nobody has a biometric number yet.</p>}
             {mapped.map((m) => (
               <div key={m.userId} className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                <Link href={`/people/${m.user.id}`} className="text-text hover:underline">
+                <Link href={personPath(m.user.userSeq)} className="text-text hover:underline">
                   {m.user.name}
                   {!m.user.active && <span className="ml-1 text-xs text-subtle">(inactive)</span>}
                 </Link>
@@ -214,7 +215,7 @@ export function BiometricDevices({
                 </td>
                 <td className="px-4 py-2.5">
                   {p.user ? (
-                    <Link href={`/people/${p.user.id}`} className="text-text hover:underline">
+                    <Link href={personPath(p.user.userSeq)} className="text-text hover:underline">
                       {p.user.name}
                     </Link>
                   ) : (

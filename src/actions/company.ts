@@ -17,6 +17,7 @@ import { noteRecordsRead } from "@/lib/security/bulk-read";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { toPlain } from "@/lib/serialize";
 import { formatCompanyId, formatOrderId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import {
   createCompanySchema,
   updateCompanySchema,
@@ -179,7 +180,7 @@ export async function findCompanyMatches(query: string): Promise<CompanyMatches>
 
 export async function createCompany(
   input: unknown,
-): Promise<ActionResult<{ id: string; contacts: { id: string; name: string; designation: string }[] }>> {
+): Promise<ActionResult<{ id: string; companySeq: number; contacts: { id: string; name: string; designation: string }[] }>> {
   const user = await requireUser();
   const parsed = createCompanySchema.safeParse(input);
   if (!parsed.success) {
@@ -288,7 +289,7 @@ export async function createCompany(
         },
       },
       // Returned so a form that created a contact alongside the company can select it straight away.
-      select: { id: true, name: true, contacts: { select: { id: true, name: true, designation: true } } },
+      select: { id: true, companySeq: true, name: true, contacts: { select: { id: true, name: true, designation: true } } },
     });
 
     if (termsCheck.decision) {
@@ -299,7 +300,7 @@ export async function createCompany(
     revalidatePath("/companies");
     revalidatePath("/vendors");
     revalidatePath("/commission-parties");
-    return { ok: true, data: { id: company.id, contacts: company.contacts } };
+    return { ok: true, data: { id: company.id, companySeq: company.companySeq, contacts: company.contacts } };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "A company with this name already exists." };
@@ -631,7 +632,7 @@ export async function setCompanyCaller(companyId: string, userId: string | null)
   const actor = await requireUser();
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, ownerUserId: true, assignedToUserId: true },
+    select: { id: true, companySeq: true, name: true, ownerUserId: true, assignedToUserId: true },
   });
   if (!company || !(await canSeeCompany(actor.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
@@ -669,7 +670,7 @@ export async function setCompanyCaller(companyId: string, userId: string | null)
       type: "CALLER_ASSIGNED",
       title: "You were assigned as caller",
       message: company.name,
-      link: `/companies/${companyId}`,
+      link: companyPath(company.companySeq),
     });
   }
 
@@ -733,7 +734,7 @@ async function auditCallerChange(actorId: string, companies: { id: string; name:
 
 export async function setCompanyOwner(companyId: string, userId: string | null): Promise<ActionResult<null>> {
   const actor = await requireUser();
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true } });
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, companySeq: true, name: true, ownerUserId: true } });
   // Outside the account scope is answered as missing — and this check comes first because the
   // account manager *is* the scope: without it, naming yourself was a way to see any company.
   if (!company || !(await canSeeCompany(actor.id, company.ownerUserId))) {
@@ -767,7 +768,7 @@ export async function setCompanyOwner(companyId: string, userId: string | null):
       type: "ACCOUNT_MANAGER_ASSIGNED",
       title: "You were made account manager",
       message: company.name,
-      link: `/companies/${companyId}`,
+      link: companyPath(company.companySeq),
     });
   }
 
@@ -1328,7 +1329,7 @@ export async function listEndCustomers(resellerId: string) {
   return db.company.findMany({
     where: { managedByResellerId: resellerId, ...(visible ? {} : { id: { in: [] } }) },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, _count: { select: { ordersAsEndCustomer: true } } },
+    select: { id: true, name: true, companySeq: true, _count: { select: { ordersAsEndCustomer: true } } },
   });
 }
 
@@ -1414,7 +1415,7 @@ export async function getCompany(id: string) {
   const company = await db.company.findUnique({
     where: { id },
     include: {
-      managedByReseller: { select: { id: true, name: true } },
+      managedByReseller: { select: { id: true, name: true, companySeq: true } },
       customerCategory: { select: CATEGORY_SELECT },
       contacts: { orderBy: { isPrimary: "desc" } },
       leads: {
@@ -1440,9 +1441,9 @@ export async function getCompany(id: string) {
             select: { id: true, name: true, sku: true, type: true, unit: true, sellingPrice: true, taxRatePercent: true },
           },
           location: { select: { id: true, label: true, gstNumber: true, state: true } },
-          vendor: { select: { id: true, name: true, paymentTerms: true } },
+          vendor: { select: { id: true, companySeq: true, name: true, paymentTerms: true } },
           // On a reseller's own orders, who it was bought for.
-          endCustomer: { select: { id: true, name: true } },
+          endCustomer: { select: { id: true, companySeq: true, name: true } },
           addedBy: { select: { id: true, name: true } },
           // Seats added part-way through the term, so the list can show the running total rather
           // than only what was bought on day one.
@@ -1479,8 +1480,8 @@ export async function getCompany(id: string) {
             select: { id: true, name: true, sku: true, type: true, unit: true, sellingPrice: true, taxRatePercent: true },
           },
           location: { select: { id: true, label: true, gstNumber: true, state: true } },
-          vendor: { select: { id: true, name: true, paymentTerms: true } },
-          company: { select: { id: true, name: true } },
+          vendor: { select: { id: true, companySeq: true, name: true, paymentTerms: true } },
+          company: { select: { id: true, companySeq: true, name: true } },
           addedBy: { select: { id: true, name: true } },
           allocations: {
             orderBy: { createdAt: "desc" },

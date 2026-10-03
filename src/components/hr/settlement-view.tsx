@@ -12,6 +12,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { personPath } from "@/lib/record-links";
 
 type Settlement = NonNullable<Awaited<ReturnType<typeof getSettlement>>>;
 
@@ -26,11 +27,13 @@ const num = (v: unknown) => Number(v ?? 0);
 export function SettlementView({
   settlement,
   userId,
+  userSeq,
   userName,
   canManage,
 }: {
   settlement: Settlement | null;
   userId: string;
+  userSeq: number;
   userName: string;
   canManage: boolean;
 }) {
@@ -224,7 +227,7 @@ export function SettlementView({
       )}
 
       {settlement.status !== "DRAFT" && (
-        <Link href={`/people/${userId}`} className="inline-block text-sm text-brand hover:underline">
+        <Link href={personPath(userSeq)} className="inline-block text-sm text-brand hover:underline">
           Issue the relieving and no-dues letters from the personnel file →
         </Link>
       )}

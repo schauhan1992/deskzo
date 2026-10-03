@@ -102,6 +102,7 @@ import { TicketsTable } from "@/components/tickets/tickets-table";
 import { TaskList } from "@/components/tasks/task-list";
 import { getRenewalStatus } from "@/lib/renewals";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, leadPath } from "@/lib/record-links";
 import { paymentTermsLabels } from "@/lib/gst";
 import { relationshipTypeLabels, vendorStatusLabels, isContactDetailField } from "@/lib/validation/company";
 import { headcountLabel } from "@/lib/company-size";
@@ -353,7 +354,7 @@ export async function CompanyDetail({
     const query = new URLSearchParams();
     for (const [k, v] of Object.entries(linkParams)) if (v) query.set(k, v);
     query.set("tab", key);
-    return `${basePath ?? `/companies/${company.id}`}?${query}`;
+    return `${basePath ?? companyPath(company.companySeq)}?${query}`;
   };
   const primaryLocation = company.locations.find((l) => l.isPrimary) ?? company.locations[0];
   const activeTab = tabs.some((t) => t.key === tab) ? tab! : "details";
@@ -398,6 +399,7 @@ export async function CompanyDetail({
         ...a,
         notes: a.type === "STAGE_CHANGE" ? readStageNote(a.notes, pipelineStages) : a.notes,
         leadId: l.id,
+        leadSeq: l.leadSeq,
         leadTitle: l.title,
       })),
     )
@@ -414,7 +416,7 @@ export async function CompanyDetail({
           </div>
           <p className="mt-1 text-sm text-warning">
             {company.name} is a customer of{" "}
-            <Link href={`/companies/${managedByReseller.id}`} className="font-medium underline">
+            <Link href={companyPath(managedByReseller.companySeq)} className="font-medium underline">
               {managedByReseller.name}
             </Link>
             . {NO_DIRECT_CONTACT_NOTICE} They&apos;re excluded from the Companies and Customer lists and from
@@ -629,7 +631,7 @@ export async function CompanyDetail({
       <TabNav
         tabs={tabs}
         activeKey={activeTab}
-        basePath={basePath ?? `/companies/${company.id}`}
+        basePath={basePath ?? companyPath(company.companySeq)}
         otherParams={linkParams}
       />
 
@@ -722,7 +724,7 @@ export async function CompanyDetail({
                   )}
                   {endCustomers.map((ec) => (
                     <div key={ec.id} className="flex items-center justify-between border-t border-line pt-2">
-                      <Link href={`/companies/${ec.id}`} className="font-medium text-text hover:underline">
+                      <Link href={companyPath(ec.companySeq)} className="font-medium text-text hover:underline">
                         {ec.name}
                       </Link>
                       <span className="text-muted">
@@ -1059,7 +1061,7 @@ export async function CompanyDetail({
                     {company.leads.map((l) => (
                       <tr key={l.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                         <td className="px-4 py-2.5">
-                          <Link href={`/leads/${l.id}`} className="font-medium text-text hover:underline">
+                          <Link href={leadPath(l.leadSeq)} className="font-medium text-text hover:underline">
                             {l.title}
                           </Link>
                         </td>

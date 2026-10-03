@@ -41,6 +41,7 @@ import {
 } from "../src/lib/orders/handoff-rules";
 // The rules take the workspace's clock; this suite's workspace, and its fixtures, are India's.
 import { indiaClock } from "../src/lib/time/zone";
+import { formatCompanyId, formatOrderId } from "../src/lib/order-id";
 
 // ── Who the actions think is calling ───────────────────────────────────────────────────────────
 
@@ -141,12 +142,12 @@ async function cleanup() {
   const userIds = users.map((u) => u.id);
   const companies = await db.company.findMany({
     where: { OR: [{ name: { startsWith: TAG } }, { createdById: { in: userIds } }, { ownerUserId: { in: userIds } }] },
-    select: { id: true },
+    select: { id: true, companySeq: true },
   });
   const companyIds = companies.map((c) => c.id);
   const orders = await db.companyProduct.findMany({
     where: { OR: [{ companyId: { in: companyIds } }, { addedByUserId: { in: userIds } }, { item: { sku: { startsWith: TAG } } }] },
-    select: { id: true },
+    select: { id: true, orderSeq: true },
   });
   const orderIds = orders.map((o) => o.id);
   // Purchase and accounts are real people too: everything the fixture told them goes, by its link.
@@ -154,8 +155,8 @@ async function cleanup() {
     where: {
       OR: [
         { userId: { in: userIds } },
-        { link: { in: orderIds.map((id) => `/orders/${id}`) } },
-        ...companyIds.map((id) => ({ link: { startsWith: `/companies/${id}` } })),
+        { link: { in: orders.flatMap((o) => [`/orders/${formatOrderId(o.orderSeq)}`, `/orders/${o.id}`]) } },
+        ...companies.flatMap((c) => [{ link: { startsWith: `/companies/${formatCompanyId(c.companySeq)}` } }, { link: { startsWith: `/companies/${c.id}` } }]),
       ],
     },
   });
@@ -266,7 +267,10 @@ async function main() {
       const r = await orderActions.approveOrder({ orderId: id, approved: true, creditOverrideReason: "Advance PO from the customer on file" });
       if (!r.ok) throw new Error(`could not approve: ${r.error}`);
     };
-    const noticesFor = (userId: string, orderId: string) => db.notification.findMany({ where: { userId, link: `/orders/${orderId}` }, orderBy: { createdAt: "asc" } });
+    const noticesFor = async (userId: string, orderId: string) => {
+      const { orderSeq } = await db.companyProduct.findUniqueOrThrow({ where: { id: orderId }, select: { orderSeq: true } });
+      return db.notification.findMany({ where: { userId, link: `/orders/${formatOrderId(orderSeq)}` }, orderBy: { createdAt: "asc" } });
+    };
 
     // ── Punching ─────────────────────────────────────────────────────────────────────────────────
     section("Punching: send now, hold, or schedule");
@@ -509,7 +513,7 @@ async function main() {
     ok("a held order cancels cleanly, without a reason", cx1.ok && c1Row.orderStatus === "CANCELLED" && c1Row.cancelledById === sales.id && !!c1Row.cancelledAt && c1Row.vendorPoCancel === null, errorOf(cx1));
     ok("  purchase never hears of it", (await noticesFor(buyer.id, c1Id)).length === 0);
     ok("  the ₹400 paid against it moves on account", cx1.ok && cx1.data.movedOnAccount === 400 && (await db.paymentAllocation.count({ where: { paymentId: pay2.id } })) === 0);
-    const accountsTold = await db.notification.findFirst({ where: { userId: accounts.id, link: { startsWith: `/companies/${customer.id}` } } });
+    const accountsTold = await db.notification.findFirst({ where: { userId: accounts.id, link: { startsWith: `/companies/${formatCompanyId(customer.companySeq)}` } } });
     ok("  and accounts is told to refund it or apply it", !!accountsTold && accountsTold.title.includes("₹400") && (accountsTold.message ?? "").includes("Refund"), accountsTold?.title);
     as(accounts);
     const reuse = await paymentActions.allocatePayment({ paymentId: pay2.id, companyProductId: c1Id, amount: 100 });

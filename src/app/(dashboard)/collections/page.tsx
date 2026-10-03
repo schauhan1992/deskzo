@@ -12,6 +12,7 @@ import { AGING_BUCKETS } from "@/lib/receivables";
 import { followUpChannelLabels, longDay, shortDay, daysBetween } from "@/lib/collections/rules";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { companyPath } from "@/lib/record-links";
 
 const FILTERS: { value: CollectionsFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -127,7 +128,7 @@ export default async function CollectionsPage({
             <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-4 py-3">
               <div>
                 {group.onTheirAccount ? (
-                  <Link href={`/companies/${group.companyId}?tab=statement`} className="font-medium text-text hover:underline">
+                  <Link href={`${companyPath(group.companySeq)}?tab=statement`} className="font-medium text-text hover:underline">
                     {group.companyName}
                   </Link>
                 ) : (
@@ -155,7 +156,8 @@ export default async function CollectionsPage({
               </thead>
               <tbody>
                 {group.rows.map((row) => {
-                  const href = row.onTheirAccount ? (row.kind === "invoice" ? `/documents/${row.id}` : `/orders/${row.id}`) : null;
+                  // An order's label is its ORD- reference, which is the order page's own address.
+                  const href = row.onTheirAccount ? (row.kind === "invoice" ? `/documents/${row.id}` : `/orders/${row.label}`) : null;
                   const next = row.nextFollowUpOn ? new Date(`${row.nextFollowUpOn}T00:00:00Z`) : null;
                   const nextIn = next ? daysBetween(today, next) : null;
                   return (

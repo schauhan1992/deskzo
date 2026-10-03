@@ -9,6 +9,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useClock } from "@/components/time/clock-provider";
 import { toDomain } from "@/lib/domain-intel/signatures";
+import { companyPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof listDomainProfiles>>["rows"][number];
 
@@ -77,7 +78,7 @@ function DomainRow({ row }: { row: Row }) {
   return (
     <tr className="border-b border-line last:border-0 hover:bg-surface-sunken">
       <td className="px-4 py-2.5">
-        <Link href={`/companies/${row.id}`} className="font-medium text-text hover:underline">
+        <Link href={companyPath(row.companySeq)} className="font-medium text-text hover:underline">
           {row.name}
         </Link>
         <div className="mt-0.5 font-mono text-xs text-subtle">{toDomain(row.website) ?? row.website}</div>

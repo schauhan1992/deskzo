@@ -84,8 +84,8 @@ const noteSelect = {
   createdAt: true,
   updatedAt: true,
   owner: { select: { name: true } },
-  company: { select: { id: true, name: true } },
-  lead: { select: { id: true, title: true } },
+  company: { select: { id: true, name: true, companySeq: true } },
+  lead: { select: { id: true, title: true, leadSeq: true } },
   ticket: { select: { id: true, ticketSeq: true, title: true } },
 } satisfies Prisma.StickyNoteSelect;
 
@@ -115,8 +115,8 @@ export type NoteListItem = {
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  company: { id: string; name: string } | null;
-  lead: { id: string; title: string } | null;
+  company: { id: string; name: string; companySeq: number } | null;
+  lead: { id: string; title: string; leadSeq: number } | null;
   ticket: { id: string; ticketSeq: number; title: string } | null;
 };
 

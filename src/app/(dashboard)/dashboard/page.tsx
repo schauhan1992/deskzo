@@ -15,6 +15,7 @@ import { formatCurrency, cn } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, leadPath } from "@/lib/record-links";
 import { SCOPE_LABEL, getDashboardWidgetDefinition } from "@/lib/dashboard-widgets";
 import type { ProjectHealth, ProjectStatus } from "@prisma/client";
 import { projectHealthLabels, projectHealthTone, projectStatusLabels } from "@/lib/projects/status";
@@ -418,7 +419,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           {leadSummary.recent.map((lead) => (
             <li key={lead.id} className="flex items-center justify-between px-5 py-3">
               <div className="min-w-0">
-                <Link href={`/leads/${lead.id}`} className="truncate text-sm font-medium text-text hover:underline">
+                <Link href={leadPath(lead.leadSeq)} className="truncate text-sm font-medium text-text hover:underline">
                   {lead.title}
                 </Link>
                 <p className="truncate text-xs text-muted">{lead.companyName}</p>
@@ -448,7 +449,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               <li key={r.id} className="flex items-center justify-between px-5 py-3">
                 <div className="min-w-0">
                   <Link
-                    href={`/companies/${r.companyId}?tab=renewals`}
+                    href={`${companyPath(r.companySeq)}?tab=renewals`}
                     className="truncate text-sm font-medium text-text hover:underline"
                   >
                     {r.companyName}

@@ -1398,7 +1398,7 @@ export async function listTradeDocuments(params: {
         origin: true,
         // What a conversion came from, so the Source column can link to it rather than only name it.
         sourceDocument: { select: { id: true, docNumber: true, docType: true } },
-        company: { select: { id: true, name: true, relationshipType: true } },
+        company: { select: { id: true, name: true, relationshipType: true, companySeq: true } },
         createdBy: { select: { name: true } },
         salesperson: { select: { id: true, name: true } },
         branch: { select: { id: true, name: true, code: true } },

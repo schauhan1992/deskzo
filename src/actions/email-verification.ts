@@ -247,7 +247,7 @@ export async function badEmailContacts(params: { page: number; pageSize: number 
         id: true, name: true, designation: true, email: true, phone: true,
         emailStatus: true, emailCheckedValue: true, emailCheckedAt: true,
         emailCheckMethod: true, emailCheckDetail: true,
-        company: { select: { id: true, name: true } },
+        company: { select: { id: true, companySeq: true, name: true } },
       },
     }),
     db.contact.count({ where }),

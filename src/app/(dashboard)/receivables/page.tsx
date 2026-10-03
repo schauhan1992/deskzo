@@ -9,6 +9,7 @@ import { formatCurrency } from "@/lib/utils";
 import { AGING_BUCKETS } from "@/lib/receivables";
 import { followUpChannelLabels } from "@/lib/collections/rules";
 import { workspaceClock } from "@/lib/time/workspace";
+import { companyPath } from "@/lib/record-links";
 
 /** Collections' views of the list: customers with a promise to pay broken, or due in the next week. */
 const PROMISE_FILTERS = [
@@ -118,7 +119,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
             {rows.map((row) => (
               <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 <td className="px-4 py-2.5">
-                  <Link href={`/companies/${row.id}?tab=statement`} className="font-medium text-text hover:underline">
+                  <Link href={`${companyPath(row.companySeq)}?tab=statement`} className="font-medium text-text hover:underline">
                     {row.name}
                   </Link>
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">

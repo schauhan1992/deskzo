@@ -13,6 +13,7 @@ import { CallButton } from "@/components/calls/call-button";
 import { EmailCheckBadge } from "@/components/contacts/email-address";
 import { formatSpan } from "@/lib/workspace/allocation";
 import { headcountLabel } from "@/lib/company-size";
+import { companyPath } from "@/lib/record-links";
 
 type Queue = NonNullable<Awaited<ReturnType<typeof myCallingQueue>>>;
 type Record_ = Queue["records"][number];
@@ -102,7 +103,7 @@ export function CallingStation({ queue }: { queue: Queue }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold text-text">{current.company.name}</h2>
                   <Link
-                    href={`/companies/${current.company.id}`}
+                    href={companyPath(current.company.companySeq)}
                     target="_blank"
                     className="flex items-center gap-1 text-xs text-brand hover:underline"
                   >

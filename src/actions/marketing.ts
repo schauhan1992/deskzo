@@ -408,7 +408,7 @@ export async function getCampaign(id: string) {
       where: { campaignId: id },
       orderBy: [{ sentAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
       take: 100,
-      select: { id: true, toEmail: true, status: true, sentAt: true, suppressedReason: true, error: true, contact: { select: { name: true } }, company: { select: { id: true, name: true } } },
+      select: { id: true, toEmail: true, status: true, sentAt: true, suppressedReason: true, error: true, contact: { select: { name: true } }, company: { select: { id: true, companySeq: true, name: true } } },
     }),
     // One real message as it went out, for the preview.
     db.marketingMessage.findFirst({ where: { campaignId: id, status: { notIn: ["SUPPRESSED"] }, body: { not: "" } }, select: { body: true, subject: true } }),

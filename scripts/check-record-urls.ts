@@ -20,7 +20,8 @@
  */
 import "dotenv/config";
 import Module from "node:module";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { db } from "../src/lib/db";
 import { parseRecordRef } from "../src/lib/record-url";
 import { formatCompanyId, formatLeadId, formatOrderId, formatItemId, formatUserId } from "../src/lib/order-id";
@@ -143,6 +144,48 @@ async function main() {
         : "every call below the lookup takes the row's own id",
     );
   }
+
+  section("The app links straight to the readable address");
+
+  /**
+   * A cuid still opens a record, by redirecting, and the redirect is the slow part. Next follows
+   * it and then fetches the new address again itself, so the page renders twice, side by side.
+   * Every link the app builds therefore hands over the reference (src/lib/record-links.ts), and the
+   * redirect is left to old bookmarks and emails.
+   *
+   * Read from the source: a link interpolated into a detail route has to come from a formatter, or
+   * from a value whose name says it is the reference (`…Ref`, `…Label`). Sub-routes (/edit,
+   * /handover, /settlement) take the cuid and never redirect, and `revalidatePath` isn't a link.
+   * The website CMS has a /leads of its own, on its own host, keyed by its own ids.
+   */
+  const ROUTE_LINK = /\/(companies|leads|items|orders|people|tickets|visits|expenses)\/\$\{([^`]*?)\}(?!\/)/g;
+  const READABLE = /format\w*Id\(|(^|\.)\w*([rR]ef|[lL]abel)$/;
+  /** The order just punched, held as its ORD- reference (new-order-form.tsx sets it from formatOrderId). */
+  const KNOWN_READABLE = new Set(["src/components/orders/punch/order-summary.tsx:justPunched"]);
+  const NOT_APP_RECORDS = ["src/lib/cms/", "src/app/platform-cms/"];
+  const cuidLinks: string[] = [];
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(path.join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [path.join(dir, e.name)] : [],
+    );
+  for (const file of walk("src")) {
+    const name = file.replace(/\\/g, "/");
+    if (NOT_APP_RECORDS.some((prefix) => name.startsWith(prefix))) continue;
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (line.includes("revalidatePath(")) return;
+      for (const m of line.matchAll(ROUTE_LINK)) {
+        const expr = m[2].trim();
+        if (READABLE.test(expr) || KNOWN_READABLE.has(`${name}:${expr}`)) continue;
+        cuidLinks.push(`${name}:${i + 1} /${m[1]}/\${${m[2]}}`);
+      }
+    });
+  }
+  ok(
+    "no link hands a detail page the cuid",
+    cuidLinks.length === 0,
+    cuidLinks.length ? `\n      ${cuidLinks.join("\n      ")}` : "every one goes through companyPath, leadPath, orderPath…",
+  );
 
   // ── Against real records ─────────────────────────────────────────────────────────────────────
   section("Both forms find the same record");

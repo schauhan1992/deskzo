@@ -199,6 +199,7 @@ const queueSelect = {
   company: {
     select: {
       id: true,
+      companySeq: true,
       name: true,
       website: true,
       employeeCount: true,

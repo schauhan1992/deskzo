@@ -31,6 +31,7 @@ import {
 // The engine's days are the workspace's; the fixtures here are Indian days.
 import { indiaClock } from "../src/lib/time/zone";
 import { renderHtml } from "./lib/render-html";
+import { formatOrderId } from "../src/lib/order-id";
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -96,7 +97,10 @@ async function cleanup() {
   await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: userIds } }, { entityId: { in: companyIds } }] } });
   // Approving an order sent to purchase tells everyone who processes orders — real people here — so
   // what the probe's orders caused goes by its link as well as by the probe users.
-  const orderLinks = (await db.companyProduct.findMany({ where: { companyId: { in: companyIds } }, select: { id: true } })).map((o) => `/orders/${o.id}`);
+  const orderLinks = (await db.companyProduct.findMany({ where: { companyId: { in: companyIds } }, select: { id: true, orderSeq: true } })).flatMap((o) => [
+    `/orders/${formatOrderId(o.orderSeq)}`,
+    `/orders/${o.id}`,
+  ]);
   await db.notification.deleteMany({ where: { OR: [{ userId: { in: userIds } }, { link: { in: orderLinks } }] } });
   await db.tradeDocument.deleteMany({ where: { companyId: { in: companyIds } } });
   await db.payment.deleteMany({ where: { companyId: { in: companyIds } } });

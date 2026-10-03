@@ -14,6 +14,7 @@ import {
 import { createTicket, listCompanyOrderOptions } from "@/actions/ticket";
 import { ticketTypeLabels } from "@/lib/tickets";
 import { formatOrderId } from "@/lib/order-id";
+import { ticketPath } from "@/lib/record-links";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -71,7 +72,7 @@ export function NewTicketForm({
       setServerError(result.error);
       return;
     }
-    router.push(`/tickets/${result.data.id}`);
+    router.push(ticketPath(result.data.ticketSeq));
   }
 
   return (

@@ -5,6 +5,7 @@ import { CallButton } from "@/components/calls/call-button";
 import type { runWorkbook } from "@/actions/workspace";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
 import { headcountLabel } from "@/lib/company-size";
+import { companyPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof runWorkbook>>["rows"][number];
 
@@ -49,7 +50,7 @@ export async function WorkbookResults({ rows, filters }: { rows: Row[]; filters?
             return (
               <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 <td className="px-4 py-2.5">
-                  <Link href={`/companies/${row.id}`} className="font-medium text-text hover:underline">
+                  <Link href={companyPath(row.companySeq)} className="font-medium text-text hover:underline">
                     {row.name}
                   </Link>
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-subtle">

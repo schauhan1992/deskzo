@@ -17,6 +17,7 @@ import {
   type CustomFieldPerson,
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
+import { itemPath } from "@/lib/record-links";
 
 type FormValues = z.input<typeof createItemSchema>;
 
@@ -68,7 +69,7 @@ export function NewItemForm({
       setServerError(result.error);
       return;
     }
-    router.push(`/items/${result.data.id}`);
+    router.push(itemPath(result.data.itemSeq));
   }
 
   return (

@@ -14,6 +14,7 @@ import { PaymentsReceivedTable } from "@/components/payments/payments-received-t
 import { formatCurrency } from "@/lib/utils";
 import { getPaymentStatus } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath } from "@/lib/record-links";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 
@@ -121,7 +122,7 @@ export default async function PaymentsPage({
                   <tr key={o.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                     <td className="px-4 py-2.5 font-mono text-xs text-muted">{formatOrderId(o.orderSeq)}</td>
                     <td className="px-4 py-2.5">
-                      <Link href={`/companies/${o.company.id}?tab=products`} className="font-medium text-text hover:underline">
+                      <Link href={`${companyPath(o.company.companySeq)}?tab=products`} className="font-medium text-text hover:underline">
                         {o.company.name}
                       </Link>
                     </td>

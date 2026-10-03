@@ -318,7 +318,7 @@ export async function rebatesReport(params: { from: string; to: string }) {
     add(byQuarter, quarter.key, quarter.label, summary.totals);
     return {
       id: o.id,
-      orderId: formatOrderId(o.orderSeq),
+      orderRef: formatOrderId(o.orderSeq),
       bookedAt: o.bookedAt,
       company: o.company,
       itemName: o.item.name,

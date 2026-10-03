@@ -5,6 +5,7 @@ import { toKey } from "@/lib/hr/calendar";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { employmentTypeLabels, exitTypeLabels } from "@/lib/validation/hr";
+import { personPath } from "@/lib/record-links";
 
 type Row = Awaited<ReturnType<typeof listPeople>>[number];
 
@@ -52,7 +53,7 @@ export async function PeopleTable({ people }: { people: Row[] }) {
               return (
                 <tr key={p.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-4 py-2.5">
-                    <Link href={`/people/${p.id}`} className="font-medium text-text hover:underline">
+                    <Link href={personPath(p.userSeq)} className="font-medium text-text hover:underline">
                       {p.name}
                     </Link>
                     <div className="text-xs text-subtle">{p.email}</div>

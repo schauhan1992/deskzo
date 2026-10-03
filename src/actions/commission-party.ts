@@ -14,7 +14,7 @@ export async function listLinkedCompanies(commissionPartyId: string) {
   const links = await db.commissionPartyLink.findMany({
     where: { commissionPartyId },
     orderBy: { createdAt: "desc" },
-    include: { company: { select: { id: true, name: true, relationshipType: true } } },
+    include: { company: { select: { id: true, companySeq: true, name: true, relationshipType: true } } },
   });
   return links.map((l) => ({ linkId: l.id, ...l.company }));
 }
@@ -200,7 +200,7 @@ export async function listCompanyCommissionParties(companyId: string) {
   const links = await db.commissionPartyLink.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
-    include: { commissionParty: { select: { id: true, name: true, vendorStatus: true } } },
+    include: { commissionParty: { select: { id: true, companySeq: true, name: true, vendorStatus: true } } },
   });
   return links.map((l) => ({ linkId: l.id, ...l.commissionParty }));
 }
@@ -225,7 +225,7 @@ export async function listCompanyCommissions(companyId: string) {
     where: { type: "COMMISSION", companyProduct: { companyId } },
     orderBy: { createdAt: "desc" },
     include: {
-      payee: { select: { id: true, name: true } },
+      payee: { select: { id: true, companySeq: true, name: true } },
       payeeAccount: { select: { id: true, label: true, bankName: true, upiId: true } },
       companyProduct: {
         select: { id: true, orderSeq: true, createdAt: true, item: { select: { name: true } } },
@@ -265,7 +265,7 @@ export async function listCommissionPartyEarnings(commissionPartyId: string) {
           orderSeq: true,
           createdAt: true,
           item: { select: { name: true } },
-          company: { select: { id: true, name: true } },
+          company: { select: { id: true, companySeq: true, name: true } },
         },
       },
     },

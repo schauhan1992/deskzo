@@ -12,6 +12,7 @@ import { wants } from "@/lib/notifications/catalogue";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
+import { companyPath, personPath, ticketPath } from "@/lib/record-links";
 
 const DAY_MS = 86_400_000;
 
@@ -94,7 +95,7 @@ export async function syncSystemNotifications(userId: string) {
         endDate: { not: null, gte: today, lte: new Date(today.getTime() + 30 * DAY_MS) },
         company: { ownerUserId: userId },
       },
-      select: { id: true, item: { select: { name: true } }, company: { select: { id: true, name: true } } },
+      select: { id: true, item: { select: { name: true } }, company: { select: { id: true, companySeq: true, name: true } } },
     }),
     // A promised callback, owed by whoever promised it, now due. Unlike the task sweep above this
     // works to the minute rather than the day — a callback agreed for 3pm is late at 3pm, not at
@@ -177,7 +178,7 @@ export async function syncSystemNotifications(userId: string) {
         type: "TICKET_SLA_OVERDUE",
         title: "Ticket past its SLA",
         message: `${formatTicketId(ticket.ticketSeq)} — ${ticket.title}`,
-        link: `/tickets/${ticket.id}`,
+        link: ticketPath(ticket.ticketSeq),
         dedupeKey: `ticket-sla:${ticket.id}`,
       });
     }
@@ -189,7 +190,7 @@ export async function syncSystemNotifications(userId: string) {
       type: "RENEWAL_EXPIRING",
       title: "Subscription expiring soon",
       message: `${r.company.name} — ${r.item.name}`,
-      link: `/companies/${r.company.id}?tab=renewals`,
+      link: `${companyPath(r.company.companySeq)}?tab=renewals`,
       dedupeKey: `renewal-expiring:${r.id}`,
     });
   }
@@ -302,7 +303,7 @@ async function peopleCandidates(
 
   const colleagues = await db.employeeProfile.findMany({
     where: { exitedOn: null, user: { active: true } },
-    select: { dateOfBirth: true, joinedOn: true, designation: true, user: { select: { id: true, name: true } } },
+    select: { dateOfBirth: true, joinedOn: true, designation: true, user: { select: { id: true, userSeq: true, name: true } } },
   });
 
   for (const c of colleagues) {
@@ -314,7 +315,7 @@ async function peopleCandidates(
           type: "BIRTHDAY_TODAY",
           title: c.user.id === userId ? "Happy birthday!" : `It's ${c.user.name}'s birthday`,
           message: c.user.id === userId ? "From everyone at the company." : c.designation,
-          link: `/people/${c.user.id}`,
+          link: personPath(c.user.userSeq),
           dedupeKey: `birthday:${c.user.id}:${yearKey}`,
         });
       }
@@ -331,7 +332,7 @@ async function peopleCandidates(
           type: "WORK_ANNIVERSARY",
           title: `${c.user.name} — ${years} year${years === 1 ? "" : "s"} today`,
           message: c.designation,
-          link: `/people/${c.user.id}`,
+          link: personPath(c.user.userSeq),
           dedupeKey: `anniversary:${c.user.id}:${yearKey}`,
         });
       }

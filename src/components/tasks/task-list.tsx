@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { useClock } from "@/components/time/clock-provider";
 import { formatTicketId } from "@/lib/tickets";
+import { companyPath, leadPath, ticketPath } from "@/lib/record-links";
 import { taskDue } from "@/lib/task-due";
 import type { Clock } from "@/lib/time/zone";
 
@@ -31,8 +32,8 @@ export type TaskRow = {
   createdAt: Date | string;
   assignedTo: { id: string; name: string } | null;
   createdBy: { id: string; name: string };
-  company: { id: string; name: string } | null;
-  lead: { id: string; title: string } | null;
+  company: { id: string; name: string; companySeq: number } | null;
+  lead: { id: string; title: string; leadSeq: number } | null;
   ticket: { id: string; ticketSeq: number; title: string } | null;
 };
 
@@ -53,21 +54,21 @@ function dueBadge(task: TaskRow, clock: Clock) {
 function LinkedRecord({ task }: { task: TaskRow }) {
   if (task.company) {
     return (
-      <Link href={`/companies/${task.company.id}`} className="hover:underline">
+      <Link href={companyPath(task.company.companySeq)} className="hover:underline">
         {task.company.name}
       </Link>
     );
   }
   if (task.lead) {
     return (
-      <Link href={`/leads/${task.lead.id}`} className="hover:underline">
+      <Link href={leadPath(task.lead.leadSeq)} className="hover:underline">
         {task.lead.title}
       </Link>
     );
   }
   if (task.ticket) {
     return (
-      <Link href={`/tickets/${task.ticket.id}`} className="hover:underline">
+      <Link href={ticketPath(task.ticket.ticketSeq)} className="hover:underline">
         {formatTicketId(task.ticket.ticketSeq)}
       </Link>
     );

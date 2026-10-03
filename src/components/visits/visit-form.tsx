@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { visitPurposeValues, visitPurposeLabels } from "@/lib/visits";
+import { visitPath } from "@/lib/record-links";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 
 type Company = { id: string; name: string };
@@ -14,6 +15,8 @@ type Options = Awaited<ReturnType<typeof visitFormOptions>>;
 
 export type VisitFormDefaults = {
   id?: string;
+  /** With `id`: where Cancel goes back to. */
+  visitSeq?: number;
   companyId: string;
   contactId: string;
   leadId: string;
@@ -105,7 +108,7 @@ export function VisitForm({
         setError(result.error);
         return;
       }
-      router.push(`/visits/${result.data.id}`);
+      router.push(visitPath(result.data.visitSeq));
       router.refresh();
     });
   }
@@ -253,7 +256,7 @@ export function VisitForm({
         <Button type="submit" disabled={pending || !companyId}>
           {pending ? "Saving…" : defaults.id ? "Save changes" : "Plan visit"}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => router.push(defaults.id ? `/visits/${defaults.id}` : "/visits")}>
+        <Button type="button" variant="secondary" onClick={() => router.push(defaults.visitSeq ? visitPath(defaults.visitSeq) : "/visits")}>
           Cancel
         </Button>
       </div>

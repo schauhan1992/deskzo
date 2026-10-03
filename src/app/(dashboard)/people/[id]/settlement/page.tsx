@@ -6,6 +6,7 @@ import { getPerson, hrCapabilities } from "@/actions/hr";
 import { getSettlement } from "@/actions/settlement";
 import { Card } from "@/components/ui/card";
 import { SettlementView } from "@/components/hr/settlement-view";
+import { personPath } from "@/lib/record-links";
 
 export default async function SettlementPage({ params }: { params: Promise<{ id: string }> }) {
   const enabled = await isModuleEnabled("payroll");
@@ -26,13 +27,14 @@ export default async function SettlementPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="animate-fade-rise">
-      <Link href={`/people/${person.id}`} className="text-sm text-muted hover:text-text">
+      <Link href={personPath(person.userSeq)} className="text-sm text-muted hover:text-text">
         ← {person.name}
       </Link>
       <div className="mt-3">
         <SettlementView
           settlement={settlement}
           userId={person.id}
+          userSeq={person.userSeq}
           userName={person.name}
           canManage={caps.payroll}
         />

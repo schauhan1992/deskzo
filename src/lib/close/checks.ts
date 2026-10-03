@@ -2,6 +2,7 @@ import { monthlyCharge, type AssetForDepreciation } from "@/lib/ledger/depreciat
 import { indiaClock } from "@/lib/time/zone";
 import type { AutoCheckKey } from "@/lib/close/catalogue";
 import { dayKey, monthEnd, monthEndPostingDate, monthKeyOf, monthLabel, monthOfDate, sameDay } from "@/lib/close/months";
+import { expensePath } from "@/lib/record-links";
 
 /**
  * The checklist's automatic checks, each a pure function over what its loader (loaders.ts) read.
@@ -297,12 +298,12 @@ export function checkPayrollPosted(input: PayrollCheckInput): CheckOutcome {
 
 export type ExpensesCheckInput = {
   month: Date;
-  claims: { id: string; label: string; amount: number }[];
+  claims: { id: string; expenseSeq: number; label: string; amount: number }[];
 };
 
 /** No approved claim dated in the month without its journal entry. */
 export function checkExpensesPosted(input: ExpensesCheckInput): CheckOutcome {
-  const items = input.claims.map((c) => ({ id: c.id, label: c.label, href: `/expenses/${c.id}`, amount: c.amount, note: "Approved, not posted" }));
+  const items = input.claims.map((c) => ({ id: c.id, label: c.label, href: expensePath(c.expenseSeq), amount: c.amount, note: "Approved, not posted" }));
   const amount = round2(items.reduce((t, i) => t + i.amount, 0));
   const summary = items.length === 0
     ? `Every approved claim in ${monthLabel(input.month)} is posted.`

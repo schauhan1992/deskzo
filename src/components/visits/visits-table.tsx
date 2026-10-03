@@ -5,6 +5,7 @@ import type { VisitPurpose, VisitStatus } from "@prisma/client";
 import { Badge, Card } from "@/components/ui/card";
 import { useClock } from "@/components/time/clock-provider";
 import { formatVisitId, visitPurposeLabels, visitStatusLabels, visitStatusTone, visitDuration, formatDuration } from "@/lib/visits";
+import { companyPath, visitPath } from "@/lib/record-links";
 
 type VisitRow = {
   id: string;
@@ -15,7 +16,7 @@ type VisitRow = {
   checkInAt: Date | string | null;
   checkOutAt: Date | string | null;
   agenda: string | null;
-  company: { id: string; name: string };
+  company: { id: string; name: string; companySeq: number };
   contact: { id: string; name: string } | null;
   user: { id: string; name: string };
   _count: { expenses: number };
@@ -47,7 +48,7 @@ export function VisitsTable({ visits }: { visits: VisitRow[] }) {
           {visits.map((v) => (
             <tr key={v.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
               <td className="px-4 py-2.5 font-mono text-xs">
-                <Link href={`/visits/${v.id}`} className="text-text hover:underline">
+                <Link href={visitPath(v.visitSeq)} className="text-text hover:underline">
                   {formatVisitId(v.visitSeq)}
                 </Link>
               </td>
@@ -55,7 +56,7 @@ export function VisitsTable({ visits }: { visits: VisitRow[] }) {
                 <Badge tone={visitStatusTone[v.status]}>{visitStatusLabels[v.status]}</Badge>
               </td>
               <td className="px-4 py-2.5">
-                <Link href={`/companies/${v.company.id}`} className="text-text hover:underline">
+                <Link href={companyPath(v.company.companySeq)} className="text-text hover:underline">
                   {v.company.name}
                 </Link>
                 {v.contact && <div className="text-xs text-subtle">{v.contact.name}</div>}

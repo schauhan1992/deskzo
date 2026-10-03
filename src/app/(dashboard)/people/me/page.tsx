@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { dateOnly } from "@/lib/hr/calendar";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { workspaceClock } from "@/lib/time/workspace";
+import { personPath } from "@/lib/record-links";
 
 export default async function MyHrPage() {
   const enabled = await isModuleEnabled("hr");
@@ -43,7 +44,7 @@ export default async function MyHrPage() {
     handoverHistory(caps.userId),
     db.user.findUnique({
       where: { id: caps.userId },
-      select: { name: true, employeeProfile: { select: { exitedOn: true } } },
+      select: { name: true, userSeq: true, employeeProfile: { select: { exitedOn: true } } },
     }),
   ]);
 
@@ -59,9 +60,11 @@ export default async function MyHrPage() {
             Your attendance, leave and payslips — and anything waiting on you to decide.
           </p>
         </div>
-        <Link href={`/people/${caps.userId}`} className="text-sm text-brand hover:underline">
-          My full record →
-        </Link>
+        {me && (
+          <Link href={personPath(me.userSeq)} className="text-sm text-brand hover:underline">
+            My full record →
+          </Link>
+        )}
       </div>
 
       {/*

@@ -204,7 +204,7 @@ export async function getVendorCredit(id: string) {
   const credit = await db.vendorCredit.findUnique({
     where: { id },
     include: {
-      vendor: { select: { id: true, name: true } },
+      vendor: { select: { id: true, companySeq: true, name: true } },
       bankAccount: { select: { id: true, name: true } },
       createdBy: { select: { id: true, name: true } },
       cancelledBy: { select: { id: true, name: true } },

@@ -38,6 +38,7 @@ import { toKey } from "@/lib/hr/calendar";
 import { CANDIDATE_LETTERS, candidateStatusLabels, candidateStatusTone } from "@/lib/hr/onboarding";
 import { letterTypeLabels } from "@/lib/hr/letters";
 import { employmentTypeLabels } from "@/lib/validation/hr";
+import { personPath } from "@/lib/record-links";
 import { SetupLinkOnce } from "@/components/settings/setup-link-once";
 
 type Candidate = NonNullable<Awaited<ReturnType<typeof getCandidate>>>;
@@ -123,14 +124,14 @@ export function CandidateRecord({ candidate, origin }: { candidate: Candidate; o
         <Card className="border-danger/40 bg-danger-bg px-4 py-3 text-sm text-danger">{error}</Card>
       )}
 
-      {joined && candidate.convertedUserId && (
+      {joined && candidate.convertedUser && (
         <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
           <span className="text-sm text-muted">
             Joined on {candidate.convertedAt ? clock.date(candidate.convertedAt) : "—"}. Their documents and letters
             moved onto the employee record.
           </span>
           <Link
-            href={`/people/${candidate.convertedUserId}`}
+            href={personPath(candidate.convertedUser.userSeq)}
             className="text-sm font-medium text-brand hover:underline"
           >
             Open employee record →
@@ -629,7 +630,7 @@ function ConvertPanel({ candidate }: { candidate: Candidate }) {
   const [employeeCode, setEmployeeCode] = useState("");
   const [probationMonths, setProbationMonths] = useState("6");
   // Converted, but the setup email didn't go: the step that says so — with the link to pass on, once.
-  const [unsent, setUnsent] = useState<{ userId: string; setupUrl?: string } | null>(null);
+  const [unsent, setUnsent] = useState<{ userSeq: number; setupUrl?: string } | null>(null);
 
   // Once they have joined the panel goes — unless it is still showing the link to pass on: the conversion
   // re-renders this page with the candidate joined, and the link must not vanish before it is copied.
@@ -652,19 +653,19 @@ function ConvertPanel({ candidate }: { candidate: Candidate }) {
       }
       const made = result.data;
       if (!made.emailed) {
-        setUnsent({ userId: made.userId, ...(made.setupUrl ? { setupUrl: made.setupUrl } : {}) });
+        setUnsent({ userSeq: made.userSeq, ...(made.setupUrl ? { setupUrl: made.setupUrl } : {}) });
         return;
       }
       setOpen(false);
-      router.push(`/people/${made.userId}`);
+      router.push(personPath(made.userSeq));
     });
   }
 
   function finish() {
-    const userId = unsent?.userId;
+    const userSeq = unsent?.userSeq;
     setUnsent(null);
     setOpen(false);
-    if (userId) router.push(`/people/${userId}`);
+    if (userSeq !== undefined) router.push(personPath(userSeq));
   }
 
   return (

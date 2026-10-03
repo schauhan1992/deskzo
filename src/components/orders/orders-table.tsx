@@ -7,6 +7,7 @@ import type { OrderStatus, OrderBusinessType, CompanyRelationshipType } from "@p
 import { orderBusinessTypeLabels } from "@/lib/validation/order";
 import { calculateOrderAmount } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 import { CustomerNoticeButton } from "@/components/marketing/customer-notice-button";
 import { canAnnounceFulfilment } from "@/lib/marketing/customer-notices";
 import { formatCurrency } from "@/lib/utils";
@@ -43,7 +44,7 @@ type OrderRow = {
   unitPrice: number | null;
   orderStatus: OrderStatus;
   businessType: OrderBusinessType;
-  company: { id: string; name: string; relationshipType: CompanyRelationshipType };
+  company: { id: string; companySeq: number; name: string; relationshipType: CompanyRelationshipType };
   endCustomer: { id: string; name: string } | null;
   item: { id: string; name: string; unit: string | null; sellingPrice: number; taxRatePercent: number | null };
   vendor: { id: string; name: string } | null;
@@ -128,7 +129,7 @@ export function OrdersTable({
               <tr key={o.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                 {cols.show("order") && (
                   <td className="px-4 py-2.5 font-mono text-xs">
-                    <Link href={`/orders/${o.id}`} className="text-text hover:underline">
+                    <Link href={orderPath(o.orderSeq)} className="text-text hover:underline">
                       {formatOrderId(o.orderSeq)}
                     </Link>
                   </td>
@@ -153,7 +154,7 @@ export function OrdersTable({
                 )}
                 {cols.show("customer") && (
                   <td className="px-4 py-2.5">
-                    <Link href={`/companies/${o.company.id}`} className="text-text hover:underline">
+                    <Link href={companyPath(o.company.companySeq)} className="text-text hover:underline">
                       {o.company.name}
                     </Link>
                     {o.company.relationshipType === "RESELLER" && (

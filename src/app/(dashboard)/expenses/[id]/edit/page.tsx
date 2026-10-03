@@ -5,6 +5,7 @@ import { getExpense } from "@/actions/expense";
 import { listCompanyOptions } from "@/actions/company";
 import { ExpenseForm } from "@/components/expenses/expense-form";
 import { isExpenseEditable } from "@/lib/expenses";
+import { expensePath } from "@/lib/record-links";
 
 export default async function EditExpensePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,7 +20,7 @@ export default async function EditExpensePage({ params }: { params: Promise<{ id
           A claim is only editable by the person who raised it, and only while it&apos;s a draft or has come back
           rejected — otherwise editing would move the goalposts mid-review.
         </p>
-        <Link href={`/expenses/${id}`} className="mt-3 inline-block text-sm text-brand hover:underline">
+        <Link href={expensePath(expense.expenseSeq)} className="mt-3 inline-block text-sm text-brand hover:underline">
           ← Back to the claim
         </Link>
       </div>
@@ -31,7 +32,7 @@ export default async function EditExpensePage({ params }: { params: Promise<{ id
   return (
     <div>
       <div className="mb-5">
-        <Link href={`/expenses/${id}`} className="text-sm text-muted hover:text-text">
+        <Link href={expensePath(expense.expenseSeq)} className="text-sm text-muted hover:text-text">
           ← Back to the claim
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-text">Edit expense</h1>
@@ -46,6 +47,7 @@ export default async function EditExpensePage({ params }: { params: Promise<{ id
         }
         defaults={{
           id: expense.id,
+          expenseSeq: expense.expenseSeq,
           category: expense.category,
           amount: String(expense.amount),
           taxAmount: expense.taxAmount !== null ? String(expense.taxAmount) : "",

@@ -33,7 +33,7 @@ const listSelect = {
   error: true,
   suppressedReason: true,
   noticeKind: true,
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, companySeq: true, name: true } },
   contact: { select: { id: true, name: true } },
   campaign: { select: { reference: true, name: true, createdBy: { select: { name: true } } } },
   enrolment: { select: { journey: { select: { name: true } } } },
@@ -148,7 +148,7 @@ export async function getMailMessage(id: string) {
       scheduledFor: true,
       attempts: true,
       providerMessageId: true,
-      company: { select: { id: true, name: true, ownerUserId: true } },
+      company: { select: { id: true, companySeq: true, name: true, ownerUserId: true } },
       provider: { select: { label: true, fromEmail: true, fromName: true } },
       events: { select: { type: true, occurredAt: true, url: true, detail: true }, orderBy: { occurredAt: "asc" } },
     },
@@ -158,7 +158,7 @@ export async function getMailMessage(id: string) {
   const { company, ...rest } = message;
   return toPlain({
     ...rest,
-    company: { id: company.id, name: company.name },
+    company: { id: company.id, companySeq: company.companySeq, name: company.name },
     source: mailSource(message, formatOrderId),
     sender: mailSender(message),
   });

@@ -41,13 +41,13 @@ export type DashboardSummary = {
   leads: {
     open: number;
     pipelineValue: number;
-    recent: { id: string; title: string; companyName: string; status: string; estimatedValue: number | null }[];
+    recent: { id: string; leadSeq: number; title: string; companyName: string; status: string; estimatedValue: number | null }[];
   } | null;
   vendors: { onboarding: number; active: number; inactive: number } | null;
   renewals: {
     expired: number;
     next30: number;
-    upcoming: { id: string; orderSeq: number; companyId: string; companyName: string; itemName: string; endDate: Date }[];
+    upcoming: { id: string; orderSeq: number; companyId: string; companySeq: number; companyName: string; itemName: string; endDate: Date }[];
   } | null;
   /**
    * The projects this person is on. Never company-wide, whatever permissions they hold — a
@@ -205,6 +205,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     pipelineValue: Number(pipelineValueAgg._sum.estimatedValue ?? 0),
     recent: recentLeads.map((lead) => ({
       id: lead.id,
+      leadSeq: lead.leadSeq,
       title: lead.title,
       companyName: lead.company.name,
       status: lead.status,
@@ -236,7 +237,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
         where: next30Where,
         orderBy: { endDate: "asc" },
         take: 5,
-        include: { company: { select: { id: true, name: true } }, item: { select: { name: true } } },
+        include: { company: { select: { id: true, companySeq: true, name: true } }, item: { select: { name: true } } },
       }),
     ]);
     renewals = {
@@ -246,6 +247,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
         id: r.id,
         orderSeq: r.orderSeq,
         companyId: r.company.id,
+        companySeq: r.company.companySeq,
         companyName: r.company.name,
         itemName: r.item.name,
         endDate: r.endDate as Date,

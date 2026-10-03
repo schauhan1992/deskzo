@@ -35,6 +35,7 @@ import type { ActionResult } from "@/actions/company";
 import { chooseOwner } from "@/lib/leads/assign";
 import { mayChangeLeadOwner, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
+import { leadPath } from "@/lib/record-links";
 
 /** A person's name for the activity log — or "nobody". */
 async function ownerName(userId: string | null | undefined): Promise<string> {
@@ -115,7 +116,7 @@ async function resolveOwner(
   return { ok: true, userId: user.role === "SALES" ? user.id : null, note: null };
 }
 
-export async function createLead(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createLead(input: unknown): Promise<ActionResult<{ id: string; leadSeq: number }>> {
   const user = await requireUser();
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = createLeadSchema.safeParse(input);
@@ -196,7 +197,7 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
       type: "LEAD_ASSIGNED",
       title: "A lead was assigned to you",
       message: data.title,
-      link: `/leads/${lead.id}`,
+      link: leadPath(lead.leadSeq),
     });
   }
 
@@ -205,7 +206,7 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
 
   revalidatePath("/leads");
   revalidatePath(`/companies/${data.companyId}`);
-  return { ok: true, data: { id: lead.id } };
+  return { ok: true, data: { id: lead.id, leadSeq: lead.leadSeq } };
 }
 
 export async function addLeadRequirement(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -371,7 +372,7 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
 }
 
 const leadListInclude = {
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, name: true, companySeq: true } },
   contact: { select: { id: true, name: true } },
   owner: { select: { id: true, name: true } },
 } as const;
@@ -467,6 +468,7 @@ export async function leadDocumentDraft(leadId: string) {
     where: { id: leadId, ...(await viaCompanyScope(user.id)) },
     select: {
       id: true,
+      leadSeq: true,
       title: true,
       companyId: true,
       ownerUserId: true,
@@ -557,7 +559,7 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
       type: "LEAD_STATUS_CHANGED",
       title: "Your lead's status changed",
       message: `${lead.title} — now ${target.label}`,
-      link: `/leads/${leadId}`,
+      link: leadPath(lead.leadSeq),
     });
   }
 
@@ -674,7 +676,7 @@ export async function logActivity(input: unknown): Promise<ActionResult<{ id: st
       type: "LEAD_ACTIVITY",
       title: "New activity on your lead",
       message: `${lead.title} — ${notes}`,
-      link: `/leads/${leadId}`,
+      link: leadPath(lead.leadSeq),
     });
   }
 
@@ -718,7 +720,7 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
     const rights = await reassignRights(user.id);
     const leads = await db.lead.findMany({
       where: { id: { in: leadIds }, ...(await viaCompanyScope(user.id)) },
-      select: { id: true, title: true, ownerUserId: true },
+      select: { id: true, leadSeq: true, title: true, ownerUserId: true },
     });
     if (leads.length !== new Set(leadIds).size) {
       return { ok: false, error: "Some of the selected leads are not yours to change." };
@@ -751,7 +753,7 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
         type: "LEAD_ASSIGNED",
         title: `${leads.length === 1 ? "A lead was" : `${leads.length} leads were`} assigned to you`,
         message: leads.length === 1 ? leads[0]!.title : undefined,
-        link: leads.length === 1 ? `/leads/${leads[0]!.id}` : "/leads?view=list",
+        link: leads.length === 1 ? leadPath(leads[0]!.leadSeq) : "/leads?view=list",
       });
     }
   }

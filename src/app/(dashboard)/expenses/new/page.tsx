@@ -6,6 +6,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { ExpenseForm } from "@/components/expenses/expense-form";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { workspaceClock } from "@/lib/time/workspace";
+import { visitPath } from "@/lib/record-links";
 
 export default async function NewExpensePage({
   searchParams,
@@ -25,7 +26,7 @@ export default async function NewExpensePage({
   return (
     <div>
       <div className="mb-5">
-        <Link href={visit ? `/visits/${visit.id}` : "/expenses"} className="text-sm text-muted hover:text-text">
+        <Link href={visit ? visitPath(visit.visitSeq) : "/expenses"} className="text-sm text-muted hover:text-text">
           ← {visit ? "Back to the visit" : "Expenses"}
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-text">New expense</h1>

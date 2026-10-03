@@ -15,6 +15,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { ensureChartOfAccounts, postExpenseReimbursementToLedger, postExpenseToLedger } from "@/lib/ledger/journal";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
+import { expensePath } from "@/lib/record-links";
 import {
   formatExpenseId,
   isExpenseEditable,
@@ -147,9 +148,9 @@ async function expenseListWhere(viewerId: string, params?: ExpenseListParams): P
 const expenseListInclude = {
   user: { select: { id: true, name: true } },
   approver: { select: { id: true, name: true } },
-  company: { select: { id: true, name: true } },
+  company: { select: { id: true, name: true, companySeq: true } },
   visit: { select: { id: true, visitSeq: true, company: { select: { name: true } } } },
-  lead: { select: { id: true, title: true } },
+  lead: { select: { id: true, leadSeq: true, title: true } },
 } as const;
 
 export async function listExpensesPaged(params: ExpenseListParams & { page: number; pageSize: number }) {
@@ -227,7 +228,7 @@ export async function getExpense(id: string) {
   return toPlain(expense);
 }
 
-export async function createExpense(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createExpense(input: unknown): Promise<ActionResult<{ id: string; expenseSeq: number }>> {
   const user = await requireModuleUser("expenses");
   const parsed = createExpenseSchema.safeParse(input);
   if (!parsed.success) {
@@ -285,7 +286,7 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
       type: "EXPENSE_SUBMITTED",
       title: "An expense claim needs your approval",
       message: `${expenseCategoryLabels[data.category]} — ₹${data.amount.toFixed(2)}`,
-      link: `/expenses/${expense.id}`,
+      link: expensePath(expense.expenseSeq),
     });
   }
   await recordAudit({
@@ -298,10 +299,10 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
 
   revalidatePath("/expenses");
   if (data.visitId) revalidatePath(`/visits/${data.visitId}`);
-  return { ok: true, data: { id: expense.id } };
+  return { ok: true, data: { id: expense.id, expenseSeq: expense.expenseSeq } };
 }
 
-export async function updateExpense(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function updateExpense(input: unknown): Promise<ActionResult<{ id: string; expenseSeq: number }>> {
   const user = await requireModuleUser("expenses");
   const parsed = updateExpenseSchema.safeParse(input);
   if (!parsed.success) {
@@ -320,7 +321,7 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
   const spentOn = spentOnFrom(data.spentOn);
   if (!spentOn) return { ok: false, error: "That isn't a date." };
 
-  await db.expense.update({
+  const { expenseSeq } = await db.expense.update({
     where: { id },
     data: {
       category: data.category,
@@ -334,12 +335,13 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
       leadId: data.leadId || null,
       ...(data.receiptDataUrl ? { receiptDataUrl: data.receiptDataUrl, receiptName: data.receiptName || null } : {}),
     },
+    select: { expenseSeq: true },
   });
 
   revalidatePath("/expenses");
   revalidatePath(`/expenses/${id}`);
   if (existing.visitId) revalidatePath(`/visits/${existing.visitId}`);
-  return { ok: true, data: { id } };
+  return { ok: true, data: { id, expenseSeq } };
 }
 
 /** Hands a draft (or a rejected claim being re-tried) to the manager's queue. */
@@ -365,7 +367,7 @@ export async function submitExpense(id: string): Promise<ActionResult<{ id: stri
       type: "EXPENSE_SUBMITTED",
       title: "An expense claim needs your approval",
       message: `${expenseCategoryLabels[expense.category]} — ₹${Number(expense.amount).toFixed(2)}`,
-      link: `/expenses/${id}`,
+      link: expensePath(expense.expenseSeq),
     });
   }
 
@@ -428,7 +430,7 @@ export async function decideExpense(input: unknown): Promise<ActionResult<{ id: 
     type: "EXPENSE_DECIDED",
     title: approved ? "Your expense claim was approved" : "Your expense claim was rejected",
     message: `${formatExpenseId(expense.expenseSeq)} — ${expenseCategoryLabels[expense.category]}${note ? `: ${note}` : ""}`,
-    link: `/expenses/${id}`,
+    link: expensePath(expense.expenseSeq),
   });
   await recordAudit({
     userId: user.id,

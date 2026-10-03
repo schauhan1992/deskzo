@@ -4,6 +4,7 @@ import { LinkedCompaniesManager } from "@/components/companies/linked-companies-
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
+import { companyPath, orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
 
 type CommissionParty = Awaited<ReturnType<typeof listCompanyCommissionParties>>[number];
@@ -51,7 +52,7 @@ export async function CompanyCommission({
           <LinkedCompaniesManager
             ownerId={companyId}
             side="company"
-            links={commissionParties.map((p) => ({ linkId: p.linkId, id: p.id, name: p.name }))}
+            links={commissionParties.map((p) => ({ linkId: p.linkId, id: p.id, companySeq: p.companySeq, name: p.name }))}
             companyOptions={partyOptions}
             emptyText="No commission party linked to this customer yet."
             searchPlaceholder="Type to search commission parties…"
@@ -94,14 +95,14 @@ export async function CompanyCommission({
                   {commissions.map((commission) => (
                     <tr key={commission.id} className="border-b border-line last:border-0">
                       <td className="px-5 py-2">
-                        <Link href={`/orders/${commission.order.id}`} className="font-mono text-xs text-text hover:underline">
+                        <Link href={orderPath(commission.order.orderSeq)} className="font-mono text-xs text-text hover:underline">
                           {formatOrderId(commission.order.orderSeq)}
                         </Link>
                         <div className="text-xs text-subtle">{commission.order.itemName}</div>
                       </td>
                       <td className="px-3 py-2">
                         {commission.payee ? (
-                          <Link href={`/companies/${commission.payee.id}`} className="text-text hover:underline">
+                          <Link href={companyPath(commission.payee.companySeq)} className="text-text hover:underline">
                             {commission.payee.name}
                           </Link>
                         ) : (
