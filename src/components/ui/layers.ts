@@ -22,6 +22,12 @@
  * against the others.
  */
 
+/**
+ * A card in the corner that floats over the page without stopping work — today's wishes. Below a
+ * splash, which is the one thing meant to interrupt.
+ */
+export const LAYER_CORNER = "z-[55]";
+
 /** Full-screen interruptions — celebrations, survey prompts. Above the page, below anything modal. */
 export const LAYER_SPLASH = "z-[60]";
 

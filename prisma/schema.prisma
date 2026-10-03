@@ -353,6 +353,7 @@ enum NotificationType {
   REGULARISATION_DECIDED
   BIRTHDAY_TODAY
   WORK_ANNIVERSARY
+  WISHES
   HOLIDAY_UPCOMING
   LETTER_ISSUED
   FEEDBACK_RECEIVED
@@ -681,6 +682,8 @@ model User {
   helpLinks                HelpLink[]                 @relation("HelpLinkCreatedBy")
   announcements            Announcement[]             @relation("AnnouncementCreatedBy")
   celebrationsSeen         CelebrationSeen[]
+  wishesReceived           Wish[]                     @relation("WishesReceived")
+  wishesSent               Wish[]                     @relation("WishesSent")
   ledgerLocks              LedgerLock[]               @relation("LedgerLockBy")
   fiscalYearsClosed        FiscalYearClose[]          @relation("FiscalYearClosedBy")
   bankAccountsCreated      BankAccount[]              @relation("BankAccountCreatedBy")
@@ -5517,6 +5520,35 @@ model CelebrationSeen {
   @@unique([userId, occasionKey])
   @@index([userId])
   @@map("celebration_seen")
+}
+
+/**
+ * A colleague's wish on somebody's birthday or work anniversary, sent by clicking the occasion in the
+ * dashboard's greeting strip (src/lib/hr/wishes.ts).
+ * The unique key is "once": one wish per sender per occasion, however often they click. The occasion
+ * is the same opaque key the greeting uses — `birthday:<userId>:2026` — so it needs no row to point at.
+ * `seenAt` is when the person wished closed the corner card that showed it; a wish arriving after that
+ * brings the card back with the new names.
+ */
+model Wish {
+  id          String    @id @default(cuid())
+  occasionKey String
+  kind        WishKind
+  recipientId String
+  recipient   User      @relation("WishesReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User      @relation("WishesSent", fields: [senderId], references: [id], onDelete: Cascade)
+  seenAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([occasionKey, senderId])
+  @@index([recipientId, occasionKey])
+  @@map("wishes")
+}
+
+enum WishKind {
+  BIRTHDAY
+  ANNIVERSARY
 }
 
 // ─── Books control ────────────────────────────────────────────────────────────

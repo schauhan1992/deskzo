@@ -592,6 +592,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   },
   Celebration: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   CelebrationSeen: { disposition: "excluded", reason: "Whether somebody dismissed a birthday banner." },
+  Wish: { disposition: "excluded", reason: "Who wished whom on a birthday or work anniversary: the moment itself, not a business record." },
   ContactVerification: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   DepreciationCharge: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   DocumentCounter: { disposition: "specification", reason: "The current value of a numbering series. The series definition exports; its counter is state." },

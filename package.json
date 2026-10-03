@@ -125,6 +125,7 @@
     "check:prizes": "tsx scripts/check-prizes.ts",
     "check:customer-categories": "tsx scripts/check-customer-categories.ts",
     "check:custom-fields": "tsx scripts/check-custom-fields.ts",
+    "check:wishes": "tsx scripts/check-wishes.ts",
     "check:custom-field-filters": "tsx scripts/check-custom-field-filters.ts",
     "check:custom-field-reports": "tsx scripts/check-custom-field-reports.ts",
     "check:custom-field-intake": "tsx scripts/check-custom-field-intake.ts",

@@ -94,6 +94,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "LETTER_ISSUED", label: "A letter is issued to me", when: "HR issues you an offer, confirmation or any other letter.", group: "people" },
   { type: "BIRTHDAY_TODAY", label: "Somebody's birthday", when: "A colleague has a birthday today.", group: "people" },
   { type: "WORK_ANNIVERSARY", label: "A work anniversary", when: "A colleague reaches a year with the company.", group: "people" },
+  { type: "WISHES", label: "Colleagues wish me", when: "Somebody wishes you on your birthday or work anniversary. One notice for the day, however many wish you.", group: "people" },
   { type: "ACTIVITY_AWARD", label: "Awards and prizes", when: "The fortnight's most active, the month's top sellers, the prizes up for grabs — and a note to you when you win.", group: "people" },
   { type: "HOLIDAY_UPCOMING", label: "A holiday is coming", when: "A company holiday is a few days away.", group: "people" },
 

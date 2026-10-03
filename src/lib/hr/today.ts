@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
-import { currentUser } from "@/lib/session";
+import { currentUser, viewAsContext } from "@/lib/session";
+import { wishedBy } from "@/lib/hr/wishes";
 import { workspaceClock } from "@/lib/time/workspace";
 import { indiaClock } from "@/lib/time/zone";
 import { greeting, momentsFor, type Moment } from "@/lib/hr/celebrations";
@@ -74,25 +75,43 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
     // A win for a customer, deal or target deleted since is not celebrated — see withoutOrphanedWins.
     const celebrations = await withoutOrphanedWins(allCelebrations);
 
-    return {
-      greeting: greeting(now, firstName, clock),
-      moments: momentsFor({
-        today,
-        viewer: { userId: user.id, departmentId: viewer?.departmentId ?? null },
-        people: people.map((p) => ({
-          userId: p.userId,
-          name: p.user.name,
-          designation: p.designation,
-          dateOfBirth: p.dateOfBirth,
-          joinedOn: p.joinedOn,
-          departmentId: p.user.departmentId,
-        })),
-        holidays,
-        celebrations,
-        seen: seen.map((s) => s.occasionKey),
-      }),
-    };
+    const moments = momentsFor({
+      today,
+      viewer: { userId: user.id, departmentId: viewer?.departmentId ?? null },
+      people: people.map((p) => ({
+        userId: p.userId,
+        name: p.user.name,
+        designation: p.designation,
+        dateOfBirth: p.dateOfBirth,
+        joinedOn: p.joinedOn,
+        departmentId: p.user.departmentId,
+      })),
+      holidays,
+      celebrations,
+      seen: seen.map((s) => s.occasionKey),
+    });
+    return { greeting: greeting(now, firstName, clock), moments: await withWishes(moments, user.id) };
   } catch {
     return empty;
   }
 });
+
+/**
+ * A colleague's birthday or anniversary becomes something to wish them on, marked sent where the
+ * viewer already has. Not while viewing as somebody. A lookup that fails (a workspace not yet given
+ * the wishes table, mid-release) leaves the strip as it was rather than taking the greeting with it.
+ */
+async function withWishes(moments: Moment[], viewerId: string): Promise<Moment[]> {
+  const wishable = moments.filter((m) => (m.tone === "birthday" || m.tone === "anniversary") && m.subject && !m.aboutViewer);
+  if (wishable.length === 0 || (await viewAsContext())) return moments;
+  try {
+    const sent = await wishedBy(viewerId, wishable.map((m) => m.key));
+    return moments.map((m) =>
+      wishable.includes(m)
+        ? { ...m, wish: { kind: m.tone === "birthday" ? "BIRTHDAY" : "ANNIVERSARY", firstName: m.subject!.name.split(" ")[0]!, sent: sent.has(m.key) } }
+        : m,
+    );
+  } catch {
+    return moments;
+  }
+}

@@ -188,6 +188,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "visitor-public.ts": "public",
   "visitor.ts": ["visitors"],
   "wins.ts": ["wins"],
+  // A colleague's wish on a birthday or work anniversary: the occasions are HR's (src/lib/hr/wishes.ts).
+  "wishes.ts": ["hr"],
   "workspace.ts": ["workspace"],
   "platform/console-admin.ts": "platform",
   "platform/console-alerts.ts": "platform",

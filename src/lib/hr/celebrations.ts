@@ -39,6 +39,12 @@ export type Moment = {
   splash: boolean;
   /** A sales win or an achievement: the splash throws confetti. */
   confetti?: boolean;
+  /**
+   * A colleague's birthday or work anniversary the viewer may wish them on, from the strip — and
+   * whether they already have (src/lib/hr/wishes.ts). Absent on everything else, and while viewing as
+   * somebody: a wish is never sent in another person's name.
+   */
+  wish?: { kind: "BIRTHDAY" | "ANNIVERSARY"; firstName: string; sent: boolean };
 };
 
 export type PersonForCelebration = {

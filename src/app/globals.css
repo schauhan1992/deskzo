@@ -305,6 +305,109 @@
   animation-timing-function: cubic-bezier(0.25, 0.4, 0.6, 1);
   animation-fill-mode: forwards;
 }
+/* The same, falling the height of a card rather than the screen — the wishes card in the corner. */
+@keyframes confetti-fall-short {
+  0% {
+    transform: translateY(-12px) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(240px) rotate(420deg);
+    opacity: 0;
+  }
+}
+.confetti-short {
+  top: -12px;
+  animation-name: confetti-fall-short;
+}
+
+/*
+ * Wishes — src/components/layout/wish-chip.tsx and wishes-corner.tsx. A spark from the chip a wish is
+ * sent from; the card rising into the corner, its icon bobbing a few times, and balloons going up once.
+ * Each runs out on its own, so nothing keeps moving beside somebody's work.
+ */
+@keyframes wish-burst {
+  0% {
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1);
+    opacity: 0;
+  }
+}
+.wish-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: wish-burst 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes wish-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-wish-in {
+  animation: wish-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes wish-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  30% {
+    transform: translateY(-5px) rotate(-6deg);
+  }
+  60% {
+    transform: translateY(0) rotate(5deg);
+  }
+}
+.animate-wish-bob {
+  animation: wish-bob 1.1s ease-in-out 4;
+}
+@keyframes wish-balloon {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  50% {
+    transform: translateY(-70px) translateX(6px);
+  }
+  100% {
+    transform: translateY(-150px) translateX(-4px);
+    opacity: 0;
+  }
+}
+.wish-balloon {
+  position: absolute;
+  bottom: -28px;
+  width: 18px;
+  height: 22px;
+  border-radius: 50% 50% 48% 48%;
+  pointer-events: none;
+  opacity: 0;
+  animation: wish-balloon 3.2s ease-out forwards;
+}
+.wish-balloon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 1px;
+  height: 14px;
+  background: currentColor;
+  opacity: 0.4;
+}
 
 /* Respect the OS setting — animation should never be the reason someone can't use the app. */
 @media (prefers-reduced-motion: reduce) {

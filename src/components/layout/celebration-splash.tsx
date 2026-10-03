@@ -5,6 +5,7 @@ import { Cake, PartyPopper, Sparkles, Trophy, X, Gift, Megaphone, CalendarHeart 
 import type { Moment, MomentTone } from "@/lib/hr/celebrations";
 import { dismissMoment } from "@/actions/celebration";
 import { Button } from "@/components/ui/button";
+import { WishChip } from "@/components/layout/wish-chip";
 
 const ICONS: Record<MomentTone, typeof Cake> = {
   birthday: Cake,
@@ -148,7 +149,8 @@ function SplashCard({ moment, remaining, onClose }: { moment: Moment; remaining:
  */
 const CONFETTI_COLOURS = ["#f59e0b", "#10b981", "#6366f1", "#ec4899", "#06b6d4", "#ef4444"];
 
-export function Confetti({ accent, pieces = 70 }: { accent: string; pieces?: number }) {
+/** `short`: falling the height of a card rather than the screen. */
+export function Confetti({ accent, pieces = 70, short = false }: { accent: string; pieces?: number; short?: boolean }) {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
       {Array.from({ length: pieces }, (_, i) => {
@@ -160,7 +162,7 @@ export function Confetti({ accent, pieces = 70 }: { accent: string; pieces?: num
         return (
           <span
             key={i}
-            className="confetti-piece"
+            className={short ? "confetti-piece confetti-short" : "confetti-piece"}
             style={{
               left: `${left}%`,
               width: size,
@@ -181,7 +183,8 @@ export function Confetti({ accent, pieces = 70 }: { accent: string; pieces?: num
  * The quiet line under the dashboard's greeting: whose birthday it is, who has an anniversary.
  *
  * Never interrupts, and is not dismissed — it is simply what is true today, and it disappears
- * tomorrow on its own. Renders nothing when there is nothing quiet to say.
+ * tomorrow on its own. Renders nothing when there is nothing quiet to say. A colleague's birthday or
+ * anniversary can be clicked, to wish them (src/lib/hr/wishes.ts).
  */
 export function MomentChips({ moments }: { moments: Moment[] }) {
   // Only the quiet ones: anything that earned a splash has already had its moment.
@@ -192,6 +195,8 @@ export function MomentChips({ moments }: { moments: Moment[] }) {
       {quiet.map((m) => {
         const Icon = ICONS[m.tone];
         const accent = m.accent || ACCENTS[m.tone];
+        // A colleague's birthday or anniversary is a button: a click wishes them.
+        if (m.wish) return <WishChip key={m.key} moment={m} icon={Icon} accent={accent} />;
         return (
           <span
             key={m.key}

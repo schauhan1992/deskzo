@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Suspense } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -34,7 +35,9 @@ import { clearViewAsCookie } from "@/lib/impersonation";
 import { listViewAsTargets } from "@/actions/impersonation";
 import { ViewAsSwitcher } from "@/components/layout/view-as-switcher";
 import { CelebrationSplash } from "@/components/layout/celebration-splash";
+import { WishesCorner } from "@/components/layout/wishes-corner";
 import { todaysMoments } from "@/lib/hr/today";
+import { wishesForLayout } from "@/lib/hr/wishes";
 import { getSecurityPolicy } from "@/lib/security/store";
 import { dlpApplies, hasAnyDeterrent } from "@/lib/security/policy";
 import { recordPageView } from "@/lib/security/page-view";
@@ -120,6 +123,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Not while viewing as somebody else: an admin borrowing an account should not be wished a happy
   // birthday on their behalf, and dismissing it would mark it seen for a person who never saw it.
   const today = viewAs ? null : await todaysMoments();
+  // Wishes on the shown person's birthday or work anniversary today — an admin viewing as them sees
+  // theirs, read-only. Empty on any other day; never throws (src/lib/hr/wishes.ts).
+  const wishes = shownUser ? await wishesForLayout(shownUser.id) : [];
   // The owner's reminder while a trial or a grace period runs — null for everybody else.
   const billing = session?.user && !viewAs ? await billingNotice().catch(() => null) : null;
   // The platform's announcements for this workspace. Cached for a minute and never throws, so a
@@ -328,6 +334,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
         <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">{children}</main>
         {today && <CelebrationSplash moments={today.moments} />}
+        {wishes.length > 0 && (
+          <Suspense fallback={null}>
+            <WishesCorner initial={wishes} readOnly={!!viewAs} />
+          </Suspense>
+        )}
       </div>
 
       {/*
