@@ -76,6 +76,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "document-mail.ts": ["sales_documents", "purchase_documents"],
   "workplace-connection.ts": ["sales_documents", "purchase_documents", "calendar"],
   "calendar.ts": ["calendar"],
+  "industry-templates.ts": "core",
   "document-number.ts": ["sales_documents", "purchase_documents"],
   "domain.ts": ["domains"],
   // Settings › Domain: the workspace's own addresses (custom domains) — the owner's, like billing; not the Domains module above.

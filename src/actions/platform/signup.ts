@@ -39,6 +39,7 @@ import {
 import { clientIpFrom } from "@/lib/client-ip";
 import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { subdomainHost } from "@/lib/tenancy/registry";
+import { templateOf } from "@/lib/industry-templates/catalogue";
 
 /**
  * Signing up for a workspace — the public site on the platform's own address (src/app/platform-site).
@@ -161,6 +162,8 @@ export type SignupForm = {
   email: string;
   password: string;
   country: string;
+  /** An industry template's key (src/lib/industry-templates/catalogue.ts), or empty for none. Optional, so a form without it still works. */
+  industry?: string;
   invite: string;
   /** A partner's referral code — from a /signup?ref= link, the referral cookie, or typed. Optional, so a form without it still works. */
   referral?: string;
@@ -205,6 +208,9 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   if (email && isDisposableDomain(email.domain)) put("email", disposableEmailMessage(email.domain));
   put("country", country ? null : countryProblem("", () => false));
   put("password", passwordProblem(password));
+  const industryInput = String(form.industry ?? "").trim();
+  const industry = industryInput ? templateOf(industryInput) : null;
+  if (industryInput && !industry) put("industry", "Choose your kind of business from the list — or leave it for later.");
   // An invitation that holds an address for its customer: this signup gets exactly it, without the
   // signup rules. The registered name is still asked for, and kept — just not matched against it.
   const inviteCode = String(form.invite ?? "").trim();
@@ -240,6 +246,7 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
       ip: clientIpFrom(head),
       referralCode: referral?.code ?? null,
       referralVia,
+      industryTemplate: industry?.key ?? null,
     },
     select: { id: true },
   });
@@ -328,6 +335,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
       planKey: invite?.planKey ?? referral?.planKey ?? null,
       attribution,
       hold,
+      industryTemplate: pending.industryTemplate,
     }));
   } catch (err) {
     // The invitation goes back: nothing was made with it.

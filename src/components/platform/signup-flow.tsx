@@ -26,6 +26,7 @@ import {
   type SignupIssues,
 } from "@/lib/signup-fields";
 import type { Country } from "@/lib/geo/countries";
+import { INDUSTRY_TEMPLATES } from "@/lib/industry-templates/catalogue";
 
 type Stage = { at: "form" } | { at: "code"; email: string } | { at: "progress"; step: string; ready?: boolean } | { at: "failed"; message: string };
 
@@ -40,6 +41,7 @@ const FIELD_ID: Record<SignupField, string> = {
   email: "email",
   password: "password",
   country: "country",
+  industry: "industry",
   invite: "invite",
   referral: "referral",
 };
@@ -134,7 +136,7 @@ export function SignupFlow({
   brandName?: string;
 }) {
   const [stage, setStage] = useState<Stage>({ at: "form" });
-  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", invite, referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
+  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", industry: "", invite, referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
   // The address an invitation code holds, with the code it belongs to — it applies only while that code is the one typed.
   const [hold, setHold] = useState<{ code: string; slug: string } | null>(held && invite.trim() ? { code: invite.trim(), slug: held } : null);
   const inviteCode = form.invite.trim();
@@ -174,6 +176,7 @@ export function SignupFlow({
         return countryProblem(v.country, countryKnown);
       case "invite":
         return inviteRequiredProblem(v.invite, inviteRequired);
+      case "industry":
       case "referral":
         return null;
     }
@@ -543,6 +546,29 @@ export function SignupFlow({
           ))}
         </Select>
         <Note id="country" error={issueOf("country")} />
+      </div>
+      <div>
+        <Label htmlFor="industry">Your kind of business (optional)</Label>
+        <Select
+          id="industry"
+          className={INVALID_BORDER}
+          value={form.industry ?? ""}
+          onChange={set("industry")}
+          aria-invalid={issueOf("industry") ? true : undefined}
+          aria-describedby={describedBy("industry-hint", issueOf("industry") && "industry-error")}
+        >
+          <option value="">Not now — I&apos;ll set things up myself</option>
+          {INDUSTRY_TEMPLATES.map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
+        <Note id="industry" error={issueOf("industry")}>
+          <p id="industry-hint" className="mt-1 text-xs text-subtle">
+            Starts your workspace with a pipeline, order steps, words and fields for how that business works. You can change all of it, or pick one later in Settings.
+          </p>
+        </Note>
       </div>
       <div>
         <Label htmlFor="invite">{inviteRequired ? "Invitation code" : "Invitation code (if you have one)"}</Label>

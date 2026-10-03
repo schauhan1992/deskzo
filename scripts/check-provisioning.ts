@@ -25,6 +25,7 @@ import Module from "node:module";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { directClient } from "../src/lib/tenancy/direct-client";
+import { moduleEntitled, parseEntitlements } from "../src/lib/entitlements";
 
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 delete process.env.TRUST_PROXY;
@@ -127,14 +128,15 @@ async function main() {
     section("Signing up");
     const INVITE = "zz-provcheck-invite";
     await control.signupInvite.create({ data: { codeHash: sha256(INVITE), maxUses: 1 } });
-    const form = { companyName: "Zzprov Alpha Systems Ltd", slug: "zzprov-alpha", ownerName: "Asha Zz", email: "asha@zzprov.example", password: "correct horse battery", country: "IN", invite: INVITE };
+    const form = { companyName: "Zzprov Alpha Systems Ltd", slug: "zzprov-alpha", ownerName: "Asha Zz", email: "asha@zzprov.example", password: "correct horse battery", country: "IN", industry: "system_integrators", invite: INVITE };
     const refusals = await Promise.all([
       signup.startSignup({ ...form, invite: "not-an-invite" }),
       signup.startSignup({ ...form, email: "someone@mailinator.com" }),
       signup.startSignup({ ...form, slug: "admin" }),
       signup.startSignup({ ...form, password: "short" }),
+      signup.startSignup({ ...form, industry: "crm" }),
     ]);
-    ok("refused: no invitation, a throwaway address, a reserved name, a short password", refusals.every((r) => !r.ok), refusals.map((r) => (r.ok ? "accepted" : r.error.slice(0, 40))).join(" | "));
+    ok("refused: no invitation, a throwaway address, a reserved name, a short password, an industry not on the list", refusals.every((r) => !r.ok), refusals.map((r) => (r.ok ? "accepted" : r.error.slice(0, 40))).join(" | "));
     const started = await signup.startSignup(form);
     ok("the form is accepted and a code is emailed", started.ok && mail.length === 1 && /\d{6}/.test(mail[0].subject), started.ok ? mail[0]?.subject : started.error);
     const code = mail[0]?.subject.match(/(\d{6})$/)?.[1] ?? "";
@@ -142,6 +144,7 @@ async function main() {
     ok("  and only this browser holds the signup", jar.has("deskzo.signup"));
     const pendingRow = await control.pendingSignup.findFirst({ where: { slug: "zzprov-alpha" } });
     ok("  the password is kept only as a hash", !!pendingRow && pendingRow.passwordHash !== form.password && (await bcrypt.compare(form.password, pendingRow.passwordHash)));
+    ok("  and the industry chosen with it", pendingRow?.industryTemplate === "system_integrators");
 
     const wrong = await signup.verifySignup("000000" === code ? "111111" : "000000");
     ok("a wrong code is refused", !wrong.ok);
@@ -168,6 +171,7 @@ async function main() {
     ok("  and the workspace is open", A.status === "ACTIVE");
     const job = await control.provisioningJob.findFirstOrThrow({ where: { tenantId: A.id } });
     ok("  the job no longer holds the password", job.status === "SUCCEEDED" && job.ownerPasswordHash === null);
+    ok("  it carried the industry", job.industryTemplate === "system_integrators");
     registry.forgetRegistry();
     const tenantA = (await registry.tenantBySlug("zzprov-alpha"))!;
     const inA = directClient(tenantA.dbUrl);
@@ -178,6 +182,15 @@ async function main() {
       const org = await inA.organisationSettings.findUnique({ where: { id: "global" } });
       const brand = await inA.brandingSettings.findUnique({ where: { id: "global" } });
       ok("its organisation and its sign-in page carry its name", org?.legalName === form.companyName && org.country === "India" && brand?.appName === form.companyName);
+      // Order steps and order fields only where its plan has Orders.
+      const ordersInPlan = moduleEntitled(parseEntitlements(A.entitlements), A.country, "orders");
+      const stagesA = await inA.leadStage.findMany({ where: { archivedAt: null }, orderBy: { sortOrder: "asc" }, select: { label: true } });
+      const wordsA = (await inA.terminologySettings.findUnique({ where: { id: "global" } }))?.overrides as { terms?: Record<string, { one: string }> } | undefined;
+      ok(
+        "set up for system integrators, as chosen: its pipeline, words, steps and fields, applied by its owner",
+        stagesA[0]?.label === "Enquiry" && stagesA[1]?.label === "Site survey" && wordsA?.terms?.lead?.one === "Enquiry" && (await inA.orderStep.count()) === (ordersInPlan ? 5 : 0) && (await inA.customFieldDefinition.count({ where: { entity: "LEAD" } })) === 3 && (await inA.customFieldDefinition.count({ where: { entity: "ORDER" } })) === (ordersInPlan ? 4 : 0) && (await inA.auditLog.count({ where: { entityType: "IndustryTemplate", userId: owner?.id } })) === 1,
+        JSON.stringify({ stages: stagesA.map((st) => st.label), lead: wordsA?.terms?.lead?.one, steps: await inA.orderStep.count(), fields: await inA.customFieldDefinition.count(), audit: await inA.auditLog.count({ where: { entityType: "IndustryTemplate" } }) }),
+      );
     } finally {
       await inA.$disconnect();
     }

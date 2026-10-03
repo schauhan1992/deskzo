@@ -282,6 +282,8 @@ model ProvisioningJob {
   country     String
   /// The plan it starts on — its invitation's, or the default plan's when null.
   planKey     String?
+  /// The industry template chosen at signup (src/lib/industry-templates), applied as the workspace is set up.
+  industryTemplate String?
 
   createdAt DateTime @default(now())
 
@@ -390,6 +392,8 @@ model PendingSignup {
   /// A partner's referral code on the form, and how it got there: "link" | "cookie" | "typed" (informational).
   referralCode String?
   referralVia  String?
+  /// The industry template chosen on the form, if any — src/lib/industry-templates/catalogue.ts keys.
+  industryTemplate String?
 
   @@index([email])
   @@index([slug])

@@ -177,6 +177,7 @@
     "check:time-zones": "tsx scripts/check-time-zones.ts",
     "check:zone-pages": "tsx scripts/check-zone-pages.ts",
     "check:calendar": "tsx scripts/check-calendar.ts",
+    "check:industry-templates": "tsx scripts/check-industry-templates.ts",
     "fix:typed-times": "tsx scripts/fix-typed-times.ts",
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",

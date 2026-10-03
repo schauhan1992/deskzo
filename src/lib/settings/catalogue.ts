@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  LayoutTemplate,
   Archive,
   SquareKanban,
   CreditCard,
@@ -150,6 +151,14 @@ export const SETTINGS: SettingsSection[] = [
             description: "Your own words for leads, customers, orders and more — an Enquiry, a Booking, a Student — and for an order's statuses.",
             href: "/settings/wording",
             icon: Languages,
+            permission: "settings.manage",
+          },
+          {
+            key: "industry-templates",
+            label: "Industry templates",
+            description: "Start from how your kind of business works — a pipeline, order steps, words and fields for system integrators, real estate, IT services, manufacturing or software resellers.",
+            href: "/settings/industry-templates",
+            icon: LayoutTemplate,
             permission: "settings.manage",
           },
           {

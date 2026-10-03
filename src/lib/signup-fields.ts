@@ -17,12 +17,12 @@ export const CODE_LENGTH = 6;
 export const CODE_TTL_MINUTES = 15;
 export const MAX_CODE_ATTEMPTS = 5;
 
-export type SignupField = "companyName" | "slug" | "ownerName" | "email" | "password" | "country" | "invite" | "referral";
+export type SignupField = "companyName" | "slug" | "ownerName" | "email" | "password" | "country" | "industry" | "invite" | "referral";
 export type SignupIssueField = SignupField | "code";
 export type SignupIssues = Partial<Record<SignupIssueField, string>>;
 
 /** The form's order, top to bottom: the first problem is the one focused, and the one `error` repeats. */
-export const SIGNUP_FIELD_ORDER: readonly SignupIssueField[] = ["companyName", "slug", "ownerName", "email", "password", "country", "invite", "referral", "code"];
+export const SIGNUP_FIELD_ORDER: readonly SignupIssueField[] = ["companyName", "slug", "ownerName", "email", "password", "country", "industry", "invite", "referral", "code"];
 
 export const firstIssue = (issues: SignupIssues): SignupIssueField | null => SIGNUP_FIELD_ORDER.find((f) => issues[f]) ?? null;
 

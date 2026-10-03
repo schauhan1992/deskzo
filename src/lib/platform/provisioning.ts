@@ -17,6 +17,9 @@ import { trialDays } from "@/lib/platform/settings";
 import { workspaceNameVerdict, type InviteHold } from "@/lib/platform/name-rules";
 import { NAME_TAKEN } from "@/lib/workspace-names";
 import { mailNewCustomer, recordSignupAttribution, type AttributionDecision } from "@/lib/partners/attribution";
+import { templateOf } from "@/lib/industry-templates/catalogue";
+import { applyTemplate } from "@/lib/industry-templates/apply";
+import { moduleEntitled, parseEntitlements } from "@/lib/entitlements";
 
 /**
  * Setting a workspace up, from a name to a working address.
@@ -55,6 +58,8 @@ export type ProvisioningInput = {
   attribution?: AttributionDecision | null;
   /** The address its invitation holds for it, when the invitation holds one — checked again here, never skipped. */
   hold?: InviteHold | null;
+  /** The industry template chosen at signup (src/lib/industry-templates), applied as the workspace is set up. */
+  industryTemplate?: string | null;
 };
 
 /** What `slugProblem` says of a name that is fine but belongs to a workspace already (or is held for another customer). */
@@ -114,6 +119,7 @@ export async function startProvisioning(input: ProvisioningInput): Promise<{ ten
         companyName: input.companyName.trim(),
         country: country.code,
         planKey: plan?.key ?? null,
+        industryTemplate: templateOf(input.industryTemplate)?.key ?? null,
       },
       select: { id: true },
     });
@@ -224,10 +230,10 @@ async function runJob(claimed: ClaimedJob): Promise<void> {
   const workspace = directClient(url);
   try {
     await step(job.id, "Creating your account");
-    const owner = await workspace.user.findUnique({ where: { email: job.ownerEmail }, select: { id: true } });
+    let owner = await workspace.user.findUnique({ where: { email: job.ownerEmail }, select: { id: true } });
     if (!owner) {
       if (!job.ownerPasswordHash) throw new Error("The owner's password is no longer on the job; the signup has to be started again.");
-      await bootstrapOwner(workspace, { name: job.ownerName, email: job.ownerEmail, passwordHash: job.ownerPasswordHash });
+      owner = await bootstrapOwner(workspace, { name: job.ownerName, email: job.ownerEmail, passwordHash: job.ownerPasswordHash });
     }
     await step(job.id, "Setting up your organisation");
     const countryName = WORLD_COUNTRIES.find((c) => c.code === job.country)?.name ?? null;
@@ -238,6 +244,19 @@ async function runJob(claimed: ClaimedJob): Promise<void> {
     });
     // Their name on their sign-in page and in the sidebar, not the platform's.
     await workspace.brandingSettings.upsert({ where: { id: "global" }, create: { id: "global", appName: job.companyName }, update: {} });
+    // The industry they chose: its pipeline, steps, words and fields. Safe to run again — a second time
+    // finds it all there — so a retried job applies it once.
+    const template = templateOf(job.industryTemplate);
+    if (template) {
+      await step(job.id, `Setting up for ${template.name.toLowerCase()}`);
+      const entitlements = parseEntitlements(tenant.entitlements);
+      const done = await applyTemplate(workspace, template, (key) => moduleEntitled(entitlements, tenant.country, key), owner.id);
+      if (done.changes.length) {
+        await workspace.auditLog.create({
+          data: { userId: owner.id, action: "UPDATE", entityType: "IndustryTemplate", entityId: template.key, entityLabel: `Industry template: ${template.name} — ${done.changes.join("; ")}` },
+        });
+      }
+    }
   } finally {
     await workspace.$disconnect();
   }
