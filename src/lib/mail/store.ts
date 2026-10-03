@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { encryptSecret } from "@/lib/crypto";
 import type { WorkplaceProvider } from "@/lib/workplace/providers";
 import type { TokenSet } from "@/lib/mail/types";
+import { forgetCalendar } from "@/lib/calendar/account";
 
 /**
  * Keeping a person's connected mailbox (MailConnection): one per person, whichever provider — connecting
@@ -37,6 +38,17 @@ export async function saveMailbox(
  * Set when the provider refuses the stored token — a changed password, a revoked consent, an account
  * disabled. Nothing is sent until the person connects again.
  */
+/**
+ * The person's connection taken down — their mailbox, and the calendar that came with it (the meetings
+ * scheduled from records stay on the records). What was connected, or null when nothing was.
+ */
+export async function removeConnection(userId: string): Promise<{ provider: WorkplaceProvider; mailbox: string } | null> {
+  const had = await db.mailConnection.findUnique({ where: { userId }, select: { provider: true, mailbox: true } });
+  const removed = await db.mailConnection.deleteMany({ where: { userId } });
+  await forgetCalendar(userId);
+  return removed.count > 0 ? had : null;
+}
+
 export async function markMailboxBroken(userId: string, error: string) {
   await db.mailConnection.update({ where: { userId }, data: { brokenAt: new Date(), lastError: error.slice(0, 300) } });
 }

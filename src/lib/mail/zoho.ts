@@ -20,15 +20,33 @@ import type { OutgoingMail, ProviderSend, TokenOutcome } from "@/lib/mail/types"
  */
 
 export const ZOHO_MAIL_SCOPES = "ZohoMail.messages.CREATE,ZohoMail.accounts.READ,AaaServer.profile.Read";
+/** Added when the workspace has Calendar on: the person's calendars, their events, and Zoho Meeting links. */
+export const ZOHO_CALENDAR_SCOPES = "ZohoCalendar.calendar.READ,ZohoCalendar.event.ALL,ZohoMeeting.meeting.ALL";
 
-type Hosts = { accounts: string; mail: string };
+export function zohoScopes(calendar: boolean): string {
+  return calendar ? `${ZOHO_MAIL_SCOPES},${ZOHO_CALENDAR_SCOPES}` : ZOHO_MAIL_SCOPES;
+}
+
+type Hosts = { accounts: string; mail: string; calendar: string };
 const live = (): Record<ZohoRegion, Hosts> =>
-  Object.fromEntries(Object.entries(ZOHO_REGIONS).map(([k, v]) => [k, { accounts: v.accounts, mail: v.mail }])) as Record<ZohoRegion, Hosts>;
+  Object.fromEntries(Object.entries(ZOHO_REGIONS).map(([k, v]) => [k, { accounts: v.accounts, mail: v.mail, calendar: v.calendar }])) as Record<ZohoRegion, Hosts>;
 let regions = live();
 
-/** For check scripts only: point every data centre at a local stand-in. */
-export function setTestZohoRegions(next: Record<ZohoRegion, Hosts> | null) {
-  regions = next ?? live();
+/**
+ * For check scripts only: point every data centre at a local stand-in. A data centre given no calendar
+ * host has one beside its accounts host — "…/z-in-accounts" becomes "…/z-in-calendar".
+ */
+export function setTestZohoRegions(next: Record<ZohoRegion, Omit<Hosts, "calendar"> & { calendar?: string }> | null) {
+  regions = next
+    ? (Object.fromEntries(
+        Object.entries(next).map(([k, h]) => [k, { ...h, calendar: h.calendar ?? h.accounts.replace(/accounts(?!.*accounts)/, "calendar") }]),
+      ) as Record<ZohoRegion, Hosts>)
+    : live();
+}
+
+/** Zoho Calendar's address in a data centre, for src/lib/calendar/zoho.ts. */
+export function zohoCalendarBase(region: ZohoRegion): string {
+  return regions[region].calendar;
 }
 
 /** The data centre whose accounts server this is — only one of Zoho's own. */
@@ -45,12 +63,12 @@ export function accountsServerOf(region: ZohoRegion): string {
   return regions[region].accounts;
 }
 
-export function zohoAuthorizeUrl(app: ZohoApp, p: { redirectUri: string; state: string }): string {
+export function zohoAuthorizeUrl(app: ZohoApp, p: { redirectUri: string; state: string; scope?: string }): string {
   const url = new URL(`${regions[app.region].accounts}/oauth/v2/auth`);
   url.searchParams.set("client_id", app.clientId);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("redirect_uri", p.redirectUri);
-  url.searchParams.set("scope", ZOHO_MAIL_SCOPES);
+  url.searchParams.set("scope", p.scope ?? ZOHO_MAIL_SCOPES);
   url.searchParams.set("state", p.state);
   // A refresh token, every time — Zoho gives one only for offline access on a consent it has just shown.
   url.searchParams.set("access_type", "offline");

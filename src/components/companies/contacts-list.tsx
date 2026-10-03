@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { ScheduleMeetingButton } from "@/components/calendar/schedule-meeting-button";
 import type { z } from "zod";
 import { useForm, type UseFormRegister, type FieldValues, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -248,12 +249,15 @@ export function ContactsList({
   companyName,
   contacts,
   customFields = NO_CUSTOM_FIELDS,
+  canMeet = false,
 }: {
   companyId: string;
   companyName: string;
   contacts: Contact[];
   /** The workspace's own contact fields — none when it has none this person sees. */
   customFields?: ContactCustomFields;
+  /** Calendar is on: a meeting can be scheduled with somebody who has an address. */
+  canMeet?: boolean;
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -351,6 +355,9 @@ export function ContactsList({
                   </span>
                 )}
                 {c.email && <EmailAddress contact={c} />}
+                {canMeet && c.email && !c.detailsRedacted && (
+                  <ScheduleMeetingButton record={{ kind: "contact", id: c.id }} size="sm" variant="ghost" label="Meet" />
+                )}
                 {c.phone && (
                   <CallButton
                     companyId={companyId}

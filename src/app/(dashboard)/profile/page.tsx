@@ -11,7 +11,9 @@ import { MyAccess } from "@/components/access/my-access";
 import { DEVICE_KIND_LABEL } from "@/lib/access/device";
 import { placeText } from "@/lib/access/geo";
 import { workspaceClock } from "@/lib/time/workspace";
-import { getMailConnection } from "@/actions/document-mail";
+import { getMyConnection } from "@/actions/workplace-connection";
+import { getMyCalendar } from "@/actions/calendar";
+import { isModuleEnabled } from "@/actions/module";
 import { MailboxConnection } from "@/components/profile/mailbox-connection";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { myLinkedWorkspaces } from "@/actions/linked-sign-in";
@@ -25,11 +27,17 @@ export default async function ProfilePage({
   /** `mailbox` and `via`: how connecting a mailbox went, and with which provider. `outlook` is the same, from before Gmail and Zoho. */
   searchParams: Promise<{ mailbox?: string; via?: string; outlook?: string; link?: string }>;
 }) {
-  const [profile, security, access, mail, linked, { mailbox, via, outlook, link }, clock] = await Promise.all([
+  // A connection is for emailing documents, and for the calendar — either is reason enough for the card.
+  const [mailUse, calendarOn] = await Promise.all([
+    isModuleEntitled("sales_documents").then(async (has) => has || (await isModuleEntitled("purchase_documents"))),
+    isModuleEnabled("calendar"),
+  ]);
+  const [profile, security, access, mail, calendar, linked, { mailbox, via, outlook, link }, clock] = await Promise.all([
     getOwnProfile(),
     getCachedSecuritySettings(),
     myAccess(),
-    isModuleEntitled("sales_documents").then(async (has) => (has || (await isModuleEntitled("purchase_documents")) ? getMailConnection() : null)),
+    mailUse || calendarOn ? getMyConnection() : null,
+    calendarOn ? getMyCalendar() : null,
     // One card on this page, never a reason for the page to fail: a control plane out of reach just hides it.
     myLinkedWorkspaces().catch(() => null),
     searchParams,
@@ -146,11 +154,13 @@ export default async function ProfilePage({
         {/* Not shown while viewing as somebody: whose mailbox is connected is theirs alone. */}
         {mail && (
           <Card id="mailbox" className="scroll-mt-20">
-            <CardHeader className="text-sm font-medium text-text">Your mailbox</CardHeader>
+            <CardHeader className="text-sm font-medium text-text">{calendarOn ? (mailUse ? "Your mailbox and calendar" : "Your calendar") : "Your mailbox"}</CardHeader>
             <CardContent>
               <MailboxConnection
                 providers={mail.providers}
                 connection={mail.connection}
+                mailUse={mailUse}
+                calendar={calendar}
                 outcome={mailbox ?? outlook ?? null}
                 via={mailbox ? (via ?? null) : outlook ? "microsoft" : null}
               />

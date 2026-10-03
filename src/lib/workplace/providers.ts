@@ -85,19 +85,19 @@ export function signInCallbackPath(provider: WorkplaceProvider): string {
 
 /**
  * Zoho's data centres. A company's accounts live in one, and every call for them goes to its servers:
- * the accounts server for sign-in and tokens, Zoho Mail's for sending. A token request carries the
+ * the accounts server for sign-in and tokens, Zoho Mail's for sending, Zoho Calendar's for meetings. A token request carries the
  * company's client secret, so it only ever goes to an accounts server named here — never to one a
  * redirect merely mentions (src/lib/mail/zoho.ts).
  */
 export const ZOHO_REGIONS = {
-  in: { label: "India — zoho.in", accounts: "https://accounts.zoho.in", mail: "https://mail.zoho.in", console: "https://api-console.zoho.in" },
-  com: { label: "United States — zoho.com", accounts: "https://accounts.zoho.com", mail: "https://mail.zoho.com", console: "https://api-console.zoho.com" },
-  eu: { label: "Europe — zoho.eu", accounts: "https://accounts.zoho.eu", mail: "https://mail.zoho.eu", console: "https://api-console.zoho.eu" },
-  uk: { label: "United Kingdom — zoho.uk", accounts: "https://accounts.zoho.uk", mail: "https://mail.zoho.uk", console: "https://api-console.zoho.uk" },
-  "com.au": { label: "Australia — zoho.com.au", accounts: "https://accounts.zoho.com.au", mail: "https://mail.zoho.com.au", console: "https://api-console.zoho.com.au" },
-  jp: { label: "Japan — zoho.jp", accounts: "https://accounts.zoho.jp", mail: "https://mail.zoho.jp", console: "https://api-console.zoho.jp" },
-  ca: { label: "Canada — zohocloud.ca", accounts: "https://accounts.zohocloud.ca", mail: "https://mail.zohocloud.ca", console: "https://api-console.zohocloud.ca" },
-  sa: { label: "Saudi Arabia — zoho.sa", accounts: "https://accounts.zoho.sa", mail: "https://mail.zoho.sa", console: "https://api-console.zoho.sa" },
+  in: { label: "India — zoho.in", accounts: "https://accounts.zoho.in", mail: "https://mail.zoho.in", calendar: "https://calendar.zoho.in", console: "https://api-console.zoho.in" },
+  com: { label: "United States — zoho.com", accounts: "https://accounts.zoho.com", mail: "https://mail.zoho.com", calendar: "https://calendar.zoho.com", console: "https://api-console.zoho.com" },
+  eu: { label: "Europe — zoho.eu", accounts: "https://accounts.zoho.eu", mail: "https://mail.zoho.eu", calendar: "https://calendar.zoho.eu", console: "https://api-console.zoho.eu" },
+  uk: { label: "United Kingdom — zoho.uk", accounts: "https://accounts.zoho.uk", mail: "https://mail.zoho.uk", calendar: "https://calendar.zoho.uk", console: "https://api-console.zoho.uk" },
+  "com.au": { label: "Australia — zoho.com.au", accounts: "https://accounts.zoho.com.au", mail: "https://mail.zoho.com.au", calendar: "https://calendar.zoho.com.au", console: "https://api-console.zoho.com.au" },
+  jp: { label: "Japan — zoho.jp", accounts: "https://accounts.zoho.jp", mail: "https://mail.zoho.jp", calendar: "https://calendar.zoho.jp", console: "https://api-console.zoho.jp" },
+  ca: { label: "Canada — zohocloud.ca", accounts: "https://accounts.zohocloud.ca", mail: "https://mail.zohocloud.ca", calendar: "https://calendar.zohocloud.ca", console: "https://api-console.zohocloud.ca" },
+  sa: { label: "Saudi Arabia — zoho.sa", accounts: "https://accounts.zoho.sa", mail: "https://mail.zoho.sa", calendar: "https://calendar.zoho.sa", console: "https://api-console.zoho.sa" },
 } as const;
 export type ZohoRegion = keyof typeof ZOHO_REGIONS;
 export const ZOHO_REGION_KEYS = Object.keys(ZOHO_REGIONS) as ZohoRegion[];

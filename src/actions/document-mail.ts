@@ -22,6 +22,7 @@ import { mintRenderGrant } from "@/lib/documents/render-grant";
 import { RENDER_PARAM } from "@/lib/documents/render-token";
 import { PDF_MAX_BYTES, PdfError, renderPdf } from "@/lib/documents/pdf";
 import { mailboxState, sendAsUser } from "@/lib/mail/mailbox";
+import { removeConnection } from "@/lib/mail/store";
 import { mailProviders } from "@/lib/workplace/settings";
 import { MAIL_NAMES, SIGN_IN_NAMES, sayEither } from "@/lib/workplace/providers";
 import {
@@ -354,9 +355,8 @@ export async function disconnectMailbox(): Promise<ActionResult<null>> {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const blockedWhileViewing = await refuseWhileViewingAs();
   if (blockedWhileViewing) return { ok: false, error: blockedWhileViewing };
-  const had = await db.mailConnection.findUnique({ where: { userId: user.id }, select: { provider: true, mailbox: true } });
-  const removed = await db.mailConnection.deleteMany({ where: { userId: user.id } });
-  if (removed.count > 0 && had) {
+  const had = await removeConnection(user.id);
+  if (had) {
     await recordAudit({ userId: user.id, action: "DELETE", entityType: "MailConnection", entityId: user.id, entityLabel: `${MAIL_NAMES[had.provider]} disconnected: ${had.mailbox}` });
   }
   revalidatePath("/profile");

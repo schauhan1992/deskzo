@@ -170,6 +170,7 @@ const EXTRA_ROUTES: [string, string][] = [
 const COMPONENT_FOLDERS: Record<string, string[]> = {
   accounting: ["accounting"],
   assets: ["it_assets"],
+  calendar: ["calendar"],
   close: ["revenue_close"],
   credit: ["receivables"],
   documents: ["sales_documents", "purchase_documents"],

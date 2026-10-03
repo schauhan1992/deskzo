@@ -25,6 +25,27 @@ export type { OutgoingMail, SendOutcome } from "@/lib/mail/types";
  */
 
 export const MAIL_SCOPES = "offline_access User.Read Mail.Send";
+/** Added when the workspace has Calendar on: the person's own calendar, read and written (src/lib/calendar). */
+export const CALENDAR_SCOPE = "Calendars.ReadWrite";
+
+/** What a connection asks for: mail, and the calendar too when the workspace keeps calendars. */
+export function microsoftScopes(calendar: boolean): string {
+  return calendar ? `${MAIL_SCOPES} ${CALENDAR_SCOPE}` : MAIL_SCOPES;
+}
+
+/**
+ * What a refresh asks for: what was granted, and no more. Asking for a permission the person never
+ * approved — the calendar, on a connection made before calendars — is refused as consent_required,
+ * which would mark a working mailbox broken.
+ */
+export function refreshScopes(granted: string | null | undefined): string {
+  const scopes = new Set(["offline_access", ...(granted ?? "").split(/\s+/).filter(Boolean)]);
+  return scopes.size > 1 ? [...scopes].join(" ") : MAIL_SCOPES;
+}
+
+export function grantsCalendar(scope: string): boolean {
+  return /(^|[\s/])Calendars\.ReadWrite(\s|$)/i.test(scope);
+}
 export const CALLBACK_PATH = "/api/mail/microsoft/callback";
 export const CONNECT_PATH = "/api/mail/microsoft/connect";
 
@@ -33,6 +54,11 @@ let endpoints = { login: "https://login.microsoftonline.com", graph: "https://gr
 /** For check scripts only: point every call at a local stand-in. */
 export function setTestMicrosoftEndpoints(next: { login: string; graph: string } | null) {
   endpoints = next ?? { login: "https://login.microsoftonline.com", graph: "https://graph.microsoft.com" };
+}
+
+/** Graph's address, for the calendar's calls (src/lib/calendar/microsoft.ts) — the stand-in's in a check. */
+export function graphBase(): string {
+  return endpoints.graph;
 }
 
 export type MicrosoftApp = { tenantId: string; clientId: string; clientSecret: string };
@@ -54,13 +80,13 @@ export function pkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
 }
 
-export function authorizeUrl(app: MicrosoftApp, p: { redirectUri: string; state: string; challenge: string; loginHint?: string | null }): string {
+export function authorizeUrl(app: MicrosoftApp, p: { redirectUri: string; state: string; challenge: string; loginHint?: string | null; scope?: string }): string {
   const url = new URL(`${endpoints.login}/${encodeURIComponent(app.tenantId)}/oauth2/v2.0/authorize`);
   url.searchParams.set("client_id", app.clientId);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("redirect_uri", p.redirectUri);
   url.searchParams.set("response_mode", "query");
-  url.searchParams.set("scope", MAIL_SCOPES);
+  url.searchParams.set("scope", p.scope ?? MAIL_SCOPES);
   url.searchParams.set("state", p.state);
   url.searchParams.set("code_challenge", p.challenge);
   url.searchParams.set("code_challenge_method", "S256");
@@ -71,13 +97,13 @@ export function authorizeUrl(app: MicrosoftApp, p: { redirectUri: string; state:
   return url.toString();
 }
 
-async function tokenRequest(app: MicrosoftApp, form: Record<string, string>): Promise<TokenOutcome> {
+async function tokenRequest(app: MicrosoftApp, scope: string, form: Record<string, string>): Promise<TokenOutcome> {
   let res: Response;
   try {
     res = await fetch(`${endpoints.login}/${encodeURIComponent(app.tenantId)}/oauth2/v2.0/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: app.clientId, client_secret: app.clientSecret, scope: MAIL_SCOPES, ...form }).toString(),
+      body: new URLSearchParams({ client_id: app.clientId, client_secret: app.clientSecret, scope, ...form }).toString(),
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
@@ -98,17 +124,18 @@ async function tokenRequest(app: MicrosoftApp, form: Record<string, string>): Pr
       accessToken: body.access_token,
       refreshToken: typeof body.refresh_token === "string" ? body.refresh_token : null,
       expiresAt: new Date(Date.now() + Math.max(60, Number(body.expires_in) || 3600) * 1000),
-      scope: typeof body.scope === "string" ? body.scope : MAIL_SCOPES,
+      scope: typeof body.scope === "string" ? body.scope : scope,
     },
   };
 }
 
-export function exchangeCode(app: MicrosoftApp, p: { code: string; verifier: string; redirectUri: string }) {
-  return tokenRequest(app, { grant_type: "authorization_code", code: p.code, code_verifier: p.verifier, redirect_uri: p.redirectUri });
+export function exchangeCode(app: MicrosoftApp, p: { code: string; verifier: string; redirectUri: string; scope?: string }) {
+  return tokenRequest(app, p.scope ?? MAIL_SCOPES, { grant_type: "authorization_code", code: p.code, code_verifier: p.verifier, redirect_uri: p.redirectUri });
 }
 
-export function microsoftRefresh(app: MicrosoftApp, refreshToken: string) {
-  return tokenRequest(app, { grant_type: "refresh_token", refresh_token: refreshToken });
+/** `granted`: the connection's stored scopes — see refreshScopes. */
+export function microsoftRefresh(app: MicrosoftApp, refreshToken: string, granted?: string | null) {
+  return tokenRequest(app, refreshScopes(granted), { grant_type: "refresh_token", refresh_token: refreshToken });
 }
 
 export type GraphMe = { mail: string | null; userPrincipalName: string | null; displayName: string | null };

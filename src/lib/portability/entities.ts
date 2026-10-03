@@ -628,6 +628,12 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   CopilotProposal: { disposition: "excluded", reason: "Tasks and notes the copilot drafted; the ones confirmed exist as ordinary tasks and notes, which travel as themselves." },
   CompanyLock: { disposition: "excluded", reason: "Whether this installation's CRM is locked for everybody but the super admin, and the notice shown. A switch, not a record." },
   MailConnection: { disposition: "excluded", reason: "A person's connection to their own mailbox — Outlook, Gmail or Zoho Mail: a provider token encrypted under this installation's secret. Useless anywhere else — each person connects again." },
+  CalendarAccount: { disposition: "excluded", reason: "Where a person's calendar sync got to — Outlook's delta link, Google's sync token, the next run due. Meaningless outside this installation; it starts again when they connect." },
+  CalendarEvent: {
+    disposition: "excluded",
+    reason:
+      "A copy of each person's own Outlook, Google or Zoho calendar, kept in step with it; the calendar itself stays the record, and the meetings scheduled from leads, customers and tickets are in it. A meeting held is on its lead's timeline as an activity, which is exported.",
+  },
   DocumentRenderGrant: { disposition: "excluded", reason: "Two-minute passes for the server to print a document it is emailing. Spent or expired within minutes; nothing to carry." },
   DocumentEmailTemplate: { disposition: "specification", reason: "The wording sent with an emailed document, per type. Configuration rather than records." },
   HelpDesk: { disposition: "specification", reason: "The helpline number, hours and support address shown on the dashboard. Configuration rather than records — set again in a new system." },

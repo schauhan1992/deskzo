@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CallButton } from "@/components/calls/call-button";
+import { ScheduleMeetingButton } from "@/components/calendar/schedule-meeting-button";
+import { RecordMeetings } from "@/components/calendar/record-meetings";
 import { getTicket, listSupportAgents } from "@/actions/ticket";
 import { listTasks } from "@/actions/task";
 import { listAssignableUsers } from "@/actions/company";
@@ -32,6 +34,7 @@ import { CategoryChip } from "@/components/customers/category-chip";
 export async function TicketDetail({ id }: { id: string }) {
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
+  const calendarEnabled = await isModuleEnabled("calendar");
   const [ticket, users, canDelete, tasksEnabled, canDeleteAnyTask, clock] = await Promise.all([
     getTicket(id),
     listSupportAgents(),
@@ -79,6 +82,7 @@ export async function TicketDetail({ id }: { id: string }) {
             ticketId={ticket.id}
             contact={ticket.contact ? { id: ticket.contact.id, name: ticket.contact.name, phone: ticket.contact.phone } : undefined}
           />
+          {calendarEnabled && <ScheduleMeetingButton record={{ kind: "ticket", id: ticket.id }} />}
           {canDelete && <DeleteTicketButton ticketId={ticket.id} ticketSeq={ticket.ticketSeq} redirectTo="/tickets" />}
         </div>
       </div>
@@ -133,6 +137,8 @@ export async function TicketDetail({ id }: { id: string }) {
         </div>
 
         <div className="space-y-6">
+          {calendarEnabled && <RecordMeetings record={{ kind: "ticket", id: ticket.id }} viewerId={userId} />}
+
           <Card>
             <CardHeader className="text-sm font-medium text-text">Details</CardHeader>
             <CardContent className="space-y-2 text-sm">

@@ -456,6 +456,9 @@ async function run(scratchUrl: string, base: string) {
     await runAsTenant(tenant, async () => {
       // ── Fixture ──────────────────────────────────────────────────────────────────────────────
       section("Fixture");
+      // Mail on its own: with Calendar on, a connection asks for the calendar too, and the stand-in here
+      // grants mail only. Calendars have their own suite (check:calendar).
+      await db.systemModule.upsert({ where: { key: "calendar" }, create: { key: "calendar", enabled: false }, update: { enabled: false } });
       const passwordHash = await bcrypt.hash(PASSWORD, 4);
       const person = (key: string, extra: { isSuperAdmin?: boolean; role?: string; active?: boolean } = {}) =>
         db.user.create({

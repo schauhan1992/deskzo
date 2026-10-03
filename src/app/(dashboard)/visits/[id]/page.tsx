@@ -7,6 +7,8 @@ import { getVisit } from "@/actions/visit";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { VisitActions } from "@/components/visits/visit-actions";
+import { RecordMeetings } from "@/components/calendar/record-meetings";
+import { isModuleEnabled } from "@/actions/module";
 import { EmailAddress } from "@/components/contacts/email-address";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -48,6 +50,9 @@ export default async function VisitDetailPage({ params, searchParams }: { params
 
   const userId = session!.user.id;
   const canEdit = visit.userId === userId || (await getDownlineUserIds(userId)).includes(visit.userId);
+  // The visit goes into the calendar of whoever is making it, and only they put it there.
+  const calendarEnabled = await isModuleEnabled("calendar");
+  const canCalendar = calendarEnabled && visit.userId === userId && visit.status === "PLANNED";
 
   const claimed = visit.expenses.reduce((sum, e) => sum + e.amount, 0);
   const duration = visitDuration(visit.checkInAt, visit.checkOutAt);
@@ -147,6 +152,14 @@ export default async function VisitDetailPage({ params, searchParams }: { params
         </div>
 
         <div className="space-y-5">
+          {calendarEnabled && (
+            <RecordMeetings
+              record={{ kind: "visit", id: visit.id }}
+              viewerId={userId}
+              canSchedule={canCalendar}
+              emptyText={canCalendar ? "Not in your calendar yet." : "Not in a calendar."}
+            />
+          )}
           <Card>
             <CardHeader className="text-sm font-medium text-text">Where</CardHeader>
             <CardContent className="space-y-2 text-sm">

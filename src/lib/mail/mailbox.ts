@@ -14,7 +14,8 @@ import type { OutgoingMail, ProviderSend, SendOutcome, TokenOutcome } from "@/li
  *
  * Everything that sends as a person sends through `sendAsUser`, which takes care of the provider, a
  * fresh token (stored again when the provider rotates it), one retry when a token is refused early,
- * and marking the connection broken when the provider has withdrawn it.
+ * and marking the connection broken when the provider has withdrawn it. The person's calendar goes
+ * through the same connection (src/lib/calendar/access.ts), with `workplaceAccess` for its token.
  */
 
 /** A mailbox as the email dialog and My profile see it. */
@@ -37,16 +38,16 @@ export async function mailboxState(userId: string): Promise<MailboxState> {
   return providers.length > 0 ? { state: "not-connected", providers } : { state: "app-missing" };
 }
 
-type Connection = { provider: WorkplaceProvider; mailbox: string; displayName: string | null; zoho: { region: ZohoRegion; accountId: string } | null };
-type Access = { ok: true; token: string; connection: Connection } | { ok: false; error: string; reconnect: boolean };
+export type Connection = { provider: WorkplaceProvider; mailbox: string; displayName: string | null; zoho: { region: ZohoRegion; accountId: string } | null };
+export type Access = { ok: true; token: string; connection: Connection } | { ok: false; error: string; reconnect: boolean };
 
 const withdrawn = (p: WorkplaceProvider) => `${SIGN_IN_NAMES[p]} stopped accepting your ${MAIL_NAMES[p]} connection. Connect it again from My profile.`;
 
-async function refreshFor(c: Connection, refreshToken: string): Promise<TokenOutcome | null> {
+async function refreshFor(c: Connection, refreshToken: string, granted: string): Promise<TokenOutcome | null> {
   switch (c.provider) {
     case "MICROSOFT": {
       const app = await microsoftApp();
-      return app ? microsoftRefresh(app, refreshToken) : null;
+      return app ? microsoftRefresh(app, refreshToken, granted) : null;
     }
     case "GOOGLE": {
       const app = await googleApp();
@@ -59,11 +60,15 @@ async function refreshFor(c: Connection, refreshToken: string): Promise<TokenOut
   }
 }
 
-/** A usable access token, refreshing — and storing the new refresh token a provider rotates in — when due. */
-async function accessTokenFor(userId: string, force = false): Promise<Access> {
+/**
+ * A usable access token for the person's connection, refreshing — and storing the new refresh token a
+ * provider rotates in — when due. `force`: refresh even though the stored one has time left, after a
+ * provider refused it early.
+ */
+export async function workplaceAccess(userId: string, force = false): Promise<Access> {
   const c = await db.mailConnection.findUnique({
     where: { userId },
-    select: { provider: true, mailbox: true, displayName: true, refreshTokenCipher: true, accessTokenCipher: true, accessTokenExpiresAt: true, brokenAt: true },
+    select: { provider: true, mailbox: true, displayName: true, refreshTokenCipher: true, accessTokenCipher: true, accessTokenExpiresAt: true, brokenAt: true, scopes: true },
   });
   if (!c) return { ok: false, error: "Connect your mailbox first — My profile → Email.", reconnect: true };
   if (!(await mailProviders()).includes(c.provider)) {
@@ -100,7 +105,7 @@ async function accessTokenFor(userId: string, force = false): Promise<Access> {
     await markMailboxBroken(userId, "The stored token could not be read.");
     return { ok: false, error: `Your ${MAIL_NAMES[c.provider]} connection can't be read any more. Connect it again from My profile.`, reconnect: true };
   }
-  const refreshed = await refreshFor(connection, refreshToken);
+  const refreshed = await refreshFor(connection, refreshToken, c.scopes);
   if (!refreshed) {
     return { ok: false, error: `The ${PROVIDER_NAMES[c.provider]} app isn't set up any more (Settings → Security). Ask an admin.`, reconnect: false };
   }
@@ -129,7 +134,7 @@ export async function sendAsUser(userId: string, mail: OutgoingMail): Promise<Se
   let raw: Buffer | null = null;
   let provider: WorkplaceProvider = "MICROSOFT";
   for (const force of [false, true]) {
-    const access = await accessTokenFor(userId, force);
+    const access = await workplaceAccess(userId, force);
     if (!access.ok) return access;
     const { token, connection: c } = access;
     provider = c.provider;

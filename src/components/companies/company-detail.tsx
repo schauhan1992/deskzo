@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ScheduleMeetingButton } from "@/components/calendar/schedule-meeting-button";
+import { RecordMeetings } from "@/components/calendar/record-meetings";
 import {
   getCompany,
   listAssignableUsers,
@@ -132,6 +134,7 @@ export async function CompanyDetail({
 }) {
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
+  const calendarEnabled = await isModuleEnabled("calendar");
   const [
     itemsEnabled,
     renewalsEnabled,
@@ -329,6 +332,7 @@ export async function CompanyDetail({
     ...(showStatement ? [{ key: "statement", label: "Statement" }] : []),
     ...(showCommissionTab ? [{ key: "commission", label: "Commission" }] : []),
     ...(visitsEnabled ? [{ key: "visits", label: "Visits" }] : []),
+    ...(calendarEnabled && !isVendor ? [{ key: "meetings", label: "Meetings" }] : []),
     ...(callsEnabled ? [{ key: "calls", label: "Calls" }] : []),
     ...(!isVendor && canSeeLeads ? [{ key: "leads", label: "Leads" }] : []),
     ...(!isVendor && projectsEnabled ? [{ key: "projects", label: "Projects" }] : []),
@@ -455,6 +459,8 @@ export async function CompanyDetail({
           {callsEnabled && !managedByReseller && (
             <CallButton companyId={company.id} companyName={company.name} />
           )}
+          {/* A reseller's customer can still be met about — with colleagues only (src/lib/calendar/records.ts). */}
+          {calendarEnabled && !isVendor && <ScheduleMeetingButton record={{ kind: "company", id: company.id }} />}
           {isVendor && company.vendorStatus && (
             <VendorStatusControl companyId={company.id} status={company.vendorStatus} />
           )}
@@ -1019,6 +1025,10 @@ export async function CompanyDetail({
             </Card>
           )}
 
+          {activeTab === "meetings" && calendarEnabled && !isVendor && (
+            <RecordMeetings record={{ kind: "company", id: company.id }} viewerId={userId} emptyText="No meetings scheduled with this customer yet — from here, a lead, a contact or a ticket." />
+          )}
+
           {activeTab === "statement" && statement && <CompanyStatement statement={statement} />}
 
           {activeTab === "credit" && creditProfile && <CompanyCredit companyId={company.id} profile={creditProfile} />}
@@ -1176,7 +1186,7 @@ export async function CompanyDetail({
             <Card>
               <CardHeader className="text-sm font-medium text-text">Contacts</CardHeader>
               <CardContent>
-                <ContactsList companyId={company.id} companyName={company.name} contacts={company.contacts} customFields={contactFields} />
+                <ContactsList companyId={company.id} companyName={company.name} contacts={company.contacts} customFields={contactFields} canMeet={calendarEnabled} />
               </CardContent>
             </Card>
           )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { ScheduleMeetingButton } from "@/components/calendar/schedule-meeting-button";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MailCheck, MessageCircle } from "lucide-react";
@@ -33,8 +34,11 @@ type ContactRow = VerifiableContact & {
 export function ContactsTable({
   contacts,
   customColumns = { columns: [], texts: {} },
+  canMeet = false,
 }: {
   contacts: ContactRow[];
+  /** Calendar is on: a meeting can be scheduled with somebody who has an address. */
+  canMeet?: boolean;
   /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`, `listedOnly`): no column picker here. */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
@@ -192,6 +196,7 @@ export function ContactsTable({
                           variant="ghost"
                         />
                       )}
+                      {canMeet && c.email && <ScheduleMeetingButton record={{ kind: "contact", id: c.id }} size="icon" variant="ghost" label={`Schedule a meeting with ${c.name}`} />}
                       {c.phone && (
                         <OutboundLink
                           href={whatsappHref(c.phone)}

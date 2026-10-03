@@ -93,7 +93,7 @@ export default async function ContactsLibraryPage({
       </div>
 
       <div className="mt-6">
-        <ContactsTable contacts={result.rows} customColumns={customColumns} />
+        <ContactsTable contacts={result.rows} customColumns={customColumns} canMeet={await isModuleEnabled("calendar")} />
       </div>
 
       <Pagination

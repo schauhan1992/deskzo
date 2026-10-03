@@ -7,6 +7,7 @@ import { announcePrizes } from "@/lib/wins/prize-announce";
 import { runRevenueAndClose } from "@/lib/close/nightly";
 import { runOrderReleases } from "@/lib/orders/handoff";
 import { runCollectionsDaily } from "@/lib/collections/daily";
+import { calendarChores } from "@/lib/calendar/chores";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -88,6 +89,15 @@ export async function runHeartbeat() {
     console.error("collections daily failed", err);
     return { ran: false, broken: 0 };
   });
+  /**
+   * Calendars: whoever is due is kept in step with Outlook, Google or Zoho — as many as a minute allows,
+   * the longest-waiting first, the rest on the next beat — and meetings held go on their leads' timelines.
+   * Only where Calendar is on; it asks for itself.
+   */
+  const calendars = await calendarChores({ budgetMs: 60_000 }).catch((err) => {
+    console.error("calendar sync failed", err);
+    return null;
+  });
   return {
     ...result,
     leadScoresRefreshed,
@@ -98,5 +108,7 @@ export async function runHeartbeat() {
     revenueAndCloseRan: revenueAndClose.ran,
     ordersReleased: orderReleases.released,
     promisesBroken: collections.broken,
+    calendarsSynced: calendars?.synced ?? 0,
+    meetingsHeld: calendars?.held ?? 0,
   };
 }

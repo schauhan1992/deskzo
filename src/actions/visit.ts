@@ -14,6 +14,7 @@ import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatVisitId, visitPurposeLabels } from "@/lib/visits";
 import { createVisitSchema, updateVisitSchema, completeVisitSchema, setVisitStatusSchema } from "@/lib/validation/visit";
+import { followVisitCancel, followVisitMove } from "@/lib/calendar/meetings";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -267,6 +268,10 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
     },
   });
 
+  // Its event in the calendar of whoever is making it moves too (src/lib/calendar/meetings.ts).
+  const unfollowed = await followVisitMove(existing.userId, id, scheduledFor).catch((err: unknown) => String(err));
+  if (unfollowed) console.error("visit moved without its calendar event", id, unfollowed);
+
   revalidatePath("/visits");
   revalidatePath(`/visits/${id}`);
   revalidatePath(`/companies/${existing.companyId}`);
@@ -348,6 +353,11 @@ export async function setVisitStatus(input: unknown): Promise<ActionResult<{ id:
     where: { id },
     data: { status, ...(note ? { outcome: note } : {}) },
   });
+  if (status === "CANCELLED") {
+    // Everybody invited to it is told it's off.
+    const unfollowed = await followVisitCancel(visit.userId, id).catch((err: unknown) => String(err));
+    if (unfollowed) console.error("visit cancelled without its calendar event", id, unfollowed);
+  }
 
   revalidatePath("/visits");
   revalidatePath(`/visits/${id}`);
@@ -370,6 +380,8 @@ export async function deleteVisit(id: string): Promise<ActionResult<{ id: string
     return { ok: false, error: "Expenses are claimed against this visit. Remove them first." };
   }
 
+  // A planned visit taken away takes its calendar event with it.
+  if (visit.status === "PLANNED") await followVisitCancel(visit.userId, id).catch(() => null);
   await db.visit.delete({ where: { id } });
   revalidatePath("/visits");
   revalidatePath(`/companies/${visit.companyId}`);

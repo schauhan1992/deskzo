@@ -431,6 +431,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navItems: [{ href: "/tasks", label: "Tasks", icon: CheckSquare }],
   },
   {
+    key: "calendar",
+    inEveryPlan: true,
+    label: "Calendar",
+    description:
+      "Each person's own Outlook, Google Calendar or Zoho Calendar, kept in step — meetings scheduled from a lead, a customer, a ticket or a planned visit with a Teams, Meet or Zoho Meeting link, and colleagues' busy times when picking a slot.",
+    navGroup: "My work",
+    navItems: [{ href: "/calendar", label: "Calendar", icon: CalendarDays }],
+  },
+  {
     key: "notes",
     inEveryPlan: true,
     label: "Sticky Notes",

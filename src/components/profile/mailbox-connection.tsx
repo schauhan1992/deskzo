@@ -2,20 +2,34 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Plug, Unplug } from "lucide-react";
-import { disconnectMailbox } from "@/actions/document-mail";
+import Link from "next/link";
+import { CalendarCheck2, CheckCircle2, Plug, Unplug } from "lucide-react";
+import { disconnectMyConnection } from "@/actions/workplace-connection";
+import type { CalendarSummary } from "@/actions/calendar";
 import { Button } from "@/components/ui/button";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { useClock } from "@/components/time/clock-provider";
 import { MAIL_NAMES, PROVIDER_NAMES, SIGN_IN_NAMES, mailConnectPath, providerOfMailSlug, sayEither, type WorkplaceProvider } from "@/lib/workplace/providers";
 
 /** What a round trip to the provider came back as — `?mailbox=…&via=…` on the way back here. */
-function outcomeNotice(outcome: string, provider: WorkplaceProvider): { tone: "success" | "error" | "info"; text: string } | null {
+function outcomeNotice(outcome: string, provider: WorkplaceProvider, withCalendar: boolean): { tone: "success" | "error" | "info"; text: string } | null {
   const mail = MAIL_NAMES[provider];
   const who = SIGN_IN_NAMES[provider];
   switch (outcome) {
     case "connected":
-      return { tone: "success", text: `${mail} connected. Documents you email from here now go out from your own mailbox.` };
+      return withCalendar
+        ? { tone: "success", text: `${mail} and your calendar connected. Meetings you schedule here go into your own calendar, and documents you email go out from your own mailbox.` }
+        : { tone: "success", text: `${mail} connected. Documents you email from here now go out from your own mailbox.` };
+    case "no-calendar":
+      return {
+        tone: "info",
+        text:
+          provider === "GOOGLE"
+            ? `${mail} connected, but not your calendar — Google wasn't allowed it. Connect again and leave “View and edit events on all your calendars” ticked.`
+            : provider === "ZOHO"
+              ? `${mail} connected, but your Zoho Calendar couldn't be reached. Connect again and allow the calendar, or ask IT to add the ZohoCalendar scopes to your company's Zoho app.`
+              : `${mail} connected, but not your calendar — ${who} didn't allow it. Ask IT to add Calendars.ReadWrite (delegated) to the app, then connect again.`,
+      };
     case "declined":
       return { tone: "info", text: `You didn't approve it at ${who}, so nothing was connected.` };
     case "expired":
@@ -52,36 +66,43 @@ type Connection = {
 const linkClass = "inline-flex items-center gap-1.5 rounded-base bg-brand px-3 py-1.5 text-sm font-medium text-brand-contrast shadow-sm hover:brightness-110";
 
 /**
- * My profile → Your mailbox. Connecting lets the invoices, proposals and credit notes this person
- * emails go out from their own address — Outlook, Gmail or Zoho Mail, whichever the company offers
- * (src/lib/mail/mailbox.ts).
+ * My profile → Your mailbox (and calendar). Connecting lets the invoices, proposals and credit notes this
+ * person emails go out from their own address — Outlook, Gmail or Zoho Mail, whichever the company offers
+ * (src/lib/mail/mailbox.ts) — and, with Calendar on, keeps their own calendar in step (src/lib/calendar).
  */
 export function MailboxConnection({
   providers,
   connection,
   outcome,
   via,
+  mailUse = true,
+  calendar = null,
 }: {
   /** What the company offers for mail, in order. */
   providers: WorkplaceProvider[];
   connection: Connection | null;
   outcome: string | null;
   via: string | null;
+  /** The workspace emails documents. */
+  mailUse?: boolean;
+  /** The person's calendar, with Calendar on; null without. */
+  calendar?: CalendarSummary | null;
 }) {
   const router = useRouter();
   const clock = useClock();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const said = outcome ? outcomeNotice(outcome, providerOfMailSlug(via) ?? "MICROSOFT") : null;
+  const said = outcome ? outcomeNotice(outcome, providerOfMailSlug(via) ?? "MICROSOFT", !!calendar) : null;
   // A mailbox with a provider the company no longer offers can't be sent from: connect one it does.
   const live = connection && providers.includes(connection.provider) ? connection : null;
 
   function disconnect() {
     if (!connection) return;
-    if (!window.confirm(`Disconnect your ${MAIL_NAMES[connection.provider]}? Documents can't be emailed from here until you connect a mailbox again.`)) return;
+    const losing = [mailUse ? "documents can't be emailed from here" : null, calendar ? "your calendar stops syncing" : null].filter(Boolean).join(", and ");
+    if (!window.confirm(`Disconnect your ${MAIL_NAMES[connection.provider]}?${losing ? ` Until you connect again, ${losing}.` : ""}`)) return;
     setError(null);
     startTransition(async () => {
-      const r = await disconnectMailbox();
+      const r = await disconnectMyConnection();
       if (!r.ok) setError(r.error);
       else router.replace("/profile");
     });
@@ -90,8 +111,10 @@ export function MailboxConnection({
   return (
     <div className="space-y-3 text-sm">
       <p className="text-muted">
-        Connect your mailbox to email invoices, proposals and credit notes to customers from your own address. Each one lands in your Sent folder, and replies
-        come back to you.
+        {mailUse
+          ? "Connect your mailbox to email invoices, proposals and credit notes to customers from your own address. Each one lands in your Sent folder, and replies come back to you."
+          : "Connect your account to keep your calendar in step here."}
+        {calendar && mailUse && " The same connection keeps your calendar in step: meetings you schedule go into it, with the invitations sent from it."}
       </p>
 
       {said && <ActionNotice tone={said.tone}>{said.text}</ActionNotice>}
@@ -113,6 +136,7 @@ export function MailboxConnection({
             <Unplug className="mr-1 h-3.5 w-3.5" />
             Disconnect
           </Button>
+          {calendar && <CalendarLine calendar={calendar} provider={live.provider} />}
         </div>
       ) : providers.length === 0 ? (
         <p className="text-muted">Your company hasn&apos;t set up Microsoft 365, Google Workspace or Zoho for mail yet — an admin does it under Settings → Security.</p>
@@ -141,6 +165,36 @@ export function MailboxConnection({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const CALENDAR_OF: Record<WorkplaceProvider, string> = { MICROSOFT: "Outlook calendar", GOOGLE: "Google Calendar", ZOHO: "Zoho Calendar" };
+
+/** Under a connected mailbox: whether the calendar came with it, and what to do when it didn't. */
+function CalendarLine({ calendar, provider }: { calendar: CalendarSummary; provider: WorkplaceProvider }) {
+  const clock = useClock();
+  if (calendar.state === "ready") {
+    return (
+      <p className="flex w-full flex-wrap items-center gap-1.5 border-t border-line pt-2 text-xs text-muted">
+        <CalendarCheck2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+        {CALENDAR_OF[provider]} {calendar.lastSyncedAt ? `synced ${clock.dateTime(calendar.lastSyncedAt)}` : "connected — the first sync is on its way"}
+        {" · "}
+        <Link href="/calendar" className="text-brand hover:underline">
+          Open Calendar
+        </Link>
+      </p>
+    );
+  }
+  if (calendar.state !== "no-calendar" && calendar.state !== "broken") return null;
+  return (
+    <div className="w-full border-t border-line pt-2 text-xs">
+      <p className="text-warning">
+        {calendar.state === "broken" ? `Your ${CALENDAR_OF[provider]} stopped letting Deskzo in${calendar.error ? ` (${calendar.error})` : ""}.` : `Your ${CALENDAR_OF[provider]} isn't connected — it wasn't allowed when you connected.`}
+      </p>
+      <a href={mailConnectPath(provider, "/profile")} className="mt-1 inline-block font-medium text-brand hover:underline">
+        Connect again and allow the calendar
+      </a>
     </div>
   );
 }

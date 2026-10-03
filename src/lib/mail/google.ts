@@ -17,26 +17,43 @@ import type { OutgoingMail, ProviderSend, TokenOutcome } from "@/lib/mail/types"
 
 export const GOOGLE_MAIL_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.send";
 const GMAIL_SEND = "https://www.googleapis.com/auth/gmail.send";
+/** Added when the workspace has Calendar on: events in the person's own calendars (src/lib/calendar). */
+export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+export function googleScopes(calendar: boolean): string {
+  return calendar ? `${GOOGLE_MAIL_SCOPES} ${GOOGLE_CALENDAR_SCOPE}` : GOOGLE_MAIL_SCOPES;
+}
+
+/** Google lets a person untick the calendar on its consent screen and still connect. */
+export function grantsGoogleCalendar(scope: string): boolean {
+  return scope.split(/\s+/).includes(GOOGLE_CALENDAR_SCOPE);
+}
 
 const LIVE = {
   accounts: "https://accounts.google.com",
   oauth2: "https://oauth2.googleapis.com",
   openid: "https://openidconnect.googleapis.com",
   gmail: "https://gmail.googleapis.com",
+  calendar: "https://www.googleapis.com",
 };
 let endpoints = { ...LIVE };
 
-/** For check scripts only: point every call at a local stand-in. */
-export function setTestGoogleEndpoints(next: typeof LIVE | null) {
-  endpoints = next ?? { ...LIVE };
+/** For check scripts only: point every call at a local stand-in. One not named stays Google's own. */
+export function setTestGoogleEndpoints(next: Partial<typeof LIVE> | null) {
+  endpoints = next ? { ...LIVE, ...next } : { ...LIVE };
 }
 
-export function googleAuthorizeUrl(app: GoogleApp, p: { redirectUri: string; state: string; challenge: string; loginHint?: string | null }): string {
+/** The Calendar API's address, for src/lib/calendar/google.ts — the stand-in's in a check. */
+export function googleCalendarBase(): string {
+  return endpoints.calendar;
+}
+
+export function googleAuthorizeUrl(app: GoogleApp, p: { redirectUri: string; state: string; challenge: string; loginHint?: string | null; scope?: string }): string {
   const url = new URL(`${endpoints.accounts}/o/oauth2/v2/auth`);
   url.searchParams.set("client_id", app.clientId);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("redirect_uri", p.redirectUri);
-  url.searchParams.set("scope", GOOGLE_MAIL_SCOPES);
+  url.searchParams.set("scope", p.scope ?? GOOGLE_MAIL_SCOPES);
   url.searchParams.set("state", p.state);
   url.searchParams.set("code_challenge", p.challenge);
   url.searchParams.set("code_challenge_method", "S256");

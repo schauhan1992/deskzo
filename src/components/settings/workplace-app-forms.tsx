@@ -68,7 +68,8 @@ export function GoogleAppForm({ settings, origins }: { settings: GoogleSettings;
         <p>Your company&apos;s own Google app, made once in Google Cloud:</p>
         <ol className="list-decimal space-y-1 pl-5">
           <li>
-            In the Google Cloud console, pick or create a project and turn on the <strong className="font-medium text-text">Gmail API</strong>.
+            In the Google Cloud console, pick or create a project and turn on the <strong className="font-medium text-text">Gmail API</strong> — and, with
+            Calendar on, the <strong className="font-medium text-text">Google Calendar API</strong>.
           </li>
           <li>
             Set up the OAuth consent screen as <strong className="font-medium text-text">Internal</strong>: only your company&apos;s Google Workspace accounts
@@ -83,7 +84,8 @@ export function GoogleAppForm({ settings, origins }: { settings: GoogleSettings;
         <RedirectList origins={origins} path={mailCallbackPath("GOOGLE")} label="Gmail redirect URIs" />
         <p>
           Sign-in asks Google for <Code>openid</Code>, <Code>email</Code> and <Code>profile</Code>; Gmail also for <Code>gmail.send</Code>, to send as the person
-          who connected — never to read their mail.
+          who connected — never to read their mail. With Calendar on, the same connection asks for <Code>calendar.events</Code>: the person&apos;s own
+          events, and meetings scheduled with a Meet link.
         </p>
       </div>
 
@@ -194,6 +196,8 @@ export function ZohoAppForm({ settings, origins }: { settings: ZohoSettings; ori
         <p>
           Sign-in asks Zoho for <Code>AaaServer.profile.Read</Code>; Zoho Mail also for <Code>ZohoMail.messages.CREATE</Code> and{" "}
           <Code>ZohoMail.accounts.READ</Code>, to send as the person who connected — never to read their mail. Sign-in uses the data centre chosen here.
+          With Calendar on, the same connection asks for <Code>ZohoCalendar.calendar.READ</Code>, <Code>ZohoCalendar.event.ALL</Code> and{" "}
+          <Code>ZohoMeeting.meeting.ALL</Code>: the person&apos;s own calendar, and meetings scheduled with a Zoho Meeting link.
         </p>
       </div>
 

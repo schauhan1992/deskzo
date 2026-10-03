@@ -811,6 +811,8 @@ model User {
   customFieldDefinitionsCreated CustomFieldDefinition[] @relation("CustomFieldDefinitionCreatedBy")
   customFieldDefinitionsUpdated CustomFieldDefinition[] @relation("CustomFieldDefinitionUpdatedBy")
   orderStepChanges              OrderStepChange[]
+  calendarAccount               CalendarAccount?         @relation("UserCalendarAccount")
+  calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
   @@index([departmentId])
   @@index([managerId])
   @@map("users")
@@ -1023,6 +1025,7 @@ model Company {
   revenueSchedules    RevenueSchedule[]    @relation("RevenueScheduleCustomer")
   accountingSchedules AccountingSchedule[] @relation("AccountingScheduleVendor")
   paymentFollowUps    PaymentFollowUp[]
+  calendarEvents          CalendarEvent[]
 
   @@index([stage])
   @@index([assignedToUserId])
@@ -1263,6 +1266,7 @@ model Contact {
   consignments     Consignment[]         @relation("ConsignmentContact")
   projectStakes    ProjectStakeholder[]  @relation("ProjectStakeholderContact")
   portalLogins     PortalLogin[]         @relation("PortalLoginContact")
+  calendarEvents   CalendarEvent[]
 
   @@index([companyId])
   @@index([emailStatus])
@@ -1354,6 +1358,7 @@ model Lead {
   calls           CallLog[]
   formSubmissions FormSubmission[] @relation("FormSubmissionLead")
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
+  calendarEvents     CalendarEvent[]
 
   @@unique([captureKeyId, externalId])
   @@index([companyId])
@@ -3306,6 +3311,7 @@ model Ticket {
   assetMovements   AssetMovement[]   @relation("AssetMovementTicket")
   feedbackRequests FeedbackRequest[] @relation("FeedbackTicket")
   stickyNotes      StickyNote[]      @relation("StickyNoteTicket")
+  calendarEvents     CalendarEvent[]
 
   @@index([companyId])
   @@index([status])
@@ -3577,6 +3583,7 @@ model Visit {
   expenses         Expense[]
   assetMovements   AssetMovement[]
   feedbackRequests FeedbackRequest[] @relation("FeedbackVisit")
+  calendarEvent      CalendarEvent?
 
   @@index([companyId])
   @@index([userId, scheduledFor])
@@ -11429,6 +11436,110 @@ model MailConnection {
   updatedAt            DateTime               @updatedAt
 
   @@map("mail_connections")
+}
+
+
+/**
+ * A person's calendar, kept in step with Outlook, Google Calendar or Zoho Calendar (src/lib/calendar) —
+ * through the same connection as their mailbox (MailConnection), with the calendar permission granted
+ * on it as well. One per person, and only ever read for that person: colleagues see their busy times
+ * and nothing else.
+ *
+ * It holds where the last sync got to — Outlook's delta link or Google's sync token, and the days it
+ * covers — and when the next is due. Zoho has no such cursor and reads its window afresh each time.
+ */
+model CalendarAccount {
+  id           String                 @id @default(cuid())
+  userId       String                 @unique
+  user         User                   @relation("UserCalendarAccount", fields: [userId], references: [id], onDelete: Cascade)
+  provider     MailConnectionProvider
+  /** Zoho only: the uid of the person's default calendar. Outlook and Google use their primary one. */
+  calendarId   String?
+  /** Outlook: the delta link. Google: the sync token. Null until the first full read, and after a reset. */
+  syncCursor   String?
+  windowFrom   DateTime?
+  windowTo     DateTime?
+  lastSyncedAt DateTime?
+  nextSyncAt   DateTime               @default(now())
+  /** Held by the sync running now, so that two never run for one person at once. */
+  claimedUntil DateTime?
+  lastError    String?
+  /** The provider stopped allowing the calendar; the person connects again from My profile. */
+  brokenAt     DateTime?
+  connectedAt  DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@index([nextSyncAt])
+  @@map("calendar_accounts")
+}
+
+enum CalendarEventStatus {
+  CONFIRMED
+  TENTATIVE
+  CANCELLED
+}
+
+/**
+ * An event in a person's own calendar, as the last sync found it — a meeting scheduled from a lead,
+ * a customer, a contact, a ticket or a planned visit, or anything else they keep there.
+ *
+ * One scheduled from here carries the record it was for (`companyId` … `visitId`), so the record shows
+ * it and a meeting moved in Outlook is moved here too. Everything else is the person's own, shown on
+ * their Calendar page and nowhere else; to colleagues it is a busy time, without its title or who is in it.
+ *
+ * Times are instants; an all-day event runs from midnight UTC of its first day to midnight UTC of the
+ * day after its last, as a typed day is kept (src/lib/time/zone.ts formatCalendarDay).
+ */
+model CalendarEvent {
+  id             String                 @id @default(cuid())
+  userId         String
+  user           User                   @relation("UserCalendarEvents", fields: [userId], references: [id], onDelete: Cascade)
+  provider       MailConnectionProvider
+  /** The provider's id for the event — for a repeating one, for this occurrence. */
+  externalId     String
+  /** Outlook's changeKey, Google's etag, Zoho's etag: what an update has to name. */
+  etag           String?
+  title          String
+  description    String?
+  location       String?
+  startsAt       DateTime
+  endsAt         DateTime
+  allDay         Boolean                @default(false)
+  /** The Teams, Meet or Zoho Meeting link. */
+  joinUrl        String?
+  status         CalendarEventStatus    @default(CONFIRMED)
+  /** False when the calendar shows the time as free. */
+  busy           Boolean                @default(true)
+  /** Only the organiser may move or cancel it from here. */
+  isOrganizer    Boolean                @default(false)
+  organizerEmail String?
+  /** [{ email, name, response }] */
+  attendees      Json                   @default("[]")
+  /** Scheduled from a record here, rather than found in the calendar. */
+  fromDeskzo     Boolean                @default(false)
+  companyId      String?
+  company        Company?               @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId      String?
+  contact        Contact?               @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  leadId         String?
+  lead           Lead?                  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  ticketId       String?
+  ticket         Ticket?                @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  visitId        String?                @unique
+  visit          Visit?                 @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  /** When the lead's timeline was told the meeting took place (src/lib/calendar/held.ts). */
+  heldLoggedAt   DateTime?
+  syncedAt       DateTime               @default(now())
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([userId, externalId])
+  @@index([userId, startsAt])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([leadId])
+  @@index([ticketId])
+  @@map("calendar_events")
 }
 
 /**

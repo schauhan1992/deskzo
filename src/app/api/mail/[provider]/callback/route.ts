@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
     redirectUri: `${origin}${mailCallbackPath(provider)}`,
     accountsServer: query.get("accounts-server"),
   });
-  if (done.outcome === "connected") {
+  if (done.outcome === "connected" || done.outcome === "no-calendar") {
     await recordAudit({
       userId: user.id,
       action: "UPDATE",

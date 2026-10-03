@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FileText, MapPin } from "lucide-react";
 import { CallButton } from "@/components/calls/call-button";
+import { ScheduleMeetingButton } from "@/components/calendar/schedule-meeting-button";
+import { RecordMeetings } from "@/components/calendar/record-meetings";
 import { DomainPanel } from "@/components/domains/domain-panel";
 import { getDomainBriefing } from "@/actions/domain";
 import { isModuleEnabled } from "@/actions/module";
@@ -53,6 +55,7 @@ export async function LeadDetail({ id }: { id: string }) {
     canEditProducts,
     canDeleteProducts,
     canDeleteAnyTask,
+    calendarEnabled,
   ] = await Promise.all([
     isModuleEnabled("items"),
     isModuleEnabled("tasks"),
@@ -62,6 +65,7 @@ export async function LeadDetail({ id }: { id: string }) {
     hasEffectivePermission(userId, "products.edit"),
     hasEffectivePermission(userId, "products.delete"),
     hasEffectivePermission(userId, "tasks.delete"),
+    isModuleEnabled("calendar"),
   ]);
   const [lead, items, tasks, assignableUsers, documents, visits] = await Promise.all([
     getLead(id),
@@ -138,6 +142,7 @@ export async function LeadDetail({ id }: { id: string }) {
             leadId={lead.id}
             contact={lead.contact ? { id: lead.contact.id, name: lead.contact.name, phone: lead.contact.phone } : undefined}
           />
+          {calendarEnabled && <ScheduleMeetingButton record={{ kind: "lead", id: lead.id }} />}
           {visitsEnabled && (
             <Link href={`/visits/new?companyId=${company.id}&leadId=${lead.id}`}>
               <Button variant="secondary">
@@ -219,6 +224,8 @@ export async function LeadDetail({ id }: { id: string }) {
         </div>
 
         <div className="space-y-6">
+          {calendarEnabled && <RecordMeetings record={{ kind: "lead", id: lead.id }} viewerId={userId} />}
+
           {visitsEnabled && <LeadVisits visits={visits} leadId={lead.id} companyId={company.id} />}
 
           {domainBriefing && <DomainPanel companyId={company.id} briefing={domainBriefing} />}

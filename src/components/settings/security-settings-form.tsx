@@ -116,6 +116,10 @@ export function MicrosoftAppForm({ settings, origins }: { settings: MicrosoftSet
           Outlook also needs the delegated Microsoft Graph permissions <Code>Mail.Send</Code>, <Code>User.Read</Code> and <Code>offline_access</Code>. Each
           person then connects their own mailbox from My profile; nobody can send as anybody else.
         </p>
+        <p className="mt-2 text-sm text-muted">
+          With Calendar on (Settings → Modules), add <Code>Calendars.ReadWrite</Code> (delegated) too: people&apos;s own calendars, kept in step here, and
+          meetings scheduled with a Teams link. The same connection carries it; people who connected before reconnect once.
+        </p>
       </div>
 
       <div className="space-y-3">
