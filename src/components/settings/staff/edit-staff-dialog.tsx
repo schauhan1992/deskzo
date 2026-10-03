@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resendSetupEmail, resetUserTwoFactor, updateUserAssignment } from "@/actions/user";
+import { resendSetupEmail, resetPasswordToTemporary, resetUserTwoFactor, sendPasswordResetEmail, updateUserAssignment } from "@/actions/user";
 import { setUserBranch } from "@/actions/branch";
 import { branchLabel } from "@/lib/branches/format";
 import { Avatar } from "@/components/ui/avatar";
@@ -11,17 +11,19 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
-import { SetupLinkOnce } from "@/components/settings/setup-link-once";
+import { ResetLinkOnce, SetupLinkOnce, TemporaryPasswordOnce } from "@/components/settings/setup-link-once";
 import type { DepartmentChoice, RoleChoice, StaffRow, WorkBranch } from "@/components/settings/staff/types";
 import { PersonSignInRule } from "@/components/settings/staff/person-sign-in-rule";
 
 /**
  * The pencil on a Staff row: what the old team table edited in a row of its own — role, department,
- * reporting manager, where they work, two-factor and the setup email — in one dialog.
+ * reporting manager, where they work, two-factor and the setup email — in one dialog, with their
+ * password: a reset email, or a temporary password shown once.
  *
  * Every change goes through the action it always did (`updateUserAssignment`, `setUserBranch`,
- * `resetUserTwoFactor`, `resendSetupEmail`), so every rule they enforce still applies. The fields the
- * viewer can't change are shown disabled with the reason, rather than offered and then refused.
+ * `resetUserTwoFactor`, `resendSetupEmail`, `sendPasswordResetEmail`, `resetPasswordToTemporary`), so
+ * every rule they enforce still applies. The fields the viewer can't change are shown disabled with the
+ * reason, rather than offered and then refused.
  */
 export function EditStaffDialog({
   row,
@@ -57,6 +59,10 @@ export function EditStaffDialog({
   const [confirmReset, setConfirmReset] = useState(false);
   // The link to pass on when the setup email couldn't be sent — held only while this is open.
   const [setupUrl, setSetupUrl] = useState<string | null>(null);
+  const [confirmPassword, setConfirmPassword] = useState(false);
+  // Shown once and held only while this is open: the temporary password, or the reset link whose email failed.
+  const [temporary, setTemporary] = useState<string | null>(null);
+  const [resetUrl, setResetUrl] = useState<string | null>(null);
 
   const assignmentDirty =
     role !== row.role || departmentId !== (row.departmentId ?? "") || managerId !== (row.managerId ?? "");
@@ -108,6 +114,36 @@ export function EditStaffDialog({
         return;
       }
       setDone("Two-factor is reset. They'll set it up again from their profile.");
+      router.refresh();
+    });
+  }
+
+  /** One click: a link to their own address. Their current password works until they use it. */
+  function sendResetEmail() {
+    setError(null);
+    setDone(null);
+    startWork(async () => {
+      const result = await sendPasswordResetEmail(row.id);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (result.data.emailed) setDone(`Sent to ${row.email}. Their current password works until they use the link.`);
+      else setResetUrl(result.data.resetUrl);
+    });
+  }
+
+  function resetPassword() {
+    setError(null);
+    setDone(null);
+    startWork(async () => {
+      const result = await resetPasswordToTemporary(row.id);
+      setConfirmPassword(false);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setTemporary(result.data.password);
       router.refresh();
     });
   }
@@ -254,6 +290,49 @@ export function EditStaffDialog({
                   {working ? "Resetting…" : "Reset"}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {!row.setupPending && !row.isYou && row.active && (
+            <div className="space-y-2 border-t border-line pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm text-text">
+                  Password
+                  {row.tempPassword && (
+                    <Badge tone="amber" title="They choose their own when they next sign in.">
+                      Temporary
+                    </Badge>
+                  )}
+                </div>
+                {!confirmPassword && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" size="sm" disabled={working} onClick={sendResetEmail}>
+                      {working ? "Working…" : "Send reset email"}
+                    </Button>
+                    <Button type="button" variant="secondary" size="sm" disabled={working} onClick={() => setConfirmPassword(true)}>
+                      Reset password
+                    </Button>
+                  </div>
+                )}
+              </div>
+              {confirmPassword && (
+                <div className="rounded-base border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
+                  <p>
+                    Reset <strong>{row.name}</strong>&apos;s password? They&apos;re signed out everywhere at once, and you get a
+                    temporary password to give them. They choose their own when they next sign in; two-factor stays on.
+                  </p>
+                  <div className="mt-2 flex justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmPassword(false)} disabled={working}>
+                      Cancel
+                    </Button>
+                    <Button type="button" variant="danger" size="sm" onClick={resetPassword} disabled={working}>
+                      {working ? "Resetting…" : "Reset password"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {temporary && <TemporaryPasswordOnce name={row.name} password={temporary} onDone={() => setTemporary(null)} />}
+              {resetUrl && <ResetLinkOnce email={row.email} resetUrl={resetUrl} onDone={() => setResetUrl(null)} />}
             </div>
           )}
 

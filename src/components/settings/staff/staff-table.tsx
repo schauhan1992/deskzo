@@ -2,8 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Power, Search, Trash2 } from "lucide-react";
-import { setUserActive } from "@/actions/user";
+import { KeyRound, Pencil, Power, Search, Trash2 } from "lucide-react";
+import { sendPasswordResetEmail, setUserActive } from "@/actions/user";
+import { ResetLinkOnce } from "@/components/settings/setup-link-once";
 import { STAFF_STATUS_LABEL, type StaffStatus } from "@/lib/staff/status";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/card";
@@ -70,6 +71,8 @@ export function StaffTable({
   const [editing, setEditing] = useState<StaffRow | null>(null);
   const [switchingOff, setSwitchingOff] = useState<StaffRow | null>(null);
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null);
+  // A reset link whose email couldn't be sent, to pass on — held only while its dialog is open.
+  const [resetLink, setResetLink] = useState<{ row: StaffRow; url: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   const roleChoices = useMemo(() => {
@@ -111,6 +114,26 @@ export function StaffTable({
         message: active ? `${r.name} is switched on again.` : `${r.name} is switched off. Everything they own stays as it is.`,
       });
       router.refresh();
+    });
+  }
+
+  /**
+   * One click, no confirming: the email only offers a new password, and their current one keeps working
+   * until they use it. When it can't be sent, the link is shown once to pass on.
+   */
+  function sendResetEmail(r: StaffRow) {
+    setNotice(null);
+    startTransition(async () => {
+      const result = await sendPasswordResetEmail(r.id);
+      if (!result.ok) {
+        setNotice({ tone: "error", message: result.error });
+        return;
+      }
+      if (result.data.emailed) {
+        setNotice({ tone: "success", message: `Password reset email sent to ${r.email}. Their current password works until they use the link.` });
+      } else {
+        setResetLink({ row: r, url: result.data.resetUrl });
+      }
     });
   }
 
@@ -238,7 +261,14 @@ export function StaffTable({
                   </td>
                 )}
                 <td className="px-4 py-3">
-                  <Badge tone={STATUS_TONE[r.status]}>{STAFF_STATUS_LABEL[r.status]}</Badge>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Badge tone={STATUS_TONE[r.status]}>{STAFF_STATUS_LABEL[r.status]}</Badge>
+                    {r.tempPassword && (
+                      <Badge tone="amber" title="An admin reset their password; they choose their own at next sign-in.">
+                        Temporary password
+                      </Badge>
+                    )}
+                  </div>
                 </td>
                 {showSignIns && (
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
@@ -255,6 +285,14 @@ export function StaffTable({
                   <RowActions>
                     {canEdit(r) && (
                       <IconButton icon={Pencil} label={`Edit ${r.name}`} onClick={() => setEditing(r)} disabled={pending} />
+                    )}
+                    {canEdit(r) && r.active && !r.isYou && !r.setupPending && (
+                      <IconButton
+                        icon={KeyRound}
+                        label={`Send ${r.name} a password reset email`}
+                        onClick={() => sendResetEmail(r)}
+                        disabled={pending}
+                      />
                     )}
                     <UserAccessDrawer userId={r.id} userName={r.name} mayManage={mayManageAccess} />
                     {canSwitchOff(r) && (
@@ -329,6 +367,10 @@ export function StaffTable({
             </div>
           </div>
         )}
+      </Dialog>
+
+      <Dialog open={resetLink !== null} onClose={() => setResetLink(null)} title="Password reset link">
+        {resetLink && <ResetLinkOnce email={resetLink.row.email} resetUrl={resetLink.url} onDone={() => setResetLink(null)} />}
       </Dialog>
     </div>
   );

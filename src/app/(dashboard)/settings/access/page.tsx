@@ -190,6 +190,7 @@ async function StaffTab({
       active: r.active,
       setupPending,
       setupLinkIssued: u?.setupLinkIssued ?? false,
+      tempPassword: !setupPending && Boolean(u?.mustChangePassword),
       photoUpdatedAt: f?.photoUpdatedAt?.toISOString() ?? null,
       jobTitle: f?.jobTitle ?? null,
       phone: f?.phone ?? null,

@@ -67,7 +67,8 @@ export default async function ProfilePage({
 
       {profile.mustChangePassword && (
         <div className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">
-          Your administrator created this account with a temporary password — set a new one below before continuing.
+          You signed in with a temporary password from your administrator. Choose your own below before continuing — use
+          the temporary one as your current password.
         </div>
       )}
       {mustSetUpTwoFactor && (

@@ -21,6 +21,8 @@ export type StaffRow = {
   setupPending: boolean;
   /** A setup link was issued before, so the button says "Resend". */
   setupLinkIssued: boolean;
+  /** Signing in with a temporary password an admin reset theirs to, until they choose their own. */
+  tempPassword: boolean;
   photoUpdatedAt: string | null;
   jobTitle: string | null;
   phone: string | null;

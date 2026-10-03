@@ -1,9 +1,11 @@
 "use server";
 
+import { createHash, randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { refuseWhileViewingAs, requireUser } from "@/lib/session";
 import { wouldCreateCycle } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
 import { PERMISSIONS } from "@/lib/permissions";
@@ -12,10 +14,17 @@ import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/u
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
-import { awaitingSetup, sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
+import { awaitingSetup, mayPassOnSetupLink, sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
 import { AWAITING_SETUP, noPasswordYet } from "@/lib/no-password";
-import { lockoutState, recordFailure } from "@/lib/security/lockout";
+import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { tenantKey } from "@/lib/tenancy/cache";
+import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
+import { sendPlatformMail } from "@/lib/platform/mailer";
+import { recordAudit } from "@/lib/audit";
+import { logActivity } from "@/lib/activity";
+import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
+import { lockedOut, waysIn } from "@/lib/workplace/sign-in-rules";
+import { ADMIN_RESET_LINK_TTL_MS, adminResetMail, temporaryPassword, temporaryResetNotice } from "@/lib/admin-password";
 
 function refuse(err: unknown): ActionResult<never> {
   if (err instanceof AuthzError) return { ok: false, error: err.message };
@@ -261,8 +270,8 @@ export async function createUser(
  *
  * The rules of any re-issued password link: `users.manage`, an ordinary admin can't act on a super admin,
  * not for a switched-off account, and asks for one address share one limit with "Forgot your password?"
- * (src/actions/password-reset.ts). Somebody who has set a password is pointed there instead — this is
- * never a way for an admin to reset somebody's password.
+ * (src/actions/password-reset.ts). Somebody who has set a password gets a reset instead
+ * (`sendPasswordResetEmail`, `resetPasswordToTemporary` below).
  */
 export async function resendSetupEmail(id: string): Promise<ActionResult<SetupInvitation>> {
   const session = await requireUser();
@@ -282,7 +291,7 @@ export async function resendSetupEmail(id: string): Promise<ActionResult<SetupIn
   }
   if (!target.active) return { ok: false, error: "Activate them first — a switched-off account can't be set up." };
   if (!(await awaitingSetup(target.id))) {
-    return { ok: false, error: "They've already chosen a password. If they've forgotten it, they can ask for a new one from the sign-in page." };
+    return { ok: false, error: "They've already chosen a password. To reset it, send them a password reset email." };
   }
 
   const keys = [`${await tenantKey()}|reset:${target.email.trim().toLowerCase()}`];
@@ -356,4 +365,142 @@ export async function resetUserTwoFactor(id: string): Promise<ActionResult<null>
   await accountsChanged([id], { revoke: "two-factor-reset", by: `admin:${admin.id}` });
   revalidatePath("/settings/access");
   return { ok: true, data: null };
+}
+
+// ─── An admin resetting somebody's password ────────────────────────────────────────────────────────
+
+/**
+ * Who an admin may reset a password for, and the account, or why not. Both ways share it:
+ *
+ *   · `users.manage`, as themselves (never while viewing as somebody), and never their own (Profile is
+ *     for that);
+ *   · an ordinary admin can't act on the super admin, and a switched-off account can't sign in anyway;
+ *   · somebody who hasn't chosen a password yet needs their setup email, not a reset;
+ *   · somebody whose sign-in rule is single sign-on only would get a password that lets them in nowhere.
+ */
+async function passwordTarget(id: string): Promise<
+  | { ok: true; admin: Awaited<ReturnType<typeof actorContext>>; target: { id: string; name: string; email: string; role: string; isSuperAdmin: boolean } }
+  | { ok: false; error: string }
+> {
+  const session = await requireUser();
+  const blocked = await refuseWhileViewingAs();
+  if (blocked) return { ok: false, error: blocked };
+  const admin = await actorContext(session.id);
+  if (!(await hasEffectivePermission(admin.id, "users.manage"))) return { ok: false, error: "You can't reset passwords." };
+  const target = await db.user.findUnique({
+    where: { id: String(id ?? "") },
+    select: { id: true, name: true, email: true, role: true, active: true, kind: true, isSuperAdmin: true },
+  });
+  if (!target || target.kind !== "MEMBER") return { ok: false, error: "That user no longer exists." };
+  if (target.id === admin.id) return { ok: false, error: "That's you. Change your own password from your profile." };
+  try {
+    assertMayActOnTarget(admin, target);
+  } catch (err) {
+    if (err instanceof AuthzError) return { ok: false, error: err.message };
+    throw err;
+  }
+  if (!target.active) return { ok: false, error: "Switch them on first. A switched-off account can't sign in." };
+  if (await awaitingSetup(target.id)) {
+    return { ok: false, error: "They haven't chosen a password yet. Send their setup email instead." };
+  }
+  const policy = await signInPolicyFor(target);
+  if (!policy.password) {
+    return {
+      ok: false,
+      error: lockedOut(policy)
+        ? "Their sign-in rule names a sign-in that's switched off, so nothing lets them in. Change how they sign in first."
+        : `They sign in with ${waysIn(policy)} only, so a password wouldn't let them in.`,
+    };
+  }
+  return { ok: true, admin, target };
+}
+
+/**
+ * The one-click reset email: a link to the person's own address to choose a new password, for 24 hours,
+ * once. Their current password keeps working until they use it, so a click on the wrong row locks nobody
+ * out. It replaces any unused link they have, and shares the per-address limit of "Forgot your password?".
+ * When the email can't be sent the link comes back, once, to an admin who holds everything the person
+ * holds (`mayPassOnSetupLink`); anybody else is told to try again.
+ */
+export async function sendPasswordResetEmail(id: string): Promise<ActionResult<{ emailed: true } | { emailed: false; resetUrl: string }>> {
+  const checked = await passwordTarget(id);
+  if (!checked.ok) return checked;
+  const { admin, target } = checked;
+
+  const keys = [`${await tenantKey()}|reset:${target.email.trim().toLowerCase()}`];
+  const limit = lockoutState(keys);
+  if (limit.lockedOut) {
+    return { ok: false, error: `Too many password emails for this address. Try again in ${Math.ceil(limit.retryInSeconds / 60)} minutes.` };
+  }
+  recordFailure(keys);
+
+  const tenant = await currentTenant();
+  const token = randomBytes(32).toString("base64url");
+  await db.$transaction(async (tx) => {
+    await tx.passwordResetToken.deleteMany({ where: { userId: target.id, usedAt: null } });
+    await tx.passwordResetToken.create({
+      data: { tokenHash: createHash("sha256").update(token).digest("hex"), userId: target.id, expiresAt: new Date(Date.now() + ADMIN_RESET_LINK_TTL_MS) },
+    });
+  });
+  const url = `${await tenantOrigin(tenant)}/reset-password?t=${encodeURIComponent(token)}`;
+  await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "User", entityId: target.id, entityLabel: `${target.name} — sent a password reset email` });
+
+  try {
+    await sendPlatformMail({ to: target.email, ...adminResetMail({ name: target.name, workspace: tenant.name, admin: admin.name, url }) });
+    return { ok: true, data: { emailed: true } };
+  } catch {
+    if (await mayPassOnSetupLink(admin, target.id)) return { ok: true, data: { emailed: false, resetUrl: url } };
+    return { ok: false, error: "The email couldn't be sent. Try again in a while." };
+  }
+}
+
+/**
+ * The direct reset: a temporary password the app makes up (`temporaryPassword`), shown to the admin
+ * once and never stored but as its hash. The person is signed out everywhere, any password link they
+ * had stops working, their lockouts are cleared, and they must choose their own at next sign-in.
+ * Two-factor stays on.
+ *
+ * Only for an admin who holds everything the person holds (`mayPassOnSetupLink`): the password is the
+ * power to sign in as them, which must never be more than the admin could already do. The person is
+ * emailed that it happened, without the password.
+ */
+export async function resetPasswordToTemporary(id: string): Promise<ActionResult<{ password: string }>> {
+  const checked = await passwordTarget(id);
+  if (!checked.ok) return checked;
+  const { admin, target } = checked;
+  if (!(await mayPassOnSetupLink(admin, target.id))) {
+    return {
+      ok: false,
+      error: "They hold access you don't, so only the super admin can reset their password. You can still send them a reset email.",
+    };
+  }
+
+  const password = temporaryPassword();
+  const passwordHash = await bcrypt.hash(password, 10);
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: target.id }, data: { passwordHash, mustChangePassword: true } });
+    await tx.passwordResetToken.deleteMany({ where: { userId: target.id, usedAt: null } });
+    await tx.signIn.updateMany({ where: { userId: target.id, endedAt: null }, data: { endedAt: now } });
+  });
+  await accountsChanged([target.id], { revoke: "credentials", by: `admin:${admin.id}` });
+  const workspace = await tenantKey();
+  const email = target.email.trim().toLowerCase();
+  clearFailures([`${workspace}|account:${email}`, `${workspace}|reset:${email}`]);
+
+  await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "User", entityId: target.id, entityLabel: `${target.name} — password reset to a temporary one` });
+  await logActivity({
+    kind: "PASSWORD_CHANGED",
+    userId: target.id,
+    userName: target.name,
+    userEmail: target.email,
+    summary: `${target.name}'s password was reset to a temporary one by ${admin.name}`,
+  });
+  try {
+    await sendPlatformMail({ to: target.email, ...temporaryResetNotice({ name: target.name, workspace: (await currentTenant()).name, admin: admin.name }) });
+  } catch {
+    // The notice is a courtesy: the reset has happened, and the admin is passing the password on.
+  }
+  revalidatePath("/settings/access");
+  return { ok: true, data: { password } };
 }
