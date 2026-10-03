@@ -985,7 +985,8 @@ export async function listCompaniesPaged(params: CompanyListParams & { page: num
   // Counted towards the read-volume check. Deliberately not awaited — see the contacts list for
   // why the alerting path must never be on the critical path of a page load.
   void noteRecordsRead({ userId: user.id, userName: user.name, count: rows.length, what: "the company list" });
-  return { rows, total };
+  // A client component draws these rows: a credit limit is a Decimal, which it cannot be handed (toPlain).
+  return { rows: toPlain(rows), total };
 }
 
 /**
@@ -1048,7 +1049,8 @@ export async function listCustomersPaged(params: CustomerListParams & { page: nu
     }),
     db.company.count({ where }),
   ]);
-  return { rows, total };
+  // A client component draws these rows: a credit limit is a Decimal, which it cannot be handed (toPlain).
+  return { rows: toPlain(rows), total };
 }
 
 /**
@@ -1136,7 +1138,8 @@ export async function listVendorsPaged(params: VendorListParams & { page: number
     }),
     db.company.count({ where }),
   ]);
-  return { rows, total };
+  // A client component draws these rows: a credit limit is a Decimal, which it cannot be handed (toPlain).
+  return { rows: toPlain(rows), total };
 }
 
 /**
@@ -1304,7 +1307,7 @@ export async function listResellersPaged(params: ResellerListParams & { page: nu
     // Counted across every matching reseller, not just this page, so the header doesn't shrink as you page.
     db.company.count({ where: { managedByReseller: { is: where } } }),
   ]);
-  return { rows, total, endCustomerTotal };
+  return { rows: toPlain(rows), total, endCustomerTotal };
 }
 
 /**
