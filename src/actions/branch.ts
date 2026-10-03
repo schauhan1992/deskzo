@@ -350,12 +350,13 @@ export async function saveGstRegistration(input: unknown): Promise<ActionResult<
   const pan = panOfGstin(gstin)!;
 
   // Resolved before any transaction: ensureHeadOffice may write.
-  const [existing, org, headOffice, clash, sameState] = await Promise.all([
+  const [existing, org, headOffice, clash, sameState, another] = await Promise.all([
     id ? db.gstRegistration.findUnique({ where: { id }, select: { id: true, gstin: true, stateCode: true } }) : Promise.resolve(null),
     db.organisationSettings.findUnique({ where: { id: "global" }, select: ORG_SELECT }),
     ensureHeadOffice(),
     db.gstRegistration.findFirst({ where: { OR: [{ gstin }, { code }], ...(id ? { NOT: { id } } : {}) }, select: { gstin: true } }),
     db.gstRegistration.count({ where: { stateCode, active: true, ...(id ? { NOT: { id } } : {}) } }),
+    db.gstRegistration.findFirst({ where: id ? { NOT: { id } } : {}, orderBy: { createdAt: "asc" }, select: { gstin: true } }),
   ]);
   if (id && !existing) return { ok: false, error: "That registration no longer exists." };
   if (clash) return { ok: false, error: clash.gstin === gstin ? GSTIN_TAKEN : CODE_TAKEN };
@@ -364,10 +365,14 @@ export async function saveGstRegistration(input: unknown): Promise<ActionResult<
   // (the screen flags it) can still have its code edited, or be deactivated.
   const gstinChanges = !existing || existing.gstin !== gstin;
   const orgPan = normalisedPan(org?.pan);
+  // The company PAN is the profile's. Where that is blank but the company already has registrations
+  // (made before the PAN was kept, or loaded some other way), it is theirs: a new GSTIN on another PAN
+  // is still another company.
+  const companyPan = orgPan ?? (another ? panOfGstin(another.gstin) : null);
   if (gstinChanges) {
     const problem = gstinProblem(gstin);
     if (problem) return { ok: false, error: problem };
-    if (orgPan && orgPan !== pan) return { ok: false, error: panMismatch(pan, orgPan) };
+    if (companyPan && companyPan !== pan) return { ok: false, error: panMismatch(pan, companyPan) };
   }
 
   if (existing && existing.gstin !== gstin) {

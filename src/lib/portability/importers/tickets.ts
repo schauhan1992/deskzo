@@ -79,9 +79,6 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedTi
   const company = await requireCompany("Company", r.text("Company"));
   if ("error" in company) return { error: company.error };
 
-  const assignee = await optionalUserRef("Assigned to", r.text("Assigned to"));
-  if ("error" in assignee) return { error: assignee.error };
-
   // A cell that holds *something* is somebody naming a ticket. If it is not one of our keys we
   // cannot tell which, and `seqFromKey` returning null would otherwise fall through to "no key
   // means create" — turning a file carrying another helpdesk's numbering into a duplicate of every
@@ -97,18 +94,23 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedTi
   const found = seq
     ? await db.ticket.findUnique({
         where: { ticketSeq: seq },
-        include: { assignedTo: { select: { name: true } } },
+        include: { assignedTo: { select: { id: true, name: true, email: true, active: true } } },
       })
     : null;
 
   if (seq && !found) {
     return { error: `No ticket with key ${keyOf("TKT", seq)}. Remove the Ticket cell to raise a new one.` };
   }
+
   if (found && found.companyId !== company.value.id) {
     return {
       error: `${keyOf("TKT", found.ticketSeq)} belongs to another company, and a ticket can't be moved by an import — its contact, order and asset belong to that account. Correct the Company cell, or clear the Ticket cell to raise a new ticket.`,
     };
   }
+
+  // After the ticket, so the person it is assigned to today reads back even if they have since left.
+  const assignee = await optionalUserRef("Assigned to", r.text("Assigned to"), false, found?.assignedTo);
+  if ("error" in assignee) return { error: assignee.error };
 
   return {
     value: {

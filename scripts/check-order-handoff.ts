@@ -572,14 +572,21 @@ async function main() {
       `SELECT finished_at FROM _prisma_migrations WHERE migration_name = '20260930120000_order_handoff'`,
     );
     const cutoff = applied[0]?.finished_at;
-    const drifted = cutoff
-      ? await db.$queryRawUnsafe<{ n: bigint }[]>(
-          `SELECT count(*)::bigint AS n FROM company_products WHERE "createdAt" < $1 AND ("purchaseRelease" <> 'RELEASED' OR "bookedAt" IS DISTINCT FROM "createdAt")`,
-          cutoff,
+    // Written before the migration, not dated before it: `createdAt` takes any past day (the demo seed
+    // backdates a year of orders, held and scheduled ones among them), but a cuid begins with the
+    // moment its row was made, in base 36.
+    const writtenAt = (id: string) => (/^c[a-z0-9]{24}$/.test(id) ? new Date(parseInt(id.slice(1, 9), 36)) : null);
+    const writtenBefore = cutoff
+      ? (await db.companyProduct.findMany({ where: { createdAt: { lt: cutoff } }, select: { id: true, purchaseRelease: true, bookedAt: true, createdAt: true } })).filter(
+          (o) => (writtenAt(o.id) ?? o.createdAt) < cutoff,
         )
-      : [{ n: BigInt(-1) }];
-    const existing = cutoff ? await db.companyProduct.count({ where: { createdAt: { lt: cutoff } } }) : 0;
-    ok(`every order from before the migration is released and booked when punched (${existing} of them)`, Number(drifted[0]!.n) === 0, `${drifted[0]!.n} differ`);
+      : [];
+    const drifted = writtenBefore.filter((o) => o.purchaseRelease !== "RELEASED" || o.bookedAt?.getTime() !== o.createdAt.getTime());
+    ok(
+      `every order from before the migration is released and booked when punched (${writtenBefore.length} of them)`,
+      Boolean(cutoff) && drifted.length === 0,
+      cutoff ? `${drifted.length} differ` : "the migration hasn't run here",
+    );
     // A row written the way any other path writes one — naming none of the new columns — gets the
     // defaults: with purchase, and booked the moment it was made. (Also what the migration backfilled,
     // which the dev database may have had no orders to show.)

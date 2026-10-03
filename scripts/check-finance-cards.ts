@@ -266,10 +266,19 @@ async function run(
   ok("  and the list is capped where it says it is", top.length <= 6, `${top.length} rows`);
   ok("Largest first", top.every((r, i) => i === 0 || r.amount <= top[i - 1]!.amount), top.map((r) => r.name).join(", ") || "none");
   ok("  none of them negative", top.every((r) => r.amount > 0), "a credit-balance expense account is a refund, not a cost");
+  // Total expense nets off the expense accounts that end the year in credit (purchase rebates, round
+  // off), which the list leaves out as not costs. So the bound is the total before those credits.
+  const expenseLines = await db.journalLine.findMany({
+    where: { account: { type: "EXPENSE" }, entry: { date: { gte: fy.from, lte: fy.to } } },
+    select: { debit: true, credit: true, accountId: true },
+  });
+  const netByAccount = new Map<string, number>();
+  for (const l of expenseLines) netByAccount.set(l.accountId, (netByAccount.get(l.accountId) ?? 0) + money(l.debit) - money(l.credit));
+  const credited = [...netByAccount.values()].filter((v) => v < 0).reduce((t, v) => t - v, 0);
   ok(
-    "  and they never exceed total expense",
-    top.reduce((t, r) => t + r.amount, 0) <= ie.totalExpense + 0.05,
-    `${inr(top.reduce((t, r) => t + r.amount, 0))} of ${inr(ie.totalExpense)}`,
+    "  and they never exceed total expense before the accounts in credit",
+    top.reduce((t, r) => t + r.amount, 0) <= ie.totalExpense + credited + 0.05,
+    `${inr(top.reduce((t, r) => t + r.amount, 0))} of ${inr(ie.totalExpense)} + ${inr(credited)} netted off`,
   );
 
   section("Cash flow reconciles with the cash accounts");

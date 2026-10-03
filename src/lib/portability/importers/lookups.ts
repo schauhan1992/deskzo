@@ -66,6 +66,12 @@ export async function findUser(nameOrEmail: string, includeInactive = false): Pr
   return db.user.findFirst({ where: match, select: SELECT });
 }
 
+/** Whether a cell names this person, the way `findUser` matches: their email address, or their full name in any case. */
+function names(value: string, person: { name: string; email: string }): boolean {
+  const cell = value.trim().toLowerCase();
+  return cell === person.email.toLowerCase() || cell === person.name.trim().toLowerCase();
+}
+
 function notFound(column: string, value: string, includeInactive: boolean): string {
   const who = includeInactive ? "No user" : "No active user";
   return `${who} matches "${value}" (${column}). Use their full name or their email address.`;
@@ -93,8 +99,15 @@ export async function optionalUserRef(
   column: string,
   value: string,
   includeInactive = false,
+  /**
+   * Who the record has in this column today. A cell naming them is no change, even after they have
+   * left: our own export writes their name, and reading it back must not refuse the row. Naming
+   * somebody new still has to name a current person.
+   */
+  current?: UserRef | null,
 ): Promise<Resolved<UserRef | null>> {
   if (!value.trim()) return { value: null };
+  if (current && names(value, current)) return { value: current };
   const user = await findUser(value, includeInactive);
   if (!user) return { error: `${notFound(column, value, includeInactive)} Or leave the cell empty.` };
   return { value: user };

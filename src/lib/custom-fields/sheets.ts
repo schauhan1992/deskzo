@@ -2,6 +2,7 @@ import type { FieldChange } from "@/lib/portability/importers/types";
 import { exportValue, type CustomFieldDef, type CustomFieldEntityKey, type CustomFieldValues } from "@/lib/custom-fields/rules";
 import { fieldsFor, prepareCustomFields, valuesOf } from "@/lib/custom-fields/server";
 import { db } from "@/lib/db";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Custom fields in spreadsheets — the Settings → Data exports and imports (src/lib/portability), the
@@ -79,6 +80,39 @@ export async function exportCells(
   };
 }
 
+/**
+ * A person field's cells as the ids the field stores, in place in `input`.
+ *
+ * An export writes the person's name (`exportValue`), so that is what comes back. A cell that reads
+ * exactly as this record's export would is the person it holds, unchanged, even one who has since
+ * left. Anything else names somebody by full name or email address, and must be a current person.
+ */
+async function personIds(
+  defs: CustomFieldDef[],
+  input: Record<string, string>,
+  existing: CustomFieldValues,
+  heads: Map<string, string>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (defs.length === 0) return { ok: true };
+  const held = await namesFor(defs, [existing]);
+  for (const d of defs) {
+    const cell = input[d.key]!;
+    const current = existing[d.key];
+    if (typeof current === "string" && cell === exportValue(d, current, (pid) => held.get(pid))) {
+      input[d.key] = current;
+      continue;
+    }
+    const person = await db.user.findFirst({
+      // An id still works: until names were read back, it was the only thing this column took.
+      where: { active: true, ...PEOPLE_ONLY, OR: [{ id: cell }, { email: cell.toLowerCase() }, { name: { equals: cell, mode: "insensitive" } }] },
+      select: { id: true },
+    });
+    if (!person) return { ok: false, error: `No current person matches "${cell}" (${heads.get(d.key)}). Use their full name or their email address.` };
+    input[d.key] = person.id;
+  }
+  return { ok: true };
+}
+
 export type CustomSheet = {
   /** The columns the template offers and the unknown-column check accepts. */
   headers: string[];
@@ -118,6 +152,8 @@ export async function customSheetFor(entity: CustomFieldEntityKey, userId: strin
       }
       const keys = Object.keys(input);
       if (keys.length === 0) return { ok: true, values: existing, changes: [], ignored };
+      const named = await personIds(visible.filter((d) => d.type === "USER" && input[d.key] !== undefined), input, existing, heads);
+      if (!named.ok) return named;
       const prepared = await prepareCustomFields({ entity, userId, input, existing, checkRequired: false, only: keys });
       if (!prepared.ok) return { ok: false, error: prepared.error };
       const names = await namesFor(visible, [existing, prepared.values]);
