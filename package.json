@@ -59,6 +59,7 @@
     "check:feedback": "tsx scripts/check-feedback.ts",
     "db:seed:feedback": "tsx prisma/seed-feedback.ts",
     "check:marketing": "tsx scripts/check-marketing.ts",
+    "check:journey-runs": "tsx scripts/check-journey-runs.ts",
     "db:seed:marketing": "tsx prisma/seed-marketing.ts",
     "check:security": "tsx scripts/check-security.ts",
     "check:rbac": "tsx scripts/check-rbac.ts",

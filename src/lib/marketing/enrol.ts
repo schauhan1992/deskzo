@@ -486,10 +486,16 @@ export type AdvanceOutcome = { stepped: number; exited: number; queued: number; 
  *
  * Exits are checked *before* the step, not after. A sequence that sends one more email to somebody
  * who bought yesterday has told them plainly that nobody is reading.
+ *
+ * Only a running journey's. Pausing one holds everybody in it where they are: a paused journey kept
+ * sending until 3 Oct 2026, because nothing here looked at the journey, only at the enrolment. On
+ * Start they carry on from their step; one that came due during the pause goes at the next run, and
+ * the waits after it count from then. A draft or archived journey holds the same way (archiving also
+ * exits them, in `setJourneyStatus`).
  */
 export async function advanceEnrolments(origin: string): Promise<AdvanceOutcome> {
   const due = await db.journeyEnrolment.findMany({
-    where: { status: "ACTIVE", nextRunAt: { lte: new Date() } },
+    where: { status: "ACTIVE", nextRunAt: { lte: new Date() }, journey: { status: "ACTIVE" } },
     include: {
       journey: { include: { steps: { orderBy: { order: "asc" } } } },
       company: { select: { id: true, name: true, ownerUserId: true, assignedToUserId: true, managedByResellerId: true } },

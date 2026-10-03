@@ -888,13 +888,23 @@ export async function setJourneyStatus(id: string, status: JourneyStatus): Promi
     return { ok: false, error: "It has no steps, so there is nothing to start." };
   }
 
-  await db.journey.update({ where: { id }, data: { status } });
+  // Archived is over: whoever is still in it leaves, so bringing the journey back can't wake them
+  // mid-sequence. Paused only holds them (src/lib/marketing/enrol.ts `advanceEnrolments`).
+  const ended = await db.$transaction(async (tx) => {
+    await tx.journey.update({ where: { id }, data: { status } });
+    if (status !== "ARCHIVED") return 0;
+    const left = await tx.journeyEnrolment.updateMany({
+      where: { journeyId: id, status: "ACTIVE" },
+      data: { status: "EXITED", exitedAt: new Date(), exitReason: "The journey was archived", nextRunAt: null },
+    });
+    return left.count;
+  });
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
     entityType: "Journey",
     entityId: id,
-    entityLabel: `${journey.name} — ${status.toLowerCase()}`,
+    entityLabel: `${journey.name} — ${status.toLowerCase()}${ended ? `, ${ended} still in it stopped` : ""}`,
   });
   revalidatePath("/marketing/journeys");
   return { ok: true, data: null };
