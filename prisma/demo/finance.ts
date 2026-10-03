@@ -46,8 +46,9 @@ export async function seedFinance(
   // Idempotent, and cheap. Every posting below resolves its accounts by system key, so a chart with
   // one missing account fails the whole run with a message about the chart rather than about a
   // seed — which is the right message, but only if it is checked before four hundred entries are
-  // half-written.
-  await ensureChartOfAccounts();
+  // half-written. On this seed's own database: without a client it would go through the app's `db`,
+  // which outside a request falls back to the workspace .env names, not the one being seeded.
+  await ensureChartOfAccounts(db);
 
   // ── Bank accounts ───────────────────────────────────────────────────────────────────────────
   /**

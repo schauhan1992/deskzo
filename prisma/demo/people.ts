@@ -1,6 +1,5 @@
 import { PrismaClient } from "@prisma/client";
 import type { Role } from "@/lib/roles";
-import bcrypt from "bcryptjs";
 import { ROLE_PRESETS } from "../../src/lib/authz/presets";
 import {
   daysAhead,
@@ -151,9 +150,9 @@ export async function seedPeople(db: PrismaClient): Promise<{
   }
   log("Departments", `${departments.size}`);
 
-  // One hash for all of them. Nobody signs in as a demo user in anger, and hashing a hundred
-  // passwords at a real cost factor is thirty seconds of nothing.
-  const passwordHash = await bcrypt.hash("demo-password-not-for-real-use", 10);
+  // No password anybody could sign in with (owner, 3 Oct 2026: passwords are never set for people) —
+  // a super admin sees the app as any of them with View as.
+  const passwordHash = "!";
 
   const people: SeededPerson[] = [];
   let n = 0;

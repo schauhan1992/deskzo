@@ -53,6 +53,8 @@ import { seedExtras } from "./demo/extras";
 import { seedDetail } from "./demo/detail";
 import { seedFinance } from "./demo/finance";
 import { seedReach } from "./demo/reach";
+import { COVER_AREAS, resetCover } from "./demo/cover";
+import { loadDemoContext } from "./demo/context";
 import { BOOK_SIZE, COMPANY_AGE_DAYS, DEMO_EMAIL_DOMAIN, DEMO_SKU, DEMO_TAG, HEADCOUNT, log } from "./demo/shared";
 
 const db = directClient();
@@ -69,6 +71,9 @@ async function reset() {
   const userIds = users.map((u) => u.id);
   const companies = await db.company.findMany({ where: { tags: { has: DEMO_TAG } }, select: { id: true } });
   const companyIds = companies.map((c) => c.id);
+
+  // What the coverage seeds added first — some of it points at the ledger and the people below.
+  await resetCover(db, companyIds, userIds);
 
   /**
    * Order matters, and the database enforces it.
@@ -293,10 +298,17 @@ async function main() {
   // Last, because it posts the books: the invoices, credit notes, receipts, claims and payroll runs
   // it reads have to exist before there is anything to post.
   await seedFinance(db, companies, people, departments, admin.id);
+  // Then everything the above leaves out: every module and add-on, every status, stage and kind
+  // (prisma/demo/cover). Each reads the company back as it stands by then.
+  for (const area of COVER_AREAS) {
+    console.log(`
+— ${area.label} —`);
+    await area.seed(db, await loadDemoContext(db));
+  }
 
   const seconds = Math.round((Date.now() - started) / 1000);
   console.log(`\nDone in ${seconds}s.\n`);
-  console.log("  Sign in as any of them with:  demo-password-not-for-real-use");
+  console.log("  None of them has a password: sign in as yourself and use View as to see the app as any of them.");
   console.log(`  Their addresses all end ${DEMO_EMAIL_DOMAIN}\n`);
   // The single-module seeds (db:seed:hr, db:seed:accounting and the rest) each build their own
   // narrow fixture and are still there for working on one module in isolation. They are not a

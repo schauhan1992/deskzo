@@ -35,7 +35,7 @@ export const TODAY = new Date();
  * also what keeps the renewals screen worth looking at: clamp those too and every expiry lands more
  * than eight months out, so the 30/60/90-day windows are empty and the module cannot be tested.
  */
-export const COMPANY_AGE_DAYS = 120;
+export const COMPANY_AGE_DAYS = 365;
 
 /** The day the company opened. */
 export const FOUNDED = new Date(TODAY.getTime() - COMPANY_AGE_DAYS * 86400000);
@@ -48,8 +48,8 @@ export const HEADCOUNT = 50;
  *
  * Tied to the headcount rather than fixed, because the two move together: a book is only as big as
  * the people working it. Four accounts a head is a young company's ratio — enough that every list,
- * filter and report has something to show, and not so many that a four-month-old firm looks like it
- * has been trading for a decade.
+ * filter and report has something to show, and not so many that a year-old firm looks like it has
+ * been trading for a decade.
  */
 export const BOOK_SIZE = HEADCOUNT * 4;
 
