@@ -32,7 +32,7 @@ const ok = (label: string, pass: boolean, detail: unknown = "") => {
 const section = (title: string) => console.log(`\n— ${title} —\n`);
 
 /** The exported rows `pick` chooses, planned back in: what each row would do. */
-async function roundTrip(actorId: string, area: string, pick: (row: Record<string, string | number>) => boolean, edit?: (row: Record<string, string | number>) => void) {
+async function roundTrip(actorId: string, area: string, pick: (row: Record<string, unknown>) => boolean, edit?: (row: Record<string, unknown>) => void) {
   const rows = (await areaRows(actorId, area)).filter(pick).map((r) => ({ ...r }));
   if (edit) rows.forEach(edit);
   if (rows.length === 0) return { rows: 0, errors: ["the export holds no such row"], changes: 0 };
@@ -68,14 +68,14 @@ async function main() {
       data: { name: `${TAG} Other Traders`, normalizedName: `${TAG} other traders`.toLowerCase(), createdById: actor.id, ownerUserId: here.id },
       select: { id: true, name: true },
     });
-    const named = (r: Record<string, string | number>, ...values: string[]) => values.some((v) => Object.values(r).includes(v));
-    const leaverCell = (column: string) => (r: Record<string, string | number>) => void (r[column] = leaver.name);
+    const named = (r: Record<string, unknown>, ...values: string[]) => values.some((v) => Object.values(r).includes(v));
+    const leaverCell = (column: string) => (r: Record<string, unknown>) => void (r[column] = leaver.name);
 
-    const expectClean = async (label: string, area: string, pick: (r: Record<string, string | number>) => boolean) => {
+    const expectClean = async (label: string, area: string, pick: (r: Record<string, unknown>) => boolean) => {
       const back = await roundTrip(actor.id, area, pick);
       ok(label, back.rows > 0 && back.errors.length === 0 && back.changes === 0, back);
     };
-    const expectRefused = async (label: string, area: string, pick: (r: Record<string, string | number>) => boolean, column: string) => {
+    const expectRefused = async (label: string, area: string, pick: (r: Record<string, unknown>) => boolean, column: string) => {
       const back = await roundTrip(actor.id, area, pick, leaverCell(column));
       ok(label, back.rows > 0 && back.errors.some((e) => /No active user matches/.test(e)), back);
     };
