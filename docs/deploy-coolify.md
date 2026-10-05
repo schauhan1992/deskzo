@@ -244,8 +244,9 @@ INBOUND_MAIL_SECRET=<the secret from step 2>
    email from an address that is a contact: a ticket opens, and the acknowledgement arrives. From any other address,
    the email waits in Helpdesk → Support inbox. An address that is no workspace bounces.
 
-Replies to customers go out through `PLATFORM_SMTP_URL` as "<Company> Support", from `PLATFORM_MAIL_FROM`'s address,
-with Reply-To the workspace's helpdesk address, so the customer's answer comes back to the ticket.
+Replies to customers go out through the account Settings › Mail names for **Support** mail (else the default's) as
+"<Company> Support", from that type's address, with Reply-To the workspace's helpdesk address, so the customer's
+answer comes back to the ticket.
 
 ## Releases
 
