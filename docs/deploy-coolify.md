@@ -14,6 +14,44 @@ It goes in two phases:
 
 ## Phase 1 — live today
 
+### 0. The Azure VM and Coolify
+
+In the Azure portal, **Create a virtual machine**:
+
+| Setting | Value |
+|---|---|
+| Region | **Central India** (customers' data stays in India) |
+| Image | **Ubuntu Server 24.04 LTS**, x64 |
+| Size | **Standard_B4ms** (4 vCPUs, 16 GiB) at least. Coolify builds the image on this same machine while the app, PostgreSQL and Coolify keep running, and the build alone peaks at 5–6 GB of memory |
+| OS disk | Premium SSD, **128 GiB**. Each release's image is about 2.5 GB, and Coolify keeps earlier ones for rollback |
+| Public IP | New, **Static** |
+| Backup | **Enable Azure Backup**, daily |
+
+In the VM's **Networking** (its network security group), allow inbound:
+
+| Port | From | What |
+|---|---|---|
+| 22 | your own IP only | SSH |
+| 80, 443 | anywhere | the website, the console and every workspace, through Coolify's proxy |
+| 8000, 6001, 6002 | your own IP only | Coolify's dashboard, its live updates, and its **Terminal**, which steps 3 and 4 use |
+
+Then install Coolify:
+
+```bash
+ssh azureuser@<the VM's IP>
+```
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
+```
+
+Open `http://<the VM's IP>:8000` straight away and register: the first account made becomes Coolify's owner. Then
+**+ New → Project**, and in it **+ New → Private Repository (with GitHub App)**: connect GitHub, choose this repository
+and the branch `main`. That is the Deskzo application of step 3.
+
+Once Coolify's own dashboard has a domain of its own (Settings → Instance's Domain), ports 8000, 6001 and 6002 can be
+closed: the dashboard and its Terminal then come through 443.
+
 ### 1. DNS (Openprovider, for now)
 
 Keep the `@` A record to the server's IP. Add one more:
@@ -46,7 +84,7 @@ On the Deskzo application:
   - turn **off** *Inject Build Args to Dockerfile*, so no secret reaches the build;
   - leave the health check off, because the image has no curl or wget for one.
 - **Persistent Storage:** add a volume named `deskzo-data` with destination path `/data`. Workspace backups, support attachments and the GeoIP file live there.
-- **Post-deployment command:** `npm run tenants:migrate`. Each release migrates every database just after the new container starts. The migrations are written expand-then-contract, so the new code tolerates the old schema meanwhile. A new column on an existing table is not tolerated by itself: Prisma names every column in a query without a `select`, sign-in's among them. Until a later release, such a column goes in `NOT_YET_EVERYWHERE` in `src/lib/tenancy/clients.ts`, and the code that reads it is ready for it to be missing.
+- **Post-deployment command:** `npm run tenants:migrate`. Each release migrates every database just after the new container starts. The migrations are written expand-then-contract, so the new code tolerates the old schema meanwhile. A new column on an existing table is not tolerated by itself: Prisma names every column in a query without a `select`, sign-in's among them. Until a later release, such a column goes in `NOT_YET_EVERYWHERE` in `src/lib/tenancy/clients.ts`, and the code that reads it is ready for it to be missing. On the deploys before the first run (step 4) it fails, because the databases don't exist yet: that is expected. Coolify only logs a failing post-deployment command and still calls the deployment a success, so after every release read its log (Releases, below).
 - **Environment Variables → Developer view.** Paste this, with the database's password and host from step 2 put in the four URLs:
 
 ```ini
@@ -97,10 +135,12 @@ It does the following:
 
 It prints a setup link, which is also emailed once mail is set up. Open it to choose your password and turn on two-factor sign-in at https://admin.deskzo.com.
 
-To make yourself the owner of your own workspace, type the password at the prompt, not into the command:
+To make yourself the owner of your own workspace, type the password at the prompt, not into the command. The Terminal
+may open `sh`, which can't read a password without showing it, so this runs in `bash`, and the password goes when it
+ends:
 
 ```bash
-read -rs -p "Password for deskzo.deskzo.com: " ADMIN_PASSWORD && export ADMIN_PASSWORD && ADMIN_EMAIL=you@deskzo.com ADMIN_NAME="Your Name" npm run db:bootstrap; unset ADMIN_PASSWORD
+bash -c 'read -rs -p "Password for deskzo.deskzo.com: " ADMIN_PASSWORD && echo && export ADMIN_PASSWORD && ADMIN_EMAIL=you@deskzo.com ADMIN_NAME="Your Name" npm run db:bootstrap'
 ```
 
 ### 5. Scheduled Tasks

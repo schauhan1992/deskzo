@@ -23,6 +23,8 @@
  * could only ever produce a refusal or a disaster.
  */
 import { db } from "../src/lib/db";
+import { legacyTenant } from "../src/lib/tenancy/registry";
+import { runAsTenant } from "../src/lib/tenancy/resolve";
 
 async function main() {
   const email = process.argv[2]?.trim().toLowerCase();
@@ -113,7 +115,20 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
+/**
+ * As the first workspace, named here: a script has no request to say which, and only a development
+ * .env switches on the fallback that would otherwise pick it (DESKZO_TENANCY_FALLBACK).
+ */
+async function asFirstWorkspace() {
+  const tenant = await legacyTenant();
+  if (!tenant) {
+    console.error("There is no first workspace: set DATABASE_URL, or run npm run platform:adopt.");
+    process.exit(1);
+  }
+  await runAsTenant(tenant, main);
+}
+
+asFirstWorkspace().catch((err) => {
   console.error(err);
   process.exit(1);
 });

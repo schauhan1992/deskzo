@@ -79,6 +79,12 @@ async function runnable(only: ReadonlySet<string> | null): Promise<Tenant[]> {
   return only ? all.filter((t) => only.has(t.slug)) : all;
 }
 
+/** Whether the control plane has its tables — false only before its first migration. */
+async function controlPlaneMigrated(): Promise<boolean> {
+  const [row] = await controlDb().$queryRaw<{ ready: boolean }[]>`SELECT to_regclass('tenant_job_leases') IS NOT NULL AS "ready"`;
+  return row?.ready === true;
+}
+
 /** The slugs `only` names — null when it is not given, which is every database. */
 function namedSlugs(only: string | string[] | null | undefined): ReadonlySet<string> | null {
   if (only === null || only === undefined) return null;
@@ -93,6 +99,13 @@ export async function migrateEverything(options: { only?: string | string[] | nu
   if (only?.size === 0) {
     log("  no workspace named: nothing to migrate");
     return summary;
+  }
+  // A new installation's control plane has no tables yet, not even the lease this run is taken
+  // under: its migrations go first, outside the lease. Once the table is there this does nothing,
+  // and Prisma's own lock keeps two runs from migrating it at once.
+  if (!only && !(await controlPlaneMigrated())) {
+    log("  control (a new installation)…");
+    await migrateDeploy(process.env.CONTROL_DATABASE_URL!, "control");
   }
   const outcome = await withPlatformLease("migrate", 2 * 60 * 60_000, async () => {
     // 1–2. The platform's own databases and the warm pool — unless workspaces were named.
