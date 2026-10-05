@@ -41,6 +41,13 @@ const nextConfig: NextConfig = {
    */
   experimental: {
     serverActions: { bodySizeLimit: "6mb" },
+    /**
+     * The proxy buffers a request's body up to this, and silently cuts it there (10 MB by default).
+     * Tickets by email posts each email whole, base64 inside JSON (src/app/api/platform/inbound-email):
+     * a 25 MB email, the most the mail receiver accepts, is about 34 MB. Cut short, its signature would
+     * fail and the email bounce. The route itself refuses anything larger.
+     */
+    proxyClientMaxBodySize: "36mb",
   },
 
   /**

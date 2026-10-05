@@ -91,7 +91,7 @@ const MAINTENANCE_PAGE = `<!doctype html>
  * API paths answered on the platform's own address — the scheduled ticks, which fan out over every
  * workspace, and the billing gateways' webhooks.
  */
-const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay))\/?$/;
+const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay)|platform\/inbound-email)\/?$/;
 
 /** The partner programme's first-touch referral cookie on the public site, and a referral code's shape (6–40 characters). */
 const REFERRAL_COOKIE = "deskzo_ref";

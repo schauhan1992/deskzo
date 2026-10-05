@@ -74,6 +74,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "TICKET_ASSIGNED", label: "A ticket is assigned to me", when: "A ticket is put in your name.", group: "support" },
   { type: "TICKET_STATUS_CHANGED", label: "A ticket changes status", when: "A ticket you raised or hold is resolved, reopened or closed.", group: "support" },
   { type: "TICKET_COMMENT", label: "Somebody comments on a ticket", when: "A comment is added to a ticket you are on.", group: "support" },
+  { type: "TICKET_EMAIL", label: "A customer emails support", when: "An email opens a ticket, answers one you are on, or waits in the Support inbox.", group: "support" },
   { type: "TICKET_SLA_OVERDUE", label: "A ticket breaches its SLA", when: "One of your tickets passes its response or resolution window.", group: "support" },
   { type: "PROJECT_STATUS_CHANGED", label: "A project changes status", when: "A project you are on moves stage.", group: "support" },
   { type: "PROJECT_STAKEHOLDER_ADDED", label: "I am added to a project", when: "Somebody adds you to a project, which is also how you got sight of it.", group: "support" },

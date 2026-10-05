@@ -24,6 +24,7 @@ import { TicketStatusControl } from "@/components/tickets/ticket-status-control"
 import { TicketPriorityControl } from "@/components/tickets/ticket-priority-control";
 import { AssignTicketButton } from "@/components/tickets/assign-ticket-button";
 import { CommentThread } from "@/components/tickets/comment-thread";
+import { TicketEmails } from "@/components/tickets/ticket-emails";
 import { DeleteTicketButton } from "@/components/tickets/delete-ticket-button";
 import { TaskList } from "@/components/tasks/task-list";
 import { CategoryChip } from "@/components/customers/category-chip";
@@ -113,6 +114,9 @@ export async function TicketDetail({ id }: { id: string }) {
               </p>
             </CardContent>
           </Card>
+
+          {/* With the customer, by email (src/lib/support-mail) — before Comments, which are the team's own. */}
+          <TicketEmails ticketId={ticket.id} />
 
           <Card>
             <CardHeader className="text-sm font-medium text-text">Comments</CardHeader>

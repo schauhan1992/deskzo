@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   LayoutTemplate,
+  Inbox,
   Archive,
   SquareKanban,
   CreditCard,
@@ -346,6 +347,15 @@ export const SETTINGS: SettingsSection[] = [
             icon: MessageSquareHeart,
             permission: "settings.manage",
             module: "feedback",
+          },
+          {
+            key: "support-email",
+            label: "Support email",
+            description: "The address your support mail is forwarded to, so every email becomes a ticket, and how a new one is answered.",
+            href: "/settings/support-email",
+            icon: Inbox,
+            permission: "settings.manage",
+            module: "helpdesk",
           },
         ],
       },

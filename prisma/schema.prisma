@@ -340,6 +340,7 @@ enum NotificationType {
   TICKET_STATUS_CHANGED
   TICKET_SLA_OVERDUE
   TICKET_COMMENT
+  TICKET_EMAIL
   RENEWAL_EXPIRING
   ORDER_STATUS_CHANGED
   ORDER_WATCHER_ADDED
@@ -684,6 +685,9 @@ model User {
   celebrationsSeen         CelebrationSeen[]
   wishesReceived           Wish[]                     @relation("WishesReceived")
   wishesSent               Wish[]                     @relation("WishesSent")
+  supportEmailsSent        SupportEmail[]             @relation("SupportEmailSentBy")
+  supportEmailsHandled     SupportEmail[]             @relation("SupportEmailHandledBy")
+  supportMailDefaultFor    SupportMailSettings[]      @relation("SupportMailDefaultAssignee")
   ledgerLocks              LedgerLock[]               @relation("LedgerLockBy")
   fiscalYearsClosed        FiscalYearClose[]          @relation("FiscalYearClosedBy")
   bankAccountsCreated      BankAccount[]              @relation("BankAccountCreatedBy")
@@ -1229,6 +1233,7 @@ model Contact {
   emailCheckDetail     String?
   emailCheckedByUserId String?
   emailCheckedBy       User?             @relation("ContactEmailCheckedBy", fields: [emailCheckedByUserId], references: [id])
+  supportEmails        SupportEmail[]
   /**
    * The preference-centre link. Long-lived rather than one-time — somebody has to be able to come
    * back and change their mind — and generated lazily, so a contact nobody has ever mailed has none.
@@ -3315,6 +3320,7 @@ model Ticket {
   feedbackRequests FeedbackRequest[] @relation("FeedbackTicket")
   stickyNotes      StickyNote[]      @relation("StickyNoteTicket")
   calendarEvents     CalendarEvent[]
+  emails             SupportEmail[]
 
   @@index([companyId])
   @@index([status])
@@ -3350,6 +3356,94 @@ model TicketComment {
 
   @@index([ticketId])
   @@map("ticket_comments")
+}
+
+/**
+ * Tickets by email (src/lib/support-mail): the workspace's helpdesk address, <slug>@<INBOUND_MAIL_DOMAIN>.
+ * One row of settings: whether a new ticket is acknowledged by email, and who a new ticket goes to.
+ */
+model SupportMailSettings {
+  id                    String   @id @default("global")
+  acknowledge           Boolean  @default(true)
+  defaultAssigneeUserId String?
+  defaultAssignee       User?    @relation("SupportMailDefaultAssignee", fields: [defaultAssigneeUserId], references: [id], onDelete: SetNull)
+  updatedAt             DateTime @updatedAt
+
+  @@map("support_mail_settings")
+}
+
+enum SupportEmailDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum SupportEmailState {
+  /** Received, and opened a new ticket. */
+  NEW_TICKET
+  /** Received, and added to a ticket's conversation. */
+  REPLY
+  /** Received, and waiting in the Support inbox for somebody to decide where it belongs. */
+  INBOX
+  /** Received and left out: an auto-reply, a bounce, a flood, or a repeat delivery. */
+  IGNORED
+  /** Sent, and accepted by the mail server. */
+  SENT
+  /** Sent, and refused by the mail server. */
+  FAILED
+}
+
+/**
+ * One email in a ticket's conversation, either way — or, with no ticket, one waiting in the Support inbox.
+ * Kept as plain text: an email's HTML is never shown, so nothing in it can run here.
+ */
+model SupportEmail {
+  id           String                @id @default(cuid())
+  direction    SupportEmailDirection
+  state        SupportEmailState
+  ticketId     String?
+  ticket       Ticket?               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  contactId    String?
+  contact      Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  fromAddress  String
+  fromName     String?
+  toAddresses  String[]
+  ccAddresses  String[]
+  subject      String
+  body         String
+  /** The email's own Message-ID: how a reply finds the conversation, and how a repeat delivery is spotted. */
+  messageId    String?               @unique
+  inReplyTo    String?
+  references   String[]
+  /** Why it waits, was left out, or failed. */
+  note         String?
+  sentByUserId String?
+  sentBy       User?                 @relation("SupportEmailSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  handledById  String?
+  handledBy    User?                 @relation("SupportEmailHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+  handledAt    DateTime?
+  createdAt    DateTime              @default(now())
+
+  attachments SupportEmailAttachment[]
+
+  @@index([ticketId, createdAt])
+  @@index([state, createdAt])
+  @@index([fromAddress, createdAt])
+  @@map("support_emails")
+}
+
+/** A file that came with an email, kept as the workspace keeps its other files: in the database. */
+model SupportEmailAttachment {
+  id        String       @id @default(cuid())
+  emailId   String
+  email     SupportEmail @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  dataUrl   String
+  createdAt DateTime     @default(now())
+
+  @@index([emailId])
+  @@map("support_email_attachments")
 }
 
 model Task {

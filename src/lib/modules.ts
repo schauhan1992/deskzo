@@ -542,6 +542,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navGroup: "Support",
     navItems: [
       { href: "/tickets", label: "Tickets", term: { key: "ticket" }, icon: Ticket },
+      // Emails to the helpdesk address nobody could place yet — src/lib/support-mail/receive.ts.
+      { href: "/tickets/inbox", label: "Support inbox", icon: Inbox, permission: "tickets.create" },
       // Which customers take the most support against what they pay — src/lib/support/load.ts.
       { href: "/tickets/load", label: "Support load", icon: Gauge },
     ],

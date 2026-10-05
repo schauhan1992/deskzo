@@ -174,6 +174,35 @@ Openprovider.
 
 Customers' own domains (Settings → Domain) need a certificate each, issued on demand. Traefik doesn't do that, so leave the console's **Offer custom domains** off on Coolify.
 
+## Tickets by email
+
+Every workspace's helpdesk gets an address, `<workspace>@tickets.deskzo.com`, and a company forwards its own
+support mail there (Settings → Support email shows it the steps). Nothing changes on the company's domain. This is
+set up once, here, for every workspace. It needs deskzo.com's DNS on Cloudflare (Phase 2, steps 1 and 2).
+
+1. **Cloudflare → deskzo.com → Email → Email Routing.** Under *Settings*, add the subdomain `tickets.deskzo.com` and
+   let Cloudflare add its MX and SPF records. deskzo.com's own mail is untouched.
+2. **Make a secret** in the application's Terminal: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+3. **Cloudflare → Workers & Pages → Create → Worker.** Name it `deskzo-inbound-email`, replace its code with
+   `deploy/cloudflare/inbound-email-worker.js`, and deploy. Under its *Settings → Variables and Secrets* add:
+   - `DESKZO_INBOUND_URL` = `https://deskzo.com/api/platform/inbound-email` (text);
+   - `DESKZO_INBOUND_SECRET` = the secret from step 2 (type *Secret*).
+4. **Email Routing → Routing rules → Catch-all address** for `tickets.deskzo.com`: action *Send to a Worker*,
+   destination `deskzo-inbound-email`. Enable it.
+5. **On the Deskzo application → Environment Variables,** add, then **Redeploy**:
+
+```ini
+INBOUND_MAIL_DOMAIN=tickets.deskzo.com
+INBOUND_MAIL_SECRET=<the secret from step 2>
+```
+
+6. **Check:** in Deskzo's own workspace, Settings → Support email now shows `deskzo@tickets.deskzo.com`. Send it an
+   email from an address that is a contact: a ticket opens, and the acknowledgement arrives. From any other address,
+   the email waits in Helpdesk → Support inbox. An address that is no workspace bounces.
+
+Replies to customers go out through `PLATFORM_SMTP_URL` as "<Company> Support", from `PLATFORM_MAIL_FROM`'s address,
+with Reply-To the workspace's helpdesk address, so the customer's answer comes back to the ticket.
+
 ## Releases
 
 Push to `main`. If automatic deployment is on, Coolify builds and starts the new version, then runs the

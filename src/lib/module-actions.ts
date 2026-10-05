@@ -177,6 +177,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "task.ts": ["tasks"],
   "tax-reports.ts": ["accounting"],
   "ticket.ts": ["helpdesk"],
+  // Tickets by email: the address and its settings, the Support inbox, replies (src/lib/support-mail).
+  "support-mail.ts": ["helpdesk"],
   "trade-document.ts": ["sales_documents", "purchase_documents"],
   "transporter.ts": ["sales_documents", "it_assets"],
   "user-photo.ts": "core",
