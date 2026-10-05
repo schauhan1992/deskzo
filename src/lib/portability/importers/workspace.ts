@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { notifyUser } from "@/lib/notify";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
-import { findUser, optionalUserRef } from "./lookups";
+import { findUser, names, optionalUserRef } from "./lookups";
 import {
   createRow,
   diff,
@@ -268,7 +268,17 @@ async function resolve(
   const dueAt = r.date("Due");
   if (r.error) return { error: r.error };
 
-  const owner = await optionalUserRef("Owner", r.text("Owner"));
+  // A list kept under somebody who has since left reads back under them: of the lists with this name,
+  // the owner the cell names, active or not (`optionalUserRef`). Naming a leaver on any other list still fails.
+  const ownerCell = r.text("Owner");
+  const sameName = ownerCell
+    ? await db.workbook.findMany({
+        where: { name: { equals: name, mode: "insensitive" } },
+        select: { name: true, owner: { select: { id: true, name: true, email: true, active: true } } },
+      })
+    : [];
+  const held = sameName.find((w) => w.name.toLowerCase() === name.toLowerCase() && w.owner && names(ownerCell, w.owner))?.owner;
+  const owner = await optionalUserRef("Owner", ownerCell, false, held);
   if ("error" in owner) return { error: owner.error };
 
   // Name and owner together, matched case-insensitively because "renewals 90 days" and

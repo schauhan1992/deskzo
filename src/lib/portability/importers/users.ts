@@ -144,7 +144,7 @@ async function loadUser(where: { userSeq: number } | { email: string }) {
       active: true,
       kind: true,
       department: { select: { name: true } },
-      manager: { select: { name: true } },
+      manager: { select: { id: true, name: true, email: true, active: true } },
     },
   });
 }
@@ -260,7 +260,8 @@ async function resolve(row: Record<string, string>, ctx: ImportContext): Promise
   }
 
   // ── The reporting line ────────────────────────────────────────────────────────────────────────
-  const manager = await optionalUserRef("Manager", r.text("Manager"));
+  // The manager they report to today reads back even if that manager has since left.
+  const manager = await optionalUserRef("Manager", r.text("Manager"), false, existing?.manager);
   if ("error" in manager) return { error: manager.error };
   if (existing && manager.value && (await wouldCreateCycle(existing.id, manager.value.id))) {
     return {

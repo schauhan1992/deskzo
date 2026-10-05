@@ -67,9 +67,6 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCa
   const expectedJoining = r.date("Expected joining");
   if (r.error) return { error: r.error };
 
-  const owner = await optionalUserRef("Owner", r.text("Owner"));
-  if ("error" in owner) return { error: owner.error };
-
   // The address is the key, and the database does not enforce it. Two candidate rows really can
   // hold one — somebody who applied again a year later, or a row entered twice. Quietly taking the
   // first of them writes this row's name, status and owner over the other person's record and
@@ -79,7 +76,7 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCa
   const matches = await db.candidate.findMany({
     where: { email },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { id: true },
+    select: { id: true, owner: { select: { id: true, name: true, email: true, active: true } } },
     take: 2,
   });
   if (matches.length > 1) {
@@ -87,6 +84,10 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCa
       error: `More than one candidate already has the address "${email}" (Email). Merge or remove the duplicate first — the address is the only thing a row can be matched on.`,
     };
   }
+
+  // After the match, so the owner the candidate has today reads back even if they have since left.
+  const owner = await optionalUserRef("Owner", r.text("Owner"), false, matches[0]?.owner);
+  if ("error" in owner) return { error: owner.error };
 
   return {
     value: {

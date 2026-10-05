@@ -109,9 +109,6 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedVi
   const company = await requireCompany("Company", r.text("Company"));
   if ("error" in company) return { error: company.error };
 
-  const user = await requireUserRef("By", r.text("By"));
-  if ("error" in user) return { error: user.error };
-
   const purpose = r.enum("Purpose", VisitPurpose);
   const status = r.enum("Status", VisitStatus);
   const scheduledFor = startOf(r.date("Scheduled for"));
@@ -121,8 +118,17 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedVi
 
   const seq = seqFromKey("VIS", r.text("Visit"));
   const day = scheduledFor ? clock.dayRange(clock.dateKey(scheduledFor), clock.dateKey(scheduledFor)) : null;
+  const keyed = seq
+    ? await db.visit.findUnique({ where: { visitSeq: seq }, select: { ...VISIT_SELECT, user: { select: { id: true, name: true, email: true, active: true } } } })
+    : null;
+
+  // After the keyed match, so whoever made the visit reads back even if they have since left: it is a
+  // record of who went (`requireUserRef`). A keyless row is matched on the person, who must be found first.
+  const user = await requireUserRef("By", r.text("By"), false, keyed?.user);
+  if ("error" in user) return { error: user.error };
+
   const existing = seq
-    ? await db.visit.findUnique({ where: { visitSeq: seq }, select: VISIT_SELECT })
+    ? keyed
     : day
       ? // Without a key, the same person at the same account on the same day is the same visit.
         // Matching on nothing would make a keyless migration file double its rows every time

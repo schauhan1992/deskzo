@@ -49,13 +49,19 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCo
   const source = r.enum("Source", CompanySource);
   if (r.error) return { error: r.error };
 
-  const owner = await optionalUserRef("Account manager", r.text("Account manager"));
+  // The account manager it has today reads back even if they have since left (`optionalUserRef`).
+  const normalizedName = normalizeCompanyName(name);
+  const held = await db.company.findUnique({
+    where: { normalizedName },
+    select: { owner: { select: { id: true, name: true, email: true, active: true } } },
+  });
+  const owner = await optionalUserRef("Account manager", r.text("Account manager"), false, held?.owner);
   if ("error" in owner) return { error: owner.error };
 
   return {
     value: {
       name,
-      normalizedName: normalizeCompanyName(name),
+      normalizedName,
       stage,
       source,
       industryName: r.text("Industry") || undefined,

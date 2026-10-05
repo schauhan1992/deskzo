@@ -67,7 +67,7 @@ export async function findUser(nameOrEmail: string, includeInactive = false): Pr
 }
 
 /** Whether a cell names this person, the way `findUser` matches: their email address, or their full name in any case. */
-function names(value: string, person: { name: string; email: string }): boolean {
+export function names(value: string, person: { name: string; email: string }): boolean {
   const cell = value.trim().toLowerCase();
   return cell === person.email.toLowerCase() || cell === person.name.trim().toLowerCase();
 }
@@ -81,8 +81,11 @@ export async function requireUserRef(
   column: string,
   value: string,
   includeInactive = false,
+  /** Who the record has in this column today: see `optionalUserRef`. */
+  current?: UserRef | null,
 ): Promise<Resolved<UserRef>> {
   if (!value.trim()) return { error: `${column} is required.` };
+  if (current && names(value, current)) return { value: current };
   const user = await findUser(value, includeInactive);
   if (!user) return { error: notFound(column, value, includeInactive) };
   return { value: user };

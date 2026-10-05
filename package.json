@@ -73,6 +73,7 @@
     "db:bootstrap": "tsx scripts/bootstrap-admin.ts",
     "check:portability": "tsx scripts/check-portability.ts",
     "check:import": "tsx scripts/check-import.ts",
+    "check:import-leavers": "tsx scripts/check-import-leavers.ts",
     "check:notes": "tsx scripts/check-notes.ts",
     "check:notifications": "tsx scripts/check-notifications.ts",
     "check:analytics": "tsx scripts/check-analytics.ts",
