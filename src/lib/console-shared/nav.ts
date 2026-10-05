@@ -30,6 +30,7 @@ export type ConsolePageKey =
   | "migrations"
   | "devices"
   | "reference"
+  | "mail"
   | "website"
   | "staff"
   | "audit"
@@ -62,6 +63,7 @@ export type NavIconName =
   | "Globe"
   | "Users"
   | "ScrollText"
+  | "Mail"
   | "Settings"
   | "UserRound";
 
@@ -110,6 +112,8 @@ export const PAGE_ROLES: Record<ConsolePageKey, readonly ConsoleRole[] | undefin
   migrations: undefined,
   devices: undefined,
   reference: undefined,
+  // The full addresses every platform mail went to (owner, 5 Oct 2026): those who answer for delivery.
+  mail: ENTER,
   website: WEBSITE_VIEWERS,
   staff: undefined,
   audit: undefined,
@@ -138,6 +142,7 @@ export const CONSOLE_PAGES: readonly ConsolePage[] = [
   { key: "migrations", href: "/migrations", label: "Migrations", group: "platform", icon: "DatabaseZap", badge: "migrations", keywords: ["schema", "database", "behind"], shortcut: "m", inNav: true },
   { key: "devices", href: "/devices", label: "Terminals", group: "platform", icon: "Fingerprint", keywords: ["devices", "biometric", "attendance", "serial"], inNav: true },
   { key: "reference", href: "/reference", label: "Reference data", group: "platform", icon: "Earth", badge: "reference", keywords: ["pin", "postal", "places", "countries", "sync"], inNav: true },
+  { key: "mail", href: "/mail", label: "Mail log", group: "platform", icon: "Mail", roles: PAGE_ROLES.mail, keywords: ["email", "smtp", "delivery", "sent", "bounced", "failed"], inNav: true },
   { key: "website", href: "/website", label: "Website CMS", group: "platform", icon: "Globe", roles: PAGE_ROLES.website, keywords: ["cms", "site", "marketing", "blog", "pages", "leads"], inNav: true },
   { key: "staff", href: "/staff", label: "Staff", group: "admin", icon: "Users", keywords: ["team", "people", "roles", "sessions"], shortcut: "s", inNav: true },
   { key: "audit", href: "/audit", label: "Audit log", group: "admin", icon: "ScrollText", keywords: ["history", "activity", "log"], shortcut: "l", inNav: true },

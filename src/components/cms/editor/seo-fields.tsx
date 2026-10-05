@@ -8,11 +8,14 @@ import type { PostSeo } from "@/lib/cms/types";
 
 /**
  * How a page or post appears in a search result and when shared: its title, description and image,
- * with a snippet showing roughly what a search engine will print, and its three primary keywords.
+ * with a snippet showing roughly what a search engine will print, and its three primary keywords —
+ * and whether search engines, and the site's llms.txt (src/lib/seo/llms.ts), list it at all.
  *
  * Every field carries `data-field-path` (its path in the document, "seo.description"), so a finding
  * in the SEO score panel can bring the cursor to it (src/components/cms/seo/focus-field.ts).
  */
+
+const LLMS_HINT = "llms.txt lists the site's pages for AI assistants. Anything kept out of search engines is left out of it anyway.";
 
 function Snippet({ title, url, description }: { title: string; url: string; description: string }) {
   return (
@@ -68,6 +71,9 @@ export function PageSeoFields({
         <div data-field-path="seo.noindex">
           <CheckField label="Keep this page out of search engines" checked={!!seo.noindex} onChange={(noindex) => onChange({ ...seo, noindex: noindex || undefined })} hint="For pages that should not be found by searching (a thank-you page, a campaign page)." />
         </div>
+        <div data-field-path="seo.noLlms">
+          <CheckField label="Leave this page out of llms.txt" checked={!!seo.noLlms} onChange={(noLlms) => onChange({ ...seo, noLlms: noLlms || undefined })} hint={LLMS_HINT} />
+        </div>
       </div>
     </IssueScope>
   );
@@ -95,6 +101,9 @@ export function PostSeoFields({ seo, onChange, fallbackTitle, fallbackDescriptio
         </div>
         <div data-field-path="seo.noindex">
           <CheckField label="Keep this post out of search engines" checked={!!value.noindex} onChange={(noindex) => set({ ...value, noindex })} />
+        </div>
+        <div data-field-path="seo.noLlms">
+          <CheckField label="Leave this post out of llms.txt" checked={!!value.noLlms} onChange={(noLlms) => set({ ...value, noLlms })} hint={LLMS_HINT} />
         </div>
       </div>
     </IssueScope>

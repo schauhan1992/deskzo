@@ -113,8 +113,9 @@ function checkDescription(raw: unknown, issues: CmsIssue[]): string | null {
 }
 
 /**
- * A category's or tag's { title, description, imageMediaId, keywords } — the image from the media
- * library, the keywords checked as a page's are (validate.ts `checkKeywords`) and stored normalised.
+ * A category's or tag's { title, description, imageMediaId, keywords, noindex } — the image from the
+ * media library, the keywords checked as a page's are (validate.ts `checkKeywords`) and stored
+ * normalised; `noindex` (its archive kept out of search engines and the sitemap) only when true.
  */
 async function checkSeo(raw: unknown, issues: CmsIssue[]): Promise<TermSeo | null> {
   if (raw === undefined || raw === null) return null;
@@ -138,6 +139,8 @@ async function checkSeo(raw: unknown, issues: CmsIssue[]): Promise<TermSeo | nul
   const keywords = checkKeywords(r.keywords);
   for (const p of keywords.issues) issues.push({ path: p.index === null ? "seo.keywords" : `seo.keywords[${p.index}]`, message: p.message });
   if (keywords.keywords.length) out.keywords = keywords.keywords;
+  if (r.noindex === true) out.noindex = true;
+  else if (r.noindex !== undefined && r.noindex !== false) issues.push({ path: "seo.noindex", message: "This must be yes or no." });
   return Object.keys(out).length ? out : null;
 }
 
@@ -539,7 +542,7 @@ export async function auditNewTags(created: CmsTermRef[], me: CmsMe, postId: str
 // ─── The public site ─────────────────────────────────────────────────────────────────────────────
 
 /** An archive's search and sharing details: its own, else its name and description; the image from the library; its primary keywords, when it has some. */
-export type ArchiveSeo = { title: string; description: string | null; image: SitePostCover | null; keywords?: string[] };
+export type ArchiveSeo = { title: string; description: string | null; image: SitePostCover | null; keywords?: string[]; noindex?: boolean };
 
 type ArchiveBase = {
   slug: string;
@@ -712,7 +715,7 @@ export async function blogCategories(): Promise<BlogCategory[]> {
   );
 }
 
-/** For the sitemap: every category and tag archive with at least one post on the site, and when its newest change was. */
+/** For the sitemap: every category and tag archive with at least one post on the site and not kept out of search, and when its newest change was. */
 export async function taxonomySitemapEntries(): Promise<{ path: string; updatedAt: Date }[]> {
   return cachedSiteRead(
     "taxonomy:sitemap",
@@ -720,15 +723,19 @@ export async function taxonomySitemapEntries(): Promise<{ path: string; updatedA
       const now = new Date();
       const [{ cats, stats }, tagLinks] = await Promise.all([
         liveCategoryStats(now),
-        controlDb().sitePostTag.findMany({ where: { post: livePostWhere(now) }, select: { tagId: true, postId: true, tag: { select: { slug: true } }, post: { select: { updatedAt: true } } } }),
+        controlDb().sitePostTag.findMany({ where: { post: livePostWhere(now) }, select: { tagId: true, postId: true, tag: { select: { slug: true, seo: true } }, post: { select: { updatedAt: true } } } }),
       ]);
+      const hiddenCategories = new Set(
+        (await controlDb().siteCategory.findMany({ select: { id: true, seo: true } })).filter((c) => seoOf(c.seo)?.noindex === true).map((c) => c.id),
+      );
       const tagStats: LiveStats = new Map();
       const tagSlugs = new Map<string, string>();
       for (const l of tagLinks) {
+        if (seoOf(l.tag.seo)?.noindex === true) continue;
         addStat(tagStats, l.tagId, l.postId, l.post.updatedAt);
         tagSlugs.set(l.tagId, l.tag.slug);
       }
-      const categories = cats.filter((c) => (stats.get(c.id)?.posts.size ?? 0) > 0).map((c) => ({ path: categoryPath(c.slug), updatedAt: stats.get(c.id)!.updatedAt }));
+      const categories = cats.filter((c) => (stats.get(c.id)?.posts.size ?? 0) > 0 && !hiddenCategories.has(c.id)).map((c) => ({ path: categoryPath(c.slug), updatedAt: stats.get(c.id)!.updatedAt }));
       const tags = [...tagStats].map(([id, s]) => ({ path: tagPath(tagSlugs.get(id)!), updatedAt: s.updatedAt }));
       return [...categories, ...tags].sort((a, b) => a.path.localeCompare(b.path));
     },

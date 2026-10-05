@@ -34,6 +34,13 @@ export function keywordsOf(seo: unknown): string[] {
 /** `keywords` is added only when there are some: an entity without keeps the exact object the site has always built. */
 const withKeywords = (metadata: Metadata, keywords: string[]): Metadata => (keywords.length ? { ...metadata, keywords } : metadata);
 
+/**
+ * `robots` only on an entity kept out of search. Present at all, even undefined, Next lets it replace
+ * the layout's — and the layout's says noindex for every page while the CMS hides the whole site
+ * (page-view.tsx `siteLayoutMetadata`).
+ */
+const robotsFor = (noindex: boolean | undefined): Pick<Metadata, "robots"> => (noindex ? { robots: { index: false, follow: false } } : {});
+
 // ─── The builders ────────────────────────────────────────────────────────────────────────────────
 
 /** The layout's: title template and default, description, Open Graph defaults (page-view.tsx `siteLayoutMetadata`). */
@@ -75,7 +82,7 @@ export function buildPageMetadata(page: Pick<SitePage, "slug" | "seo"> | null, c
         images: image ? [image] : undefined,
       },
       twitter: { card: image ? "summary_large_image" : "summary", title, description },
-      robots: page.seo.noindex ? { index: false, follow: false } : undefined,
+      ...robotsFor(page.seo.noindex),
     },
     keywordsOf(page.seo),
   );
@@ -116,14 +123,14 @@ export function buildPostMetadata(post: PostMetaSource | null): Metadata {
         images: image ? [image] : undefined,
       },
       twitter: { card: image ? "summary_large_image" : "summary", title, description },
-      robots: post.seo?.noindex ? { index: false, follow: false } : undefined,
+      ...robotsFor(post.seo?.noindex),
     },
     keywordsOf(post.seo),
   );
 }
 
 /** An archive's search and sharing details as the site works them out: its own, else its name and description. */
-export type ArchiveSeoView = { title: string; description: string | null; image: { src: string; alt: string; width: number | null; height: number | null } | null };
+export type ArchiveSeoView = { title: string; description: string | null; image: { src: string; alt: string; width: number | null; height: number | null } | null; noindex?: boolean };
 
 /** What an archive's metadata reads — `CategoryArchive` and `TagArchive` (src/lib/cms/taxonomy.ts) are. */
 export type ArchiveMetaSource = { kind: "category" | "tag"; name: string; page: number; canonical: string; seo: ArchiveSeoView };
@@ -131,13 +138,13 @@ export type ArchiveMetaSource = { kind: "category" | "tag"; name: string; page: 
 /**
  * A stored TermSeo worked out as the site does (src/lib/cms/taxonomy.ts `archiveSeo`): its title or
  * the name, its description or the term's, the image already looked up in the library. Carries the
- * keywords through for the metadata.
+ * keywords and "keep out of search engines" through for the metadata.
  */
 export function archiveSeoView(stored: unknown, name: string, description: string | null, image: ArchiveSeoView["image"]): ArchiveSeoView & { keywords?: string[] } {
-  const seo = (stored && typeof stored === "object" ? stored : {}) as { title?: unknown; description?: unknown };
+  const seo = (stored && typeof stored === "object" ? stored : {}) as { title?: unknown; description?: unknown; noindex?: unknown };
   const own = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const keywords = keywordsOf(stored);
-  return { title: own(seo.title) || name, description: own(seo.description) || description || null, image, ...(keywords.length ? { keywords } : {}) };
+  return { title: own(seo.title) || name, description: own(seo.description) || description || null, image, ...(keywords.length ? { keywords } : {}), ...(seo.noindex === true ? { noindex: true } : {}) };
 }
 
 /** An archive page's (blog/archive-view.tsx `archiveMetadata`); null is the site's "Not found". */
@@ -156,6 +163,7 @@ export function buildArchiveMetadata(archive: ArchiveMetaSource | null, settings
       alternates: { canonical: archive.canonical },
       openGraph: { type: "website", siteName: settings.siteName, title, description, url: archive.canonical, images },
       twitter: { card: images ? "summary_large_image" : "summary", title, description },
+      ...robotsFor(archive.seo.noindex),
     },
     keywordsOf(archive.seo),
   );

@@ -111,6 +111,7 @@ export async function sendContactRequest(input: ContactInput): Promise<ContactRe
   }
   try {
     await sendPlatformMail({
+      type: "ALERTS",
       to,
       subject: oneLine(`Contact form: ${TOPIC_TITLES[topic]} — ${company}`),
       text: [

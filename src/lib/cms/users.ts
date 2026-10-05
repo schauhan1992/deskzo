@@ -60,7 +60,7 @@ async function mailSetupLink(to: string, name: string, url: string, why: "new" |
         ? "Your website CMS account has been switched back on. Choose a new password here — the link works once, for three days:"
         : "Here is a link to choose a new password for the website CMS. It works once, for three days:";
   try {
-    await sendPlatformMail({ to, subject: "Your website CMS account", text: [`Hello ${name},`, "", opening, "", url, "", "If you did not expect this, you can ignore it."].join("\n") });
+    await sendPlatformMail({ type: "ACCOUNT", to, subject: "Your website CMS account", text: [`Hello ${name},`, "", opening, "", url, "", "If you did not expect this, you can ignore it."].join("\n") });
     return true;
   } catch (err) {
     console.error(`[cms] a setup email could not be sent: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);

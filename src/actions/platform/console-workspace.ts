@@ -11,6 +11,7 @@ import { ROLE_LIMITS, applyRoleLimits, roleLimits, workspaceDatabaseExists } fro
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
 import { requestSupportAccess } from "@/lib/platform/support-request";
+import { sendWorkspaceAdminReset } from "@/lib/platform/admin-reset";
 import { PIN_CAP, TIMELINE_KINDS, workspaceTimeline, type TimelineKind, type TimelinePage } from "@/lib/platform/workspace-data";
 
 /**
@@ -212,6 +213,18 @@ export async function consoleRequestSupportAccess(tenantId: string, reason: stri
     const { at } = await requestSupportAccess(staff, idOf(tenantId, GONE), String(reason ?? ""));
     revalidateConsole();
     return { at: at.toISOString() };
+  });
+}
+
+/**
+ * A password reset link to the workspace's super admin, at their own address in the workspace — staff
+ * never see it (src/lib/platform/admin-reset.ts). Owners, admins and support; once every ten minutes.
+ */
+export async function consoleSendAdminReset(tenantId: string): Promise<ConsoleResult<{ name: string; to: string }>> {
+  return asStaff(ENTER, async (staff) => {
+    const sent = await sendWorkspaceAdminReset(staff, idOf(tenantId, GONE));
+    revalidateConsole();
+    return sent;
   });
 }
 

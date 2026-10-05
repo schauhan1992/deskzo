@@ -48,6 +48,7 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
   let failure: string | null = null;
   try {
     await sendPlatformMail({
+      type: "SUPPORT",
       to: input.to,
       cc,
       subject,

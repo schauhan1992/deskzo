@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/console/kit/empty-state";
 import { SearchField, SelectFilter, ToggleFilter } from "@/components/console/kit/filter-controls";
 import { FilterBar, FilterChips, ViewTabs } from "@/components/console/kit/filters";
 import { PageHeader } from "@/components/console/kit/page-header";
+import { HiddenSiteBanner } from "@/components/cms/common/hidden-site-banner";
 import { Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill, TONE_DOT } from "@/components/console/kit/status";
@@ -102,6 +103,7 @@ export default async function CmsSeoPage({ searchParams }: PageProps<"/platform-
       />
 
       <div className="space-y-6">
+        <HiddenSiteBanner admin={caps.admin} />
         <section aria-label="Summary" className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
           <div className="col-span-2 md:col-span-1 [&>*]:h-full">
             <KpiTile

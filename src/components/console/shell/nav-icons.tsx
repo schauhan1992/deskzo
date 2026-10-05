@@ -20,6 +20,7 @@ import {
   Megaphone,
   Rocket,
   ScrollText,
+  Mail,
   Settings,
   Ticket,
   UserPlus,
@@ -59,6 +60,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   Globe,
   Users,
   ScrollText,
+  Mail,
   Settings,
   UserRound,
 };

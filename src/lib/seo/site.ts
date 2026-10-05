@@ -129,7 +129,7 @@ export function siteChecks(entries: SiteScoreEntry[], meta: SiteMeta): CheckResu
       "AI search crawlers allowed",
       meta.aiSearchCrawlersAllowed,
       6,
-      meta.aiSearchCrawlersAllowed ? "robots.txt lets AI search crawlers read the site; training crawlers stay blocked." : "robots.txt blocks AI search crawlers, so AI search can't read or cite any page.",
+      meta.aiSearchCrawlersAllowed ? "robots.txt lets AI search crawlers read the site." : "robots.txt blocks AI search crawlers, so AI search can't read or cite any page.",
       "Site-wide, in code: allow the AI search crawlers in src/app/robots.ts and keep the training crawlers blocked (owner decision S-D2).",
       { status: "FAIL", severity: "critical" },
     ),

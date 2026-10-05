@@ -25,6 +25,7 @@ import { Meter } from "@/components/console/charts/meter";
 import { ActivityFeed } from "@/components/console/kit/activity-feed";
 import { EmptyState } from "@/components/console/kit/empty-state";
 import { PageHeader } from "@/components/console/kit/page-header";
+import { HiddenSiteBanner } from "@/components/cms/common/hidden-site-banner";
 import { Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { TONE_PILL } from "@/components/console/kit/status";
@@ -90,6 +91,7 @@ export default async function CmsDashboardPage() {
       />
 
       <div className="space-y-6">
+        <HiddenSiteBanner admin={caps.admin} />
         <GettingStarted setup={data.setup} caps={caps} />
 
         <KpiGrid columns={4}>

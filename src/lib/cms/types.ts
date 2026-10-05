@@ -218,6 +218,32 @@ export type SettingsDetail = {
   publishedAt: Date | null;
 };
 
+// ─── Search & AI ─────────────────────────────────────────────────────────────────────────────────
+// What crawlers may do on the public site (Settings › Search & AI, admins only; src/lib/cms/search-policy.ts).
+// Not a draft: a change is live as soon as it is saved.
+
+export type SearchPolicy = {
+  /** The whole public site kept out of search engines: every page noindex, no sitemap, no llms.txt, no AI crawler. */
+  hideSite: boolean;
+  /** AI search crawlers (ChatGPT search, Claude, Perplexity…) may read the site — S-D2's default. */
+  aiSearch: boolean;
+  /** AI training crawlers (GPTBot, ClaudeBot, CCBot, Google-Extended…) may read the site. */
+  aiTraining: boolean;
+  /** /llms.txt is served. */
+  llmsTxt: boolean;
+  /** llms.txt's opening line; empty, the site's search description. */
+  llmsSummary: string;
+};
+
+export const DEFAULT_SEARCH_POLICY: SearchPolicy = { hideSite: false, aiSearch: true, aiTraining: false, llmsTxt: true, llmsSummary: "" };
+export const LLMS_SUMMARY_MAX = 500;
+
+/** The policy as it applies: `hidden` is `hideSite`, or forced by a staging installation (PLATFORM_ENV=staging), which is never indexed. */
+export type EffectiveSearchPolicy = SearchPolicy & { hidden: boolean; forcedHidden: boolean };
+
+/** The Search & AI page's data: the policy, who changed it last, and where the site's own files are. */
+export type SearchPolicyDetail = { policy: SearchPolicy; effective: EffectiveSearchPolicy; updatedAt: Date | null; updatedBy: string | null; siteOrigin: string };
+
 // ─── Dashboard ───────────────────────────────────────────────────────────────────────────────────
 
 export type CmsDashboard = {
@@ -238,7 +264,7 @@ export type CmsDashboard = {
  * A post's search and sharing details. Each falls back: title → the post's title, description → the excerpt, image → the cover.
  * `keywords`: its primary keywords, keyword 1 first (at most three, no repeats); absent when none.
  */
-export type PostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; keywords?: string[] };
+export type PostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; noLlms?: boolean; keywords?: string[] };
 
 /**
  * The blocks a post's body may use: no second h1 (hero, pageHeader) and no forms or live pricing.
@@ -322,7 +348,7 @@ export type CmsTermRef = { id: string; slug: string; name: string };
  * A category's or tag's own search and sharing details. Each falls back: title → the name, description → the description.
  * `keywords`: its archive's primary keywords, keyword 1 first (at most three, no repeats); absent when none.
  */
-export type TermSeo = { title?: string; description?: string; imageMediaId?: string; keywords?: string[] };
+export type TermSeo = { title?: string; description?: string; imageMediaId?: string; keywords?: string[]; noindex?: boolean };
 
 /** Category and tag slugs: lower-case words and hyphens, at most 60 (the database's CHECKs). */
 export const TERM_SLUG_MAX = 60;
@@ -566,6 +592,7 @@ export const CMS_AUDIT_ACTIONS = [
   "post.delete",
   "settings.save",
   "settings.publish",
+  "settings.search",
   "media.upload",
   "media.alt",
   "media.delete",

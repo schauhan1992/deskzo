@@ -308,6 +308,8 @@ export type SiteSeo = {
   ogImage?: Href;
   /** Kept out of search engines (the signup page). */
   noindex?: boolean;
+  /** Left out of /llms.txt (src/lib/seo/llms.ts); a noindex page is left out anyway. */
+  noLlms?: boolean;
   /**
    * The page's primary keywords, keyword 1 first (at most three; trimmed, no repeats): for the SEO
    * Intelligence engine's placement checks and `<meta name="keywords">`. Absent when there are none —

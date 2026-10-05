@@ -69,6 +69,7 @@ export const CMS_ACTION_LABELS: Record<CmsAuditAction, { label: string; tone: To
   "post.delete": { label: "Deleted a post", tone: "danger" },
   "settings.save": { label: "Edited the settings draft", tone: "neutral" },
   "settings.publish": { label: "Published the site settings", tone: "success" },
+  "settings.search": { label: "Changed the search & AI settings", tone: "warning" },
   "media.upload": { label: "Uploaded an image", tone: "brand" },
   "media.alt": { label: "Changed an image's alt text", tone: "neutral" },
   "media.delete": { label: "Deleted an image", tone: "danger" },
@@ -138,6 +139,8 @@ export function entityHref(
       return opts.canOpenRedirects ? CMS_ROUTES.redirects : null;
     case "settings":
       if (row.action === "security.two-factor-policy") return opts.canOpenSecurity ? CMS_ROUTES.security : null;
+      // Search & AI is an admin's page, as Security is.
+      if (row.action === "settings.search") return opts.canOpenSecurity ? CMS_ROUTES.search : null;
       return CMS_ROUTES.settings;
     default:
       return null;
@@ -252,6 +255,17 @@ export function describeActivity(row: Pick<CmsAuditRow, "action" | "detail">, cl
       return { subject: null, note: d.twoFactor === true ? "With two-factor" : "Password only" };
     case "security.two-factor-policy":
       return { subject: null, note: d.mode === "required" ? "Now required for everybody" : d.mode === "optional" ? "Now optional" : null };
+    case "settings.search": {
+      const said: Record<string, (on: boolean) => string> = {
+        hideSite: (on) => (on ? "site hidden from search" : "site visible in search"),
+        aiSearch: (on) => (on ? "AI search allowed" : "AI search refused"),
+        aiTraining: (on) => (on ? "AI training allowed" : "AI training refused"),
+        llmsTxt: (on) => (on ? "llms.txt on" : "llms.txt off"),
+      };
+      const fields = Array.isArray(d.fields) ? d.fields.filter((f): f is string => typeof f === "string") : [];
+      const parts = fields.map((f) => (f in said && typeof d[f] === "boolean" ? said[f]!(d[f] as boolean) : f === "llmsSummary" ? "llms.txt summary" : f));
+      return { subject: null, note: parts.length ? parts.join(", ") : null };
+    }
     case "settings.save": {
       const fields = Array.isArray(d.fields) ? d.fields.filter((f): f is string => typeof f === "string").map((f) => SETTINGS_FIELD_NAMES[f] ?? f) : [];
       return { subject: null, note: fields.length ? fields.join(", ") : null };

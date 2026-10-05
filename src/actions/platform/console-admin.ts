@@ -127,6 +127,7 @@ export async function consoleMyPasswordLink(): Promise<ConsoleResult<{ sentTo: s
     revalidateConsole();
     try {
       await sendPlatformMail({
+        type: "ACCOUNT",
         to: staff.email,
         subject: "Choose a new console password",
         text: [

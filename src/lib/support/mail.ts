@@ -87,7 +87,7 @@ export function acknowledgementMail(r: RequestMailFacts): PlatformMail {
     "",
     `${r.brandName} support`,
   ].join("\n");
-  return { to: r.requester.email, subject: subjectLine(`We've received your request ${ref}: ${r.subject}`), text, ...(address(r.supportEmail) ? { replyTo: address(r.supportEmail) } : {}) };
+  return { type: "SUPPORT", to: r.requester.email, subject: subjectLine(`We've received your request ${ref}: ${r.subject}`), text, ...(address(r.supportEmail) ? { replyTo: address(r.supportEmail) } : {}) };
 }
 
 /** To the support address: "[SR-1042][URGENT] {workspace}: {subject}", with the console link. */
@@ -109,7 +109,7 @@ export function notificationMail(r: RequestMailFacts): PlatformMail {
     `Open it in the console: ${consoleSupportUrl(r.number)}`,
     "Answer from the console, so the reply is kept on the request.",
   ].join("\n");
-  return { to: r.supportEmail, subject: subjectLine(`[${ref}][${r.priority}] ${r.workspace.name}: ${r.subject}`), text };
+  return { type: "SUPPORT", to: r.supportEmail, subject: subjectLine(`[${ref}][${r.priority}] ${r.workspace.name}: ${r.subject}`), text };
 }
 
 export type ReplyMailFacts = {
@@ -137,7 +137,7 @@ export function replyMail(r: ReplyMailFacts): PlatformMail {
     `Your request: ${ref} — ${subjectLine(r.subject)}`,
     "To answer, reply to this email and keep the reference in the subject.",
   ].join("\n");
-  return { to: r.requester.email, subject: subjectLine(`Re: [${ref}] ${r.subject}`), text, ...(address(r.supportEmail) ? { replyTo: address(r.supportEmail) } : {}) };
+  return { type: "SUPPORT", to: r.requester.email, subject: subjectLine(`Re: [${ref}] ${r.subject}`), text, ...(address(r.supportEmail) ? { replyTo: address(r.supportEmail) } : {}) };
 }
 
 /** Why a send failed, for the console and the log: secrets masked, addresses left out, one short line. */

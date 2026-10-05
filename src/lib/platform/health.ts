@@ -1,3 +1,4 @@
+import { mailConfigured } from "@/lib/platform/mail/store";
 import { compactNumber, dayKeyLabel, plural } from "@/lib/console-shared/format";
 import { jobLabel, schemaLabel } from "@/lib/console-shared/labels";
 import { redactSecrets } from "@/lib/console-shared/redact";
@@ -285,7 +286,7 @@ export type SecurityFacts = {
   chosen: boolean;
   /** Active staff without an authenticator — counted only while two-factor is required. */
   withoutAuthenticator: number | null;
-  /** PLATFORM_SMTP_URL is set: platform mail is sent, not written to platform-outbox/. */
+  /** Platform mail is sent, not written to platform-outbox/: Settings › Mail has a default account, or PLATFORM_SMTP_URL is set. */
   mailServer: boolean;
   /** PLATFORM_CONSOLE_IP_ALLOWLIST is set. */
   allowlist: boolean;
@@ -301,7 +302,7 @@ export async function securityFacts(): Promise<SecurityFacts> {
     twoFactor: policy.mode,
     chosen: policy.chosen,
     withoutAuthenticator,
-    mailServer: Boolean(process.env.PLATFORM_SMTP_URL?.trim()),
+    mailServer: await mailConfigured(),
     allowlist: Boolean(process.env.PLATFORM_CONSOLE_IP_ALLOWLIST?.trim()),
     trustProxy: process.env.TRUST_PROXY?.trim() === "1",
   };
@@ -466,8 +467,8 @@ function presence(): Presence[] {
     row("CONTROL_DATABASE_URL", "Control plane database", control, control ? null : "The console and every workspace lookup need it.", { required: true }),
     row("REFERENCE_DATABASE_URL", "Reference database", reference, reference ? null : "Address lookups by PIN and place are off."),
     row("PLATFORM_MASTER_KEY", "Platform key", platformKey, platformKey ? null : "Workspace keys and saved settings cannot be sealed or opened.", { required: true }),
-    row("PLATFORM_SMTP_URL", "Mail server", smtp, smtp ? null : "Mail is written to platform-outbox/ instead of being sent."),
-    row("PLATFORM_MAIL_FROM", "Mail sender", mailFrom, mailFrom ? null : "Mail goes out from the default no-reply address."),
+    row("PLATFORM_SMTP_URL", "Mail server (fallback)", smtp, smtp ? "Used while Settings › Mail has no default account." : "Optional: mail accounts are set in Settings › Mail. Without one, or this, mail is written to platform-outbox/."),
+    row("PLATFORM_MAIL_FROM", "Mail sender (fallback)", mailFrom, mailFrom ? "Used with the server setting above." : "Accounts in Settings › Mail name their own sender."),
     row("PLATFORM_TICK_SECRET", "Platform tick secret", tickSecret, tickSecret ? null : "The platform tick refuses every call, so it never runs."),
     row("PLATFORM_PROVISIONER_URL", "Provisioner login", provisioner, provisioner ? null : "New databases are made with the main database server's login — for development only."),
     row(

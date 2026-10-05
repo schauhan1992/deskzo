@@ -113,8 +113,12 @@ sh deploy/make-secrets.sh
 
 It prints five lines: `AUTH_SECRET`, `PLATFORM_MASTER_KEY` and the three tick secrets. Paste them into the Developer view as well, and **copy `PLATFORM_MASTER_KEY` to two safe places offline**: without it no workspace can ever be read again. Run it once only, because it prints new values every time.
 
-Mail: Azure blocks port 25, so set `PLATFORM_SMTP_URL` to a provider on 587 or 465, e.g.
-`smtp://user%40deskzo.com:password@smtp.office365.com:587`. An `@` in the user name is written `%40`.
+Mail: set it up in the console once it is running — **Settings › Mail**. Add an account (Microsoft 365 by OAuth,
+Amazon SES, Elastic Email, SendGrid, Brevo, Mailgun, Postmark or any SMTP server), press **Send test**, then
+choose it as the default and, if you like, a different account for each type of mail (Account & security,
+Billing, Support, Alerts). Every send is in the console's **Mail log**. Azure blocks port 25: every provider
+there uses 587, 465 or 2525. `PLATFORM_SMTP_URL` (e.g. `smtps://user%40deskzo.com:password@smtp.example.com:465`)
+is only the fallback while Settings › Mail has no default account, and can be left empty.
 
 Save, then **Redeploy**.
 

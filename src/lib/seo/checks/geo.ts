@@ -374,7 +374,7 @@ export const GEO_CHECKS: readonly CheckDef[] = [
     applicableTo: ALL_KINDS,
     indexedOnly: true,
     evaluate(input, w) {
-      if (input.site.aiSearchCrawlersAllowed) return pass(w, "AI search crawlers (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot and others) may read the site; AI training crawlers stay blocked.");
+      if (input.site.aiSearchCrawlersAllowed) return pass(w, "AI search crawlers (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot and others) may read the site.");
       return fail(
         "robots.txt blocks AI search crawlers (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot), so AI search can't read or cite this page.",
         "Site-wide, in code: allow the AI search crawlers in src/app/robots.ts and keep the training crawlers blocked (owner decision S-D2). Nothing in the CMS changes it.",

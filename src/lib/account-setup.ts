@@ -128,7 +128,7 @@ export async function sendSetupInvitation(user: { id: string; name: string; emai
     return { emailed: false };
   }
   try {
-    await sendPlatformMail({ to: user.email, ...setupInvitationMail({ name: user.name, workspace, url, linking }) });
+    await sendPlatformMail({ type: "ACCOUNT", to: user.email, ...setupInvitationMail({ name: user.name, workspace, url, linking }) });
     return { emailed: true };
   } catch (err) {
     console.error(`[setup] a setup email could not be sent: ${codeOf(err)}`);

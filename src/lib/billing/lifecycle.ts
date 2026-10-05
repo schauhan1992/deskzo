@@ -213,7 +213,7 @@ async function remind(tenant: { id: string; slug: string; name: string; to: stri
     what === "trial"
       ? [`Your free trial ends on ${dateText(at, clock)}.`, "", "Choose a plan to keep everything as it is:", billingUrl(tenant.slug)]
       : [`${tenant.name} will be held on ${dateText(at, clock)} unless the subscription is paid — nothing is deleted, but nobody can work in it until it is.`, "", "Settle it here:", billingUrl(tenant.slug)];
-  await sendPlatformMail({ to: tenant.to, subject, text: body.join("\n") });
+  await sendPlatformMail({ type: "BILLING", to: tenant.to, subject, text: body.join("\n") });
   return true;
 }
 

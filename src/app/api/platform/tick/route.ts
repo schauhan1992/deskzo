@@ -1,3 +1,4 @@
+import { purgeDeliveries } from "@/lib/platform/mail/log";
 import { NextResponse } from "next/server";
 import { runBillingLifecycle } from "@/lib/billing/lifecycle";
 import { onPlatformHost } from "@/lib/billing/platform-request";
@@ -90,6 +91,12 @@ async function handle(request: Request) {
         failed.push(...domains.failed.map((f) => `domains: ${f}`));
       } catch (err) {
         failed.push(`domains: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      // The Mail log keeps 90 days (src/lib/platform/mail/log.ts).
+      try {
+        await purgeDeliveries(now);
+      } catch (err) {
+        failed.push(`mail-log: ${err instanceof Error ? err.message : String(err)}`);
       }
       await setSetting("billing.dailyRanOn", today, "tick");
       daily = { reconciled: reconciled.read, failed, usage: usage.length, revenue, domains };

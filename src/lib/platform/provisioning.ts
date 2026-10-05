@@ -274,6 +274,7 @@ async function runJob(claimed: ClaimedJob): Promise<void> {
 
   const host = subdomainHost(tenant.slug);
   await sendPlatformMail({
+    type: "ACCOUNT",
     to: job.ownerEmail,
     subject: `${tenant.name} is ready`,
     text: [

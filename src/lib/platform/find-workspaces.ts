@@ -165,6 +165,7 @@ export async function mailWorkspacesTo(email: string): Promise<number> {
   if (!found.length) return 0;
   const { siteName } = await getSiteSettings();
   await sendPlatformMail({
+    type: "ACCOUNT",
     to: email,
     subject: `Your ${siteName} workspaces`,
     text: [

@@ -694,7 +694,9 @@ async function main() {
     const notIndexed = { index: false, follow: false };
     // Today's metadata, frozen: the bodies of page-view.tsx `sitePageMetadata`, blog/page.tsx, blog/[slug]/page.tsx and
     // archive-view.tsx `archiveMetadata` as they were written before the site moved onto src/lib/seo's builders. Every
-    // entity without keywords must still get exactly this, key for key.
+    // entity without keywords must still get exactly this, key for key — with one change since (5 Oct 2026): `robots` is
+    // there only for an entity kept out of search. Present but undefined, Next let it replace the layout's, which says
+    // noindex for every page while the CMS hides the whole site; the HTML of an indexable page is the same either way.
     const before = {
       page(page: SitePage | null, ctx: { settings: SiteSettings; trialDays: number }): Meta {
         if (!page) return { title: links.fill(ctx.settings.notFound.heading, ctx), robots: { index: false, follow: false } };
@@ -715,7 +717,7 @@ async function main() {
             images: image ? [image] : undefined,
           },
           twitter: { card: image ? "summary_large_image" : "summary", title, description },
-          robots: page.seo.noindex ? { index: false, follow: false } : undefined,
+          ...(page.seo.noindex ? { robots: { index: false, follow: false } } : {}),
         };
       },
       blogIndex(settings: SiteSettings): Meta {
@@ -741,7 +743,7 @@ async function main() {
             images: image ? [image] : undefined,
           },
           twitter: { card: image ? "summary_large_image" : "summary", title, description },
-          robots: post.seo?.noindex ? { index: false, follow: false } : undefined,
+          ...(post.seo?.noindex ? { robots: { index: false, follow: false } } : {}),
         };
       },
       archive(archive: Archive | null, settings: SiteSettings): Meta {

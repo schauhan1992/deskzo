@@ -408,7 +408,7 @@ async function sendUnlinkNotice(member: Removed, why: string, closed: boolean): 
         ? `If you didn't expect this, ask an administrator of ${tenant.name}.`
         : `If you didn't expect this, sign in to ${tenant.name} directly and change your password, or ask its administrator.`,
     ].join("\n");
-    await sendPlatformMail({ to: member.email, subject: "A workspace was unlinked", text });
+    await sendPlatformMail({ type: "ACCOUNT", to: member.email, subject: "A workspace was unlinked", text });
   } catch (err) {
     // The unlink stands; only the notice is lost.
     console.warn(`[linked] could not send an unlink notice: ${errorCode(err)}`);

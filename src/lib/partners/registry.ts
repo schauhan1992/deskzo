@@ -187,7 +187,7 @@ export async function mailPartnerUsers(partnerId: string, who: { roles?: readonl
     });
     for (const user of users) {
       try {
-        await sendPlatformMail({ to: user.email, subject, text: [`Hello ${user.name},`, "", ...lines].join("\n") });
+        await sendPlatformMail({ type: "ACCOUNT", to: user.email, subject, text: [`Hello ${user.name},`, "", ...lines].join("\n") });
         sent += 1;
       } catch (err) {
         console.error(`[partners] "${subject}" could not be sent: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);

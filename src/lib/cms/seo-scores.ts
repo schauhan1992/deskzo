@@ -51,7 +51,8 @@ import {
   type SeoSiteContext,
   type SiteScoreEntry,
 } from "@/lib/seo";
-import { aiSearchCrawlersAllowed, PUBLIC_SITE_DISALLOW } from "@/lib/seo/crawlers";
+import { searchPolicy, searchPolicyChangedAt } from "@/lib/cms/search-policy";
+import { aiSearchCrawlersAllowed, publicSiteRobotsRules, PUBLIC_SITE_DISALLOW, type CrawlerPolicy } from "@/lib/seo/crawlers";
 
 /**
  * SEO Intelligence's score cache (control `seo_scores`): the latest calculation of every page, post,
@@ -81,7 +82,7 @@ import { aiSearchCrawlersAllowed, PUBLIC_SITE_DISALLOW } from "@/lib/seo/crawler
  * Loading is by kind, never by entity: one query each for the settings, pages, posts (with their
  * term links), categories, tags, redirects and the cached rows — then, per batch, the bodies of the
  * posts being scored and every library image the batch shows, one query each. The site around the
- * entities (settings, the AI-crawler policy from src/lib/seo/crawlers.ts, the redirects, and every
+ * entities (settings, the CMS's crawler policy — src/lib/cms/search-policy.ts — the redirects, and every
  * live entity's title, description and H1 for the duplicate checks) is built once per call.
  *
  * Scoring never runs on a public request: only the CMS calls this (its dashboard's actions, and
@@ -230,7 +231,10 @@ type Spec = SeoEntityRef & {
 type Snapshot = {
   now: Date;
   settings: SiteSettings;
+  /** When the settings were last published — or the CMS's crawler policy changed, if later: either can change every score. */
   settingsPublishedAt: Date | null;
+  /** What robots.txt lets in now (Settings › Search & AI). */
+  crawlers: CrawlerPolicy;
   signupOpen: boolean;
   trialDays: number;
   specs: Spec[];
@@ -271,7 +275,7 @@ async function loadCache(): Promise<Map<string, CacheRow>> {
 async function loadSnapshot(options: { cache: boolean }): Promise<Snapshot> {
   const now = new Date();
   const db = controlDb();
-  const [settingsRow, open, days, pages, posts, categoryRows, tagRows, redirectRules, cache] = await Promise.all([
+  const [settingsRow, open, days, pages, posts, categoryRows, tagRows, redirectRules, cache, crawlers, crawlersChangedAt] = await Promise.all([
     db.siteSettings.findUnique({ where: { key: "site" }, select: { published: true, publishedAt: true } }),
     signupOpen(),
     trialDays(),
@@ -281,6 +285,8 @@ async function loadSnapshot(options: { cache: boolean }): Promise<Snapshot> {
     db.siteTag.findMany({ select: TERM_SELECT }),
     db.siteRedirect.findMany({ where: { enabled: true }, select: { id: true, fromPath: true, toUrl: true, match: true } }),
     options.cache ? loadCache() : Promise.resolve(new Map<string, CacheRow>()),
+    searchPolicy(),
+    searchPolicyChangedAt(),
   ]);
   const categories = new Map(categoryRows.map((c) => [c.id, c]));
   const tags = new Map(tagRows.map((t) => [t.id, { ...t, parentId: null }]));
@@ -395,7 +401,8 @@ async function loadSnapshot(options: { cache: boolean }): Promise<Snapshot> {
   return {
     now,
     settings: mergeSiteSettings(settingsRow?.published),
-    settingsPublishedAt: settingsRow?.published ? (settingsRow.publishedAt ?? null) : null,
+    settingsPublishedAt: latest([settingsRow?.published ? settingsRow.publishedAt : null, crawlersChangedAt]),
+    crawlers,
     signupOpen: open,
     trialDays: days,
     specs,
@@ -482,7 +489,7 @@ function baseContext(snap: Snapshot): SeoSiteContext {
     trialDays: snap.trialDays,
     signupOpen: snap.signupOpen,
     origin: siteOrigin(),
-    aiSearchCrawlersAllowed: aiSearchCrawlersAllowed(),
+    aiSearchCrawlersAllowed: aiSearchCrawlersAllowed(publicSiteRobotsRules(snap.crawlers)),
     emitsJsonLd: SITE_EMITS_JSON_LD,
     placeholderTagline: DEFAULT_SITE_SETTINGS.tagline,
     robotsDisallow: PUBLIC_SITE_DISALLOW,
@@ -891,6 +898,7 @@ const noindexOf = (spec: Spec): boolean => {
   const src = spec.source;
   if (src.kind === "page") return src.doc.seo?.noindex === true;
   if (src.kind === "post") return isObj(src.post.seo) && src.post.seo.noindex === true;
+  if (src.kind === "category" || src.kind === "tag") return isObj(src.term.seo) && src.term.seo.noindex === true;
   return false;
 };
 

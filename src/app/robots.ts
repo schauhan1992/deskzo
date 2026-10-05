@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
+import { searchPolicy } from "@/lib/cms/search-policy";
 import { closedRobotsRules, publicSiteRobotsRules } from "@/lib/seo/crawlers";
 import { classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
 
@@ -25,12 +26,16 @@ import { classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
  * — the bare domain and www. (src/app/platform-site) — which exists to be found: search engines may
  * crawl it, except signing up, and are pointed at its sitemap. AI search crawlers may read it on the
  * same terms (owner decision S-D2: an AI answer that quotes the site links to it); AI training
- * crawlers and the SEO tools' crawlers stay shut out there too.
+ * crawlers and the SEO tools' crawlers stay shut out there too. The two AI choices are the CMS's since
+ * 5 Oct 2026 (Settings › Search & AI); while it keeps the whole site out of search, no AI crawler is let
+ * in and no sitemap is named — search engines still fetch pages, to read their noindex.
  */
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const host = requestHost(await headers());
   if (typeof host === "string" && classifyHost(host).kind === "root") {
-    return { rules: publicSiteRobotsRules(), sitemap: `${protocolFor(host)}://${host}/sitemap.xml` };
+    const policy = await searchPolicy();
+    const rules = publicSiteRobotsRules(policy);
+    return policy.hidden ? { rules } : { rules, sitemap: `${protocolFor(host)}://${host}/sitemap.xml` };
   }
   return { rules: closedRobotsRules() };
 }

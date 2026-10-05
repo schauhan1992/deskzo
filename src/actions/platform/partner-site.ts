@@ -79,6 +79,7 @@ async function mailSales(application: ApplicationInput, countryName: string): Pr
   }
   try {
     await sendPlatformMail({
+      type: "ALERTS",
       to,
       subject: oneLine(`Partner application: ${application.companyName}`),
       replyTo: application.contactEmail,

@@ -6,6 +6,7 @@ import { cmsCreateCategory, cmsUpdateCategory } from "@/actions/cms/categories";
 import { cmsCreateTag, cmsUpdateTag } from "@/actions/cms/tags";
 import { LibraryGrid } from "@/components/cms/common/media-select";
 import { TextAreaField, TextField } from "@/components/cms/common/fields";
+import { CheckField } from "@/components/cms/editor/fields";
 import { issuesByPath, useCmsAction } from "@/components/cms/common/use-cms-action";
 import { termDraftInput, type TermDraftSource } from "@/components/cms/seo/editor-input";
 import { focusFieldPath } from "@/components/cms/seo/focus-field";
@@ -53,7 +54,7 @@ export type TermKind = "category" | "tag";
 type TermRow = CategoryRow | TagRow;
 
 /** What the dialog holds while it is open. `keywords`: the three boxes, box for box (a blank one kept while a later one is filled). */
-export type TermDraft = { name: string; slug: string; description: string; parentId: string; seoTitle: string; seoDescription: string; image: string; keywords: string[] };
+export type TermDraft = { name: string; slug: string; description: string; parentId: string; seoTitle: string; seoDescription: string; image: string; keywords: string[]; noindex: boolean };
 type Draft = TermDraft;
 
 const SEO_TITLE_MAX = 120;
@@ -72,6 +73,7 @@ export const draftOf = (row: TermRow | null, parentId: string | null): Draft => 
   seoDescription: row?.seo?.description ?? "",
   image: row?.seo?.imageMediaId ? `/media/${row.seo.imageMediaId}` : "",
   keywords: [...(row?.seo?.keywords ?? [])],
+  noindex: row?.seo?.noindex === true,
 });
 
 /** What is sent as the term's `seo`: each part trimmed, the keywords box for box (the server stores them without blanks). */
@@ -83,6 +85,7 @@ function seoOf(d: Draft): TermSeo | null {
   if (id) seo.imageMediaId = id;
   const keywords = keywordsFromSlots(d.keywords.map((k) => k.trim()));
   if (keywords) seo.keywords = keywords;
+  if (d.noindex) seo.noindex = true;
   return Object.keys(seo).length ? seo : null;
 }
 
@@ -380,6 +383,14 @@ export function TermDialog({
                 </div>
               </div>
               {server["seo.imageMediaId"] && <p className="text-xs text-danger">{server["seo.imageMediaId"]}</p>}
+            </div>
+            <div data-field-path="seo.noindex">
+              <CheckField
+                label={`Keep this ${words.one} out of search engines`}
+                checked={draft.noindex}
+                onChange={(v) => set("noindex", v)}
+                hint="Its page stays on the site; search engines are asked not to list it, and the sitemap leaves it out."
+              />
             </div>
           </fieldset>
 

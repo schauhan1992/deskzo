@@ -1,7 +1,7 @@
 "use server";
 
 import { spawn } from "node:child_process";
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
@@ -37,7 +37,9 @@ import {
   type SignupIssues,
 } from "@/lib/signup-fields";
 import { clientIpFrom } from "@/lib/client-ip";
-import { PLATFORM_DOMAIN, protocolFor, requestHost } from "@/lib/tenancy/host";
+import { protocolFor, requestHost } from "@/lib/tenancy/host";
+import { newSignupCode, signupCodeMail } from "@/lib/platform/signup-code";
+import { SIGNUP_BROWSER_MS } from "@/lib/console-shared/signup-browser";
 import { subdomainHost } from "@/lib/tenancy/registry";
 import { templateOf } from "@/lib/industry-templates/catalogue";
 
@@ -228,7 +230,7 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   if (formError || firstIssue(issues) || !email || !country) return refused(issues, formError);
   const referralVia = referral ? ((REFERRAL_VIA as readonly string[]).includes(String(form.referralVia)) ? String(form.referralVia) : "typed") : null;
 
-  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const code = newSignupCode();
   const secret = randomBytes(24).toString("base64url");
   const head = await headers();
   const pending = await controlDb().pendingSignup.create({
@@ -257,14 +259,11 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
     sameSite: "lax",
     path: "/",
     secure: typeof host === "string" && protocolFor(host) === "https",
-    maxAge: 24 * 60 * 60,
+    // The signup's day: staff's "Send a new code" is offered for as long (src/lib/console-shared/signup-browser.ts).
+    maxAge: SIGNUP_BROWSER_MS / 1000,
   });
 
-  await sendPlatformMail({
-    to: email.address,
-    subject: `Your code for ${slug}.${PLATFORM_DOMAIN}: ${code}`,
-    text: [`Hello ${ownerName},`, "", `Your code to finish setting up ${companyName} is ${code}.`, "", "It works for 15 minutes. If you didn't ask for this, ignore it."].join("\n"),
-  });
+  await sendPlatformMail({ type: "ACCOUNT", to: email.address, ...signupCodeMail({ ownerName, companyName, slug, code, minutes: CODE_TTL_MINUTES }) });
   return { ok: true, data: { email: email.address } };
 }
 

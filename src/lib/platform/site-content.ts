@@ -173,27 +173,40 @@ export async function getSitePage(slug: string): Promise<SitePage | null> {
   return published?.page ?? DEFAULT_SITE_PAGES.find((page) => page.slug === slug) ?? null;
 }
 
-export type SitePageSummary = { slug: string; path: string; title: string; indexable: boolean; updatedAt: Date | null };
+/** `description`: its search description, tokens ({siteName}…) not yet filled. `inLlms`: not left out of llms.txt by an editor. */
+export type SitePageSummary = { slug: string; path: string; title: string; description: string; indexable: boolean; inLlms: boolean; updatedAt: Date | null };
 
-/** Every page — the built-in ones (as published, or their defaults) and those the CMS added — for the sitemap. */
+function pageSummary(page: SitePage, updatedAt: Date | null): SitePageSummary {
+  const seo = page.seo ?? ({} as SitePage["seo"]);
+  return {
+    slug: page.slug,
+    path: sitePath(page.slug),
+    title: page.title,
+    description: typeof seo.description === "string" ? seo.description : "",
+    indexable: !seo.noindex,
+    inLlms: !seo.noLlms,
+    updatedAt,
+  };
+}
+
+/** Every page — the built-in ones (as published, or their defaults) and those the CMS added — for the sitemap and llms.txt. */
 export async function listSitePages(): Promise<SitePageSummary[]> {
   const published = await publishedPages();
   const builtins = DEFAULT_SITE_PAGES.map((page) => {
     const cms = published.get(page.slug);
-    const shown = cms?.page ?? page;
-    return { slug: page.slug, path: sitePath(page.slug), title: shown.title, indexable: !shown.seo.noindex, updatedAt: cms?.publishedAt ?? null };
+    return pageSummary({ ...(cms?.page ?? page), slug: page.slug }, cms?.publishedAt ?? null);
   });
   const added = [...published.values()]
     .filter(({ page }) => !DEFAULT_SITE_PAGES.some((d) => d.slug === page.slug))
     .sort((a, b) => a.page.slug.localeCompare(b.page.slug))
-    .map(({ page, publishedAt }) => ({ slug: page.slug, path: sitePath(page.slug), title: page.title, indexable: !page.seo.noindex, updatedAt: publishedAt }));
+    .map(({ page, publishedAt }) => pageSummary(page, publishedAt));
   return [...builtins, ...added];
 }
 
 // ─── Posts ───────────────────────────────────────────────────────────────────────────────────────
 
 /** `keywords`: the post's primary keywords (0–3), absent when none — read tolerantly (`normaliseKeywords`), as older posts have none. */
-export type SitePostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; keywords?: string[] };
+export type SitePostSeo = { title?: string; description?: string; ogImage?: string; noindex?: boolean; noLlms?: boolean; keywords?: string[] };
 export type SitePostCover = { src: string; alt: string; width: number | null; height: number | null };
 /** A category or tag as the site links to it: its name and its archive's address. */
 export type SiteTermLink = { slug: string; name: string; path: string };
@@ -300,13 +313,19 @@ export async function getPublishedPost(slug: string): Promise<SitePost | null> {
   );
 }
 
-/** Every live post's address and last change, for the sitemap (at most 5,000). */
-export async function listSitePosts(): Promise<{ path: string; updatedAt: Date; indexable: boolean }[]> {
+export type SitePostListing = { path: string; title: string; description: string; updatedAt: Date; indexable: boolean; inLlms: boolean };
+
+/** Every live post, newest first, for the sitemap and llms.txt (at most 5,000): its SEO description, else its excerpt. */
+export async function listSitePosts(): Promise<SitePostListing[]> {
   return cached(
     "posts:sitemap",
     async () => {
-      const rows = await controlDb().sitePost.findMany({ where: liveWhere(new Date()), orderBy: { publishAt: "desc" }, take: 5000, select: { slug: true, updatedAt: true, seo: true } });
-      return rows.map((r) => ({ path: `/blog/${r.slug}`, updatedAt: r.updatedAt, indexable: !(isObj(r.seo) && r.seo.noindex === true) }));
+      const rows = await controlDb().sitePost.findMany({ where: liveWhere(new Date()), orderBy: { publishAt: "desc" }, take: 5000, select: { slug: true, title: true, excerpt: true, updatedAt: true, seo: true } });
+      return rows.map((r) => {
+        const seo = isObj(r.seo) ? r.seo : {};
+        const own = typeof seo.description === "string" ? seo.description.trim() : "";
+        return { path: `/blog/${r.slug}`, title: r.title, description: own || r.excerpt || "", updatedAt: r.updatedAt, indexable: seo.noindex !== true, inLlms: seo.noLlms !== true };
+      });
     },
     () => [],
   );

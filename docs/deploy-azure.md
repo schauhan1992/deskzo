@@ -75,7 +75,7 @@ It writes `.env` with every secret generated. Then:
 1. **Copy `PLATFORM_MASTER_KEY` from `.env` to two safe places offline** — a password manager, and paper in a sealed envelope. Without it no workspace can ever be read again (runbook §4).
 2. Fill in the rest with `nano .env`:
    - `ACME_EMAIL` — where Let's Encrypt writes about certificates.
-   - `PLATFORM_SMTP_URL` — the platform's mail: signup codes, setup links, billing reminders. Azure blocks port 25, so use a provider on 587 or 465: `smtp://user:password@smtp.office365.com:587` or `smtps://user:password@smtp.zoho.in:465`. An `@` in the user name is written `%40`.
+   - `PLATFORM_SMTP_URL` — optional: the platform's mail is set up in the console, Settings › Mail. This is only the fallback while that has no default account. Azure blocks port 25, so use a provider on 587 or 465, e.g. `smtps://user:password@smtp.zoho.in:465`. An `@` in the user name is written `%40`.
    - `PLATFORM_SALES_EMAIL` — where the website's contact form is mailed.
    - `PLATFORM_CONSOLE_IP_ALLOWLIST` — your office's and home's addresses, so nobody else reaches the console's sign-in.
 

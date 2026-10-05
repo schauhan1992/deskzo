@@ -43,7 +43,7 @@ Set in the server's environment (pm2 ecosystem file or systemd unit), never in t
 | `TRUST_PROXY_HOPS` | with a chain of proxies (1) | How many proxies of ours append to X-Forwarded-For — 2 for a CDN in front of nginx; the caller is that many entries from the end |
 | `PLATFORM_PROVISIONER_URL` | yes | A role with CREATEDB and CREATEROLE, on the maintenance database |
 | `PLATFORM_WARM_POOL` | no (2) | Databases made ahead of signups |
-| `PLATFORM_SMTP_URL`, `PLATFORM_MAIL_FROM` | yes | The platform's own mail (signup codes, billing reminders); unset, mail is written to `platform-outbox/` |
+| `PLATFORM_SMTP_URL`, `PLATFORM_MAIL_FROM` | no | The fallback for the platform's own mail while the console's Settings › Mail has no default account; with neither, mail is written to `platform-outbox/` |
 | `PLATFORM_SALES_EMAIL` | yes, before launch | Where the public website's contact form is mailed (through `PLATFORM_SMTP_URL`; the visitor's address leads the message, as the mailer sets no reply-to). Unset, a contact request is **not mailed anywhere**: the visitor is still thanked and the server logs `[site] a contact request arrived, but PLATFORM_SALES_EMAIL is not set`. Every request is also kept in the CMS's leads inbox (§10), mailed or not. The address the site *shows* is separate — the CMS's site settings |
 | `PLATFORM_CONSOLE_IP_ALLOWLIST` | recommended | CIDRs allowed to reach the console (needs `TRUST_PROXY=1`) |
 | `MARKETING_TICK_SECRET`, `BACKUP_TICK_SECRET`, `PLATFORM_TICK_SECRET` | yes | §1 |
@@ -220,7 +220,7 @@ Then set `TENANCY_POOLER_URL=postgresql://127.0.0.1:6432`. Only the app's querie
 - [ ] `cms.<domain>` in DNS and the proxy's certificate; the first CMS admin invited; CMS two-factor **required** (CMS → Settings → Security, or `npm run cms:user -- two-factor required`); the placeholders (tagline, display domain, sales email) replaced and published.
 - [ ] PgBouncer in front of workspace databases (§7); the three schedulers running (§1); the worker under pm2.
 - [ ] Gateways: live keys entered, webhooks set, one test-mode checkout run end to end first (docs: billing is proven only against fakes so far).
-- [ ] `PLATFORM_SMTP_URL` set; a signup code and a billing reminder received.
+- [ ] Settings › Mail: a default account that passes **Send test**; a signup code and a billing reminder received, and both in the Mail log.
 - [ ] Contact Support (§11): console → Settings → Support has a real support address in place of the placeholder `support@yourdomain.com`, a mailbox somebody reads; the helpline and hours if there is one; `SUPPORT_DIR` on a disk that is backed up.
 - [ ] Before the first partner (§12): `partners.<domain>` in DNS and the proxy's certificate; at Stripe, the endpoint pinned to API version `2024-06-20` and `charge.refunded` and `credit_note.*` among its events, at Razorpay `payment.refunded` and `refund.processed` (§2); the programme's settings looked at in the console → Partners (two-factor **required**, the statement day, deal protection, the clawback window, the two-person rule — and the referral cookie left off); `PLATFORM_SALES_EMAIL` set, as applications are mailed there; the first partner created with its terms, and its first admin invited (the partner's page → Invite partner admin, or `npm run partners -- user create`); the accountant's answers to the tax questions in §12.
 - [ ] Privacy documents reviewed by counsel and published (docs/privacy).
@@ -264,7 +264,7 @@ Anyone signed in to a workspace can ask the platform for help with the **Contact
 | Screen recording | on | Off removes the Record button everywhere |
 | Keep files after closing | 365 days (30–3650) | How long a closed request's files are kept (below) |
 
-**Where the mail goes.** All of it goes through the platform's mailer (`PLATFORM_SMTP_URL`; unset, into `platform-outbox/`):
+**Where the mail goes.** All of it goes through the platform's mailer — the account the console's Settings › Mail names for its type, else the default's, else `PLATFORM_SMTP_URL`, else into `platform-outbox/` — and every send is in the console's Mail log:
 
 - each new request is announced to the support email, `[SR-1042][URGENT] {workspace}: {subject}`, with a link to it in the console;
 - the person who sent it gets an acknowledgement with its number, Reply-To the support email;

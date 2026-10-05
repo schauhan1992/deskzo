@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
 import { Banner } from "@/components/console/kit/banner";
 import { EnvBadge } from "@/components/console/kit/env-badge";
 import { PageHeader } from "@/components/console/kit/page-header";
@@ -29,6 +29,8 @@ import { configurationPresence, securityFacts } from "@/lib/platform/health";
 import { linkedSignInSetting } from "@/lib/platform/linked/groups";
 import { autoDeprovision, customDomainsOffered, gatewayModes, settingsOverview, signupOpen, staffTwoFactorPolicy, trialDays, type SettingRow } from "@/lib/platform/settings";
 import { lastTick, type TickSummary } from "@/lib/platform/tick-summary";
+import { MAIL_STREAMS } from "@/lib/console-shared/mail-catalogue";
+import { mailSetup } from "@/lib/platform/mail/store";
 import { SUPPORT_SETTING_KEYS, getSupportSettings } from "@/lib/support/settings";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -41,6 +43,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "custom-domains", label: "Custom domains", icon: Globe },
   { id: "time-zone", label: "Time zone", icon: Clock },
   { id: "support", label: "Support", icon: LifeBuoy },
+  { id: "mail", label: "Mail", icon: Mail },
   { id: "environment", label: "Environment", icon: Server },
 ];
 
@@ -61,7 +64,7 @@ export default async function ConsoleSettingsPage() {
   // First: signed out, the page ends here with a redirect to /login; support and read-only staff get "not found".
   const staff = await consoleStaff(PAGE_ROLES.settings);
   const caps = capsFor(staff.role);
-  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone] = await Promise.all([
+  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
@@ -75,6 +78,8 @@ export default async function ConsoleSettingsPage() {
     linkedSignInState(),
     customDomainsOffered(),
     consoleZone(),
+    // Null until the release's migration has made the mail tables.
+    mailSetup().catch(() => null),
   ]);
   const env = platformEnv();
   const production = env.key === "production";
@@ -291,6 +296,20 @@ export default async function ConsoleSettingsPage() {
           </Panel>
 
           <Panel
+            id="mail"
+            title="Mail"
+            description="The accounts the platform's own mail goes through, and which one each type of mail uses."
+            footer={
+              <Link href="/settings/mail" className={LINK}>
+                {caps.owner ? "Manage mail accounts" : "See mail accounts"}
+                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+              </Link>
+            }
+          >
+            {mail ? <MailSummary mail={mail} /> : <p className="text-sm text-muted">{"Mail settings appear once this release's migrations have run."}</p>}
+          </Panel>
+
+          <Panel
             id="environment"
             title="Environment"
             description="What this installation was started with. Values stay on the server; only whether each is set is shown."
@@ -403,6 +422,34 @@ function LastTick({ tick, by }: { tick: TickSummary | null; by: string | null })
         <p className="mt-1 text-sm text-muted">No run recorded yet. The scheduler should call /api/platform/tick every hour.</p>
       )}
     </div>
+  );
+}
+
+/** Where each type of mail goes now, in one line each. */
+function MailSummary({ mail }: { mail: Awaited<ReturnType<typeof mailSetup>> }) {
+  const name = (id: string | null) => (id ? (mail.connections.find((c) => c.id === id)?.name ?? null) : null);
+  const base = mail.routes.find((r) => r.stream === "DEFAULT")?.connectionId ?? null;
+  const fallback = mail.serverFallback ? "the server setting (PLATFORM_SMTP_URL)" : "nowhere — written to platform-outbox/";
+  return (
+    <DefinitionList
+      columns={1}
+      items={MAIL_STREAMS.map((s) => {
+        const own = mail.routes.find((r) => r.stream === s.key)?.connectionId ?? null;
+        const through = name(own) ?? (s.key === "DEFAULT" ? null : name(base));
+        return {
+          term: s.label,
+          value: through ? (
+            <Stated tone="success" label={through}>
+              {own || s.key === "DEFAULT" ? "Its own account." : "The default's account."}
+            </Stated>
+          ) : (
+            <Stated tone={mail.serverFallback ? "info" : "warning"} label="No account">
+              {`Sent through ${fallback}.`}
+            </Stated>
+          ),
+        };
+      })}
+    />
   );
 }
 

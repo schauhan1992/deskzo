@@ -2210,3 +2210,118 @@ model WorkspaceEmail {
   @@index([emailHmac])
   @@map("workspace_emails")
 }
+
+// ─── Platform mail (owner, 5 Oct 2026) ───────────────────────────────────────────────────────────
+// Console › Settings › Mail (src/lib/platform/mail): the accounts the platform's own mail is sent
+// through, which one each type of mail uses, and every send, sent or not.
+
+enum MailProvider {
+  MICROSOFT_365
+  AWS_SES
+  ELASTIC_EMAIL
+  SENDGRID
+  BREVO
+  MAILGUN
+  POSTMARK
+  SMTP
+}
+
+/// TLS: encrypted from the first byte (port 465). STARTTLS: plain, then upgraded — and refused if the server won't (587, 2525).
+enum MailSecurity {
+  TLS
+  STARTTLS
+}
+
+/// The four types of platform mail, and the default every type falls back to.
+enum MailStream {
+  DEFAULT
+  ACCOUNT
+  BILLING
+  SUPPORT
+  ALERTS
+}
+
+/// SENT through an account; FAILED with why; OUTBOX: no account and no PLATFORM_SMTP_URL, written to platform-outbox/.
+enum MailDeliveryStatus {
+  SENT
+  FAILED
+  OUTBOX
+}
+
+/// A mail account the platform sends through. Its password, API key or client secret is sealed
+/// ("mail-connection") and never leaves the server again.
+model MailConnection {
+  id            String       @id @default(cuid())
+  /// The console's name for it, 1–80 (a CHECK in the migration).
+  name          String
+  provider      MailProvider
+  host          String
+  port          Int
+  security      MailSecurity
+  /// The SMTP login; for Microsoft 365, the mailbox it sends as.
+  username      String?
+  secretCipher  String?
+  /// Microsoft 365 only: the Entra directory (tenant) and the app that signs in.
+  msTenantId    String?
+  msClientId    String?
+  /// What the account sends from unless a type of mail names its own.
+  fromAddress   String
+  fromName      String?
+  lastTestAt    DateTime?
+  lastTestOk    Boolean?
+  /// Why the last test failed, secrets masked, one line.
+  lastTestError String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  /// The staff member's id.
+  updatedBy     String
+
+  routes MailRoute[]
+
+  @@map("mail_connections")
+}
+
+/// Which account one type of mail goes through, and as whom. Nothing set: the default's.
+model MailRoute {
+  stream       MailStream      @id
+  connectionId String?
+  /// Removing an account sends its types back to the default.
+  connection   MailConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  fromName     String?
+  fromAddress  String?
+  replyTo      String?
+  updatedAt    DateTime        @updatedAt
+  updatedBy    String
+
+  @@map("mail_routes")
+}
+
+/// One platform mail, sent or not — with the addresses in full (owner's choice), kept 90 days (the
+/// platform tick's daily chores drop older rows). `via` names the account as it was then, so the row
+/// still reads after the account is removed.
+model MailDelivery {
+  id           String             @id @default(cuid())
+  at           DateTime           @default(now())
+  stream       MailStream
+  status       MailDeliveryStatus
+  connectionId String?
+  via          String
+  toAddresses  String[]
+  ccAddresses  String[]
+  /// Every address it went to, lower-case, space-separated — what the log's search looks in.
+  addresses    String             @default("")
+  fromAddress  String
+  /// The subject, unless the mail carries a code in it — then with the code hidden.
+  subject      String
+  error        String?
+  messageId    String?
+  /// How long the server took to accept it.
+  ms           Int?
+  /// A test sent from the console.
+  test         Boolean            @default(false)
+
+  @@index([at])
+  @@index([stream, at])
+  @@index([status, at])
+  @@map("mail_deliveries")
+}

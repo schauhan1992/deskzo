@@ -461,7 +461,7 @@ async function mailOwner(domain: DomainRow, problems: string[], brand: string): 
       },
       clockOfTenant(tenant),
     );
-    await sendPlatformMail({ to, subject: mail.subject, text: mail.text });
+    await sendPlatformMail({ type: "ALERTS", to, subject: mail.subject, text: mail.text });
   }
   // Written even without an owner's address, so the next day does not try again.
   await audit(SWEEP_ACTOR, "tenant.domain.mail", { key, host: domain.host, kind, failingSince: domain.failingSince.toISOString(), mailed: !!to }, domain.tenantId);

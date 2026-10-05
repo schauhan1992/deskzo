@@ -100,7 +100,7 @@ export function seoField(input: SeoInput, what: "title" | "description" | "ogIma
   if (what === "slug") return input.isBuiltin ? undefined : "slug";
   if (isArchive(input)) {
     if (what === "ogImage") return "seo.imageMediaId";
-    if (what === "noindex" || what === "ogTitle" || what === "ogDescription") return undefined;
+    if (what === "ogTitle" || what === "ogDescription") return undefined;
   }
   if (input.kind === "post" && (what === "ogTitle" || what === "ogDescription")) return undefined;
   return `seo.${what}`;

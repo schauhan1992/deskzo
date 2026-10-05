@@ -10,6 +10,7 @@ import { fill, resolveAction } from "@/components/site/links";
 import { fillNav } from "@/components/site/nav";
 import { applicationsShown, directoryShown } from "@/components/site/partners/programme";
 import { Breadcrumbs, ButtonLink, Container } from "@/components/site/ui";
+import { searchPolicy } from "@/lib/cms/search-policy";
 import { getSitePage, getSiteSettings, sitePath, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
 import { aiSearchCrawlersAllowed } from "@/lib/seo/crawlers";
 import { inputFromPage, siteContextFrom } from "@/lib/seo/extract";
@@ -160,10 +161,15 @@ export function joinKeywords(metadata: Metadata): Metadata {
   return Array.isArray(metadata.keywords) && metadata.keywords.length ? { ...metadata, keywords: metadata.keywords.join(", ") } : metadata;
 }
 
-/** The site's title template, description and Open Graph defaults — the layout's metadata. */
+/**
+ * The site's title template, description and Open Graph defaults — the layout's metadata. While the
+ * CMS keeps the whole site out of search (Settings › Search & AI), noindex too: every page inherits it,
+ * as no page's own metadata names `robots` unless it is itself kept out (src/lib/seo/metadata.ts).
+ */
 export async function siteLayoutMetadata(): Promise<Metadata> {
-  const [ctx, origin] = await Promise.all([renderContext(), requestOrigin()]);
-  return buildLayoutMetadata(ctx, origin);
+  const [ctx, origin, policy] = await Promise.all([renderContext(), requestOrigin(), searchPolicy()]);
+  const metadata = buildLayoutMetadata(ctx, origin);
+  return policy.hidden ? { ...metadata, robots: { index: false, follow: false } } : metadata;
 }
 
 /** A page's title, description, keywords, Open Graph and canonical address; kept out of search engines when its content says so. */

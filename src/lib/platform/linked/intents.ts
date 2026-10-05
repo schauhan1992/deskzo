@@ -445,7 +445,7 @@ async function sendLinkedNotice(recipients: { address: string; workspace: Tenant
     if (!key || seen.has(key) || isSupportAddress(key)) continue;
     seen.add(key);
     try {
-      await sendPlatformMail({ to: address.trim(), subject: "Your workspaces were linked", text: textOn(workspace) });
+      await sendPlatformMail({ type: "ACCOUNT", to: address.trim(), subject: "Your workspaces were linked", text: textOn(workspace) });
     } catch (err) {
       console.warn(`[linked] could not send a link notice: ${errorCode(err)}`);
     }

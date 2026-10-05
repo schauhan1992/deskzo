@@ -446,7 +446,7 @@ export async function sendPasswordResetEmail(id: string): Promise<ActionResult<{
   await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "User", entityId: target.id, entityLabel: `${target.name} — sent a password reset email` });
 
   try {
-    await sendPlatformMail({ to: target.email, ...adminResetMail({ name: target.name, workspace: tenant.name, admin: admin.name, url }) });
+    await sendPlatformMail({ type: "ACCOUNT", to: target.email, ...adminResetMail({ name: target.name, workspace: tenant.name, admin: admin.name, url }) });
     return { ok: true, data: { emailed: true } };
   } catch {
     if (await mayPassOnSetupLink(admin, target.id)) return { ok: true, data: { emailed: false, resetUrl: url } };
@@ -497,7 +497,7 @@ export async function resetPasswordToTemporary(id: string): Promise<ActionResult
     summary: `${target.name}'s password was reset to a temporary one by ${admin.name}`,
   });
   try {
-    await sendPlatformMail({ to: target.email, ...temporaryResetNotice({ name: target.name, workspace: (await currentTenant()).name, admin: admin.name }) });
+    await sendPlatformMail({ type: "ACCOUNT", to: target.email, ...temporaryResetNotice({ name: target.name, workspace: (await currentTenant()).name, admin: admin.name }) });
   } catch {
     // The notice is a courtesy: the reset has happened, and the admin is passing the password on.
   }

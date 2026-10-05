@@ -27,8 +27,8 @@ const PATH = "/signups";
  * Signups (spec §3.6): how far people get between starting to sign up and paying, over a range of
  * India's days (the last 30 unless one is picked), and the ones who got stuck on the way — for staff
  * to follow up with. Owners, admins, support and billing may open it; only managers see the address
- * a signup came from, and for everybody else the loader does not read it at all. Nothing here
- * changes anything.
+ * a signup came from, and for everybody else the loader does not read it at all. The one change
+ * made here: a new code for a signup whose address was never confirmed (src/lib/platform/signup-code.ts).
  */
 export default async function ConsoleSignupsPage({ searchParams }: PageProps<"/platform-console/signups">) {
   const staff = await consoleStaff(PAGE_ROLES.signups);

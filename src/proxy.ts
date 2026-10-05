@@ -14,6 +14,7 @@ import { HOST_MISMATCH, classifyHost, protocolFor, requestHost } from "@/lib/ten
 import { referralCookieDays } from "@/lib/partners/settings";
 import { redirectablePath } from "@/lib/cms/redirect-rules";
 import { matchRedirect, recordHit } from "@/lib/cms/redirects";
+import { searchPolicy } from "@/lib/cms/search-policy";
 import { tenantForKind } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
 import type { Tenant } from "@/lib/tenancy/state";
@@ -208,8 +209,8 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
             ? "/platform-partners"
             : null;
   if (!tenant && platformFolder && !inPlatformFolder) {
-    // The public site's sitemap is src/app/sitemap.ts, at the root like robots.txt — not in the folder.
-    if (platformFolder === "/platform-site" && pathname === "/sitemap.xml") return harden(NextResponse.next() as NextResponse, pathname);
+    // The public site's sitemap and llms.txt are src/app/sitemap.ts and src/app/llms.txt, at the root like robots.txt — not in the folder.
+    if (platformFolder === "/platform-site" && (pathname === "/sitemap.xml" || pathname === "/llms.txt")) return harden(NextResponse.next() as NextResponse, pathname);
     /**
      * The CMS's redirects (src/lib/cms/redirects.ts) — on the public site's own hosts only (the bare
      * domain and www.), before the rewrite into its folder, for a GET or a HEAD. /api never gets here
@@ -249,11 +250,15 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
      * One query is let through: a lone `?page=N` on the blog and its archives. It carries no code or
      * token, and page N is a real page with its own canonical address — noindexing it would hide older
      * posts' only links from anything that follows pages rather than reading the sitemap.
+     *
+     * While the CMS keeps the whole site out of search (Settings › Search & AI; always on staging), no
+     * page is: harden()'s noindex stays on every one. The policy is this process's copy, read again
+     * within 30 seconds of a change (src/lib/cms/search-policy.ts).
      */
     const preview = /^\/preview(\/|$)/.test(pathname);
     const blogPage = /^\/blog(\/|$)/.test(pathname) && /^\?page=[1-9][0-9]{0,4}$/.test(req.nextUrl.search);
     if (platformFolder === "/platform-site" && preview) response.headers.set("cache-control", "no-store");
-    if (platformFolder === "/platform-site" && !preview && !/^\/signup(\/|$)/.test(pathname) && (!req.nextUrl.search || blogPage)) {
+    if (platformFolder === "/platform-site" && !preview && !/^\/signup(\/|$)/.test(pathname) && (!req.nextUrl.search || blogPage) && !(await searchPolicy()).hidden) {
       response.headers.set("X-Robots-Tag", "index, follow");
     }
     /**

@@ -43,7 +43,7 @@ export type CmsNavPage = {
 
 /**
  * Each page's gate, for `cmsPage(CMS_PAGE_ROLES.x)` on the page itself. Sub-routes gate themselves:
- * /settings/security is ADMIN only; /pages/[id] and /posts/[id] follow their list. Categories and
+ * /settings/search and /settings/security are ADMIN only; /pages/[id] and /posts/[id] follow their list. Categories and
  * tags are read by everybody (the post editor's pickers) and changed by editors and admins; the
  * redirect manager is theirs alone.
  */
@@ -88,6 +88,8 @@ export const CMS_ROUTES = {
   seoDetail: (type: "page" | "post" | "category" | "tag" | "blog", key: string) => `/seo?${new URLSearchParams({ open: `${type}:${key}` }).toString()}`,
   settings: "/settings",
   navigation: "/settings/navigation",
+  /** Settings › Search & AI, admins only: the whole site in or out of search, AI crawlers, llms.txt. */
+  search: "/settings/search",
   redirects: "/redirects",
   security: "/settings/security",
   users: "/users",

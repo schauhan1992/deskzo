@@ -63,6 +63,7 @@ export async function requestPasswordReset(input: string): Promise<{ ok: true }>
   });
   const link = `${await tenantOrigin()}/reset-password?t=${encodeURIComponent(token)}`;
   await sendPlatformMail({
+    type: "ACCOUNT",
     to: email,
     subject: "Set a new password",
     text: [`Hello ${user.name},`, "", "Somebody — hopefully you — asked to set a new password for this account. The link works for an hour, once:", "", link, "", "If it wasn't you, ignore this; nothing has changed."].join("\n"),

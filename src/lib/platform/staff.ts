@@ -57,6 +57,7 @@ export async function createStaff(input: { email: string; name: string; role: St
   const setupUrl = await issuePasswordSetup(user.id);
   await audit(actor, "staff.create", { email, role: input.role });
   await sendPlatformMail({
+    type: "ACCOUNT",
     to: email,
     subject: "Your console account",
     text: [`Hello ${name},`, "", "You have been given an account on the platform console. Choose your password here — the link works once, for three days:", "", setupUrl, "", "At your first sign-in you will set up two-factor authentication."].join("\n"),
@@ -187,6 +188,7 @@ export async function reactivateStaff(userId: string, actor: string): Promise<{ 
   const setupUrl = await issuePasswordSetup(userId);
   await audit(actor, "staff.reactivate", { email: user.email });
   await sendPlatformMail({
+    type: "ACCOUNT",
     to: user.email,
     subject: "Your console account",
     text: [

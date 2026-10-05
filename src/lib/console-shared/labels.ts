@@ -1,3 +1,4 @@
+import { MAIL_PROVIDERS, MAIL_STREAMS } from "@/lib/console-shared/mail-catalogue";
 import { formatMoney } from "@/lib/billing/money";
 import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import type {
@@ -528,6 +529,13 @@ export const ACTION_LABELS: Record<string, string> = {
   "tenant.domain.mail": "Owner told about a failing address",
   "domains.settings": "Custom domains setting changed",
   "console.time-zone": "Console time zone changed",
+  "mail.account.add": "Mail account added",
+  "signup.code.resend": "New signup code sent",
+  "tenant.admin-reset": "Password reset sent to its super admin",
+  "mail.account.change": "Mail account changed",
+  "mail.account.remove": "Mail account removed",
+  "mail.routes": "Mail routing changed",
+  "mail.test": "Test mail sent",
   "bulk.apply-standing": "Billing rules applied to a batch",
   "bulk.trial-extend": "Trials extended in bulk",
   "export.invoices": "Invoices exported",
@@ -665,15 +673,15 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
     prefixes: ["tenant.plans", "tenant.module-override", "tenant.limit-override", "tenant.trial", "tenant.billing-details", "plan.", "billing.", "bulk.apply-standing", "bulk.trial-extend", "export.invoices"],
   },
   { key: "staff", label: "Staff", prefixes: ["staff."] },
-  { key: "support", label: "Support", prefixes: ["support."] },
+  { key: "support", label: "Support", prefixes: ["support.", "tenant.admin-reset"] },
   { key: "setup", label: "Setup and migrations", prefixes: ["provision.", "warm-pool.", "migrate.", "tenant.migration", "tenant.role-limits", "tenant.adopt"] },
   { key: "reference", label: "Reference data", prefixes: ["reference."] },
-  { key: "invites", label: "Invitations", prefixes: ["invite."] },
+  { key: "invites", label: "Invitations", prefixes: ["invite.", "signup.code"] },
   { key: "names", label: "Workspace names", prefixes: ["names."] },
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
-  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings", "console.time-zone"] },
+  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings", "console.time-zone", "mail."] },
 ];
 
 export function categoryOf(action: string): AuditCategoryKey | null {
@@ -687,6 +695,9 @@ export function categoryOf(action: string): AuditCategoryKey | null {
 }
 
 const ACTION_TONES: Record<string, Tone> = {
+  "mail.account.change": "warning",
+  "mail.account.remove": "warning",
+  "mail.routes": "warning",
   "tenant.suspend": "warning",
   "tenant.resume": "success",
   "tenant.deprovision": "danger",
@@ -895,6 +906,19 @@ export function auditSummary(action: string, detail: unknown, clock: Clock): str
       return typeof d.offered === "boolean" ? (d.offered ? "offered to workspaces" : "not offered") : null;
     case "console.time-zone":
       return change("zone", d.from, d.to);
+    case "signup.code.resend":
+      return text(d.slug);
+    case "tenant.admin-reset":
+      return typeof d.to === "string" ? `to ${d.to}` : null;
+    case "mail.account.add":
+    case "mail.account.remove":
+      return join([text(d.name), mailProviderText(d.provider), action === "mail.account.remove" && Array.isArray(d.streams) && d.streams.length ? `its mail now goes through the default (${d.streams.map(mailStreamText).join(", ")})` : null]);
+    case "mail.account.change":
+      return join([text(d.name), list(d.changed)]);
+    case "mail.routes":
+      return Array.isArray(d.changed) ? d.changed.map(mailStreamText).join(", ") || null : null;
+    case "mail.test":
+      return join([d.target === "account" ? "an account" : typeof d.target === "string" ? `${mailStreamText(d.target)} mail` : null, d.ok === true ? "arrived at the server" : d.ok === false ? "refused" : null]);
     case "tenant.trial":
       return join([date(d.endsAt) ? `ends ${clock.date(date(d.endsAt))}` : null, typeof d.days === "number" ? `+${d.days} days` : null]);
     case "tenant.billing-details":
@@ -1065,6 +1089,8 @@ export function auditHref(action: string, detail: unknown, workspaceSlug: string
   if (action.startsWith("device-route.")) return "/devices";
   if (action.startsWith("reference.")) return "/reference";
   if (action.startsWith("alert.")) return "/alerts";
+  if (action.startsWith("mail.")) return "/settings/mail";
+  if (action === "signup.code.resend") return "/signups";
   if (action === "warm-pool.top-up") return "/provisioning#warm-pool";
   if (!workspaceSlug) return null;
   const tab: Partial<Record<AuditCategoryKey, string>> = { billing: "billing", support: "support", setup: "operations", notes: "notes", terminals: "operations" };
@@ -1200,4 +1226,14 @@ function genericSummary(d: Record<string, unknown>): string | null {
     }
   }
   return parts.length ? parts.join(" · ") : null;
+}
+
+/** A mail service's name in the audit log ("AWS_SES" → "Amazon SES"). */
+function mailProviderText(value: unknown): string | null {
+  return typeof value === "string" ? (MAIL_PROVIDERS.find((p) => p.key === value)?.label ?? value) : null;
+}
+
+/** A type of platform mail's name ("ACCOUNT" → "Account & security"). */
+function mailStreamText(value: unknown): string {
+  return typeof value === "string" ? (MAIL_STREAMS.find((s) => s.key === value)?.label ?? value) : "?";
 }

@@ -5,6 +5,8 @@ import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/ta
 import { JOB_STATUS, SIGNUP_STAGE } from "@/lib/console-shared/labels";
 import { withParams } from "@/lib/console-shared/params";
 import type { StuckRow } from "@/lib/platform/signups";
+import { SIGNUP_BROWSER_MS } from "@/lib/console-shared/signup-browser";
+import { ResendCode } from "./resend-code";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,7 +15,8 @@ import { cn } from "@/lib/utils";
  * row is somebody to follow up with, so the contact details lead.
  *
  * The address the signup came from is a column only for the staff allowed to see it (`showIp`, the
- * managers) — and the loader does not even read it for anybody else. Server-safe.
+ * managers) — and the loader does not even read it for anybody else. A signup whose code never got
+ * entered offers a new one (src/lib/platform/signup-code.ts). Server-safe.
  */
 export function StuckTable({ rows, showIp }: { rows: StuckRow[]; showIp: boolean }) {
   return (
@@ -60,6 +63,7 @@ export function StuckTable({ rows, showIp }: { rows: StuckRow[]; showIp: boolean
             <Td nowrap>
               <LabelPill map={SIGNUP_STAGE} value={row.stage} />
               <StageDetail row={row} />
+              {row.stage === "never-verified" && <ResendCode signupId={row.id} email={row.email} pageEndsAt={new Date(row.createdAt.getTime() + SIGNUP_BROWSER_MS)} />}
             </Td>
             <Td numeric muted={row.attempts === 0}>
               {row.attempts}

@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
 import { applicationsShown, directoryShown } from "@/components/site/partners/programme";
 import { redirectedPaths } from "@/lib/cms/redirects";
+import { searchPolicy } from "@/lib/cms/search-policy";
 import { taxonomySitemapEntries } from "@/lib/cms/taxonomy";
 import { listSitePages, listSitePosts } from "@/lib/platform/site-content";
 import { classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
@@ -19,10 +20,12 @@ import { classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
  * blog's category and tag archives are listed while they have a post on the site
  * (src/lib/cms/taxonomy.ts). A redirect's source never is: not an old address, nor a live page's or
  * post's that an enabled redirect now sends elsewhere (src/lib/cms/redirects.ts `redirectedPaths`).
+ * While the CMS keeps the whole site out of search (Settings › Search & AI), it lists nothing.
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const host = requestHost(await headers());
   if (typeof host !== "string" || classifyHost(host).kind !== "root") return [];
+  if ((await searchPolicy()).hidden) return [];
   const origin = `${protocolFor(host)}://${host}`;
   const [pages, posts, applying, directory, archives] = await Promise.all([listSitePages(), listSitePosts(), applicationsShown(), directoryShown(), taxonomySitemapEntries()]);
   const pageEntries = pages

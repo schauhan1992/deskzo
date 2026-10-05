@@ -92,7 +92,7 @@ export async function requestSupportAccess(staff: Staff, tenantId: string, reaso
   ].join("\n");
 
   try {
-    await sendPlatformMail({ to, subject: `${COMPANY_NAME} support asks to look at ${workspace}`, text });
+    await sendPlatformMail({ type: "ACCOUNT", to, subject: `${COMPANY_NAME} support asks to look at ${workspace}`, text });
   } catch (err) {
     console.error(`[support] the access request for ${tenant.slug} could not be sent: ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
     throw new ConsoleRefused("The email could not be sent.");

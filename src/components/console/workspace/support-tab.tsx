@@ -9,6 +9,7 @@ import type { Caps } from "@/lib/console-shared/roles";
 import { consoleClock } from "@/lib/platform/console-clock";
 import type { SupportPanel, WorkspaceHeader } from "@/lib/platform/workspace-data";
 import { EnterAsSupport } from "./enter-as-support";
+import { AdminReset } from "./admin-reset";
 import { RequestAccess } from "./request-access";
 
 /**
@@ -70,6 +71,12 @@ export function SupportTab({ header, support, caps }: { header: WorkspaceHeader;
   return (
     <div className="space-y-6">
       <SupportAccessCard header={header} support={support} caps={caps} />
+
+      {caps.enter && header.tenant.status === "ACTIVE" && (
+        <Panel title="Sign-in help" description="When its super admin can't get in: a link to choose a new password, sent to their own address in the workspace — never to you.">
+          <AdminReset tenantId={header.tenant.id} workspace={header.tenant.name} />
+        </Panel>
+      )}
 
       <Panel title="Grants" description="Every grant its super admin gave, newest first." padded={false}>
         {support.grants.length === 0 ? (

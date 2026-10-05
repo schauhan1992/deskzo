@@ -199,10 +199,11 @@ const SEO_SPEC: Fields = {
   ogDescription: text(300),
   ogImage: { k: "image" },
   noindex: { k: "bool" },
+  noLlms: { k: "bool" },
   keywords: { k: "keywords" },
 } satisfies Record<keyof SiteSeo, Field>;
 
-const POST_SEO_SPEC: Fields = { title: text(SHORT), description: text(300), ogImage: { k: "image" }, noindex: { k: "bool" }, keywords: { k: "keywords" } } satisfies Record<keyof PostSeo, Field>;
+const POST_SEO_SPEC: Fields = { title: text(SHORT), description: text(300), ogImage: { k: "image" }, noindex: { k: "bool" }, noLlms: { k: "bool" }, keywords: { k: "keywords" } } satisfies Record<keyof PostSeo, Field>;
 
 const SOCIAL_NETWORKS = ["linkedin", "x", "youtube", "facebook", "instagram", "github", "other"] as const;
 
