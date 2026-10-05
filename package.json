@@ -160,6 +160,7 @@
     "check:site-search": "tsx scripts/check-site-search.ts",
     "check:platform-mail": "tsx scripts/check-platform-mail.ts",
     "check:console-assist": "tsx scripts/check-console-assist.ts",
+    "check:auth-host": "tsx scripts/check-auth-host.ts",
     "check:seo-core": "tsx scripts/check-seo-core.ts",
     "check:partners": "tsx scripts/check-partners.ts",
     "check:support": "tsx scripts/check-support.ts",
