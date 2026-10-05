@@ -346,6 +346,39 @@ async function main() {
     tokenAnswer = { status: 200, body: { access_token: "zz-token-2", expires_in: 3600 } };
     await mailer.sendPlatformMail(mail("ACCOUNT"));
     ok("  changing the account asks for a new one", tokenCalls.length === 2 && (sent.at(-1)!.options.auth as { accessToken?: string }).accessToken === "zz-token-2");
+
+    // Microsoft's tokens carry the app's permissions ("roles") in their payload, fixed when issued.
+    const jwt = (roles: string[]) => `zzhead.${Buffer.from(JSON.stringify({ aud: "https://outlook.office365.com", roles })).toString("base64url")}.zzsig`;
+    const exchangeRefusal = (code: string, words: string) => Object.assign(new Error(`Invalid login: 535 ${code} ${words}`), { code: "EAUTH", responseCode: 535 });
+    tokenAnswer = { status: 200, body: { access_token: jwt([]), expires_in: 3600 } };
+    const callsBefore = tokenCalls.length;
+    await actions.consoleSendTestMail({ connectionId: m365Id });
+    await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok("a console test asks for a new token every time — it tests the app as it is now", tokenCalls.length === callsBefore + 2, tokenCalls.length - callsBefore);
+    failNext = exchangeRefusal("5.7.3", "Authentication unsuccessful");
+    const noRole = await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok(
+      "5.7.3 with a token lacking SMTP.SendAsApp: says to add it and grant consent, then what Exchange said",
+      noRole.ok && !noRole.data.ok && /no SMTP\.SendAsApp: add it under Office 365 Exchange Online/.test(noRole.data.error ?? "") && (noRole.data.error ?? "").includes("5.7.3"),
+      noRole.ok ? noRole.data.error : noRole.error,
+    );
+    tokenAnswer = { status: 200, body: { access_token: jwt(["SMTP.SendAsApp"]), expires_in: 3600 } };
+    failNext = exchangeRefusal("5.7.3", "Authentication unsuccessful");
+    const withRole = await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok("  with SMTP.SendAsApp in it: says Exchange doesn't let the app use the mailbox yet", withRole.ok && !withRole.data.ok && /New-ServicePrincipal and Add-MailboxPermission/.test(withRole.data.error ?? ""), withRole.ok ? withRole.data.error : withRole.error);
+    failNext = exchangeRefusal("5.7.139", "Authentication unsuccessful, SmtpClientAuthentication is disabled for the Tenant.");
+    const smtpOff = await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok("5.7.139: says to turn SMTP AUTH on for the mailbox", smtpOff.ok && !smtpOff.data.ok && /Set-CASMailbox/.test(smtpOff.data.error ?? ""));
+    // An ordinary send after a refusal: the refused token is gone, so a fixed app's new permissions are used.
+    tokenAnswer = { status: 200, body: { access_token: jwt(["SMTP.SendAsApp"]), expires_in: 3600 } };
+    failNext = exchangeRefusal("5.7.3", "Authentication unsuccessful");
+    await thrown(() => mailer.sendPlatformMail(mail("ACCOUNT")));
+    const afterRefusal = tokenCalls.length;
+    await mailer.sendPlatformMail(mail("ACCOUNT"));
+    ok("after Exchange refuses a token, the next send asks for a new one", tokenCalls.length === afterRefusal + 1);
+    await mailer.sendPlatformMail(mail("ACCOUNT"));
+    ok("  and keeps that one while it works", tokenCalls.length === afterRefusal + 1);
+
     tokenAnswer = { status: 401, body: { error: "invalid_client", error_description: "AADSTS7000215: Invalid client secret provided. Ensure the secret being sent is the client secret value.\r\nTrace ID: abc Correlation ID: def" } };
     await actions.consoleSaveMailConnection({ ...m365, id: m365Id, secret: "zz-wrong-secret" });
     const refused = await thrown(() => mailer.sendPlatformMail(mail("ACCOUNT")));
@@ -369,7 +402,7 @@ async function main() {
     const failedOnly = await mailLog.listDeliveries({ status: "FAILED" });
     const billing = await mailLog.listDeliveries({ stream: "BILLING" });
     ok("the log finds part of an address", byPart.rows.length === 1 && byPart.rows[0]!.cc[0] === "cc.zz@example.com");
-    ok("  filters by status and type, and counts", failedOnly.rows.every((r) => r.status === "FAILED") && failedOnly.rows.length === 2 && billing.rows.every((r) => r.stream === "BILLING") && byPart.counts.SENT === 1);
+    ok("  filters by status and type, and counts", failedOnly.rows.every((r) => r.status === "FAILED") && failedOnly.rows.length === (await control.mailDelivery.count({ where: { status: "FAILED" } })) && failedOnly.rows.length >= 2 && billing.rows.every((r) => r.stream === "BILLING") && byPart.counts.SENT === 1);
     await control.mailDelivery.create({ data: { at: new Date(Date.now() - 91 * 86_400_000), stream: "ACCOUNT", status: "SENT", via: "Zz", toAddresses: ["old.zz@example.com"], ccAddresses: [], addresses: "old.zz@example.com", fromAddress: "x@zz.example", subject: "Zz old" } });
     const purged = await mailLog.purgeDeliveries();
     ok("rows older than 90 days are dropped, the rest kept", purged === 1 && (await control.mailDelivery.count({ where: { subject: "Zz old" } })) === 0 && (await control.mailDelivery.count()) > 5);

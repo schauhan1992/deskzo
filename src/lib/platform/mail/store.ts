@@ -346,6 +346,51 @@ function forgetToken(connectionId: string) {
   tokens.delete(connectionId);
 }
 
+/**
+ * Drops an account's Microsoft token — after it was refused, so the next send asks again. Microsoft
+ * writes the app's permissions into the token when it issues it: one fetched before an admin granted
+ * consent never gains them, however long it has left.
+ */
+export function forgetMailToken(connectionId: string): void {
+  forgetToken(connectionId);
+}
+
+/** The permissions ("roles") Microsoft wrote into an account's current token, or null without one. Read, never verified — it is only for saying why a send failed. */
+function tokenRoles(connectionId: string): string[] | null {
+  const held = tokens.get(connectionId);
+  if (!held) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(held.token.split(".")[1] ?? "", "base64url").toString("utf8")) as { roles?: unknown };
+    return Array.isArray(payload.roles) ? payload.roles.filter((r): r is string => typeof r === "string") : [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What to do about a Microsoft 365 refusal, in words, when it is one of the known ones: SMTP AUTH off
+ * for the mailbox or the tenant (5.7.139), or the app not allowed to send as the mailbox (5.7.3) —
+ * told apart by whether the token carries SMTP.SendAsApp. Null for anything else, or another service.
+ */
+export function microsoftHint(connection: MailConnection, err: unknown): string | null {
+  if (connection.provider !== "MICROSOFT_365") return null;
+  const e = err as { message?: unknown; response?: unknown } | null;
+  const said = `${typeof e?.message === "string" ? e.message : ""} ${typeof e?.response === "string" ? e.response : ""}`;
+  if (/5\.7\.139/.test(said)) {
+    return "SMTP AUTH is off for this mailbox in Microsoft 365: Set-CASMailbox -Identity <mailbox> -SmtpClientAuthenticationDisabled $false, then allow up to an hour.";
+  }
+  if (/5\.7\.3\b|\b535\b/.test(said)) {
+    const roles = tokenRoles(connection.id);
+    if (roles && !roles.includes("SMTP.SendAsApp")) {
+      return "The app's token has no SMTP.SendAsApp: add it under Office 365 Exchange Online › Application permissions, grant admin consent, and test again.";
+    }
+    if (roles) {
+      return "The app has SMTP.SendAsApp, so Exchange doesn't let it use this mailbox yet: run New-ServicePrincipal and Add-MailboxPermission (the steps), then allow 30 minutes.";
+    }
+  }
+  return null;
+}
+
 /** A refusal Microsoft sends back, as one line without its trace and correlation ids. */
 function microsoftSaid(body: unknown): string {
   const b = body && typeof body === "object" ? (body as { error?: unknown; error_description?: unknown }) : {};
@@ -371,8 +416,12 @@ async function microsoftToken(connection: MailConnection, secret: string): Promi
   return json.access_token;
 }
 
-/** The transport for an account — its secret opened here and nowhere else. */
-export async function transportFor(connection: MailConnection): Promise<Transporter> {
+/**
+ * The transport for an account — its secret opened here and nowhere else. `fresh`: a new Microsoft
+ * token rather than the one held (a console test, which should test the app as it is now).
+ */
+export async function transportFor(connection: MailConnection, how: { fresh?: boolean } = {}): Promise<Transporter> {
+  if (how.fresh) forgetToken(connection.id);
   const secret = connection.secretCipher ? openForPlatform("mail-connection", connection.secretCipher) : "";
   const auth: SMTPTransport.Options["auth"] =
     connection.provider === "MICROSOFT_365"
@@ -412,7 +461,9 @@ export function sendError(err: unknown): string {
  * as typed, and as SMTP's AUTH PLAIN and LOGIN would have carried it — should a server ever echo it.
  */
 export function connectionSendError(connection: MailConnection, err: unknown): string {
-  let text = sendError(err);
+  // The way out first, when it is a known Microsoft refusal; what the server said after it.
+  const hint = microsoftHint(connection, err);
+  let text = hint ? `${hint} — ${sendError(err)}`.slice(0, 300) : sendError(err);
   let secret = "";
   try {
     secret = connection.secretCipher ? openForPlatform("mail-connection", connection.secretCipher) : "";

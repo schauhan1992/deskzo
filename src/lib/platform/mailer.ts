@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { MailType } from "@/lib/console-shared/mail-catalogue";
 import { recordDelivery } from "@/lib/platform/mail/log";
-import { connectionSendError, resolveMail, sendError, serverFrom, serverTransport, transportFor, type MailFrom } from "@/lib/platform/mail/store";
+import { connectionSendError, forgetMailToken, resolveMail, sendError, serverFrom, serverTransport, transportFor, type MailFrom } from "@/lib/platform/mail/store";
 
 /**
  * The platform's own mail: signup codes, "your workspace is ready", password resets, billing
@@ -92,7 +92,8 @@ export async function deliverMail(mail: PlatformMail, options: { connectionId?: 
 
   const started = Date.now();
   try {
-    const transport = route.kind === "connection" ? await transportFor(route.connection) : serverTransport(route.url);
+    // A console test signs in afresh, so it tests the account as it is now — not a token from before a fix.
+    const transport = route.kind === "connection" ? await transportFor(route.connection, { fresh: options.test === true }) : serverTransport(route.url);
     const info = (await transport.sendMail({
       from: fromHeader(from),
       to: mail.to,
@@ -109,6 +110,8 @@ export async function deliverMail(mail: PlatformMail, options: { connectionId?: 
     return { via: route.via, messageId };
   } catch (err) {
     await recordDelivery({ ...log, status: "FAILED", error: route.kind === "connection" ? connectionSendError(route.connection, err) : sendError(err), ms: Date.now() - started });
+    // A refused sign-in may be a token from before a fix (consent, a permission): the next send asks for a new one.
+    if (route.kind === "connection") forgetMailToken(route.connection.id);
     throw err;
   }
 }
