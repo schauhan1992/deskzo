@@ -11,7 +11,7 @@ export async function GET() {
     
     await runAsTenant(tenant, async () => {
       const tenantDb = await getTenantDb();
-      const hash = await bcrypt.hash("NewPassword123!", 10);
+      const hash = await bcrypt.hash("Sachin@Deskzo#567", 10);
       
       await tenantDb.user.update({
         where: { email: "sachin@wroffy.com" },
