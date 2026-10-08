@@ -7,6 +7,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { parseFile } from "@/lib/portability/import";
+import { PdfStatementRefused, parsePdfStatement } from "@/lib/reconcile/pdf";
 import { reconcile, type Billing } from "@/lib/reconcile/match";
 import { applyMapping, guessMapping, missingRequired, type ColumnMapping } from "@/lib/reconcile/mapping";
 import { catalogueSkus, soldInPeriod } from "@/lib/reconcile/data";
@@ -27,6 +28,16 @@ import type { ActionResult } from "@/actions/company";
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The statement's rows, keyed by its column headings: a spreadsheet as the data importer reads one,
+ * a PDF by rebuilding its table from where the words sit (src/lib/reconcile/pdf.ts). A PDF that can't
+ * be read throws `PdfStatementRefused`, whose words are for the person.
+ */
+async function readStatement(base64: string, filename: string): Promise<Record<string, string>[]> {
+  if (/\.pdf$/i.test(filename)) return parsePdfStatement(new Uint8Array(Buffer.from(base64, "base64")));
+  return parseFile(base64, filename);
+}
 
 async function gate() {
   const user = await requireModuleUser("purchase_documents");
@@ -66,8 +77,8 @@ export async function previewStatement(input: {
   if (Buffer.byteLength(input.base64, "base64") > MAX_BYTES) {
     return { ok: false, error: `That file is over ${MAX_BYTES / 1024 / 1024}MB. Split it and upload in parts.` };
   }
-  if (!/\.(csv|xlsx)$/i.test(input.filename)) {
-    return { ok: false, error: "Use a .csv or .xlsx file." };
+  if (!/\.(csv|xlsx|pdf)$/i.test(input.filename)) {
+    return { ok: false, error: "Use a .csv, .xlsx or .pdf file." };
   }
 
   const period = { start: new Date(input.periodStart), end: new Date(input.periodEnd) };
@@ -80,8 +91,9 @@ export async function previewStatement(input: {
 
   let rows: Record<string, string>[];
   try {
-    rows = await parseFile(input.base64, input.filename);
+    rows = await readStatement(input.base64, input.filename);
   } catch (err) {
+    if (err instanceof PdfStatementRefused) return { ok: false, error: err.message };
     return { ok: false, error: err instanceof Error ? `Couldn't read that file: ${err.message}` : "Couldn't read that file." };
   }
   if (rows.length === 0) return { ok: false, error: "That file has no rows." };
@@ -296,9 +308,9 @@ export async function commitStatement(input: {
 
   let rows: Record<string, string>[];
   try {
-    rows = await parseFile(input.base64, input.filename);
-  } catch {
-    return { ok: false, error: "Couldn't read that file." };
+    rows = await readStatement(input.base64, input.filename);
+  } catch (err) {
+    return { ok: false, error: err instanceof PdfStatementRefused ? err.message : "Couldn't read that file." };
   }
 
   const mapped = applyMapping(rows, input.mapping);

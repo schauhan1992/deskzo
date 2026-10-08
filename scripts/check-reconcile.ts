@@ -585,9 +585,160 @@ function main() {
     ok("a pasted PDF table reaches a verdict", r.lines[0]!.state === "QUANTITY_MISMATCH", r.lines[0]!.state);
     ok("  worth the five extra seats", r.lines[0]!.variance === 3750, r.lines[0]!.variance);
   }
+}
 
-  console.log(failures === 0 ? "\nAll reconciliation checks passed.\n" : `\n${failures} check(s) failed.\n`);
-  if (failures > 0) process.exitCode = 1;
+// ─── A statement as a PDF (src/lib/reconcile/pdf.ts) ────────────────────────────────────────────
+
+type Placed = { x: number; y: number; text: string; size?: number; alignRight?: boolean };
+
+/**
+ * A PDF the way a vendor's portal makes one: real words, in Helvetica, at real positions — one array
+ * of placed words per page (A4 landscape). Right-aligned words end at `x`, as numbers in a table do.
+ */
+function pdfOf(pages: Placed[][]): Uint8Array {
+  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const objects: string[] = [];
+  const pageIds = pages.map((_, i) => 4 + i * 2);
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`;
+  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+  pages.forEach((words, i) => {
+    const content = words
+      .map((w) => {
+        const size = w.size ?? 9;
+        const x = w.alignRight ? w.x - w.text.length * size * 0.556 : w.x;
+        return `BT /F1 ${size} Tf 1 0 0 1 ${x.toFixed(2)} ${w.y} Tm (${esc(w.text)}) Tj ET`;
+      })
+      .join("\n");
+    objects[pageIds[i]!] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 3 0 R >> >> /Contents ${pageIds[i]! + 1} 0 R >>`;
+    objects[pageIds[i]! + 1] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+  });
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (let id = 1; id < objects.length; id++) {
+    offsets[id] = out.length;
+    out += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+  }
+  const xref = out.length;
+  out += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let id = 1; id < objects.length; id++) out += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  out += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(out, "latin1"));
+}
+
+/** The table's columns: headings left-aligned, numbers right-aligned under them. */
+const COLS = { part: 40, description: 160, customer: 360, qty: 520, unit: 610, amount: 720 };
+const headingRow = (y: number): Placed[] => [
+  { x: COLS.part, y, text: "Part Number" },
+  { x: COLS.description, y, text: "Description" },
+  { x: COLS.customer, y, text: "End Customer" },
+  { x: COLS.qty, y, text: "Qty" },
+  { x: COLS.unit, y, text: "Unit Price" },
+  { x: COLS.amount, y, text: "Amount" },
+];
+const dataRow = (y: number, part: string, description: string, customer: string, qty: string, unit: string, amount: string): Placed[] => [
+  { x: COLS.part, y, text: part },
+  { x: COLS.description, y, text: description },
+  { x: COLS.customer, y, text: customer },
+  { x: COLS.qty + 18, y, text: qty, alignRight: true },
+  { x: COLS.unit + 44, y, text: unit, alignRight: true },
+  { x: COLS.amount + 36, y, text: amount, alignRight: true },
+];
+
+async function pdfChecks() {
+  const { parsePdfStatement, PdfStatementRefused } = await import("../src/lib/reconcile/pdf");
+  const refusal = async (bytes: Uint8Array) => {
+    try {
+      // A copy each time: the PDF reader takes the bytes it is given over, as the app's fresh upload is.
+      await parsePdfStatement(bytes.slice());
+      return "";
+    } catch (err) {
+      return err instanceof PdfStatementRefused ? err.message : `not a refusal: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  };
+
+  section("A statement as a PDF");
+
+  // Ingram's own layout, roughly: a letterhead, the table, a description that wraps, page numbers,
+  // and the headings again at the top of page two, under which a total closes the table.
+  const statement = pdfOf([
+    [
+      { x: 40, y: 560, text: "Ingram Micro India Private Limited", size: 14 },
+      { x: 40, y: 540, text: "Statement of account - September 2026" },
+      { x: 40, y: 528, text: "Customer: Wroffy Technologies Pvt Ltd, New Delhi" },
+      ...headingRow(480),
+      ...dataRow(462, "CFQ7TTC0LH18-0001", "Microsoft 365 Business Basic", "Acme Industries", "15", "750.00", "11,250.00"),
+      ...dataRow(446, "CFQ7TTC0LDH3-0002", "Microsoft 365 Business Premium -", "Globex Pvt Ltd", "5", "1,850.00", "9,250.00"),
+      { x: COLS.description, y: 436, text: "annual commitment, monthly billing" },
+      { x: 400, y: 30, text: "Page 1 of 2" },
+    ],
+    [
+      ...headingRow(560),
+      ...dataRow(542, "CFQ7TTC0LF8Q-0001", "Exchange Online (Plan 1)", "Initech", "2", "375.00", "750.00"),
+      { x: COLS.part, y: 510, text: "Total" },
+      { x: COLS.amount + 36, y: 510, text: "21,250.00", alignRight: true },
+      { x: 400, y: 30, text: "Page 2 of 2" },
+    ],
+  ]);
+  let rows: Record<string, string>[] = [];
+  try {
+    rows = await parsePdfStatement(statement.slice());
+  } catch (err) {
+    ok("a statement PDF is read", false, err instanceof Error ? err.message : String(err));
+  }
+  const headers = rows[0] ? Object.keys(rows[0]) : [];
+  ok("its headings, as the table names them — the letterhead above is passed over", JSON.stringify(headers) === JSON.stringify(["Part Number", "Description", "End Customer", "Qty", "Unit Price", "Amount"]), JSON.stringify(headers));
+  ok("every line of the table, on both pages, the repeated headings skipped", rows.length === 4, rows.length);
+  ok(
+    "  each value in its column — right-aligned numbers under their headings",
+    rows[0]?.["Part Number"] === "CFQ7TTC0LH18-0001" && rows[0]?.["End Customer"] === "Acme Industries" && rows[0]?.Qty === "15" && rows[0]?.["Unit Price"] === "750.00" && rows[0]?.Amount === "11,250.00",
+    JSON.stringify(rows[0]),
+  );
+  ok("  a wrapped description joined to its own row", rows[1]?.Description === "Microsoft 365 Business Premium - annual commitment, monthly billing", rows[1]?.Description);
+  ok("  the page numbers belong to no row", !rows.some((r) => Object.values(r).some((v) => /Page \d/.test(v))), JSON.stringify(rows.map((r) => r.Description)));
+  ok("  the second page's row read the same way", rows[2]?.["Part Number"] === "CFQ7TTC0LF8Q-0001" && rows[2]?.Qty === "2" && rows[2]?.Amount === "750.00", JSON.stringify(rows[2]));
+
+  const mapping = guessMapping(headers);
+  ok(
+    "the columns are guessed as for a spreadsheet",
+    mapping.sku === "Part Number" && mapping.customer === "End Customer" && mapping.quantity === "Qty" && mapping.unitCost === "Unit Price" && mapping.lineTotal === "Amount",
+    JSON.stringify(mapping),
+  );
+  const mapped = applyMapping(rows, mapping);
+  ok("the three lines come through; the total line is a problem, not a line", mapped.rows.length === 3 && mapped.problems.length === 1, `${mapped.rows.length} rows, problems ${JSON.stringify(mapped.problems)}`);
+  const r = run(mapped.rows.map((m) => m.row), [order()]);
+  const acme = r.lines.find((l) => l.customerRef === "Acme Industries");
+  ok("and reaches the same verdict a spreadsheet would: five seats more than we sold", acme?.state === "QUANTITY_MISMATCH" && acme.variance === 3750, `${acme?.state} ${acme?.variance}`);
+
+  // Tight columns: a long amount, right-aligned under a short heading, starts nearer the heading to
+  // its left than its own. It is its middle, not its start, that says which column it is in.
+  const tight = pdfOf([
+    [
+      { x: 40, y: 500, text: "SKU" },
+      { x: 200, y: 500, text: "Customer" },
+      { x: 500, y: 500, text: "Qty" },
+      { x: 540, y: 500, text: "Unit Price" },
+      { x: 40, y: 482, text: "ABC-1" },
+      { x: 200, y: 482, text: "Acme Industries" },
+      { x: 515, y: 482, text: "3", alignRight: true },
+      { x: 590, y: 482, text: "12,34,850.00", alignRight: true },
+    ],
+  ]);
+  const tightRows = await parsePdfStatement(tight.slice()).catch(() => []);
+  ok("a long amount right-aligned under a short heading stays in its own column", tightRows[0]?.["Unit Price"] === "12,34,850.00" && tightRows[0]?.Qty === "3", JSON.stringify(tightRows[0]));
+
+  section("A PDF that can't be read is said so");
+  const scan = pdfOf([[]]);
+  ok("a scan or a photo — no words in it — is refused, asking for Excel or CSV", /looks like a scan or a photo/.test(await refusal(scan)), await refusal(scan));
+  const letter = pdfOf([[{ x: 40, y: 500, text: "Dear customer, please find your statement attached." }, { x: 40, y: 480, text: "Regards, Accounts" }]]);
+  ok("words but no table headings: refused, naming the headings it looks for", /column headings/.test(await refusal(letter)), await refusal(letter));
+  ok("a damaged file: refused", /couldn't be opened/.test(await refusal(new Uint8Array(Buffer.from("not a pdf at all")))), await refusal(new Uint8Array(Buffer.from("not a pdf at all"))));
 }
 
 main();
+pdfChecks()
+  .catch((err) => ok("the PDF checks ran", false, err instanceof Error ? err.message : String(err)))
+  .finally(() => {
+    console.log(failures === 0 ? "\nAll reconciliation checks passed.\n" : `\n${failures} check(s) failed.\n`);
+    if (failures > 0) process.exitCode = 1;
+  });

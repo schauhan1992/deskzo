@@ -317,14 +317,18 @@ export function UploadStatement({ vendors }: { vendors: { id: string; name: stri
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,.xlsx"
+              accept=".csv,.xlsx,.pdf"
               aria-label="Statement file"
+              aria-describedby="statement-file-hint"
               className="block w-full text-sm text-muted file:mr-3 file:rounded-base file:border-0 file:bg-brand-subtle file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) choose(f);
               }}
             />
+            <p id="statement-file-hint" className="mt-1.5 text-xs text-muted">
+              Excel, CSV, or a PDF from the vendor&apos;s portal. A scanned PDF or a photo can&apos;t be read — ask for Excel or CSV instead.
+            </p>
           </div>
           )}
 

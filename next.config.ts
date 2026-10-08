@@ -32,7 +32,9 @@ const nextConfig: NextConfig = {
    * Prisma's main client. Bundled, a client's search for its own query engine on disk makes the
    * build trace the entire project.
    */
-  serverExternalPackages: ["@deskzo/control-client", "@deskzo/reference-client", "@prisma/adapter-pg"],
+  // unpdf: pdf.js reads vendor statements (src/lib/reconcile/pdf.ts); loaded by Node itself, as pdf.js
+  // expects, rather than split across the server bundle's chunks.
+  serverExternalPackages: ["@deskzo/control-client", "@deskzo/reference-client", "@prisma/adapter-pg", "unpdf"],
 
   /**
    * Server actions accept bodies up to 6 MB: the website CMS uploads images of up to 5 MB through one
