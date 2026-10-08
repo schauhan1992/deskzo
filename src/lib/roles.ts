@@ -31,8 +31,9 @@ export type Role = string;
 export type AssignableRole = Role;
 
 /**
- * The built-in roles: the eight the application shipped with, and HR, Recruiter and Renewal
- * specialist (owner, 8 Oct 2026; migration 20261030110000_built_in_hr_recruiter_renewal_roles).
+ * The built-in roles: the eight the application shipped with; HR, Recruiter and Renewal specialist
+ * (owner, 8 Oct 2026; migration 20261030110000_built_in_hr_recruiter_renewal_roles); and Sales manager
+ * (9 Oct 2026; migration 20261030120000_built_in_sales_manager_role).
  *
  * Not the list of roles — that lives in the database and is whatever somebody has made it. These
  * are the keys the code itself names: `ADMIN` in the permission resolver and the super-admin
@@ -44,6 +45,7 @@ export const SYSTEM_ROLE_KEYS = [
   "PROFILE",
   "CALLING",
   "SALES",
+  "SALES_MANAGER",
   "SUPPORT",
   "MANAGEMENT",
   "ACCOUNTS",

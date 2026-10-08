@@ -84,7 +84,7 @@ console.log("\n— Roles —\n");
 // There is no enum any more: roles are rows. What the code still names by hand is
 // `SYSTEM_ROLE_KEYS`, and the drift to guard against is between that list and the database, which
 // is checked in `rolesAreData()` below because it needs a query.
-eq("The application names eleven roles of its own — the eight it shipped with, and HR, Recruiter and Renewal specialist", SYSTEM_ROLE_KEYS.length, 11);
+eq("The application names twelve roles of its own — the eight it shipped with, HR, Recruiter, Renewal specialist and Sales manager", SYSTEM_ROLE_KEYS.length, 12);
 
 /**
  * The three added on 8 Oct 2026 start with their preset applied, written by the migration as role rows
@@ -104,6 +104,16 @@ eq("The application names eleven roles of its own — the eight it shipped with,
     ok(`  keeping everybody's own HR self-service`, !unticked.includes("section.hr"));
   }
   ok("hiring got the answer people records had, wherever that was set by hand", /SELECT "role", 'hiring.manage', "allowed"/.test(sql) && /SELECT "userId", 'hiring.manage', "allowed"/.test(sql));
+
+  // Sales manager (9 Oct 2026): the preset, and Sales's own menu copied rather than a fixed one.
+  const managerSql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030120000_built_in_sales_manager_role", "migration.sql"), "utf8");
+  const managerRows = [...managerSql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
+  const managerGranted = managerRows.filter((r) => r.role === "SALES_MANAGER" && r.allowed).map((r) => r.key).sort();
+  const managerWanted = [...(getPreset("sales-manager")?.permissions ?? [])].map(String).sort();
+  ok("SALES_MANAGER starts as the sales-manager preset", managerGranted.join() === managerWanted.join() && managerRows.every((r) => r.allowed), `migration ${managerGranted.length}, preset ${managerWanted.length}`);
+  ok("  with the menu Sales has in the workspace", /rp\."role" = 'SALES' AND rp\."permission" LIKE 'section\.%'/.test(managerSql));
+  const executive = (getPreset("sales-executive")?.permissions ?? []) as readonly string[];
+  ok("  and everything a sales executive has, so moving up never takes anything away", executive.every((k) => managerWanted.includes(k)), executive.filter((k) => !managerWanted.includes(k)).join(", "));
 }
 
 console.log("\n— Presets —\n");
@@ -143,8 +153,9 @@ const rolesWithPresets = new Set(ROLE_PRESETS.map((p) => p.role));
 const rolesWithout = (SYSTEM_ROLE_KEYS as readonly string[]).filter((r) => r !== "ADMIN" && !rolesWithPresets.has(r as never));
 ok("Every assignable role has a preset to start from", rolesWithout.length === 0, rolesWithout.join(", ") || "all covered");
 
-const salesPresets = presetsForRole("SALES");
-ok("presetsForRole finds them", salesPresets.length >= 2, `${salesPresets.length} for SALES`);
+// HR has two (executive and manager); Sales and Sales manager one each since the manager got a role.
+const hrPresets = presetsForRole("HR");
+ok("presetsForRole finds them", hrPresets.length >= 2 && presetsForRole("SALES").length === 1 && presetsForRole("SALES_MANAGER").length === 1, `${hrPresets.length} for HR`);
 ok("getPreset resolves a known key", getPreset("accounts-manager")?.role === "ACCOUNTS");
 ok("  and returns undefined for an unknown one", getPreset("not-a-preset") === undefined);
 

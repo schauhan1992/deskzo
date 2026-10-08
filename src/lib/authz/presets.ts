@@ -83,8 +83,12 @@ export const ROLE_PRESETS: RolePreset[] = [
     key: "sales-manager",
     label: "Sales manager",
     description: "A sales executive plus the team view: their reports' visits, expenses and targets, the ability to set targets, and handing a departing rep's accounts to somebody else.",
-    role: "SALES",
+    // Its own role since 9 Oct 2026: executives and managers sharing Sales meant a role setting
+    // could never give managers more, so the difference lived in personal grants nobody could see.
+    role: "SALES_MANAGER",
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "activities.viewAll", "meetings.schedule",
+      // Everything a sales executive has, so moving to this role never takes anything away.
+      "vault.use",
       "products.edit",
       "products.delete",
       // A manager hands leads to their team; a rep does not hand leads to a manager.
