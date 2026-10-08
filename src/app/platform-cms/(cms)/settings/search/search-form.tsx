@@ -14,6 +14,7 @@ import { CheckField } from "@/components/cms/editor/fields";
 import { Button } from "@/components/ui/button";
 import { LLMS_SUMMARY_MAX, type SearchPolicy, type SearchPolicyDetail } from "@/lib/cms/types";
 import { cn } from "@/lib/utils";
+import { OutboundLink } from "@/components/ui/outbound-link";
 
 const VISIBILITY = [
   {
@@ -256,11 +257,11 @@ function FileLink({ icon, href, name, off = false, children }: { icon: ReactNode
         {off ? (
           <p className="text-[13px] font-medium text-muted">{name}</p>
         ) : (
-          <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] font-medium text-brand hover:underline">
+          <OutboundLink href={href} className="inline-flex items-center gap-1 text-[13px] font-medium text-brand hover:underline">
             {name}
             <ExternalLink aria-hidden="true" className="h-3 w-3" />
             <span className="sr-only">(opens in a new tab)</span>
-          </a>
+          </OutboundLink>
         )}
         <p className="mt-0.5 text-xs text-muted">{children}</p>
       </div>
