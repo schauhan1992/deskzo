@@ -36,7 +36,7 @@ const originalLoad = internals._load;
 internals._load = function (this: unknown, request: string, parent: unknown, isMain: boolean) {
   if (request === "next/cache") return { revalidatePath() {}, revalidateTag() {}, unstable_cache: (fn: unknown) => fn };
   if (request === "@/lib/session" || request.endsWith("lib/session")) {
-    const user = () => ({ id: actorId, role: "PROFILE", name: "Zzprobe Views", email: "rep@zzprobe-views.invalid" });
+    const user = () => ({ id: actorId, role: "SALES", name: "Zzprobe Views", email: "rep@zzprobe-views.invalid" });
     return { requireUser: async () => user(), currentUser: async () => user() };
   }
   if (request === "next/navigation") {
@@ -77,6 +77,13 @@ const VIEWS = [
   "tickets.view",
 ] as const;
 const NON_ADMIN_ROLES = ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"];
+/**
+ * The money views the profiler and the calling agent don't hold by default (owner, 9 Oct 2026): they
+ * build and call the records, and never needed payments, quotes or invoices. Every other pair holds.
+ */
+const MONEY_VIEWS = ["payments.view", "documents.view"];
+const NO_MONEY_ROLES = ["PROFILE", "CALLING"];
+const holdsByDefault = (role: string, key: string) => !(NO_MONEY_ROLES.includes(role) && MONEY_VIEWS.includes(key));
 
 async function cleanup() {
   const users = await db.user.findMany({ where: { email: { endsWith: MAIL } }, select: { id: true } });
@@ -116,12 +123,16 @@ async function main() {
   for (const key of VIEWS) {
     const def = PERMISSION_REGISTRY.find((p) => p.key === key);
     const roles = (def?.defaultRoles ?? []) as readonly string[];
-    ok(`${key} exists and every non-admin role has it by default`, !!def && NON_ADMIN_ROLES.every((r) => roles.includes(r)), def ? roles.join(",") : "missing");
+    const wrong = NON_ADMIN_ROLES.filter((r) => roles.includes(r) !== holdsByDefault(r, key));
+    ok(`${key} exists, and its default roles are every non-admin role${MONEY_VIEWS.includes(key) ? " but the profiler and the calling agent" : ""}`, !!def && wrong.length === 0, def ? roles.join(",") : "missing");
   }
-  // The seven roles that had the nine before they were permissions keep them in every preset. The roles
-  // added later (HR, Recruiter, Renewal specialist) never had them; HR and Recruiter see no customers.
-  const presetsMissing = ROLE_PRESETS.filter((p) => NON_ADMIN_ROLES.includes(p.role) && !VIEWS.every((k) => (p.permissions as readonly string[]).includes(k))).map((p) => p.key);
-  ok("every preset of the seven original roles keeps all nine — applying one never takes a view away", presetsMissing.length === 0, presetsMissing.join(", "));
+  // The seven roles that had the nine before they were permissions keep, in every preset, the ones their
+  // role holds by default — so applying a preset never takes a view away. The roles added later (HR,
+  // Recruiter, Renewal specialist) never had them; HR and Recruiter see no customers.
+  const presetsMissing = ROLE_PRESETS.filter(
+    (p) => NON_ADMIN_ROLES.includes(p.role) && !VIEWS.every((k) => (p.permissions as readonly string[]).includes(k) === holdsByDefault(p.role, k)),
+  ).map((p) => p.key);
+  ok("every preset of the seven original roles has exactly the views its role holds by default — applying one never takes a view away", presetsMissing.length === 0, presetsMissing.join(", "));
   const peopleSide = ROLE_PRESETS.filter((p) => p.role === "HR" || p.role === "RECRUITER");
   ok("  HR and Recruiter presets hold none of them — they don't see customers", peopleSide.length >= 3 && peopleSide.every((p) => !VIEWS.some((k) => (p.permissions as readonly string[]).includes(k))), peopleSide.map((p) => p.key).join(", "));
 
@@ -205,10 +216,10 @@ async function main() {
       const u = await db.user.create({
         data: { name: `Zzprobe ${role}`, email: `role-${role.toLowerCase()}${MAIL}`, role, passwordHash: "x".repeat(60) },
       });
-      for (const key of VIEWS) if (!configured.has(`${role}:${key}`) && !(await can(u.id, key))) byRole.push(`${role}:${key}`);
+      for (const key of VIEWS) if (!configured.has(`${role}:${key}`) && (await can(u.id, key)) !== holdsByDefault(role, key)) byRole.push(`${role}:${key}`);
     }
     ok(
-      `every role, with nothing configured, holds all nine${configured.size ? ` (${configured.size} set by an admin here, left out)` : ""}`,
+      `every role, with nothing configured, holds all nine — the profiler and the calling agent all but the money views${configured.size ? ` (${configured.size} set by an admin here, left out)` : ""}`,
       byRole.length === 0,
       byRole.join(", "),
     );
@@ -219,7 +230,9 @@ async function main() {
       data: {
         name: "Zzprobe Rep",
         email: `rep${MAIL}`,
-        role: "PROFILE",
+        // A salesperson: a role holding all nine by default (the profiler holds no money views since
+        // 9 Oct 2026), so taking them away is the only difference between the two passes.
+        role: "SALES",
         passwordHash: "x".repeat(60),
         // Visibility of the account comes from managing it, not from a company-wide grant.
         permissionGrants: { create: [{ permission: "companies.viewAll", allowed: false, reason: TAG }] },
@@ -229,7 +242,7 @@ async function main() {
       data: {
         name: "Zzprobe Outsider",
         email: `outsider${MAIL}`,
-        role: "PROFILE",
+        role: "SALES",
         passwordHash: "x".repeat(60),
         permissionGrants: { create: [{ permission: "companies.viewAll", allowed: false, reason: TAG }] },
       },

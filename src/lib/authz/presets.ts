@@ -56,6 +56,13 @@ const ACCOUNT_VIEWS = [
 ] as const satisfies readonly PermissionKey[];
 
 /**
+ * The account views without the money: no payments, receivables or statements, and no quotes or
+ * invoices. For the people who build and call the records rather than sell against them (owner,
+ * 9 Oct 2026) — the profiler and the calling agent.
+ */
+const ACCOUNT_VIEWS_WITHOUT_MONEY = ACCOUNT_VIEWS.filter((k) => k !== "payments.view" && k !== "documents.view");
+
+/**
  * What every profile carries besides the account views — tools anybody's job can use. The AI copilot
  * only ever sees and does what the person using it already can, so it widens nothing.
  */
@@ -69,7 +76,9 @@ export const ROLE_PRESETS: RolePreset[] = [
     description: "Works leads and orders for their own accounts. Cannot approve their own paperwork or see anybody else's numbers.",
     role: "SALES",
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "meetings.schedule",
-      "vault.use","products.edit", "tickets.create", "feedback.request", "marketing.viewAll", "targets.viewAll",
+      // Not targets.viewAll (owner, 9 Oct 2026): it is the manager's — everybody's targets, and the whole
+      // company's pipeline on the dashboard. A sales executive sees their own, as the description says.
+      "vault.use","products.edit", "tickets.create", "feedback.request", "marketing.viewAll",
       "documents.issue",
       "documents.send",
       // Their own event invitations and requirement assessments.
@@ -133,24 +142,25 @@ export const ROLE_PRESETS: RolePreset[] = [
     description: "Works a calling list and logs outcomes. Deliberately narrow — this is the profile with the widest access to contact details and the least need for anything else.",
     role: "CALLING",
     // leads.assign: a qualified call is handed to the salesperson who will work it.
-    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "tickets.create", "companies.viewAll", "leads.assign"],
+    permissions: [...ACCOUNT_VIEWS_WITHOUT_MONEY, ...EVERY_PROFILE, "tickets.create", "companies.viewAll", "leads.assign"],
   },
   {
     key: "data-profiler",
     label: "Data profiler",
     description: "Builds and cleans the company and contact records that everything else runs on.",
     role: "PROFILE",
-    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "tickets.create", "companies.viewAll"],
+    permissions: [...ACCOUNT_VIEWS_WITHOUT_MONEY, ...EVERY_PROFILE, "tickets.create", "companies.viewAll"],
   },
   // ─── Support ────────────────────────────────────────────────────────────────────────────────
   {
     key: "support-agent",
     label: "Support agent",
-    description: "Handles tickets and the IT asset estate for customers under contract.",
+    description: "Handles tickets for customers under contract, and sees the IT asset estate. Adding, assigning and moving assets — licence keys included — is the support lead's.",
     role: "SUPPORT",
+    // Not assets.manage (owner, 9 Oct 2026): it includes seeing licence keys, so it is the lead's.
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "meetings.schedule",
       "visitors.view",
-      "vault.use","tickets.create", "assets.manage", "assets.viewAll", "feedback.request", "contacts.viewRestricted", "companies.viewAll"],
+      "vault.use","tickets.create", "assets.viewAll", "feedback.request", "contacts.viewRestricted", "companies.viewAll"],
   },
   {
     key: "project-manager",

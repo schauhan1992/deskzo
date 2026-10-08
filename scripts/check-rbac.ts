@@ -11,7 +11,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PERMISSIONS, PERMISSION_KEYS, permissionGroup, PERMISSION_GROUP_ORDER, getPermissionDefinition } from "../src/lib/permissions";
+import { PERMISSIONS, PERMISSION_KEYS, permissionGroup, PERMISSION_GROUP_ORDER, getPermissionDefinition, heldByDefaultKey } from "../src/lib/permissions";
 import { SYSTEM_ROLE_KEYS } from "../src/lib/roles";
 import { roleKeys } from "../src/lib/authz/role-registry";
 import { ROLE_PRESETS, presetDiff, presetsForRole, getPreset } from "../src/lib/authz/presets";
@@ -169,6 +169,23 @@ ok("Every non-admin permission appears in at least one preset", uncovered.length
 // no screen — which HR manager did until 9 Oct 2026.
 const usersWithoutScreen = ROLE_PRESETS.filter((p) => (p.permissions as readonly string[]).includes("users.manage") && !(p.permissions as readonly string[]).includes("permissions.view")).map((p) => p.key);
 ok("Every preset that manages users can open Staff & roles to do it", usersWithoutScreen.length === 0, usersWithoutScreen.join(", ") || `${ROLE_PRESETS.filter((p) => (p.permissions as readonly string[]).includes("users.manage")).length} presets`);
+
+// Who holds what, as the owner set it on 9 Oct 2026 — in the presets and in the defaults a role with
+// nothing configured falls back to, so the two can't disagree.
+{
+  const has = (preset: string, key: string) => ((getPreset(preset)?.permissions ?? []) as readonly string[]).includes(key);
+  ok("A sales executive sees their own targets and pipeline, not everybody's", !has("sales-executive", "targets.viewAll") && !heldByDefaultKey("targets.viewAll", "SALES") && has("sales-manager", "targets.viewAll"));
+  const money = ["payments.view", "documents.view"];
+  ok(
+    "The profiler and the calling agent see no payments, quotes or invoices — in their presets or by default",
+    ["data-profiler", "calling-agent"].every((p) => money.every((k) => !has(p, k))) && ["PROFILE", "CALLING"].every((r) => money.every((k) => !heldByDefaultKey(k, r))),
+  );
+  ok("  while a salesperson, support and accounts still do", ["SALES", "SUPPORT", "ACCOUNTS"].every((r) => money.every((k) => heldByDefaultKey(k, r))));
+  ok(
+    "Managing IT assets (licence keys included) is the support lead's, not every support agent's",
+    !has("support-agent", "assets.manage") && has("support-agent", "assets.viewAll") && has("support-lead", "assets.manage") && !heldByDefaultKey("assets.manage", "SUPPORT"),
+  );
+}
 
 const rolesWithPresets = new Set(ROLE_PRESETS.map((p) => p.role));
 const rolesWithout = (SYSTEM_ROLE_KEYS as readonly string[]).filter((r) => r !== "ADMIN" && !rolesWithPresets.has(r as never));
