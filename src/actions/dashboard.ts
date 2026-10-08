@@ -35,8 +35,8 @@ import type { ActionResult } from "@/actions/company";
 
 export type DashboardSummary = {
   /** The raw sourcing pool — everyone who hasn't bought anything from us yet (see `customers` for who has). */
-  companies: { total: number; prospects: number; leads: number; awaitingOrder: number };
-  customers: { total: number };
+  companies: { total: number; prospects: number; leads: number; awaitingOrder: number } | null;
+  customers: { total: number } | null;
   /** Null without `leads.view` — the widgets are left off rather than shown as zero. */
   leads: {
     open: number;
@@ -129,6 +129,16 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const now = new Date();
 
   /**
+   * Only the figures of widgets this person may be offered are read — permission first, then the
+   * query, rather than every module's figures fetched and the unauthorised ones hidden afterwards.
+   * This is a server action a browser can call directly, so what it returns is what it discloses.
+   * `getDashboardWidgetOptions` is the one rule for which widgets those are (the module open to
+   * them, and the widget's own permission).
+   */
+  const offered = new Set((await getDashboardWidgetOptions()).map((w) => w.key));
+  const offers = (...keys: string[]) => keys.some((key) => offered.has(key));
+
+  /**
    * Whose leads this person may count.
    *
    * Every figure on this screen used to be company-wide, which meant a calling agent's home page
@@ -137,7 +147,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    * numbers rather than the numbers being returned bare.
    */
   const leadIds = await scopeUserIds(user.id, "targets.viewAll");
-  const canSeeLeads = await can(user.id, "leads.view");
+  // The lead widgets carry "View leads" (src/lib/dashboard-widgets.ts), so being offered one is holding it.
+  const canSeeLeads = offers("leads", "recentLeads");
   const leadScope = !canSeeLeads ? { id: { in: [] } } : leadIds === null ? {} : { ownerUserId: { in: leadIds } };
   const leadWidgetScope: WidgetScope = leadIds === null ? "company" : leadIds.length > 1 ? "team" : "own";
 
@@ -147,62 +158,68 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     leadGroups,
     pipelineValueAgg,
     recentLeads,
-    vendorsEnabled,
-    renewalsEnabled,
-    projectsEnabled,
-    paymentsEnabled,
-    helpdeskEnabled,
-    tasksEnabled,
-    notesEnabled,
-    accountingEnabled,
-    salesDocumentsEnabled,
-    targetsEnabled,
-    expensesEnabled,
-    ordersEnabled,
+    vendorsOffered,
+    renewalsOffered,
+    projectsOffered,
+    paymentsOffered,
+    helpdeskOffered,
+    tasksOffered,
+    notesOffered,
+    financeOffered,
+    salesDocumentsOffered,
+    targetsOffered,
+    expensesOffered,
+    ordersOffered,
   ] = await Promise.all([
-    db.company.groupBy({ by: ["stage"], where: { relationshipType: "CLIENT" }, _count: true }),
-    db.company.count({ where: { relationshipType: "CLIENT", stage: "CUSTOMER", products: { some: {} } } }),
-    db.lead.groupBy({ by: ["status"], where: leadScope, _count: true }),
-    db.lead.aggregate({
-      where: { ...leadScope, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } },
-      _sum: { estimatedValue: true },
-    }),
-    db.lead.findMany({
-      where: leadScope,
-      orderBy: { updatedAt: "desc" },
-      take: 5,
-      include: { company: { select: { name: true } } },
-    }),
-    isModuleEnabled("vendors"),
-    isModuleEnabled("renewals"),
-    isModuleEnabled("projects"),
-    isModuleEnabled("payments"),
-    isModuleEnabled("helpdesk"),
-    isModuleEnabled("tasks"),
-    isModuleEnabled("notes"),
-    isModuleEnabled("accounting"),
-    isModuleEnabled("sales_documents"),
-    isModuleEnabled("targets"),
-    isModuleEnabled("expenses"),
-    isModuleEnabled("orders"),
+    offers("companies", "customers")
+      ? db.company.groupBy({ by: ["stage"], where: { relationshipType: "CLIENT" }, _count: true })
+      : Promise.resolve(null),
+    offers("companies", "customers")
+      ? db.company.count({ where: { relationshipType: "CLIENT", stage: "CUSTOMER", products: { some: {} } } })
+      : Promise.resolve(0),
+    canSeeLeads ? db.lead.groupBy({ by: ["status"], where: leadScope, _count: true }) : Promise.resolve([]),
+    canSeeLeads
+      ? db.lead.aggregate({
+          where: { ...leadScope, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } },
+          _sum: { estimatedValue: true },
+        })
+      : Promise.resolve(null),
+    canSeeLeads
+      ? db.lead.findMany({
+          where: leadScope,
+          orderBy: { updatedAt: "desc" },
+          take: 5,
+          include: { company: { select: { name: true } } },
+        })
+      : Promise.resolve([]),
+    offers("vendors"),
+    offers("renewals", "upcomingRenewals"),
+    offers("myProjects", "projectsAtRisk"),
+    offers("payments"),
+    offers("tickets"),
+    offers("tasks"),
+    offers("notes"),
+    offers("incomeExpense", "topExpenses", "cashFlow", "receivables", "payables"),
+    offers("quotations"),
+    offers("salesTarget"),
+    offers("expenses"),
+    offers("orders"),
   ]);
 
-  const wonCount = companyGroups.find((g) => g.stage === "CUSTOMER")?._count ?? 0;
   // A won deal only counts as a real customer once it has an order on file — the rest ("awaiting
   // order") stay in the raw pool below, alongside prospects/leads, until their first order lands.
-  const awaitingOrder = wonCount - customersWithOrders;
-  const companies = {
+  const companies: DashboardSummary["companies"] = companyGroups && {
     total: companyGroups.reduce((sum, g) => sum + g._count, 0) - customersWithOrders,
     prospects: companyGroups.find((g) => g.stage === "PROSPECT")?._count ?? 0,
     leads: companyGroups.find((g) => g.stage === "LEAD")?._count ?? 0,
-    awaitingOrder,
+    awaitingOrder: (companyGroups.find((g) => g.stage === "CUSTOMER")?._count ?? 0) - customersWithOrders,
   };
-  const customers = { total: customersWithOrders };
+  const customers: DashboardSummary["customers"] = companyGroups && { total: customersWithOrders };
 
   const closedStatuses = new Set(["WON", "LOST", "DISQUALIFIED"]);
   const leads: DashboardSummary["leads"] = !canSeeLeads ? null : {
     open: leadGroups.filter((g) => !closedStatuses.has(g.status)).reduce((sum, g) => sum + g._count, 0),
-    pipelineValue: Number(pipelineValueAgg._sum.estimatedValue ?? 0),
+    pipelineValue: Number(pipelineValueAgg?._sum.estimatedValue ?? 0),
     recent: recentLeads.map((lead) => ({
       id: lead.id,
       leadSeq: lead.leadSeq,
@@ -214,7 +231,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   };
 
   let vendors: DashboardSummary["vendors"] = null;
-  if (vendorsEnabled) {
+  if (vendorsOffered) {
     const vendorGroups = await db.company.groupBy({
       by: ["vendorStatus"],
       where: { relationshipType: { in: vendorRelationshipTypeValues } },
@@ -228,7 +245,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   let renewals: DashboardSummary["renewals"] = null;
-  if (renewalsEnabled) {
+  if (renewalsOffered) {
     const next30Where = { item: { type: "SUBSCRIPTION" as const }, endDate: { not: null, gte: now, lte: addDays(now, 30) } };
     const [expiredCount, next30Count, upcomingRows] = await Promise.all([
       db.companyProduct.count({ where: { item: { type: "SUBSCRIPTION" }, endDate: { not: null, lt: now } } }),
@@ -256,7 +273,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   let projects: DashboardSummary["projects"] = null;
-  if (projectsEnabled) {
+  if (projectsOffered) {
     // Through listProjects rather than a query of its own, so the stakeholders-only rule is applied
     // in exactly one place. A dashboard that re-derived it is the classic way a widget ends up
     // counting rows the page it links to will not open.
@@ -300,12 +317,12 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   let payments: DashboardSummary["payments"] = null;
-  if (paymentsEnabled) {
+  if (paymentsOffered) {
     payments = await paymentsSnapshot();
   }
 
   let tickets: DashboardSummary["tickets"] = null;
-  if (helpdeskEnabled) {
+  if (helpdeskOffered) {
     const openTickets = await db.ticket.findMany({
       // The same line the tickets list follows. This card is a count of the same rows, and a
       // summary that disagrees with the list it links to is its own kind of wrong: an executive
@@ -324,7 +341,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   let tasks: DashboardSummary["tasks"] = null;
-  if (tasksEnabled) {
+  if (tasksOffered) {
     const myOpenTasks = await db.task.findMany({
       where: { assignedToUserId: user.id, done: false },
       select: { dueDate: true },
@@ -343,7 +360,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    * screen, and it would be the one place nobody thought to check.
    */
   let notes: DashboardSummary["notes"] = null;
-  if (notesEnabled) {
+  if (notesOffered) {
     const readable = await listNotes();
     notes = {
       total: readable.length,
@@ -365,7 +382,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   // them — ticking either produced a dashboard that did not change. Adding the data was the
   // smaller fix; the alternative was removing two widgets whose descriptions were already right.
   let expenses: DashboardSummary["expenses"] = null;
-  if (expensesEnabled) {
+  if (expensesOffered) {
     const [awaitingMe, myUnreimbursed] = await Promise.all([
       db.expense.count({ where: { status: "SUBMITTED", approverUserId: user.id } }),
       // Approved but not yet paid out — the claimant's own money, still out.
@@ -375,7 +392,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   let orders: DashboardSummary["orders"] = null;
-  if (ordersEnabled) {
+  if (ordersOffered) {
     // A scheduled order whose day has come is purchase's now, whether or not the daily job has run.
     await releaseDueOrders();
     const [awaitingApproval, awaitingSourcing] = await Promise.all([
@@ -396,7 +413,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    * one most worth a phone call.
    */
   let quotations: DashboardSummary["quotations"] = null;
-  if (salesDocumentsEnabled) {
+  if (salesDocumentsOffered) {
     const scopeIds = await accountScopeIds(user.id);
     const where = {
       direction: "SALES" as const,
@@ -423,7 +440,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    * shown here — the Targets screen lists them all.
    */
   let salesTarget: DashboardSummary["salesTarget"] = null;
-  if (targetsEnabled) {
+  if (targetsOffered) {
     const candidates = await db.target.findMany({
       where: {
         active: true,
@@ -465,7 +482,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   let finance: DashboardSummary["finance"] = null;
-  if (accountingEnabled && (await can(user.id, "payments.manage"))) {
+  // The finance widgets carry "Manage finance records" (src/lib/dashboard-widgets.ts).
+  if (financeOffered) {
     const fy = fiscalYearOf(now);
     // Twelve Indian months back from the start of this one (finance/dashboard.ts `cashWindowFrom`).
     const cashFrom = cashWindowFrom(now);

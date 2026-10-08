@@ -118,6 +118,7 @@
     "check:reassign": "tsx scripts/check-reassign.ts",
     "check:view-permissions": "tsx scripts/check-view-permissions.ts",
     "check:permission-gates": "tsx scripts/check-permission-gates.ts",
+    "check:navigation-access": "tsx scripts/check-navigation-access.ts",
     "check:item-import": "tsx scripts/check-item-import.ts",
     "check:credit": "tsx scripts/check-credit.ts",
     "check:support-load": "tsx scripts/check-support-load.ts",

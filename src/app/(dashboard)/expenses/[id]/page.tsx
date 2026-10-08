@@ -19,8 +19,11 @@ import {
 } from "@/lib/expenses";
 import { formatVisitId } from "@/lib/visits";
 import { companyPath, leadPath, visitPath } from "@/lib/record-links";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function ExpenseDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  if (!(await isModuleEnabled("expenses"))) return <ModuleDisabledNotice moduleKey="expenses" />;
   const [{ id }, query] = await Promise.all([params, searchParams]);
   /**
    * The sequence resolves to the cuid before the action runs, so every check that action already

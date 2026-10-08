@@ -11,6 +11,8 @@ import { monthName } from "@/lib/ledger/period";
 import { formatCurrency } from "@/lib/utils";
 import { previousIstMonth } from "@/lib/india-time";
 import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
+import { notFound } from "next/navigation";
+import { viewerHas } from "@/actions/permission";
 
 /**
  * What was withheld, both ways.
@@ -26,6 +28,9 @@ export default async function TdsPage({
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
+  // The finance function's (`payments.manage`), like every action behind the page: without it the
+  // page is not there, the same as its link (owner, 8 Oct 2026 — pages you can't open are a 404).
+  if (!(await viewerHas("payments.manage"))) notFound();
 
   const params = await searchParams;
   const now = new Date();
@@ -36,13 +41,7 @@ export default async function TdsPage({
   const year = Number(params.year) || previous.year;
 
   const [tds, org] = await Promise.all([tdsSummary({ month, year }), getOrganisation()]);
-  if (!tds) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        TDS sits behind the same permission as payments and the ledger.
-      </Card>
-    );
-  }
+  if (!tds) notFound();
 
   // One reading of the clock for the whole render, so "overdue" and "days left" can't disagree. Both
   // count India's days, in every workspace: the deposit is due by the end of the 7th in India. Comparing

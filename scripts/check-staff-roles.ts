@@ -525,7 +525,8 @@ async function main() {
     section("8. The name");
     ok("Settings lists it as Staff & roles", SETTINGS_ITEMS.find((i) => i.key === "access")?.label === "Staff & roles");
     ok("  and the browser tab says so", (PAGE as unknown as { metadata?: { title?: string } }).metadata?.title === "Staff & roles");
-    const sidebar = fs.readFileSync(path.join(__dirname, "../src/components/layout/sidebar.tsx"), "utf8");
+    // The menu's links are built in src/lib/navigation.ts; the sidebar only draws them.
+    const sidebar = fs.readFileSync(path.join(__dirname, "../src/lib/navigation.ts"), "utf8");
     ok("  as does the sidebar", sidebar.includes('label: "Staff & roles"') && !sidebar.includes('label: "Users & Access"'));
   } finally {
     actorId = "";

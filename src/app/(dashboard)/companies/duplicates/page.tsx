@@ -4,6 +4,8 @@ import { viewerHas } from "@/actions/permission";
 import { listDuplicates } from "@/actions/company-merge";
 import { DuplicatesList } from "@/components/companies/duplicates-list";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export const metadata = { title: "Duplicate companies" };
 
@@ -13,6 +15,7 @@ export const metadata = { title: "Duplicate companies" };
  * See src/lib/companies/duplicates.ts.
  */
 export default async function DuplicateCompaniesPage() {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   if (!(await viewerHas("companies.merge"))) notFound();
   const result = await listDuplicates();
 

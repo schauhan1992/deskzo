@@ -9,6 +9,8 @@ import { viewerHas } from "@/actions/permission";
 import { getMergeScreen } from "@/actions/company-merge";
 import { MergePartnerPicker, MergeWizard } from "@/components/companies/merge-wizard";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export const metadata = { title: "Merge companies" };
 
@@ -17,6 +19,7 @@ export const metadata = { title: "Merge companies" };
  * `keep`, the duplicate is picked first.
  */
 export default async function MergeCompaniesPage({ searchParams }: { searchParams: Promise<{ keep?: string; drop?: string }> }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const [{ keep, drop }, user] = await Promise.all([searchParams, requireUser()]);
   if (!(await viewerHas("companies.merge"))) notFound();
 

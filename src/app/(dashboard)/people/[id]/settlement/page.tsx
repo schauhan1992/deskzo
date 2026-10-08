@@ -9,6 +9,7 @@ import { SettlementView } from "@/components/hr/settlement-view";
 import { personPath } from "@/lib/record-links";
 
 export default async function SettlementPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!(await isModuleEnabled("hr"))) return <ModuleDisabledNotice moduleKey="hr" />;
   const enabled = await isModuleEnabled("payroll");
   if (!enabled) return <ModuleDisabledNotice moduleKey="payroll" />;
 

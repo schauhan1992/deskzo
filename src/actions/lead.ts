@@ -119,6 +119,9 @@ async function resolveOwner(
 
 export async function createLead(input: unknown): Promise<ActionResult<{ id: string; leadSeq: number }>> {
   const user = await requireUser();
+  // Only somebody who may open Leads: the Create menu and the form are hidden otherwise, and this
+  // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
+  if (!(await isModuleEnabled("companies"))) return { ok: false, error: "You don't have access to Leads." };
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = createLeadSchema.safeParse(input);
   if (!parsed.success) {

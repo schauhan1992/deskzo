@@ -9,11 +9,8 @@ import { db } from "@/lib/db";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
-import { getModuleStates } from "@/actions/module";
 import { billingNotice } from "@/actions/billing";
 import { currentTenant } from "@/lib/tenancy/resolve";
-import { canViewPerformance } from "@/actions/performance";
-import { navPermissions } from "@/actions/permission";
 import { canBroadcastNotes } from "@/actions/note";
 import { Sidebar } from "@/components/layout/sidebar";
 import { SideRail } from "@/components/layout/side-rail";
@@ -50,7 +47,8 @@ import { HeaderSearch } from "@/components/layout/header-search";
 import { searchScopesForMe } from "@/actions/search";
 import { unreadUpdateCounts } from "@/actions/help";
 import { can } from "@/lib/authz/resolve";
-import { isModuleEntitled } from "@/lib/modules-access";
+import { accessContextFor, isModuleEntitled } from "@/lib/modules-access";
+import { buildNavigation } from "@/lib/navigation";
 import { activeAnnouncementsFor } from "@/lib/platform/announcements";
 import { PlatformAnnouncements } from "@/components/platform/platform-announcements";
 import { supportLauncherState } from "@/actions/support";
@@ -66,11 +64,9 @@ import { wizardAutoOpens, wizardMounted } from "@/lib/help/onboarding";
 const NO_UNREAD = { deskzo: 0, company: 0 };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [session, modules, requestHeaders, canSeePerformance, branding, viewAs, securityPolicy, wording, zone] = await Promise.all([
+  const [session, requestHeaders, branding, viewAs, securityPolicy, wording, zone] = await Promise.all([
     auth(),
-    getModuleStates(),
     headers(),
-    canViewPerformance(),
     getBranding(),
     viewAsContext(),
     getSecurityPolicy(),
@@ -81,17 +77,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // ClockProvider.
     workspaceZone(),
   ]);
-  const enabledKeys = modules.filter((m) => m.enabled).map((m) => m.key);
-
   // While viewing as someone else, every chrome element below describes them, not the admin — the
   // point of the feature is to see their app, and a header still showing the admin's name and role
   // would make it impossible to tell whose permissions a page was rendered with.
   const shownUser = viewAs?.user ?? session?.user;
-  const [viewAsTargets, permissions, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp, supportLauncher, supportAccess] = await Promise.all([
+  /**
+   * What this person may open — the plan, the company's switches and their permissions, resolved
+   * once for the request and for whoever it is acting as, so an admin viewing as a salesperson sees
+   * the salesperson's menu. The sidebar, the Create menu and the rail are drawn from it; the pages
+   * and actions they lead to ask the same rule again (src/lib/navigation.ts). Read fresh on every
+   * request, so a permission taken away is gone from the menu on the next page.
+   */
+  const [access, viewAsTargets, tablePreferences, canBroadcast, splash, copilot, searchScopes, unreadUpdates, canManageHelp, supportLauncher, supportAccess] = await Promise.all([
+    shownUser ? accessContextFor(shownUser.id) : Promise.resolve(null),
     listViewAsTargets(),
-    // Resolved for whoever the request is acting as, so an admin viewing as a salesperson sees
-    // the salesperson's sidebar rather than their own.
-    shownUser ? navPermissions(shownUser.id) : Promise.resolve([]),
     // One read for every table on every page — see src/components/ui/table-columns.tsx for why this
     // is hoisted rather than fetched per table.
     getTablePreferences(),
@@ -119,6 +118,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // (src/actions/support-access.ts). A control plane out of reach only hides the button.
     session?.user && !viewAs ? getSupportAccess().catch(() => null) : Promise.resolve(null),
 ]);
+
+  const permissions: string[] = access?.permissions ?? [];
+  const openModules = access?.openModules ?? [];
+  const navigation = access ? buildNavigation(access) : [];
 
   // Not while viewing as somebody else: an admin borrowing an account should not be wished a happy
   // birthday on their behalf, and dismissing it would mark it seen for a person who never saw it.
@@ -237,14 +240,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           )}
         </>
       )}
-      <Sidebar
-        enabledKeys={enabledKeys}
-        canViewPerformance={canSeePerformance}
-        permissions={permissions}
-        branding={branding}
-        country={(await currentTenant()).country}
-        support={!!supportLauncher}
-      />
+      <Sidebar navigation={navigation} branding={branding} support={!!supportLauncher} />
 
       <div className={`flex min-w-0 flex-1 flex-col${viewAs ? " ring-2 ring-inset ring-warning/50" : ""}`}>
         {/* Sticky so the controls stay reachable when a long table scrolls. */}
@@ -274,7 +270,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {/* Resolved for whoever the request is acting as, like everything else in this header —
                 an admin viewing as a salesperson should be offered the salesperson's options. */}
             <CreateMenu
-              enabledKeys={enabledKeys}
+              openModules={openModules}
               permissions={permissions}
               canBroadcastNotes={canBroadcast}
             />
@@ -359,6 +355,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           // its Create proposal button needs "Raise and issue sales documents" (owner, 8 Oct 2026).
           proRata={(await isModuleEntitled("renewals")) && permissions.includes("orders.view")}
           proRataProposals={(await isModuleEntitled("sales_documents")) && permissions.includes("documents.issue")}
+          // The rail's tasks and notes are those modules' — not offered where their pages aren't.
+          tasks={openModules.includes("tasks")}
+          notes={openModules.includes("notes")}
           country={(await currentTenant()).country}
           support={!!supportLauncher}
           supportAccess={supportAccess ? { inside: !!supportAccess.grant } : null}

@@ -236,23 +236,27 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
    */
   const widgets: Record<string, ReactNode> = {};
 
-  widgets.companies = (
-    <StatCard
-      label="Companies"
-      value={String(summary.companies.total)}
-      sublabel={`${summary.companies.prospects} prospects · ${summary.companies.leads} leads · ${summary.companies.awaitingOrder} awaiting order`}
-      href="/companies"
-    />
-  );
+  if (summary.companies) {
+    widgets.companies = (
+      <StatCard
+        label="Companies"
+        value={String(summary.companies.total)}
+        sublabel={`${summary.companies.prospects} prospects · ${summary.companies.leads} leads · ${summary.companies.awaitingOrder} awaiting order`}
+        href="/companies"
+      />
+    );
+  }
 
-  widgets.customers = (
-    <StatCard
-      label="Customers"
-      value={String(summary.customers.total)}
-      sublabel="Have purchased at least once"
-      href="/customers"
-    />
-  );
+  if (summary.customers) {
+    widgets.customers = (
+      <StatCard
+        label="Customers"
+        value={String(summary.customers.total)}
+        sublabel="Have purchased at least once"
+        href="/customers"
+      />
+    );
+  }
 
   const leadSummary = summary.leads;
   if (leadSummary) {

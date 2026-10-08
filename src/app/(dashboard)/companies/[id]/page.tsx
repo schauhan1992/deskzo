@@ -8,6 +8,8 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { mergedInto, mergedNotice } from "@/lib/companies/merge";
 import { CompanyDetail } from "@/components/companies/company-detail";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function CompanyDetailPage({
   params,
@@ -16,6 +18,7 @@ export default async function CompanyDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const [{ id }, query, user] = await Promise.all([params, searchParams, requireUser()]);
   const tab = typeof query.tab === "string" ? query.tab : undefined;
   const ref = parseRecordRef(id);

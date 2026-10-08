@@ -3,6 +3,8 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { listPortalRequests } from "@/actions/portal";
 import { RequestInbox } from "@/components/portal/request-inbox";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 /**
  * Deliberately not under `/portal`. That prefix is public — see `PUBLIC_PREFIXES` in src/proxy.ts —
@@ -12,6 +14,7 @@ import { RequestInbox } from "@/components/portal/request-inbox";
 export const dynamic = "force-dynamic";
 
 export default async function CustomerRequestsPage() {
+  if (!(await isModuleEnabled("customer_portal"))) return <ModuleDisabledNotice moduleKey="customer_portal" />;
   const user = await requireUser();
   if (!(await can(user.id, "portal.manage"))) notFound();
 

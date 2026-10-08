@@ -230,6 +230,9 @@ export async function getExpense(id: string) {
 
 export async function createExpense(input: unknown): Promise<ActionResult<{ id: string; expenseSeq: number }>> {
   const user = await requireModuleUser("expenses");
+  // Only somebody who may open Expenses: the Create menu and the form are hidden otherwise, and this
+  // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
+  if (!(await isModuleEnabled("expenses"))) return { ok: false, error: "You don't have access to Expenses." };
   const parsed = createExpenseSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

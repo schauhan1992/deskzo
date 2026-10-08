@@ -10,6 +10,8 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { cn } from "@/lib/utils";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 /**
  * Everything, rather than the most recent twenty.
@@ -38,6 +40,7 @@ export default async function NotificationsPage({
     pageSize?: string;
   }>;
 }) {
+  if (!(await isModuleEnabled("notifications"))) return <ModuleDisabledNotice moduleKey="notifications" />;
   const params = await searchParams;
   const view = TABS.some((t) => t.key === params.view) ? (params.view as (typeof TABS)[number]["key"]) : "inbox";
 

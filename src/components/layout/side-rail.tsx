@@ -46,6 +46,8 @@ export function SideRail({
   companyName = null,
   proRata = true,
   proRataProposals = false,
+  tasks = true,
+  notes = true,
   country = "IN",
   support = false,
   supportAccess = null,
@@ -54,6 +56,9 @@ export function SideRail({
   proRata?: boolean;
   /** This person may raise a proposal — the pro-rata panel then offers to draft one from its figures. */
   proRataProposals?: boolean;
+  /** The person may open Tasks / Sticky Notes — the rail's panels are those modules'. */
+  tasks?: boolean;
+  notes?: boolean;
   /** The workspace's: the GST calculator and the GSTIN check are India's. */
   country?: string;
   /** The copilot is on and this person may use it — the rail then offers it beside Help. */
@@ -118,7 +123,7 @@ export function SideRail({
 
   // Only the tools this workspace has: nothing here asks for a module outside its plan.
   const tools = TOOLS.filter(
-    (t) => (t.key !== "prorata" || proRata) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess),
+    (t) => (t.key !== "prorata" || proRata) && (t.key !== "tasks" || tasks) && (t.key !== "notes" || notes) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess),
   );
   const active = tools.find((t) => t.key === open);
 

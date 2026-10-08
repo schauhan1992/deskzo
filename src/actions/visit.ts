@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type VisitStatus, type VisitPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { isModuleEnabled } from "@/actions/module";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -163,6 +164,9 @@ export async function getVisit(id: string) {
 
 export async function createVisit(input: unknown): Promise<ActionResult<{ id: string; visitSeq: number }>> {
   const user = await requireModuleUser("visits");
+  // Only somebody who may open Field Visits: the Create menu and the form are hidden otherwise, and this
+  // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
+  if (!(await isModuleEnabled("visits"))) return { ok: false, error: "You don't have access to Field Visits." };
   const parsed = createVisitSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

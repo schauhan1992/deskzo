@@ -4,6 +4,8 @@ import { listBankAccounts, reconciliationView, unclearedCheques } from "@/action
 import { getOrganisation } from "@/lib/organisation";
 import { ReportHeader } from "@/components/accounting/report-chrome";
 import { BankingManager } from "@/components/accounting/banking-manager";
+import { notFound } from "next/navigation";
+import { viewerHas } from "@/actions/permission";
 
 export default async function BankingPage({
   searchParams,
@@ -12,6 +14,9 @@ export default async function BankingPage({
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
+  // The finance function's (`payments.manage`), like every action behind the page: without it the
+  // page is not there, the same as its link (owner, 8 Oct 2026 — pages you can't open are a 404).
+  if (!(await viewerHas("payments.manage"))) notFound();
 
   const params = await searchParams;
   const [accounts, cheques, org] = await Promise.all([listBankAccounts(), unclearedCheques(), getOrganisation()]);

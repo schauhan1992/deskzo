@@ -7,8 +7,11 @@ import { VisitForm } from "@/components/visits/visit-form";
 import { isVisitOpen } from "@/lib/visits";
 import { workspaceClock } from "@/lib/time/workspace";
 import { visitPath } from "@/lib/record-links";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function EditVisitPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!(await isModuleEnabled("visits"))) return <ModuleDisabledNotice moduleKey="visits" />;
   const { id } = await params;
   const [visit, session] = await Promise.all([getVisit(id), auth()]);
   if (!visit) notFound();

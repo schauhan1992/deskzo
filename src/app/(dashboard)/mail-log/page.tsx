@@ -10,6 +10,8 @@ import { Pagination } from "@/components/ui/pagination";
 import { Card } from "@/components/ui/card";
 import { MAIL_STATUS_GROUPS, MAIL_STATUS_GROUP_KEYS, type MailStatusGroup } from "@/lib/mail-log";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 type Params = {
   q?: string;
@@ -38,6 +40,7 @@ const CHANNELS: { key: MessageChannel | "ALL"; label: string }[] = [
  * Every email the ERP sent a customer — searchable, and narrowed to one customer from their page.
  */
 export default async function MailLogPage({ searchParams }: { searchParams: Promise<Params> }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   if (!(await viewerHas("emails.view"))) notFound();
 
   const params = await searchParams;

@@ -25,6 +25,8 @@ import { viewerHas } from "@/actions/permission";
 import { listColumns } from "@/lib/custom-fields/server";
 import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function CustomersPage({
   searchParams,
@@ -43,6 +45,7 @@ export default async function CustomersPage({
     tab?: string;
   } & CustomFilterParams>;
 }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);

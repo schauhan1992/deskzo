@@ -174,8 +174,18 @@ export async function recordBillPayment(input: {
   return { ok: true, data: { id: payment.id } };
 }
 
+/**
+ * The reads below are what we owe, so they take "View payments" as Receivables' do — checked before
+ * the database is asked. They were the plan alone, which put every vendor's balance in reach of
+ * anybody signed in, whatever their role.
+ */
+async function payablesViewer() {
+  const user = await requireModuleUser("payables");
+  return (await hasEffectivePermission(user.id, "payments.view")) ? user : null;
+}
+
 export async function getBillSettlement(billId: string) {
-  await requireModuleUser("payables");
+  if (!(await payablesViewer())) return null;
   const bill = await db.tradeDocument.findUnique({
     where: { id: billId },
     select: {
@@ -217,8 +227,8 @@ export async function getBillSettlement(billId: string) {
  * impossible to read side by side.
  */
 export async function payablesAging(params?: { search?: string }) {
-  await requireModuleUser("payables");
   const asOf = new Date();
+  if (!(await payablesViewer())) return toPlain({ rows: [], totals: { buckets: emptyAging(), total: 0 }, asOf });
 
   const bills = await db.tradeDocument.findMany({
     where: {
@@ -270,7 +280,7 @@ export async function payablesAging(params?: { search?: string }) {
 
 /** A vendor's account: bills credit what we owe, payments out debit it back down. */
 export async function vendorStatement(companyId: string, opts?: { from?: string; to?: string }) {
-  await requireModuleUser("payables");
+  if (!(await payablesViewer())) return null;
   // A bill's and a payment's dates are typed days held at UTC midnight: From and To are those days,
   // both ends in.
   const dateFilter = calendarDayRange(opts?.from, opts?.to) ?? undefined;
@@ -330,7 +340,7 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
 
 /** Bills a payment can still be put against, for the record-payment picker. */
 export async function listOpenBills(companyId: string) {
-  await requireModuleUser("payables");
+  if (!(await payablesViewer())) return [];
   const bills = await db.tradeDocument.findMany({
     where: { companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
     orderBy: { issueDate: "asc" },

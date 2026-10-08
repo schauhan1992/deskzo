@@ -22,8 +22,6 @@ import { MenuLabel, MenuSeparator } from "@/components/ui/menu";
 import { NoteDialog } from "@/components/notes/note-dialog";
 import { useWording } from "@/components/terms/wording-provider";
 import { slot, type TermKey } from "@/lib/terms/dictionary";
-import { getModuleDefinition } from "@/lib/modules";
-import { sectionPermission, type PermissionKey } from "@/lib/permissions";
 
 /**
  * The header's "Create" button: one place to start any of the records somebody makes several times
@@ -91,11 +89,12 @@ const itemClass =
   "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-text transition-colors hover:bg-surface-sunken";
 
 export function CreateMenu({
-  enabledKeys,
+  openModules,
   permissions,
   canBroadcastNotes,
 }: {
-  enabledKeys: string[];
+  /** The modules this person may open, decided on the server (`accessContextFor`) — as the sidebar's are. */
+  openModules: readonly string[];
   permissions: string[];
   canBroadcastNotes: boolean;
 }) {
@@ -130,17 +129,11 @@ export function CreateMenu({
   }, [open]);
 
   /**
-   * Only what this person may open (owner, 8 Oct 2026): the module on, its section not unticked for
-   * their role, its view permission held — as the sidebar decides — and the entry's own permission.
+   * Only what this person may open (owner, 8 Oct 2026) — the module, by the same rule as the sidebar
+   * (`decideModuleAccess`, applied on the server) — and the entry's own permission. The create
+   * actions behind each entry refuse on the same terms, so this only keeps the menu honest.
    */
-  const mayOpen = (moduleKey: string) => {
-    const def = getModuleDefinition(moduleKey);
-    return (
-      enabledKeys.includes(moduleKey) &&
-      permissions.includes(sectionPermission(moduleKey) as PermissionKey) &&
-      (!def?.viewPermission || permissions.includes(def.viewPermission))
-    );
-  };
+  const mayOpen = (moduleKey: string) => openModules.includes(moduleKey);
   const sections = SECTIONS.map(({ group, entries }) => ({
     group,
     entries: entries.filter((e) => mayOpen(e.module) && (!e.permission || permissions.includes(e.permission))),

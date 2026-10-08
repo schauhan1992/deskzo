@@ -188,6 +188,9 @@ export async function createCompany(
   input: unknown,
 ): Promise<ActionResult<{ id: string; companySeq: number; contacts: { id: string; name: string; designation: string }[] }>> {
   const user = await requireUser();
+  // Only somebody who may open Companies: the Create menu and the form are hidden otherwise, and this
+  // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
+  if (!(await isModuleEnabled("companies"))) return { ok: false, error: "You don't have access to Companies." };
   const parsed = createCompanySchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

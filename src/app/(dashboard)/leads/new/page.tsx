@@ -7,12 +7,14 @@ import { listIndustries } from "@/actions/industry";
 import { isModuleEnabled } from "@/actions/module";
 import { NewLeadForm } from "@/components/leads/new-lead-form";
 import { formSetup } from "@/lib/custom-fields/server";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function NewLeadPage({
   searchParams,
 }: {
   searchParams: Promise<{ companyId?: string }>;
 }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const [itemsEnabled, user] = await Promise.all([isModuleEnabled("items"), requireUser()]);
   const [canViewLeads, canAddContact] = await Promise.all([
     hasEffectivePermission(user.id, "leads.view"),

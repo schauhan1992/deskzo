@@ -178,6 +178,11 @@ async function main() {
   const { CompanyDetail } = require("../src/components/companies/company-detail") as typeof import("../src/components/companies/company-detail");
   const { ModuleDisabledNotice } = require("../src/components/settings/module-disabled-notice") as typeof import("../src/components/settings/module-disabled-notice");
   const { Sidebar } = require("../src/components/layout/sidebar") as typeof import("../src/components/layout/sidebar");
+  const { buildNavigation, openModuleKeys } = require("../src/lib/navigation") as typeof import("../src/lib/navigation");
+  // The menu as the layout builds it, for a workspace with every module on: the same pure rule over
+  // the permissions given, then drawn by the sidebar.
+  const menuFor = (permissions: string[]) =>
+    buildNavigation({ openModules: openModuleKeys(() => ({ entitled: true, switchedOn: true }), new Set(permissions)), permissions, country: "IN" });
   const { can } = require("../src/lib/authz/resolve") as typeof import("../src/lib/authz/resolve");
 
   await cleanup();
@@ -360,12 +365,7 @@ async function main() {
     const offers = (link: string, permissions: string[]) => {
       pathname = link;
       return renderToStaticMarkup(
-        createElement(Sidebar, {
-          enabledKeys: MODULE_REGISTRY.map((m) => m.key),
-          canViewPerformance: false,
-          permissions,
-          branding: DEFAULT_BRANDING,
-        }),
+        createElement(Sidebar, { navigation: menuFor(permissions), branding: DEFAULT_BRANDING }),
       ).includes(`href="${link}"`);
     };
     const links = ["/orders", "/payments", "/projects", "/calls", "/visits", "/tickets", "/leads", "/contacts", "/verifications"];

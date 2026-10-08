@@ -4,10 +4,14 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { listAccounts } from "@/actions/ledger";
 import { ChartManager } from "@/components/accounting/chart-manager";
 import { can } from "@/lib/authz/resolve";
+import { notFound } from "next/navigation";
+import { viewerHas } from "@/actions/permission";
 
 export default async function ChartOfAccountsPage() {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
+  // The reports' readers and whoever keeps the chart — its link's terms; a 404 for anybody else.
+  if (!(await viewerHas("ledger.viewReports")) && !(await viewerHas("ledger.manageAccounts"))) notFound();
 
   const [session, accounts] = await Promise.all([auth(), listAccounts()]);
 

@@ -214,6 +214,11 @@ async function run(db: PrismaClient) {
   const { can, permissionsFor } = require("../src/lib/authz/resolve") as typeof import("../src/lib/authz/resolve");
   const { moduleAccessFor } = require("../src/lib/modules-access") as typeof import("../src/lib/modules-access");
   const { Sidebar } = require("../src/components/layout/sidebar") as typeof import("../src/components/layout/sidebar");
+  const { buildNavigation, openModuleKeys } = require("../src/lib/navigation") as typeof import("../src/lib/navigation");
+  // The menu as the layout builds it, for a workspace with every module on: the same pure rule over
+  // the permissions given, then drawn by the sidebar.
+  const menuFor = (permissions: string[]) =>
+    buildNavigation({ openModules: openModuleKeys(() => ({ entitled: true, switchedOn: true }), new Set(permissions)), permissions, country: "IN" });
   const { DEFAULT_BRANDING } = require("../src/lib/branding") as typeof import("../src/lib/branding");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -352,9 +357,7 @@ async function run(db: PrismaClient) {
   ok("  while accounts still see both", (await moduleAccessFor(accounts.id, "it_assets")) === "available" && (await moduleAccessFor(accounts.id, "hr")) === "available");
   ok("an admin sees every section", (await moduleAccessFor(boss.id, "it_assets")) === "available");
   const sellerHolds = await permissionsFor(seller.id);
-  const enabled = MODULE_REGISTRY.map((m) => m.key);
-  const menu = (holds: string[]) =>
-    renderToStaticMarkup(createElement(Sidebar, { enabledKeys: enabled, canViewPerformance: false, permissions: holds, branding: DEFAULT_BRANDING }));
+  const menu = (holds: string[]) => renderToStaticMarkup(createElement(Sidebar, { navigation: menuFor(holds), branding: DEFAULT_BRANDING }));
   const sellerMenu = menu(sellerHolds);
   const accountsMenu = menu(await permissionsFor(accounts.id));
   // Sections render folded: their headings are what is there.

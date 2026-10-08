@@ -6,8 +6,11 @@ import { listCompanyOptions } from "@/actions/company";
 import { ExpenseForm } from "@/components/expenses/expense-form";
 import { isExpenseEditable } from "@/lib/expenses";
 import { expensePath } from "@/lib/record-links";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function EditExpensePage({ params }: { params: Promise<{ id: string }> }) {
+  if (!(await isModuleEnabled("expenses"))) return <ModuleDisabledNotice moduleKey="expenses" />;
   const { id } = await params;
   const [expense, session] = await Promise.all([getExpense(id), auth()]);
   if (!expense) notFound();

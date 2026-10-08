@@ -5,8 +5,11 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { formatOrderId } from "@/lib/order-id";
 import { OrderDetail } from "@/components/orders/order-detail";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  if (!(await isModuleEnabled("orders"))) return <ModuleDisabledNotice moduleKey="orders" />;
   const [{ id }, query, user] = await Promise.all([params, searchParams, requireUser()]);
   const ref = parseRecordRef(id);
 

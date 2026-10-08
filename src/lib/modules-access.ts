@@ -1,9 +1,10 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
-import { can } from "@/lib/authz/resolve";
+import { permissionsFor } from "@/lib/authz/resolve";
 import { featureAvailable, moduleEntitled } from "@/lib/entitlements";
 import { getModuleDefinition, type CountryFeature } from "@/lib/modules";
-import { isPermissionKey, sectionPermission } from "@/lib/permissions";
+import { decideModuleAccess, openModuleKeys, type ModuleAccess, type NavAccess } from "@/lib/navigation";
+import type { PermissionKey } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
@@ -19,10 +20,13 @@ import { currentTenant } from "@/lib/tenancy/resolve";
  *   · available
  *
  * The plan travels with the workspace through the registry, so none of this queries plans. The
- * company's switches are read once per request.
+ * company's switches are read once per request, and the person's permissions resolved once.
+ *
+ * The rule itself is `decideModuleAccess` (src/lib/navigation.ts), so the gates here and the menus
+ * built from `accessContextFor` cannot disagree about what somebody may open.
  */
 
-export type ModuleAccess = "available" | "not-entitled" | "switched-off" | "no-permission";
+export type { ModuleAccess } from "@/lib/navigation";
 
 /** A module outside the workspace's plan, reached anyway — by a stale page or a hand-made request. */
 export class ModuleNotInPlan extends Error {}
@@ -60,14 +64,28 @@ export async function moduleAvailableForTenant(key: string): Promise<boolean> {
 export async function moduleAccessFor(userId: string, key: string): Promise<ModuleAccess> {
   const def = getModuleDefinition(key);
   if (!def) return "available";
-  if (!(await isModuleEntitled(key))) return "not-entitled";
-  if (!(await switchedOn(key))) return "switched-off";
-  if (def.viewPermission && !(await can(userId, def.viewPermission))) return "no-permission";
-  // The section itself, untickable per role (owner, 8 Oct 2026): hidden from the menu, and its pages
-  // say there's no access — as for a missing view permission.
-  if (isPermissionKey(sectionPermission(key)) && !(await can(userId, sectionPermission(key)))) return "no-permission";
-  return "available";
+  const [entitled, on, held] = await Promise.all([isModuleEntitled(key), switchedOn(key), permissionsFor(userId)]);
+  return decideModuleAccess(def, { entitled, switchedOn: on }, new Set(held));
 }
+
+export type AccessContext = NavAccess & { userId: string; permissions: PermissionKey[] };
+
+/**
+ * Everything the menus, the Create menu, the side rail and the dashboard are built from — the
+ * workspace's plan and switches and this person's permissions, read once for the request, then every
+ * module decided in memory by the same rule `moduleAccessFor` uses. No query per link.
+ *
+ * Pass the id the request acts as (`requireUser().id`), so an admin viewing as somebody gets that
+ * person's menu.
+ */
+export const accessContextFor = cache(async (userId: string): Promise<AccessContext> => {
+  const [tenant, on, permissions] = await Promise.all([currentTenant(), switches(), permissionsFor(userId)]);
+  const openModules = openModuleKeys(
+    (def) => ({ entitled: moduleEntitled(tenant.entitlements, tenant.country, def.key), switchedOn: on.get(def.key) ?? true }),
+    new Set<string>(permissions),
+  );
+  return { userId, country: tenant.country, permissions, openModules };
+});
 
 /**
  * The first line of every action a module owns (src/lib/module-actions.ts, enforced by

@@ -4,9 +4,9 @@ import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Menu, X, ChevronRight, LayoutDashboard, BarChart3, Search, Settings as SettingsIcon, UserCog, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck, FileSpreadsheet, Headset } from "lucide-react";
-import { MODULE_REGISTRY, navGroupRank , navPermissionKeys } from "@/lib/modules";
-import { sectionPermission, type PermissionKey } from "@/lib/permissions";
+import { Menu, X, ChevronRight, LayoutDashboard, Search, PanelLeftClose, PanelLeftOpen, Headset } from "lucide-react";
+import { MODULE_REGISTRY } from "@/lib/modules";
+import { DASHBOARD_HREF, hasModuleNavigation, navIcon, type VisibleNavSection } from "@/lib/navigation";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { useWording } from "@/components/terms/wording-provider";
@@ -119,20 +119,18 @@ function BrandMark({ branding, collapsed }: { branding: Branding; collapsed: boo
 }
 
 export function Sidebar({
-  enabledKeys,
-  canViewPerformance,
-  /** Permission keys this viewer holds, for nav items that name one. */
-  permissions = [],
+  navigation,
   branding,
-  country = "IN",
   support = false,
 }: {
-  enabledKeys: string[];
-  canViewPerformance: boolean;
-  permissions?: string[];
+  /**
+   * The menu, already decided on the server for whoever the request acts as —
+   * `buildNavigation` (src/lib/navigation.ts) over the layout's access context. Nothing is filtered
+   * here: this draws what it is given, so it can't show a module the server would refuse, and there
+   * is no moment after sign-in when it shows more than that.
+   */
+  navigation: VisibleNavSection[];
   branding: Branding;
-  /** The workspace's, for links that only exist in some countries (the e-way bill register). */
-  country?: string;
   /**
    * Whether to offer "Contact Support" at the foot of the menu, below xl (the tool rail has it from xl) —
    * the layout's answer from `supportLauncherState()`. The dialog itself is the layout's
@@ -154,18 +152,6 @@ export function Sidebar({
 
   function toggleCollapsed() {
     collapsedStore.write(String(!collapsed));
-  }
-
-  const groups = new Map<string, typeof MODULE_REGISTRY>();
-  for (const mod of MODULE_REGISTRY) {
-    if (!enabledKeys.includes(mod.key)) continue;
-    // A module this person may not see is not offered — the page would only tell them so.
-    if (mod.viewPermission && !permissions.includes(mod.viewPermission)) continue;
-    // Nor a section unticked for their role (src/lib/permissions.ts, "Sections").
-    if (!permissions.includes(sectionPermission(mod.key) as PermissionKey)) continue;
-    const list = groups.get(mod.navGroup) ?? [];
-    list.push(mod);
-    groups.set(mod.navGroup, list);
   }
 
   const matches = (href: string) => pathname === href || pathname?.startsWith(`${href}/`);
@@ -223,60 +209,21 @@ export function Sidebar({
     );
   }
 
-  // `canonical` is the app's own label: a renamed page is still found by its old name.
-  const sections: { group: string; items: { href: string; label: string; canonical?: string; Icon: typeof LayoutDashboard }[] }[] = [
-    // Explicit order rather than the order the registry happens to declare them in.
-    // See NAV_GROUP_ORDER in src/lib/modules.ts.
-    ...Array.from(groups.entries())
-      .sort(([a], [b]) => navGroupRank(a) - navGroupRank(b))
-      .map(([group, mods]) => ({
-        group,
-        items: mods
-          .flatMap((m) => m.navItems)
-          // An array means any one of them will do — the same rule the settings catalogue uses.
-          .filter((i) => {
-            if (i.countries && !i.countries.includes(country)) return false;
-            const keys = navPermissionKeys(i);
-            return keys.length === 0 || keys.some((k) => permissions.includes(k));
-          })
-          .map((i) => ({ href: i.href, label: i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label, canonical: i.label, Icon: i.icon })),
+  // `canonical` is the app's own label: a renamed page is still found by its old name. A group with
+  // nothing in it was dropped by `buildNavigation` — a bare heading over nothing reads as broken.
+  const visibleSections: { group: string; items: { href: string; label: string; canonical?: string; exact?: boolean; Icon: typeof LayoutDashboard }[] }[] =
+    navigation.map(({ group, items }) => ({
+      group,
+      items: items.map((i) => ({
+        href: i.href,
+        label: i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label,
+        canonical: i.label,
+        exact: i.exact,
+        Icon: navIcon(i.href),
       })),
-    {
-      group: "Reports",
-      items: [
-        ...(canViewPerformance ? [{ href: "/performance", label: "Performance", Icon: BarChart3 }] : []),
-        // No permission gate: everybody can see their own activity, and should. A log that is
-        // secret from the people in it is surveillance; one they can check is also the fastest
-        // way somebody notices a sign-in that was not them. The action narrows the rows.
-        { href: "/activity", label: "Activity log", Icon: ScrollText },
-      ],
-    },
-    {
-      // Each administration link is gated on the key its own page requires, not on a blanket
-      // "is an admin" flag. The two must agree: a link whose page then refuses you is the
-      // invitation-to-a-locked-door problem, and gating the group as a whole would hide Staff &
-      // roles from an auditor who holds permissions.view and nothing else.
-      group: "Administration",
-      items: [
-        ...(permissions.includes("settings.manage")
-          ? [{ href: "/settings", label: "Settings", Icon: SettingsIcon }]
-          : []),
-        ...(permissions.includes("permissions.view")
-          ? [{ href: "/settings/access", label: "Staff & roles", Icon: UserCog }]
-          : []),
-        ...(permissions.includes("security.manage")
-          ? [{ href: "/settings/security", label: "Security & DLP", Icon: ShieldCheck }]
-          : []),
-        // Any export permission opens it. Deliberately not gated on being an admin: an accountant
-        // who exports statements is not an administrator, and hiding it from them defeats the point.
-        ...(permissions.some((k) => k.startsWith("data."))
-          ? [{ href: "/settings/data", label: "Import & export", Icon: FileSpreadsheet }]
-          : []),
-      ],
-    },
-  ];
-
-  const visibleSections = sections.filter((section) => section.items.length > 0);
+    }));
+  /** Nothing to open but the dashboard and the app's own pages — said, rather than shown as a bare menu. */
+  const noModules = !hasModuleNavigation(navigation);
 
   /**
    * The section holding the page you are on.
@@ -288,7 +235,7 @@ export function Sidebar({
    */
   const activeGroup =
     visibleSections.find((section) =>
-      section.items.some((i) => (i.href === "/settings" ? pathname === i.href : isActive(i.href))),
+      section.items.some((i) => (i.exact ? pathname === i.href : isActive(i.href))),
     )?.group ?? null;
 
   /**
@@ -382,18 +329,25 @@ export function Sidebar({
             list reads as "Dashboard is the only match". */}
         {!query && (
           <NavLink
-            href="/dashboard"
+            href={DASHBOARD_HREF}
             label="Dashboard"
             Icon={LayoutDashboard}
-            active={pathname === "/dashboard"}
+            active={pathname === DASHBOARD_HREF}
             isCollapsed={isCollapsed}
             onNavigate={onNavigate}
           />
         )}
 
-        {/* A group whose every item was filtered out by permission renders as a bare heading over
-            nothing, which reads as a broken menu rather than as an absent one — hence
-            `visibleSections`, which drops them before anything here sees them. */}
+        {/* Signed in to nothing yet: a role with every section unticked, or a plan of the core alone
+            switched off. Said once, under the dashboard, instead of a menu of headings with no
+            modules — the dashboard and the app's own pages still work. */}
+        {noModules && !query && !isCollapsed && (
+          <div role="note" className="mx-0.5 my-2 rounded-base border border-dashed border-line px-3 py-3 text-xs text-muted">
+            <p className="font-medium text-text">No modules assigned</p>
+            <p className="mt-1">Please contact your administrator to request access.</p>
+          </div>
+        )}
+
         {query && matching.length === 0 && (
           <p className="px-2.5 py-6 text-center text-xs text-subtle">
             Nothing here matches &ldquo;{search.trim()}&rdquo;.
@@ -415,7 +369,7 @@ export function Sidebar({
                       href={item.href}
                       label={item.label}
                       Icon={item.Icon}
-                      active={item.href === "/settings" ? pathname === item.href : isActive(item.href)}
+                      active={item.exact ? pathname === item.href : isActive(item.href)}
                       isCollapsed
                       onNavigate={onNavigate}
                     />
@@ -467,7 +421,7 @@ export function Sidebar({
                       href={item.href}
                       label={item.label}
                       Icon={item.Icon}
-                      active={item.href === "/settings" ? pathname === item.href : isActive(item.href)}
+                      active={item.exact ? pathname === item.href : isActive(item.href)}
                       isCollapsed={false}
                       onNavigate={onNavigate}
                     />
