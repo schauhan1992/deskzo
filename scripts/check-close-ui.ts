@@ -131,6 +131,15 @@ async function html(node: unknown): Promise<string> {
   // React marks the join between two text nodes with an empty comment; the page doesn't show it.
   return renderToStaticMarkup((await resolveAsync(await node)) as ReactElement).replace(/<!-- -->/g, "");
 }
+/** "notFound" when rendering it calls notFound() — the 404 page — or what it rendered otherwise. */
+async function notFoundOr(node: unknown): Promise<string> {
+  try {
+    return await html(node);
+  } catch (err) {
+    if (err instanceof Error && err.message === "NOT_FOUND_CALLED") return "notFound";
+    throw err;
+  }
+}
 /** HTML entities back to text, so assertions read like the page does. */
 const text = (s: string) =>
   s
@@ -436,9 +445,9 @@ async function run(scratchUrl: string) {
 
     section("Somebody outside the close");
     actor = outsider;
-    const refused = text(await closePage({ month: k2 }));
-    ok("a salesperson is refused, and told which permission would let them in", refused.includes("You don't have access to this") && !refused.includes("Checklist"));
-    ok("  as on Prepaids & accruals", text(await html(SchedulesPage({ searchParams: Promise.resolve({}) }))).includes("You don't have access to this"));
+    // The 404 page (owner, 8 Oct 2026), as for an address the app doesn't have.
+    ok("a salesperson gets the 404 page", (await notFoundOr(ClosePage({ searchParams: Promise.resolve({ month: k2 }) }))) === "notFound");
+    ok("  as on Prepaids & accruals", (await notFoundOr(SchedulesPage({ searchParams: Promise.resolve({}) }))) === "notFound");
 
     // ── Every automatic check, rendered ───────────────────────────────────────────────────────
     section("Every automatic check's findings, written for people");
@@ -524,7 +533,7 @@ async function run(scratchUrl: string) {
     const explained = text(await closePage({ month: k2, tab: "flux" }));
     ok("the explained row shows the note and who wrote it", explained.includes("the new office's first full month") && explained.includes(`— ${exec.name}`) && explained.includes("Explained"));
     actor = outsider;
-    ok("  and the salesperson can't read the flux either", !text(await closePage({ month: k2, tab: "flux" })).includes(rent.name));
+    ok("  and the salesperson can't read the flux either — it is the 404 page", (await notFoundOr(ClosePage({ searchParams: Promise.resolve({ month: k2, tab: "flux" }) }))) === "notFound");
 
     // ── Closing, the override, reopening, the history ─────────────────────────────────────────
     section(`Closing: ${L1} first, then ${L2} with a written reason`);
@@ -658,7 +667,7 @@ async function run(scratchUrl: string) {
     ok("  its form: the checks in plain language, the owner, the due working day", text(templateForm).includes("Every active bank account reconciled to the month end") && text(templateForm).includes("None — ticked by hand") && text(templateForm).includes("The 3rd working day (Mon–Fri) of the following month"));
     actor = exec;
     pathname = "/settings/revenue-close";
-    ok("the executive is refused both", text(await html(SettingsRevenueClose())).includes("You don’t have permission to change this") && text(await html(SettingsChecklist())).includes("You don’t have permission to change this"));
+    ok("the executive gets the 404 page for both", (await notFoundOr(SettingsRevenueClose())) === "notFound" && (await notFoundOr(SettingsChecklist())) === "notFound");
     actor = manager;
 
     // ── The lock gap ─────────────────────────────────────────────────────────────────────────

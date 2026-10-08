@@ -1,10 +1,11 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ArrowLeft, ClipboardList, CalendarDays, FileQuestion, MessageSquareText, Sparkles } from "lucide-react";
 import type { FormCategory } from "@prisma/client";
 import { isModuleEnabled } from "@/actions/module";
 import { formEditorOptions } from "@/actions/forms";
 import { viewerHas } from "@/actions/permission";
-import { ModuleDisabledNotice, NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { Card } from "@/components/ui/card";
 import { FormBuilder } from "@/components/forms/form-builder";
 import { CATEGORY_KEYS, FORM_CATEGORIES, categoryOf } from "@/lib/forms/categories";
@@ -20,7 +21,7 @@ const ICONS: Record<FormCategory, typeof CalendarDays> = {
 
 export default async function NewFormPage({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
   if (!(await isModuleEnabled("forms"))) return <ModuleDisabledNotice moduleKey="forms" />;
-  if (!(await viewerHas("forms.create"))) return <NoAccessNotice title="New form" permission="forms.create" />;
+  if (!(await viewerHas("forms.create"))) notFound();
 
   const { category } = await searchParams;
   const chosen = category && (CATEGORY_KEYS as string[]).includes(category) ? (category as FormCategory) : null;

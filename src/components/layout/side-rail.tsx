@@ -45,12 +45,15 @@ export function SideRail({
   canManageHelp = false,
   companyName = null,
   proRata = true,
+  proRataProposals = false,
   country = "IN",
   support = false,
   supportAccess = null,
 }: {
   /** Renewals are in the workspace's plan — the pro-rata tool quotes seats onto a subscription. */
   proRata?: boolean;
+  /** This person may raise a proposal — the pro-rata panel then offers to draft one from its figures. */
+  proRataProposals?: boolean;
   /** The workspace's: the GST calculator and the GSTIN check are India's. */
   country?: string;
   /** The copilot is on and this person may use it — the rail then offers it beside Help. */
@@ -151,7 +154,7 @@ export function SideRail({
             {active.key === "tasks" && <RailTasks />}
             {active.key === "notes" && <RailNotes />}
             {active.key === "calculator" && <RailCalculator />}
-            {active.key === "prorata" && <RailProRata />}
+            {active.key === "prorata" && <RailProRata canPropose={proRataProposals} />}
             {active.key === "currency" && <RailCurrency />}
             {active.key === "lookup" && <RailLookup />}
             {active.key === "updates" && <RailUpdates canManage={canManageHelp} />}

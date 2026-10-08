@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Globe, ShieldOff, UserX } from "lucide-react";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
@@ -23,14 +24,7 @@ export default async function CustomerPortalPage({
 }) {
   const { q } = await searchParams;
   const user = await requireUser();
-  if (!(await can(user.id, "portal.manage"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Portal access</h1>
-        <p className="mt-2 text-sm text-muted">You don&rsquo;t have access to the customer portal.</p>
-      </div>
-    );
-  }
+  if (!(await can(user.id, "portal.manage"))) notFound();
 
   const roster = await portalRoster(q);
   if (!roster.ok) return <p className="text-sm text-danger">{roster.error}</p>;

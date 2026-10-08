@@ -17,7 +17,9 @@
  *   npm run check:view-permissions
  */
 import "dotenv/config";
+import { readFileSync, readdirSync } from "node:fs";
 import Module from "node:module";
+import path from "node:path";
 import { createElement, type ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { PERMISSION_REGISTRY, PERMISSIONS } from "../src/lib/permissions";
@@ -140,6 +142,22 @@ async function main() {
     nav.find((n) => n.href === "/leads")?.permission === "leads.view" && nav.find((n) => n.href === "/verifications")?.permission === "contacts.view",
   );
 
+  /**
+   * A page somebody may not open is the 404 page (owner, 8 Oct 2026), the same as an address the app
+   * doesn't have. One that says "you don't have permission" tells everybody what is behind the door,
+   * so no page may say it — whatever the wording.
+   */
+  const refusing = /You don(?:&apos;|&rsquo;|'|’)t (?:have (?:permission|access)|hold (?:the|any) [a-z ]*permission)|You need permission|Only an admin can view|Only somebody holding the/;
+  const root = path.join(__dirname, "..");
+  const pagesDir = path.join(root, "src/app/(dashboard)");
+  const screens = [
+    ...readdirSync(pagesDir, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith("page.tsx")).map((f) => path.join(pagesDir, f)),
+    path.join(root, "src/components/settings/settings-page.tsx"),
+    path.join(root, "src/components/settings/module-disabled-notice.tsx"),
+  ];
+  const sayingSo = screens.filter((f) => refusing.test(readFileSync(f, "utf8"))).map((f) => path.relative(root, f));
+  ok("no page tells somebody it is refusing them — it is not found instead", screens.length > 100 && sayingSo.length === 0, sayingSo.join(", "));
+
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
   const moduleActions = require("../src/actions/module") as typeof import("../src/actions/module");
@@ -166,14 +184,25 @@ async function main() {
   try {
     section("Everybody keeps what they had");
 
+    // A role an admin has set a view on in this database (the CALLING role without orders, say) is
+    // configured, not "nothing configured" — those pairs are the admin's answer, not the default's.
+    const configured = new Set(
+      (await db.rolePermission.findMany({ where: { role: { in: [...NON_ADMIN_ROLES] }, permission: { in: [...VIEWS] } }, select: { role: true, permission: true } })).map(
+        (r) => `${r.role}:${r.permission}`,
+      ),
+    );
     const byRole: string[] = [];
     for (const role of NON_ADMIN_ROLES) {
       const u = await db.user.create({
         data: { name: `Zzprobe ${role}`, email: `role-${role.toLowerCase()}${MAIL}`, role, passwordHash: "x".repeat(60) },
       });
-      for (const key of VIEWS) if (!(await can(u.id, key))) byRole.push(`${role}:${key}`);
+      for (const key of VIEWS) if (!configured.has(`${role}:${key}`) && !(await can(u.id, key))) byRole.push(`${role}:${key}`);
     }
-    ok("every role, with nothing configured, holds all nine", byRole.length === 0, byRole.join(", "));
+    ok(
+      `every role, with nothing configured, holds all nine${configured.size ? ` (${configured.size} set by an admin here, left out)` : ""}`,
+      byRole.length === 0,
+      byRole.join(", "),
+    );
 
     section("The fixture");
 
@@ -317,8 +346,13 @@ async function main() {
     ok("  and none of the cards, nor New lead", !["Open pipeline", "Last activity", "Billed", "Outstanding", "New lead", "Module off"].some((t) => blindPage.includes(t)));
     ok("  and asking for a hidden tab by URL shows Details instead", !blindPage.includes("Zzprobe Person") && !blindPage.includes("person@zzprobe-views.invalid"));
 
-    const notice = renderToStaticMarkup((await ModuleDisabledNotice({ moduleKey: "orders" })) as ReactElement);
-    ok("a module page names the permission rather than saying it is switched off", notice.includes("View orders") && !notice.includes("currently disabled"), notice.replace(/<[^>]+>/g, " ").trim());
+    // Not a notice naming the permission any more (owner, 8 Oct 2026): the 404 page, as for an address
+    // the app doesn't have, and never "switched off" — the module is on, it just isn't theirs.
+    const notice = await ModuleDisabledNotice({ moduleKey: "orders" }).then(
+      () => "rendered",
+      (err: unknown) => (err instanceof NotFound ? "notFound" : String(err)),
+    );
+    ok("a module page the role can't see is not found, rather than saying it is switched off", notice === "notFound", notice);
     ok("  and says which reason it is", (await moduleActions.moduleAccess("orders")) === "no-permission");
 
     // A section renders its links only while open, and the section holding the current page is

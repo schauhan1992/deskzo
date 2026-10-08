@@ -141,6 +141,8 @@ export async function CompanyDetail({
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
   const calendarEnabled = await isModuleEnabled("calendar");
+  // Booking one is "Schedule meetings" (owner, 8 Oct 2026); the Meetings tab still lists what was booked.
+  const canScheduleMeetings = calendarEnabled && (await hasEffectivePermission(userId, "meetings.schedule"));
   const [
     itemsEnabled,
     renewalsEnabled,
@@ -480,7 +482,7 @@ export async function CompanyDetail({
             <CallButton companyId={company.id} companyName={company.name} />
           )}
           {/* A reseller's customer can still be met about — with colleagues only (src/lib/calendar/records.ts). */}
-          {calendarEnabled && !isVendor && <ScheduleMeetingButton record={{ kind: "company", id: company.id }} />}
+          {canScheduleMeetings && !isVendor && <ScheduleMeetingButton record={{ kind: "company", id: company.id }} />}
           {isVendor && company.vendorStatus && (
             <VendorStatusControl companyId={company.id} status={company.vendorStatus} />
           )}
@@ -990,6 +992,7 @@ export async function CompanyDetail({
                   documents={documents}
                   isVendor={isVendor}
                   managedByResellerName={managedByReseller?.name}
+                  canRaise={await hasEffectivePermission(userId, "documents.issue")}
                 />
               </CardContent>
             </Card>
@@ -1202,7 +1205,7 @@ export async function CompanyDetail({
                   companyName={company.name}
                   contacts={company.contacts.map((c) => ({ ...c, designationName: contactRoles[c.id] ?? null }))}
                   customFields={contactFields}
-                  canMeet={calendarEnabled}
+                  canMeet={canScheduleMeetings}
                   left={contactsLeft}
                   moves={contactMoves}
                 />

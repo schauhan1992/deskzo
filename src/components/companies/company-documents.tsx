@@ -19,12 +19,15 @@ export function CompanyDocuments({
   documents,
   isVendor,
   managedByResellerName,
+  canRaise,
 }: {
   companyId: string;
   documents: Document[];
   isVendor: boolean;
   /** Set when this company's orders are billed to a reseller, which is why it has no invoices of its own. */
   managedByResellerName?: string | null;
+  /** May raise a document ("Raise and issue sales documents") — the New button is theirs only. */
+  canRaise: boolean;
 }) {
   const groups = (isVendor ? PURCHASE_ORDER : SALES_ORDER)
     .map((docType) => ({ docType, rows: documents.filter((d) => d.docType === docType) }))
@@ -50,9 +53,11 @@ export function CompanyDocuments({
                   .reduce((sum, d) => sum + d.total, 0),
               )} issued`}
         </p>
-        <Link href={`/documents/new?type=${newDocType}&companyId=${companyId}`}>
-          <Button size="sm">New {tradeDocumentLabels[newDocType].toLowerCase()}</Button>
-        </Link>
+        {canRaise && (
+          <Link href={`/documents/new?type=${newDocType}&companyId=${companyId}`}>
+            <Button size="sm">New {tradeDocumentLabels[newDocType].toLowerCase()}</Button>
+          </Link>
+        )}
       </div>
 
       {managedByResellerName && (

@@ -653,8 +653,12 @@ async function main() {
     ok("My collections for the manager: the team's", managerPage.text.includes(`${TAG} Alpha`) && managerPage.text.includes(`${TAG} Shared`) && !managerPage.text.includes(`${TAG} Plain`));
     const accountsPage = await page(accounts, "collections-accounts", CollectionsPage, { q: TAG });
     ok("  for accounts: every account's", [`${TAG} Alpha`, `${TAG} Shared`, `${TAG} Stranger`, `${TAG} Plain`].every((s) => accountsPage.text.includes(s)) && accountsPage.text.includes("What every client owes"));
-    const plainPage = await page(plain, "collections-refused", CollectionsPage);
-    ok("  and refused without the permission, naming it", plainPage.text.includes("Follow up payments on their accounts") && !plainPage.text.includes(`${TAG} Plain`));
+    // The 404 page without the permission (owner, 8 Oct 2026), as for an address the app doesn't have.
+    const plainPage = await page(plain, "collections-refused", CollectionsPage).then(
+      () => "rendered",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    );
+    ok("  and the 404 page without the permission", plainPage === "NOT_FOUND_CALLED", plainPage);
 
     const receivablesPage = await page(accounts, "receivables-accounts", ReceivablesPage, { q: TAG });
     ok("Receivables for accounts: the Broken promises and Promised this week filters, and the last follow-up", ["Broken promises", "Promised this week", "Last follow-up", "Zzprobe sales"].every((s) => receivablesPage.text.includes(s)));

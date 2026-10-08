@@ -128,6 +128,12 @@ type Page = (props: { params: Promise<Record<string, string>>; searchParams: Pro
 const renderPage = async (page: Page, searchParams: Record<string, string> = {}, params: Record<string, string> = {}) =>
   html(await page({ params: Promise.resolve(params), searchParams: Promise.resolve(searchParams) }));
 /** The words on the page, entities decoded. */
+/** "notFound" when the page answers with the 404 page — what a refusal is (owner, 8 Oct 2026). */
+const notFoundOr = (rendering: Promise<string>) =>
+  rendering.then(
+    () => "rendered",
+    (err: unknown) => (err instanceof Error && err.message === "NOT_FOUND_CALLED" ? "notFound" : String(err)),
+  );
 const text = (markup: string) =>
   markup
     .replace(/<[^>]+>/g, " ")
@@ -422,8 +428,8 @@ async function run(scratchName: string) {
   ok("an accounts executive reads the list", [sa, sb, sc].every((s) => listExec.includes(`/accounting/revenue/${s.id}`)));
   ok("  with nothing that moves money: no Recognise through, no opening tab", !te.includes("Recognise through") && !te.includes("Open deferred revenue") && !te.includes("Recognise revenue"));
   as(rep);
-  const listRep = text(await renderPage(RevenuePage));
-  ok("a salesperson is refused, and told why", listRep.includes("permission to see revenue recognition") && !listRep.includes("Zz Acme Cloud"), listRep.slice(0, 120));
+  const listRep = await notFoundOr(renderPage(RevenuePage));
+  ok("a salesperson gets the 404 page", listRep === "notFound", listRep);
 
   as(manager);
   const byCustomer = await renderPage(RevenuePage, { customer: formula.id });
@@ -475,7 +481,7 @@ async function run(scratchName: string) {
   const detailExec = text(await renderPage(SchedulePage, {}, { id: sa.id }));
   ok("the executive reads it with no buttons", detailExec.includes("Zz Cloud suite, a year") && !detailExec.includes("Cancel schedule") && !detailExec.includes(" Edit "));
   as(rep);
-  ok("a salesperson is refused", text(await renderPage(SchedulePage, {}, { id: sa.id })).includes("permission to see revenue recognition"));
+  ok("a salesperson is refused — the 404 page", (await notFoundOr(renderPage(SchedulePage, {}, { id: sa.id }))) === "notFound");
   as(manager);
   const missing = await renderPage(SchedulePage, {}, { id: "no-such-schedule" }).catch((e: Error) => e.message);
   ok("an id that isn't one is not found", missing === "NOT_FOUND_CALLED", missing.slice(0, 80));
@@ -587,7 +593,7 @@ async function run(scratchName: string) {
   const csvRefused = await screens.exportWaterfallCsv({ by: "customer", months: 12 });
   ok("  somebody without the export permission is refused", !csvRefused.ok && /export permission/.test(csvRefused.error));
   as(rep);
-  ok("a salesperson can't open the waterfall", text(await renderPage(WaterfallPage)).includes("permission to see revenue recognition"));
+  ok("a salesperson can't open the waterfall — the 404 page", (await notFoundOr(renderPage(WaterfallPage))) === "notFound");
 
   // ── The company page ───────────────────────────────────────────────────────────────────────────
   section("9. The customer revenue card");

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { RevenueScheduleStatus } from "@prisma/client";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
@@ -10,7 +11,6 @@ import { getOrganisation } from "@/lib/organisation";
 import { addMonths, isMonthKey, monthLabel } from "@/lib/revenue/periods";
 import { mayApproveSchedule, type ScheduleApprovalVerdict } from "@/lib/revenue/schedules";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
-import { Card } from "@/components/ui/card";
 import { TabNav } from "@/components/ui/tab-nav";
 import { Pagination } from "@/components/ui/pagination";
 import { SearchParamInput } from "@/components/ui/search-param-input";
@@ -40,16 +40,9 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
   const enabled = await isModuleEnabled("revenue_close");
   if (!enabled) return <ModuleDisabledNotice moduleKey="revenue_close" />;
 
-  // Refused in place rather than hidden, so somebody who followed a link is told why.
+  // Without either, the page is not found, like any address the viewer shouldn't have.
   const viewer = await currentUser();
-  if (!viewer || !((await can(viewer.id, "revenue.viewReports")) || (await can(viewer.id, "revenue.manage")))) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        You don&rsquo;t have permission to see revenue recognition. It needs &ldquo;View revenue recognition&rdquo;; ask an
-        admin if your work needs it.
-      </Card>
-    );
-  }
+  if (!viewer || !((await can(viewer.id, "revenue.viewReports")) || (await can(viewer.id, "revenue.manage")))) notFound();
 
   const params = await searchParams;
   const [ctx, org, pendingCount] = await Promise.all([

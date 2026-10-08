@@ -1,5 +1,6 @@
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
-import { ModuleDisabledNotice, NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { closeMonthHistory, getCloseMonth, getFlux, listCloseMonths, listCloseOwnerOptions } from "@/actions/close";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
@@ -30,7 +31,7 @@ export default async function MonthEndClosePage({
 
   const viewer = await currentUser();
   const [work, manage] = viewer ? await Promise.all([can(viewer.id, "close.work"), can(viewer.id, "close.manage")]) : [false, false];
-  if (!work && !manage) return <NoAccessNotice title="Month-end close" permission="close.work" />;
+  if (!work && !manage) notFound();
 
   const params = await searchParams;
   const now = new Date();

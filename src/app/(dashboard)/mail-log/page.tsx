@@ -1,8 +1,8 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { MessageChannel, MessageClass } from "@prisma/client";
 import { listMailLog } from "@/actions/mail-log";
 import { viewerHas } from "@/actions/permission";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { MailLogTable } from "@/components/mail-log/mail-log-table";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -38,7 +38,7 @@ const CHANNELS: { key: MessageChannel | "ALL"; label: string }[] = [
  * Every email the ERP sent a customer — searchable, and narrowed to one customer from their page.
  */
 export default async function MailLogPage({ searchParams }: { searchParams: Promise<Params> }) {
-  if (!(await viewerHas("emails.view"))) return <NoAccessNotice title="Mail log" permission="emails.view" />;
+  if (!(await viewerHas("emails.view"))) notFound();
 
   const params = await searchParams;
   const status = MAIL_STATUS_GROUP_KEYS.find((k) => k === params.status);

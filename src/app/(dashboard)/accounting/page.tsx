@@ -1,6 +1,7 @@
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { balanceSheet, profitAndLoss, trialBalance } from "@/actions/ledger-reports";
@@ -46,17 +47,11 @@ export default async function AccountingOverviewPage() {
    * The books are not a module-level read.
    *
    * Every statement on these pages is built from the same ledger, and the actions behind them
-   * answered any signed-in session until this key existed. Refused in place rather than hidden, so
-   * somebody who followed a link is told why.
+   * answered any signed-in session until this key existed. Without it the page is not found, like
+   * any address the viewer shouldn't have.
    */
   const viewer = await currentUser();
-  if (!viewer || !(await can(viewer.id, "ledger.viewReports"))) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        You don&rsquo;t have permission to see the books.
-      </Card>
-    );
-  }
+  if (!viewer || !(await can(viewer.id, "ledger.viewReports"))) notFound();
 
   const now = new Date();
   const fy = financialYearBounds(now);
@@ -108,7 +103,7 @@ export default async function AccountingOverviewPage() {
         subtitle="Total unpaid invoices"
         data={ar}
         href="/receivables"
-        newHref="/documents/new?type=INVOICE"
+        newHref={(await can(viewer.id, "documents.issue")) ? "/documents/new?type=INVOICE" : undefined}
         newLabel="New"
       />
     ),

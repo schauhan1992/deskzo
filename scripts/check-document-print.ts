@@ -237,7 +237,7 @@ async function main() {
      * copy at all — which is what this half of the suite is guarding against coming back.
      */
     const { DocumentActions } = await import("../src/components/documents/document-actions");
-    const bar = (status: "DRAFT" | "ACCEPTED") =>
+    const bar = (status: "DRAFT" | "ACCEPTED", may = true) =>
       renderToStaticMarkup(
         createElement(DocumentActions, {
           id: made.data.id,
@@ -247,6 +247,8 @@ async function main() {
           hasIrn: false,
           einvoiceEnabled: false,
           canCancelIrn: false,
+          canIssue: may,
+          canVoid: may,
         }),
       );
 
@@ -254,6 +256,10 @@ async function main() {
     ok("a draft offers the printable copy", /Preview PDF/.test(draftBar), "it offered nothing at all before");
     ok("  without losing Issue", /Issue/.test(draftBar));
     ok("  or Edit", /Edit/.test(draftBar));
+
+    // Somebody who may only look gets the printable copy and nothing that would refuse them (owner, 8 Oct 2026).
+    const lookingOnly = bar("DRAFT", false);
+    ok("  somebody who may not raise or cancel one sees only the printable copy", /Preview PDF/.test(lookingOnly) && !/>Issue|>Edit|More/.test(lookingOnly));
 
     const issuedBar = bar("ACCEPTED");
     ok("an issued document still offers it", /Print \/ PDF/.test(issuedBar));

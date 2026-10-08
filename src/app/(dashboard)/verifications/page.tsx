@@ -1,5 +1,6 @@
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
-import { ModuleDisabledNotice, NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { viewerHas } from "@/actions/permission";
 import { pendingVerifications, verificationSummary } from "@/actions/verification";
 import { badEmailContacts, emailVerificationSummary } from "@/actions/email-verification";
@@ -26,7 +27,7 @@ export default async function VerificationsPage({
   const enabled = await isModuleEnabled("workspace");
   if (!enabled) return <ModuleDisabledNotice moduleKey="workspace" />;
   // The queues are the address book, so they are `contacts.view`'s — the sidebar link says the same.
-  if (!(await viewerHas("contacts.view"))) return <NoAccessNotice title="Contact checks" permission="contacts.view" />;
+  if (!(await viewerHas("contacts.view"))) notFound();
 
   const params = await searchParams;
   const page = resolvePage(params.page);

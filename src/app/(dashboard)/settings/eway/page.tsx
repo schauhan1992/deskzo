@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Truck, XCircle } from "lucide-react";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
@@ -23,14 +24,7 @@ export default async function EwaySettingsPage() {
     );
   }
   const sessionUser = await currentUser();
-  if (!sessionUser || !(await can(sessionUser.id, "settings.manage"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">E-way bills</h1>
-        <p className="mt-2 text-sm text-muted">Only an admin can view and change these settings.</p>
-      </div>
-    );
-  }
+  if (!sessionUser || !(await can(sessionUser.id, "settings.manage"))) notFound();
 
   const [result, transporters] = await Promise.all([ewaySettings(), listTransporters({})]);
   if (!result.ok) {

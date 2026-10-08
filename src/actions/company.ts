@@ -6,6 +6,7 @@ import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationship
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
+import { scopeUserIds } from "@/lib/authz/scope";
 import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
@@ -1555,6 +1556,12 @@ export async function listCommissionPartyOptions(forCompanyId?: string) {
 
 export async function getCompany(id: string) {
   const user = await requireUser();
+  /**
+   * Whose activity on the account this person sees (owner, 8 Oct 2026): their own and their team's,
+   * or everybody's with "See everyone's calls, notes & meetings". Filtered in the query, so what
+   * they may not read never leaves the database — the Activity pane and the copilot both read this.
+   */
+  const activityBy = await scopeUserIds(user.id, "activities.viewAll");
   const company = await db.company.findUnique({
     where: { id },
     include: {
@@ -1567,6 +1574,7 @@ export async function getCompany(id: string) {
           owner: { select: { id: true, name: true } },
           contact: { select: { id: true, name: true } },
           activities: {
+            where: activityBy ? { userId: { in: activityBy } } : undefined,
             orderBy: { occurredAt: "desc" },
             include: { user: { select: { id: true, name: true } } },
           },

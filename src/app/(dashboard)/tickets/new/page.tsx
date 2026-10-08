@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { listCompanyOptions } from "@/actions/company";
 import { listCompanyOrderOptions, listSupportAgents } from "@/actions/ticket";
 import { isModuleEnabled } from "@/actions/module";
@@ -13,14 +14,7 @@ export default async function NewTicketPage({
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
   const canCreate = await hasEffectivePermission(userId, "tickets.create");
-  if (!canCreate) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">New ticket</h1>
-        <p className="mt-2 text-sm text-muted">You don&apos;t have permission to create tickets.</p>
-      </div>
-    );
-  }
+  if (!canCreate) notFound();
 
   const itemsEnabled = await isModuleEnabled("items");
   const [{ companyId }, companies, users] = await Promise.all([

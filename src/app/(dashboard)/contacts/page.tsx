@@ -13,6 +13,7 @@ import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagi
 import { contactDesignationValues, relationshipTypeValues, relationshipTypeLabels, isContactDetailField } from "@/lib/validation/company";
 import type { ContactDesignation, CompanyRelationshipType } from "@prisma/client";
 import { requireUser } from "@/lib/session";
+import { viewerHas } from "@/actions/permission";
 import { fieldsFor, listColumns } from "@/lib/custom-fields/server";
 import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
@@ -114,7 +115,7 @@ export default async function ContactsLibraryPage({
       </div>
 
       <div className="mt-6">
-        <ContactsTable contacts={result.rows} customColumns={customColumns} canMeet={await isModuleEnabled("calendar")} />
+        <ContactsTable contacts={result.rows} customColumns={customColumns} canMeet={(await isModuleEnabled("calendar")) && (await viewerHas("meetings.schedule"))} />
       </div>
 
       <Pagination

@@ -225,7 +225,12 @@ async function main() {
     const settingsHtml = await html(SettingsCategoriesPage());
     ok("the settings page shows them, with their notes", settingsHtml.includes(`${TAG} Strategic`) && settingsHtml.includes(`${TAG} Reply within four hours.`) && settingsHtml.includes("Add a category"));
     as(rep);
-    ok("  and refuses somebody without the permission", !(await html(SettingsCategoriesPage())).includes("Add a category"));
+    // The 404 page for somebody without the permission (owner, 8 Oct 2026).
+    const settingsRefused = await html(SettingsCategoriesPage()).then(
+      () => "rendered",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    );
+    ok("  and is the 404 page for somebody without the permission", settingsRefused === "notFound", settingsRefused);
 
     // ───────────────────────────────────────────────────────────────────────────
     section("Putting a customer in one");

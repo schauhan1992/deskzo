@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ArrowLeft, Database } from "lucide-react";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
@@ -43,14 +44,7 @@ export default async function AccessControlPage({ searchParams }: { searchParams
   const [manage, approve, view] = user
     ? await Promise.all([can(user.id, "security.manage"), can(user.id, "access.approveDevices"), can(user.id, "access.viewSignIns")])
     : [false, false, false];
-  if (!user || (!manage && !approve && !view)) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Devices, networks & sign-ins</h1>
-        <p className="mt-2 text-sm text-muted">You need permission to manage security, approve devices, or see sign-ins.</p>
-      </div>
-    );
-  }
+  if (!user || (!manage && !approve && !view)) notFound();
 
   const params = await searchParams;
   const overview = await accessOverview();

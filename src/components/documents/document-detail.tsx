@@ -255,6 +255,8 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             hasIrn={!!document.irn}
             einvoiceEnabled={org.einvoiceEnabled}
             canCancelIrn={isWithinCancellationWindow(document.ackDate)}
+            canIssue={await viewerHas("documents.issue")}
+            canVoid={await viewerHas("documents.void")}
             canEmail={
               isEmailable(document.docType) &&
               document.status !== "DRAFT" &&

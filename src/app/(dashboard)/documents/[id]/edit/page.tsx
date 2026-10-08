@@ -9,6 +9,7 @@ import { documentBankChoices } from "@/lib/banking/organisation-accounts";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
+import { can } from "@/lib/authz/resolve";
 import { DocumentForm } from "@/components/documents/document-form";
 import { isEditable, tradeDocumentLabels } from "@/lib/trade-documents";
 import { periodKey } from "@/lib/documents/service-period";
@@ -23,7 +24,8 @@ const asDateInput = (value: Date | string | null | undefined) => periodKey(value
 export default async function EditDocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [document, user] = await Promise.all([getTradeDocument(id), requireUser()]);
-  if (!document) notFound();
+  // Editing is raising: the form could only refuse to save without it (owner, 8 Oct 2026).
+  if (!document || !(await can(user.id, "documents.issue"))) notFound();
 
   /**
    * Via the party the document was raised for — `document.companyId`, already loaded, so this is a

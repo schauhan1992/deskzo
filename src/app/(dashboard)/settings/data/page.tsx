@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { exportableAreas } from "@/actions/data-export";
@@ -27,16 +28,7 @@ export default async function DataSettingsPage() {
     (await can(user.id, "data.importCatalog")) ||
     (await can(user.id, "data.importUsers"));
 
-  if (!mayOpen) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Import &amp; export</h1>
-        <p className="mt-2 text-sm text-muted">
-          You don&rsquo;t hold any import or export permission. A super admin grants these under Staff &amp; roles.
-        </p>
-      </div>
-    );
-  }
+  if (!mayOpen) notFound();
 
   const areas = await exportableAreas();
 

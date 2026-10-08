@@ -8,6 +8,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { scopeUserIds, scopeWhere } from "@/lib/authz/scope";
 import { callOutcomeValues, isConnected } from "@/lib/calls";
 import type { ActionResult } from "@/actions/company";
 import { viewerHas } from "@/actions/permission";
@@ -245,15 +246,19 @@ export async function listCalls(params: {
   const days = (await workspaceClock()).dayRange(params.from, params.to);
   const where: Prisma.CallLogWhereInput = {
     /**
-     * Scoped by the account, not by the caller.
+     * Scoped by the account, and by the caller.
      *
      * `CallLog.companyId` is required, so every call hangs off a company and the account manager of
      * that company is who it belongs to — the one-hop `company.ownerUserId` path, same as leads and
-     * tickets. There is no "whose calls" permission to weigh this against: the `userId` parameter
-     * here is a filter the floor manager chooses, never a restriction. What leaks without this is
-     * the number dialled and the note taken afterwards, which are the customer's, not the caller's.
+     * tickets. What leaks without that is the number dialled and the note taken afterwards, which are
+     * the customer's, not the caller's.
+     *
+     * And then whose calls (owner, 8 Oct 2026): their own and their team's, or everybody's with "See
+     * everyone's calls, notes & meetings". The `userId` parameter stays a filter chosen inside that.
      */
     ...(await viaCompanyScope(user.id)),
+    // Under AND, so the caller filter below narrows it rather than replacing it.
+    AND: [await scopeWhere(user.id, "activities.viewAll", "call")],
     ...(params.outcome && callOutcomeValues.includes(params.outcome as CallOutcome)
       ? { outcome: params.outcome as CallOutcome }
       : {}),
@@ -300,7 +305,8 @@ export async function callSummary(params?: { from?: string; to?: string; userId?
   // Both queries, not just the first. The overdue-callback tally is a second read of the same table
   // and counts the whole business unless it is scoped too — a number nobody would think to doubt,
   // and one that tells a sales executive how many customers they cannot see are waiting on a call.
-  const scope = await viaCompanyScope(user.id);
+  // Whose calls under AND, so the caller filter narrows it rather than replacing it.
+  const scope = { ...(await viaCompanyScope(user.id)), AND: [await scopeWhere(user.id, "activities.viewAll", "call")] };
 
   const [calls, dueCount] = await Promise.all([
     db.callLog.findMany({
@@ -331,7 +337,7 @@ export async function listCompanyCalls(companyId: string, take = 50) {
       // Scoped as well as filtered by id. Every row here shares one company, so the scope is
       // all-or-nothing and reads as the refusal it is: without it, a company id — which is not a
       // secret — is enough to read the call notes on an account somebody else manages.
-      where: { ...(await viaCompanyScope(user.id)), companyId },
+      where: { ...(await viaCompanyScope(user.id)), ...(await scopeWhere(user.id, "activities.viewAll", "call")), companyId },
       orderBy: { startedAt: "desc" },
       take,
       select: callSelect,
@@ -342,12 +348,14 @@ export async function listCompanyCalls(companyId: string, take = 50) {
 /**
  * The names in the "caller" filter. Our own staff, so deliberately not account-scoped: narrowing it
  * to colleagues who happened to ring your accounts would hide nothing a customer owns and would
- * leave the filter offering a different set of names on every page.
+ * leave the filter offering a different set of names on every page. Narrowed to the callers whose
+ * calls this person sees, though — a name whose calls never show is a filter that only empties.
  */
 export async function listCallers() {
-  await requireModuleUser("calls");
+  const user = await requireModuleUser("calls");
+  const callers = await scopeUserIds(user.id, "activities.viewAll");
   return db.user.findMany({
-    where: { active: true, callsLogged: { some: {} } },
+    where: { active: true, callsLogged: { some: {} }, ...(callers ? { id: { in: callers } } : {}) },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });

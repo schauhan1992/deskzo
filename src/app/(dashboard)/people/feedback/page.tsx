@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { listInternalFeedback } from "@/actions/internal-feedback";
@@ -8,9 +8,9 @@ export default async function FeedbackInboxPage() {
   if (!(await isModuleEnabled("engagement"))) return <ModuleDisabledNotice moduleKey="engagement" />;
 
   const items = await listInternalFeedback();
-  // Null means the permission is absent. Redirected rather than shown an explanation, because a
-  // page that says "you can't see the anonymous feedback" is itself a small disclosure.
-  if (items === null) redirect("/dashboard");
+  // Null means the permission is absent. Not found rather than an explanation, because a page that
+  // says "you can't see the anonymous feedback" is itself a small disclosure.
+  if (items === null) notFound();
 
   return (
     <div className="animate-fade-rise">

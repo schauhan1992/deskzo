@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ScanSearch } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -13,16 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReconciliationPage() {
   const user = await requireUser();
-  if (!(await can(user.id, "purchase.reconcile"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Vendor reconciliation</h1>
-        <p className="mt-2 text-sm text-muted">
-          You don&rsquo;t hold the reconciliation permission. A super admin grants it under Staff &amp; roles.
-        </p>
-      </div>
-    );
-  }
+  if (!(await can(user.id, "purchase.reconcile"))) notFound();
 
   const [statements, vendors] = await Promise.all([
     db.vendorStatement.findMany({

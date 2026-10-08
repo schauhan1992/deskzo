@@ -394,7 +394,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         subtitle="Total unpaid invoices"
         data={f.receivables}
         href="/receivables"
-        newHref="/documents/new?type=INVOICE"
+        newHref={(await can(user.id, "documents.issue")) ? "/documents/new?type=INVOICE" : undefined}
         newLabel="New"
       />
     );

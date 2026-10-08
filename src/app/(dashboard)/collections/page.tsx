@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { listCollections, type CollectionsFilter } from "@/actions/collections";
 import { isModuleEnabled } from "@/actions/module";
 import { Badge, Card } from "@/components/ui/card";
-import { ModuleDisabledNotice, NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { FollowUpHistory, PromiseBadge, promiseText } from "@/components/collections/follow-up-history";
 import { LogFollowUpButton } from "@/components/collections/log-follow-up-button";
@@ -37,7 +38,7 @@ export default async function CollectionsPage({
   if (!(await isModuleEnabled("receivables"))) return <ModuleDisabledNotice moduleKey="receivables" />;
   const params = await searchParams;
   const data = await listCollections({ filter: params.filter, q: params.q, sort: params.sort });
-  if (!data) return <NoAccessNotice title="My collections" permission="collections.followUp" />;
+  if (!data) notFound();
 
   // Today on the workspace's calendar, as a date column holds a day.
   const clock = await workspaceClock();

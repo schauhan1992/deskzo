@@ -2,6 +2,7 @@
 
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { can } from "@/lib/authz/resolve";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { renewalOrderDraft } from "@/lib/subscriptions/renewal-order";
@@ -37,6 +38,10 @@ export async function createProposalFromRenewal(input: {
   companyProductId: string;
 }): Promise<ActionResult<{ id: string; docNumber: string | null; total: number }>> {
   const user = await requireModuleUser("renewals");
+  // Asked before anything is read, as the add-on proposal does: the figures come off an order, and
+  // what is made is a sales document.
+  if (!(await can(user.id, "orders.view"))) return { ok: false, error: "That subscription no longer exists." };
+  if (!(await can(user.id, "documents.issue"))) return { ok: false, error: "You don't have permission to raise or issue sales documents." };
 
   const product = await db.companyProduct.findFirst({
     /**

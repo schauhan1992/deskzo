@@ -355,7 +355,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           // The name it was registered under heads the company's own guides. A workspace read from the
           // environment may be named only by its slug, so it keeps "From your company".
           companyName={(await currentTenant()).source === "control" ? (await currentTenant()).name : null}
-          proRata={await isModuleEntitled("renewals")}
+          // It lists a customer's subscriptions and what each was sold at, so it needs "View orders";
+          // its Create proposal button needs "Raise and issue sales documents" (owner, 8 Oct 2026).
+          proRata={(await isModuleEntitled("renewals")) && permissions.includes("orders.view")}
+          proRataProposals={(await isModuleEntitled("sales_documents")) && permissions.includes("documents.issue")}
           country={(await currentTenant()).country}
           support={!!supportLauncher}
           supportAccess={supportAccess ? { inside: !!supportAccess.grant } : null}

@@ -57,6 +57,8 @@ export async function LeadDetail({ id }: { id: string }) {
     canDeleteProducts,
     canDeleteAnyTask,
     calendarEnabled,
+    canIssueDocuments,
+    canScheduleMeetings,
   ] = await Promise.all([
     isModuleEnabled("items"),
     isModuleEnabled("tasks"),
@@ -67,6 +69,9 @@ export async function LeadDetail({ id }: { id: string }) {
     hasEffectivePermission(userId, "products.delete"),
     hasEffectivePermission(userId, "tasks.delete"),
     isModuleEnabled("calendar"),
+    // Create proposal is offered only to somebody who may raise one (owner, 8 Oct 2026).
+    hasEffectivePermission(userId, "documents.issue"),
+    hasEffectivePermission(userId, "meetings.schedule"),
   ]);
   const [lead, items, tasks, assignableUsers, documents, visits] = await Promise.all([
     getLead(id),
@@ -143,7 +148,7 @@ export async function LeadDetail({ id }: { id: string }) {
             leadId={lead.id}
             contact={lead.contact ? { id: lead.contact.id, name: lead.contact.name, phone: lead.contact.phone } : undefined}
           />
-          {calendarEnabled && <ScheduleMeetingButton record={{ kind: "lead", id: lead.id }} />}
+          {calendarEnabled && canScheduleMeetings && <ScheduleMeetingButton record={{ kind: "lead", id: lead.id }} />}
           {visitsEnabled && (
             <Link href={`/visits/new?companyId=${company.id}&leadId=${lead.id}`}>
               <Button variant="secondary">
@@ -152,7 +157,7 @@ export async function LeadDetail({ id }: { id: string }) {
               </Button>
             </Link>
           )}
-          {salesDocsEnabled && (
+          {salesDocsEnabled && canIssueDocuments && (
             <Link href={`/documents/new?type=PROPOSAL&leadId=${lead.id}`}>
               <Button>
                 <FileText className="mr-1.5 h-3.5 w-3.5" />
@@ -182,7 +187,7 @@ export async function LeadDetail({ id }: { id: string }) {
           )}
 
           {salesDocsEnabled && (
-            <LeadDocuments documents={documents} leadId={lead.id} canCreate />
+            <LeadDocuments documents={documents} leadId={lead.id} canCreate={canIssueDocuments} />
           )}
 
           {tasksEnabled && (

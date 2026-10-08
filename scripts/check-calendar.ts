@@ -752,6 +752,12 @@ async function run(scratchUrl: string, base: string) {
       ok("a time already gone", !gone.ok && /gone/.test(errorOf(gone) ?? ""), errorOf(gone));
       const notAddress = await calendar.scheduleMeetingAction({ record: null, title: "x", startsAt: `${d(0)}T11:00`, durationMinutes: 30, online: false, emails: ["not an address"] });
       ok("what isn't an address", !notAddress.ok && /isn't an email/.test(errorOf(notAddress) ?? ""));
+      // "Schedule meetings" untaken from the rep (owner, 8 Oct 2026): no booking, no dialog.
+      await db.userPermission.create({ data: { userId: rep.id, permission: "meetings.schedule", allowed: false, reason: TAG } });
+      const unpermitted = await calendar.scheduleMeetingAction({ record: { kind: "lead", id: lead.id }, title: "x", startsAt: `${d(0)}T11:00`, durationMinutes: 30, online: true });
+      const unpermittedForm = await calendar.meetingFormFor({ record: { kind: "lead", id: lead.id } });
+      ok("somebody without \"Schedule meetings\" — nor the dialog", !unpermitted.ok && /permission to schedule/.test(errorOf(unpermitted) ?? "") && !unpermittedForm.ok, errorOf(unpermitted));
+      await db.userPermission.deleteMany({ where: { userId: rep.id, permission: "meetings.schedule" } });
       viewingAs = true;
       const whileViewing = await calendar.scheduleMeetingAction({ record: null, title: "x", startsAt: `${d(0)}T11:00`, durationMinutes: 30, online: false });
       ok("while viewing as somebody else", !whileViewing.ok && (await calendar.getMyCalendar()).state === "viewing-as");
@@ -989,8 +995,16 @@ async function run(scratchUrl: string, base: string) {
       ok("  as a list, the record each is for", agendaHtml.includes("Ticket · ") && agendaHtml.includes("Their QBR"), agendaHtml.slice(0, 300));
       const card = textOf(await renderHtml(createElement(ClockProvider, { zone: ZONE }, await RecordMeetings({ record: { kind: "lead", id: lead.id }, viewerId: rep.id }))));
       ok("a lead's Meetings card: held, cancelled, who organised it", card.includes("Kick-off") && card.includes("Held") && card.includes("Cancelled") && card.includes(rep.name), card.slice(0, 300));
-      const listed = await meetingsForRecord(colleague.id, { kind: "company", id: company.id });
-      ok("  the customer's: every meeting about it, from wherever; another's not theirs to move", listed.length >= 3 && listed.every((m) => !m.mine || m.organizer.id === colleague.id));
+      const listed = await meetingsForRecord(rep.id, { kind: "company", id: company.id });
+      ok("  the customer's: every meeting about it, from wherever", listed.length >= 3, listed.length);
+      // Whose meetings, as whose calls and notes (owner, 8 Oct 2026): a colleague outside the rep's
+      // team sees none of the rep's — until they may see everybody's, and even then can't move them.
+      const outsideTeam = await meetingsForRecord(colleague.id, { kind: "company", id: company.id });
+      ok("  a colleague outside the rep's team sees none of the rep's", outsideTeam.every((m) => m.organizer.id !== rep.id), outsideTeam.map((m) => m.organizer.name).join(", "));
+      await db.userPermission.create({ data: { userId: colleague.id, permission: "activities.viewAll", allowed: true, reason: TAG } });
+      const widened = await meetingsForRecord(colleague.id, { kind: "company", id: company.id });
+      ok("  with \"See everyone's calls, notes & meetings\" they do, and another's is not theirs to move", widened.length >= 3 && widened.every((m) => !m.mine || m.organizer.id === colleague.id), widened.length);
+      await db.userPermission.deleteMany({ where: { userId: colleague.id, permission: "activities.viewAll" } });
       const profile = textOf(
         await renderHtml(
           createElement(

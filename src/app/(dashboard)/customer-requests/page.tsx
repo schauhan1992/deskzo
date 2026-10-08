@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { listPortalRequests } from "@/actions/portal";
@@ -12,14 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CustomerRequestsPage() {
   const user = await requireUser();
-  if (!(await can(user.id, "portal.manage"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Customer requests</h1>
-        <p className="mt-2 text-sm text-muted">You don&rsquo;t have access to the customer portal.</p>
-      </div>
-    );
-  }
+  if (!(await can(user.id, "portal.manage"))) notFound();
 
   const requests = await listPortalRequests("all");
 

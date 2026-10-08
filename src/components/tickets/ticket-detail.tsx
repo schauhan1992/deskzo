@@ -37,6 +37,7 @@ export async function TicketDetail({ id }: { id: string }) {
   const sessionUser = await currentUser();
   const userId = sessionUser!.id;
   const calendarEnabled = await isModuleEnabled("calendar");
+  const canScheduleMeetings = calendarEnabled && (await hasEffectivePermission(userId, "meetings.schedule"));
   const [ticket, users, canDelete, tasksEnabled, canDeleteAnyTask, clock] = await Promise.all([
     getTicket(id),
     listSupportAgents(),
@@ -84,7 +85,7 @@ export async function TicketDetail({ id }: { id: string }) {
             ticketId={ticket.id}
             contact={ticket.contact ? { id: ticket.contact.id, name: ticket.contact.name, phone: ticket.contact.phone } : undefined}
           />
-          {calendarEnabled && <ScheduleMeetingButton record={{ kind: "ticket", id: ticket.id }} />}
+          {canScheduleMeetings && <ScheduleMeetingButton record={{ kind: "ticket", id: ticket.id }} />}
           {canDelete && <DeleteTicketButton ticketId={ticket.id} ticketSeq={ticket.ticketSeq} redirectTo="/tickets" />}
         </div>
       </div>

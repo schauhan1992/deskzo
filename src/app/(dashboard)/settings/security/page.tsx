@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Fingerprint, ScrollText } from "lucide-react";
 import { currentUser } from "@/lib/session";
 import { getSecurityPolicyForAdmin } from "@/actions/security-policy";
@@ -32,14 +33,7 @@ async function workspaceOrigins(): Promise<string[]> {
 export default async function SecuritySettingsPage() {
   const sessionUser = await currentUser();
 
-  if (!sessionUser || !(await can(sessionUser.id, "security.manage"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Security</h1>
-        <p className="mt-2 text-sm text-muted">Only an admin can view and change these settings.</p>
-      </div>
-    );
-  }
+  if (!sessionUser || !(await can(sessionUser.id, "security.manage"))) notFound();
 
   const [policy, loginSettings, workplace, signIn, roleRules, origins, support, linked] = await Promise.all([
     getSecurityPolicyForAdmin(),

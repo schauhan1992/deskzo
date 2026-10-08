@@ -38,7 +38,24 @@ function ago(iso: string | null, now: number): string {
  * A person's own calendar, a week at a time (a day at a time down the page on a phone) or as the next
  * fortnight's list. Opened after a while away, it asks for a sync and shows what came back.
  */
-export function CalendarBoard({ summary, events, firstDay, days, view, today }: { summary: CalendarSummary; events: MyEvent[]; firstDay: string; days: number; view: "week" | "agenda"; today: string }) {
+export function CalendarBoard({
+  summary,
+  events,
+  firstDay,
+  days,
+  view,
+  today,
+  canSchedule,
+}: {
+  summary: CalendarSummary;
+  events: MyEvent[];
+  firstDay: string;
+  days: number;
+  view: "week" | "agenda";
+  today: string;
+  /** Holds "Schedule meetings": the button, and Reschedule on their own meetings. */
+  canSchedule: boolean;
+}) {
   const router = useRouter();
   const clock = useClock();
   const [open, setOpen] = useState<MyEvent | null>(null);
@@ -99,7 +116,7 @@ export function CalendarBoard({ summary, events, firstDay, days, view, today }: 
               <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
               Sync
             </Button>
-            <ScheduleMeetingButton record={null} variant="primary" />
+            {canSchedule && <ScheduleMeetingButton record={null} variant="primary" />}
           </div>
         )}
       </div>
@@ -149,7 +166,7 @@ export function CalendarBoard({ summary, events, firstDay, days, view, today }: 
         </>
       )}
 
-      {open && <EventDetails event={open} now={now} onClose={() => setOpen(null)} />}
+      {open && <EventDetails event={open} now={now} canReschedule={canSchedule} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -288,7 +305,7 @@ function Agenda({ keys, today, onDay, onOpen }: DayProps) {
   );
 }
 
-function EventDetails({ event: e, now, onClose }: { event: MyEvent; now: number; onClose: () => void }) {
+function EventDetails({ event: e, now, canReschedule, onClose }: { event: MyEvent; now: number; canReschedule: boolean; onClose: () => void }) {
   const clock = useClock();
   const upcoming = new Date(e.endsAt).getTime() > now;
   const when = e.allDay
@@ -333,7 +350,7 @@ function EventDetails({ event: e, now, onClose }: { event: MyEvent; now: number;
         {e.description && <p className="whitespace-pre-line text-xs text-muted">{e.description}</p>}
         {e.isOrganizer && upcoming && e.status !== "CANCELLED" && !e.allDay && (
           <div className="border-t border-line pt-3">
-            <MeetingActions eventId={e.id} title={e.title} />
+            <MeetingActions eventId={e.id} title={e.title} canReschedule={canReschedule} />
           </div>
         )}
       </div>

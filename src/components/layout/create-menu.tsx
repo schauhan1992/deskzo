@@ -66,7 +66,7 @@ const SECTIONS: { group: string; entries: CreateEntry[] }[] = [
       { label: "Add company", term: { key: "company", template: "Add {one:lower}" }, icon: Building2, module: "companies", href: "/companies/new" },
       // Proposals live under Sales Documents, which owns every trade document type; the blank form
       // is the shared /documents/new page narrowed by ?type=.
-      { label: "New proposal", icon: FileText, module: "sales_documents", href: "/documents/new?type=PROPOSAL" },
+      { label: "New proposal", icon: FileText, module: "sales_documents", permission: "documents.issue", href: "/documents/new?type=PROPOSAL" },
       { label: "New order", term: { key: "order", template: "New {one:lower}" }, icon: ShoppingCart, module: "orders", href: "/orders/new" },
     ],
   },

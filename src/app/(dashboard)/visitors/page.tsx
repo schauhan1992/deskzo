@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { Building2, CalendarClock, Settings2 } from "lucide-react";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -22,7 +22,7 @@ export default async function VisitorsPage({
     listVisitors({ onDate: params.onDate, status: (params.status as "IN" | "OUT" | "ALL") ?? "ALL" }),
     hasEffectivePermission(user.id, "visitors.manage"),
   ]);
-  if (entries === null) redirect("/dashboard");
+  if (entries === null) notFound();
 
   return (
     <div className="animate-fade-rise">

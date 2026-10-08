@@ -6,6 +6,7 @@ import { OutboundLink } from "@/components/ui/outbound-link";
 import { meetingsForRecord } from "@/lib/calendar/listing";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { MeetingRecordRef } from "@/lib/calendar/kinds";
+import { can } from "@/lib/authz/resolve";
 
 /**
  * The meetings scheduled from a record — coming up first, then what has been — each with who organised
@@ -13,7 +14,8 @@ import type { MeetingRecordRef } from "@/lib/calendar/kinds";
  * viewer may see the record; `canSchedule` adds the button to book another.
  */
 export async function RecordMeetings({ record, viewerId, canSchedule = true, emptyText = "No meetings scheduled from here yet." }: { record: MeetingRecordRef; viewerId: string; canSchedule?: boolean; emptyText?: string }) {
-  const [meetings, clock] = await Promise.all([meetingsForRecord(viewerId, record), workspaceClock()]);
+  // "Schedule meetings" (owner, 8 Oct 2026) decides the button and Reschedule; cancelling your own never needs it.
+  const [meetings, clock, mayBook] = await Promise.all([meetingsForRecord(viewerId, record), workspaceClock(), can(viewerId, "meetings.schedule")]);
   const coming = meetings.filter((m) => m.upcoming).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   const rest = meetings.filter((m) => !m.upcoming);
 
@@ -24,7 +26,7 @@ export async function RecordMeetings({ record, viewerId, canSchedule = true, emp
           Meetings
           {meetings.length > 0 && <span className="ml-1.5 text-xs font-normal text-subtle">{meetings.length}</span>}
         </span>
-        {canSchedule && <ScheduleMeetingButton record={record} size="sm" label={record.kind === "visit" ? "Add to my calendar" : "+ Meeting"} />}
+        {canSchedule && mayBook && <ScheduleMeetingButton record={record} size="sm" label={record.kind === "visit" ? "Add to my calendar" : "+ Meeting"} />}
       </CardHeader>
       <CardContent className={meetings.length === 0 ? undefined : "space-y-3"}>
         {meetings.length === 0 ? (
@@ -54,7 +56,7 @@ export async function RecordMeetings({ record, viewerId, canSchedule = true, emp
                         <Video className="h-3.5 w-3.5" aria-hidden /> Join
                       </OutboundLink>
                     )}
-                    {m.mine && <MeetingActions eventId={m.id} title={m.title} />}
+                    {m.mine && <MeetingActions eventId={m.id} title={m.title} canReschedule={mayBook} />}
                   </div>
                 )}
               </div>

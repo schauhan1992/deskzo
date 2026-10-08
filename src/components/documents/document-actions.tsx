@@ -36,6 +36,8 @@ export function DocumentActions({
   hasIrn,
   einvoiceEnabled,
   canCancelIrn,
+  canIssue,
+  canVoid,
   canEmail = false,
 }: {
   id: string;
@@ -48,6 +50,13 @@ export function DocumentActions({
   canCancelIrn: boolean;
   /** May email it to the customer — documents.send, an emailable type, issued and not cancelled. */
   canEmail?: boolean;
+  /**
+   * "Raise and issue sales documents" and "Delete or cancel a sales document" (owner, 8 Oct 2026):
+   * only the buttons the viewer may press are shown — issue, edit, convert and the IRN with the
+   * first; a status, a cancellation and deleting a draft with the second.
+   */
+  canIssue: boolean;
+  canVoid: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -65,13 +74,13 @@ export function DocumentActions({
   // A dead document isn't a starting point for anything — the server refuses these conversions, and
   // offering a button that always errors is worse than not offering it.
   const isDead = status === "CANCELLED" || status === "REJECTED";
-  const targets = isDead ? [] : (conversionTargets[docType] ?? []);
+  const targets = isDead || !canIssue ? [] : (conversionTargets[docType] ?? []);
   // Statuses you can set by hand, minus the one it already has — setting a document to where it
   // already is isn't an action. A rejected or cancelled document keeps these: the server allows the
   // reverse, and hiding them would make a mis-click permanent with no way back through the UI.
-  const markable = isDraft ? [] : manualStatuses[docType].filter((s) => s !== status);
-  const canCancelEInvoice = hasIrn && einvoiceStatus === "GENERATED" && canCancelIrn;
-  const hasMoreActions = markable.length > 0 || canCancelEInvoice || isDraft;
+  const markable = isDraft || !canVoid ? [] : manualStatuses[docType].filter((s) => s !== status);
+  const canCancelEInvoice = canVoid && hasIrn && einvoiceStatus === "GENERATED" && canCancelIrn;
+  const hasMoreActions = markable.length > 0 || canCancelEInvoice || (isDraft && canVoid);
 
   function run(fn: () => Promise<{ ok: true; data?: unknown } | { ok: false; error: string }>, after?: () => void) {
     setError(null);
@@ -92,7 +101,7 @@ export function DocumentActions({
       {/* One bar, in the order the work happens: the action that moves the document forward first,
           then the things you do with it, then the long tail behind More. */}
       <div className="flex flex-wrap items-center gap-2">
-        {isDraft ? (
+        {!canIssue ? null : isDraft ? (
           <>
             <Button
               onClick={() =>
@@ -198,7 +207,7 @@ export function DocumentActions({
                   </>
                 )}
 
-                {isDraft && (
+                {isDraft && canVoid && (
                   <>
                     {markable.length > 0 && <MenuSeparator />}
                     <MenuItem

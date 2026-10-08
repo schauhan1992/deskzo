@@ -33,7 +33,7 @@ type Quote = NonNullable<Awaited<ReturnType<typeof quoteAddon>>>;
  * is what the order will carry — including its refusals. A calculator that quietly quoted for a
  * subscription the system would not let you add to is worse than one that says why not.
  */
-export function RailProRata() {
+export function RailProRata({ canPropose }: { canPropose: boolean }) {
   const clock = useClock();
   const today = clock.today();
 
@@ -344,7 +344,8 @@ export function RailProRata() {
                 * what the proposal carries cannot differ from what the panel just showed, and a
                 * price cannot be posted in from outside.
                 */}
-              {drafted ? (
+              {/* Only for somebody who may raise one: a button that can only ever refuse is worse than none. */}
+              {!canPropose ? null : drafted ? (
                 /* The number truncates and "Open" never does: the rail is 288px wide at anything
                    below a large screen, and a document number is free text that can be as long as
                    whoever set the numbering format wanted. Keeping the action at full width and

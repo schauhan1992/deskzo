@@ -28,6 +28,17 @@ async function access() {
 }
 
 /**
+ * Reading what a customer is on — the subscriptions, what each was sold at, the term — is order
+ * data, so it takes "View orders" as the Orders and Renewals pages do (owner, 8 Oct 2026). The
+ * pro-rata tool read it with nothing but the plan, so a role that can't open an order could still
+ * see what every customer pays.
+ */
+async function reader() {
+  const user = await requireModuleUser("renewals");
+  return { user, allowed: await hasEffectivePermission(user.id, "orders.view") };
+}
+
+/**
  * What adding seats would cost, before anybody commits to it.
  *
  * Separate from creating it so the form can show the figure as the quantity and date are typed —
@@ -39,7 +50,8 @@ export async function quoteAddon(params: {
   quantity: number;
   startDate: string;
 }) {
-  const user = await requireModuleUser("renewals");
+  const { user, allowed } = await reader();
+  if (!allowed) return null;
   const parent = await db.companyProduct.findUnique({
     where: { id: params.parentId },
     select: {
@@ -205,7 +217,8 @@ export async function createAddon(input: {
  * and, separately, 5 seats".
  */
 export async function subscriptionWithAddons(id: string) {
-  const user = await requireModuleUser("renewals");
+  const { user, allowed } = await reader();
+  if (!allowed) return null;
   const parent = await db.companyProduct.findUnique({
     where: { id },
     include: {
@@ -252,7 +265,8 @@ export async function subscriptionWithAddons(id: string) {
  * real subscription.
  */
 export async function addableSubscriptions(companyId: string) {
-  const user = await requireModuleUser("renewals");
+  const { user, allowed } = await reader();
+  if (!allowed) return [];
   const now = new Date();
   return toPlain(
     await db.companyProduct.findMany({

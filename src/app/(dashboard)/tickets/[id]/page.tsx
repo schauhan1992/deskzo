@@ -6,11 +6,10 @@ import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { formatTicketId } from "@/lib/tickets";
 import { TicketDetail } from "@/components/tickets/ticket-detail";
 import { viewerHas } from "@/actions/permission";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ id }, query, user] = await Promise.all([params, searchParams, requireUser()]);
-  if (!(await viewerHas("tickets.view"))) return <NoAccessNotice title="Ticket" permission="tickets.view" />;
+  if (!(await viewerHas("tickets.view"))) notFound();
   const ref = parseRecordRef(id);
 
   /**

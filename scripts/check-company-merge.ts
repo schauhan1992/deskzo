@@ -384,8 +384,8 @@ async function main() {
     const blockedHtml = renderToStaticMarkup(await MergePage({ searchParams: Promise.resolve({ keep: kRef, drop: formatCompanyId(V.companySeq) }) }));
     ok("  a pair that can't be merged shows why, and no merge button", blockedHtml.includes("is a vendor") && !blockedHtml.includes("Merge into"));
     as(rep);
-    const refusedHtml = renderToStaticMarkup(await MergePage({ searchParams: Promise.resolve({ keep: kRef, drop: dRef }) }));
-    ok("  somebody without the permission is told which one they'd need", refusedHtml.includes("Merge duplicate companies") && !refusedHtml.includes(D.name));
+    // The 404 page (owner, 8 Oct 2026), as for an address the app doesn't have.
+    ok("  somebody without the permission gets the 404 page", (await thrown(() => MergePage({ searchParams: Promise.resolve({ keep: kRef, drop: dRef }) }))) === "notFound");
     as(boss);
 
     // ───────────────────────────────────────────────────────────────────────────

@@ -21,14 +21,13 @@ import {
 } from "@/lib/visits";
 import { expenseCategoryLabels, expenseStatusLabels, expenseStatusTone, formatExpenseId } from "@/lib/expenses";
 import { viewerHas } from "@/actions/permission";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { companyPath, expensePath, leadPath } from "@/lib/record-links";
 
 export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  if (!(await viewerHas("visits.view"))) return <NoAccessNotice title="Visit" permission="visits.view" />;
+  if (!(await viewerHas("visits.view"))) notFound();
   /**
    * The sequence resolves to the cuid before the action runs, so every check that action already
    * made still happens — this translates the reference, it does not bypass anything. A sequence

@@ -73,6 +73,7 @@ export function CompaniesTable({
   mode = "companies",
   reassign,
   customColumns = { columns: [], texts: {} },
+  canSeeOrders = true,
 }: {
   companies: CompanyRow[];
   assignableUsers: AssignableUser[];
@@ -84,6 +85,8 @@ export function CompaniesTable({
    * after the registered columns: the ones they show in the column picker, or each field's default.
    */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
+  /** Holds "View orders": Customers counts each one's orders, which is order data (owner, 8 Oct 2026). */
+  canSeeOrders?: boolean;
 }) {
   const router = useRouter();
   const selection = useRowSelection(companies);
@@ -100,6 +103,8 @@ export function CompaniesTable({
   // the sourcing pool shows pipeline stage, so one shared preference would put a Leads entry in a
   // picker on a screen that has none.
   const cols = useColumns(mode);
+  // On Customers the status column is the order count — not there for somebody who can't see orders.
+  const statusAllowed = mode !== "customers" || canSeeOrders;
   // No adjustment needed: `leads` is simply absent from every registry but Companies, so
   // `cols.show("leads")` is already false elsewhere and the count is already right.
   /**
@@ -222,7 +227,7 @@ export function CompaniesTable({
                 )}
                 {cols.show("id") && <th className="px-4 py-2.5">ID</th>}
                 {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
-                {cols.show("status") &&
+                {cols.show("status") && statusAllowed &&
                   (hasOnboardingStatusColumn ? (
                     <th className="px-4 py-2.5">Onboarding status</th>
                   ) : mode === "customers" ? (
@@ -268,7 +273,7 @@ export function CompaniesTable({
                       </span>
                     </td>
                   )}
-                  {cols.show("status") &&
+                  {cols.show("status") && statusAllowed &&
                     (hasOnboardingStatusColumn ? (
                       <td className="px-4 py-2.5">
                         {c.vendorStatus ? (

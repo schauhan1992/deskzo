@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { refuseWhileViewingAs, viewAsContext } from "@/lib/session";
 import { requireModuleUser, switchedOn } from "@/lib/modules-access";
+import { can } from "@/lib/authz/resolve";
 import { mailboxState } from "@/lib/mail/mailbox";
 import { workspaceClock } from "@/lib/time/workspace";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
@@ -33,6 +34,14 @@ async function calendarUser() {
   const user = await requireModuleUser("calendar");
   return (await switchedOn("calendar")) ? user : null;
 }
+
+/**
+ * Booking or moving a meeting takes "Schedule meetings" (owner, 8 Oct 2026). Reading your own diary
+ * and cancelling a meeting you booked don't: somebody whose role lost it keeps a way to call off what
+ * they had already arranged.
+ */
+const NO_SCHEDULING = "You don't have permission to schedule meetings.";
+const maySchedule = (userId: string) => can(userId, "meetings.schedule");
 
 // ─── The person's own calendar ───────────────────────────────────────────────────────────────────
 
@@ -215,6 +224,7 @@ export type MeetingForm = {
 export async function meetingFormFor(input: { record: MeetingRecordRef | null }): Promise<ActionResult<MeetingForm>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
+  if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
   const calendar = await getMyCalendar();
   if (!input?.record) return { ok: true, data: { calendar, record: null } };
   const ref = readMeetingRecordRef(input.record);
@@ -263,6 +273,7 @@ const addressOf = (email: string) => email.trim().toLowerCase();
 export async function scheduleMeetingAction(input: unknown): Promise<ActionResult<{ eventId: string }>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
+  if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
   const blocked = await refuseWhileViewingAs();
   if (blocked) return { ok: false, error: blocked };
   const i = (input ?? {}) as Fields & { record?: unknown; contactIds?: unknown; colleagueIds?: unknown; emails?: unknown };
@@ -325,6 +336,7 @@ export async function scheduleMeetingAction(input: unknown): Promise<ActionResul
 export async function meetingToEdit(input: { eventId: string }): Promise<ActionResult<{ title: string; startsAt: string; durationMinutes: number; online: boolean; hasLink: boolean; location: string | null; agenda: string | null; emails: string[]; noDirectContact: boolean }>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
+  if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
   const row = await db.calendarEvent.findFirst({
     where: { id: String(input?.eventId ?? ""), userId: user.id },
     select: { title: true, startsAt: true, endsAt: true, joinUrl: true, location: true, description: true, attendees: true, isOrganizer: true, status: true, allDay: true, company: { select: { managedByResellerId: true } } },
@@ -351,6 +363,7 @@ export async function meetingToEdit(input: { eventId: string }): Promise<ActionR
 export async function rescheduleMeetingAction(input: unknown): Promise<ActionResult<{ eventId: string }>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
+  if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
   const blocked = await refuseWhileViewingAs();
   if (blocked) return { ok: false, error: blocked };
   const i = (input ?? {}) as Fields & { eventId?: unknown; emails?: unknown };

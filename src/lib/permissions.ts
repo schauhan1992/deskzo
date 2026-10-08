@@ -498,6 +498,22 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT"],
   },
   {
+    /**
+     * Whose calls, notes and meetings somebody sees (owner, 8 Oct 2026): their own and their team's
+     * (src/lib/authz/scope.ts, the reporting line), unless they hold this. It narrows a customer's and a
+     * lead's Activity, the call log and a record's Meetings — on top of the account scope, which still
+     * decides which customers are theirs at all.
+     *
+     * Not `activity.viewAll` above: that is the security log of sign-ins and exports.
+     */
+    key: "activities.viewAll",
+    label: "See everyone's calls, notes & meetings",
+    description:
+      "The calls, emails, notes, meetings and stage changes everybody logged on a customer or lead, and every call in the call log. Without it, somebody sees what they logged themselves and what the people who report to them logged.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
     key: "activity.export",
     label: "Export the activity log",
     description:
@@ -819,6 +835,19 @@ export const PERMISSION_REGISTRY = [
     description: "The Projects module and a customer's Projects tab. Which projects appear still follows project membership — see \"See every project\".",
     defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
     group: "Support",
+  },
+  {
+    /**
+     * Booking a Teams or Outlook meeting from Deskzo (src/actions/calendar.ts). Every role keeps it
+     * until an admin unticks it (owner, 8 Oct 2026): a calling team that books appointments needs it,
+     * one that only dials may not. Cancelling a meeting you booked never needs it.
+     */
+    key: "meetings.schedule",
+    label: "Schedule meetings",
+    description:
+      "Book a Teams or Outlook meeting from a customer, contact, lead, ticket or visit, or from the Calendar, and reschedule one you booked. Without it the Calendar still shows your own diary, and a meeting you booked can still be cancelled.",
+    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    group: "Sales & customers",
   },
   {
     key: "calls.view",

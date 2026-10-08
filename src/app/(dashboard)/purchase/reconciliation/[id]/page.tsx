@@ -17,9 +17,7 @@ const BILLING_LABEL = { MONTHLY: "monthly", ANNUAL: "annually", ONE_OFF: "one-of
 export default async function StatementPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!(await can(user.id, "purchase.reconcile"))) {
-    return <p className="text-sm text-muted">You don&rsquo;t have access to vendor reconciliation.</p>;
-  }
+  if (!(await can(user.id, "purchase.reconcile"))) notFound();
 
   const statement = await db.vendorStatement.findUnique({
     where: { id },

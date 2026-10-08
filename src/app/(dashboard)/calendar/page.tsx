@@ -2,6 +2,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { getMyCalendar, listMyEvents } from "@/actions/calendar";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { CalendarBoard } from "@/components/calendar/calendar-board";
+import { viewerHas } from "@/actions/permission";
 import { addDays, isDayKey, mondayOf } from "@/lib/calendar/days";
 import { workspaceClock } from "@/lib/time/workspace";
 
@@ -22,5 +23,15 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
   const summary = await getMyCalendar();
   const events = summary.state === "ready" || summary.state === "broken" ? await listMyEvents({ from: first, to: addDays(first, days - 1) }) : [];
 
-  return <CalendarBoard summary={summary} events={events} firstDay={first} days={days} view={view} today={today} />;
+  return (
+    <CalendarBoard
+      summary={summary}
+      events={events}
+      firstDay={first}
+      days={days}
+      view={view}
+      today={today}
+      canSchedule={await viewerHas("meetings.schedule")}
+    />
+  );
 }

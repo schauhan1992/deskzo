@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMailMessage } from "@/actions/mail-log";
 import { viewerHas } from "@/actions/permission";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { MAIL_STATUS_LABEL, MAIL_STATUS_TONE, mailPreviewDocument } from "@/lib/mail-log";
 import { formatOrderId } from "@/lib/order-id";
@@ -27,7 +26,7 @@ const EVENT_LABEL: Record<string, string> = {
  * customer reading it.
  */
 export default async function MailMessagePage({ params }: { params: Promise<{ id: string }> }) {
-  if (!(await viewerHas("emails.view"))) return <NoAccessNotice title="Email" permission="emails.view" />;
+  if (!(await viewerHas("emails.view"))) notFound();
   const { id } = await params;
   const [m, clock] = await Promise.all([getMailMessage(id), workspaceClock()]);
   if (!m) notFound();

@@ -12,7 +12,18 @@ import { MeetingDialog } from "@/components/calendar/meeting-dialog";
  * Moving or cancelling a meeting the viewer organises. Either way the calendar tells everybody invited;
  * a cancellation can carry a line saying why.
  */
-export function MeetingActions({ eventId, title, size = "sm" }: { eventId: string; title: string; size?: "sm" | "md" }) {
+export function MeetingActions({
+  eventId,
+  title,
+  size = "sm",
+  canReschedule = true,
+}: {
+  eventId: string;
+  title: string;
+  size?: "sm" | "md";
+  /** Holds "Schedule meetings" — without it a meeting they booked can still be cancelled, not moved. */
+  canReschedule?: boolean;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -36,9 +47,11 @@ export function MeetingActions({ eventId, title, size = "sm" }: { eventId: strin
   return (
     <>
       <div className="flex gap-1.5">
-        <Button size={size} variant="secondary" onClick={() => setEditing(true)}>
-          Reschedule
-        </Button>
+        {canReschedule && (
+          <Button size={size} variant="secondary" onClick={() => setEditing(true)}>
+            Reschedule
+          </Button>
+        )}
         <Button size={size} variant="ghost" onClick={() => setCancelling(true)}>
           Cancel meeting
         </Button>

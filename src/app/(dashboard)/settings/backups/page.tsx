@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { backupOverview } from "@/actions/backup";
@@ -15,17 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function BackupSettingsPage() {
   const user = await requireUser();
 
-  if (!(await can(user.id, "backups.manage"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Backups</h1>
-        <p className="mt-2 text-sm text-muted">
-          Only somebody holding the backups permission can see this. It is deliberately narrow — a backup is a
-          complete copy of the system in one file.
-        </p>
-      </div>
-    );
-  }
+  if (!(await can(user.id, "backups.manage"))) notFound();
 
   const [overview, canDownload, canRestore, resetOverview] = await Promise.all([
     backupOverview(),

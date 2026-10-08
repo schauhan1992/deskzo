@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { listAssignableUsers, listCompanyOptions } from "@/actions/company";
 import { hasEffectivePermission } from "@/actions/permission";
 import { requireUser } from "@/lib/session";
@@ -5,7 +6,6 @@ import { listItemOptions } from "@/actions/item";
 import { listIndustries } from "@/actions/industry";
 import { isModuleEnabled } from "@/actions/module";
 import { NewLeadForm } from "@/components/leads/new-lead-form";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { formSetup } from "@/lib/custom-fields/server";
 
 export default async function NewLeadPage({
@@ -18,7 +18,7 @@ export default async function NewLeadPage({
     hasEffectivePermission(user.id, "leads.view"),
     hasEffectivePermission(user.id, "contacts.view"),
   ]);
-  if (!canViewLeads) return <NoAccessNotice title="New lead" permission="leads.view" />;
+  if (!canViewLeads) notFound();
   const [{ companyId }, companies, items, industries, canAssign, people, customFields] = await Promise.all([
     searchParams,
     listCompanyOptions(),

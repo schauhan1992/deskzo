@@ -379,8 +379,12 @@ async function run(scratchUrl: string) {
       textOf(screen).slice(0, 300),
     );
     as(rep);
-    const refused = renderToStaticMarkup((await resolveAsync(await WordingPage())) as ReactElement);
-    ok("  a rep opening it is told it isn't theirs to change, and sees none of it", textOf(refused).includes("permission to change this") && !refused.includes("<input"), textOf(refused).slice(0, 300));
+    // The 404 page (owner, 8 Oct 2026), as for an address the app doesn't have.
+    const refused = await resolveAsync(await WordingPage()).then(
+      () => "rendered",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    );
+    ok("  a rep opening it gets the 404 page", refused === "NOT_FOUND_CALLED", refused);
     as(admin);
 
     // ── What people see ────────────────────────────────────────────────────────────────────────

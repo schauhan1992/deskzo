@@ -22,6 +22,7 @@ import { directClient } from "../src/lib/tenancy/direct-client";
 import { canonicalColumn, hsnIssue, nameKey } from "../src/lib/items/catalogue-import";
 import { createItemSchema } from "../src/lib/validation/item";
 import { MODULE_REGISTRY } from "../src/lib/modules";
+import { PERMISSIONS } from "../src/lib/permissions";
 import { DEFAULT_BRANDING } from "../src/lib/branding";
 
 let actorId = "";
@@ -278,7 +279,8 @@ async function main() {
     ok("the Brands page is a link under Items & Inventory", MODULE_REGISTRY.find((m) => m.key === "items")?.navItems.some((n) => n.href === "/items/brands") === true);
     pathname = "/items/brands";
     const nav = renderToStaticMarkup(
-      createElement(Sidebar, { enabledKeys: MODULE_REGISTRY.map((m) => m.key), canViewPerformance: false, permissions: [], branding: DEFAULT_BRANDING }),
+      // The sections every role holds until unticked — without them the menu shows nothing (owner, 8 Oct 2026).
+      createElement(Sidebar, { enabledKeys: MODULE_REGISTRY.map((m) => m.key), canViewPerformance: false, permissions: PERMISSIONS.filter((d) => d.everyone).map((d) => d.key), branding: DEFAULT_BRANDING }),
     );
     const current = [...nav.matchAll(/<a [^>]*href="([^"]+)"[^>]*aria-current="page"|<a [^>]*aria-current="page"[^>]*href="([^"]+)"/g)].map((m) => m[1] ?? m[2]);
     ok("  and on it, it alone is marked as where you are", current.length === 1 && current[0] === "/items/brands", current.join(", "));

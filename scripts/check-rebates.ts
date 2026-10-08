@@ -740,9 +740,13 @@ async function run(scratchUrl: string) {
     ok("CN-2's page: from Ingram, set against ORD-000001's rebate", creditPage.includes(`${TAG}-CN-2`) && creditPage.includes(ingram.name) && creditPage.includes("ORD-000001"));
 
     const settingsKey = (who: typeof exec) => screen(who, el(ProgrammesPage));
-    const execProgrammes = await settingsKey(exec);
+    // The 404 page for the executive (owner, 8 Oct 2026), as for an address the app doesn't have.
+    const execProgrammes = await settingsKey(exec).then(
+      () => "rendered",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    );
     const accountsProgrammes = await settingsKey(accounts);
-    ok("the programmes page: not the executive's", execProgrammes.includes("permission") && !execProgrammes.includes("Adobe deal registration"));
+    ok("the programmes page: not the executive's — the 404 page", execProgrammes === "NOT_FOUND_CALLED", execProgrammes);
     ok("  accounts sees Adobe's and Microsoft's", accountsProgrammes.includes("Adobe deal registration") && accountsProgrammes.includes("Microsoft through Redington"));
 
     // ── Merging a duplicate distributor ──────────────────────────────────────────────────────────

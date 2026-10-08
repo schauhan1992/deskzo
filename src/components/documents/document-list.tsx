@@ -14,6 +14,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { ColumnPicker } from "@/components/ui/table-columns";
 import { documentTableKey } from "@/lib/tables/registry";
 import { listAssignableUsers } from "@/actions/company";
+import { viewerHas } from "@/actions/permission";
 import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
 import { branchLabel } from "@/lib/branches/format";
 import { Pagination } from "@/components/ui/pagination";
@@ -83,6 +84,9 @@ export async function DocumentList({
    * `branch` left in a link from when there were two must not narrow a list with no control to undo it.
    */
   const multiBranchCheck = isMultiBranch();
+  // "New …" only for somebody who may raise one (owner, 8 Oct 2026): every document type is saved
+  // through the same "Raise and issue sales documents" gate.
+  const canRaise = await viewerHas("documents.issue");
   const [viewMode, { rows, total }, summary, approvalPolicy, users, multiBranch, branches] = await Promise.all([
     getViewMode("documents"),
     multiBranchCheck.then((multi) =>
@@ -230,9 +234,11 @@ export async function DocumentList({
           these stay on the right rather than falling to the left margin. */}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ViewModeToggle viewKey="documents" mode={viewMode} />
-        <Link href={`/documents/new?type=${docType}`}>
-          <Button>New {tradeDocumentLabels[docType].toLowerCase()}</Button>
-        </Link>
+        {canRaise && (
+          <Link href={`/documents/new?type=${docType}`}>
+            <Button>New {tradeDocumentLabels[docType].toLowerCase()}</Button>
+          </Link>
+        )}
       </div>
     </div>
   );

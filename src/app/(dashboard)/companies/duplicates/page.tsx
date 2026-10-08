@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { viewerHas } from "@/actions/permission";
 import { listDuplicates } from "@/actions/company-merge";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { DuplicatesList } from "@/components/companies/duplicates-list";
 import { ActionNotice } from "@/components/ui/action-notice";
 
@@ -13,7 +13,7 @@ export const metadata = { title: "Duplicate companies" };
  * See src/lib/companies/duplicates.ts.
  */
 export default async function DuplicateCompaniesPage() {
-  if (!(await viewerHas("companies.merge"))) return <NoAccessNotice title="Duplicate companies" permission="companies.merge" />;
+  if (!(await viewerHas("companies.merge"))) notFound();
   const result = await listDuplicates();
 
   return (

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
@@ -6,7 +7,6 @@ import { parseRecordRef } from "@/lib/record-url";
 import { formatCompanyId } from "@/lib/order-id";
 import { viewerHas } from "@/actions/permission";
 import { getMergeScreen } from "@/actions/company-merge";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { MergePartnerPicker, MergeWizard } from "@/components/companies/merge-wizard";
 import { ActionNotice } from "@/components/ui/action-notice";
 
@@ -18,7 +18,7 @@ export const metadata = { title: "Merge companies" };
  */
 export default async function MergeCompaniesPage({ searchParams }: { searchParams: Promise<{ keep?: string; drop?: string }> }) {
   const [{ keep, drop }, user] = await Promise.all([searchParams, requireUser()]);
-  if (!(await viewerHas("companies.merge"))) return <NoAccessNotice title="Merge companies" permission="companies.merge" />;
+  if (!(await viewerHas("companies.merge"))) notFound();
 
   const header = (
     <div>

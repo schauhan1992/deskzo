@@ -1,10 +1,14 @@
 import { db } from "@/lib/db";
+import { scopeUserIds } from "@/lib/authz/scope";
 import type { MeetingRecordRef } from "@/lib/calendar/records";
 
 /**
  * The meetings scheduled from a record, for its page. The page has already decided the viewer may see
  * the record; a meeting scheduled from it is part of it — when, who organised it, who was invited, and
  * how to join — unlike the rest of anybody's calendar, which stays theirs.
+ *
+ * Whose, though, is activity like a call or a note (owner, 8 Oct 2026): the viewer's own and their
+ * team's, or everybody's with "See everyone's calls, notes & meetings".
  */
 
 export type RecordMeeting = {
@@ -32,8 +36,9 @@ const WHERE: Record<MeetingRecordRef["kind"], (id: string) => object> = {
 };
 
 export async function meetingsForRecord(viewerId: string, ref: MeetingRecordRef, take = 20, now = new Date()): Promise<RecordMeeting[]> {
+  const organisers = await scopeUserIds(viewerId, "activities.viewAll");
   const rows = await db.calendarEvent.findMany({
-    where: { fromDeskzo: true, ...WHERE[ref.kind](ref.id) },
+    where: { fromDeskzo: true, ...WHERE[ref.kind](ref.id), ...(organisers ? { userId: { in: organisers } } : {}) },
     orderBy: { startsAt: "desc" },
     take,
     select: { id: true, title: true, startsAt: true, endsAt: true, status: true, joinUrl: true, location: true, attendees: true, isOrganizer: true, user: { select: { id: true, name: true } } },

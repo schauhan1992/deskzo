@@ -1,6 +1,7 @@
 import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { listLeads, listLeadsPaged } from "@/actions/lead";
 import { listAssignableUsers } from "@/actions/company";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,6 @@ import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
 import { viewerReassignControls } from "@/lib/authz/reassign";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import { listColumns } from "@/lib/custom-fields/server";
 import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
@@ -49,7 +49,7 @@ export default async function LeadsPage({
   } & CustomFilterParams>;
 }) {
   const user = await requireUser();
-  if (!(await hasEffectivePermission(user.id, "leads.view"))) return <NoAccessNotice title="Lead pipeline" permission="leads.view" />;
+  if (!(await hasEffectivePermission(user.id, "leads.view"))) notFound();
 
   const params = await searchParams;
   const view = params.view === "list" ? "list" : "board";

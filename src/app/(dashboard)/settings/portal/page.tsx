@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { portalSettings } from "@/actions/portal";
@@ -10,17 +11,7 @@ export default async function PortalSettingsPage() {
   const gate = await planGate("customer_portal", "Customer portal");
   if (gate) return gate;
   const user = await requireUser();
-  if (!(await can(user.id, "portal.manage"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Customer portal</h1>
-        <p className="mt-2 text-sm text-muted">
-          Only somebody holding the portal permission can change this — it decides what people outside the company
-          can read.
-        </p>
-      </div>
-    );
-  }
+  if (!(await can(user.id, "portal.manage"))) notFound();
 
   const settings = await portalSettings();
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ArrowLeft, Eye } from "lucide-react";
 import type { Role } from "@/lib/roles";
 import { listRoles, roleKeys } from "@/lib/authz/role-registry";
@@ -68,14 +69,7 @@ export default async function StaffAndRolesPage({
 }) {
   const sessionUser = await currentUser();
 
-  if (!sessionUser || !(await can(sessionUser.id, "permissions.view"))) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Staff &amp; roles</h1>
-        <p className="mt-2 text-sm text-muted">Only an admin can view and change these settings.</p>
-      </div>
-    );
-  }
+  if (!sessionUser || !(await can(sessionUser.id, "permissions.view"))) notFound();
 
   /**
    * Seeing and changing are different permissions, and this screen used to offer the second to

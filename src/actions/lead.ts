@@ -5,6 +5,7 @@ import { detectSalesWins } from "@/lib/wins/detect";
 import Papa from "papaparse";
 import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { scopeUserIds } from "@/lib/authz/scope";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
@@ -410,6 +411,9 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
 export async function getLead(id: string) {
   const user = await requireUser();
   if (!(await canViewLeads(user.id))) return null;
+  // The timeline shows their own and their team's activity, or everybody's with "See everyone's calls,
+  // notes & meetings" (owner, 8 Oct 2026) — as on the customer's Activity pane (`getCompany`).
+  const activityBy = await scopeUserIds(user.id, "activities.viewAll");
   const lead = await db.lead.findUnique({
     where: { id },
     include: {
@@ -428,7 +432,11 @@ export async function getLead(id: string) {
       owner: { select: { id: true, name: true } },
       sourcedBy: { select: { id: true, name: true } },
       qualifiedBy: { select: { id: true, name: true } },
-      activities: { orderBy: { occurredAt: "desc" }, include: { user: { select: { id: true, name: true } } } },
+      activities: {
+        where: activityBy ? { userId: { in: activityBy } } : undefined,
+        orderBy: { occurredAt: "desc" },
+        include: { user: { select: { id: true, name: true } } },
+      },
       proposals: { orderBy: { createdAt: "desc" } },
       requirements: { orderBy: { createdAt: "asc" }, include: { item: true } },
     },

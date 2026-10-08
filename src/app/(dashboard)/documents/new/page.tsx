@@ -15,7 +15,6 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { defaultServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
 import { viewerHas } from "@/actions/permission";
 import { leadPath } from "@/lib/record-links";
-import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import {
   documentDirection,
   documentListPath,
@@ -28,7 +27,9 @@ export default async function NewDocumentPage({
 }: {
   searchParams: Promise<{ type?: string; companyId?: string; leadId?: string }>;
 }) {
-  if (!(await viewerHas("documents.view"))) return <NoAccessNotice title="New document" permission="documents.view" />;
+  // Seeing documents isn't raising one: without "Raise and issue sales documents" the form could
+  // only ever refuse to save, so it is not found (owner, 8 Oct 2026).
+  if (!(await viewerHas("documents.view")) || !(await viewerHas("documents.issue"))) notFound();
   const params = await searchParams;
   // A delivery challan is not in this list — it is raised from a consignment, so there is no blank
   // form for one. The cast narrows to the types that do have one.

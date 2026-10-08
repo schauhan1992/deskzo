@@ -1,5 +1,6 @@
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
-import { ModuleDisabledNotice, NoAccessNotice } from "@/components/settings/module-disabled-notice";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { billsForPrepaid, getSchedule, listSchedules, scheduleFormOptions } from "@/actions/accounting-schedules";
 import { listVendorOptions } from "@/actions/company";
 import { currentUser } from "@/lib/session";
@@ -26,7 +27,7 @@ export default async function SchedulesPage({
 
   const viewer = await currentUser();
   const [work, manage] = viewer ? await Promise.all([can(viewer.id, "close.work"), can(viewer.id, "close.manage")]) : [false, false];
-  if (!work && !manage) return <NoAccessNotice title="Prepaids & accruals" permission="close.work" />;
+  if (!work && !manage) notFound();
 
   const params = await searchParams;
   const kind = KINDS.find((k) => k === params.kind);

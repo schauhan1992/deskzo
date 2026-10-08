@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Trophy } from "lucide-react";
 import { getUserPerformance, canViewPerformance } from "@/actions/performance";
 import { Card, Badge } from "@/components/ui/card";
@@ -19,17 +20,7 @@ export default async function PerformancePage({
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
   const allowed = await canViewPerformance();
-  if (!allowed) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">Performance</h1>
-        <p className="mt-2 text-sm text-muted">You don&apos;t have permission to view team performance.</p>
-        <Link href="/wins/most-active" className="mt-3 inline-flex items-center gap-1.5 text-sm text-brand hover:underline">
-          <Trophy className="h-4 w-4" aria-hidden /> Most active of the fortnight
-        </Link>
-      </div>
-    );
-  }
+  if (!allowed) notFound();
 
   const params = await searchParams;
   const rows = await getUserPerformance({ from: params.from, to: params.to });

@@ -32,6 +32,7 @@ const BY_KEY: Record<string, ModuleRef> = {
   // The Calls module's own view permission (src/lib/modules.ts).
   "calls.view": "calls",
   "workspace.manageAny": "workspace",
+  "meetings.schedule": "calendar",
 };
 
 const BY_PREFIX: Record<string, ModuleRef> = {

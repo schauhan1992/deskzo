@@ -2,6 +2,7 @@
 
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { can } from "@/lib/authz/resolve";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { proRata, proRataMonths, canAddTo } from "@/lib/subscriptions/proration";
 import { partyDetails } from "@/lib/proposals/party";
@@ -49,6 +50,10 @@ export async function createProposalFromAddonQuote(input: {
   basis?: "DAY" | "MONTH";
 }): Promise<ActionResult<{ id: string; docNumber: string | null }>> {
   const user = await requireModuleUser("renewals");
+  // Asked before anything is read: the price comes off an order, and what is made is a sales
+  // document. Without "View orders" the subscription is as good as missing, as in `quoteAddon`.
+  if (!(await can(user.id, "orders.view"))) return { ok: false, error: "That subscription no longer exists." };
+  if (!(await can(user.id, "documents.issue"))) return { ok: false, error: "You don't have permission to raise or issue sales documents." };
 
   const parent = await db.companyProduct.findUnique({
     where: { id: input.parentId },

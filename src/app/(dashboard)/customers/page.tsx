@@ -21,6 +21,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { viewerReassignControls } from "@/lib/authz/reassign";
 import { requireUser } from "@/lib/session";
+import { viewerHas } from "@/actions/permission";
 import { listColumns } from "@/lib/custom-fields/server";
 import { customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
@@ -136,6 +137,7 @@ export default async function CustomersPage({
             mode="customers"
             reassign={await viewerReassignControls()}
             customColumns={customColumns}
+            canSeeOrders={await viewerHas("orders.view")}
           />
           <Pagination
             page={page}

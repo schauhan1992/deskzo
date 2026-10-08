@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { AlertTriangle, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { isModuleEnabled } from "@/actions/module";
@@ -37,16 +38,7 @@ export default async function MarketingPage({
     listTemplates(),
   ]);
 
-  if (!overview) {
-    return (
-      <div className="animate-fade-rise">
-        <h1 className="text-xl font-semibold text-text">Marketing</h1>
-        <Card className="mt-5 px-4 py-12 text-center text-sm text-subtle">
-          You don&apos;t have access to marketing.
-        </Card>
-      </div>
-    );
-  }
+  if (!overview) notFound();
 
   const counts = overview.counts as Record<string, number>;
   const sent = (counts.SENT ?? 0) + (counts.DELIVERED ?? 0) + (counts.OPENED ?? 0) + (counts.CLICKED ?? 0);

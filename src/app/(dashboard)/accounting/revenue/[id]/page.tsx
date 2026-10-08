@@ -24,14 +24,7 @@ export default async function RevenueSchedulePage({ params }: { params: Promise<
   if (!enabled) return <ModuleDisabledNotice moduleKey="revenue_close" />;
 
   const viewer = await currentUser();
-  if (!viewer || !((await can(viewer.id, "revenue.viewReports")) || (await can(viewer.id, "revenue.manage")))) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        You don&rsquo;t have permission to see revenue recognition. It needs &ldquo;View revenue recognition&rdquo;; ask an
-        admin if your work needs it.
-      </Card>
-    );
-  }
+  if (!viewer || !((await can(viewer.id, "revenue.viewReports")) || (await can(viewer.id, "revenue.manage")))) notFound();
 
   const { id } = await params;
   // Out of scope and not there give the same answer, so a guessed id learns nothing.
