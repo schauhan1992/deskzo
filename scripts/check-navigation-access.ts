@@ -281,6 +281,23 @@ async function main() {
     const stranger = await accessContextFor("zzprobe-nav-another-workspaces-user");
     ok("10. somebody this workspace doesn't have — another workspace's account — opens nothing here", stranger.openModules.length === 0 && stranger.permissions.length === 0);
 
+    section("An HR head, as the built-in role starts");
+    // The role as migration 20261030130000 writes it — nothing set on the person.
+    const hrHead = await person("HrHead", "HR_HEAD");
+    const head = await accessContextFor(hrHead.id);
+    const headMenu = buildNavigation(head);
+    const peopleWork = ["hr", "payroll", "visitors", "engagement", "expenses", "it_assets", "vault", "tasks", "notes", "calendar", "notifications"];
+    ok("their menu has the people work, payroll, expenses, assets and their own tools", peopleWork.every((k) => head.openModules.includes(k)), peopleWork.filter((k) => !head.openModules.includes(k)).join(", "));
+    const notTheirs = ["companies", "orders", "items", "sales_documents", "payments", "accounting", "marketing", "vendors", "helpdesk", "reports"];
+    ok("  and none of the customer, sales or finance modules", !notTheirs.some((k) => head.openModules.includes(k)), notTheirs.filter((k) => head.openModules.includes(k)).join(", "));
+    ok("  hiring, biometric and celebrations among its People links", ["/people/hiring", "/people/devices", "/people/celebrations", "/people/payroll"].every((h) => hrefs(headMenu).includes(h)));
+    ok("  every IT asset, and Staff & roles to read — but not Settings or Security", hrefs(headMenu).includes("/assets") && hrefs(headMenu).includes("/settings/access") && !hrefs(headMenu).includes("/settings") && !hrefs(headMenu).includes("/settings/security"));
+    ok("  they hold payroll and anonymous feedback, and no customer view", head.permissions.includes("payroll.manage") && head.permissions.includes("engagement.readFeedback") && !head.permissions.some((k) => k === "leads.view" || k === "orders.view"));
+    actorId = hrHead.id;
+    ok("  and /customers by its address is a 404 for them", (await outcome(page("customers")(props))) === "notFound");
+    const addStaff = await outcome(page("settings/access/new")(props));
+    ok("  while Add a staff account opens for them, rather than saying they can't", !/^(notFound|error)/.test(addStaff) && !addStaff.includes("You can&#x27;t add staff") && !addStaff.includes("You can't add staff"), addStaff.slice(0, 80));
+
     section("3–4. View without create");
     actorId = clerk.id;
     const ticketsPage = await outcome(page("tickets")(props));

@@ -314,6 +314,47 @@ export const ROLE_PRESETS: RolePreset[] = [
     ],
   },
   {
+    /**
+     * The head of the HR function, as a role of its own (owner, 9 Oct 2026) — like Sales manager, so
+     * the head's extra reach is a role setting rather than personal grants nobody can see. Everything
+     * the HR manager has, so moving up never takes anything away, plus what heading the function adds:
+     * company-wide notices, who holds which laptop (exit clearance), and the company's own guides.
+     *
+     * Deliberately not here: reimbursing expenses (HR approves, Accounts pays out), locking people out
+     * (granted to a person where the workspace's process gives HR its exits), and the keys that
+     * rewrite access — never handed out by a profile.
+     */
+    key: "hr-head",
+    label: "HR head",
+    description: "Heads HR: everything an HR manager has — people records, hiring, payroll, leave, user accounts, anonymous feedback, expense approvals, employee imports — plus company-wide notices, every IT asset (for exit clearance), the company's own guides, and reading Staff & roles so they can add staff accounts. Payroll and anonymous feedback are not inheritable.",
+    role: "HR_HEAD",
+    permissions: [...EVERY_PROFILE, "meetings.schedule",
+      "hr.manage",
+      "hr.viewAll",
+      "hr.approveLeave",
+      "hiring.manage",
+      "people.handover",
+      "engagement.manage",
+      "engagement.readFeedback",
+      "visitors.view",
+      "visitors.manage",
+      "payroll.manage",
+      "users.manage",
+      "expenses.approve",
+      "expenses.viewAll",
+      "performance.view",
+      "vault.use",
+      "data.exportPeople",
+      "data.importPeople",
+      "notes.broadcast",
+      "assets.viewAll",
+      "help.manage",
+      // Read-only, and what opens Staff & roles: without it "user accounts" is a key with no screen —
+      // adding a staff account takes this and `users.manage` together.
+      "permissions.view",
+    ],
+  },
+  {
     key: "recruiter",
     label: "Recruiter",
     description: "Runs hiring — candidates, their status, intake links, offer letters and documents — without opening employee records. HR converts a hired candidate into an employee.",
