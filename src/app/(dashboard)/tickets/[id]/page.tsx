@@ -23,9 +23,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
    */
   const ticket = await db.ticket.findUnique({
     where: ref.kind === "seq" ? { ticketSeq: ref.seq } : { id: ref.id },
-    select: { id: true, ticketSeq: true, company: { select: { ownerUserId: true } } },
+    select: { id: true, ticketSeq: true, company: { select: { ownerUserId: true, relationshipType: true } } },
   });
-  if (!ticket || !(await canSeeCompany(user.id, ticket.company.ownerUserId))) notFound();
+  if (!ticket || !(await canSeeCompany(user.id, ticket.company))) notFound();
 
   // After the check, never before — see `canonicalise`.
   canonicalise(id, "/tickets", formatTicketId(ticket.ticketSeq), query);

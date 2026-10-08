@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-import { canSeeCompany } from "@/lib/authz/company-scope";
+import { mayAccess } from "@/lib/authz/access";
 import { DocumentDetail } from "@/components/documents/document-detail";
 import { viewerHas } from "@/actions/permission";
 
@@ -10,19 +9,16 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
   if (!(await viewerHas("documents.view"))) notFound();
 
   /**
-   * `company` is the other party — the customer on a sales document, the vendor on a purchase one —
-   * and it is the relation company-scope.ts names for TradeDocument. `leadId` is the other route to
+   * The access engine answers whether this document is in reach, asked of the same fragment the list
+   * uses — a missing id answers no as well. With no level set it follows `company`, the other party
+   * (the customer on a sales document, the vendor on a purchase one); `leadId` is the other route to
    * a company here and is deliberately not used: it is nullable, so half the documents would fall
    * through it, and it reaches the same company anyway.
    *
    * A purchase bill's party is a vendor and so has no account manager, which hides it from anyone
    * without `companies.viewAll` — correct, because purchasing and accounts both hold that key.
    */
-  const document = await db.tradeDocument.findUnique({
-    where: { id },
-    select: { company: { select: { ownerUserId: true } } },
-  });
-  if (!document || !(await canSeeCompany(user.id, document.company.ownerUserId))) notFound();
+  if (!(await mayAccess(user.id, "documents", "view", id))) notFound();
 
   return <DocumentDetail id={id} />;
 }

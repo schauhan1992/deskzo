@@ -36,9 +36,9 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
    */
   const party = await db.company.findUnique({
     where: { id: document.companyId },
-    select: { ownerUserId: true },
+    select: { ownerUserId: true, relationshipType: true },
   });
-  if (!party || !(await canSeeCompany(user.id, party.ownerUserId))) notFound();
+  if (!party || !(await canSeeCompany(user.id, party))) notFound();
 
   if (!isEditable(document.status)) {
     return (

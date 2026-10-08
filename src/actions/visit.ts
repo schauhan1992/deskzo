@@ -417,8 +417,8 @@ export async function visitFormOptions(companyId: string) {
    * The picker that feeds it is scoped already (`listCompanyOptions`), so this turns nobody away
    * who reached the form the ordinary way; it closes the id-in-a-request-body route.
    */
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { contacts: [], locations: [], leads: [] };
   }
 

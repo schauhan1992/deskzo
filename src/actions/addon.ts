@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
-import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { mayAccess, orderAccess } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -63,8 +64,8 @@ export async function quoteAddon(params: {
   });
   if (!parent) return null;
   // The same refusal for a record out of scope as for one that does not exist, so a parent id
-  // cannot be used to find out which accounts are real.
-  if (!(await canSeeCompany(user.id, parent.company.ownerUserId))) return null;
+  // cannot be used to find out which accounts are real. The access engine answers it.
+  if (!(await mayAccess(user.id, "orders", "view", parent.id))) return null;
 
   const problems = canAddTo({
     parent: {
@@ -120,7 +121,7 @@ export async function createAddon(input: {
   });
   // Scoped like punching an order: seats only on an account this person could open. Out of scope and
   // missing answer the same, so an id can't be used to find out which subscriptions are real.
-  if (!parent || !(await canSeeCompany(user.id, parent.company.ownerUserId))) {
+  if (!parent || !(await canSeeCompany(user.id, parent.company))) {
     return { ok: false, error: "That subscription no longer exists." };
   }
   const resellerRefusal = await resellerOrderRefusal(parent.company);
@@ -233,7 +234,8 @@ export async function subscriptionWithAddons(id: string) {
     },
   });
   // Out of scope answers as missing does: what a customer pays is the account's own business.
-  if (!parent || !(await canSeeCompany(user.id, parent.company.ownerUserId))) return null;
+  // The access engine answers the scope (`mayAccess`).
+  if (!parent || !(await mayAccess(user.id, "orders", "view", parent.id))) return null;
 
   const live = parent.addons.filter((a) => a.orderStatus !== "CANCELLED");
   const group = renewalGroup([
@@ -272,8 +274,9 @@ export async function addableSubscriptions(companyId: string) {
     await db.companyProduct.findMany({
       where: {
         // Scoped as well as filtered by id: a company id is not a secret, and without this
-        // anybody signed in could read what any account pays by passing one in.
-        ...(await viaCompanyScope(user.id)),
+        // anybody signed in could read what any account pays by passing one in. The access
+        // engine answers the scope, inside `AND` so its keys never meet the ones beside it.
+        AND: [await orderAccess(user.id, "view")],
         companyId,
         parentId: null,
         item: { type: "SUBSCRIPTION" },

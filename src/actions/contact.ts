@@ -179,7 +179,7 @@ export async function bulkUpdateContacts(input: unknown): Promise<ActionResult<{
    * Every selected contact must be one this person may see. This deleted or re-designated any ids
    * it was handed, whichever account they belonged to. All or nothing, like the other bulk bars.
    */
-  const allowed = await contactIdsInScope(user.id, contactIds);
+  const allowed = await contactIdsInScope(user.id, contactIds, action === "delete" ? "delete" : "edit");
   if (allowed.length !== new Set(contactIds).size) {
     return { ok: false, error: allowed.length === 0 ? NO_CONTACTS : "Some of the selected contacts are not yours to change." };
   }

@@ -13,6 +13,7 @@ import {
   paymentScope,
   viaCompanyScope,
 } from "@/lib/authz/company-scope";
+import { paymentAccess } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { pageOf } from "@/lib/pagination";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
@@ -49,10 +50,10 @@ const orderItemSelect = {
 async function canSeeCompanyMoney(userId: string, companyId: string) {
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { ownerUserId: true },
+    select: { ownerUserId: true, relationshipType: true },
   });
   if (!company) return false;
-  return canSeeCompany(userId, company.ownerUserId);
+  return canSeeCompany(userId, company);
 }
 
 export async function recordPayment(
@@ -507,15 +508,16 @@ export async function listPayments(params?: {
     where: {
       direction: "RECEIVED",
       /**
-       * `paymentScope` rather than a hand-written clause: a receipt reaches its account through
-       * its own `companyId` — which is set even on a lump sum that has not been allocated to any
-       * order yet, and those are precisely the rows an account manager is chasing.
+       * The access engine's `paymentAccess` rather than a hand-written clause: with no level set a
+       * receipt reaches its account through its own `companyId` — which is set even on a lump sum
+       * that has not been allocated to any order yet, and those are precisely the rows an account
+       * manager is chasing.
        *
        * As an `AND` term because the search narrows through `company` too; two spreads into one
        * object would leave only the last `company` key standing.
        */
       AND: [
-        await paymentScope(user.id),
+        await paymentAccess(user.id, "view"),
         ...(params?.search ? [{ company: { name: { contains: params.search, mode: "insensitive" as const } } }] : []),
       ],
     },
@@ -567,7 +569,7 @@ export async function listCompanyPayments(companyId: string) {
 
   const payments = await db.payment.findMany({
     // Received only: a vendor payment is money going the other way.
-    where: { companyId, direction: "RECEIVED" },
+    where: { AND: [{ companyId, direction: "RECEIVED" }, await paymentAccess(user.id, "view")] },
     orderBy: { paidOn: "desc" },
     include: {
       recordedBy: { select: { id: true, name: true } },
@@ -622,7 +624,7 @@ export async function companyPaymentSummary(companyId: string) {
       },
     }),
     db.payment.findMany({
-      where: { companyId, direction: "RECEIVED" },
+      where: { AND: [{ companyId, direction: "RECEIVED" }, await paymentAccess(user.id, "view")] },
       select: { amount: true, currency: true, exchangeRate: true, allocations: { select: { amount: true, paymentAmount: true } } },
     }),
   ]);

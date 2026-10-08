@@ -315,8 +315,8 @@ export async function waterfall(params: { by: "customer" | "item"; months: 12 | 
 /** A customer's revenue for the company page — refused for a company outside the caller's scope. */
 export async function customerRevenue(companyId: string): Promise<CustomerRevenue | null> {
   const user = await reader();
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) return null;
   return customerRevenueOf(db, { companyId });
 }
 

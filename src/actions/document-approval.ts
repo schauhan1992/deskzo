@@ -197,11 +197,11 @@ async function loadForApproval(id: string, userId: string) {
     select: {
       id: true, docNumber: true, docType: true, status: true, approvalStatus: true,
       submittedById: true, createdById: true, total: true, currency: true,
-      company: { select: { name: true, ownerUserId: true } },
+      company: { select: { name: true, ownerUserId: true, relationshipType: true } },
     },
   });
   if (!document) return null;
-  if (!(await canSeeCompany(userId, document.company.ownerUserId))) return null;
+  if (!(await canSeeCompany(userId, document.company))) return null;
   return document;
 }
 

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { getCandidate } from "@/actions/candidate";
+import { viewerHas } from "@/actions/permission";
 import { CandidateRecord } from "@/components/hr/candidate-record";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 
@@ -21,7 +22,7 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="animate-fade-rise">
-      <CandidateRecord candidate={candidate} origin={origin} />
+      <CandidateRecord candidate={candidate} origin={origin} canConvert={await viewerHas("hr.manage")} />
     </div>
   );
 }

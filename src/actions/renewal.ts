@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { toPlain } from "@/lib/serialize";
 import { requireModuleUser } from "@/lib/modules-access";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { orderAccess } from "@/lib/authz/access";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { resolveRenewalStage, type RenewalStageKey } from "@/lib/renewals";
 import { pageSlice } from "@/lib/pagination";
@@ -60,9 +61,9 @@ async function renewalWhere(
     endDate,
     // The scope and the search both narrow through `company`, so they are two `AND` terms rather
     // than two spreads into one object — a second `company` key would replace the first, and the
-    // one written first is the scope.
+    // one written first is the scope. The access engine answers the scope (`orderAccess`).
     AND: [
-      await viaCompanyScope(userId),
+      await orderAccess(userId, "view"),
       ...(params?.search
         ? [{ company: { name: { contains: params.search, mode: "insensitive" as const } } }]
         : []),

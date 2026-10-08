@@ -33,6 +33,8 @@ const BY_KEY: Record<string, ModuleRef> = {
   "calls.view": "calls",
   "workspace.manageAny": "workspace",
   "meetings.schedule": "calendar",
+  // Hiring lives in the People (HR) module.
+  "hiring.manage": "hr",
 };
 
 const BY_PREFIX: Record<string, ModuleRef> = {

@@ -40,6 +40,17 @@ async function requireHr() {
   return { user, allowed: await hasEffectivePermission(user.id, "hr.manage") };
 }
 
+/**
+ * Hiring: "Run hiring", or "Manage people records", which has always included it (owner, 8 Oct 2026).
+ * A recruiter holds the first without the second, so runs candidates without opening employee
+ * records. Converting a hired candidate stays with `requireHr` — it creates a login and an employee.
+ */
+async function requireHiring() {
+  const user = await requireModuleUser("hr");
+  const allowed = (await hasEffectivePermission(user.id, "hiring.manage")) || (await hasEffectivePermission(user.id, "hr.manage"));
+  return { user, allowed };
+}
+
 const candidateSelect = {
   id: true,
   name: true,
@@ -69,7 +80,7 @@ const candidateSelect = {
 } satisfies Prisma.CandidateSelect;
 
 export async function listCandidates(filters?: { status?: string; search?: string }) {
-  const { allowed } = await requireHr();
+  const { allowed } = await requireHiring();
   if (!allowed) return [];
   return toPlain(
     await db.candidate.findMany({
@@ -96,7 +107,7 @@ export async function listCandidates(filters?: { status?: string; search?: strin
 }
 
 export async function getCandidate(id: string) {
-  const { allowed } = await requireHr();
+  const { allowed } = await requireHiring();
   if (!allowed) return null;
   const row = await db.candidate.findUnique({
     where: { id },
@@ -133,8 +144,8 @@ export async function saveCandidate(input: {
   expectedJoining?: string;
   notes?: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const { user, allowed } = await requireHr();
-  if (!allowed) return { ok: false, error: "Only HR can manage candidates." };
+  const { user, allowed } = await requireHiring();
+  if (!allowed) return { ok: false, error: "Only HR or a recruiter can manage candidates." };
 
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
@@ -186,8 +197,8 @@ export async function setCandidateStatus(
   status: CandidateStatus,
   reason?: string,
 ): Promise<ActionResult<null>> {
-  const { user, allowed } = await requireHr();
-  if (!allowed) return { ok: false, error: "Only HR can change a candidate's status." };
+  const { user, allowed } = await requireHiring();
+  if (!allowed) return { ok: false, error: "Only HR or a recruiter can change a candidate's status." };
 
   const candidate = await db.candidate.findUnique({ where: { id }, select: { name: true, status: true } });
   if (!candidate) return { ok: false, error: "That candidate no longer exists." };
@@ -234,8 +245,8 @@ const INTAKE_VALID_DAYS = 14;
  * types changes anything until HR converts them and reviews it.
  */
 export async function issueIntakeLink(id: string): Promise<ActionResult<{ token: string; expiresAt: string }>> {
-  const { user, allowed } = await requireHr();
-  if (!allowed) return { ok: false, error: "Only HR can issue an intake link." };
+  const { user, allowed } = await requireHiring();
+  if (!allowed) return { ok: false, error: "Only HR or a recruiter can issue an intake link." };
 
   const candidate = await db.candidate.findUnique({ where: { id }, select: { name: true, status: true } });
   if (!candidate) return { ok: false, error: "That candidate no longer exists." };
@@ -265,8 +276,8 @@ export async function issueIntakeLink(id: string): Promise<ActionResult<{ token:
 }
 
 export async function revokeIntakeLink(id: string): Promise<ActionResult<null>> {
-  const { allowed } = await requireHr();
-  if (!allowed) return { ok: false, error: "Only HR can revoke an intake link." };
+  const { allowed } = await requireHiring();
+  if (!allowed) return { ok: false, error: "Only HR or a recruiter can revoke an intake link." };
   await db.candidate.update({ where: { id }, data: { intakeToken: null, intakeExpiresAt: null } });
   revalidatePath(`/people/hiring/${id}`);
   return { ok: true, data: null };
@@ -466,8 +477,8 @@ export async function draftCandidateLetter(
   candidateId: string,
   type: LetterType,
 ): Promise<ActionResult<{ id: string }>> {
-  const { user, allowed } = await requireHr();
-  if (!allowed) return { ok: false, error: "Only HR can issue letters." };
+  const { user, allowed } = await requireHiring();
+  if (!allowed) return { ok: false, error: "Only HR or a recruiter can issue a candidate's letters." };
   if (!CANDIDATE_LETTERS.includes(type)) {
     return { ok: false, error: "That letter is for an employee — convert them first." };
   }
@@ -558,8 +569,8 @@ export async function uploadCandidateDocument(input: {
   mimeType: string;
   note?: string;
 }): Promise<ActionResult<{ id: string }>> {
-  const { user, allowed } = await requireHr();
-  if (!allowed) return { ok: false, error: "Only HR can file a candidate's documents." };
+  const { user, allowed } = await requireHiring();
+  if (!allowed) return { ok: false, error: "Only HR or a recruiter can file a candidate's documents." };
 
   const check = checkUpload(input);
   if (!check.ok) return { ok: false, error: check.error };

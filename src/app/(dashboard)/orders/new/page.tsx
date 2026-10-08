@@ -53,7 +53,7 @@ async function prefillFor(userId: string, companyId: unknown) {
   });
   if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
   if (company.stage === "DISQUALIFIED" || company.managedByResellerId !== null) return null;
-  if (!(await canSeeCompany(userId, company.ownerUserId))) return null;
+  if (!(await canSeeCompany(userId, company))) return null;
   const context = await punchCustomerContext(company.id);
   if (!context) return null;
   const { id, name, relationshipType, customerCategory } = company;

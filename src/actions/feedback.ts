@@ -135,13 +135,13 @@ export async function createFeedbackRequest(input: {
 
   const company = await db.company.findUnique({
     where: { id: input.companyId },
-    select: { id: true, name: true, managedByResellerId: true, ownerUserId: true },
+    select: { id: true, name: true, managedByResellerId: true, ownerUserId: true, relationshipType: true },
   });
   if (!company) return { ok: false, error: "That company no longer exists." };
   // `feedback.request` says somebody may ask customers for feedback. It does not say which
   // customers — the account scope answers that, and it is settled before the reseller rule below so
   // that "managed by a reseller" is not something you can learn about an account you cannot see.
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "That isn't your account to ask." };
   }
   // A reseller's end customer is the reseller's relationship, not ours — the same do-not-contact
@@ -432,8 +432,8 @@ export async function feedbackTargets(companyId: string) {
    * anybody who could type a company id. Refused as a whole rather than filtered query by query:
    * five wheres are five chances to miss one, and the same empty shape already means "not for you".
    */
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { contacts: [], people: [], tickets: [], visits: [], orders: [] };
   }
 

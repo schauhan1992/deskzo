@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { hasEffectivePermission } from "@/actions/permission";
-import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { contactAccess, mayAccessContactsOf, type AccessAction } from "@/lib/authz/access";
 import { can } from "@/lib/authz/resolve";
 import { definitionsFor } from "@/lib/custom-fields/server";
 import { isResellerManaged } from "@/lib/reseller";
@@ -32,18 +32,17 @@ export async function canViewContacts(userId: string): Promise<boolean> {
 /**
  * For a query on `Contact` (or on anything reaching a company the same way): the viewer's account
  * scope, or — without `contacts.view` — a clause nothing matches, so a list comes back empty rather
- * than each caller having to remember to check first.
+ * than each caller having to remember to check first. The access engine answers it (`contactAccess`).
  */
 export async function contactScope(userId: string): Promise<Prisma.ContactWhereInput> {
-  if (!(await canViewContacts(userId))) return { id: { in: [] } };
-  return (await viaCompanyScope(userId)) as Prisma.ContactWhereInput;
+  return contactAccess(userId, "view");
 }
 
-/** Whether one company's contacts are this person's to see and change — for a single-record action. */
-export async function mayWorkWithContactsOf(userId: string, companyId: string): Promise<boolean> {
+/** Whether one company's contacts are this person's to act on this way (edit unless told) — for a single-record action. */
+export async function mayWorkWithContactsOf(userId: string, companyId: string, action: AccessAction = "edit"): Promise<boolean> {
   if (!(await canViewContacts(userId))) return false;
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  return !!company && (await canSeeCompany(userId, company.ownerUserId));
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  return !!company && (await mayAccessContactsOf(userId, action, company));
 }
 
 /**
@@ -75,11 +74,11 @@ export async function contactDetailFieldKeys(): Promise<string[]> {
   return (await definitionsFor("CONTACT")).filter((d) => isContactDetailField(d.type)).map((d) => d.key);
 }
 
-/** Which of these contact ids this person may act on — the rest are out of scope or don't exist. */
-export async function contactIdsInScope(userId: string, ids: string[]): Promise<string[]> {
+/** Which of these contact ids this person may act on this way — the rest are out of scope or don't exist. */
+export async function contactIdsInScope(userId: string, ids: string[], action: AccessAction = "edit"): Promise<string[]> {
   if (ids.length === 0) return [];
   const rows = await db.contact.findMany({
-    where: { AND: [{ id: { in: ids } }, await contactScope(userId)] },
+    where: { AND: [{ id: { in: ids } }, await contactAccess(userId, action)] },
     select: { id: true },
   });
   return rows.map((r) => r.id);

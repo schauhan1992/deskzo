@@ -33,14 +33,14 @@ export default async function CompanyDetailPage({
    */
   const company = await db.company.findUnique({
     where: ref.kind === "seq" ? { companySeq: ref.seq } : { id: ref.id },
-    select: { id: true, companySeq: true, ownerUserId: true },
+    select: { id: true, companySeq: true, ownerUserId: true, relationshipType: true },
   });
   if (!company) {
     // A duplicate merged away: its COM number and its id — in bookmarks, emails, notifications —
     // open the company it became. Checked against that company, so a guess learns nothing more
     // than it would from the company's own number.
     const merge = await mergedInto(ref);
-    if (merge && (await canSeeCompany(user.id, merge.into.ownerUserId))) {
+    if (merge && (await canSeeCompany(user.id, merge.into))) {
       const search = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) {
         if (Array.isArray(value)) for (const v of value) search.append(key, v);
@@ -51,7 +51,7 @@ export default async function CompanyDetailPage({
     }
     notFound();
   }
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) notFound();
+  if (!(await canSeeCompany(user.id, company))) notFound();
 
   // After the check, never before — see `canonicalise`.
   canonicalise(id, "/companies", formatCompanyId(company.companySeq), query);

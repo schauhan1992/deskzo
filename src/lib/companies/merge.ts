@@ -928,7 +928,7 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
 export async function mergedInto(ref: { kind: "seq"; seq: number } | { kind: "id"; id: string }) {
   return db.companyMerge.findFirst({
     where: ref.kind === "seq" ? { fromSeq: ref.seq } : { fromCompanyId: ref.id },
-    select: { fromSeq: true, into: { select: { id: true, companySeq: true, ownerUserId: true } } },
+    select: { fromSeq: true, into: { select: { id: true, companySeq: true, ownerUserId: true, relationshipType: true } } },
   });
 }
 

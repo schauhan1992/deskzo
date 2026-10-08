@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany } from "@/lib/authz/company-scope";
+import { mayAccess, mayAccessContactsOf } from "@/lib/authz/access";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { isResellerManaged } from "@/lib/reseller";
 import { formatTicketId } from "@/lib/tickets";
@@ -42,7 +43,7 @@ export function readMeetingRecordRef(value: unknown): MeetingRecordRef | null {
 }
 
 type CompanyBits = { id: string; name: string; ownerUserId: string | null; managedByResellerId: string | null };
-const COMPANY = { select: { id: true, companySeq: true, name: true, ownerUserId: true, managedByResellerId: true } } as const;
+const COMPANY = { select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true, managedByResellerId: true } } as const;
 const NO_LINKS: MeetingLinks = { companyId: null, contactId: null, leadId: null, ticketId: null, visitId: null };
 
 async function contactsOf(userId: string, company: CompanyBits) {
@@ -66,7 +67,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
     case "lead": {
       if (!(await can(userId, "leads.view"))) return null;
       const lead = await db.lead.findUnique({ where: { id: ref.id }, select: { id: true, leadSeq: true, title: true, contactId: true, company: COMPANY } });
-      if (!lead || !(await canSeeCompany(userId, lead.company.ownerUserId))) return null;
+      if (!lead || !(await mayAccess(userId, "leads", "view", lead.id))) return null;
       return {
         ref,
         label: `Lead · ${lead.company.name} — ${lead.title}`,
@@ -80,7 +81,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
     }
     case "company": {
       const company = await db.company.findUnique({ where: { id: ref.id }, ...COMPANY });
-      if (!company || !(await canSeeCompany(userId, company.ownerUserId))) return null;
+      if (!company || !(await canSeeCompany(userId, company))) return null;
       return {
         ref,
         label: company.name,
@@ -94,7 +95,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
     }
     case "contact": {
       const contact = await db.contact.findUnique({ where: { id: ref.id }, select: { id: true, name: true, company: COMPANY } });
-      if (!contact || !(await canSeeCompany(userId, contact.company.ownerUserId))) return null;
+      if (!contact || !(await mayAccessContactsOf(userId, "view", contact.company))) return null;
       return {
         ref,
         label: `${contact.name} · ${contact.company.name}`,
@@ -109,7 +110,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
     case "ticket": {
       if (!(await moduleAvailableForTenant("helpdesk")) || !(await can(userId, "tickets.view"))) return null;
       const ticket = await db.ticket.findUnique({ where: { id: ref.id }, select: { id: true, ticketSeq: true, title: true, contactId: true, company: COMPANY } });
-      if (!ticket || !(await canSeeCompany(userId, ticket.company.ownerUserId))) return null;
+      if (!ticket || !(await canSeeCompany(userId, ticket.company))) return null;
       const number = formatTicketId(ticket.ticketSeq);
       return {
         ref,

@@ -206,7 +206,7 @@ export async function listCompanyNumbers(companyId: string) {
    */
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { managedByResellerId: true, ownerUserId: true },
+    select: { managedByResellerId: true, ownerUserId: true, relationshipType: true },
   });
   if (!company || company.managedByResellerId) return [];
 
@@ -218,7 +218,7 @@ export async function listCompanyNumbers(companyId: string) {
    * arrives from the caller, so there is nothing to filter — refuse, as `canSeeCompany` exists for.
    * Same empty result as a reseller's customer, so the dialler cannot tell the two apart.
    */
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) return [];
+  if (!(await canSeeCompany(user.id, company))) return [];
 
   const contacts = await db.contact.findMany({
     where: { companyId, phone: { not: null }, ...STILL_THERE },

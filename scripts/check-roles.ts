@@ -15,6 +15,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { db } from "../src/lib/db";
+import { SYSTEM_ROLE_KEYS } from "../src/lib/roles";
 
 const KEY = "ZZPROBE_REGIONAL_MANAGER";
 let failures = 0;
@@ -116,7 +117,7 @@ async function main() {
     );
 
     const listed = await listRolesForScreen();
-    ok("the screen lists the built-ins with headcounts", listed.ok && listed.data.length === 8,
+    ok("the screen lists the built-ins with headcounts", listed.ok && listed.data.length === SYSTEM_ROLE_KEYS.length,
        listed.ok ? listed.data.map((r) => `${r.name} ${r.headcount}`).join(", ") : listed.error);
   } finally {
     await db.rolePermission.deleteMany({ where: { role: { startsWith: "ZZPROBE" } } });

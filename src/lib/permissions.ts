@@ -236,6 +236,22 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT"],
   },
   {
+    /**
+     * Hiring, apart from people records (owner, 8 Oct 2026): a recruiter runs candidates without
+     * opening every employee's file. "Manage people records" still includes it (src/actions/candidate.ts),
+     * and turning a hired candidate into an employee account stays with that permission alone — it
+     * creates a login and an employee record. The migration that added this gave it the same answer
+     * as "Manage people records" wherever that was set by hand, so nobody gained or lost hiring.
+     */
+    key: "hiring.manage",
+    label: "Run hiring",
+    description:
+      "Candidates and their progress, intake links, offer and other candidate letters, and candidates' documents. Does not open employee records, and converting a hired candidate into an employee is HR's.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "People & HR",
+    tier: "sensitive",
+  },
+  {
     key: "visitors.view",
     label: "See the visitor book",
     description:

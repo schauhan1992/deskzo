@@ -696,6 +696,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Configuration rather than records, and the half that gives `RolePermission` its meaning — a table of permissions keyed on roles nobody can name describes nothing. Exported in the workflow specification, where a role appears with its name, its description and every permission it grants, which is what somebody rebuilding this on another system actually needs. It is not loadable: the target has its own idea of what a role is.",
   },
+  RoleAccessLevel: { disposition: "specification", reason: "How far a role reaches over each record type — configuration rather than records, the other half of RolePermission. Specified, not loaded: the target has its own idea of what a role sees." },
   RolePermission: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   SalaryStructure: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   ScreenshotAllowance: { disposition: "excluded", reason: "A per-day counter. The evidence it counts lives in ActivityLog." },
@@ -712,6 +713,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   SystemModule: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   TablePreference: { disposition: "excluded", reason: "Which table columns somebody likes. A preference, not data." },
   Target: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
+  UserAccessLevel: { disposition: "specification", reason: "One person's own reach over a record type, over their role's — configuration rather than records, as UserPermission is. Specified, not loaded." },
   UserDailyActivity: { disposition: "excluded", reason: "Heartbeat-derived time tracking, specific to this application's own measure of activity." },
   UserPermission: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   UserPhoto: { disposition: "archive", reason: "Binary, served from its own route and referenced by the user record rather than inlined into a bundle." },

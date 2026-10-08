@@ -50,6 +50,7 @@ model Role {
 
   users        User[]
   permissions  RolePermission[]
+  accessLevels RoleAccessLevel[]
   signInRule   SignInRule?      @relation("RoleSignInRule")
   candidates   Candidate[]
   formGrants   FormAccessGrant[]
@@ -753,6 +754,8 @@ model User {
   activity               ActivityLog[]            @relation("UserActivity")
   permissionGrants       UserPermission[]         @relation("UserPermissionSubject")
   permissionGrantsMade   UserPermission[]         @relation("UserPermissionGrantedBy")
+  accessLevels           UserAccessLevel[]        @relation("UserAccessLevelSubject")
+  accessLevelsGranted    UserAccessLevel[]        @relation("UserAccessLevelGrantedBy")
   permissionChangesMade  PermissionChange[]       @relation("PermissionChangeActor")
   permissionChangesAbout PermissionChange[]       @relation("PermissionChangeSubject")
   activityAsImpersonator ActivityLog[]            @relation("ActivityImpersonatedBy")
@@ -2514,6 +2517,30 @@ model RolePermission {
 
   @@id(name: "role_permission", [role, permission])
   @@map("role_permissions")
+}
+
+/**
+ * How far a role reaches, per record type and action (docs/permission-redesign.md §4): which records
+ * of a kind its people may see, edit, delete or hand to somebody else — none, their own, their
+ * team's, their branch's, all of them, or "as the account they belong to".
+ *
+ * No row is the normal state, not a gap. A role with no row reaches exactly as far as its permissions
+ * took it before levels existed (src/lib/authz/access.ts `derivedLevel`): "See all companies" is All,
+ * a view permission is "follow the account". A row appears only when an admin sets a level, and from
+ * then on it is the answer. That is how levels shipped without changing anybody's access.
+ */
+model RoleAccessLevel {
+  role      String
+  roleRef   Role        @relation(fields: [role], references: [key], onDelete: Cascade)
+  /// A record type in src/lib/authz/access.ts `ACCESS_RECORDS` — "companies", "leads"…
+  record    String
+  /// "view" | "edit" | "delete" | "assign".
+  action    String
+  level     AccessLevel
+  updatedAt DateTime    @updatedAt
+
+  @@id(name: "role_record_action", [role, record, action])
+  @@map("role_access_levels")
 }
 
 /**
@@ -8292,6 +8319,44 @@ model UserPermission {
   @@index([permission])
   @@index([expiresAt])
   @@map("user_permissions")
+}
+
+/**
+ * One person's own level for a record type and action, over their role's — an exception, kept with
+ * who set it, why and until when, as a personal permission is (`UserPermission`).
+ */
+model UserAccessLevel {
+  userId      String
+  record      String
+  action      String
+  level       AccessLevel
+  reason      String?
+  grantedById String?
+  /// The midnight that ends its last day, as a personal permission's is.
+  expiresAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user      User  @relation("UserAccessLevelSubject", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("UserAccessLevelGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@id(name: "user_record_action", [userId, record, action])
+  @@index([expiresAt])
+  @@map("user_access_levels")
+}
+
+/**
+ * How far a role or person reaches over a record type (src/lib/authz/access.ts). Widening in this
+ * order: NONE < OWN < TEAM < BRANCH < ALL. FOLLOW stands apart — "as far as the account it belongs
+ * to", for records that hang off a company (contacts, leads, orders, documents, payments).
+ */
+enum AccessLevel {
+  NONE
+  OWN
+  TEAM
+  BRANCH
+  ALL
+  FOLLOW
 }
 
 /**

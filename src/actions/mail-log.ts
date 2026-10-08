@@ -104,8 +104,8 @@ export async function listMailLog(params: MailLogParams) {
   const user = await requireUser();
   if (!(await viewerHas("emails.view"))) return { rows: [], total: 0 };
   if (params.companyId) {
-    const company = await db.company.findUnique({ where: { id: params.companyId }, select: { ownerUserId: true } });
-    if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return { rows: [], total: 0 };
+    const company = await db.company.findUnique({ where: { id: params.companyId }, select: { ownerUserId: true, relationshipType: true } });
+    if (!company || !(await canSeeCompany(user.id, company))) return { rows: [], total: 0 };
   }
   const where = await mailWhere(user.id, params);
   const [rows, total] = await Promise.all([
@@ -119,8 +119,8 @@ export async function listMailLog(params: MailLogParams) {
 export async function companyMailSummary(companyId: string) {
   const user = await requireUser();
   if (!(await viewerHas("emails.view"))) return null;
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) return null;
   const [byStatus, last] = await Promise.all([
     db.marketingMessage.groupBy({ by: ["status"], where: { companyId, channel: "EMAIL" }, _count: { _all: true } }),
     db.marketingMessage.findFirst({ where: { companyId, channel: "EMAIL", sentAt: { not: null } }, orderBy: { sentAt: "desc" }, select: { sentAt: true } }),
@@ -148,13 +148,13 @@ export async function getMailMessage(id: string) {
       scheduledFor: true,
       attempts: true,
       providerMessageId: true,
-      company: { select: { id: true, companySeq: true, name: true, ownerUserId: true } },
+      company: { select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true } },
       provider: { select: { label: true, fromEmail: true, fromName: true } },
       events: { select: { type: true, occurredAt: true, url: true, detail: true }, orderBy: { occurredAt: "asc" } },
     },
   });
   // Out of scope answers the same as missing, so an id says nothing about whose it is.
-  if (!message || !(await canSeeCompany(user.id, message.company.ownerUserId))) return null;
+  if (!message || !(await canSeeCompany(user.id, message.company))) return null;
   const { company, ...rest } = message;
   return toPlain({
     ...rest,

@@ -1,6 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { can } from "@/lib/authz/resolve";
-import { getDownlineUserIds } from "@/lib/org-chart";
+import { companyAccess, customerReachIds, mayAccessAccount, throughAccount, type AccountFacts } from "@/lib/authz/access";
 
 /**
  * Whose accounts somebody may see.
@@ -13,6 +12,15 @@ import { getDownlineUserIds } from "@/lib/org-chart";
  * because the reporting line already answers "whose team", and nothing else has to be configured.
  * `companies.viewAll` lifts the restriction entirely, for the functions that serve every account
  * rather than owning some: accounts, purchasing, support.
+ *
+ * ## Answered by the access engine now
+ *
+ * Since the permission redesign (docs/permission-redesign.md, phase 1) these helpers ask
+ * `src/lib/authz/access.ts` how far somebody reaches over customers and vendors, rather than reading
+ * `companies.viewAll` themselves. Until an admin sets a level the engine's answer is this file's old
+ * one, derived from the same permission — `scripts/access-snapshot.ts` compares the two — and once a
+ * level is set, every screen that asks here follows it. The names and shapes are kept because about
+ * eighty call sites spread them.
  *
  * ## Why these are fragments rather than a list of ids
  *
@@ -30,50 +38,44 @@ import { getDownlineUserIds } from "@/lib/org-chart";
  * ## The rule for unowned records
  *
  * A company with no account manager is nobody's, and is therefore hidden from everybody who does
- * not hold `companies.viewAll`. That is a deliberate choice rather than an accident of the query:
- * the alternative — treating unowned as public — makes "hidden" mean "hidden until somebody clears
- * the owner field", which is not a rule anybody could rely on.
+ * not reach every account. That is a deliberate choice rather than an accident of the query: the
+ * alternative — treating unowned as public — makes "hidden" mean "hidden until somebody clears the
+ * owner field", which is not a rule anybody could rely on.
  */
 
 /**
- * The account-manager ids a user may see through, or `null` for no restriction.
+ * The account-manager ids a user may see customers through, or `null` for no restriction.
  *
  * `null` rather than "every id in the company": it keeps the `where` clause absent entirely for an
  * unrestricted viewer instead of turning every list into an `IN (...)` over the whole user table.
+ * The customer side's reach — the reports, forecasts and exports that use it are about selling.
  */
 export async function accountScopeIds(userId: string): Promise<string[] | null> {
-  if (await can(userId, "companies.viewAll")) return null;
-  // The downline is what makes a manager's view their team's. It is already cycle-safe and
-  // excludes deactivated accounts — see src/lib/org-chart.ts.
-  return [userId, ...(await getDownlineUserIds(userId))];
+  return customerReachIds(userId);
 }
 
-/** For a query on `Company` itself. */
+/** For a query on `Company` itself — customers and vendors, each at its own reach. */
 export async function companyScope(userId: string): Promise<Prisma.CompanyWhereInput> {
-  const ids = await accountScopeIds(userId);
-  return ids === null ? {} : { ownerUserId: { in: ids } };
+  return companyAccess(userId, "view");
 }
 
 /**
  * For a query on anything that has a direct `company` relation — CompanyProduct (orders and
- * renewals), Lead, Ticket, Contact, TradeDocument.
+ * renewals), Lead, Ticket, Contact, TradeDocument. The account alone: a record type with a level
+ * of its own (leads, orders, documents, payments, contacts) asks `access.ts` for that instead.
  */
 export async function viaCompanyScope(userId: string): Promise<Record<string, unknown>> {
-  const ids = await accountScopeIds(userId);
-  return ids === null ? {} : { company: { ownerUserId: { in: ids } } };
+  return throughAccount(userId, "view");
 }
 
 /**
- * For `Payment`, which reaches a company through its allocations to orders rather than directly.
+ * For `Payment`, through its company — the same account rule as `viaCompanyScope`.
  *
- * A lump-sum payment recorded against a company before it is applied to any order has a
- * `companyId` of its own, so both paths are needed — otherwise an unallocated receipt vanishes from
- * the account manager's view at exactly the moment they are chasing it.
+ * (A lump-sum payment recorded against a company before it is applied to any order has a
+ * `companyId` of its own, so the company path covers an unallocated receipt as well.)
  */
 export async function paymentScope(userId: string): Promise<Record<string, unknown>> {
-  const ids = await accountScopeIds(userId);
-  if (ids === null) return {};
-  return { company: { ownerUserId: { in: ids } } };
+  return throughAccount(userId, "view");
 }
 
 /**
@@ -82,9 +84,12 @@ export async function paymentScope(userId: string): Promise<Record<string, unkno
  *
  * A list that quietly omits a row is a usability question; a detail page that renders a record the
  * viewer should not see is the leak. Every `/companies/[id]`-shaped route needs this.
+ *
+ * Given the company's account manager **and its relationship type**: customers and vendors are
+ * separate rows in the redesign, and a level set for one must not open the other. A company that
+ * wasn't found is `null`, and answers no.
  */
-export async function canSeeCompany(userId: string, ownerUserId: string | null): Promise<boolean> {
-  const ids = await accountScopeIds(userId);
-  if (ids === null) return true;
-  return ownerUserId !== null && ids.includes(ownerUserId);
+export async function canSeeCompany(userId: string, account: AccountFacts | null): Promise<boolean> {
+  if (!account) return false;
+  return mayAccessAccount(userId, "view", account);
 }

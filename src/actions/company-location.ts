@@ -37,8 +37,8 @@ function locationScalarData(input: Omit<AddCompanyLocationInput, "companyId">) {
 export async function listCompanyLocationOptions(companyId: string) {
   const user = await requireUser();
 
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return [];
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) return [];
 
   return db.companyLocation.findMany({
     where: { companyId },

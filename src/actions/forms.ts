@@ -976,8 +976,8 @@ export async function companyFormResponses(companyId: string) {
   const user = await requireModuleUser("forms");
   const viewer = await viewerFor(user);
   if (!viewer) return null;
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) return null;
 
   const [responses, invites] = await Promise.all([
     db.formSubmission.findMany({
