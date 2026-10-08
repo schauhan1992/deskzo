@@ -86,6 +86,11 @@ export const tradeDocumentSchema = z
      * head office; a credit note always takes its invoice's.
      */
     branchId: z.string().optional().or(z.literal("")),
+    /**
+     * The organisation bank account a sales document prints (owner, 8 Oct 2026). Blank: its branch's
+     * default, else the primary. Left out: as it was — and always on a purchase, which prints none.
+     */
+    bankAccountId: z.string().optional(),
     placeOfSupplyCode: stateCode,
     gstTreatment: z.enum(gstTreatmentValues).default("UNREGISTERED"),
     /**
@@ -230,11 +235,6 @@ export const organisationSettingsSchema = z.object({
   country: z.string().trim().max(60).optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
-  bankName: z.string().trim().optional().or(z.literal("")),
-  bankAccountNumber: z.string().trim().optional().or(z.literal("")),
-  bankIfsc: z.string().trim().optional().or(z.literal("")),
-  bankBranch: z.string().trim().optional().or(z.literal("")),
-  upiId: z.string().trim().optional().or(z.literal("")),
   invoiceTerms: z.string().trim().optional().or(z.literal("")),
   invoiceNotes: z.string().trim().optional().or(z.literal("")),
   roundOffTotals: z.boolean().default(true),

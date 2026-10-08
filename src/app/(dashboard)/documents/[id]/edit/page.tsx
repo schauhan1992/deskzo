@@ -5,6 +5,7 @@ import { listAssignableUsers } from "@/actions/company";
 import { getNumberSetting } from "@/actions/document-number";
 import { getOrganisation } from "@/lib/organisation";
 import { listBranchChoices } from "@/lib/branches/identity";
+import { documentBankChoices } from "@/lib/banking/organisation-accounts";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
@@ -53,7 +54,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
   }
 
   const itemIds = [...new Set(document.lines.map((line) => line.itemId).filter((v): v is string => !!v))];
-  const [parties, salespeople, org, branches, numberSetting, lineItems] = await Promise.all([
+  const [parties, salespeople, org, branches, numberSetting, lineItems, bank] = await Promise.all([
     listDocumentParties(document.docType),
     listAssignableUsers(),
     getOrganisation(),
@@ -63,6 +64,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     getNumberSetting(document.docType, document.branchId),
     // What each line's item is, so the form offers a service period where the item suggests one.
     itemIds.length ? db.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, type: true, billingCycle: true } }) : [],
+    document.direction === "SALES" ? documentBankChoices(document.id) : undefined,
   ]);
   const itemOf = (id: string | null) => lineItems.find((item) => item.id === id);
   // Written before branches (null): the head office's.
@@ -88,6 +90,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
         roundOffTotals={org.roundOffTotals}
         numberSetting={numberSetting}
         salespeople={salespeople}
+        bank={bank}
         defaults={{
           id: document.id,
           docNumber: document.docNumber,

@@ -53,6 +53,7 @@ import {
   saveCustomFields,
 } from "@/lib/custom-fields/server";
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
+import { assignVendorCodes, vendorCodeHolder } from "@/lib/companies/vendor-code";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -295,6 +296,8 @@ export async function createCompany(
     if (termsCheck.decision) {
       await recordDecision({ userId: user.id, companyId: company.id, kind: "TERMS", ...termsCheck.decision });
     }
+    // A vendor is numbered as it is created (owner, 8 Oct 2026) — the workspace's prefix and the next number.
+    if (isVendorRelationshipType(companyInput.relationshipType)) await assignVendorCodes([company.id]);
     await recordAudit({ userId: user.id, action: "CREATE", entityType: "Company", entityId: company.id, entityLabel: company.name });
 
     revalidatePath("/companies");
@@ -795,14 +798,27 @@ export async function setVendorStatus(companyId: string, status: VendorStatus): 
   return { ok: true, data: null };
 }
 
+/**
+ * A code typed by hand, replacing the one given automatically. Not a client's — a client is never a
+ * vendor — and never another company's: a code is how purchase and accounts tell vendors apart.
+ */
 export async function setVendorCode(companyId: string, code: string): Promise<ActionResult<null>> {
-  await requireUser();
-  const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  const user = await requireUser();
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  if (isCustomerRelationshipType(company.relationshipType)) {
+    return { ok: false, error: "Only vendors and commission parties have a vendor code." };
+  }
+  const value = code.trim().toUpperCase();
+  if (value.length > 30) return { ok: false, error: "A vendor code is at most 30 characters." };
+  if (value) {
+    const holder = await vendorCodeHolder(db, value, companyId);
+    if (holder) return { ok: false, error: `${value} is already ${holder.name}'s vendor code.` };
+  }
 
-  await db.company.update({ where: { id: companyId }, data: { vendorCode: code.trim() || null } });
+  await db.company.update({ where: { id: companyId }, data: { vendorCode: value || null } });
 
   revalidatePath(`/companies/${companyId}`);
   revalidatePath("/vendors");
@@ -810,29 +826,29 @@ export async function setVendorCode(companyId: string, code: string): Promise<Ac
   return { ok: true, data: null };
 }
 
-/** Payout/compliance details (PAN, bank account) — edited separately from the main profile, same pattern as `setVendorCode`. */
+/**
+ * Compliance details (PAN) — edited separately from the main profile, same pattern as `setVendorCode`.
+ * Its bank accounts are their own list (src/actions/company-bank.ts). Finance's to change, as they are:
+ * the PAN decides the TDS deducted from every payment.
+ */
 export async function setPayoutDetails(companyId: string, input: unknown): Promise<ActionResult<null>> {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await hasEffectivePermission(user.id, "payments.manage"))) {
+    return { ok: false, error: "Changing a company's PAN needs the “Manage finance records” permission." };
+  }
   const parsed = payoutDetailsSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
+  if (company.relationshipType === "CLIENT") {
+    return { ok: false, error: "A client has no payout details — we never pay one." };
+  }
 
-  const data = parsed.data;
-  await db.company.update({
-    where: { id: companyId },
-    data: {
-      panNumber: data.panNumber || null,
-      bankAccountName: data.bankAccountName || null,
-      bankAccountNumber: data.bankAccountNumber || null,
-      bankIfsc: data.bankIfsc || null,
-      bankName: data.bankName || null,
-    },
-  });
+  await db.company.update({ where: { id: companyId }, data: { panNumber: parsed.data.panNumber || null } });
 
   revalidatePath(`/companies/${companyId}`);
   revalidatePath("/vendors");

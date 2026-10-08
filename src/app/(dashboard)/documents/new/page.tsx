@@ -8,6 +8,7 @@ import { leadDocumentDraft } from "@/actions/lead";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
 import { getOrganisation } from "@/lib/organisation";
 import { defaultBranchIdFor, listBranchChoices } from "@/lib/branches/identity";
+import { documentBankChoices } from "@/lib/banking/organisation-accounts";
 import { DocumentForm } from "@/components/documents/document-form";
 import { blankLine, emptyDefaults } from "@/lib/document-draft";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -16,6 +17,7 @@ import { viewerHas } from "@/actions/permission";
 import { leadPath } from "@/lib/record-links";
 import { NoAccessNotice } from "@/components/settings/module-disabled-notice";
 import {
+  documentDirection,
   documentListPath,
   tradeDocumentLabels,
   tradeDocumentTypeValues,
@@ -37,7 +39,7 @@ export default async function NewDocumentPage({
   // and only for it: everything else is fetched alongside.
   const signedIn = currentUser();
   const defaultBranch = signedIn.then((me) => (me ? defaultBranchIdFor(me.id) : null));
-  const [parties, salespeople, org, branches, defaultBranchId, numberSetting, nextNumber, lead, me] = await Promise.all([
+  const [parties, salespeople, org, branches, defaultBranchId, numberSetting, nextNumber, lead, me, bank] = await Promise.all([
     listDocumentParties(docType),
     listAssignableUsers(),
     getOrganisation(),
@@ -47,6 +49,7 @@ export default async function NewDocumentPage({
     defaultBranch.then((branchId) => previewNextNumber(docType, branchId)),
     params.leadId ? leadDocumentDraft(params.leadId) : Promise.resolve(null),
     signedIn,
+    documentDirection[docType] === "SALES" ? documentBankChoices() : undefined,
   ]);
 
   /**
@@ -134,6 +137,7 @@ export default async function NewDocumentPage({
         numberSetting={numberSetting}
         salespeople={salespeople}
         defaults={defaults}
+        bank={bank}
       />
     </div>
   );

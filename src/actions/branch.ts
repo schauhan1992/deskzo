@@ -24,6 +24,7 @@ import { encryptSecret } from "@/lib/crypto";
 import { GST_STATE_CODES, OTHER_COUNTRY_CODE, hasValidGstinChecksum, panOfGstin, stateCodeFromName } from "@/lib/gst-engine";
 import { isIndia } from "@/lib/geo/countries";
 import { ensureHeadOffice, listBranchChoices } from "@/lib/branches/identity";
+import { bankAccountChoices, type BankAccountChoice } from "@/lib/banking/organisation-accounts";
 import { branchLabel, formatDispatchAddress, mergeIdentity, type BranchChoice } from "@/lib/branches/format";
 import { branchSchema, gstRegistrationSchema, registrationEInvoiceSchema } from "@/lib/validation/branch";
 import type { ActionResult } from "@/actions/company";
@@ -73,11 +74,8 @@ export type BranchRow = {
   email: string | null;
   phone: string | null;
   addressSource: "branch" | "organisation";
-  bankName: string | null;
-  bankAccountNumber: string | null;
-  bankIfsc: string | null;
-  bankBranch: string | null;
-  upiId: string | null;
+  /** The organisation account its sales documents print by default; null is the organisation's primary. */
+  defaultBankAccountId: string | null;
   invoiceTerms: string | null;
   invoiceNotes: string | null;
   hasLogo: boolean;
@@ -92,6 +90,8 @@ export type BranchRow = {
 export type BranchSettings = {
   registrations: RegistrationRow[];
   branches: BranchRow[];
+  /** The organisation's accounts a branch may default to — those in use, and any one a branch already names. */
+  bankAccounts: BankAccountChoice[];
   /** `registeredOffice` is the address on one line, "" before the Profile has one. */
   org: { legalName: string; pan: string | null; registeredOffice: string };
 };
@@ -226,7 +226,7 @@ export async function listBranchesForSettings(): Promise<BranchSettings | null> 
 
   // A fresh workspace still has its head office to show.
   await ensureHeadOffice();
-  const [org, registrations, branches, issued, secrets] = await Promise.all([
+  const [org, registrations, branches, issued, secrets, bankDefaults] = await Promise.all([
     db.organisationSettings.findUnique({ where: { id: "global" }, select: ORG_SELECT }),
     db.gstRegistration.findMany({ select: { ...REGISTRATION_SELECT, _count: { select: { branches: true } } } }),
     db.branch.findMany({
@@ -241,7 +241,11 @@ export async function listBranchesForSettings(): Promise<BranchSettings | null> 
       _count: { _all: true },
     }),
     storedSecrets(),
+    // By name: the column is in NOT_YET_EVERYWHERE until every workspace has 20261028110000.
+    db.branch.findMany({ select: { id: true, defaultBankAccountId: true } }).catch(() => []),
   ]);
+  const defaultAccountOf = new Map(bankDefaults.map((b) => [b.id, b.defaultBankAccountId]));
+  const bankAccounts = await bankAccountChoices([...defaultAccountOf.values()]);
 
   const headOffice = branches.find((b) => b.isHeadOffice) ?? null;
   const orgPan = normalisedPan(org?.pan);
@@ -293,11 +297,7 @@ export async function listBranchesForSettings(): Promise<BranchSettings | null> 
         email: b.email,
         phone: b.phone,
         addressSource: identity.addressSource,
-        bankName: b.bankName,
-        bankAccountNumber: b.bankAccountNumber,
-        bankIfsc: b.bankIfsc,
-        bankBranch: b.bankBranch,
-        upiId: b.upiId,
+        defaultBankAccountId: defaultAccountOf.get(b.id) ?? null,
         invoiceTerms: b.invoiceTerms,
         invoiceNotes: b.invoiceNotes,
         hasLogo: Boolean(b.logoDataUrl),
@@ -319,6 +319,7 @@ export async function listBranchesForSettings(): Promise<BranchSettings | null> 
   return {
     registrations: registrationRows,
     branches: branchRows,
+    bankAccounts,
     org: { legalName: org?.legalName ?? "", pan: orgPan, registeredOffice },
   };
 }
@@ -584,6 +585,19 @@ export async function saveBranch(input: unknown): Promise<ActionResult<{ id: str
   if (id && !existing) return { ok: false, error: "That branch no longer exists." };
   if (codeTaken) return { ok: false, error: CODE_TAKEN };
 
+  // An account in use, or the one this branch already names (since retired) — nothing else.
+  const bankAccountId = data.defaultBankAccountId === undefined ? undefined : data.defaultBankAccountId || null;
+  if (bankAccountId) {
+    const [account, current] = await Promise.all([
+      db.organisationBankAccount.findUnique({ where: { id: bankAccountId }, select: { active: true } }),
+      id ? db.branch.findUnique({ where: { id }, select: { defaultBankAccountId: true } }) : Promise.resolve(null),
+    ]);
+    if (!account) return { ok: false, error: "That bank account isn't there any more — pick another." };
+    if (!account.active && current?.defaultBankAccountId !== bankAccountId) {
+      return { ok: false, error: "That bank account has been retired — pick one in use." };
+    }
+  }
+
   // A new branch is never the head office: the flag only moves, through setHeadOffice.
   const isHeadOffice = existing?.isHeadOffice ?? false;
   if (!isHeadOffice && !data.addressLine1) {
@@ -616,11 +630,8 @@ export async function saveBranch(input: unknown): Promise<ActionResult<{ id: str
     country: ownAddress ? text(data.country) : null,
     email: text(data.email),
     phone: text(data.phone),
-    bankName: text(data.bankName),
-    bankAccountNumber: text(data.bankAccountNumber),
-    bankIfsc: text(data.bankIfsc)?.toUpperCase() ?? null,
-    bankBranch: text(data.bankBranch),
-    upiId: text(data.upiId),
+    // The branch's own bank columns are left as they were: its account is one of the organisation's now.
+    ...(bankAccountId !== undefined ? { defaultBankAccountId: bankAccountId } : {}),
     invoiceTerms: text(data.invoiceTerms),
     invoiceNotes: text(data.invoiceNotes),
   };

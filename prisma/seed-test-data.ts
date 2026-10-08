@@ -307,7 +307,18 @@ async function main() {
         vendorStatus: isCustomerSide ? null : pick(["ONBOARDING", "ACTIVE", "ACTIVE", "INACTIVE"] as const),
         vendorCode: isCustomerSide ? null : `V-${int(1000, 9999)}`,
         panNumber: isCustomerSide ? null : `AA${pick(["A", "B", "C"])}CN${int(1000, 9999)}K`,
-        bankName: isCustomerSide ? null : pick(["HDFC Bank", "ICICI Bank", "Axis Bank", "SBI"]),
+        // A list of their own since 8 Oct 2026 (CompanyBankAccount), one of them primary.
+        bankAccounts: isCustomerSide
+          ? undefined
+          : {
+              create: {
+                label: "Main account",
+                bankName: pick(["HDFC Bank", "ICICI Bank", "Axis Bank", "SBI"]),
+                accountNumber: String(int(100000000, 999999999)),
+                ifsc: `${pick(["HDFC", "ICIC", "UTIB", "SBIN"])}0${String(int(100000, 999999))}`,
+                isPrimary: true,
+              },
+            },
         createdById: admin.id,
         ownerUserId: isCustomerSide ? pick(sales).id : admin.id,
         assignedToUserId: relationshipType === "CLIENT" && !managedByResellerId ? pick(callers).id : null,

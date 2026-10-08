@@ -375,6 +375,7 @@ const COMPANY_INCLUDE = {
   assignedTo: { select: { name: true } },
   managedByReseller: { select: { name: true } },
   locations: { select: { id: true, label: true, city: true, state: true, gstNumber: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" as const }, { createdAt: "asc" as const }] },
+  bankAccounts: { select: { id: true, isPrimary: true } },
 } satisfies Prisma.CompanyInclude;
 
 type Loaded = Prisma.CompanyGetPayload<{ include: typeof COMPANY_INCLUDE }>;
@@ -427,13 +428,7 @@ export const MERGE_FIELDS: FieldSpec[] = [
   { key: "paymentTerms", label: "Payment terms", columns: ["paymentTerms"], keepByDefault: true, show: (c) => paymentTermsLabels[c.paymentTerms as keyof typeof paymentTermsLabels] ?? humanise(c.paymentTerms) },
   { key: "creditLimit", label: "Credit limit", columns: ["creditLimit"], keepByDefault: true, show: (c) => (c.creditLimit === null ? null : rupees(Number(c.creditLimit))) },
   { key: "panNumber", label: "PAN", columns: ["panNumber"], show: (c) => c.panNumber },
-  {
-    key: "bank",
-    label: "Bank account",
-    columns: ["bankAccountName", "bankAccountNumber", "bankIfsc", "bankName"],
-    show: (c) =>
-      c.bankAccountNumber ? [c.bankAccountName, `•••• ${c.bankAccountNumber.slice(-4)}`, c.bankIfsc, c.bankName].filter(Boolean).join(" · ") : null,
-  },
+  // No bank account here: they are a list of their own since 8 Oct 2026, and move across with the merge.
   { key: "vendorStatus", label: "Vendor status", columns: ["vendorStatus"], show: (c) => (c.vendorStatus ? humanise(c.vendorStatus) : null) },
   { key: "vendorCode", label: "Vendor code", columns: ["vendorCode"], show: (c) => c.vendorCode },
   { key: "managedByResellerId", label: "Managed by reseller", columns: ["managedByResellerId"], show: (c) => c.managedByReseller?.name ?? null },
@@ -606,6 +601,9 @@ export async function planMerge(keepId: string, dropId: string): Promise<MergePl
     }
     const keepPrimary = keep.locations.some((l) => l.isPrimary);
     if (keepPrimary && drop.locations.some((l) => l.isPrimary)) clashes.push("Both have a primary address — the one staying keeps its own as primary; the other moves across as an ordinary address.");
+    if (keep.bankAccounts.some((a) => a.isPrimary) && drop.bankAccounts.some((a) => a.isPrimary)) {
+      clashes.push("Both have a primary bank account — the one staying keeps its own as primary; the other's move across as ordinary accounts.");
+    }
   }
 
   return {
@@ -764,7 +762,7 @@ async function moveFirstOrderWin(tx: Tx, fromId: string, intoId: string) {
 
 function snapshotOf(c: Loaded, contacts: FullContact[], fields: MergeFields) {
   const plain = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
-  const { industry, customerCategory, owner, assignedTo, managedByReseller, locations, ...row } = c;
+  const { industry, customerCategory, owner, assignedTo, managedByReseller, locations, bankAccounts, ...row } = c;
   return plain({
     // Its own fields too: where both companies had an answer only the staying one's is kept, and this
     // is where the duplicate's still is.
@@ -777,6 +775,8 @@ function snapshotOf(c: Loaded, contacts: FullContact[], fields: MergeFields) {
       reseller: managedByReseller?.name ?? null,
     },
     locations,
+    // Which of its bank accounts moved to the staying company (they are not copied here).
+    bankAccountIds: bankAccounts.map((a) => a.id),
     contacts: contacts.map((x) => ({
       id: x.id,
       contactSeq: x.contactSeq,
@@ -834,6 +834,10 @@ export async function executeMerge(input: MergeInput): Promise<MergeOutcome> {
       // At most one primary address per company — an index Prisma can't see (migration 20260920120000).
       if (keep.locations.some((l) => l.isPrimary) && drop.locations.some((l) => l.isPrimary)) {
         await tx.companyLocation.updateMany({ where: { companyId: drop.id, isPrimary: true }, data: { isPrimary: false } });
+      }
+      // And one primary bank account (company_bank_accounts_one_primary, migration 20261028110000).
+      if (keep.bankAccounts.some((a) => a.isPrimary) && drop.bankAccounts.some((a) => a.isPrimary)) {
+        await tx.companyBankAccount.updateMany({ where: { companyId: drop.id, isPrimary: true }, data: { isPrimary: false } });
       }
 
       notes.push(...(await settleClashes(tx, companyLinks, drop.id, keep.id)));

@@ -31,6 +31,7 @@ import { documentDirection, documentListPath, tradeDocumentLabels } from "@/lib/
 import { registeredTreatments } from "@/lib/validation/trade-document";
 import { blankLine, type AddressDraft, type DocumentFormDefaults, type LineDraft } from "@/lib/document-draft";
 import { branchLabel, type BranchChoice } from "@/lib/branches/format";
+import type { DocumentBankChoices } from "@/lib/banking/organisation-accounts";
 import { GST_NUMBERED_TYPES, expandPrefix } from "@/lib/document-numbering";
 import { indiaClock } from "@/lib/time/zone";
 import { useClock } from "@/components/time/clock-provider";
@@ -86,6 +87,7 @@ export function DocumentForm({
   numberSetting,
   salespeople,
   defaults,
+  bank,
 }: {
   docType: TradeDocumentType;
   parties: Party[];
@@ -102,6 +104,11 @@ export function DocumentForm({
   /** The series the starting branch numbers from: `getNumberSetting(docType, defaults.branchId)`. */
   numberSetting: NumberSetting;
   defaults: DocumentFormDefaults;
+  /**
+   * The organisation's bank accounts a sales document may print (src/lib/banking/organisation-accounts.ts).
+   * The picker shows only when there are any; left on "default", the branch's account or the primary prints.
+   */
+  bank?: DocumentBankChoices;
 }) {
   const router = useRouter();
   const clock = useClock();
@@ -121,6 +128,7 @@ export function DocumentForm({
   const sellerStateCode = selectedBranch?.stateCode ?? null;
   const gstNumbered = GST_NUMBERED_TYPES.includes(docType);
 
+  const [bankAccountId, setBankAccountId] = useState(bank?.current ?? "");
   const [docNumber, setDocNumber] = useState(defaults.docNumber);
   const [numberMode, setNumberMode] = useState(numberSetting.mode);
   /**
@@ -514,6 +522,8 @@ export function DocumentForm({
       // Blank where there was no choice to make: with one branch, or a credit note following its
       // invoice, the server applies the same answer itself.
       branchId: branches.length > 1 && !followsInvoice ? branchId : "",
+      // Left out where there is no picker: the server then leaves the document's account as it was.
+      ...(isSales && bank && bank.accounts.length > 0 ? { bankAccountId } : {}),
       currency,
       // Forced back to 1 on a rupee document rather than left at whatever was typed before
       // somebody switched back — the schema refuses the mismatch, and failing validation on a
@@ -866,6 +876,9 @@ export function DocumentForm({
                 </p>
               ) : null}
             </div>
+          )}
+          {isSales && bank && bank.accounts.length > 0 && (
+            <BankAccountPicker bank={bank} branchId={branchId} value={bankAccountId} onChange={setBankAccountId} />
           )}
 
           <div className="space-y-1.5">
@@ -1534,6 +1547,39 @@ function ItemPicker({
           </div>
         </div>
       </AnchoredPopover>
+    </div>
+  );
+}
+
+/** Which of the organisation's accounts this sale prints — by default, the branch's or the primary. */
+function BankAccountPicker({
+  bank,
+  branchId,
+  value,
+  onChange,
+}: {
+  bank: DocumentBankChoices;
+  branchId: string;
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const id = useId();
+  const branchDefault = bank.accounts.find((a) => a.id === bank.branchDefaults[branchId]);
+  const fallback = branchDefault ?? bank.accounts.find((a) => a.isPrimary && a.active);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>Bank account printed</Label>
+      <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">
+          {fallback ? `${branchDefault ? "Branch default" : "Primary"} — ${fallback.label}` : "None printed"}
+        </option>
+        {bank.accounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.label}
+            {a.active ? "" : " (retired)"}
+          </option>
+        ))}
+      </Select>
     </div>
   );
 }

@@ -8,43 +8,28 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
 
-type PayoutDetails = {
-  panNumber: string | null;
-  bankAccountName: string | null;
-  bankAccountNumber: string | null;
-  bankIfsc: string | null;
-  bankName: string | null;
-};
-
-export function PayoutDetailsButton({ companyId, details }: { companyId: string; details: PayoutDetails }) {
+/**
+ * The PAN of a company we pay — what TDS is deducted against. Its bank accounts are a list of their
+ * own on the record since 8 Oct 2026 (src/components/banking/bank-accounts-manager.tsx). Shown only to
+ * whoever may change it (`payments.manage`).
+ */
+export function PayoutDetailsButton({ companyId, panNumber }: { companyId: string; panNumber: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [values, setValues] = useState({
-    panNumber: details.panNumber ?? "",
-    bankAccountName: details.bankAccountName ?? "",
-    bankAccountNumber: details.bankAccountNumber ?? "",
-    bankIfsc: details.bankIfsc ?? "",
-    bankName: details.bankName ?? "",
-  });
+  const [value, setValue] = useState(panNumber ?? "");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   function openDialog() {
     setError(null);
-    setValues({
-      panNumber: details.panNumber ?? "",
-      bankAccountName: details.bankAccountName ?? "",
-      bankAccountNumber: details.bankAccountNumber ?? "",
-      bankIfsc: details.bankIfsc ?? "",
-      bankName: details.bankName ?? "",
-    });
+    setValue(panNumber ?? "");
     setOpen(true);
   }
 
   function handleSave() {
     setError(null);
     startTransition(async () => {
-      const result = await setPayoutDetails(companyId, values);
+      const result = await setPayoutDetails(companyId, { panNumber: value });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -54,8 +39,6 @@ export function PayoutDetailsButton({ companyId, details }: { companyId: string;
     });
   }
 
-  const hasDetails = Object.values(details).some(Boolean);
-
   return (
     <>
       <button
@@ -64,53 +47,26 @@ export function PayoutDetailsButton({ companyId, details }: { companyId: string;
         className="inline-flex items-center gap-1.5 rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-text transition-colors hover:bg-line"
       >
         <Landmark className="h-3 w-3" />
-        {hasDetails ? "Payout details set" : "Set payout details"}
+        {panNumber ? "PAN set" : "Set PAN"}
       </button>
 
-      <Dialog open={open} onClose={() => setOpen(false)} title="Payout details">
+      <Dialog open={open} onClose={() => setOpen(false)} title="PAN">
         <div className="space-y-3">
-          {error && <p className="text-xs text-danger">{error}</p>}
+          {error && (
+            <p role="alert" className="text-xs text-danger">
+              {error}
+            </p>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="panNumber">PAN</Label>
             <Input
               id="panNumber"
               placeholder="ABCDE1234F"
-              value={values.panNumber}
-              onChange={(e) => setValues((v) => ({ ...v, panNumber: e.target.value }))}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="font-mono uppercase"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="bankAccountName">Bank account holder name</Label>
-            <Input
-              id="bankAccountName"
-              value={values.bankAccountName}
-              onChange={(e) => setValues((v) => ({ ...v, bankAccountName: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="bankAccountNumber">Bank account number</Label>
-            <Input
-              id="bankAccountNumber"
-              value={values.bankAccountNumber}
-              onChange={(e) => setValues((v) => ({ ...v, bankAccountNumber: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="bankIfsc">IFSC</Label>
-            <Input
-              id="bankIfsc"
-              placeholder="HDFC0001234"
-              value={values.bankIfsc}
-              onChange={(e) => setValues((v) => ({ ...v, bankIfsc: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="bankName">Bank name</Label>
-            <Input
-              id="bankName"
-              value={values.bankName}
-              onChange={(e) => setValues((v) => ({ ...v, bankName: e.target.value }))}
-            />
+            <p className="text-xs text-subtle">Bank accounts are kept in their own list on this page.</p>
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={isPending}>

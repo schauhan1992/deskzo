@@ -94,7 +94,10 @@ async function call<T>(token: string, url: string, init: { method?: string; body
     const code = (body as { error?: { code?: string } } | null)?.error?.code ?? "";
     // A delta link Graph no longer knows: start again from a full read.
     const gone = res.status === 410 || /syncState(NotFound|Invalid)|resyncRequired/i.test(code);
-    return { ok: false, status: gone ? 410 : res.status, error: providerError(body, res.status, WHO) };
+    // An event no longer in the calendar — deleted or cancelled in Outlook or Teams. Graph says so as
+    // "The specified object was not found in the store", which means nothing to anybody reading it.
+    const missing = res.status === 404 || code === "ErrorItemNotFound";
+    return { ok: false, status: gone ? 410 : missing ? 404 : res.status, error: missing ? `${WHO} couldn't find it — it may have been deleted or cancelled in Outlook or Teams.` : providerError(body, res.status, WHO) };
   }
   const value = read(body, res.status);
   return value === null ? { ok: false, status: res.status, error: `${WHO} answered with something unexpected.` } : { ok: true, value };
@@ -122,12 +125,16 @@ export function updateOutlookEvent(token: string, id: string, draft: MeetingDraf
   return call(token, `${graphBase()}/v1.0/me/events/${encodeURIComponent(id)}`, { method: "PATCH", body: payload(draft, false) }, (b) => fromGraphEvent(b as GraphEvent));
 }
 
-/** With people invited, a cancellation they are told about; with nobody, simply deleted. */
-export function cancelOutlookEvent(token: string, id: string, p: { invited: boolean; note: string | null }) {
+/**
+ * With people invited, a cancellation they are told about; with nobody, simply deleted. One already gone
+ * — cancelled or deleted in Outlook or Teams — is as good as cancelled, as it is for Google and Zoho.
+ */
+export async function cancelOutlookEvent(token: string, id: string, p: { invited: boolean; note: string | null }): Promise<CalendarCall<true>> {
   const url = `${graphBase()}/v1.0/me/events/${encodeURIComponent(id)}`;
-  return p.invited
-    ? call(token, `${url}/cancel`, { method: "POST", body: { comment: p.note ?? "" } }, () => true as const)
-    : call(token, url, { method: "DELETE" }, () => true as const);
+  const done = p.invited
+    ? await call(token, `${url}/cancel`, { method: "POST", body: { comment: p.note ?? "" } }, () => true as const)
+    : await call(token, url, { method: "DELETE" }, () => true as const);
+  return !done.ok && done.status === 404 ? { ok: true, value: true } : done;
 }
 
 /**

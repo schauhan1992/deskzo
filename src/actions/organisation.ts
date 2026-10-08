@@ -188,11 +188,8 @@ export async function updateOrganisation(input: unknown): Promise<ActionResult<{
     country: blank(data.country),
     email: blank(data.email),
     phone: blank(data.phone),
-    bankName: blank(data.bankName),
-    bankAccountNumber: blank(data.bankAccountNumber),
-    bankIfsc: blank(data.bankIfsc?.toUpperCase()),
-    bankBranch: blank(data.bankBranch),
-    upiId: blank(data.upiId),
+    // The bank block is a list of accounts since 8 Oct 2026 (src/actions/organisation-bank.ts); the
+    // old columns are left as they were.
     invoiceTerms: blank(data.invoiceTerms),
     invoiceNotes: blank(data.invoiceNotes),
     roundOffTotals: data.roundOffTotals,

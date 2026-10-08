@@ -261,6 +261,11 @@ const NOT_YET_EVERYWHERE = {
   // 20261019100000_watermark_scope. The DLP policy is read on every page; read by name in
   // src/lib/security/store.ts.
   securityPolicy: { watermarkScope: true },
+  // 20261028110000_bank_accounts_vendor_codes. Read by name in src/lib/companies/vendor-code.ts and
+  // src/lib/banking/organisation-accounts.ts, which fall back when the column is not there yet.
+  organisationSettings: { vendorCodePrefix: true },
+  branch: { defaultBankAccountId: true },
+  tradeDocument: { bankAccountId: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

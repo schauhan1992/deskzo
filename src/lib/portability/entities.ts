@@ -85,7 +85,7 @@ export const CANONICAL_ENTITIES: CanonicalEntity[] = [
   {
     key: "account",
     label: "Accounts",
-    sourceModels: ["Company", "ResellerProfile", "CommissionPartyLink", "CommissionPartyAccount", "DomainProfile"],
+    sourceModels: ["Company", "ResellerProfile", "CommissionPartyLink", "CommissionPartyAccount", "CompanyBankAccount", "DomainProfile"],
     naturalKey: ["normalizedName"],
     keyNote:
       "The normalised company name, the only unique constraint on the table. GSTIN travels as a reconciliation value but cannot be the key: it lives on a location, is nullable, and one company legitimately holds one per state.",
@@ -681,6 +681,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   MessageEvent: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   MessagingProvider: { disposition: "specification", reason: "Mail and WhatsApp provider credentials, encrypted at rest. They have no legitimate export." },
   Notification: { disposition: "archive", reason: "Transient in-app alerts. Nothing is lost by leaving them behind." },
+  OrganisationBankAccount: { disposition: "specification", reason: "Configuration rather than records: the organisation's own accounts, printed on its documents. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   OrganisationSettings: { disposition: "specification", reason: "Configuration rather than records. Exported in the workflow specification, which describes the behaviour faithfully enough to rebuild rather than pretending it can be loaded." },
   PageLayout: {
     disposition: "excluded",

@@ -409,6 +409,7 @@ export function BranchesManager({ data, companyWideGstSeries }: { data: BranchSe
           key={branchDialog.id ?? "new"}
           branch={editingBranch}
           registrations={data.registrations}
+          bankAccounts={data.bankAccounts}
           registeredOffice={data.org.registeredOffice}
           hasActiveRegistrations={activeRegistrations.length > 0}
           onClose={() => setBranchDialog(null)}
@@ -670,6 +671,7 @@ function RegistrationDialog({
 function BranchDialog({
   branch,
   registrations,
+  bankAccounts,
   registeredOffice,
   hasActiveRegistrations,
   onClose,
@@ -677,6 +679,7 @@ function BranchDialog({
 }: {
   branch: BranchRow | null;
   registrations: RegistrationRow[];
+  bankAccounts: BranchSettings["bankAccounts"];
   registeredOffice: string;
   hasActiveRegistrations: boolean;
   onClose: () => void;
@@ -696,11 +699,7 @@ function BranchDialog({
     country: branch?.country ?? "",
     email: branch?.email ?? "",
     phone: branch?.phone ?? "",
-    bankName: branch?.bankName ?? "",
-    bankAccountNumber: branch?.bankAccountNumber ?? "",
-    bankIfsc: branch?.bankIfsc ?? "",
-    bankBranch: branch?.bankBranch ?? "",
-    upiId: branch?.upiId ?? "",
+    defaultBankAccountId: branch?.defaultBankAccountId ?? "",
     invoiceTerms: branch?.invoiceTerms ?? "",
     invoiceNotes: branch?.invoiceNotes ?? "",
   }));
@@ -731,21 +730,19 @@ function BranchDialog({
   const matching = !selected && addressCode ? choices.filter((r) => r.active && r.stateCode === addressCode) : [];
 
   const overrides = [
-    form.bankName,
-    form.bankAccountNumber,
-    form.bankIfsc,
-    form.bankBranch,
-    form.upiId,
+    form.defaultBankAccountId,
     form.invoiceTerms,
     form.invoiceNotes,
   ].filter((v) => v.trim()).length + (branch?.hasLogo ? 1 : 0) + (branch?.hasSignature ? 1 : 0);
 
   function save() {
     setError(null);
-    const { addressLine1, addressLine2, city, state, pincode, country, ...rest } = form;
+    const { addressLine1, addressLine2, city, state, pincode, country, defaultBankAccountId, ...rest } = form;
     startTransition(async () => {
       const result = await saveBranch({
         ...rest,
+        // Left out while the organisation has no accounts to choose from: the branch keeps what it had.
+        ...(bankAccounts.length > 0 ? { defaultBankAccountId } : {}),
         id: branch?.id ?? "",
         // Left out, not blanked: the head office then prints the registered office.
         ...(useRegisteredOffice ? {} : { addressLine1, addressLine2, city, state, pincode, country }),
@@ -876,21 +873,35 @@ function BranchDialog({
             {overrides > 0 && <span className="text-subtle">· {overrides} set</span>}
           </summary>
           <div className="space-y-4 border-t border-line p-3">
-            <p className="text-xs text-subtle">
-              The bank details print as a block: this branch&apos;s when it has an account number or a UPI ID, otherwise the
-              organisation&apos;s — never a mixture of the two.
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Bank name">{(id) => <Input id={id} value={form.bankName} onChange={set("bankName")} />}</Field>
-              <Field label="Account number">
-                {(id) => <Input id={id} value={form.bankAccountNumber} onChange={set("bankAccountNumber")} className="font-mono" />}
-              </Field>
-              <Field label="IFSC">
-                {(id) => <Input id={id} value={form.bankIfsc} onChange={set("bankIfsc")} className="font-mono" />}
-              </Field>
-              <Field label="Bank branch">{(id) => <Input id={id} value={form.bankBranch} onChange={set("bankBranch")} />}</Field>
-              <Field label="UPI ID">{(id) => <Input id={id} value={form.upiId} onChange={set("upiId")} />}</Field>
-            </div>
+            <Field
+              label="Bank account"
+              hint={
+                bankAccounts.length > 0 ? (
+                  "Printed on this branch's sales documents unless a document picks another."
+                ) : (
+                  <>
+                    Add the organisation&apos;s bank accounts under{" "}
+                    <Link href="/settings/organisation" className="text-brand hover:underline">
+                      Settings → Profile
+                    </Link>{" "}
+                    first.
+                  </>
+                )
+              }
+            >
+              {(id) => (
+                <Select id={id} value={form.defaultBankAccountId} onChange={set("defaultBankAccountId")} disabled={bankAccounts.length === 0}>
+                  <option value="">The organisation&apos;s primary</option>
+                  {bankAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label}
+                      {a.isPrimary ? " (primary)" : ""}
+                      {a.active ? "" : " (retired)"}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
             <Field label="Terms & conditions" hint="Pre-filled on new documents from this branch.">
               {(id) => <Textarea id={id} rows={3} value={form.invoiceTerms} onChange={set("invoiceTerms")} />}
             </Field>

@@ -125,7 +125,7 @@ export const SETTINGS: SettingsSection[] = [
           {
             key: "organisation",
             label: "Profile",
-            description: "Legal name, PAN, registered office, head-office GSTIN and default bank details — what prints unless a branch says otherwise.",
+            description: "Legal name, PAN, registered office, head-office GSTIN and bank accounts — what prints unless a branch says otherwise.",
             href: "/settings/organisation",
             icon: Building2,
             permission: "settings.manage",
@@ -446,6 +446,15 @@ export const SETTINGS: SettingsSection[] = [
         key: "purchase",
         label: "Purchase",
         items: [
+          {
+            key: "vendor-codes",
+            label: "Vendor codes",
+            description: "The prefix each new vendor's code starts with — VEN-0001, VEN-0002 — and codes for the vendors added before.",
+            href: "/settings/vendor-codes",
+            icon: Hash,
+            permission: "settings.manage",
+            module: "vendors",
+          },
           {
             key: "rebate-programmes",
             label: "Rebate programmes",

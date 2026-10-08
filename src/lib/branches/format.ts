@@ -138,8 +138,10 @@ const either = (own: string | null | undefined, inherited: string | null | undef
  *   · The address is taken whole — the branch's when it has a first line, else the registered office
  *     (`addressSource` says which). A head office created with every override blank therefore prints
  *     exactly what the company printed before branches existed.
- *   · So is the bank block: the branch's when it has an account number or a UPI id, never half of
- *     each — an IFSC from one account under the number of another sends money nowhere.
+ *   · So is the old bank block: the branch's when it has an account number or a UPI id, never half of
+ *     each — an IFSC from one account under the number of another sends money nowhere. Printed only in
+ *     a workspace not yet migrated: the organisation's accounts decide since 8 Oct 2026
+ *     (src/lib/banking/organisation-accounts.ts).
  *   · Email, phone, signature, terms and notes fall back one by one. The logo does not: callers fall
  *     back to the app's branding, as they always have.
  *   · Legal and trade name, PAN, CIN and round-off are the entity's; the GSTIN is the registration's.

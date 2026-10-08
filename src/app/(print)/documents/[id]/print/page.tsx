@@ -6,6 +6,7 @@ import { spendRenderGrant } from "@/lib/documents/render-grant";
 import { can } from "@/lib/authz/resolve";
 import { foreignCountry } from "@/lib/organisation";
 import { branchIdentity, isMultiBranch } from "@/lib/branches/identity";
+import { printedBankAccount } from "@/lib/banking/organisation-accounts";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
 import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
@@ -87,6 +88,9 @@ export default async function PrintDocumentPage({
 
   const isIntraState = document.cgstAmount > 0 || document.sgstAmount > 0;
   const isSales = documentDirection[document.docType] === "SALES";
+  // The document's own pick, else its branch's default, else the organisation's primary. Sales only:
+  // a purchase order printing our account would invite the vendor to pay us.
+  const bank = isSales ? await printedBankAccount(document.id, identity) : null;
   const qrDataUrl = document.signedQrCode
     ? await QRCode.toDataURL(document.signedQrCode, { margin: 1, width: 150 }).catch(() => null)
     : null;
@@ -381,14 +385,16 @@ export default async function PrintDocumentPage({
               </div>
             )}
 
-            {/* The branch's account when it has its own, else the company's — whole, never half of each. */}
-            {(identity.bankName || identity.upiId) && isSales && (
+            {/* One account, whole — never one account's IFSC under another's number. */}
+            {bank && (
               <div className="text-[11px] leading-5 text-neutral-600">
                 <div className="text-[11px] uppercase tracking-wide text-neutral-500">Bank details</div>
-                {identity.bankName && <div>{identity.bankName}{identity.bankBranch ? ` — ${identity.bankBranch}` : ""}</div>}
-                {identity.bankAccountNumber && <div>A/c: {identity.bankAccountNumber}</div>}
-                {identity.bankIfsc && <div>IFSC: {identity.bankIfsc}</div>}
-                {identity.upiId && <div>UPI: {identity.upiId}</div>}
+                {bank.accountHolderName && <div>{bank.accountHolderName}</div>}
+                {bank.bankName && <div>{bank.bankName}{bank.branchName ? ` — ${bank.branchName}` : ""}</div>}
+                {bank.accountNumber && <div>A/c: {bank.accountNumber}</div>}
+                {bank.ifsc && <div>IFSC: {bank.ifsc}</div>}
+                {bank.swift && <div>SWIFT: {bank.swift}</div>}
+                {bank.upiId && <div>UPI: {bank.upiId}</div>}
               </div>
             )}
 

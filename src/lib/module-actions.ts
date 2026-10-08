@@ -51,6 +51,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // Collections: a salesperson's dues and payment follow-ups — Receivables' (src/lib/collections).
   "collections.ts": ["receivables"],
   "commission-party.ts": ["commission_parties"],
+  // A vendor's bank accounts are its company record's, wherever it is opened from.
+  "company-bank.ts": "core",
   "company-location.ts": "core",
   "company-merge.ts": "core",
   "company.ts": "core",
@@ -132,11 +134,13 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "branch.ts": "core",
   // Getting started: the onboarding wizard's steps, skips and completion (src/lib/help).
   "onboarding.ts": "core",
+  "organisation-bank.ts": "core",
   "organisation.ts": "core",
   "page-layout.ts": "core",
   "password-reset.ts": "public",
   "payable.ts": ["payables"],
   // What distributors and OEMs give back — set against bills and orders' rebates.
+  "vendor-codes.ts": ["vendors"],
   "vendor-credit.ts": ["payables"],
   "payment.ts": ["payments"],
   "payroll.ts": ["payroll"],

@@ -73,6 +73,13 @@ export const INSTALL_ROWS = [
     // The last row's ending; the ones before it end in a comma.
     to: "CURRENT_TIMESTAMP);",
   },
+  {
+    // The standard industries every workspace starts with (src/lib/companies/standard-industries.ts).
+    table: "industries",
+    migration: "20261028100000_standard_industries",
+    from: 'INSERT INTO "industries"',
+    to: 'lower(v.name));',
+  },
 ] as const;
 
 function installStatement(row: (typeof INSTALL_ROWS)[number]): string {

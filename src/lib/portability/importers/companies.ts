@@ -1,7 +1,8 @@
 import { CompanyStage, CompanySource, type Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { valuesFor } from "@/lib/custom-fields/server";
-import { normalizeCompanyName } from "@/lib/validation/company";
+import { isVendorRelationshipType, normalizeCompanyName } from "@/lib/validation/company";
+import { assignVendorCodes } from "@/lib/companies/vendor-code";
 import { optionalUserRef } from "./lookups";
 import {
   createRow,
@@ -137,18 +138,22 @@ export const companiesImporter: Importer = {
       ...(c.ownerUserId ? { ownerUserId: c.ownerUserId } : {}),
     };
 
-    await db.company.upsert({
+    const relationshipType = RELATIONSHIP[ctx.area as keyof typeof RELATIONSHIP] ?? "CLIENT";
+    const saved = await db.company.upsert({
       where: { normalizedName: c.normalizedName },
       update: data,
+      select: { id: true },
       create: {
         ...data,
         normalizedName: c.normalizedName,
-        relationshipType: RELATIONSHIP[ctx.area as keyof typeof RELATIONSHIP] ?? "CLIENT",
+        relationshipType,
         createdById: ctx.actorUserId,
         // Falling back to the importer when the file names nobody. Better than null: an unowned
         // account is invisible to everybody under the scoping rules.
         ownerUserId: c.ownerUserId ?? ctx.actorUserId,
       },
     });
+    // A vendor new to the system is numbered as one created by hand is (src/lib/companies/vendor-code.ts).
+    if (!existing && isVendorRelationshipType(relationshipType)) await assignVendorCodes([saved.id]);
   },
 };

@@ -61,6 +61,11 @@ export async function rescheduleMeeting(userId: string, eventId: string, draft: 
   const own = await ownMeeting(userId, eventId);
   if (!own.ok) return { ok: false, error: own.error };
   const moved = await withCalendar(userId, (token, ctx) => updateEvent(ctx, token, refOf(own.row), draft));
+  if (!moved.ok && (moved.status === 404 || moved.status === 410)) {
+    // Cancelled or deleted in the calendar itself (in Teams, say) before the sync caught up: it is off.
+    await db.calendarEvent.update({ where: { id: own.row.id }, data: { status: "CANCELLED", syncedAt: new Date() } });
+    return { ok: false, error: "This meeting isn't in your calendar any more — it was cancelled or deleted there, so it's shown as cancelled here now. Schedule a new one if it's still on." };
+  }
   if (!moved.ok) return { ok: false, error: moved.error, reconnect: moved.reconnect };
   await db.calendarEvent.update({ where: { id: own.row.id }, data: eventFields(moved.ctx.provider, moved.value, new Date()) });
   // The visit it is for goes with it.

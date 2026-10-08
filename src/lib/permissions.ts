@@ -82,7 +82,7 @@ export const PERMISSION_REGISTRY = [
     key: "payments.manage",
     label: "Manage finance records",
     description:
-      "Fixed assets and depreciation, bank accounts and reconciliation, and the GST tax reports. Broader than recording a payment — this is the finance function rather than the cashbook.",
+      "Fixed assets and depreciation, bank accounts and reconciliation, vendors' bank accounts and PAN, and the GST tax reports. Broader than recording a payment — this is the finance function rather than the cashbook.",
     defaultRoles: ["ACCOUNTS", "MANAGEMENT"],
   },
   {

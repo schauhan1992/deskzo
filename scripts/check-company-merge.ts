@@ -212,9 +212,16 @@ async function main() {
   const partial = await db.$queryRaw<{ indexname: string }[]>`
     SELECT indexname::text AS indexname FROM pg_indexes
     WHERE schemaname = current_schema() AND indexdef LIKE 'CREATE UNIQUE INDEX%' AND indexdef LIKE '% WHERE %'`;
-  // branches_one_head_office: a branch links to no company and no contact, so a merge never moves a
-  // row under it — known, and nothing for the merge to settle.
-  const known = new Set(["company_locations_one_primary_per_company", "users_one_super_admin", "branches_one_head_office"]);
+  // branches_one_head_office and organisation_bank_accounts_one_primary: no company or contact link, so
+  // a merge never moves a row under them — known, and nothing for the merge to settle.
+  // company_bank_accounts_one_primary is settled as the primary address is (check:vendor-banking, 10).
+  const known = new Set([
+    "company_locations_one_primary_per_company",
+    "users_one_super_admin",
+    "branches_one_head_office",
+    "company_bank_accounts_one_primary",
+    "organisation_bank_accounts_one_primary",
+  ]);
   ok(
     "the only filtered unique indexes are ones the merge knows about (Prisma can't describe them)",
     partial.every((p) => known.has(p.indexname)),

@@ -10,6 +10,15 @@ import { toDomain } from "@/lib/domain-intel/signatures";
 import { inspectDomain } from "@/lib/domain-intel/lookup";
 import { opportunitiesFrom, rankOpportunities } from "@/lib/domain-intel/opportunities";
 import type { ActionResult } from "@/actions/company";
+import { customerRelationshipTypeValues, isCustomerRelationshipType } from "@/lib/validation/company";
+
+/**
+ * Domain Intel is for the companies we sell to (owner, 8 Oct 2026: "not required for vendor
+ * companies"). A vendor's mail provider and DMARC record are no sales opening, so vendors, OEMs,
+ * distributors, partners and commission parties are left out of the lists, the counts and the panel.
+ */
+const SOLD_TO = { relationshipType: { in: [...customerRelationshipTypeValues] } } satisfies Prisma.CompanyWhereInput;
+const NOT_SOLD_TO = "Domain lookups are for customers and resellers — not vendors or partners.";
 
 const profileSelect = {
   id: true,
@@ -53,9 +62,10 @@ export async function refreshDomainProfile(companyId: string): Promise<ActionRes
 
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, website: true },
+    select: { id: true, name: true, website: true, relationshipType: true },
   });
   if (!company) return { ok: false, error: "That company no longer exists." };
+  if (!isCustomerRelationshipType(company.relationshipType)) return { ok: false, error: NOT_SOLD_TO };
 
   const domain = toDomain(company.website);
   if (!domain) {
@@ -147,11 +157,12 @@ export async function getDomainBriefing(companyId: string) {
         employeeCount: true,
         category: true,
         companyType: true,
+        relationshipType: true,
         industry: { select: { name: true } },
       },
     }),
   ]);
-  if (!company) return null;
+  if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
 
   const opportunities = profile
     ? rankOpportunities(
@@ -189,6 +200,7 @@ export async function listDomainProfiles(params: {
   await requireModuleUser("domains");
 
   const where: Prisma.CompanyWhereInput = {
+    ...SOLD_TO,
     website: { not: null },
     ...(params.view === "unscanned" ? { domainProfile: { is: null } } : {}),
     ...(params.platform ? { domainProfile: { is: { platform: params.platform } } } : {}),
@@ -233,13 +245,13 @@ export async function domainFilterOptions() {
   await requireModuleUser("domains");
   const [platforms, providers] = await Promise.all([
     db.domainProfile.findMany({
-      where: { platform: { not: null } },
+      where: { company: SOLD_TO, platform: { not: null } },
       distinct: ["platform"],
       select: { platform: true },
       orderBy: { platform: "asc" },
     }),
     db.domainProfile.findMany({
-      where: { emailProvider: { not: null } },
+      where: { company: SOLD_TO, emailProvider: { not: null } },
       distinct: ["emailProvider"],
       select: { emailProvider: true },
       orderBy: { emailProvider: "asc" },
@@ -254,11 +266,11 @@ export async function domainFilterOptions() {
 export async function domainSummary() {
   await requireModuleUser("domains");
   const [withWebsite, scanned, noDmarc, googleWorkspace, selfHosted] = await Promise.all([
-    db.company.count({ where: { website: { not: null } } }),
-    db.domainProfile.count(),
-    db.domainProfile.count({ where: { dmarcRecord: null } }),
-    db.domainProfile.count({ where: { emailProvider: "Google Workspace" } }),
-    db.domainProfile.count({ where: { emailProvider: { in: ["Self-hosted or other", "Shared hosting mail"] } } }),
+    db.company.count({ where: { ...SOLD_TO, website: { not: null } } }),
+    db.domainProfile.count({ where: { company: SOLD_TO } }),
+    db.domainProfile.count({ where: { company: SOLD_TO, dmarcRecord: null } }),
+    db.domainProfile.count({ where: { company: SOLD_TO, emailProvider: "Google Workspace" } }),
+    db.domainProfile.count({ where: { company: SOLD_TO, emailProvider: { in: ["Self-hosted or other", "Shared hosting mail"] } } }),
   ]);
   return { withWebsite, scanned, noDmarc, googleWorkspace, selfHosted };
 }

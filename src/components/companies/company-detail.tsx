@@ -23,13 +23,15 @@ import { listCompanyVisits } from "@/actions/visit";
 import { customerStatement } from "@/actions/receivable";
 import { expenseSummary } from "@/actions/expense";
 import { listCompanyPayments, companyPaymentSummary } from "@/actions/payment";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { holdsBankAccounts, isCustomerRelationshipType } from "@/lib/validation/company";
+import { listCompanyBankAccounts } from "@/actions/company-bank";
+import { BankAccountsManager } from "@/components/banking/bank-accounts-manager";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
 import { getResellerOnboarding, getResellerCreditSummary, listResellerItemPrices } from "@/actions/reseller";
 import { onboardingChecklist, isOnboardingComplete } from "@/lib/reseller-onboarding";
 import { ResellerOnboardingPanel } from "@/components/companies/reseller-onboarding-panel";
 import { ResellerPricingManager } from "@/components/companies/reseller-pricing-manager";
-import { Lock } from "lucide-react";
+import { Lock, Merge } from "lucide-react";
 import { isModuleEnabled } from "@/actions/module";
 import { canBroadcastNotes } from "@/actions/note";
 import { RecordNotes } from "@/components/notes/record-notes";
@@ -242,6 +244,9 @@ export async function CompanyDetail({
     isModuleEntitled("customer_portal"),
   ]);
   const resellerTools = isReseller && resellersInPlan;
+  // Several accounts, one primary (owner, 8 Oct 2026); changed with payments.manage — src/actions/company-bank.ts.
+  const bankAccounts = holdsBankAccounts(company.relationshipType) ? await listCompanyBankAccounts(company.id) : null;
+  const payouts = bankAccounts?.ok ? bankAccounts.data : null;
 
   // The estate tab earns its place when there is an estate to show, or when this is somebody we
   // actually serve and whoever manages assets needs a way in to record their first machine. A
@@ -431,8 +436,8 @@ export async function CompanyDetail({
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold text-text">{company.name}</h1>
             {/* Who this customer is, before anything else on the page. Whoever can open the account can
-                edit it, so whoever can see this can change it. */}
-            <CategoryPicker companyId={company.id} current={company.customerCategory} categories={customerCategories} canEdit />
+                edit it, so whoever can see this can change it. A customer's only: a vendor is no customer. */}
+            {!isVendor && <CategoryPicker companyId={company.id} current={company.customerCategory} categories={customerCategories} canEdit />}
             {managedByReseller && <Badge tone="amber">Reseller-managed</Badge>}
             {isReseller && <Badge tone="blue">Reseller</Badge>}
             {!isVendor && <CompanyStageBadge stage={company.stage} awaitingOrder={isAwaitingOrder} />}
@@ -453,7 +458,7 @@ export async function CompanyDetail({
               ))}
             </div>
           )}
-          <CategoryGuidance category={company.customerCategory} className="mt-3 max-w-3xl" />
+          {!isVendor && <CategoryGuidance category={company.customerCategory} className="mt-3 max-w-3xl" />}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Not for a reseller's end customer: the same rule that stops us emailing them stops us
@@ -484,25 +489,20 @@ export async function CompanyDetail({
           )}
           {isVendor && <VendorCodeButton companyId={company.id} vendorCode={company.vendorCode} />}
           {/* Resellers need this for the PAN their onboarding KYC step checks. */}
-          {(isReseller || (isVendor && !isCommissionParty)) && (
-            <PayoutDetailsButton
-              companyId={company.id}
-              details={{
-                panNumber: company.panNumber,
-                bankAccountName: company.bankAccountName,
-                bankAccountNumber: company.bankAccountNumber,
-                bankIfsc: company.bankIfsc,
-                bankName: company.bankName,
-              }}
-            />
-          )}
+          {payouts?.canManage && <PayoutDetailsButton companyId={company.id} panNumber={company.panNumber} />}
           {!isVendor && canSeeLeads && <ActivityPanelButton timeline={timeline} />}
           <Link href={`/companies/${company.id}/edit`}>
             <Button variant="secondary">Edit</Button>
           </Link>
+          {/* Only with "Merge duplicate companies" (companies.merge, Management by default). */}
           {canMerge && (
-            <Link href={`/companies/merge?keep=${company.id}`} title="This company stays; pick the duplicate to fold into it">
-              <Button variant="ghost">Merge a duplicate</Button>
+            <Link
+              href={`/companies/merge?keep=${company.id}`}
+              title="Merge a duplicate into this company — this one stays, the duplicate folds into it"
+              aria-label="Merge a duplicate into this company"
+              className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-base border border-line-strong bg-surface text-muted shadow-sm transition-colors hover:bg-surface-sunken hover:text-text"
+            >
+              <Merge className="h-4 w-4" aria-hidden />
             </Link>
           )}
           {!isVendor && canSeeLeads && (
@@ -764,32 +764,26 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {(isReseller || (isVendor && !isCommissionParty)) && (
+            {payouts && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">
-                  {isReseller ? "PAN & bank details" : "Payout details"}
+                  {isReseller ? "PAN & bank accounts" : "Payout details"}
                 </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <CardContent className="space-y-4 text-sm">
+                  <div className="flex max-w-xs flex-wrap items-baseline justify-between gap-x-3">
                     <span className="text-muted">PAN</span>
                     <span className="text-text">{company.panNumber ?? "—"}</span>
                   </div>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <span className="text-muted">Bank</span>
-                    <span className="text-text">{company.bankName ?? "—"}</span>
-                  </div>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <span className="text-muted">Account holder</span>
-                    <span className="text-text">{company.bankAccountName ?? "—"}</span>
-                  </div>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <span className="text-muted">Account number</span>
-                    <span className="text-text">{company.bankAccountNumber ?? "—"}</span>
-                  </div>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <span className="text-muted">IFSC</span>
-                    <span className="text-text">{company.bankIfsc ?? "—"}</span>
-                  </div>
+                  <BankAccountsManager
+                    scope={{ kind: "company", companyId: company.id }}
+                    accounts={payouts.accounts}
+                    canManage={payouts.canManage}
+                    emptyText={
+                      payouts.canManage
+                        ? "No bank account yet — add the one this company is paid into."
+                        : "No bank account yet. Whoever manages finance records can add one."
+                    }
+                  />
                 </CardContent>
               </Card>
             )}
@@ -853,10 +847,12 @@ export async function CompanyDetail({
                   <span className="text-muted">Relationship</span>
                   <span className="text-text">{relationshipTypeLabels[company.relationshipType]}</span>
                 </div>
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="text-muted">Category</span>
-                  {company.customerCategory ? <CategoryChip category={company.customerCategory} /> : <span className="text-text">—</span>}
-                </div>
+                {!isVendor && (
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span className="text-muted">Category</span>
+                    {company.customerCategory ? <CategoryChip category={company.customerCategory} /> : <span className="text-text">—</span>}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Employees</span>
                   <span className="text-text">{headcountLabel(company.employeeCount) ?? "—"}</span>

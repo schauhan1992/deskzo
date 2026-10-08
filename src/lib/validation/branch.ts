@@ -56,11 +56,11 @@ export const branchSchema = z
     country: z.string().trim().max(60).optional().or(z.literal("")),
     email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
     phone: optionalText,
-    bankName: optionalText,
-    bankAccountNumber: optionalText,
-    bankIfsc: optionalText,
-    bankBranch: optionalText,
-    upiId: optionalText,
+    /**
+     * One of the organisation's bank accounts, printed on this branch's sales documents unless a
+     * document picks another (owner, 8 Oct 2026). Blank: the organisation's primary. Left out: as it was.
+     */
+    defaultBankAccountId: z.string().optional(),
     invoiceTerms: optionalText,
     invoiceNotes: optionalText,
   })

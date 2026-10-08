@@ -793,6 +793,32 @@ async function run(scratchUrl: string, base: string) {
       ok("cancelled, with a line to the people invited", !!cancelled?.ok && (cancelCall?.body as { comment?: string })?.comment === "Fixed remotely", cancelled && errorOf(cancelled));
       ok("  kept on the ticket as cancelled", extra.ok && (await db.calendarEvent.findUnique({ where: { id: extra.data.eventId } }))?.status === "CANCELLED");
 
+      // Cancelled in Teams first, before the sync caught up: Graph no longer has it ("not found in the store").
+      const goneFromOutlook = async (title: string) => {
+        const made = await calendar.scheduleMeetingAction({ record: { kind: "ticket", id: ticket.id }, title, startsAt: `${d(3)}T11:00`, durationMinutes: 30, online: true, contactIds: [contact.id] });
+        if (!made.ok) return null;
+        const row = await db.calendarEvent.findUniqueOrThrow({ where: { id: made.data.eventId }, select: { externalId: true } });
+        stand.ms.events.delete(row.externalId);
+        return made.data.eventId;
+      };
+      const cancelledInTeams = await goneFromOutlook("Cancelled in Teams");
+      const cancelAgain = cancelledInTeams ? await calendar.cancelMeetingAction({ eventId: cancelledInTeams }) : null;
+      ok(
+        "one already cancelled in Teams cancels here without a word from Outlook",
+        !!cancelAgain?.ok && (await db.calendarEvent.findUnique({ where: { id: cancelledInTeams! } }))?.status === "CANCELLED",
+        cancelAgain && errorOf(cancelAgain),
+      );
+      const deletedInOutlook = await goneFromOutlook("Deleted in Outlook");
+      const moveGone = deletedInOutlook
+        ? await calendar.rescheduleMeetingAction({ eventId: deletedInOutlook, title: "Deleted in Outlook", startsAt: `${d(3)}T12:00`, durationMinutes: 30, online: true })
+        : null;
+      const moveGoneError = moveGone && !moveGone.ok ? moveGone.error : "";
+      ok(
+        "  moving one deleted there says so in words, and shows it as cancelled",
+        /isn't in your calendar any more/.test(moveGoneError) && !/store/i.test(moveGoneError) && (await db.calendarEvent.findUnique({ where: { id: deletedInOutlook! } }))?.status === "CANCELLED",
+        moveGoneError || (moveGone ? "moved" : "not scheduled"),
+      );
+
       // ── Keeping in step: Outlook ─────────────────────────────────────────────────────────────
       section("Keeping in step with Outlook");
       // Somebody else's meeting the rep is invited to, a free afternoon, and a link that isn't https.

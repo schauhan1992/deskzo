@@ -904,7 +904,10 @@ model Company {
   endCustomers        Company[]               @relation("ResellerEndCustomers")
   /**
    * Payout/compliance details for a non-CLIENT company we pay (vendor or commission party) — null/unused for CLIENT companies.
+   * The four bank fields below are superseded (owner, 8 Oct 2026) by `bankAccounts`: migration 20261028110000
+   * made them each company's primary account. Kept, unread, until a later release drops them. PAN stays here.
    */
+  bankAccounts        CompanyBankAccount[]
   panNumber           String?
   bankAccountName     String?
   bankAccountNumber   String?
@@ -1153,6 +1156,58 @@ model CommissionPartyAccount {
 
   @@index([commissionPartyId])
   @@map("commission_party_accounts")
+}
+
+/**
+ * A bank account a company we pay is paid into (owner, 8 Oct 2026) — a vendor, OEM, distributor,
+ * partner or reseller; commission parties keep their payee accounts above. Several per company, at
+ * most one primary (the partial unique index company_bank_accounts_one_primary). Changed only with
+ * `payments.manage` (src/actions/company-bank.ts): an account number is what payment fraud rewrites.
+ */
+model CompanyBankAccount {
+  id                String   @id @default(cuid())
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label             String
+  accountHolderName String?
+  bankName          String?
+  branchName        String?
+  accountNumber     String?
+  ifsc              String?
+  swift             String?
+  upiId             String?
+  isPrimary         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("company_bank_accounts")
+}
+
+/**
+ * One of this organisation's own bank accounts, printed on sales documents (owner, 8 Oct 2026; Settings ›
+ * Organisation). The primary (at most one — organisation_bank_accounts_one_primary) prints unless the
+ * branch's default or the document names another. One a document or branch names is retired, not deleted.
+ */
+model OrganisationBankAccount {
+  id                String   @id @default(cuid())
+  label             String
+  accountHolderName String?
+  bankName          String?
+  branchName        String?
+  accountNumber     String?
+  ifsc              String?
+  swift             String?
+  upiId             String?
+  isPrimary         Boolean  @default(false)
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  branches  Branch[]        @relation("BranchDefaultBankAccount")
+  documents TradeDocument[] @relation("TradeDocumentBankAccount")
+
+  @@map("organisation_bank_accounts")
 }
 
 model CompanyLocation {
@@ -1520,6 +1575,9 @@ model OrganisationSettings {
   email        String?
   phone        String?
 
+  /// Superseded (owner, 8 Oct 2026) by OrganisationBankAccount: migration 20261028110000 made them the
+  /// "Main account". No longer written; read only by a print in a workspace not yet migrated. A later
+  /// release drops them.
   bankName          String?
   bankAccountNumber String?
   bankIfsc          String?
@@ -1587,6 +1645,8 @@ model OrganisationSettings {
    * Prefix for every letter reference number, e.g. WRF in WRF/APPT/2026/001.
    */
   letterNumberPrefix    String  @default("WRF")
+  /// Vendors are numbered <prefix><0001…> as they are created (owner, 8 Oct 2026; src/lib/companies/vendor-code.ts).
+  vendorCodePrefix      String  @default("VEN-")
   /**
    * Who letters are signed by. Left blank, a letter is signed by whoever drafted it.
    */
@@ -1726,13 +1786,18 @@ model Branch {
   email        String?
   phone        String?
 
-  /// Overrides — null prints the organisation's. The bank block is taken whole: the branch's when it has
-  /// an account number or a UPI id, else the organisation's, never a mixture of the two.
+  /// Superseded (owner, 8 Oct 2026) by `defaultBankAccount`: migration 20261028110000 made a branch's own
+  /// bank block one of the organisation's accounts. No longer written; read only by a print in a workspace
+  /// not yet migrated (src/lib/banking/organisation-accounts.ts). A later release drops them.
   bankName          String?
   bankAccountNumber String?
   bankIfsc          String?
   bankBranch        String?
   upiId             String?
+  /// The organisation account this branch's sales documents print unless one names another. Null: the
+  /// organisation's primary.
+  defaultBankAccountId String?
+  defaultBankAccount   OrganisationBankAccount? @relation("BranchDefaultBankAccount", fields: [defaultBankAccountId], references: [id], onDelete: SetNull)
   logoDataUrl       String?
   signatureDataUrl  String?
   invoiceTerms      String?
@@ -1919,6 +1984,10 @@ model TradeDocument {
   branch            Branch?          @relation(fields: [branchId], references: [id], onDelete: Restrict)
   gstRegistrationId String?
   gstRegistration   GstRegistration? @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+  /// The organisation bank account a sales document prints (owner, 8 Oct 2026). Null: its branch's default,
+  /// else the organisation's primary. Read live, as every other part of the letterhead is.
+  bankAccountId     String?
+  bankAccount       OrganisationBankAccount? @relation("TradeDocumentBankAccount", fields: [bankAccountId], references: [id], onDelete: SetNull)
 
   /**
    * Two-digit state code the supply is taxed in — drives CGST+SGST vs IGST.

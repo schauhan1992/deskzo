@@ -65,6 +65,15 @@ export function isVendorRelationshipType(type: CompanyRelationshipType) {
   return vendorRelationshipTypeValues.some((t) => t === type);
 }
 
+/**
+ * The companies we pay that keep bank accounts on their record (src/actions/company-bank.ts): the
+ * vendor family and resellers. Not a client (we never pay one), nor a commission party, whose payee
+ * accounts are their own list (CommissionPartyAccount).
+ */
+export function holdsBankAccounts(type: CompanyRelationshipType) {
+  return type === "RESELLER" || isVendorRelationshipType(type);
+}
+
 /** Fixed to a single option — the Commission Parties module's "New" form doesn't let you pick a different relationship type. */
 export const commissionPartyRelationshipTypeValues = ["COMMISSION_PARTY"] as const;
 
@@ -216,13 +225,12 @@ export const ifscField = z
   .optional()
   .or(z.literal(""));
 
-/** Payout/compliance details for a vendor or commission party — set separately from the main company form, same pattern as `vendorCode`. */
+/**
+ * Compliance details for a company we pay — set separately from the main company form, same pattern as
+ * `vendorCode`. Its bank accounts are a list of their own since 8 Oct 2026 (src/lib/validation/bank-account.ts).
+ */
 export const payoutDetailsSchema = z.object({
   panNumber: panField,
-  bankAccountName: z.string().trim().optional().or(z.literal("")),
-  bankAccountNumber: z.string().trim().optional().or(z.literal("")),
-  bankIfsc: ifscField,
-  bankName: z.string().trim().optional().or(z.literal("")),
 });
 
 export type PayoutDetailsInput = z.infer<typeof payoutDetailsSchema>;

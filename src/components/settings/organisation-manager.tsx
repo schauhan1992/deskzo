@@ -51,11 +51,6 @@ export function OrganisationManager({
     country: organisation.country ?? "",
     email: organisation.email ?? "",
     phone: organisation.phone ?? "",
-    bankName: organisation.bankName ?? "",
-    bankAccountNumber: organisation.bankAccountNumber ?? "",
-    bankIfsc: organisation.bankIfsc ?? "",
-    bankBranch: organisation.bankBranch ?? "",
-    upiId: organisation.upiId ?? "",
     invoiceTerms: organisation.invoiceTerms ?? "",
     invoiceNotes: organisation.invoiceNotes ?? "",
   });
@@ -257,29 +252,6 @@ export function OrganisationManager({
           </Field>
           <Field label="Phone">
             {(id) => <Input id={id} value={form.phone} onChange={set("phone")} />}
-          </Field>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="text-sm font-medium text-text">Bank details</CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Bank name">
-            {(id) => <Input id={id} value={form.bankName} onChange={set("bankName")} />}
-          </Field>
-          <Field label="Account number">
-            {(id) => (
-              <Input id={id} value={form.bankAccountNumber} onChange={set("bankAccountNumber")} className="font-mono" />
-            )}
-          </Field>
-          <Field label="IFSC">
-            {(id) => <Input id={id} value={form.bankIfsc} onChange={set("bankIfsc")} className="font-mono" />}
-          </Field>
-          <Field label="Branch">
-            {(id) => <Input id={id} value={form.bankBranch} onChange={set("bankBranch")} />}
-          </Field>
-          <Field label="UPI ID">
-            {(id) => <Input id={id} value={form.upiId} onChange={set("upiId")} />}
           </Field>
         </CardContent>
       </Card>

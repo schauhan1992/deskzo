@@ -8,6 +8,7 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { categoryTree, checkCategory, type CategoryTree, type FlatCategory } from "@/lib/customers/categories";
 import type { ActionResult } from "@/actions/company";
+import { isCustomerRelationshipType } from "@/lib/validation/company";
 
 /**
  * Customer categories: the list everybody picks from, the settings screen that shapes it, and
@@ -127,9 +128,16 @@ export async function moveCustomerCategory(id: string, direction: "up" | "down")
 /** Puts a customer in a category, or takes them out of every one (null). */
 export async function setCompanyCategory(companyId: string, categoryId: string | null): Promise<ActionResult<null>> {
   const user = await requireUser();
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true, customerCategoryId: true } });
+  const company = await db.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, name: true, ownerUserId: true, customerCategoryId: true, relationshipType: true },
+  });
   // Out of scope and missing read the same, as everywhere else.
   if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return { ok: false, error: "Company not found." };
+  // A vendor is no customer. Clearing one left from before is still allowed.
+  if (categoryId && !isCustomerRelationshipType(company.relationshipType)) {
+    return { ok: false, error: "Customer categories are for customers and resellers, not vendors or partners." };
+  }
   let label = "none";
   if (categoryId) {
     const c = await db.customerCategory.findUnique({ where: { id: categoryId }, select: { name: true, parent: { select: { name: true } } } });

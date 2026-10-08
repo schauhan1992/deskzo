@@ -247,6 +247,14 @@ function lineData(input: TradeDocumentInput["lines"][number], computed: ReturnTy
   };
 }
 
+/** The bank account a document names must be one of the organisation's. A retired one is allowed: it is
+ *  offered only to the document that already names it. */
+async function bankAccountRefusal(bankAccountId: string | undefined): Promise<string | null> {
+  if (!bankAccountId) return null;
+  const account = await db.organisationBankAccount.findUnique({ where: { id: bankAccountId }, select: { id: true } });
+  return account ? null : "That bank account isn't there any more — pick another.";
+}
+
 /**
  * Everything a create or an update writes, with the tax engine run over the submitted lines — as
  * raised from (or, on a purchase, bought by) `branch`. Resolve the branch first: this reads through
@@ -321,6 +329,8 @@ async function buildDocumentData(data: TradeDocumentInput, branch: { id: string 
       salespersonId: data.salespersonId || null,
       notes: data.notes || null,
       terms: data.terms || null,
+      // Only when sent, and only on a sale: written by name, as the column may not be there yet.
+      ...(isSales && data.bankAccountId !== undefined ? { bankAccountId: data.bankAccountId || null } : {}),
 
       dispatchFromAddress: data.dispatchFromAddress || null,
       billingAttention: data.billing.attention || null,
@@ -481,6 +491,8 @@ export async function createTradeDocument(
   }
   const leadError = await validateLinkedLead(data.leadId, data.companyId);
   if (leadError) return { ok: false, error: leadError };
+  const bankError = await bankAccountRefusal(data.bankAccountId);
+  if (bankError) return { ok: false, error: bankError };
   const links = await checkLineLinks(data.lines, data.companyId, null);
   if ("error" in links) return { ok: false, error: links.error };
 
@@ -588,6 +600,8 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
 
   const leadError = await validateLinkedLead(data.leadId, data.companyId);
   if (leadError) return { ok: false, error: leadError };
+  const bankError = await bankAccountRefusal(data.bankAccountId);
+  if (bankError) return { ok: false, error: bankError };
   const links = await checkLineLinks(data.lines, data.companyId, id);
   if ("error" in links) return { ok: false, error: links.error };
 
@@ -1109,6 +1123,10 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
   const { branchId, gstRegistrationId } = source.branchId
     ? { branchId: source.branchId, gstRegistrationId: source.gstRegistrationId }
     : await ensureHeadOffice().then((ho) => ({ branchId: ho.id, gstRegistrationId: ho.gstRegistrationId }));
+  // The account the proposal asked to be paid into comes across too. By name: the column may not be there yet.
+  const sourceBank = documentDirection[target] === "SALES"
+    ? await db.tradeDocument.findUnique({ where: { id }, select: { bankAccountId: true } }).catch(() => null)
+    : null;
   // Dated today on the workspace's calendar, as a typed day is kept: its midnight UTC.
   const issueDate = (await workspaceClock()).calendarDate(new Date());
 
@@ -1126,6 +1144,7 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
       locationId: source.locationId,
       branchId,
       gstRegistrationId,
+      ...(sourceBank?.bankAccountId ? { bankAccountId: sourceBank.bankAccountId } : {}),
       placeOfSupplyCode: source.placeOfSupplyCode,
       sellerGstin: source.sellerGstin,
       buyerGstin: source.buyerGstin,
