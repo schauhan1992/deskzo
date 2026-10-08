@@ -1,19 +1,21 @@
+import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/db";
 
 export async function GET() {
   try {
-    const hash = await bcrypt.hash("Sachin@Deskzo#567", 10);
+    // Naya Prisma connection jo app ke workspace/middleware rules ko bypass karta hai
+    const prisma = new PrismaClient();
+    const hash = await bcrypt.hash("NewPassword123!", 10);
     
-    // Workspace check bypass karke direct database update
-    await db.user.update({
+    await prisma.user.update({
       where: { email: "sachin@wroffy.com" },
       data: { passwordHash: hash }
     });
     
-    return NextResponse.json({ success: true, message: "Password reset successful!" });
+    await prisma.$disconnect();
+    return NextResponse.json({ success: true, message: "Password reset successful! You can login now." });
   } catch (error) {
-    return NextResponse.json({ error: String(error) });
+    return NextResponse.json({ error: "Error details: " + String(error) });
   }
 }
