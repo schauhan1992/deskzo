@@ -164,6 +164,12 @@ const uncovered = PERMISSIONS.filter(
 ).map((p) => p.key);
 ok("Every non-admin permission appears in at least one preset", uncovered.length === 0, uncovered.join(", ") || "all covered");
 
+// Adding a staff account takes "Create and edit users" and "Review who can do what" together
+// (src/app/(dashboard)/settings/access/new/page.tsx): a preset with the first alone hands out a key with
+// no screen — which HR manager did until 9 Oct 2026.
+const usersWithoutScreen = ROLE_PRESETS.filter((p) => (p.permissions as readonly string[]).includes("users.manage") && !(p.permissions as readonly string[]).includes("permissions.view")).map((p) => p.key);
+ok("Every preset that manages users can open Staff & roles to do it", usersWithoutScreen.length === 0, usersWithoutScreen.join(", ") || `${ROLE_PRESETS.filter((p) => (p.permissions as readonly string[]).includes("users.manage")).length} presets`);
+
 const rolesWithPresets = new Set(ROLE_PRESETS.map((p) => p.role));
 const rolesWithout = (SYSTEM_ROLE_KEYS as readonly string[]).filter((r) => r !== "ADMIN" && !rolesWithPresets.has(r as never));
 ok("Every assignable role has a preset to start from", rolesWithout.length === 0, rolesWithout.join(", ") || "all covered");

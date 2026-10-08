@@ -291,7 +291,7 @@ export const ROLE_PRESETS: RolePreset[] = [
   {
     key: "hr-manager",
     label: "HR manager",
-    description: "An HR executive plus payroll, user accounts, anonymous feedback, expense approvals and bulk employee imports. Note that payroll is not inheritable — a manager of this person does not get it.",
+    description: "An HR executive plus payroll, user accounts (and reading Staff & roles, where they are added), anonymous feedback, expense approvals and bulk employee imports. Note that payroll is not inheritable — a manager of this person does not get it.",
     role: "HR",
     permissions: [...EVERY_PROFILE, "meetings.schedule",
       "hr.manage",
@@ -311,6 +311,9 @@ export const ROLE_PRESETS: RolePreset[] = [
       "vault.use",
       "data.exportPeople",
       "data.importPeople",
+      // Read-only, and what opens Staff & roles: adding a staff account takes this and `users.manage`
+      // together, so without it "user accounts" was a key with no screen (9 Oct 2026).
+      "permissions.view",
     ],
   },
   {
