@@ -27,9 +27,9 @@ export async function setOrderStep(orderId: string, stepId: string, note?: strin
   if (typeof orderId !== "string" || !orderId || typeof stepId !== "string" || !stepId) return { ok: false, error: "Order not found." };
   const order = await db.companyProduct.findUnique({
     where: { id: orderId },
-    select: { id: true, orderSeq: true, orderStatus: true, addedByUserId: true, company: { select: { name: true, ownerUserId: true } } },
+    select: { id: true, orderSeq: true, orderStatus: true, addedByUserId: true, company: { select: { name: true, ownerUserId: true, relationshipType: true } } },
   });
-  if (!order || !(await canSeeCompany(user.id, order.company.ownerUserId))) return { ok: false, error: "Order not found." };
+  if (!order || !(await canSeeCompany(user.id, order.company))) return { ok: false, error: "Order not found." };
   const allowed =
     order.addedByUserId === user.id || (await hasEffectivePermission(user.id, "orders.process")) || (await hasEffectivePermission(user.id, "orders.approve"));
   if (!allowed) return { ok: false, error: "Only the salesperson, an approver or purchase can move this order along." };

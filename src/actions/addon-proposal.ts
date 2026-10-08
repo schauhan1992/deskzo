@@ -3,7 +3,7 @@
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
-import { canSeeCompany } from "@/lib/authz/company-scope";
+import { mayAccess } from "@/lib/authz/access";
 import { proRata, proRataMonths, canAddTo } from "@/lib/subscriptions/proration";
 import { partyDetails } from "@/lib/proposals/party";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -67,13 +67,13 @@ export async function createProposalFromAddonQuote(input: {
       parentId: true,
       locationId: true,
       item: { select: { id: true, name: true, type: true, unit: true, taxRatePercent: true, hsnCode: true } },
-      company: { select: { id: true, name: true, ownerUserId: true } },
+      company: { select: { id: true, name: true } },
     },
   });
   if (!parent) return { ok: false, error: "That subscription no longer exists." };
   // The same refusal for a record out of scope as for one that does not exist, matching `quoteAddon`
-  // — a parent id must not be usable to find out which accounts are real.
-  if (!(await canSeeCompany(user.id, parent.company.ownerUserId))) {
+  // — a parent id must not be usable to find out which accounts are real. The access engine answers it.
+  if (!(await mayAccess(user.id, "orders", "view", parent.id))) {
     return { ok: false, error: "That subscription no longer exists." };
   }
 

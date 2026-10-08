@@ -8,7 +8,8 @@ import { db } from "@/lib/db";
 import { scopeUserIds } from "@/lib/authz/scope";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireUser } from "@/lib/session";
-import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { leadAccess, mayAccess, type AccessAction } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -57,16 +58,16 @@ async function canViewLeads(userId: string): Promise<boolean> {
 }
 
 /**
- * Whether this user may work on a lead — the same line the lead page draws.
+ * Whether this user may change a lead — its edit level in the access engine. With no level stored
+ * that is the line the lead page draws; an edit level an admin sets may be narrower than view.
  *
- * A lead belongs to its company's account, and `canSeeCompany` is where that is decided. The page
+ * Which leads that is, the access engine answers (`mayAccess`, src/lib/authz/access.ts). The page
  * already refused a lead outside it; these actions did not, so a lead's products could be added to,
  * edited or removed by id from any account. Out of scope and missing answer the same.
  */
-async function leadInScope(userId: string, leadId: string): Promise<boolean> {
+async function leadInScope(userId: string, leadId: string, action: AccessAction = "edit"): Promise<boolean> {
   if (!(await canViewLeads(userId))) return false;
-  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { company: { select: { ownerUserId: true } } } });
-  return !!lead && (await canSeeCompany(userId, lead.company.ownerUserId));
+  return mayAccess(userId, "leads", action, leadId);
 }
 
 /**
@@ -128,7 +129,7 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
 
   const company = await db.company.findUnique({ where: { id: data.companyId } });
   // Scoped: a lead can only be opened on an account this person could open.
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   /**
@@ -315,9 +316,10 @@ function leadListOrder(params?: LeadListParams): Prisma.LeadOrderByWithRelationI
  *
  * ## Which key the account scope hangs off
  *
- * The company, via `viaCompanyScope` — not `Lead.ownerUserId`. `Lead.companyId` is required in the
- * schema, so "a lead with no company yet" does not exist here and needs no second rule; every lead
- * has an account behind it and `Company.ownerUserId` is who that account is for.
+ * The access engine answers it (`leadAccess`); with no level stored, that is the company — not
+ * `Lead.ownerUserId`. `Lead.companyId` is required in the schema, so "a lead with no company yet"
+ * does not exist here and needs no second rule; every lead has an account behind it and
+ * `Company.ownerUserId` is who that account is for.
  *
  * `ownerUserId` is deliberately *not* OR'd in on top of that. It answers a different question —
  * `getLead` already notes that a rep can be working a deal on an account somebody else manages —
@@ -349,7 +351,6 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   const stage = pipeline?.stages.find((s) => s.key === params?.stage);
   const narrowing = [...fieldFilters, ...(pipeline && stage ? [inStageWhere(pipeline, stage) as Prisma.LeadWhereInput] : [])];
   return {
-    ...(await viaCompanyScope(userId)),
     ...(params?.status ? { status: params.status } : {}),
     ...(params?.search
       ? {
@@ -368,7 +369,7 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
     ...(expectedCloseDate ? { expectedCloseDate } : {}),
     ...(params?.source ? { source: params.source } : {}),
     ...(params?.grade && GRADE_RANGES[params.grade] ? { score: GRADE_RANGES[params.grade] } : {}),
-    ...(narrowing.length > 0 ? { AND: narrowing } : {}),
+    AND: [await leadAccess(userId, "view"), ...narrowing],
   };
 }
 
@@ -450,7 +451,7 @@ export async function getLead(id: string) {
    * `/leads/<id>` URL, and everything the include pulls in beside the lead — the account's full
    * record and locations, the contact, the whole activity trail — comes with it.
    */
-  if (!(await canSeeCompany(user.id, lead.company.ownerUserId))) return null;
+  if (!(await mayAccess(user.id, "leads", "view", lead.id))) return null;
   // The lead names its contact either way; how to reach them is `contacts.view`'s to give.
   if (lead.contact && !(await hasEffectivePermission(user.id, "contacts.view"))) {
     return toPlain({ ...lead, contact: { ...lead.contact, email: null, phone: null, linkedinUrl: null } });
@@ -473,7 +474,7 @@ export async function leadDocumentDraft(leadId: string) {
   // Scoped in the `where` rather than checked after the fetch, so the `select` stays exactly the
   // shape the document form expects — a lead out of scope is simply not found, as in `getLead`.
   const lead = await db.lead.findFirst({
-    where: { id: leadId, ...(await viaCompanyScope(user.id)) },
+    where: { AND: [{ id: leadId }, await leadAccess(user.id, "view")] },
     select: {
       id: true,
       leadSeq: true,
@@ -587,8 +588,8 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
  * The lead's own fields (src/lib/custom-fields), from the "More details" card on its page — bound to
  * the lead there. A lead has no general edit, so the line is the one every change to it draws
  * (`updateLeadStatus`, `logActivity`, `addLeadRequirement`): `leads.view`, and the lead's account in
- * this person's scope (`leadInScope`). Those are the two checks that open the lead page, so whoever
- * sees the card may use its Edit.
+ * this person's scope (`leadInScope`). With no level stored, those are the checks that open the lead
+ * page; an edit level an admin sets may be narrower.
  */
 export async function updateLeadCustomFields(leadId: string, input: unknown): Promise<ActionResult<null>> {
   const user = await requireUser();
@@ -727,7 +728,7 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
      */
     const rights = await reassignRights(user.id);
     const leads = await db.lead.findMany({
-      where: { id: { in: leadIds }, ...(await viaCompanyScope(user.id)) },
+      where: { AND: [{ id: { in: leadIds } }, await leadAccess(user.id, "assign")] },
       select: { id: true, leadSeq: true, title: true, ownerUserId: true },
     });
     if (leads.length !== new Set(leadIds).size) {

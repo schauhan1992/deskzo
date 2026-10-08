@@ -133,7 +133,7 @@ export async function setCompanyCategory(companyId: string, categoryId: string |
     select: { id: true, name: true, ownerUserId: true, customerCategoryId: true, relationshipType: true },
   });
   // Out of scope and missing read the same, as everywhere else.
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return { ok: false, error: "Company not found." };
+  if (!company || !(await canSeeCompany(user.id, company))) return { ok: false, error: "Company not found." };
   // A vendor is no customer. Clearing one left from before is still allowed.
   if (categoryId && !isCustomerRelationshipType(company.relationshipType)) {
     return { ok: false, error: "Customer categories are for customers and resellers, not vendors or partners." };

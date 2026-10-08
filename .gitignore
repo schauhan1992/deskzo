@@ -57,6 +57,9 @@ next-env.d.ts
 *.dump.json
 # The sealed download format. Same reasoning as a dump, and more so — it carries the AUTH_SECRET.
 *.wbak
+# Who-can-see-what snapshots (scripts/access-snapshot.ts): ids and fingerprints of a real workspace's
+# data, taken before and after a permission change. Anchored, as /backups/ is.
+/access-snapshots/
 
 # Generated from whatever demo data this machine happens to hold — regenerate with
 # npm run db:seed:reconcile rather than committing one machines copy.

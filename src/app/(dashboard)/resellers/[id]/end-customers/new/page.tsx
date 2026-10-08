@@ -34,7 +34,7 @@ export default async function NewEndCustomerPage({ params }: { params: Promise<{
   // The reseller is itself a company, so its own account manager is the line — read off the record
   // already loaded. Refused the same way a non-reseller is, so the URL tells nobody which resellers
   // exist or whose book they sit in.
-  if (!(await canSeeCompany(user.id, reseller.ownerUserId))) notFound();
+  if (!(await canSeeCompany(user.id, reseller))) notFound();
   // The workspace's own company fields (src/lib/custom-fields), as on any new company.
   const customFields = await formSetup("COMPANY", user.id);
 

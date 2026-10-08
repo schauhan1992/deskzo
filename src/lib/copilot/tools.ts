@@ -73,10 +73,10 @@ async function companyIdFor(userId: string, ref: string): Promise<string | null>
   const seq = parseSeqQuery(ref);
   const company = await db.company.findFirst({
     where: seq !== null ? { companySeq: seq } : { id: ref },
-    select: { id: true, ownerUserId: true },
+    select: { id: true, ownerUserId: true, relationshipType: true },
   });
   // Not there and not yours read the same, as they do everywhere else.
-  return company && (await canSeeCompany(userId, company.ownerUserId)) ? company.id : null;
+  return company && (await canSeeCompany(userId, company)) ? company.id : null;
 }
 
 async function leadIdFor(ref: string): Promise<string | null> {

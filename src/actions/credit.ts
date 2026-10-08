@@ -33,7 +33,7 @@ async function readableCustomer(companyId: string) {
     select: { id: true, name: true, ownerUserId: true, relationshipType: true, paymentTerms: true },
   });
   if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  if (!(await canSeeCompany(user.id, company))) return null;
   return { user, company };
 }
 

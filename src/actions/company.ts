@@ -6,6 +6,7 @@ import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationship
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
+import { accessLevel, leadAccess, mayAccessContactsOf, orderAccess } from "@/lib/authz/access";
 import { scopeUserIds } from "@/lib/authz/scope";
 import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -147,7 +148,7 @@ export async function findCompanyMatches(query: string): Promise<CompanyMatches>
     db.company.findMany({
       // By the normalised name, the one the duplicate rule uses — searching the raw text let "acme   ltd"
       // (extra spaces) miss "Acme Ltd", and the exact match was then reported as somebody else's.
-      where: { ...(await companyScope(user.id)), normalizedName: { contains: normalizedName } },
+      where: { AND: [await companyScope(user.id), { normalizedName: { contains: normalizedName } }] },
       select: {
         id: true,
         companySeq: true,
@@ -345,7 +346,7 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
    * Scoped like every other company write. This took any id and saved over it — the profile, the
    * payment terms, the relationship — whoever's account it was.
    */
-  if (!current || !(await canSeeCompany(user.id, current.ownerUserId))) {
+  if (!current || !(await canSeeCompany(user.id, current))) {
     return { ok: false, error: "Company not found." };
   }
   const termsCheck = await checkTerms({
@@ -409,7 +410,7 @@ export async function updateCompanyCustomFields(companyId: string, input: unknow
   const user = await requireUser();
   const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true, relationshipType: true } });
   // Scoped like `updateCompany`: out of scope and missing answer the same.
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   const saved = await saveCustomFields(companyFieldEntity(company.relationshipType), company.id, user.id, input);
@@ -467,9 +468,10 @@ export async function addContact(
    * Scoped like every other company write. This used to check only that the company existed, so any
    * signed-in user could add a contact to any account by id — including one managed by somebody
    * else. Out of scope and non-existent answer the same, so an id cannot be used to find out which
-   * accounts are real.
+   * accounts are real. Asked as editing that company's contacts (src/lib/authz/access.ts), so adding
+   * one needs what changing one does.
    */
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!company || !(await mayAccessContactsOf(user.id, "edit", company))) {
     return { ok: false, error: "Company not found." };
   }
   // The workspace's own fields (src/lib/custom-fields), the required ones answered.
@@ -581,7 +583,7 @@ export async function deleteContact(id: string): Promise<ActionResult<null>> {
   const user = await requireUser();
   const contact = await db.contact.findUnique({ where: { id } });
   // Scoped like `addContact`: this deleted any contact by id, on any account.
-  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId, "delete"))) {
     return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
   }
 
@@ -754,9 +756,9 @@ export async function setCompanyCaller(companyId: string, userId: string | null)
   const actor = await requireUser();
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { id: true, companySeq: true, name: true, ownerUserId: true, assignedToUserId: true },
+    select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true, assignedToUserId: true },
   });
-  if (!company || !(await canSeeCompany(actor.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(actor.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   const rights = await reassignRights(actor.id);
@@ -820,7 +822,7 @@ async function checkCallerChange(
 ): Promise<ActionResult<{ id: string; name: string; assignedToUserId: string | null }[]>> {
   const rights = await reassignRights(actorId);
   const companies = await db.company.findMany({
-    where: { id: { in: companyIds }, ...(await companyScope(actorId)) },
+    where: { AND: [{ id: { in: companyIds } }, await companyScope(actorId)] },
     select: { id: true, name: true, ownerUserId: true, assignedToUserId: true },
   });
   if (companies.length !== new Set(companyIds).size) {
@@ -856,10 +858,10 @@ async function auditCallerChange(actorId: string, companies: { id: string; name:
 
 export async function setCompanyOwner(companyId: string, userId: string | null): Promise<ActionResult<null>> {
   const actor = await requireUser();
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, companySeq: true, name: true, ownerUserId: true } });
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true } });
   // Outside the account scope is answered as missing — and this check comes first because the
   // account manager *is* the scope: without it, naming yourself was a way to see any company.
-  if (!company || !(await canSeeCompany(actor.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(actor.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   const rights = await reassignRights(actor.id);
@@ -924,7 +926,7 @@ export async function setVendorStatus(companyId: string, status: VendorStatus): 
 export async function setVendorCode(companyId: string, code: string): Promise<ActionResult<null>> {
   const user = await requireUser();
   const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   if (isCustomerRelationshipType(company.relationshipType)) {
@@ -960,7 +962,7 @@ export async function setPayoutDetails(companyId: string, input: unknown): Promi
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   if (company.relationshipType === "CLIENT") {
@@ -1101,7 +1103,7 @@ const companyListInclude = {
 export async function listCompanies(params?: CompanyListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { AND: [companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -1112,7 +1114,7 @@ export async function listCompaniesPaged(params: CompanyListParams & { page: num
   const user = await requireUser();
   // One `where` for both queries below: a pager whose count outran its rows would offer page 9 of
   // a list that ends at page 2.
-  const where = { ...companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { AND: [companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1171,7 +1173,7 @@ function customerListWhere(clock: Clock, params?: CustomerListParams, custom: Co
 export async function listCustomers(params?: CustomerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { AND: [customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -1179,7 +1181,7 @@ export async function listCustomers(params?: CustomerListParams) {
 
 export async function listCustomersPaged(params: CustomerListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { AND: [customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1264,7 +1266,7 @@ const vendorListInclude = {
 export async function listVendors(params?: VendorListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), ...(await companyScope(user.id)) },
+    where: { AND: [vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: vendorListInclude,
   });
@@ -1273,7 +1275,7 @@ export async function listVendors(params?: VendorListParams) {
 /** One page of the Vendors / Commission Parties lists. */
 export async function listVendorsPaged(params: VendorListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), ...(await companyScope(user.id)) };
+  const where = { AND: [vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id)] };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1305,7 +1307,7 @@ async function companyOptionsWhere(
      * presets already grant that to the functions that genuinely serve every account: support,
      * purchasing and accounts.
      */
-    ...(await companyScope(userId)),
+    AND: [await companyScope(userId)],
     stage: { not: "DISQUALIFIED" },
     // A reseller's end customer can never be the party we deal with directly — the reseller is.
     managedByResellerId: null,
@@ -1430,7 +1432,7 @@ const resellerListInclude = {
 export async function listResellers(params?: ResellerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...resellerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { AND: [resellerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: resellerListInclude,
   });
@@ -1440,7 +1442,7 @@ export async function listResellersPaged(params: ResellerListParams & { page: nu
   const user = await requireUser();
   // The end-customer tally below is built from this same `where`, so the scope reaches it for free —
   // it counts end customers of the resellers on screen rather than of every reseller in the business.
-  const where = { ...resellerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { AND: [resellerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
   const [rows, total, endCustomerTotal] = await Promise.all([
     db.company.findMany({
       where,
@@ -1468,8 +1470,8 @@ export async function listResellersPaged(params: ResellerListParams & { page: nu
  */
 export async function listEndCustomers(resellerId: string) {
   const user = await requireUser();
-  const reseller = await db.company.findUnique({ where: { id: resellerId }, select: { ownerUserId: true } });
-  const visible = reseller !== null && (await canSeeCompany(user.id, reseller.ownerUserId));
+  const reseller = await db.company.findUnique({ where: { id: resellerId }, select: { ownerUserId: true, relationshipType: true } });
+  const visible = reseller !== null && (await canSeeCompany(user.id, reseller));
   return db.company.findMany({
     where: { managedByResellerId: resellerId, ...(visible ? {} : { id: { in: [] } }) },
     orderBy: { name: "asc" },
@@ -1508,7 +1510,7 @@ export async function listClientCompanyNameOptions() {
   const user = await requireUser();
   return db.company.findMany({
     where: {
-      ...(await companyScope(user.id)),
+      AND: [await companyScope(user.id)],
       relationshipType: "CLIENT",
       stage: { not: "DISQUALIFIED" },
       managedByResellerId: null,
@@ -1562,6 +1564,12 @@ export async function getCompany(id: string) {
    * they may not read never leaves the database — the Activity pane and the copilot both read this.
    */
   const activityBy = await scopeUserIds(user.id, "activities.viewAll");
+  // The leads and orders tabs, each at the viewer's own level for it — the access engine answers both.
+  const leadWhere = await leadAccess(user.id, "view");
+  const orderWhere = await orderAccess(user.id, "view");
+  // An order bought *for* this company belongs to its reseller, which following the account would ask
+  // about; it follows this account instead (reached, or null below), as the tab always has.
+  const endCustomerOrderWhere = (await accessLevel(user.id, "orders", "view")) === "FOLLOW" ? undefined : orderWhere;
   const company = await db.company.findUnique({
     where: { id },
     include: {
@@ -1569,6 +1577,7 @@ export async function getCompany(id: string) {
       customerCategory: { select: CATEGORY_SELECT },
       contacts: { orderBy: { isPrimary: "desc" } },
       leads: {
+        where: leadWhere,
         orderBy: { createdAt: "desc" },
         include: {
           owner: { select: { id: true, name: true } },
@@ -1586,6 +1595,7 @@ export async function getCompany(id: string) {
       },
       locations: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       products: {
+        where: orderWhere,
         orderBy: { createdAt: "desc" },
         include: {
           item: {
@@ -1619,6 +1629,7 @@ export async function getCompany(id: string) {
       // invoice), but the product/subscription is this company's — it's their seats, their expiry,
       // their support — so it belongs in their Products & Subscriptions, not the reseller's.
       ordersAsEndCustomer: {
+        where: endCustomerOrderWhere,
         orderBy: { createdAt: "desc" },
         include: {
           renewedBy: { select: { id: true, orderSeq: true, orderStatus: true } },
@@ -1664,7 +1675,7 @@ export async function getCompany(id: string) {
    * `null` rather than an error, deliberately: it is the same answer as "no such company", so a
    * refusal does not confirm that the id exists, and every caller already routes it to `notFound()`.
    */
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  if (!(await canSeeCompany(user.id, company))) return null;
 
   // Redact here rather than in the page: masking in the component would still ship the real email
   // and phone to the browser for anyone who opens devtools.
@@ -1864,7 +1875,7 @@ export async function bulkUpdateCompanies(input: unknown): Promise<ActionResult<
    * means a crafted request, and it is refused whole rather than applied to the part that fits.
    */
   const companies = await db.company.findMany({
-    where: { id: { in: companyIds }, ...(await companyScope(user.id)) },
+    where: { AND: [{ id: { in: companyIds } }, await companyScope(user.id)] },
     select: { id: true, relationshipType: true, tags: true },
   });
   if (companies.length === 0) return { ok: false, error: "Those companies no longer exist." };
@@ -1942,6 +1953,6 @@ export async function countVendorsOnboarding(params?: VendorListParams) {
   // Scoped to match `listVendorsPaged`, or the badge would advertise a number of vendors larger
   // than the list underneath it can account for.
   return db.company.count({
-    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
+    where: { AND: [vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id), { vendorStatus: "ONBOARDING" }] },
   });
 }

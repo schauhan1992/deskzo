@@ -55,7 +55,7 @@ async function loadForRenewal(id: string, userId: string) {
       },
     },
   });
-  if (!product || !(await canSeeCompany(userId, product.company.ownerUserId))) return null;
+  if (!product || !(await canSeeCompany(userId, product.company))) return null;
 
   const group = renewalGroup([
     {

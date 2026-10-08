@@ -54,7 +54,7 @@ const NO_RIGHT = "Changing a company's bank accounts needs the “Manage finance
 /** The company, if this person can see it and it is one we pay. */
 async function payee(userId: string, companyId: string): Promise<{ ok: true; id: string; name: string; seq: number } | { ok: false; error: string }> {
   const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, companySeq: true, ownerUserId: true, relationshipType: true } });
-  if (!company || !(await canSeeCompany(userId, company.ownerUserId))) return { ok: false, error: NOT_HERE };
+  if (!company || !(await canSeeCompany(userId, company))) return { ok: false, error: NOT_HERE };
   if (!holdsBankAccounts(company.relationshipType)) return { ok: false, error: NOT_A_PAYEE };
   return { ok: true, id: company.id, name: company.name, seq: company.companySeq };
 }

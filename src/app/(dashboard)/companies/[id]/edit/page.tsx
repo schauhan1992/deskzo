@@ -17,7 +17,7 @@ export default async function EditCompanyPage({ params }: { params: Promise<{ id
   // Read off the record already loaded rather than queried again — the owner is the company's own
   // field here, not something reached through a relation. Same refusal as "no such company", so the
   // edit URL is no more informative than the detail one it is reached from.
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) notFound();
+  if (!(await canSeeCompany(user.id, company))) notFound();
   // Null for a vendor, whose terms are ours to pay — see `customerTermsAdvice`.
   const termsAdvice = (await isModuleEntitled("receivables")) ? await customerTermsAdvice(company.id) : null;
 

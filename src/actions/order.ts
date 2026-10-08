@@ -8,6 +8,7 @@ import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { orderAccess } from "@/lib/authz/access";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -82,9 +83,9 @@ const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionD
 async function visibleOrder(userId: string, id: string) {
   const order = await db.companyProduct.findUnique({
     where: { id },
-    include: { company: { select: { id: true, companySeq: true, name: true, ownerUserId: true } } },
+    include: { company: { select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true } } },
   });
-  if (!order || !(await canSeeCompany(userId, order.company.ownerUserId))) return null;
+  if (!order || !(await canSeeCompany(userId, order.company))) return null;
   return order;
 }
 
@@ -203,7 +204,7 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
 
   const company = await db.company.findUnique({ where: { id: data.companyId } });
   // Scoped: an order can only be punched for an account this person could open. It took any id.
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
   /**
@@ -1292,10 +1293,10 @@ async function orderListWhere(
      * It goes in `AND` rather than being spread, because the scope narrows the same `company`
      * relation `companyFilter` does and a second `company` key in this literal would keep only
      * whichever was written last: exactly the silent drop the comment above is about, except that
-     * losing this one loses the scope. `viaCompanyScope` yields `{}` for an unrestricted viewer,
-     * and `AND: [{}]` is no condition at all.
+     * losing this one loses the scope. The access engine answers it (`orderAccess`): `{}` for an
+     * unrestricted viewer, and `AND: [{}]` is no condition at all.
      */
-    AND: [(await viaCompanyScope(userId)) as Prisma.CompanyProductWhereInput, ...search, ...fieldFilters, ...(await atStep(params?.step))],
+    AND: [await orderAccess(userId, "view"), ...search, ...fieldFilters, ...(await atStep(params?.step))],
     ...(params?.status ? { orderStatus: params.status } : {}),
     ...(params?.businessType ? { businessType: params.businessType } : {}),
     ...(params?.companyId ? { companyId: params.companyId } : {}),
@@ -1501,8 +1502,9 @@ export async function getOrder(id: string) {
   // Scoped in the `where` so the include stays exactly as the detail page expects it, and so an
   // order on somebody else's account answers the same way a made-up id does. This page carries the
   // purchase price and the vendor as well as the sale, which is more than the list ever shows.
+  // The access engine answers the scope (`orderAccess`), the same fragment the list takes.
   const order = await db.companyProduct.findFirst({
-    where: { id, ...(await viaCompanyScope(user.id)) },
+    where: { AND: [{ id }, await orderAccess(user.id, "view")] },
     include: {
       company: { select: { id: true, companySeq: true, name: true, paymentTerms: true, relationshipType: true, customerCategory: { select: CATEGORY_SELECT } } },
       endCustomer: { select: { id: true, companySeq: true, name: true } },

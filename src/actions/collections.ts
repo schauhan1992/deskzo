@@ -310,13 +310,13 @@ export async function followUpPanel(
         docNumber: true,
         currency: true,
         total: true,
-        company: { select: { name: true, ownerUserId: true } },
+        company: { select: { name: true, ownerUserId: true, relationshipType: true } },
         payments: { select: { amount: true } },
         creditsReceived: { select: { amount: true } },
         lines: { where: { companyProductId: { not: null } }, select: { companyProductId: true } },
       },
     });
-    if (!invoice || invoice.docType !== "INVOICE" || !(await canSeeCompany(user.id, invoice.company.ownerUserId))) return null;
+    if (!invoice || invoice.docType !== "INVOICE" || !(await canSeeCompany(user.id, invoice.company))) return null;
     const orderIds = invoice.lines.map((l) => l.companyProductId!);
     const history = await loadFollowUps({ OR: [{ documentId: invoice.id }, ...(orderIds.length ? [{ companyProductId: { in: orderIds } }] : [])] }, now);
     const balance = settleInvoice(
@@ -342,12 +342,12 @@ export async function followUpPanel(
         orderStatus: true,
         quantity: true,
         unitPrice: true,
-        company: { select: { name: true, ownerUserId: true } },
+        company: { select: { name: true, ownerUserId: true, relationshipType: true } },
         item: { select: { sellingPrice: true, taxRatePercent: true } },
         allocations: { select: { amount: true } },
       },
     });
-    if (!order || !(await canSeeCompany(user.id, order.company.ownerUserId))) return null;
+    if (!order || !(await canSeeCompany(user.id, order.company))) return null;
     const history = await loadFollowUps({ companyProductId: order.id }, now);
     const balance = Math.max(computeOrderFinancials(order).balance, 0);
     const chaseable = order.orderStatus !== "CANCELLED" && order.orderStatus !== "REJECTED" && balance >= 0.01;

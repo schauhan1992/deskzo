@@ -36,14 +36,14 @@ async function companyByRef(segment: string) {
   const ref = parseRecordRef(segment);
   return db.company.findUnique({
     where: ref.kind === "seq" ? { companySeq: ref.seq } : { id: ref.id },
-    select: { id: true, companySeq: true, name: true, ownerUserId: true },
+    select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true },
   });
 }
 
 /** A company this person may see, by COM number or id — null for "not there" and "not yours" alike. */
 async function visibleCompany(userId: string, segment: string) {
   const company = await companyByRef(segment);
-  return company && (await canSeeCompany(userId, company.ownerUserId)) ? company : null;
+  return company && (await canSeeCompany(userId, company)) ? company : null;
 }
 
 export type MergeScreen = {
@@ -100,7 +100,7 @@ export async function mergeCompanies(input: unknown): Promise<ActionResult<{ ref
     db.company.findUnique({ where: { id: keepId } }),
     db.company.findUnique({ where: { id: dropId } }),
   ]);
-  if (!keep || !drop || !(await canSeeCompany(user.id, keep.ownerUserId)) || !(await canSeeCompany(user.id, drop.ownerUserId))) {
+  if (!keep || !drop || !(await canSeeCompany(user.id, keep)) || !(await canSeeCompany(user.id, drop))) {
     return { ok: false, error: "Company not found — it may have been merged already." };
   }
   if (normalizeCompanyName(confirmName) !== normalizeCompanyName(drop.name)) {

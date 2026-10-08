@@ -239,7 +239,7 @@ export async function pendingVerifications(params: { page: number; pageSize: num
 /** Everything ever said about this company's details, for its own 360 view. */
 export async function companyVerifications(companyId: string) {
   const user = await requireModuleUser("workspace");
-  if (!(await mayWorkWithContactsOf(user.id, companyId))) return [];
+  if (!(await mayWorkWithContactsOf(user.id, companyId, "view"))) return [];
   return toPlain(
     await db.contactVerification.findMany({
       where: { companyId },

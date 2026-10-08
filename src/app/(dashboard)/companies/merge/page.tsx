@@ -49,9 +49,9 @@ export default async function MergeCompaniesPage({ searchParams }: { searchParam
     const ref = parseRecordRef(keep);
     const company = await db.company.findUnique({
       where: ref.kind === "seq" ? { companySeq: ref.seq } : { id: ref.id },
-      select: { id: true, companySeq: true, name: true, ownerUserId: true },
+      select: { id: true, companySeq: true, name: true, ownerUserId: true, relationshipType: true },
     });
-    if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
+    if (!company || !(await canSeeCompany(user.id, company))) {
       return (
         <div className="space-y-4">
           {header}

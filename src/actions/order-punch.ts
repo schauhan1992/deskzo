@@ -88,7 +88,7 @@ export async function punchCustomerContext(companyId: string) {
     where: { id },
     select: { id: true, ownerUserId: true, relationshipType: true, paymentTerms: true },
   });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  if (!company || !(await canSeeCompany(user.id, company))) return null;
 
   const [locations, proposals, links, endCustomers, credit] = await Promise.all([
     db.companyLocation.findMany({
@@ -163,7 +163,7 @@ export async function punchItemContext(input: { companyId: string; itemId: strin
     where: { id: companyId },
     select: { id: true, ownerUserId: true, relationshipType: true },
   });
-  if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) return nothing;
+  if (!company || !(await canSeeCompany(user.id, company))) return nothing;
 
   const [existing, resellerPrice] = await Promise.all([
     // The question `hasExistingOrderForItem` asks. Its account scope is the check just made.

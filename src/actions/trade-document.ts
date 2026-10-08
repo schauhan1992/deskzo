@@ -7,7 +7,8 @@ import { notifyUser } from "@/lib/notify";
 import { cancelReasonOrRefusal } from "@/lib/documents/cancellation";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { can } from "@/lib/authz/resolve";
-import { canSeeCompany, companyScope, viaCompanyScope } from "@/lib/authz/company-scope";
+import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
+import { documentAccess } from "@/lib/authz/access";
 import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { postDocumentToLedger, reverseDocumentPosting } from "@/lib/ledger/journal";
@@ -1323,8 +1324,8 @@ export async function setTradeDocumentStatus(id: string, status: TradeDocumentSt
  * accounts are real.
  */
 async function maySeeParty(userId: string, companyId: string): Promise<boolean> {
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  return company !== null && (await canSeeCompany(userId, company.ownerUserId));
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  return company !== null && (await canSeeCompany(userId, company));
 }
 
 /** Full document for the detail and print views, with Decimals flattened for the client. */
@@ -1344,10 +1345,11 @@ export async function listLeadDocuments(leadId: string) {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return [];
   const rows = await db.tradeDocument.findMany({
-    // Scoped through the party rather than through the lead: a document is only ever raised for the
-    // lead's own company (`validateLinkedLead` keeps the two in step), so the party is the same
-    // path every other query here takes, and it needs no join the document doesn't already have.
-    where: { leadId, ...(await viaCompanyScope(user.id)) },
+    // Scoped by the access engine (`documentAccess`), which with no level set goes through the party
+    // rather than the lead: a document is only ever raised for the lead's own company
+    // (`validateLinkedLead` keeps the two in step), so the party is the same path every other query
+    // here takes, and it needs no join the document doesn't already have.
+    where: { AND: [{ leadId }, await documentAccess(user.id, "view")] },
     orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,
@@ -1391,14 +1393,14 @@ export async function listTradeDocuments(params: {
     /**
      * The scope goes in `AND`, not spread into this literal.
      *
-     * `viaCompanyScope` returns `{ company: { ownerUserId: { in: ids } } }`, so any later `company:`
+     * The access engine's `documentAccess` can return `{ company: … }`, so any later `company:`
      * key in the same object literal replaces it wholesale and the access scope silently disappears.
      * Nothing did that today, but a party filter is the obvious next addition and it would — the
      * same reasoning, and the same fix, as `listOrders` in src/actions/order.ts. The branch filter
      * joins it there for the same reason: the head office's is an `OR`, which a search would replace.
      */
     AND: [
-      (await viaCompanyScope(user.id)) as Prisma.TradeDocumentWhereInput,
+      await documentAccess(user.id, "view"),
       ...(params.branchId ? [await branchFilter(params.branchId)] : []),
     ],
     docType: params.docType,
@@ -1467,19 +1469,19 @@ export async function tradeDocumentSummary(docType: TradeDocumentType) {
   if (!(await viewerHas("documents.view"))) return [];
   // The same scope as the list under it, in both halves: a card reading "₹4.2 crore outstanding"
   // over a list of eleven invoices is the whole book by another route, and the count and the value
-  // are separate queries that would each leak it on their own.
-  const scope = await viaCompanyScope(user.id);
+  // are separate queries that would each leak it on their own. The access engine answers it.
+  const scope = await documentAccess(user.id, "view");
   // Counts group in SQL; the value cannot. Adding a dollar total to a rupee one gives a number
   // that is no currency at all, so the rupee equivalent is summed instead — each document at
   // the rate it was raised on, which is what the ledger did with it too.
   const [grouped, rows] = await Promise.all([
     db.tradeDocument.groupBy({
       by: ["status"],
-      where: { docType, ...scope },
+      where: { AND: [{ docType }, scope] },
       _count: { _all: true },
     }),
     db.tradeDocument.findMany({
-      where: { docType, ...scope },
+      where: { AND: [{ docType }, scope] },
       select: { status: true, total: true, exchangeRate: true },
     }),
   ]);
@@ -1512,7 +1514,7 @@ export async function listDocumentParties(docType: TradeDocumentType) {
       // account name in the business to anybody who can open the new-document form. Purchase
       // parties narrow the same way — the roles that raise purchase documents hold
       // `companies.viewAll`, which is what makes that the same rule rather than a second one.
-      ...(await companyScope(user.id)),
+      AND: [await companyScope(user.id)],
       relationshipType: documentDirection[docType] === "SALES" ? salesTypes : purchaseTypes,
     },
     orderBy: { name: "asc" },
@@ -1589,7 +1591,7 @@ export async function listCreditableInvoices(companyId: string) {
   if (!(await viewerHas("documents.view"))) return [];
   if (!(await maySeeParty(user.id, companyId))) return [];
   const rows = await db.tradeDocument.findMany({
-    where: { companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
+    where: { AND: [{ companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } }, await documentAccess(user.id, "view")] },
     orderBy: { issueDate: "desc" },
     take: 50,
     // The branch, so the form can lock its picker to it: a credit note follows its invoice (null = the head office).
@@ -1610,7 +1612,7 @@ export async function listCompanyDocuments(companyId: string) {
   // company, with its numbers and its totals, answered to whoever knew the id.
   if (!(await maySeeParty(user.id, companyId))) return [];
   const rows = await db.tradeDocument.findMany({
-    where: { companyId },
+    where: { AND: [{ companyId }, await documentAccess(user.id, "view")] },
     orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,

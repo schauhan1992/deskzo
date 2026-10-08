@@ -53,7 +53,7 @@ export async function getSupportLoad(companyId: string, months = 12) {
   if (!parts.tickets) return null;
   const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
   if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
-  if (!(await canSeeCompany(user.id, company.ownerUserId))) return null;
+  if (!(await canSeeCompany(user.id, company))) return null;
 
   const window = supportWindow(await workspaceClock(), months);
   const facts = (await loadSupportFacts([companyId], window)).get(companyId)!;

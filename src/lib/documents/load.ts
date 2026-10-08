@@ -1,10 +1,10 @@
 import { db } from "@/lib/db";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { documentAccess } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 
 /**
  * One trade document as the detail and print views need it, for a given person — scoped to the
- * accounts they manage, so one outside their book reads as missing.
+ * documents the access engine says they reach, so one outside it reads as missing.
  *
  * No permission check here: the caller has made it. That is the action behind the pages
  * (getTradeDocument, for the person signed in) or the print page spending a render pass (for the
@@ -12,11 +12,11 @@ import { toPlain } from "@/lib/serialize";
  */
 export async function findTradeDocumentFor(userId: string, id: string) {
   const document = await db.tradeDocument.findFirst({
-    // `findFirst` only so the scope can travel with the id: a document belongs to whoever manages
-    // the party it was raised for, and one outside that book has to read as missing — this feeds
-    // the detail page and the printable copy, both of which render the customer's whole address
-    // and every line they were charged for.
-    where: { id, ...(await viaCompanyScope(userId)) },
+    // `findFirst` only so the scope can travel with the id: one this person doesn't reach has to
+    // read as missing — this feeds the detail page and the printable copy, both of which render
+    // the customer's whole address and every line they were charged for. The access engine answers
+    // the reach (`documentAccess`; with no level set, the party's account, as before).
+    where: { AND: [{ id }, await documentAccess(userId, "view")] },
     include: {
     company: {
       select: {

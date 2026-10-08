@@ -431,8 +431,8 @@ export async function removeCreditNoteApplication(id: string): Promise<ActionRes
  * which accounts are real.
  */
 async function maySeeCustomer(userId: string, companyId: string): Promise<boolean> {
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true } });
-  return company !== null && (await canSeeCompany(userId, company.ownerUserId));
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
+  return company !== null && (await canSeeCompany(userId, company));
 }
 
 /** One invoice's settlement, with the payments and credits that produced it. */
