@@ -31,14 +31,27 @@ export type Role = string;
 export type AssignableRole = Role;
 
 /**
- * The eight the application shipped with.
+ * The built-in roles: the eight the application shipped with, and HR, Recruiter and Renewal
+ * specialist (owner, 8 Oct 2026; migration 20261030110000_built_in_hr_recruiter_renewal_roles).
  *
  * Not the list of roles — that lives in the database and is whatever somebody has made it. These
  * are the keys the code itself names: `ADMIN` in the permission resolver and the super-admin
  * constraint, and the rest in the built-in presets. Deleting one would break something written in
  * terms of it, which is why `isSystem` rows refuse to be deleted.
  */
-export const SYSTEM_ROLE_KEYS = ["ADMIN", "PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"] as const;
+export const SYSTEM_ROLE_KEYS = [
+  "ADMIN",
+  "PROFILE",
+  "CALLING",
+  "SALES",
+  "SUPPORT",
+  "MANAGEMENT",
+  "ACCOUNTS",
+  "PURCHASE",
+  "HR",
+  "RECRUITER",
+  "RENEWAL_SPECIALIST",
+] as const;
 
 /** The one key the application compares against by name. */
 export const ADMIN_ROLE: Role = "ADMIN";

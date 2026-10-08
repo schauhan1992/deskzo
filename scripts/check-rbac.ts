@@ -84,7 +84,27 @@ console.log("\n— Roles —\n");
 // There is no enum any more: roles are rows. What the code still names by hand is
 // `SYSTEM_ROLE_KEYS`, and the drift to guard against is between that list and the database, which
 // is checked in `rolesAreData()` below because it needs a query.
-eq("The application names eight roles of its own", SYSTEM_ROLE_KEYS.length, 8);
+eq("The application names eleven roles of its own — the eight it shipped with, and HR, Recruiter and Renewal specialist", SYSTEM_ROLE_KEYS.length, 11);
+
+/**
+ * The three added on 8 Oct 2026 start with their preset applied, written by the migration as role rows
+ * (so a workspace's own custom "HR" is never reached by a code default). Two lists of the same thing
+ * drift, so the migration's starting rows are read back and compared with the presets they copy, and
+ * its starting menu with the sections it leaves ticked.
+ */
+{
+  const sql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030110000_built_in_hr_recruiter_renewal_roles", "migration.sql"), "utf8");
+  const rows = [...sql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
+  for (const [role, preset] of [["HR", "hr-executive"], ["RECRUITER", "recruiter"], ["RENEWAL_SPECIALIST", "renewal-specialist"]] as const) {
+    const granted = rows.filter((r) => r.role === role && r.allowed).map((r) => r.key).sort();
+    const wanted = [...(getPreset(preset)?.permissions ?? [])].map(String).sort();
+    ok(`${role} starts as the ${preset} preset`, granted.join() === wanted.join(), `migration ${granted.length}, preset ${wanted.length}`);
+    const unticked = rows.filter((r) => r.role === role && !r.allowed).map((r) => r.key);
+    ok(`  and only unticks sections`, unticked.length > 0 && unticked.every((k) => k.startsWith("section.")), unticked.filter((k) => !k.startsWith("section.")).join(", "));
+    ok(`  keeping everybody's own HR self-service`, !unticked.includes("section.hr"));
+  }
+  ok("hiring got the answer people records had, wherever that was set by hand", /SELECT "role", 'hiring.manage', "allowed"/.test(sql) && /SELECT "userId", 'hiring.manage', "allowed"/.test(sql));
+}
 
 console.log("\n— Presets —\n");
 

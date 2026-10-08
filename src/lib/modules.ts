@@ -325,7 +325,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navItems: [
       { href: "/people/me", label: "My HR", icon: UserRound },
       { href: "/people", label: "People", icon: IdCard },
-      { href: "/people/hiring", label: "Hiring", icon: UserPlus, permission: "hr.manage" },
+      // "Run hiring" — which every holder of "Manage people records" was given when it split off.
+      { href: "/people/hiring", label: "Hiring", icon: UserPlus, permission: "hiring.manage" },
       { href: "/people/leave", label: "Leave", icon: Plane },
       { href: "/people/attendance", label: "Attendance", icon: CalendarDays },
       { href: "/people/celebrations", label: "Celebrations", icon: PartyPopper, permission: "hr.manage" },

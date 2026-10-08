@@ -118,8 +118,12 @@ async function main() {
     const roles = (def?.defaultRoles ?? []) as readonly string[];
     ok(`${key} exists and every non-admin role has it by default`, !!def && NON_ADMIN_ROLES.every((r) => roles.includes(r)), def ? roles.join(",") : "missing");
   }
-  const presetsMissing = ROLE_PRESETS.filter((p) => !VIEWS.every((k) => (p.permissions as readonly string[]).includes(k))).map((p) => p.key);
-  ok("every preset keeps all nine — applying one never takes a view away", presetsMissing.length === 0, presetsMissing.join(", "));
+  // The seven roles that had the nine before they were permissions keep them in every preset. The roles
+  // added later (HR, Recruiter, Renewal specialist) never had them; HR and Recruiter see no customers.
+  const presetsMissing = ROLE_PRESETS.filter((p) => NON_ADMIN_ROLES.includes(p.role) && !VIEWS.every((k) => (p.permissions as readonly string[]).includes(k))).map((p) => p.key);
+  ok("every preset of the seven original roles keeps all nine — applying one never takes a view away", presetsMissing.length === 0, presetsMissing.join(", "));
+  const peopleSide = ROLE_PRESETS.filter((p) => p.role === "HR" || p.role === "RECRUITER");
+  ok("  HR and Recruiter presets hold none of them — they don't see customers", peopleSide.length >= 3 && peopleSide.every((p) => !VIEWS.some((k) => (p.permissions as readonly string[]).includes(k))), peopleSide.map((p) => p.key).join(", "));
 
   const expected: Record<string, string> = {
     orders: "orders.view",

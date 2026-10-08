@@ -80,7 +80,16 @@ const INTAKE_FIELDS: { key: string; label: string }[] = [
   { key: "bankIfsc", label: "IFSC" },
 ];
 
-export function CandidateRecord({ candidate, origin }: { candidate: Candidate; origin: string }) {
+export function CandidateRecord({
+  candidate,
+  origin,
+  canConvert,
+}: {
+  candidate: Candidate;
+  origin: string;
+  /** Holds "Manage people records": converting creates a login and an employee, so a recruiter hands over to HR. */
+  canConvert: boolean;
+}) {
   const router = useRouter();
   const clock = useClock();
   const [pending, startTransition] = useTransition();
@@ -201,7 +210,15 @@ export function CandidateRecord({ candidate, origin }: { candidate: Candidate; o
           </Card>
 
           <StatusPanel candidate={candidate} pending={pending} run={run} />
-          <ConvertPanel candidate={candidate} />
+          {canConvert ? (
+            <ConvertPanel candidate={candidate} />
+          ) : (
+            candidate.status === "ACCEPTED" && (
+              <p className="rounded-base bg-surface-sunken px-3 py-2 text-sm text-muted">
+                They have accepted. HR converts them into an employee on their joining day.
+              </p>
+            )
+          )}
         </div>
       </div>
     </div>
