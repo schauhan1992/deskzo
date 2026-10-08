@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
@@ -438,7 +439,7 @@ export async function feedbackTargets(companyId: string) {
 
   const [contacts, people, tickets, visits, orders] = await Promise.all([
     db.contact.findMany({
-      where: { companyId },
+      where: { companyId, ...STILL_THERE },
       orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
       select: { id: true, name: true, email: true, phone: true, designation: true, isPrimary: true },
     }),

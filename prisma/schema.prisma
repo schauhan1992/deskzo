@@ -359,6 +359,8 @@ enum NotificationType {
   LETTER_ISSUED
   FEEDBACK_RECEIVED
   NOTE_REMINDER
+  /** A meeting in the person's calendar starts within ten minutes (src/lib/notify.ts, once per start time). */
+  MEETING_SOON
   /**
    * Raised by the DLP layer: a screenshot, a refused attempt past the cap, or read volume that
    * looks like collection rather than work. Goes to admins, not to the person who triggered it.
@@ -522,6 +524,11 @@ model User {
    * failed or empty read of Deskzo's posts leaves it where it was.
    */
   deskzoUpdatesSeenAt    DateTime?
+  /**
+   * Which reminders chime while Deskzo is open (owner, 8 Oct 2026): { meetings, tasks, notes,
+   * callbacks } — each on unless set false; { off: true } silences them all. src/lib/reminder-sounds.ts.
+   */
+  reminderSounds         Json      @default("{}")
   /**
    * AES-256-GCM encrypted TOTP secret (see src/lib/crypto.ts) — null until the user completes two-factor setup.
    */
@@ -1274,6 +1281,24 @@ model Contact {
    * document for this company. See src/actions/document-mail.ts.
    */
   receivesDocuments Boolean      @default(false)
+  /// When they left the company (owner, 8 Oct 2026). Kept with all their history, but no longer primary,
+  /// sent documents, mailed, invited, offered in pickers or let into the portal. Null: still there.
+  leftAt            DateTime?
+  /**
+   * Their designation, from the workspace's own list (owner, 8 Oct 2026). `designation` above is
+   * kept as its type — what lead scoring, assignment rules and campaign filters go by — and follows
+   * the designation's type whenever this is set. Null: none chosen, or a record made before the list.
+   */
+  designationId     String?
+  designationRef    Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  /**
+   * The same person's record at the company they were at before (owner, 8 Oct 2026): set when
+   * somebody marked as having left is recorded as joining another company. Their history stays with
+   * the old record and the old company; the two are linked both ways.
+   */
+  previousContactId String?  @unique
+  previousContact   Contact? @relation("ContactMoves", fields: [previousContactId], references: [id], onDelete: SetNull)
+  nextContact       Contact? @relation("ContactMoves")
 
   /**
    * The last verdict on this email address — see src/lib/email-verification.ts.
@@ -1333,7 +1358,27 @@ model Contact {
 
   @@index([companyId])
   @@index([emailStatus])
+  @@index([designationId])
   @@map("contacts")
+}
+
+/**
+ * A contact designation, from the workspace's own list (owner, 8 Oct 2026) — "Network Engineer",
+ * "Head of Procurement". Picked or created as a contact is saved; renamed, retyped and merged in
+ * Settings › Lists. Each has a type, one of the eight that lead scoring, assignment rules and campaign
+ * filters go by, so a new name never leaves those blind. Contacts keep the type in their own
+ * `designation`, kept in step here (src/lib/contacts/designations.ts).
+ */
+model Designation {
+  id        String             @id @default(cuid())
+  name      String
+  kind      ContactDesignation @default(OTHER)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  contacts Contact[]
+
+  @@map("designations")
 }
 
 model Lead {
@@ -11053,7 +11098,10 @@ model CustomerCategory {
  * The record types a workspace can add its own fields to.
  */
 enum CustomFieldEntity {
+  /** Customers, resellers and commission parties — every company that isn't a vendor. */
   COMPANY
+  /** Vendors, OEMs, distributors and partners (owner, 8 Oct 2026). */
+  VENDOR
   CONTACT
   LEAD
   ORDER

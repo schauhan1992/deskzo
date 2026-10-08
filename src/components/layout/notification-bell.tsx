@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
-import { getNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead } from "@/actions/notification";
+import { getNotifications, markNotificationRead, markAllNotificationsRead, notificationPulse } from "@/actions/notification";
+import { listenForFirstGesture, playChime } from "@/components/notifications/chime";
 import { cn } from "@/lib/utils";
 
 type NotificationRow = {
@@ -38,13 +39,27 @@ export function NotificationBell() {
   const [, startTransition] = useTransition();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * The count, and a chime for a reminder that arrived since the last ask (src/lib/reminder-sounds.ts).
+   * From when the page opened: yesterday's reminders don't chime on today's first load.
+   */
+  const askedAt = useRef(new Date().toISOString());
   useEffect(() => {
+    const stopListening = listenForFirstGesture();
     async function refreshCount() {
-      setCount(await getUnreadNotificationCount());
+      const since = askedAt.current;
+      askedAt.current = new Date().toISOString();
+      const pulse = await notificationPulse(since).catch(() => null);
+      if (!pulse) return;
+      setCount(pulse.count);
+      if (pulse.chime) playChime();
     }
     refreshCount();
     const interval = setInterval(refreshCount, POLL_MS);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      stopListening();
+    };
   }, []);
 
   useEffect(() => {

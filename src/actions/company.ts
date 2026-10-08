@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationshipType, type VendorStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -31,6 +32,7 @@ import {
   customerRelationshipTypeValues,
   isVendorRelationshipType,
   isCustomerRelationshipType,
+  companyFieldEntity,
   type CreateCompanyInput,
 } from "@/lib/validation/company";
 import { addCompanyProductSchema, updateCompanyProductSchema } from "@/lib/validation/company-product";
@@ -54,6 +56,8 @@ import {
 } from "@/lib/custom-fields/server";
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { assignVendorCodes, vendorCodeHolder } from "@/lib/companies/vendor-code";
+import { hasLeft } from "@/lib/contacts/left";
+import { designationData } from "@/lib/contacts/designations";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -223,8 +227,10 @@ export async function createCompany(
   }
   // The workspace's own fields (src/lib/custom-fields), the required ones answered. The contacts
   // created with the company are created without theirs: those are filled in on each contact.
-  const custom = await customFieldsForCreate("COMPANY", user.id, customFields, { checkRequired: true });
+  const custom = await customFieldsForCreate(companyFieldEntity(companyInput.relationshipType), user.id, customFields, { checkRequired: true });
   if (!custom.ok) return { ok: false, error: custom.error };
+  // Each contact's designation from the workspace's list, new names added to it (src/lib/contacts/designations.ts).
+  const designations = await Promise.all(contacts.map((c) => designationData(db, c)));
 
   try {
     const company = await db.company.create({
@@ -252,9 +258,10 @@ export async function createCompany(
         ownerUserId: user.id,
         ...custom.data,
         contacts: {
-          create: contacts.map((c) => ({
+          create: contacts.map((c, i) => ({
             name: c.name.trim(),
             designation: c.designation,
+            ...(designations[i] ?? {}),
             email: c.email || null,
             phone: c.phone || null,
             linkedinUrl: c.linkedinUrl || null,
@@ -399,12 +406,12 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
  */
 export async function updateCompanyCustomFields(companyId: string, input: unknown): Promise<ActionResult<null>> {
   const user = await requireUser();
-  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true } });
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, ownerUserId: true, relationshipType: true } });
   // Scoped like `updateCompany`: out of scope and missing answer the same.
   if (!company || !(await canSeeCompany(user.id, company.ownerUserId))) {
     return { ok: false, error: "Company not found." };
   }
-  const saved = await saveCustomFields("COMPANY", company.id, user.id, input);
+  const saved = await saveCustomFields(companyFieldEntity(company.relationshipType), company.id, user.id, input);
   if (!saved.ok) return saved;
   if (saved.changed.length > 0) {
     await recordAudit({
@@ -473,6 +480,7 @@ export async function addContact(
       companyId,
       name: c.name.trim(),
       designation: c.designation,
+      ...((await designationData(db, c)) ?? {}),
       email: c.email || null,
       phone: c.phone || null,
       linkedinUrl: c.linkedinUrl || null,
@@ -507,6 +515,10 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
   // A reseller's end customer, edited by somebody who sees its email and phone hidden: both stay as
   // stored, whatever the form sent — it sends them blank, as it shows them.
   const detailsHidden = await contactDetailsHiddenAt(user.id, contact.companyId);
+  // Somebody who has left is nobody's primary and is sent nothing — mark them back first.
+  if ((c.isPrimary || c.receivesDocuments) && (await hasLeft(id))) {
+    return { ok: false, error: `${contact.name} has left the company — mark them back before making them primary or sending them documents.` };
+  }
 
   // The workspace's own fields (src/lib/custom-fields), when the form had them — saved first, so a
   // refusal leaves the contact exactly as it was.
@@ -522,6 +534,7 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
     data: {
       name: c.name.trim(),
       designation: c.designation,
+      ...((await designationData(db, c)) ?? {}),
       ...(detailsHidden ? {} : { email: c.email || null, phone: c.phone || null }),
       linkedinUrl: c.linkedinUrl || null,
       isPrimary: c.isPrimary,
@@ -582,6 +595,111 @@ export async function deleteContact(id: string): Promise<ActionResult<null>> {
 
   revalidatePath(`/companies/${contact.companyId}`);
   return { ok: true, data: null };
+}
+
+/**
+ * A contact who has left their company, or is back (owner, 8 Oct 2026) — src/lib/contacts/left.ts says
+ * what leaving takes them out of. Whoever may edit the contact may mark it. Leaving also stops them
+ * being primary and being sent documents, and revokes their customer-portal logins: a former employee
+ * keeps no way into their old employer's invoices.
+ */
+export async function setContactLeft(contactId: string, left: boolean): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  const contact = await db.contact.findUnique({ where: { id: contactId }, select: { id: true, name: true, companyId: true, company: { select: { name: true, companySeq: true } } } });
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
+  }
+  const now = new Date();
+  const revoked = await db.$transaction(async (tx) => {
+    await tx.contact.update({
+      where: { id: contactId },
+      data: left ? { leftAt: now, isPrimary: false, receivesDocuments: false } : { leftAt: null },
+      select: { id: true },
+    });
+    if (!left) return 0;
+    const logins = await tx.portalLogin.updateMany({ where: { contactId, revokedAt: null }, data: { revokedAt: now, revokedById: user.id } });
+    return logins.count;
+  });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "Contact",
+    entityId: contactId,
+    entityLabel: left
+      ? `${contact.name} left ${contact.company.name}${revoked ? ` — ${revoked} portal login${revoked === 1 ? "" : "s"} revoked` : ""}`
+      : `${contact.name} is back at ${contact.company.name}`,
+  });
+  revalidatePath(companyPath(contact.company.companySeq));
+  return { ok: true, data: null };
+}
+
+const moveSchema = z.object({
+  companyId: z.string().min(1, "Pick the company they've joined"),
+  email: z.string().trim().toLowerCase().email("Enter their new email, or leave it blank").optional().or(z.literal("")),
+  phone: z.string().trim().max(40).optional().or(z.literal("")),
+  designationName: z.string().max(80).optional(),
+});
+
+/**
+ * Somebody who left this company has joined another (owner, 8 Oct 2026): this record is marked as left
+ * (as `setContactLeft` does — not primary, not sent documents, out of the portal), and a record of them
+ * is made at the new company with their new email, phone and designation, linked back to this one
+ * (src/lib/contacts/moves.ts). Their history stays where it happened. Whoever may work with both
+ * companies' contacts may record it.
+ */
+export async function moveContact(contactId: string, input: unknown): Promise<ActionResult<{ id: string; companySeq: number }>> {
+  const user = await requireUser();
+  const parsed = moveSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const data = parsed.data;
+  const [contact, target] = await Promise.all([
+    db.contact.findUnique({ where: { id: contactId }, select: { id: true, name: true, linkedinUrl: true, companyId: true, company: { select: { name: true } } } }),
+    db.company.findUnique({ where: { id: data.companyId }, select: { id: true, name: true, companySeq: true } }),
+  ]);
+  if (!contact || !(await mayWorkWithContactsOf(user.id, contact.companyId))) {
+    return { ok: false, error: (await canViewContacts(user.id)) ? "Contact not found." : NO_CONTACTS };
+  }
+  if (!target || !(await mayWorkWithContactsOf(user.id, target.id))) return { ok: false, error: "That company isn't one you can add contacts to." };
+  if (target.id === contact.companyId) return { ok: false, error: `They're at ${target.name} already — pick the company they've joined.` };
+  const moved = await db.contact.findFirst({ where: { previousContactId: contactId }, select: { company: { select: { name: true } } } });
+  if (moved) return { ok: false, error: `${contact.name} is already recorded as having joined ${moved.company.name}.` };
+
+  const designation = await designationData(db, { designationName: data.designationName ?? "" });
+  const now = new Date();
+  const created = await db.$transaction(async (tx) => {
+    await tx.contact.update({ where: { id: contactId }, data: { leftAt: now, isPrimary: false, receivesDocuments: false }, select: { id: true } });
+    await tx.portalLogin.updateMany({ where: { contactId, revokedAt: null }, data: { revokedAt: now, revokedById: user.id } });
+    return tx.contact.create({
+      data: {
+        companyId: target.id,
+        name: contact.name,
+        linkedinUrl: contact.linkedinUrl,
+        email: data.email || null,
+        phone: data.phone || null,
+        ...(designation ?? {}),
+        previousContactId: contactId,
+        createdByUserId: user.id,
+      },
+      select: { id: true },
+    });
+  });
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Contact", entityId: contactId, entityLabel: `${contact.name} left ${contact.company.name} for ${target.name}` });
+  await recordAudit({ userId: user.id, action: "CREATE", entityType: "Contact", entityId: created.id, entityLabel: `${contact.name} at ${target.name}, previously at ${contact.company.name}` });
+  revalidatePath(companyPath(target.companySeq));
+  return { ok: true, data: { id: created.id, companySeq: target.companySeq } };
+}
+
+/** Companies whose name contains what was typed — where somebody who left may have gone. Any kind, in scope. */
+export async function searchCompaniesToJoin(query: string) {
+  const user = await requireUser();
+  const typed = String(query ?? "").trim().slice(0, 120);
+  if (typed.length < 2) return [];
+  return db.company.findMany({
+    where: { ...(await companyOptionsWhere(user.id)), name: { contains: typed, mode: "insensitive" } },
+    orderBy: { name: "asc" },
+    take: CUSTOMER_SEARCH_LIMIT,
+    select: COMPANY_OPTION_SELECT,
+  });
 }
 
 export async function assignCompanies(input: unknown): Promise<ActionResult<{ count: number }>> {
@@ -916,10 +1034,14 @@ function companyNarrowing(search: string | undefined, custom: CompanyCustom): Pr
 }
 
 /** `customSearchWhere` and `customFilterWhere` for companies, typed for the list builders. */
-async function companyCustom(userId: string, params?: { search?: string; customFilters?: CustomFilterInputs }): Promise<CompanyCustom> {
+async function companyCustom(
+  userId: string,
+  params?: { search?: string; customFilters?: CustomFilterInputs },
+  entity: "COMPANY" | "VENDOR" = "COMPANY",
+): Promise<CompanyCustom> {
   const [search, filters] = await Promise.all([
-    customSearchWhere("COMPANY", userId, params?.search),
-    customFilterWhere("COMPANY", userId, params?.customFilters),
+    customSearchWhere(entity, userId, params?.search),
+    customFilterWhere(entity, userId, params?.customFilters),
   ]);
   return { search: search as Prisma.CompanyWhereInput[], filters: filters as Prisma.CompanyWhereInput[] };
 }
@@ -1089,6 +1211,11 @@ type VendorListParams = {
   customFilters?: CustomFilterInputs;
 };
 
+/** The vendors list's own fields: a vendor's, except on the commission parties' list that shares it. */
+function vendorListFields(params?: VendorListParams): "COMPANY" | "VENDOR" {
+  return params?.relationshipType === "COMMISSION_PARTY" ? "COMPANY" : "VENDOR";
+}
+
 function vendorListWhere(clock: Clock, params?: VendorListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
   return {
@@ -1136,7 +1263,7 @@ const vendorListInclude = {
 export async function listVendors(params?: VendorListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) },
+    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), ...(await companyScope(user.id)) },
     orderBy: { createdAt: "desc" },
     include: vendorListInclude,
   });
@@ -1145,7 +1272,7 @@ export async function listVendors(params?: VendorListParams) {
 /** One page of the Vendors / Commission Parties lists. */
 export async function listVendorsPaged(params: VendorListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)) };
+  const where = { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), ...(await companyScope(user.id)) };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1807,6 +1934,6 @@ export async function countVendorsOnboarding(params?: VendorListParams) {
   // Scoped to match `listVendorsPaged`, or the badge would advertise a number of vendors larger
   // than the list underneath it can account for.
   return db.company.count({
-    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
+    where: { ...vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), ...(await companyScope(user.id)), vendorStatus: "ONBOARDING" },
   });
 }

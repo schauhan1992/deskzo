@@ -43,7 +43,7 @@ async function entitiesHere(): Promise<CustomFieldEntityKey[]> {
   const out: CustomFieldEntityKey[] = [];
   for (const entity of CUSTOM_FIELD_ENTITIES) {
     const needs = CUSTOM_FIELD_ENTITY_MODULES[entity];
-    if (needs === "orders" ? await moduleAvailableForTenant("orders") : needs === "items" ? await moduleAvailableForTenant("items") : true) {
+    if (needs ? await moduleAvailableForTenant(needs) : true) {
       out.push(entity);
     }
   }
@@ -52,6 +52,7 @@ async function entitiesHere(): Promise<CustomFieldEntityKey[]> {
 
 const TABLES: Record<CustomFieldEntityKey, string> = {
   COMPANY: "companies",
+  VENDOR: "companies",
   CONTACT: "contacts",
   LEAD: "leads",
   ORDER: "company_products",
@@ -72,6 +73,13 @@ async function usage(entity: CustomFieldEntityKey): Promise<Map<string, number>>
 }
 
 export type ManagedField = StoredDefinition & { inUse: number };
+
+/** The other record type's keys, where two share one table's `customFields` (companies and vendors). */
+async function sharedColumnKeys(entity: CustomFieldEntityKey): Promise<string[]> {
+  const other = entity === "COMPANY" ? "VENDOR" : entity === "VENDOR" ? "COMPANY" : null;
+  if (!other) return [];
+  return (await db.customFieldDefinition.findMany({ where: { entity: other }, select: { key: true } })).map((d) => d.key);
+}
 
 /** Everything the settings screen shows: each record type's fields, retired ones too, with how much they're used. */
 export async function listCustomFieldsForManage(): Promise<{
@@ -156,7 +164,8 @@ export async function saveCustomFieldDefinition(input: unknown): Promise<ActionR
       data: {
         ...common,
         entity: data.entity,
-        key: keyFromLabel(data.label, all.map((d) => d.key)),
+        // Companies' and vendors' fields share the companies table's one column: a key is never both.
+        key: keyFromLabel(data.label, [...all.map((d) => d.key), ...(await sharedColumnKeys(data.entity))]),
         type: data.type,
         options: options as unknown as Prisma.InputJsonValue,
         sortOrder: all.reduce((m, d) => Math.max(m, d.sortOrder), -1) + 1,

@@ -74,6 +74,13 @@ export const INSTALL_ROWS = [
     to: "CURRENT_TIMESTAMP);",
   },
   {
+    // The contact designations every workspace starts with (src/lib/contacts/designations.ts).
+    table: "designations",
+    migration: "20261029110000_designations_vendor_fields_reminders",
+    from: 'INSERT INTO "designations"',
+    to: "ON CONFLICT DO NOTHING;",
+  },
+  {
     // The standard industries every workspace starts with (src/lib/companies/standard-industries.ts).
     table: "industries",
     migration: "20261028100000_standard_industries",

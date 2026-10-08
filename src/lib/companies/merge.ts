@@ -197,6 +197,15 @@ const CLASH_RULES: Record<string, ClashRule> = {
   },
   // ─ contact links, for people combined into one
   "MarketingListMember.contactId": { what: "place on the same mailing list", outcome: "kept once", settle: "remove-theirs" },
+  // A person's record at the company they moved to points back at this one (src/lib/contacts/moves.ts):
+  // two people combined who had each moved on keep one link — the staying contact's.
+  "Contact.previousContactId": {
+    what: "record of the same person at a later company",
+    outcome: "the one staying keeps its link; the other's later record stays, unlinked",
+    settle: async (tx, fromId) => {
+      await tx.contact.updateMany({ where: { previousContactId: fromId }, data: { previousContactId: null } });
+    },
+  },
   "ProjectStakeholder.contactId": { what: "place on the same project", outcome: "kept once, in the role the contact staying has", settle: "remove-theirs" },
   "ContactConsent.contactId": {
     what: "consent for the same topic",

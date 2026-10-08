@@ -34,13 +34,19 @@ export function CompanyLinks({
       )}
       {linkedin && (
         <OutboundLink href={linkedin} className={icon} title="LinkedIn (opens in a new tab)" aria-label="LinkedIn, opens in a new tab">
-          {/* lucide has no LinkedIn mark: its "in", in the current colour. */}
-          <span aria-hidden className="grid h-4 w-4 place-items-center rounded-[3px] bg-current">
-            <span className="text-[10px] font-bold leading-none text-surface">in</span>
-          </span>
+          <LinkedInMark />
         </OutboundLink>
       )}
     </div>
+  );
+}
+
+/** lucide has no LinkedIn mark: its "in", in the current colour. Decorative — the link names itself. */
+export function LinkedInMark() {
+  return (
+    <span aria-hidden className="grid h-4 w-4 place-items-center rounded-[3px] bg-current">
+      <span className="text-[10px] font-bold leading-none text-surface">in</span>
+    </span>
   );
 }
 

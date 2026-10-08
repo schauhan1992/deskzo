@@ -8,6 +8,7 @@ import { syncSystemNotifications } from "@/lib/notify";
 import { NOTIFICATION_CATALOGUE, describeNotification, wants } from "@/lib/notifications/catalogue";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
+import { SOUND_FOR_TYPE, chimes, parseReminderSounds, type ReminderSounds } from "@/lib/reminder-sounds";
 
 export async function getNotifications(params?: { unreadOnly?: boolean; limit?: number }) {
   const user = await requireModuleUser("notifications");
@@ -19,10 +20,50 @@ export async function getNotifications(params?: { unreadOnly?: boolean; limit?: 
   });
 }
 
-export async function getUnreadNotificationCount() {
+/** This person's reminder sounds (src/lib/reminder-sounds.ts) — all on where the column isn't there yet. */
+async function soundsOf(userId: string): Promise<ReminderSounds> {
+  try {
+    const row = await db.user.findUnique({ where: { id: userId }, select: { reminderSounds: true } });
+    return parseReminderSounds(row?.reminderSounds);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * What the bell asks every 45 seconds: the unread count, and the newest reminder that arrived since it
+ * last asked, if it should chime (owner, 8 Oct 2026). `since` is when the bell asked before — on the
+ * first ask, when the page opened — so a reminder from yesterday never chimes on today's first load.
+ */
+export async function notificationPulse(since?: string): Promise<{ count: number; chime: { id: string; type: NotificationType } | null }> {
   const user = await requireModuleUser("notifications");
   await syncSystemNotifications(user.id);
-  return db.notification.count({ where: { userId: user.id, read: false } });
+  const after = since ? new Date(since) : null;
+  const [count, newest, sounds] = await Promise.all([
+    db.notification.count({ where: { userId: user.id, read: false } }),
+    after && !Number.isNaN(after.getTime())
+      ? db.notification.findFirst({
+          where: { userId: user.id, read: false, type: { in: Object.keys(SOUND_FOR_TYPE) as NotificationType[] }, createdAt: { gt: after } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, type: true },
+        })
+      : null,
+    soundsOf(user.id),
+  ]);
+  return { count, chime: newest && chimes(sounds, newest.type) ? newest : null };
+}
+
+export async function getReminderSounds(): Promise<ReminderSounds> {
+  const user = await requireModuleUser("notifications");
+  return soundsOf(user.id);
+}
+
+export async function saveReminderSounds(input: unknown): Promise<ActionResult<null>> {
+  const user = await requireModuleUser("notifications");
+  const sounds = parseReminderSounds(input);
+  await db.user.update({ where: { id: user.id }, data: { reminderSounds: sounds }, select: { id: true } });
+  revalidatePath("/notifications");
+  return { ok: true, data: null };
 }
 
 export async function markNotificationRead(id: string): Promise<ActionResult<null>> {

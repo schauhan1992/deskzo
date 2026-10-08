@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ListFilter } from "lucide-react";
-import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import { AnchoredPopover, insideAnchoredPopover } from "@/components/ui/anchored-popover";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { FilterField, FilterSetup } from "@/lib/custom-fields/filters";
@@ -81,7 +81,7 @@ export function CustomFieldFilters({ setup, resetParams = ["page"] }: { setup: F
     }
     function onMouseDown(e: MouseEvent) {
       const target = e.target as Node | null;
-      if (target && (panelRef.current?.contains(target) || anchorRef.current?.contains(target))) return;
+      if (target && (panelRef.current?.contains(target) || anchorRef.current?.contains(target) || insideAnchoredPopover(target))) return;
       setOpen(false);
     }
     document.addEventListener("keydown", onKeyDown);
@@ -198,7 +198,7 @@ function FieldControl({
           <legend className={legend}>
             {field.label} <span className="font-normal text-subtle">· any of</span>
           </legend>
-          <div className="max-h-36 space-y-1 overflow-y-auto">
+          <div className="max-h-36 space-y-1 overflow-y-auto overscroll-contain">
             {field.options.map((o) => (
               <label key={o.value} className="flex items-center gap-2 text-sm text-text">
                 <input

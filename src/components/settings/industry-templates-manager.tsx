@@ -9,7 +9,7 @@ import { ActionNotice } from "@/components/ui/action-notice";
 import { useClock } from "@/components/time/clock-provider";
 import type { TemplatePlan } from "@/lib/industry-templates/plan";
 
-const ENTITY = { COMPANY: "customers", CONTACT: "contacts", LEAD: "leads", ORDER: "orders", ITEM: "products" } as const;
+const ENTITY = { COMPANY: "customers", VENDOR: "vendors", CONTACT: "contacts", LEAD: "leads", ORDER: "orders", ITEM: "products" } as const;
 const MODULE_NAMES: Record<string, string> = { orders: "Orders", renewals: "Renewals" };
 const STEP_STATUS = { APPROVED: "Approved", PROCESSING: "Processing", FULFILLED: "Fulfilled" } as const;
 

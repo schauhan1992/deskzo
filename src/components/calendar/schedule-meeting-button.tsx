@@ -16,17 +16,20 @@ export function ScheduleMeetingButton({
   label,
   size = "md",
   variant = "secondary",
+  className,
 }: {
   record: MeetingRecordRef | null;
   label?: string;
   size?: "sm" | "md" | "icon";
   variant?: "primary" | "secondary" | "ghost" | "subtle";
+  /** For an icon among a row's actions: `h-7 w-7` to sit with IconButton's. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const text = label ?? (record?.kind === "visit" ? "Add to my calendar" : "Schedule meeting");
   return (
     <>
-      <Button variant={variant} size={size} onClick={() => setOpen(true)} title={text} aria-label={text}>
+      <Button variant={variant} size={size} onClick={() => setOpen(true)} title={text} aria-label={text} className={className}>
         <CalendarPlus className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} />
         {size === "icon" ? null : text}
       </Button>

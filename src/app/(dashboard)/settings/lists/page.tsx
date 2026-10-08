@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { listIndustries } from "@/actions/industry";
+import { listDesignationsForSettings } from "@/actions/designation";
+import { DesignationsManager } from "@/components/settings/designations-manager";
 import { listProjectTypes } from "@/actions/project-document";
 import { listCredentialTags } from "@/actions/vault";
 import { SettingsPage } from "@/components/settings/settings-page";
@@ -18,8 +20,9 @@ import { isModuleEntitled } from "@/lib/modules-access";
 export default async function Page() {
   // Project types and vault tags belong to their modules; a plan without one shows no list for it.
   const [hasProjects, hasVault] = await Promise.all([isModuleEntitled("projects"), isModuleEntitled("vault")]);
-  const [industries, projectTypes, credentialTags] = await Promise.all([
+  const [industries, designations, projectTypes, credentialTags] = await Promise.all([
     listIndustries(),
+    listDesignationsForSettings(),
     hasProjects ? listProjectTypes(true) : null,
     hasVault ? listCredentialTags(true) : null,
   ]);
@@ -35,6 +38,13 @@ export default async function Page() {
         <CardContent>
           <p className="mb-3 text-sm text-muted">What a company does, as offered on its record.</p>
           <IndustriesManager industries={industries} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="text-sm font-medium text-text">Contact designations</CardHeader>
+        <CardContent>
+          <DesignationsManager designations={designations} />
         </CardContent>
       </Card>
 

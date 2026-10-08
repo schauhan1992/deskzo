@@ -8,22 +8,28 @@ import { MailCheck, MessageCircle } from "lucide-react";
 import type { ContactDesignation, CompanyRelationshipType } from "@prisma/client";
 import { bulkUpdateContacts } from "@/actions/contact";
 import { verifyContactEmails } from "@/actions/email-verification";
-import { contactDesignationValues, relationshipTypeLabels } from "@/lib/validation/company";
+import { contactRoleLabel, relationshipTypeLabels } from "@/lib/validation/company";
+import { DesignationInput } from "@/components/contacts/designation-input";
+import { LinkedInMark } from "@/components/companies/company-links";
 import { Badge, Card } from "@/components/ui/card";
 import { CallButton } from "@/components/calls/call-button";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { EmailAddress, type VerifiableContact } from "@/components/contacts/email-address";
-import { OutboundLink, whatsappHref } from "@/components/ui/outbound-link";
+import { OutboundLink, externalHref, whatsappHref } from "@/components/ui/outbound-link";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { companyPath } from "@/lib/record-links";
 
 type ContactRow = VerifiableContact & {
   name: string;
   designation: ContactDesignation;
+  /** From the workspace's list (src/lib/contacts/designations.ts); none for a record made before it. */
+  designationName?: string | null;
   phone: string | null;
+  linkedinUrl?: string | null;
   isPrimary: boolean;
+  /** When they left their company, for those who have (src/lib/contacts/left.ts). */
+  leftAt?: Date | string | null;
   company: {
     id: string;
     companySeq: number;
@@ -49,13 +55,13 @@ export function ContactsTable({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [designation, setDesignation] = useState("");
+  const [designationName, setDesignationName] = useState("");
 
   function run(action: "update" | "delete") {
     setError(null);
     setNotice(null);
     startTransition(async () => {
-      const result = await bulkUpdateContacts({ contactIds: selection.ids, designation, action });
+      const result = await bulkUpdateContacts({ contactIds: selection.ids, designationName, action });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -66,7 +72,7 @@ export function ContactsTable({
           ? `Deleted ${count} contact(s).${skipped > 0 ? ` ${skipped} kept — they're linked to a lead.` : ""}`
           : `Updated ${count} contact(s).`,
       );
-      setDesignation("");
+      setDesignationName("");
       selection.clear();
       router.refresh();
     });
@@ -102,20 +108,16 @@ export function ContactsTable({
     <div>
       <BulkBar count={selection.count} onClear={selection.clear} error={error} notice={notice}>
         {/* No caption in the bulk bar — the name rides on the control. */}
-        <Select
-          value={designation}
-          onChange={(e) => setDesignation(e.target.value)}
-          className="h-9 w-52"
-          aria-label="Designation"
-        >
-          <option value="">Designation — no change</option>
-          {contactDesignationValues.map((d) => (
-            <option key={d} value={d}>
-              {d.replaceAll("_", " ")}
-            </option>
-          ))}
-        </Select>
-        <Button size="sm" disabled={!designation || isPending} onClick={() => run("update")}>
+        <div className="w-56">
+          <DesignationInput
+            value={designationName}
+            onChange={(e) => setDesignationName(e.target.value)}
+            aria-label="Designation to give them"
+            placeholder="Designation to give them"
+            className="h-9"
+          />
+        </div>
+        <Button size="sm" disabled={!designationName.trim() || isPending} onClick={() => run("update")}>
           {isPending ? "Applying…" : "Apply"}
         </Button>
         <Button size="sm" variant="secondary" disabled={isPending} onClick={verifySelected}>
@@ -173,8 +175,9 @@ export function ContactsTable({
                         Primary
                       </Badge>
                     )}
+                    {c.leftAt && <Badge className="ml-2">Left</Badge>}
                   </td>
-                  <td className="px-4 py-2.5 text-muted">{c.designation.replaceAll("_", " ")}</td>
+                  <td className="px-4 py-2.5 text-muted">{contactRoleLabel(c.designationName, c.designation) ?? "—"}</td>
                   <td className="px-4 py-2.5">
                     <Link href={`${companyPath(c.company.companySeq)}?tab=contacts`} className="text-text hover:underline">
                       {c.company.name}
@@ -202,10 +205,21 @@ export function ContactsTable({
                       {c.phone && (
                         <OutboundLink
                           href={whatsappHref(c.phone)}
-                          title="WhatsApp"
+                          title={`WhatsApp ${c.name} (opens in a new tab)`}
+                          aria-label={`WhatsApp ${c.name}, opens in a new tab`}
                           className="text-success hover:text-success"
                         >
-                          <MessageCircle className="h-4 w-4" />
+                          <MessageCircle className="h-4 w-4" aria-hidden />
+                        </OutboundLink>
+                      )}
+                      {externalHref(c.linkedinUrl) && (
+                        <OutboundLink
+                          href={externalHref(c.linkedinUrl)!}
+                          title={`${c.name} on LinkedIn (opens in a new tab)`}
+                          aria-label={`${c.name} on LinkedIn, opens in a new tab`}
+                          className="text-subtle hover:text-brand"
+                        >
+                          <LinkedInMark />
                         </OutboundLink>
                       )}
                     </div>

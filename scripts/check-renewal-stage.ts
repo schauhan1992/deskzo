@@ -421,6 +421,11 @@ async function main() {
       "which is what stops the anchor's blur firing before an option click registers",
     );
     ok("  and a null target is treated as not-a-field", keepsFocusOnAnchor(null) === true);
+    // Its own scrollbar is inside it too: a press there has the popover's box as its target, and an
+    // outside-click check that missed it closed the panel as soon as anybody tried to scroll it.
+    const { insideAnchoredPopover } = await import("../src/components/ui/anchored-popover");
+    const box = { closest: (sel: string) => (sel === "[data-anchored-popover]" ? {} : null) } as unknown as EventTarget;
+    ok("a press on a popover's own box — its scrollbar — counts as inside it", insideAnchoredPopover(box) && !insideAnchoredPopover(target(false)) && !insideAnchoredPopover(null));
 
     const readOnly = renderToStaticMarkup(
       createElement(RenewalsTable, { renewals: [row] as never, users: [], canSetStage: false }),

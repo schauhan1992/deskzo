@@ -13,10 +13,19 @@ import { revalidatePath } from "next/cache";
 import { recordAudit } from "@/lib/audit";
 import { bulkUpdateContactsSchema, isContactDetailField } from "@/lib/validation/company";
 import type { ActionResult } from "@/actions/company";
+import { STILL_THERE, leftAmong } from "@/lib/contacts/left";
+import { designationData, designationNamesOf } from "@/lib/contacts/designations";
 
 type ContactListParams = {
   search?: string;
   designation?: ContactDesignation;
+  /** One designation from the workspace's list (src/lib/contacts/designations.ts). */
+  designationId?: string;
+  /**
+   * Who is listed (owner, 8 Oct 2026): those still at their company by default, those who have left, or
+   * everybody — src/lib/contacts/left.ts.
+   */
+  status?: "current" | "left" | "all";
   relationshipType?: CompanyRelationshipType;
   industryId?: string;
   primaryOnly?: boolean;
@@ -27,6 +36,8 @@ type ContactListParams = {
 function contactListWhere(params?: ContactListParams, custom: Prisma.ContactWhereInput[] = []): Prisma.ContactWhereInput {
   return {
     ...(params?.designation ? { designation: params.designation } : {}),
+    ...(params?.designationId ? { designationId: params.designationId } : {}),
+    ...(params?.status === "all" ? {} : params?.status === "left" ? { leftAt: { not: null } } : STILL_THERE),
     ...(params?.primaryOnly ? { isPrimary: true } : {}),
     ...(params?.search
       ? {
@@ -144,7 +155,11 @@ export async function listAllContactsPaged(params: ContactListParams & { page: n
     count: contacts.length,
     what: "the contacts library",
   });
-  return { rows: await redactList(user.id, contacts), total };
+  // Read by name: both columns are in NOT_YET_EVERYWHERE until every workspace has them.
+  const ids = contacts.map((c) => c.id);
+  const [roles, left] = await Promise.all([designationNamesOf(ids), leftAmong(ids)]);
+  const rows = (await redactList(user.id, contacts)).map((c) => ({ ...c, designationName: roles[c.id] ?? null, leftAt: left.get(c.id) ?? null }));
+  return { rows, total };
 }
 
 /**
@@ -158,7 +173,7 @@ export async function bulkUpdateContacts(input: unknown): Promise<ActionResult<{
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { contactIds, designation, action } = parsed.data;
+  const { contactIds, designation, designationName, action } = parsed.data;
 
   /**
    * Every selected contact must be one this person may see. This deleted or re-designated any ids
@@ -196,9 +211,10 @@ export async function bulkUpdateContacts(input: unknown): Promise<ActionResult<{
     return { ok: true, data: { count: deleted, skipped } };
   }
 
-  if (!designation) return { ok: false, error: "Pick a designation to apply." };
+  const role = designationName?.trim() ? await designationData(db, { designationName }) : designation ? await designationData(db, { designation }) : null;
+  if (!role) return { ok: false, error: "Pick a designation to apply." };
 
-  const result = await db.contact.updateMany({ where: { id: { in: contactIds } }, data: { designation } });
+  const result = await db.contact.updateMany({ where: { id: { in: contactIds } }, data: role });
   await recordAudit({
     userId: user.id,
     action: "UPDATE",

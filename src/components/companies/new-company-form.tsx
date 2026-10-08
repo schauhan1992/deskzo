@@ -10,7 +10,6 @@ import type { CompanyRelationshipType } from "@prisma/client";
 import {
   createCompanySchema,
   type CreateCompanyInput,
-  contactDesignationValues,
   relationshipTypeValues,
 } from "@/lib/validation/company";
 import { createCompany } from "@/actions/company";
@@ -30,6 +29,7 @@ import {
   type CustomFieldPerson,
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
+import { DesignationInput } from "@/components/contacts/designation-input";
 
 type FormValues = z.input<typeof createCompanySchema>;
 type IndustryOption = { id: string; name: string };
@@ -228,13 +228,7 @@ export function NewCompanyForm({
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor={`${rowId}-${index}-designation`}>Designation</Label>
-                  <Select id={`${rowId}-${index}-designation`} {...register(`contacts.${index}.designation` as const)}>
-                    {contactDesignationValues.map((d) => (
-                      <option key={d} value={d}>
-                        {d.replaceAll("_", " ")}
-                      </option>
-                    ))}
-                  </Select>
+                  <DesignationInput id={`${rowId}-${index}-designation`} {...register(`contacts.${index}.designationName` as const)} />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor={`${rowId}-${index}-email`}>Email</Label>

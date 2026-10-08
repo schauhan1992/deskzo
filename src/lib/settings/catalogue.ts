@@ -396,7 +396,7 @@ export const SETTINGS: SettingsSection[] = [
           {
             key: "lists",
             label: "Lists",
-            description: "Industries, project types, and the vault's own tags. Brands and product families are under Items & Inventory.",
+            description: "Industries, contact designations, project types, and the vault's own tags. Brands and product families are under Items & Inventory.",
             href: "/settings/lists",
             icon: Tags,
             permission: "settings.manage",

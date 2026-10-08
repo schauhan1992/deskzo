@@ -12,6 +12,7 @@
  *   · **What was there is moved across**: the migration makes the old bank details the new lists' primaries.
  *   · **Domain Intel is for customers**: no vendor in its lists, counts or panel.
  *   · **Forty standard industries** in every workspace, its own kept, no near-duplicates.
+ *   · **A contact who has left their company**: kept, but out of everything new; and the compact contact list.
  *
  * Builds a scratch database beside the local one from the migrations, and drives the real actions in
  * it as stubbed users — the real workspace is only read, before and after, to show it was not touched.
@@ -591,6 +592,182 @@ async function run(db: PrismaClient) {
     ok("the starter customer categories are there", false);
   }
 
+  // ── A contact who has left ──────────────────────────────────────────────────────────────────
+
+  section("13c. A contact who has left the company");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const calls = require("../src/actions/call") as typeof import("../src/actions/call");
+  const contactActions = require("../src/actions/contact") as typeof import("../src/actions/contact");
+  const { leftContactsOf, STILL_THERE } = require("../src/lib/contacts/left") as typeof import("../src/lib/contacts/left");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const kavya = await db.contact.create({
+    data: { companyId: client.id, name: `${TAG} Kavya`, designation: "IT_MANAGER", email: "kavya@zzvb-client.example", phone: "+91 9652267482", linkedinUrl: "linkedin.com/in/zzvb-kavya", isPrimary: true, receivesDocuments: true },
+    select: { id: true },
+  });
+  const vinay = await db.contact.create({ data: { companyId: client.id, name: `${TAG} Vinay`, designation: "HR", phone: "+91 9814013374" }, select: { id: true } });
+  const portal = await db.portalLogin.create({ data: { token: `${TAG}-portal-token`, companyId: client.id, contactId: kavya.id, personName: `${TAG} Kavya` }, select: { id: true } });
+  ok("somebody who can't see the company can't mark them", !(await as(otherSeller, () => companies.setContactLeft(kavya.id, true))).ok);
+  const gone = await as(seller, () => companies.setContactLeft(kavya.id, true));
+  const kavyaNow = await db.contact.findUnique({ where: { id: kavya.id }, select: { leftAt: true, isPrimary: true, receivesDocuments: true } });
+  ok(
+    "marked left, they are no longer primary nor sent documents",
+    gone.ok && !!kavyaNow?.leftAt && !kavyaNow.isPrimary && !kavyaNow.receivesDocuments,
+    gone.ok ? json(kavyaNow) : gone.error,
+  );
+  ok("  and their customer-portal link stops working", !!(await db.portalLogin.findUnique({ where: { id: portal.id }, select: { revokedAt: true } }))?.revokedAt);
+  ok("  the company page knows when", (await leftContactsOf(client.id)).has(kavya.id) && !(await leftContactsOf(client.id)).has(vinay.id));
+  const remade = await as(seller, () =>
+    companies.updateContact({ id: kavya.id, name: `${TAG} Kavya`, designation: "IT_MANAGER", email: "kavya@zzvb-client.example", phone: "+91 9652267482", isPrimary: true, receivesDocuments: false }),
+  );
+  ok("they can't be made primary again while they're gone", !remade.ok && /has left/.test(remade.ok ? "" : remade.error), remade.ok ? "made primary" : remade.error);
+  const dialler = await as(seller, () => calls.listCompanyNumbers(client.id));
+  ok("the dialler offers only those still there", dialler.some((c) => c.id === vinay.id) && !dialler.some((c) => c.id === kavya.id), json(dialler.map((c) => c.name)));
+  ok("  as does every list that picks people to write to", (await db.contact.count({ where: { companyId: client.id, ...STILL_THERE } })) === 1);
+  const back = await as(seller, () => companies.setContactLeft(kavya.id, false));
+  ok(
+    "marked back, they are offered again — a primary and the portal are given again by hand",
+    back.ok && !(await leftContactsOf(client.id)).has(kavya.id) && (await as(seller, () => calls.listCompanyNumbers(client.id))).some((c) => c.id === kavya.id),
+  );
+  await as(seller, () => companies.setContactLeft(kavya.id, true));
+
+  // ── Designations from a list of the workspace's own ─────────────────────────────────────────
+
+  section("15. Designations: pick one, or add one");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const designationActions = require("../src/actions/designation") as typeof import("../src/actions/designation");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  ok("a workspace starts with the seven of the fixed list", (await db.designation.count()) === 7 && !!(await db.designation.findUnique({ where: { id: "des-hr" } })));
+  const roleSql = migration("20261029110000_designations_vendor_fields_reminders");
+  const backfill = roleSql.slice(roleSql.indexOf('UPDATE "contacts" c SET "designationId"')).trim().replace(/;$/, "");
+  const oldHr = await db.contact.create({ data: { companyId: client.id, name: `${TAG} Old HR`, designation: "HR" }, select: { id: true } });
+  await db.$executeRawUnsafe(backfill);
+  ok("  and a contact from before keeps its designation, now from the list", (await db.contact.findUnique({ where: { id: oldHr.id }, select: { designationId: true } }))?.designationId === "des-hr");
+  const engineer = await as(seller, () => companies.addContact(client.id, { name: `${TAG} Neha`, designationName: "  network   engineer " }));
+  const nehaRow = engineer.ok ? await db.contact.findUnique({ where: { id: engineer.data.id }, select: { designation: true, designationRef: { select: { name: true, kind: true } } } }) : null;
+  ok(
+    "a name that isn't on the list is added to it as the contact is saved, its type guessed from the words",
+    nehaRow?.designationRef?.name === "network engineer" && nehaRow.designationRef.kind === "IT_MANAGER" && nehaRow.designation === "IT_MANAGER",
+    json(nehaRow),
+  );
+  const again = await as(seller, () => companies.addContact(client.id, { name: `${TAG} Ravi`, designationName: "Network Engineer" }));
+  ok("  and the same name again, whatever its capitals, is the same designation", again.ok && (await db.designation.count({ where: { name: { equals: "network engineer", mode: "insensitive" } } })) === 1);
+  const engineerId = (await db.designation.findFirst({ where: { name: { equals: "network engineer", mode: "insensitive" } }, select: { id: true } }))!.id;
+  ok("only somebody who manages the lists renames one", !(await as(seller, () => designationActions.renameDesignation(engineerId, "Network Engineer"))).ok);
+  ok("  and not to a name already on the list", !(await as(boss, () => designationActions.renameDesignation(engineerId, "it manager"))).ok);
+  ok("  but to a new one, it is", (await as(boss, () => designationActions.renameDesignation(engineerId, "Network Engineer"))).ok);
+  const retyped = await as(boss, () => designationActions.setDesignationKind(engineerId, "IT_HEAD"));
+  ok(
+    "a new type moves every contact that has it, for scoring and rules",
+    retyped.ok && retyped.data.contacts === 2 && (await db.contact.count({ where: { designationId: engineerId, designation: "IT_HEAD" } })) === 2,
+    retyped.ok ? retyped.data.contacts : retyped.error,
+  );
+  const dupe = await as(seller, () => companies.addContact(client.id, { name: `${TAG} Sunil`, designationName: "Netwrk Engineer" }));
+  const dupeId = (await db.designation.findFirst({ where: { name: "Netwrk Engineer" }, select: { id: true } }))!.id;
+  ok("a designation in use can't be deleted", dupe.ok && !(await as(boss, () => designationActions.deleteDesignation(dupeId))).ok);
+  const merged = await as(boss, () => designationActions.mergeDesignations(dupeId, engineerId));
+  ok(
+    "a duplicate merged: its contacts take the one that stays, and its type, and it's gone",
+    merged.ok && merged.data.contacts === 1 && !(await db.designation.findUnique({ where: { id: dupeId } })) && (await db.contact.count({ where: { designationId: engineerId, designation: "IT_HEAD" } })) === 3,
+  );
+  const cleared = engineer.ok ? await as(seller, () => companies.updateContact({ id: engineer.data.id, name: `${TAG} Neha`, designationName: "" })) : null;
+  ok(
+    "clearing it leaves no designation, and the type Other",
+    !!cleared?.ok && json(await db.contact.findUnique({ where: { id: engineer.ok ? engineer.data.id : "" }, select: { designationId: true, designation: true } })) === json({ designationId: null, designation: "OTHER" }),
+  );
+  const bulk = await as(seller, () => contactActions.bulkUpdateContacts({ contactIds: [oldHr.id], designationName: "Head of Procurement" }));
+  ok("the Contacts page's bulk bar gives a designation by name too", bulk.ok && (await db.contact.findUnique({ where: { id: oldHr.id }, select: { designation: true, designationRef: { select: { name: true } } } }))?.designationRef?.name === "Head of Procurement");
+
+  // ── A person who moved to another company ───────────────────────────────────────────────────
+
+  section("16. Somebody who left joins another company");
+  const newHome = await company(seller, "New Home", "CLIENT");
+  const anjali = await db.contact.create({
+    data: { companyId: client.id, name: `${TAG} Anjali`, email: "anjali@zzvb-client.example", linkedinUrl: "https://linkedin.com/in/zzvb-anjali", isPrimary: false },
+    select: { id: true },
+  });
+  ok("not to the company they're at", !(await as(seller, () => companies.moveContact(anjali.id, { companyId: client.id }))).ok);
+  ok("nor to one the person can't add contacts to", !(await as(otherSeller, () => companies.moveContact(anjali.id, { companyId: newHome.id }))).ok);
+  const joinedThere = await as(seller, () => companies.moveContact(anjali.id, { companyId: newHome.id, email: "Anjali@NewHome.example", phone: "+91 90000 00001", designationName: "Director" }));
+  const there = joinedThere.ok ? await db.contact.findUnique({ where: { id: joinedThere.data.id }, select: { companyId: true, name: true, email: true, linkedinUrl: true, previousContactId: true, designation: true } }) : null;
+  ok(
+    "a record of them is made there, new email and designation, the same LinkedIn, linked back",
+    there?.companyId === newHome.id && there.name === `${TAG} Anjali` && there.email === "anjali@newhome.example" && there.linkedinUrl === "https://linkedin.com/in/zzvb-anjali" && there.previousContactId === anjali.id && there.designation === "DIRECTOR",
+    joinedThere.ok ? json(there) : joinedThere.error,
+  );
+  ok("  and the old record has left", !!(await db.contact.findUnique({ where: { id: anjali.id }, select: { leftAt: true } }))?.leftAt);
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { contactMovesOf } = require("../src/lib/contacts/moves") as typeof import("../src/lib/contacts/moves");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const links = joinedThere.ok ? await contactMovesOf([anjali.id, joinedThere.data.id]) : {};
+  ok(
+    "each record points at the other, company and all",
+    links[anjali.id]?.next?.companyName === newHome.name && joinedThere.ok && links[joinedThere.data.id]?.previous?.companyName === client.name,
+    json(links),
+  );
+  ok("recording the same move twice is refused", !(await as(seller, () => companies.moveContact(anjali.id, { companyId: newHome.id }))).ok);
+
+  // ── Vendors' own fields ─────────────────────────────────────────────────────────────────────
+
+  section("17. Vendors' own fields, apart from companies'");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const fieldActions = require("../src/actions/custom-fields") as typeof import("../src/actions/custom-fields");
+  const { formSetup } = require("../src/lib/custom-fields/server") as typeof import("../src/lib/custom-fields/server");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const companyField = await as(boss, () => fieldActions.saveCustomFieldDefinition({ entity: "COMPANY", label: "Region", type: "TEXT" }));
+  const vendorField = await as(boss, () => fieldActions.saveCustomFieldDefinition({ entity: "VENDOR", label: "Region", type: "TEXT" }));
+  const msme = await as(boss, () => fieldActions.saveCustomFieldDefinition({ entity: "VENDOR", label: "MSME number", type: "TEXT" }));
+  const defs = await db.customFieldDefinition.findMany({ where: { label: { in: ["Region", "MSME number"] } }, select: { entity: true, label: true, key: true } });
+  const regionKeys = defs.filter((d) => d.label === "Region").map((d) => d.key);
+  ok("the two may share a name, but never a key — both live on the company", companyField.ok && vendorField.ok && msme.ok && regionKeys.length === 2 && regionKeys[0] !== regionKeys[1], json(defs));
+  const vendorForm = await formSetup("VENDOR", boss.id);
+  const companyForm = await formSetup("COMPANY", boss.id);
+  ok(
+    "a vendor's form has the vendors' fields and not the companies'",
+    vendorForm.fields.some((f) => f.label === "MSME number") && !companyForm.fields.some((f) => f.label === "MSME number") && vendorForm.fields.length === 2,
+    json(vendorForm.fields.map((f) => f.label)),
+  );
+  const msmeKey = defs.find((d) => d.label === "MSME number")!.key;
+  const fielded = await company(seller, "Fielded Vendor", "VENDOR", { customFields: { [msmeKey]: "UDYAM-MH-01-0000001" } });
+  // By name: customFields is left out of a select-less read until every workspace has it.
+  const fieldedValues = (await db.company.findUnique({ where: { id: fielded.id }, select: { customFields: true } }))?.customFields as Record<string, unknown>;
+  ok("a vendor is created with its own field filled in", fieldedValues[msmeKey] === "UDYAM-MH-01-0000001", json(fieldedValues));
+  const companyRegion = defs.find((d) => d.entity === "COMPANY")!.key;
+  const refusedField = await as(seller, () => companies.updateCompanyCustomFields(fielded.id, { [companyRegion]: "West" }));
+  ok(
+    "  and a company field sent for it is no field of a vendor's",
+    !((await db.company.findUnique({ where: { id: fielded.id }, select: { customFields: true } }))?.customFields as Record<string, unknown>)[companyRegion],
+    refusedField.ok ? "saved nothing of it" : refusedField.error,
+  );
+
+  // ── Reminders that chime ────────────────────────────────────────────────────────────────────
+
+  section("18. A meeting about to start, and its chime");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const notifications = require("../src/actions/notification") as typeof import("../src/actions/notification");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const opened = new Date(Date.now() - 60_000).toISOString();
+  const soon = await db.calendarEvent.create({
+    data: { userId: seller.id, provider: "MICROSOFT", externalId: `${TAG}-soon`, title: `${TAG} Demo`, startsAt: new Date(Date.now() + 6 * 60_000), endsAt: new Date(Date.now() + 36 * 60_000), busy: true },
+    select: { id: true },
+  });
+  await db.calendarEvent.create({
+    data: { userId: seller.id, provider: "MICROSOFT", externalId: `${TAG}-later`, title: `${TAG} Later`, startsAt: new Date(Date.now() + 3 * 3600_000), endsAt: new Date(Date.now() + 4 * 3600_000), busy: true },
+  });
+  const pulse = await as(seller, () => notifications.notificationPulse(opened));
+  const raised = await db.notification.findMany({ where: { userId: seller.id, type: "MEETING_SOON" }, select: { title: true } });
+  ok("a meeting starting within ten minutes is a reminder; one in three hours isn't yet", raised.length === 1 && raised[0]!.title.includes(`${TAG} Demo`), json(raised));
+  ok("  and it chimes — sounds are on unless turned off", pulse.chime?.type === "MEETING_SOON", json(pulse));
+  const next = await as(seller, () => notifications.notificationPulse(new Date().toISOString()));
+  ok("  once: the next ask raises nothing new and stays quiet", next.chime === null && (await db.notification.count({ where: { userId: seller.id, type: "MEETING_SOON" } })) === 1);
+  await db.notification.deleteMany({ where: { userId: seller.id, type: "MEETING_SOON" } });
+  await db.calendarEvent.update({ where: { id: soon.id }, data: { startsAt: new Date(Date.now() + 8 * 60_000) } });
+  await as(seller, () => notifications.saveReminderSounds({ meetings: false }));
+  const quiet = await as(seller, () => notifications.notificationPulse(opened));
+  ok("moved, it is reminded again — but with meeting sounds off, it doesn't chime", (await db.notification.count({ where: { userId: seller.id, type: "MEETING_SOON" } })) === 1 && quiet.chime === null);
+  await as(seller, () => notifications.saveReminderSounds({ off: true, meetings: true }));
+  ok("every sound off is every sound off", json(await as(seller, () => notifications.getReminderSounds())) === json({ off: true }));
+  await as(seller, () => notifications.saveReminderSounds({}));
+
   // ── The screens, rendered ───────────────────────────────────────────────────────────────────
 
   section("14. The screens");
@@ -598,6 +775,49 @@ async function run(db: PrismaClient) {
   const { BankAccountsManager } = require("../src/components/banking/bank-accounts-manager") as typeof import("../src/components/banking/bank-accounts-manager");
   const { VendorCodesManager } = require("../src/components/settings/vendor-codes-manager") as typeof import("../src/components/settings/vendor-codes-manager");
   const { PayoutDetailsButton } = require("../src/components/companies/payout-details-button") as typeof import("../src/components/companies/payout-details-button");
+  const { ContactsList } = require("../src/components/companies/contacts-list") as typeof import("../src/components/companies/contacts-list");
+  const people = await db.contact.findMany({ where: { companyId: client.id }, orderBy: { createdAt: "asc" } });
+  const contactsHtml = renderToStaticMarkup(
+    createElement(ContactsList, { companyId: client.id, companyName: client.name, contacts: people, canMeet: true, left: { [kavya.id]: "8 Oct 2026" } }),
+  );
+  const [present, departed] = contactsHtml.split("Left the company (1)");
+  ok(
+    "the contacts list keeps those still there on top, each with its actions as icons",
+    !!departed && present!.includes(`${TAG} Vinay`) && present!.includes("HR") && present!.includes("WhatsApp ZZVB Vinay") && present!.includes("ZZVB Vinay has left"),
+  );
+  ok("  and the one who left below, with the day and a way back", !present!.includes(`${TAG} Kavya`) && departed!.includes(`${TAG} Kavya`) && departed!.includes("Left 8 Oct 2026") && departed!.includes("is back at"));
+  await as(seller, () => companies.setContactLeft(kavya.id, false));
+  const backHtml = renderToStaticMarkup(createElement(ContactsList, { companyId: client.id, companyName: client.name, contacts: people, canMeet: true }));
+  ok("a contact's LinkedIn is an icon of its own, opening in a new tab", backHtml.includes("ZZVB Kavya on LinkedIn") && backHtml.includes('href="https://linkedin.com/in/zzvb-kavya"') && backHtml.includes('referrerPolicy="no-referrer"'));
+  ok("  and the role reads as words", backHtml.includes("IT manager") && !backHtml.includes("IT_MANAGER") && !backHtml.includes("IT MANAGER"));
+  const { DesignationsManager } = require("../src/components/settings/designations-manager") as typeof import("../src/components/settings/designations-manager");
+  const { ReminderSoundsCard } = require("../src/components/notifications/reminder-sounds-card") as typeof import("../src/components/notifications/reminder-sounds-card");
+  const { ContactsTable } = require("../src/components/contacts/contacts-table") as typeof import("../src/components/contacts/contacts-table");
+  const designationsHtml = renderToStaticMarkup(createElement(DesignationsManager, { designations: await as(boss, () => designationActions.listDesignationsForSettings()) }));
+  ok(
+    "Settings › Lists: each designation renamable, with its type, its contacts, and merge",
+    designationsHtml.includes('value="Network Engineer"') && designationsHtml.includes("Type of Network Engineer") && designationsHtml.includes(`${await db.contact.count({ where: { designationId: engineerId } })} contacts`) && designationsHtml.includes("Merge Network Engineer into another designation"),
+  );
+  const soundsHtml = renderToStaticMarkup(createElement(ReminderSoundsCard, { sounds: { notes: false } }));
+  ok(
+    "Notifications › Preferences: sounds on, one kind off, and a way to hear it",
+    soundsHtml.includes("Play a sound when a reminder arrives") && soundsHtml.includes("A meeting is about to start") && soundsHtml.includes("Play the sound") && (soundsHtml.match(/checked=""/g) ?? []).length === 4,
+  );
+  const tableRows = await as(seller, () => contactActions.listAllContactsPaged({ page: 1, pageSize: 50, status: "all", search: TAG }));
+  const tableHtml = renderToStaticMarkup(createElement(ContactsTable, { contacts: tableRows.rows }));
+  ok(
+    "the Contacts page shows a designation's name, who has left, and LinkedIn as an icon",
+    tableHtml.includes("Head of Procurement") && tableHtml.includes(">Left<") && tableHtml.includes("ZZVB Anjali on LinkedIn"),
+  );
+  const stillThere = await as(seller, () => contactActions.listAllContactsPaged({ page: 1, pageSize: 50, search: TAG }));
+  ok("  and lists only those still there unless asked", !stillThere.rows.some((r) => r.leftAt) && tableRows.rows.some((r) => r.leftAt));
+  if (joinedThere.ok) {
+    const homePeople = await db.contact.findMany({ where: { companyId: newHome.id } });
+    const homeHtml = renderToStaticMarkup(
+      createElement(ContactsList, { companyId: newHome.id, companyName: newHome.name, contacts: homePeople, moves: await contactMovesOf(homePeople.map((p) => p.id)) }),
+    );
+    ok("a moved person's new record links to the company they were at before", homeHtml.includes(`Previously at ${client.name}`));
+  }
   /* eslint-enable @typescript-eslint/no-require-imports */
   const vendorList = await as(finance, () => companyBank.listCompanyBankAccounts(v1.id));
   const sellerList = await as(seller, () => companyBank.listCompanyBankAccounts(v1.id));

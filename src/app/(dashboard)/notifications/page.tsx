@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { NotificationType } from "@prisma/client";
-import { listNotifications, notificationPreferences } from "@/actions/notification";
+import { getReminderSounds, listNotifications, notificationPreferences } from "@/actions/notification";
+import { ReminderSoundsCard } from "@/components/notifications/reminder-sounds-card";
 import { notificationLabel } from "@/lib/notifications/catalogue";
 import { NotificationList } from "@/components/notifications/notification-list";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
@@ -41,11 +42,12 @@ export default async function NotificationsPage({
   const view = TABS.some((t) => t.key === params.view) ? (params.view as (typeof TABS)[number]["key"]) : "inbox";
 
   if (view === "preferences") {
-    const preferences = await notificationPreferences();
+    const [preferences, sounds] = await Promise.all([notificationPreferences(), getReminderSounds()]);
     return (
       <div>
         <Header view={view} unread={null} archived={null} />
-        <div className="mt-5">
+        <div className="mt-5 space-y-6">
+          <ReminderSoundsCard sounds={sounds} />
           {preferences.ok ? (
             <NotificationPreferences preferences={preferences.data} />
           ) : (

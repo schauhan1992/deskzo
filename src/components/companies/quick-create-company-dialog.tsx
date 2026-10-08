@@ -8,7 +8,6 @@ import {
   createCompanySchema,
   type CreateCompanyInput,
   companySourceValues,
-  contactDesignationValues,
 } from "@/lib/validation/company";
 import { companyFieldSetup, createCompany } from "@/actions/company";
 import { Dialog } from "@/components/ui/dialog";
@@ -25,6 +24,7 @@ import {
   type CustomFieldPerson,
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
+import { DesignationInput } from "@/components/contacts/designation-input";
 
 /** The workspace's required company fields — the only ones a quick create asks for. */
 type RequiredFields = { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
@@ -32,7 +32,7 @@ const NO_FIELDS: RequiredFields = { fields: [], values: {}, people: [] };
 
 type FormValues = z.input<typeof createCompanySchema>;
 
-const EMPTY_CONTACT = { name: "", designation: "OTHER" as (typeof contactDesignationValues)[number], email: "", phone: "" };
+const EMPTY_CONTACT = { name: "", designationName: "", email: "", phone: "" };
 type IndustryOption = { id: string; name: string };
 
 export type QuickCreatedCompany = {
@@ -140,7 +140,7 @@ export function QuickCreateCompanyDialog({
       ...values,
       customFields: custom,
       contacts: named
-        ? [{ name: named, designation: contact.designation, email: contact.email.trim(), phone: contact.phone.trim(), isPrimary: true }]
+        ? [{ name: named, designationName: contact.designationName, email: contact.email.trim(), phone: contact.phone.trim(), isPrimary: true }]
         : [],
     });
     if (!result.ok) {
@@ -236,13 +236,7 @@ export function QuickCreateCompanyDialog({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="qc-contact-designation">Designation</Label>
-                <Select id="qc-contact-designation" value={contact.designation} onChange={setContactField("designation")}>
-                  {contactDesignationValues.map((d) => (
-                    <option key={d} value={d}>
-                      {d.replaceAll("_", " ")}
-                    </option>
-                  ))}
-                </Select>
+                <DesignationInput id="qc-contact-designation" value={contact.designationName} onChange={setContactField("designationName")} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="qc-contact-email">Email</Label>

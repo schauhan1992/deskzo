@@ -25,6 +25,18 @@ export function keepsFocusOnAnchor(target: EventTarget | null): boolean {
 }
 
 /**
+ * Whether a mousedown landed in an open AnchoredPopover — its content, or its own scrollbar.
+ *
+ * The panel scrolls in this component's own box, so a press on the scrollbar has that box as its
+ * target, not anything the caller rendered inside. An outside-click check that asked only about the
+ * caller's content took dragging the scrollbar for a click elsewhere, and closed the panel the moment
+ * anybody tried to scroll it (owner, 8 Oct 2026, the Contacts page's Fields filter).
+ */
+export function insideAnchoredPopover(target: EventTarget | null): boolean {
+  return !!(target as { closest?: (selector: string) => unknown } | null)?.closest?.("[data-anchored-popover]");
+}
+
+/**
  * A dropdown panel that renders into `document.body` and positions itself against an anchor.
  *
  * An absolutely-positioned panel is clipped by the nearest scrolling ancestor, and a wide table
@@ -108,6 +120,7 @@ export function AnchoredPopover({
 
   return createPortal(
     <div
+      data-anchored-popover=""
       onMouseDown={(e) => {
         if (keepsFocusOnAnchor(e.target)) e.preventDefault();
       }}

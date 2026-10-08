@@ -104,6 +104,7 @@ function table(entity: CustomFieldEntityKey) {
   type Rows = { findMany(args: unknown): Promise<{ id: string; customFields: unknown }[]> };
   switch (entity) {
     case "COMPANY":
+    case "VENDOR":
       return db.company as unknown as Rows;
     case "CONTACT":
       return db.contact as unknown as Rows;
@@ -311,6 +312,7 @@ export async function saveCustomFields(
   const data = { customFields: prepared.values as Prisma.InputJsonValue };
   switch (entity) {
     case "COMPANY":
+    case "VENDOR":
       await db.company.update({ where: { id }, data, select: { id: true } });
       break;
     case "CONTACT":

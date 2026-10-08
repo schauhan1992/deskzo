@@ -66,6 +66,14 @@ export function isVendorRelationshipType(type: CompanyRelationshipType) {
 }
 
 /**
+ * Whose own fields a company takes (owner, 8 Oct 2026): a vendor's under Settings › Custom fields ›
+ * Vendors, every other company's — customers, resellers, commission parties — under Companies.
+ */
+export function companyFieldEntity(type: CompanyRelationshipType): "COMPANY" | "VENDOR" {
+  return isVendorRelationshipType(type) ? "VENDOR" : "COMPANY";
+}
+
+/**
  * The companies we pay that keep bank accounts on their record (src/actions/company-bank.ts): the
  * vendor family and resellers. Not a client (we never pay one), nor a commission party, whose payee
  * accounts are their own list (CommissionPartyAccount).
@@ -102,15 +110,47 @@ export const contactDesignationValues = [
   "OTHER",
 ] as const;
 
+/** As a person's role reads beside their name — "IT manager", not "IT_MANAGER". */
+export const contactDesignationLabels: Record<(typeof contactDesignationValues)[number], string> = {
+  IT_MANAGER: "IT manager",
+  PURCHASE_MANAGER: "Purchase manager",
+  IT_HEAD: "IT head",
+  DIRECTOR: "Director",
+  CEO: "CEO",
+  CIO: "CIO",
+  HR: "HR",
+  OTHER: "Other",
+};
+
+/**
+ * A contact's designation as it reads beside their name: its name from the workspace's list, else its
+ * type's label (a record made before the list, or by an import) — and nothing for "Other".
+ */
+export function contactRoleLabel(name: string | null | undefined, kind: (typeof contactDesignationValues)[number]): string | null {
+  if (name) return name;
+  return kind === "OTHER" ? null : contactDesignationLabels[kind];
+}
+
 export const contactInputSchema = z.object({
   name: z.string().trim().min(1, "Contact name is required"),
   designation: z.enum(contactDesignationValues).default("OTHER"),
+  /**
+   * The designation's name, from the workspace's list or new to it (src/lib/contacts/designations.ts).
+   * Sent by every contact form; blank clears it. Left out, only the type above is set.
+   */
+  designationName: z.string().max(80, "At most 80 characters").optional(),
   // Lowercased, as the contact importer stores it. Saved as typed, "PRIYA@EXAMPLE.COM" and
   // "priya@example.com" were two different contacts to every comparison and every duplicate check,
   // and an export re-imported as a change to a record nobody had touched.
   email: z.string().trim().toLowerCase().email("Invalid email").optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
-  linkedinUrl: z.string().trim().url("Invalid URL").optional().or(z.literal("")),
+  // "linkedin.com/in/priya" is how a profile is usually copied: taken as https.
+  linkedinUrl: z
+    .string()
+    .trim()
+    .transform((v) => (v && !/^https?:\/\//i.test(v) ? `https://${v}` : v))
+    .pipe(z.string().url("Enter a LinkedIn address, like linkedin.com/in/name").or(z.literal("")))
+    .optional(),
   isPrimary: z.boolean().default(false),
   /** Pre-selected when a document for this company is emailed — see src/actions/document-mail.ts. */
   receivesDocuments: z.boolean().default(false),
@@ -249,6 +289,8 @@ export const bulkUpdateCompaniesSchema = z.object({
 export const bulkUpdateContactsSchema = z.object({
   contactIds: z.array(z.string().min(1)).min(1, "Select at least one contact"),
   designation: z.enum(contactDesignationValues).optional().or(z.literal("")),
+  /** A designation from the workspace's list, or new to it (src/lib/contacts/designations.ts). */
+  designationName: z.string().max(80).optional(),
   /** Deleting is separate from editing, so a mis-click on a dropdown can't remove records. */
   action: z.enum(["update", "delete"]).default("update"),
 });

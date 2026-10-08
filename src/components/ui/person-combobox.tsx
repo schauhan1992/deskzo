@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
-import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import { AnchoredPopover, insideAnchoredPopover } from "@/components/ui/anchored-popover";
 import { useComboboxKeyboard } from "@/components/ui/use-combobox-keyboard";
 import { cn } from "@/lib/utils";
 
@@ -75,7 +75,7 @@ export function PersonCombobox({
     function onPointerDown(event: MouseEvent) {
       const target = event.target as HTMLElement;
       if (anchorRef.current?.contains(target)) return;
-      if (target.closest?.("[data-person-combobox-panel]")) return;
+      if (target.closest?.("[data-person-combobox-panel]") || insideAnchoredPopover(target)) return;
       setIsOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {

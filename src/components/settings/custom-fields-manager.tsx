@@ -164,6 +164,14 @@ export function CustomFieldsManager({ entities }: { entities: { entity: CustomFi
           );
         })}
       </div>
+      {/* Two tabs on one kind of record: say which companies each is for. */}
+      {(current.entity === "COMPANY" || current.entity === "VENDOR") && entities.some((e) => e.entity === "VENDOR") && (
+        <p className="text-xs text-subtle">
+          {current.entity === "COMPANY"
+            ? "Shown on customers, resellers and commission parties. Vendors have their own fields, under Vendors."
+            : "Shown on vendors, OEMs, distributors and partners — not on customers, whose fields are under Companies."}
+        </p>
+      )}
 
       {error && !draft && (
         <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">

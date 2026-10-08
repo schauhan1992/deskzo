@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { FormAttendance, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -728,6 +729,7 @@ export async function searchInvitees(formId: string, query: string) {
       AND: [
         await contactScope(user.id),
         { email: { not: null } },
+        STILL_THERE,
         {
           OR: [
             { name: { contains: q, mode: "insensitive" } },
@@ -766,7 +768,7 @@ async function invitable(formId: string, user: { id: string; role: string }, con
   if (!open.open) return { ok: false as const, error: `${open.message} Reopen it before inviting anybody.` };
 
   const allowed = await db.contact.findMany({
-    where: { AND: [await contactScope(user.id), { id: { in: contactIds.slice(0, 500) } }] },
+    where: { AND: [await contactScope(user.id), { id: { in: contactIds.slice(0, 500) } }, STILL_THERE] },
     select: { id: true },
   });
   return { ok: true as const, form: found.form, contactIds: allowed.map((c) => c.id) };

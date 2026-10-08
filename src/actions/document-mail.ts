@@ -4,6 +4,7 @@ import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import type { TradeDocumentType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { refuseWhileViewingAs, viewAsContext } from "@/lib/session";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
@@ -101,7 +102,8 @@ async function recipientsFor(companyId: string) {
   const [company, contacts] = await Promise.all([
     db.company.findUnique({ where: { id: companyId }, select: { managedByResellerId: true } }),
     db.contact.findMany({
-      where: { companyId },
+      // Not anybody who has left the company: an invoice to a former employee is a leak.
+      where: { companyId, ...STILL_THERE },
       orderBy: [{ receivesDocuments: "desc" }, { isPrimary: "desc" }, { name: "asc" }],
       select: { id: true, name: true, email: true, phone: true, designation: true, isPrimary: true, receivesDocuments: true, emailStatus: true, emailCheckedValue: true },
     }),

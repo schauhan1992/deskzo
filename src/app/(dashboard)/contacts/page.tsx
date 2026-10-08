@@ -2,6 +2,7 @@ import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
 import { listAllContactsPaged } from "@/actions/contact";
 import { listIndustries } from "@/actions/industry";
+import { listDesignationsForSettings } from "@/actions/designation";
 import { isModuleEnabled } from "@/actions/module";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -22,6 +23,7 @@ export default async function ContactsLibraryPage({
   searchParams: Promise<{
     q?: string;
     designation?: string;
+    status?: string;
     relationshipType?: string;
     industryId?: string;
     primaryOnly?: string;
@@ -38,18 +40,24 @@ export default async function ContactsLibraryPage({
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
   const customFilters = parseCustomFilters(params);
-  const [result, industries] = await Promise.all([
+  // A designation from the list by its id; a link from before the list names one of the eight types.
+  const byType = (contactDesignationValues as readonly string[]).includes(params.designation ?? "");
+  const status = params.status === "left" || params.status === "all" ? params.status : "current";
+  const [result, industries, designations] = await Promise.all([
     listAllContactsPaged({
       page,
       pageSize,
       search: params.q,
-      designation: params.designation as ContactDesignation | undefined,
+      designation: byType ? (params.designation as ContactDesignation) : undefined,
+      designationId: !byType && params.designation ? params.designation : undefined,
+      status,
       relationshipType: params.relationshipType as CompanyRelationshipType | undefined,
       industryId: params.industryId,
       primaryOnly: params.primaryOnly === "yes",
       customFilters,
     }),
     listIndustries(),
+    listDesignationsForSettings(),
   ]);
   const user = await requireUser();
   const [customColumns, fieldFilters] = await Promise.all([
@@ -62,7 +70,10 @@ export default async function ContactsLibraryPage({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Contacts", "contact")}</h1>
-          <p className="mt-1 text-sm text-muted">{result.total} contact(s) across every company</p>
+          <p className="mt-1 text-sm text-muted">
+            {result.total} contact(s) across every company
+            {status === "current" ? " — not counting those who have left" : status === "left" ? " who have left their company" : ""}
+          </p>
         </div>
       </div>
 
@@ -76,12 +87,22 @@ export default async function ContactsLibraryPage({
         <SelectParamFilter
           paramName="designation"
           label="Designation"
-          options={contactDesignationValues.map((d) => ({ value: d, label: d.replaceAll("_", " ") }))}
+          options={designations.map((d) => ({ value: d.id, label: d.name }))}
         />
         <SelectParamFilter
           paramName="industryId"
           label="Industry"
           options={industries.map((i) => ({ value: i.id, label: i.name }))}
+        />
+        {/* Those still at their company unless asked — src/lib/contacts/left.ts. */}
+        <SelectParamFilter
+          paramName="status"
+          label="Status"
+          allLabel="Still there"
+          options={[
+            { value: "left", label: "Left the company" },
+            { value: "all", label: "Everybody" },
+          ]}
         />
         <SelectParamFilter
           paramName="primaryOnly"

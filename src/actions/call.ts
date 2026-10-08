@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CallOutcome, CallDirection, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -219,7 +220,7 @@ export async function listCompanyNumbers(companyId: string) {
   if (!(await canSeeCompany(user.id, company.ownerUserId))) return [];
 
   const contacts = await db.contact.findMany({
-    where: { companyId, phone: { not: null } },
+    where: { companyId, phone: { not: null }, ...STILL_THERE },
     orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
     select: { id: true, name: true, designation: true, phone: true, email: true, isPrimary: true },
   });

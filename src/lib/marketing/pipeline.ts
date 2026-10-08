@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { MessageChannel, MessageClass, MarketingTopic, Prisma, TemplateFormat } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { decryptSecret } from "@/lib/crypto";
 import { getOrganisation } from "@/lib/organisation";
 import { closedDates } from "@/lib/hr/calendar";
@@ -118,7 +119,8 @@ export async function resolveRecipients(params: {
   if (!fromAudience && !fromList) return [];
 
   const contacts = await db.contact.findMany({
-    where: fromAudience && fromList ? { OR: [fromAudience, fromList] } : (fromAudience ?? fromList)!,
+    // Nobody who has left their company (src/lib/contacts/left.ts), from an audience or from a list.
+    where: { AND: [fromAudience && fromList ? { OR: [fromAudience, fromList] } : (fromAudience ?? fromList)!, STILL_THERE] },
     select: {
       id: true,
       name: true,

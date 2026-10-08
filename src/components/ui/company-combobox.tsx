@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CompanyRelationshipType } from "@prisma/client";
 import { Input } from "@/components/ui/input";
-import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import { AnchoredPopover, insideAnchoredPopover } from "@/components/ui/anchored-popover";
 import { useComboboxKeyboard, useComboboxSearch } from "@/components/ui/use-combobox-keyboard";
 import { cn } from "@/lib/utils";
 import { offersCreate } from "@/lib/company-name";
@@ -113,7 +113,7 @@ export function CompanyCombobox({
     function onPointerDown(event: MouseEvent) {
       const target = event.target as HTMLElement;
       if (anchorRef.current?.contains(target)) return;
-      if (target.closest?.("[data-company-combobox-panel]")) return;
+      if (target.closest?.("[data-company-combobox-panel]") || insideAnchoredPopover(target)) return;
       setIsOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {

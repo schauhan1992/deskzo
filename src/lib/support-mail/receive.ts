@@ -1,5 +1,6 @@
 import type { SupportEmailState } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { recordAudit } from "@/lib/audit";
 import { automationUserId } from "@/lib/automation-user";
 import { notifyUser } from "@/lib/notify";
@@ -136,7 +137,8 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
 
   // ── 4. A new ticket ─────────────────────────────────────────────────────────────────────────────
   const contacts = await db.contact.findMany({
-    where: { email: { equals: sender, mode: "insensitive" } },
+    // Somebody who has left is no longer who the company is: their mail waits, like a stranger's.
+    where: { email: { equals: sender, mode: "insensitive" }, ...STILL_THERE },
     select: { id: true, companyId: true },
     orderBy: { createdAt: "asc" },
   });

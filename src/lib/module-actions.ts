@@ -73,6 +73,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "data-import.ts": "core",
   "data-reset.ts": "core",
   "department.ts": "core",
+  // Contact designations: a list the contacts on every company pick from.
+  "designation.ts": "core",
   "dlp.ts": "core",
   "document-approval.ts": ["sales_documents", "purchase_documents"],
   "document-mail.ts": ["sales_documents", "purchase_documents"],

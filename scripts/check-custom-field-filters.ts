@@ -398,6 +398,8 @@ async function run(scratchUrl: string) {
     await define({ entity: "ITEM", label: "Warranty months", type: "NUMBER" });
     await define({ entity: "ITEM", label: "Grade", type: "SELECT", options: [{ label: "Gold" }, { label: "Silver" }] });
     await define({ entity: "CONTACT", label: "Alternate email", type: "EMAIL" });
+    // A vendor's own fields are the Vendors set (owner, 8 Oct 2026), not the companies' "Region".
+    await define({ entity: "VENDOR", label: "Supply region", type: "SELECT", options: [{ label: "North" }, { label: "South" }] });
     await define({ entity: "CONTACT", label: "Birthday", type: "DATE" });
     const keys = (await db.customFieldDefinition.findMany({ orderBy: [{ entity: "asc" }, { sortOrder: "asc" }], select: { entity: true, key: true } }))
       .map((d) => `${d.entity}:${d.key}`)
@@ -406,7 +408,7 @@ async function run(scratchUrl: string) {
       "fields on every record type, keyed from their labels",
       keys ===
         "COMPANY:region,COMPANY:focus_areas,COMPANY:vip,COMPANY:account_lead,COMPANY:notes,COMPANY:renewal_due,COMPANY:credit_limit,COMPANY:internal_rating,COMPANY:legacy_code," +
-          "CONTACT:alternate_email,CONTACT:birthday,LEAD:priority,LEAD:decision_date,ORDER:site_code,ORDER:installed,ITEM:batch_no,ITEM:warranty_months,ITEM:grade",
+          "CONTACT:alternate_email,CONTACT:birthday,LEAD:priority,LEAD:decision_date,ORDER:site_code,ORDER:installed,ITEM:batch_no,ITEM:warranty_months,ITEM:grade,VENDOR:supply_region",
       keys,
     );
 
@@ -467,9 +469,9 @@ async function run(scratchUrl: string) {
     const E = await company("Epsilon", { region: "east", notes: "500 off", renewal_due: "2026-02-28", vip: "true" });
     const clients = [A, B, C, D, E];
 
-    const V1 = await company("Vendor One", { region: "north" }, { relationshipType: "VENDOR", vendorStatus: "ONBOARDING" });
-    const V2 = await company("Vendor Two", { region: "south" }, { relationshipType: "VENDOR", vendorStatus: "ACTIVE" });
-    const V3 = await company("Vendor Three", { region: "south" }, { relationshipType: "VENDOR", vendorStatus: "ONBOARDING" });
+    const V1 = await company("Vendor One", { supply_region: "north" }, { relationshipType: "VENDOR", vendorStatus: "ONBOARDING" });
+    const V2 = await company("Vendor Two", { supply_region: "south" }, { relationshipType: "VENDOR", vendorStatus: "ACTIVE" });
+    const V3 = await company("Vendor Three", { supply_region: "south" }, { relationshipType: "VENDOR", vendorStatus: "ONBOARDING" });
     const P1 = await company("Agent One", { region: "north" }, { relationshipType: "COMMISSION_PARTY" });
     const P2 = await company("Agent Two", { region: "south" }, { relationshipType: "COMMISSION_PARTY" });
     const R1 = await company("Reseller One", { region: "north" }, { relationshipType: "RESELLER" });
@@ -591,10 +593,12 @@ async function run(scratchUrl: string) {
     const customerIds = fixtureOnly((await companies.listCustomersPaged({ page: 1, pageSize: 100, customFilters: cf({ region: { value: "north" } }) })).rows.map((r) => r.id), clients);
     ok("customers: the ones with orders, narrowed by a field", same(customerIds, [A]), customerIds.length);
     const vendors = [V1, V2, V3];
-    const vendorIds = fixtureOnly((await companies.listVendorsPaged({ page: 1, pageSize: 100, customFilters: cf({ region: { value: "north" } }) })).rows.map((r) => r.id), vendors);
-    ok("vendors narrowed by a field", same(vendorIds, [V1]), vendorIds.length);
+    const vendorIds = fixtureOnly((await companies.listVendorsPaged({ page: 1, pageSize: 100, customFilters: cf({ supply_region: { value: "north" } }) })).rows.map((r) => r.id), vendors);
+    ok("vendors narrowed by a field of their own", same(vendorIds, [V1]), vendorIds.length);
+    const byCompanyField = fixtureOnly((await companies.listVendorsPaged({ page: 1, pageSize: 100, customFilters: cf({ region: { value: "north" } }) })).rows.map((r) => r.id), vendors);
+    ok("  and a companies' field is no filter of theirs", same(byCompanyField, vendors), byCompanyField.length);
     const onboardingAll = await companies.countVendorsOnboarding({});
-    const onboardingSouth = await companies.countVendorsOnboarding({ customFilters: cf({ region: { value: "south" } }) });
+    const onboardingSouth = await companies.countVendorsOnboarding({ customFilters: cf({ supply_region: { value: "south" } }) });
     ok("  and the onboarding count is of the same filtered list", onboardingAll - onboardingSouth === 1, `${onboardingAll} → ${onboardingSouth}`);
     const agentIds = fixtureOnly(
       (await companies.listVendorsPaged({ page: 1, pageSize: 100, relationshipType: "COMMISSION_PARTY", customFilters: cf({ region: { value: "south" } }) })).rows.map((r) => r.id),
@@ -684,7 +688,7 @@ async function run(scratchUrl: string) {
     const customersTree = await page("customers")({ searchParams: Promise.resolve({ "cf.region": "north" }) });
     const customersTable = findElements(customersTree, CompaniesTable)[0]?.props as ComponentProps<typeof CompaniesTable> | undefined;
     ok("/customers: filtered", !!customersTable && same(fixtureOnly(customersTable.companies.map((c) => c.id), clients), [A]));
-    const vendorsTree = await page("vendors")({ searchParams: Promise.resolve({ "cf.region": "south" }) });
+    const vendorsTree = await page("vendors")({ searchParams: Promise.resolve({ "cf.supply_region": "south" }) });
     const vendorsTable = findElements(vendorsTree, CompaniesTable)[0]?.props as ComponentProps<typeof CompaniesTable> | undefined;
     ok("/vendors: filtered", !!vendorsTable && same(fixtureOnly(vendorsTable.companies.map((c) => c.id), vendors), [V2, V3]));
     const agentsTree = await page("commission-parties")({ searchParams: Promise.resolve({ "cf.region": "north" }) });

@@ -41,6 +41,11 @@ const RELATIONSHIP = {
   "commission-parties": "COMMISSION_PARTY",
 } as const;
 
+/** Whose own fields an area's rows carry: a vendor's on the vendors import, a company's on the rest. */
+function areaFields(area: string): "COMPANY" | "VENDOR" {
+  return area === "vendors" ? "VENDOR" : "COMPANY";
+}
+
 async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCompany>> {
   const r = new RowReader(row);
   const name = r.text("Name") || r.text("name");
@@ -87,7 +92,7 @@ export const companiesImporter: Importer = {
       include: { owner: { select: { name: true } }, industry: { select: { name: true } } },
     });
     // The workspace's own fields in this row, checked against what the company holds (sheets.ts).
-    const custom = ctx.custom ? await ctx.custom.merge(existing ? await valuesFor("COMPANY", existing.id) : {}, row) : null;
+    const custom = ctx.custom ? await ctx.custom.merge(existing ? await valuesFor(areaFields(ctx.area), existing.id) : {}, row) : null;
     if (custom && !custom.ok) return errorRow(line, c.name, custom.error);
 
     if (!existing) {
@@ -125,7 +130,7 @@ export const companiesImporter: Importer = {
       : null;
 
     const existing = await db.company.findUnique({ where: { normalizedName: c.normalizedName }, select: { id: true } });
-    const custom = ctx.custom ? await ctx.custom.merge(existing ? await valuesFor("COMPANY", existing.id) : {}, row) : null;
+    const custom = ctx.custom ? await ctx.custom.merge(existing ? await valuesFor(areaFields(ctx.area), existing.id) : {}, row) : null;
     if (custom && !custom.ok) throw new Error(custom.error);
 
     const data = {

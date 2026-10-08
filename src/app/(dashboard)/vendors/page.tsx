@@ -97,8 +97,8 @@ export default async function VendorsPage({
   // has none, so it asks for no values, but the picker still offers them — and the filter panel.
   const user = await requireUser();
   const [customColumns, fieldFilters] = await Promise.all([
-    listColumns("COMPANY", user.id, viewMode === "split" ? [] : result.rows.map((c) => c.id)),
-    customFilterSetup("COMPANY", user.id, vendorFilters.customFilters),
+    listColumns("VENDOR", user.id, viewMode === "split" ? [] : result.rows.map((c) => c.id)),
+    customFilterSetup("VENDOR", user.id, vendorFilters.customFilters),
   ]);
 
   return (

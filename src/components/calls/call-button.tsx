@@ -32,6 +32,7 @@ export function CallButton({
   size = "md",
   variant = "secondary",
   label,
+  className,
 }: {
   companyId: string;
   companyName: string;
@@ -50,6 +51,8 @@ export function CallButton({
   size?: "sm" | "md" | "icon";
   variant?: "primary" | "secondary" | "ghost" | "subtle";
   label?: string;
+  /** Sizing for a tight row — a contact's line, say. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -57,6 +60,7 @@ export function CallButton({
       <Button
         variant={variant}
         size={size}
+        className={className}
         onClick={() => setOpen(true)}
         title={`Call ${contact?.name ?? companyName}`}
         aria-label={`Log a call to ${contact?.name ?? companyName}`}

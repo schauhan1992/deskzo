@@ -23,7 +23,7 @@ import { listCompanyVisits } from "@/actions/visit";
 import { customerStatement } from "@/actions/receivable";
 import { expenseSummary } from "@/actions/expense";
 import { listCompanyPayments, companyPaymentSummary } from "@/actions/payment";
-import { holdsBankAccounts, isCustomerRelationshipType } from "@/lib/validation/company";
+import { companyFieldEntity, holdsBankAccounts, isCustomerRelationshipType } from "@/lib/validation/company";
 import { listCompanyBankAccounts } from "@/actions/company-bank";
 import { BankAccountsManager } from "@/components/banking/bank-accounts-manager";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
@@ -62,6 +62,9 @@ import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { workspaceClock } from "@/lib/time/workspace";
 import { ContactsList, type ContactCustomFields } from "@/components/companies/contacts-list";
+import { leftContactsOf } from "@/lib/contacts/left";
+import { designationNamesOf } from "@/lib/contacts/designations";
+import { contactMovesOf } from "@/lib/contacts/moves";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formatMany, formSetup, valuesFor, valuesOf } from "@/lib/custom-fields/server";
@@ -367,8 +370,18 @@ export async function CompanyDetail({
   const recentMail = activeTab === "emails" && mailSummary ? await listMailLog({ companyId: company.id, page: 1, pageSize: 50 }) : null;
   // The workspace's own fields (src/lib/custom-fields), on the tabs that show them. Whoever may open
   // the company may edit its fields, as with the company itself.
-  const companyFields = activeTab === "details" ? await companyCustomFields(company.id, userId) : null;
+  const companyFields = activeTab === "details" ? await companyCustomFields(company.id, userId, companyFieldEntity(company.relationshipType)) : null;
   const contactFields = activeTab === "contacts" && canSeeContacts ? await contactCustomFields(company.contacts, userId) : undefined;
+  // Who has left the company, and when — in the workspace's own calendar (src/lib/contacts/left.ts).
+  const contactsLeft =
+    activeTab === "contacts" && canSeeContacts
+      ? await Promise.all([leftContactsOf(company.id), workspaceClock()]).then(([left, clock]) =>
+          Object.fromEntries([...left].map(([id, at]) => [id, clock.date(at)])),
+        )
+      : {};
+  // Each contact's designation from the list, and where those who moved came from or went.
+  const contactIds = activeTab === "contacts" && canSeeContacts ? company.contacts.map((c) => c.id) : [];
+  const [contactRoles, contactMoves] = await Promise.all([designationNamesOf(contactIds), contactMovesOf(contactIds)]);
 
   // Renewals follow the subscription, so an end customer sees the expiries bought for them too.
   //
@@ -1184,7 +1197,15 @@ export async function CompanyDetail({
             <Card>
               <CardHeader className="text-sm font-medium text-text">Contacts</CardHeader>
               <CardContent>
-                <ContactsList companyId={company.id} companyName={company.name} contacts={company.contacts} customFields={contactFields} canMeet={calendarEnabled} />
+                <ContactsList
+                  companyId={company.id}
+                  companyName={company.name}
+                  contacts={company.contacts.map((c) => ({ ...c, designationName: contactRoles[c.id] ?? null }))}
+                  customFields={contactFields}
+                  canMeet={calendarEnabled}
+                  left={contactsLeft}
+                  moves={contactMoves}
+                />
               </CardContent>
             </Card>
           )}
@@ -1319,9 +1340,10 @@ async function CompanyPortalTab({
  * The company's own fields (src/lib/custom-fields) for its Details tab: in words for the card, and as
  * the Edit dialog starts with them.
  */
-async function companyCustomFields(companyId: string, userId: string) {
-  const values = await valuesFor("COMPANY", companyId);
-  const [shown, form] = await Promise.all([displayFields("COMPANY", userId, values), formSetup("COMPANY", userId, values)]);
+/** A vendor's own fields are the Vendors set; every other company's, the Companies set (owner, 8 Oct 2026). */
+async function companyCustomFields(companyId: string, userId: string, entity: "COMPANY" | "VENDOR") {
+  const values = await valuesFor(entity, companyId);
+  const [shown, form] = await Promise.all([displayFields(entity, userId, values), formSetup(entity, userId, values)]);
   return { shown, form };
 }
 

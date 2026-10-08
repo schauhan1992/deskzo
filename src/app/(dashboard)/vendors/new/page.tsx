@@ -14,7 +14,7 @@ export default async function NewVendorPage() {
   }
 
   const user = await requireUser();
-  const [industries, canAddContacts, customFields] = await Promise.all([listIndustries(), viewerHas("contacts.view"), formSetup("COMPANY", user.id)]);
+  const [industries, canAddContacts, customFields] = await Promise.all([listIndustries(), viewerHas("contacts.view"), formSetup("VENDOR", user.id)]);
 
   return (
     <div>

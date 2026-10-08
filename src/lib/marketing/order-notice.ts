@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { toPlain } from "@/lib/serialize";
 import { canSend, type RecipientState } from "@/lib/marketing/suppression";
 import { render } from "@/lib/marketing/merge";
@@ -104,7 +105,7 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
   const recipientCompanyId = product.companyId;
   const [contacts, settings, templates] = await Promise.all([
     db.contact.findMany({
-      where: { companyId: recipientCompanyId },
+      where: { companyId: recipientCompanyId, ...STILL_THERE },
       orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
       select: {
         id: true,

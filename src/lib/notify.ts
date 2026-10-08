@@ -68,6 +68,32 @@ export async function notifyUser(input: { userId: string; type: NotificationType
  * notifications — there's no background job runner in this app, so "on next fetch" stands in for
  * a cron. Idempotent via each candidate's `dedupeKey` + `createMany({ skipDuplicates: true })`.
  */
+/** How long before a meeting it is said to be about to start. */
+const MEETING_NOTICE_MS = 10 * 60 * 1000;
+
+/**
+ * A meeting in this person's calendar starting within ten minutes (owner, 8 Oct 2026) — as the bell
+ * asks, every 45 seconds while Deskzo is open. Once per start time: a meeting moved is reminded again.
+ * Their own calendar only, not all-day events, nothing cancelled.
+ */
+async function meetingCandidates(userId: string, now: Date, clock: Awaited<ReturnType<typeof workspaceClock>>) {
+  const soon = await db.calendarEvent
+    .findMany({
+      where: { userId, allDay: false, status: { not: "CANCELLED" }, startsAt: { gt: now, lte: new Date(now.getTime() + MEETING_NOTICE_MS) } },
+      select: { id: true, title: true, startsAt: true, location: true, joinUrl: true },
+      take: 10,
+    })
+    .catch(() => []);
+  return soon.map((m) => ({
+    userId,
+    type: "MEETING_SOON" as NotificationType,
+    title: `Starting at ${clock.time(m.startsAt)}: ${m.title}`,
+    message: m.joinUrl ? "Online — join from your calendar." : m.location,
+    link: "/calendar",
+    dedupeKey: `meeting-soon:${m.id}:${m.startsAt.toISOString()}`,
+  }));
+}
+
 export async function syncSystemNotifications(userId: string) {
   const now = new Date();
   /**
@@ -253,6 +279,7 @@ export async function syncSystemNotifications(userId: string) {
   }
 
   candidates.push(...(await peopleCandidates(userId, now, clock)));
+  candidates.push(...(await meetingCandidates(userId, now, clock)));
 
   if (candidates.length === 0) return;
 

@@ -3,6 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { hasLeft } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
@@ -359,6 +360,7 @@ export async function createPortalLogin(input: {
       select: { name: true, email: true },
     });
     if (!contact) return { ok: false, error: "That contact isn't at this company." };
+    if (await hasLeft(input.contactId)) return { ok: false, error: `${contact.name} has left this company — a portal link is for somebody still there.` };
     personName = contact.name;
     personEmail = contact.email;
   }

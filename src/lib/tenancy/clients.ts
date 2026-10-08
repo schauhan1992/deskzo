@@ -245,11 +245,13 @@ type BatchedRequest = { transaction?: { id?: string | number } };
  */
 const NOT_YET_EVERYWHERE = {
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
-  user: { deskzoUpdatesSeenAt: true },
+  user: { deskzoUpdatesSeenAt: true, reminderSounds: true },
   // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through
   // src/lib/custom-fields/server.ts, which treats a workspace without the column as having no values.
   company: { customFields: true },
-  contact: { customFields: true },
+  // and 20261029100000_contact_left, 20261029110000_designations_vendor_fields_reminders: read by name in
+  // src/lib/contacts/left.ts, designations.ts and moves.ts. user.reminderSounds: src/actions/reminder-sounds.ts.
+  contact: { customFields: true, leftAt: true, designationId: true, previousContactId: true },
   // 20261015100000_lead_pipeline. Read by name through src/lib/pipeline/server.ts and the lead actions.
   lead: { customFields: true, stageId: true, stageChangedAt: true },
   item: { customFields: true },

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { render } from "@/lib/marketing/merge";
 import { marketingSettings, mergeValuesFor, newToken, sendQueued } from "@/lib/marketing/pipeline";
 import type { RecipientState } from "@/lib/marketing/suppression";
@@ -33,7 +34,7 @@ export async function inviteCandidates(form: Pick<FormForInvites, "id" | "topic"
 
   const [contacts, settings, existing] = await Promise.all([
     db.contact.findMany({
-      where: { id: { in: contactIds } },
+      where: { id: { in: contactIds }, ...STILL_THERE },
       orderBy: [{ company: { name: "asc" } }, { name: "asc" }],
       select: {
         id: true,

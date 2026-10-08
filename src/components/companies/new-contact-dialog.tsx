@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { addContact, contactFieldSetup } from "@/actions/company";
-import { contactDesignationValues } from "@/lib/validation/company";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import {
   CustomFieldInputs,
   missingRequired,
@@ -13,9 +12,9 @@ import {
   type CustomFieldPerson,
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
+import { DesignationInput } from "@/components/contacts/designation-input";
 
-type Designation = (typeof contactDesignationValues)[number];
-const EMPTY = { name: "", designation: "OTHER" as Designation, email: "", phone: "" };
+const EMPTY = { name: "", designationName: "", email: "", phone: "" };
 
 type FieldSetup = { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
 const NO_FIELDS: FieldSetup = { fields: [], values: {}, people: [] };
@@ -105,7 +104,7 @@ export function NewContactDialog({
     setError(null);
     const result = await addContact(companyId, {
       name,
-      designation: form.designation,
+      designationName: form.designationName,
       email: form.email.trim(),
       phone: form.phone.trim(),
       isPrimary: false,
@@ -116,7 +115,7 @@ export function NewContactDialog({
       setError(result.error);
       return;
     }
-    onCreated({ id: result.data.id, name, designation: form.designation });
+    onCreated({ id: result.data.id, name, designation: form.designationName.trim() || "OTHER" });
   }
 
   return (
@@ -130,13 +129,7 @@ export function NewContactDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="nc-designation">Designation</Label>
-            <Select id="nc-designation" value={form.designation} onChange={set("designation")}>
-              {contactDesignationValues.map((d) => (
-                <option key={d} value={d}>
-                  {d.replaceAll("_", " ")}
-                </option>
-              ))}
-            </Select>
+            <DesignationInput id="nc-designation" value={form.designationName} onChange={set("designationName")} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="nc-email">Email</Label>

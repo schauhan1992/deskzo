@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -47,7 +48,7 @@ const NO_LINKS: MeetingLinks = { companyId: null, contactId: null, leadId: null,
 async function contactsOf(userId: string, company: CompanyBits) {
   if (isResellerManaged(company) || !(await can(userId, "contacts.view"))) return [];
   const rows = await db.contact.findMany({
-    where: { companyId: company.id, email: { not: null } },
+    where: { companyId: company.id, email: { not: null }, ...STILL_THERE },
     orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
     take: 50,
     select: { id: true, name: true, email: true },

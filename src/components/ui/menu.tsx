@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, type LucideIcon } from "lucide-react";
-import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import { AnchoredPopover, insideAnchoredPopover } from "@/components/ui/anchored-popover";
 
 /**
  * A "More" button with a dropdown of actions.
@@ -38,7 +38,7 @@ export function Menu({
       if (anchorRef.current?.contains(target)) return;
       // The panel is portalled to <body>, so it isn't inside the anchor — without this, mousedown
       // on an item would close the menu and the click would never reach the item's handler.
-      if (target?.closest?.("[data-menu-panel]")) return;
+      if (target?.closest?.("[data-menu-panel]") || insideAnchoredPopover(target)) return;
       setOpen(false);
     }
     function onKey(e: KeyboardEvent) {

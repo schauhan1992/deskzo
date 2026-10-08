@@ -32,7 +32,8 @@ import { usersImporter } from "./users";
 export const IMPORTERS: Record<string, Importer> = {
   companies: companiesImporter,
   customers: companiesImporter,
-  vendors: companiesImporter,
+  // Its own fields are a vendor's (src/lib/custom-fields), the rest is the companies import.
+  vendors: { ...companiesImporter, customEntity: "VENDOR" },
   resellers: companiesImporter,
   "commission-parties": companiesImporter,
   contacts: contactsImporter,

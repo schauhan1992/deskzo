@@ -14,12 +14,13 @@ import { formatCalendarDay } from "@/lib/time/zone";
  * that is retired keeps its values, unseen, until it is restored.
  */
 
-export const CUSTOM_FIELD_ENTITIES = ["COMPANY", "CONTACT", "LEAD", "ORDER", "ITEM"] as const;
+export const CUSTOM_FIELD_ENTITIES = ["COMPANY", "VENDOR", "CONTACT", "LEAD", "ORDER", "ITEM"] as const;
 export type CustomFieldEntityKey = (typeof CUSTOM_FIELD_ENTITIES)[number];
 
 /** What each record type is called where the fields are managed. */
 export const CUSTOM_FIELD_ENTITY_LABELS: Record<CustomFieldEntityKey, string> = {
   COMPANY: "Companies",
+  VENDOR: "Vendors",
   CONTACT: "Contacts",
   LEAD: "Leads",
   ORDER: "Orders",
@@ -30,8 +31,9 @@ export const CUSTOM_FIELD_ENTITY_LABELS: Record<CustomFieldEntityKey, string> = 
  * The module a record type belongs to — its fields are offered only where the module is. Companies,
  * contacts and leads are the core of every plan (src/lib/module-actions.ts "core"): null.
  */
-export const CUSTOM_FIELD_ENTITY_MODULES: Record<CustomFieldEntityKey, "orders" | "items" | null> = {
+export const CUSTOM_FIELD_ENTITY_MODULES: Record<CustomFieldEntityKey, "orders" | "items" | "vendors" | null> = {
   COMPANY: null,
+  VENDOR: "vendors",
   CONTACT: null,
   LEAD: null,
   ORDER: "orders",
