@@ -42,6 +42,12 @@ export type PermissionDefinition = {
   selfExcluded?: boolean;
   /** Drives the warning colour in the UI and whether granting it notifies the admins. */
   tier?: "standard" | "sensitive" | "critical";
+  /**
+   * Held by every role — built-in and custom alike — until it is unticked for one (owner, 8 Oct 2026):
+   * the sections. An admin unticking one writes an explicit deny; nothing else takes it away. Presets
+   * leave these alone.
+   */
+  everyone?: boolean;
 };
 
 export const PERMISSION_REGISTRY = [
@@ -1071,6 +1077,51 @@ export const PERMISSION_REGISTRY = [
     superAdminOnly: true,
     tier: "critical",
   },
+  // ─── Sections (owner, 8 Oct 2026) ──────────────────────────────────────────────────────────
+  // One per module, in the menu's order and named by its menu group: whether a role sees it in the menu
+  // and may open its pages. Every role holds them (`everyone`) until one is unticked for it — so nobody
+  // loses a section on the day these arrive. A menu group goes when every module in it is unticked.
+  { key: "section.companies", label: "Sales › Companies & Leads", description: "See Companies & Leads in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.wins", label: "Sales › Sales Wins", description: "See Sales Wins in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.forecast", label: "Sales › Forecasting", description: "See Forecasting in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.workspace", label: "Prospecting › Workspace", description: "See Workspace in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.domains", label: "Prospecting › Domain Intel", description: "See Domain Intel in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.calls", label: "Prospecting › Calls", description: "See Calls in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.salesDocuments", label: "Quotes & Invoices › Sales Documents", description: "See Sales Documents in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.items", label: "Catalog & Stock › Items & Inventory", description: "See Items & Inventory in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.orders", label: "Orders & Renewals › Orders", description: "See Orders in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.renewals", label: "Orders & Renewals › Renewals", description: "See Renewals in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.purchaseDocuments", label: "Purchase › Purchase Documents", description: "See Purchase Documents in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.payments", label: "Payments", description: "See Payments in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.receivables", label: "Payments › Receivables", description: "See Receivables in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.payables", label: "Payments › Payables", description: "See Payables in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.accounting", label: "Accounting", description: "See Accounting in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.revenueClose", label: "Accounting › Revenue & Close", description: "See Revenue & Close in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.customerPortal", label: "Support › Customer Portal", description: "See Customer Portal in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.feedback", label: "Support › Customer Feedback", description: "See Customer Feedback in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.helpdesk", label: "Support › Helpdesk / Tickets", description: "See Helpdesk / Tickets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.projects", label: "Delivery › Projects", description: "See Projects in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.visits", label: "Field & Expenses › Field Visits", description: "See Field Visits in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.expenses", label: "Field & Expenses › Expenses", description: "See Expenses in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.itAssets", label: "IT Assets", description: "See IT Assets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.contactsLibrary", label: "Directory › Contacts Library", description: "See Contacts Library in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.vendors", label: "Directory › Vendors", description: "See Vendors in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.resellers", label: "Directory › Resellers", description: "See Resellers in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.commissionParties", label: "Directory › Commission Parties", description: "See Commission Parties in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.marketing", label: "Marketing › Marketing Automation", description: "See Marketing Automation in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.forms", label: "Marketing › Forms & Events", description: "See Forms & Events in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.hr", label: "People › People (HR)", description: "See People (HR) in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.visitors", label: "People › Visitor Management", description: "See Visitor Management in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.engagement", label: "People › Speak Up & Forms", description: "See Speak Up & Forms in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.payroll", label: "People › Payroll", description: "See Payroll in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.notifications", label: "My work › Notifications", description: "See Notifications in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.tasks", label: "My work › Tasks", description: "See Tasks in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.calendar", label: "My work › Calendar", description: "See Calendar in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.notes", label: "My work › Sticky Notes", description: "See Sticky Notes in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.vault", label: "My work › Credential Vault", description: "See Credential Vault in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.targets", label: "Performance › Targets", description: "See Targets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.incentives", label: "Performance › Incentives", description: "See Incentives in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.reports", label: "Performance › Reports", description: "See Reports in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
 ] as const satisfies readonly PermissionDefinition[];
 
 /**
@@ -1099,6 +1150,26 @@ export function getPermissionDefinition(key: string): PermissionDefinition | und
   return BY_KEY.get(key);
 }
 
+/**
+ * Whether a role holds this with nothing written for it: every role for a section (`everyone`), the
+ * listed built-in roles for the rest. ADMIN is decided by the resolver, not here.
+ */
+export function heldByDefault(def: PermissionDefinition, role: string): boolean {
+  return def.everyone === true || (def.defaultRoles as readonly string[]).includes(role);
+}
+
+/** `heldByDefault` by key — false for a key that isn't one. */
+export function heldByDefaultKey(key: string, role: string): boolean {
+  const def = BY_KEY.get(key);
+  return def ? heldByDefault(def, role) : false;
+}
+
+/** The section permission of a module (src/lib/modules.ts) — whether a role sees it at all. */
+export function sectionPermission(moduleKey: string): string {
+  // noun.verb, as every key is: sales_documents → section.salesDocuments.
+  return `section.${moduleKey.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())}`;
+}
+
 export function isPermissionKey(key: string): key is PermissionKey {
   return BY_KEY.has(key);
 }
@@ -1107,6 +1178,7 @@ export const PERMISSION_KEYS = PERMISSION_REGISTRY.map((p) => p.key) as Permissi
 
 /** Section order in the permission screen; anything ungrouped is collected under "Other". */
 export const PERMISSION_GROUP_ORDER = [
+  "Sections",
   "Sales & customers",
   "Orders & fulfilment",
   "Finance",

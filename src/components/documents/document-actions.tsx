@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { DocumentMailButton } from "@/components/documents/document-mail-dialog";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/menu";
 import { Dialog } from "@/components/ui/dialog";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { CANCEL_REASON_MAX, CANCEL_REASON_MIN } from "@/lib/documents/cancel-reason";
 import {
   conversionTargets,
   documentListPath,
@@ -55,6 +56,9 @@ export function DocumentActions({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("1");
   const [cancelRemark, setCancelRemark] = useState("");
+  // Cancelling the document itself asks why (src/lib/documents/cancellation.ts).
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
 
   const isDraft = status === "DRAFT";
   const eligible = isEInvoiceEligible(docType);
@@ -165,6 +169,12 @@ export function DocumentActions({
                     disabled={pending}
                     onClick={() => {
                       close();
+                      if (s === "CANCELLED") {
+                        setVoidReason("");
+                        setError(null);
+                        setVoidOpen(true);
+                        return;
+                      }
                       run(() => setTradeDocumentStatus(id, s));
                     }}
                   >
@@ -212,6 +222,44 @@ export function DocumentActions({
 
       {error && <p className="text-sm text-danger">{error}</p>}
       {notice && <p className="text-sm text-success">{notice}</p>}
+
+      <Dialog open={voidOpen} onClose={() => setVoidOpen(false)} title={`Cancel this ${tradeDocumentLabels[docType].toLowerCase()}?`}>
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Say why — it&apos;s kept with the {tradeDocumentLabels[docType].toLowerCase()}, so anybody can see later why it
+            didn&apos;t go ahead.
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="voidReason">Reason for cancelling</Label>
+            <Textarea
+              id="voidReason"
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              rows={3}
+              maxLength={CANCEL_REASON_MAX}
+              placeholder="Customer chose another vendor on price"
+              autoFocus
+            />
+          </div>
+          {error && voidOpen && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button
+              variant="danger"
+              disabled={pending || voidReason.trim().length < CANCEL_REASON_MIN}
+              onClick={() => run(() => setTradeDocumentStatus(id, "CANCELLED", voidReason), () => setVoidOpen(false))}
+            >
+              {pending ? "Cancelling…" : `Cancel ${tradeDocumentLabels[docType].toLowerCase()}`}
+            </Button>
+            <Button variant="secondary" onClick={() => setVoidOpen(false)}>
+              Keep it
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog open={cancelOpen} onClose={() => setCancelOpen(false)} title="Cancel this e-invoice">
         <div className="space-y-4">

@@ -60,9 +60,9 @@ async function main() {
     const row = matrix[0];
     ok("it appears as a column in the permission matrix", row !== undefined && KEY in row.roles, Object.keys(row?.roles ?? {}).length + " columns");
     ok(
-      "  holding nothing to begin with",
-      matrix.every((r) => r.roles[KEY] === false),
-      "a role that arrives holding a guess is worse than one that arrives empty",
+      "  holding no permission to begin with — only every section, until one is unticked",
+      matrix.every((r) => r.roles[KEY] === r.key.startsWith("section.")),
+      "a role that arrives holding a guess is worse than one that arrives empty; seeing a section is no capability",
     );
 
     // ── It can be granted a permission like any other ────────────────────────────────────────────

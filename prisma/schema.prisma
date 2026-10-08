@@ -428,6 +428,11 @@ enum NotificationType {
    */
   DOCUMENT_APPROVAL_DECIDED
   /**
+   * A proforma on one of your deals was issued by somebody else — usually accounts — and is ready to
+   * send to the client (owner, 8 Oct 2026). Goes to the document's salesperson, by email too.
+   */
+  PROFORMA_ISSUED
+  /**
    * A client's promise to pay passed its date without the money. Goes to whoever logged the
    * follow-up and their reporting manager, once per promise.
    */
@@ -611,6 +616,7 @@ model User {
   resellerAgreementsApproved ResellerProfile[]        @relation("ResellerAgreementApprovedBy")
   tradeDocumentsCreated      TradeDocument[]          @relation("TradeDocumentCreatedBy")
   tradeDocumentsSold         TradeDocument[]          @relation("TradeDocumentSalesperson")
+  tradeDocumentsCancelled    TradeDocument[]          @relation("TradeDocumentCancelledBy")
   journalEntriesCreated      JournalEntry[]           @relation("JournalCreatedBy")
   ordersAccountsApproved     CompanyProduct[]         @relation("OrderAccountsApprovedBy")
   ordersPurchased            CompanyProduct[]         @relation("OrderPurchasedBy")
@@ -2194,6 +2200,15 @@ model TradeDocument {
   einvoiceError        String?
   einvoiceCancelledAt  DateTime?
   einvoiceCancelReason String?
+  /**
+   * Why it was cancelled, by whom and when (owner, 8 Oct 2026: "so that in future we can identify why a
+   * proposal was cancelled"). Required whenever a document is marked cancelled, by hand or with its
+   * e-invoice. Read by name — in NOT_YET_EVERYWHERE until every workspace has it.
+   */
+  cancelReason    String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledBy     User?     @relation("TradeDocumentCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
 
   createdById   String
   createdBy     User      @relation("TradeDocumentCreatedBy", fields: [createdById], references: [id])

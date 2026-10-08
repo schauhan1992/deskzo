@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { noPasswordYet } from "@/lib/no-password";
 import { AUTOMATION_EMAIL, AUTOMATION_NAME, isAutomationKind } from "@/lib/people";
-import { PERMISSIONS } from "@/lib/permissions";
+import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
 import { ADMIN_ROLE, SUPPORT_READONLY_ROLE } from "@/lib/roles";
 import { tenantKey } from "@/lib/tenancy/cache";
 
@@ -112,6 +112,6 @@ async function leastPrivilegedRole(client: UserClient): Promise<string> {
   const keys = roles.map((r) => r.key);
   const overrides = await client.rolePermission.findMany({ where: { role: { in: keys } }, select: { role: true, permission: true, allowed: true } });
   const override = new Map(overrides.map((o) => [`${o.role}:${o.permission}`, o.allowed]));
-  const held = (role: string) => PERMISSIONS.filter((p) => override.get(`${role}:${p.key}`) ?? (p.defaultRoles as readonly string[]).includes(role)).length;
+  const held = (role: string) => PERMISSIONS.filter((p) => override.get(`${role}:${p.key}`) ?? heldByDefault(p, role)).length;
   return keys.map((key) => ({ key, n: held(key) })).sort((a, b) => a.n - b.n || a.key.localeCompare(b.key))[0].key;
 }

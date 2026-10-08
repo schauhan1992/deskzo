@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
 import { roleExists, roleKeys } from "@/lib/authz/role-registry";
-import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey } from "@/lib/permissions";
+import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey, heldByDefault } from "@/lib/permissions";
 import { can, permissionsFor, explain, resolveUserPermissions, describeSource } from "@/lib/authz/resolve";
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
 import { actorContext, assertGrantWithinOwnAuthority, assertKeepsOwnAccessAdmin, AuthzError } from "@/lib/authz/guards";
@@ -98,7 +98,7 @@ export async function getPermissionMatrix() {
         role,
         overrides.get(`${role}:${perm.key}`) ??
           // Absent an override, an admin holds everything and everyone else holds their defaults.
-          (role === "ADMIN" ? true : (perm.defaultRoles as readonly Role[]).includes(role)),
+          (role === "ADMIN" ? true : heldByDefault(perm, role)),
       ]),
     ) as Record<Role, boolean>,
 
@@ -198,7 +198,7 @@ export async function resetRolePermission(role: Role, key: PermissionKey | strin
   try {
     await assertGrantWithinOwnAuthority(actor, key);
     const def = getPermissionDefinition(key);
-    const byDefault = role === "ADMIN" || ((def?.defaultRoles ?? []) as readonly Role[]).includes(role);
+    const byDefault = role === "ADMIN" || (def ? heldByDefault(def, role) : false);
     await assertKeepsOwnAccessAdmin(actor, role, key, byDefault);
   } catch (err) {
     if (err instanceof AuthzError) return { ok: false, error: err.message };

@@ -997,7 +997,7 @@ async function database() {
     // A document's posting carries no cost centre of its own; one is put on the lines so the reversal
     // has something to copy — "copied" must not pass because null equals null.
     if (posting) await db.journalLine.updateMany({ where: { entryId: posting.id }, data: { departmentId: department.id } });
-    const cancelled = await docs.setTradeDocumentStatus(invB2R.id, "CANCELLED");
+    const cancelled = await docs.setTradeDocumentStatus(invB2R.id, "CANCELLED", "Raised against the wrong branch");
     ok("the B2 invoice is cancelled", cancelled.ok, cancelled.ok ? "" : cancelled.error);
     const reversal = posting
       ? await db.journalEntry.findFirst({ where: { reversesId: posting.id }, include: { lines: { orderBy: { sortOrder: "asc" } } } })

@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { refuseWhileViewingAs, requireUser } from "@/lib/session";
 import { wouldCreateCycle } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
-import { PERMISSIONS } from "@/lib/permissions";
+import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
 import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, assertNotSelf, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
 import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
@@ -204,7 +204,7 @@ export async function createUser(
    * `assertGrantWithinOwnAuthority` applies one key at a time when granting directly.
    */
   if (!admin.isSuperAdmin) {
-    const wouldHold = PERMISSIONS.filter((def) => (def.defaultRoles as readonly string[]).includes(role));
+    const wouldHold = PERMISSIONS.filter((def) => heldByDefault(def, role));
     for (const def of wouldHold) {
       try {
         await assertGrantWithinOwnAuthority(admin, def.key);

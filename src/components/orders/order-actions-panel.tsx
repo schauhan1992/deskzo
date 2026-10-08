@@ -84,10 +84,13 @@ export function OrderActionsPanel({
   const [showPayments, setShowPayments] = useState(false);
 
   const [vendorId, setVendorId] = useState(order.vendorId ?? "");
-  const [purchasePrice, setPurchasePrice] = useState(order.purchasePrice ? String(order.purchasePrice) : "");
+  const [purchasePrice, setPurchasePrice] = useState(
+    order.purchasePrice ? String(order.purchasePrice) : purchase.quotePrice !== null ? String(purchase.quotePrice) : "",
+  );
   const [ourPoNumber, setOurPoNumber] = useState(order.ourPoNumber ?? "");
   const [increaseReason, setIncreaseReason] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [purchasingError, setPurchasingError] = useState<string | null>(null);
+  const [purchasingNotice, setPurchasingNotice] = useState<string | null>(null);
 
   // The price typed, against the salesperson's distributor price — said before saving, not after.
   const typedPrice = purchasePrice === "" ? null : Number(purchasePrice);
@@ -97,6 +100,21 @@ export function OrderActionsPanel({
       ? savingAmount(purchase.quotePrice, typedPrice, order.quantity)
       : null;
   const released = purchase.purchaseRelease === "RELEASED";
+  /**
+   * A price far from the distributor's — a tenth of it, or ten times — is more likely a slip (₹1 typed
+   * for ₹1,00,000, the order's total typed as a unit price) than a bargain. Said, not refused.
+   */
+  const farOff =
+    typedPrice !== null && Number.isFinite(typedPrice) && typedPrice > 0 && purchase.quotePrice !== null && purchase.quotePrice > 0
+      ? typedPrice < purchase.quotePrice / 10
+        ? "below"
+        : typedPrice > purchase.quotePrice * 10
+          ? "above"
+          : null
+      : null;
+  // Fulfilling goes by what was saved, so it waits until the vendor and price are.
+  const savedForPurchase = !!order.vendorId && order.purchasePrice !== null && order.purchasePrice !== undefined && order.purchasePrice !== "";
+  const vendorName = (id: string) => vendorOptions.find((v) => v.id === id)?.name ?? "the vendor";
 
   function handleApprove(approved: boolean, notes?: string) {
     setError(null);
@@ -112,28 +130,36 @@ export function OrderActionsPanel({
   }
 
   function handleProcess() {
-    setError(null);
-    setNotice(null);
+    setPurchasingError(null);
+    setPurchasingNotice(null);
+    if (!vendorId) return setPurchasingError("Pick the vendor first.");
+    if (purchasePrice === "") return setPurchasingError("Enter the purchase price per unit.");
     startTransition(async () => {
       const result = await processOrder({ orderId: order.id, vendorId, purchasePrice, ourPoNumber, increaseReason });
       if (!result.ok) {
-        setError(result.error);
+        setPurchasingError(result.error);
         return;
       }
       if (result.data.awaitingSales) {
-        setNotice("Sent to sales to accept the higher price. The order is processed once they do.");
+        setPurchasingNotice("Sent to sales to accept the higher price. The order is processed once they do.");
         setIncreaseReason("");
+      } else {
+        // Said, so a save is seen to have happened — before, the box just looked the same afterwards.
+        setPurchasingNotice(
+          `Saved — ${vendorName(vendorId)} at ${formatCurrency(Number(purchasePrice))} a unit${ourPoNumber.trim() ? `, our PO ${ourPoNumber.trim()}` : ""}. Mark it fulfilled once it's delivered.`,
+        );
       }
       router.refresh();
     });
   }
 
   function handleFulfill() {
-    setError(null);
+    setPurchasingError(null);
+    setPurchasingNotice(null);
     startTransition(async () => {
       const result = await fulfillOrder(order.id);
       if (!result.ok) {
-        setError(result.error);
+        setPurchasingError(result.error);
         return;
       }
       router.refresh();
@@ -163,7 +189,6 @@ export function OrderActionsPanel({
   return (
     <div className="space-y-4">
       {error && <p className="text-sm text-danger">{error}</p>}
-      {notice && <p className="text-sm text-info">{notice}</p>}
 
       {order.orderStatus === "PENDING_APPROVAL" && canApprove && (
         <div className="space-y-2 rounded-md border border-warning bg-warning-bg p-3">
@@ -241,7 +266,7 @@ export function OrderActionsPanel({
           {purchase.quotePrice !== null && (
             <p className="text-xs text-muted">
               {purchase.priceCeiling === null
-                ? `You entered the distributor price (${formatCurrency(purchase.quotePrice)}) yourself, so no saving is recorded against it.`
+                ? `You entered the distributor price (${formatCurrency(purchase.quotePrice)} a unit) yourself when the order was punched, so it isn't a limit for you, and no saving is recorded against it.`
                 : `Sales has a distributor price of ${formatCurrency(purchase.quotePrice)} a unit${
                     purchase.priceCeiling > purchase.quotePrice ? `, and accepted up to ${formatCurrency(purchase.priceCeiling)}` : ""
                   }.`}
@@ -285,6 +310,12 @@ export function OrderActionsPanel({
                   : `${formatCurrency(-saving)} above the distributor price, within what sales accepted.`}
             </p>
           )}
+          {farOff && !aboveCeiling && (
+            <p className="text-xs text-warning">
+              {formatCurrency(typedPrice ?? 0)} a unit is far {farOff} the distributor price of {formatCurrency(purchase.quotePrice ?? 0)} — check
+              it&apos;s the price for one unit.
+            </p>
+          )}
           {aboveCeiling && (
             <div className="space-y-1">
               <p className="text-xs text-warning">
@@ -313,19 +344,30 @@ export function OrderActionsPanel({
               type="button"
               variant="secondary"
               size="sm"
-              disabled={isPending || !order.vendorId || order.purchasePrice === null || purchase.pendingIncrease}
+              disabled={isPending || !savedForPurchase || purchase.pendingIncrease}
               onClick={handleFulfill}
-              title={
-                purchase.pendingIncrease
-                  ? "A higher price is waiting for sales"
-                  : !order.vendorId || order.purchasePrice === null
-                    ? "Save vendor and purchase price first"
-                    : undefined
-              }
             >
               Mark fulfilled
             </Button>
           </div>
+          {/* Why "Mark fulfilled" can't be pressed, in words rather than in a tooltip nobody sees. */}
+          {(purchase.pendingIncrease || !savedForPurchase) && (
+            <p className="text-xs text-subtle">
+              {purchase.pendingIncrease
+                ? "Mark fulfilled waits for sales to accept the higher price."
+                : "Save the vendor and purchase price first — then it can be marked fulfilled."}
+            </p>
+          )}
+          {purchasingError && (
+            <p role="alert" className="text-xs text-danger">
+              {purchasingError}
+            </p>
+          )}
+          {purchasingNotice && (
+            <p role="status" className="text-xs text-success">
+              {purchasingNotice}
+            </p>
+          )}
         </div>
       )}
 

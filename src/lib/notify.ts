@@ -49,10 +49,10 @@ export async function notifyUser(input: { userId: string; type: NotificationType
         link: input.link ?? null,
       },
     });
-    // Nothing sends yet — sendEmailNotification is still a stub — but the preference is honoured
-    // here so that connecting a transport does not also mean remembering this rule.
+    // Only the kinds that go by email are sent (src/lib/email.ts); each honours the person's preference.
+    // Awaited, so it goes before the request ends; it never throws.
     if (wants(input.type, "email", preference)) {
-      void sendEmailNotification({ userId: input.userId, subject: input.title, body: input.message ?? "" });
+      await sendEmailNotification({ userId: input.userId, type: input.type, subject: input.title, body: input.message ?? "", link: input.link });
     }
     return notification;
   } catch (err) {

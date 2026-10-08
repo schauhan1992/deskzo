@@ -114,7 +114,8 @@ ok(
 // original reason — they are granted to a person one at a time, never handed out by a profile.
 const presetCovered = new Set(ROLE_PRESETS.flatMap((p) => p.permissions as readonly string[]));
 const uncovered = PERMISSIONS.filter(
-  (p) => permissionGroup(p) !== "Administration" && p.superAdminOnly !== true && !presetCovered.has(p.key),
+  // Sections are held by every role until unticked, and no preset touches them (src/lib/permissions.ts).
+  (p) => permissionGroup(p) !== "Administration" && p.superAdminOnly !== true && p.everyone !== true && !presetCovered.has(p.key),
 ).map((p) => p.key);
 ok("Every non-admin permission appears in at least one preset", uncovered.length === 0, uncovered.join(", ") || "all covered");
 
@@ -134,9 +135,9 @@ eq("A preset applied to nothing grants its whole list", diffFromNothing.willGran
 eq("  and revokes nothing", diffFromNothing.willRevoke.length, 0);
 const allHeld = Object.fromEntries(PERMISSIONS.map((p) => [p.key, true]));
 eq(
-  "Applied over everything it revokes the rest",
+  "Applied over everything it revokes the rest — but never a section, which presets leave alone",
   presetDiff(exec, allHeld).willRevoke.length,
-  PERMISSIONS.length - exec.permissions.length,
+  PERMISSIONS.filter((p) => !p.everyone).length - exec.permissions.length,
   "a preset states what a role has, rather than only adding to it",
 );
 

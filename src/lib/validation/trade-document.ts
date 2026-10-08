@@ -284,4 +284,6 @@ export const bulkUpdateTradeDocumentsSchema = z.object({
   documentIds: z.array(z.string().min(1)).min(1, "Select at least one document"),
   action: z.enum(["issue", "status", "delete"]),
   status: z.enum(["ACCEPTED", "REJECTED", "PAID", "CANCELLED", "EXPIRED"]).optional().or(z.literal("")),
+  /** Why, when the status is CANCELLED — one reason for all of them (src/lib/documents/cancellation.ts). */
+  reason: z.string().max(1000).optional(),
 });

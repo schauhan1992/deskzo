@@ -1,6 +1,6 @@
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { getPermissionDefinition, type PermissionKey } from "@/lib/permissions";
+import { getPermissionDefinition, type PermissionKey, heldByDefault } from "@/lib/permissions";
 
 /**
  * What a *role* grants, with no user involved.
@@ -26,5 +26,5 @@ export async function rolePermits(role: Role, key: PermissionKey | string): Prom
    * fallback differs by role rather than by definition.
    */
   if (role === "ADMIN") return row?.allowed ?? true;
-  return row?.allowed ?? (def.defaultRoles as readonly Role[]).includes(role);
+  return row?.allowed ?? heldByDefault(def, role);
 }

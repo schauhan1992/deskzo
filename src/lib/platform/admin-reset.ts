@@ -14,6 +14,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
 import { tenantById } from "@/lib/tenancy/registry";
 import { runAsTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Staff sending a workspace's super admin a link to choose a new password (owner, 5 Oct 2026 —
@@ -56,7 +57,7 @@ export async function sendWorkspaceAdminReset(staff: Staff, tenantId: string, no
 
   const sent = await runAsTenant(tenant, async () => {
     const admin = await db.user.findFirst({
-      where: { isSuperAdmin: true, kind: "MEMBER" },
+      where: { isSuperAdmin: true, ...PEOPLE_ONLY },
       select: { id: true, name: true, email: true, role: true, active: true, isSuperAdmin: true },
     });
     if (!admin) throw new ConsoleRefused("This workspace has no super admin to send it to.");

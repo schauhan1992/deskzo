@@ -7,7 +7,8 @@ import type { TradeDocumentType } from "@prisma/client";
 import { bulkUpdateTradeDocuments } from "@/actions/trade-document";
 import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
+import { CANCEL_REASON_MAX, CANCEL_REASON_MIN } from "@/lib/documents/cancel-reason";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
@@ -102,12 +103,15 @@ export function DocumentRows({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+  // Cancelling asks why — one reason for all of them (src/lib/documents/cancellation.ts).
+  const [reason, setReason] = useState("");
+  const needsReason = status === "CANCELLED";
 
   function run(action: "issue" | "status" | "delete") {
     setError(null);
     setNotice(null);
     startTransition(async () => {
-      const result = await bulkUpdateTradeDocuments({ documentIds: selection.ids, action, status });
+      const result = await bulkUpdateTradeDocuments({ documentIds: selection.ids, action, status, ...(action === "status" && needsReason ? { reason } : {}) });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -118,6 +122,7 @@ export function DocumentRows({
           (skipped > 0 ? ` ${skipped} skipped — not in a state to change.` : ""),
       );
       setStatus("");
+      setReason("");
       selection.clear();
       router.refresh();
     });
@@ -143,7 +148,22 @@ export function DocumentRows({
             </option>
           ))}
         </Select>
-        <Button size="sm" variant="secondary" disabled={!status || isPending} onClick={() => run("status")}>
+        {needsReason && (
+          <Input
+            aria-label="Reason for cancelling"
+            placeholder="Reason for cancelling"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            maxLength={CANCEL_REASON_MAX}
+            className="h-9 w-64"
+          />
+        )}
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!status || isPending || (needsReason && reason.trim().length < CANCEL_REASON_MIN)}
+          onClick={() => run("status")}
+        >
           Apply status
         </Button>
         <Button

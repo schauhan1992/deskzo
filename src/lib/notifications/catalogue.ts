@@ -67,6 +67,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "ORDER_STATUS_CHANGED", label: "An order changes status", when: "An order you raised or watch is approved, processed or fulfilled.", group: "sales" },
   { type: "ORDER_WATCHER_ADDED", label: "I am added to an order", when: "Somebody adds you as a watcher.", group: "sales" },
   { type: "DOCUMENT_APPROVAL_REQUESTED", label: "A document needs my approval", when: "Somebody submits a quotation or invoice you are an approver for. Never for your own — nobody approves what they submitted.", group: "sales" },
+  { type: "PROFORMA_ISSUED", label: "A proforma on my deal is issued", when: "Somebody else — usually accounts — issues a proforma invoice you're the salesperson on, ready to send to the client. Emailed too.", group: "sales" },
   { type: "DOCUMENT_APPROVAL_DECIDED", label: "My document was approved or sent back", when: "An approver signs off something you submitted, or sends it back with a reason.", group: "sales" },
   { type: "RENEWAL_EXPIRING", label: "A renewal is coming up", when: "A subscription on your accounts enters its expiry window.", group: "sales" },
   { type: "VISIT_SCHEDULED", label: "A visit is scheduled", when: "A field visit is booked in your name.", group: "sales" },

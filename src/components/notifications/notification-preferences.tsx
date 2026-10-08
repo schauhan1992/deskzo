@@ -76,8 +76,8 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
             <span>
               Everything is on until you say otherwise, so a new kind of notification reaches you without your
               having to find it here.{" "}
-              <span className="font-medium text-text">Email is stored but not yet sent</span> — nothing in the app
-              sends mail for notifications, so that column is a choice waiting for a mail transport.
+              <span className="font-medium text-text">Email goes out for a proforma issued on your deal</span>; for
+              the rest, the email column is kept for when they&apos;re sent too.
             </span>
           </div>
           {muted > 0 && (

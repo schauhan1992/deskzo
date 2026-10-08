@@ -6,6 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Menu, X, ChevronRight, LayoutDashboard, BarChart3, Search, Settings as SettingsIcon, UserCog, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck, FileSpreadsheet, Headset } from "lucide-react";
 import { MODULE_REGISTRY, navGroupRank , navPermissionKeys } from "@/lib/modules";
+import { sectionPermission, type PermissionKey } from "@/lib/permissions";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { useWording } from "@/components/terms/wording-provider";
@@ -160,6 +161,8 @@ export function Sidebar({
     if (!enabledKeys.includes(mod.key)) continue;
     // A module this person may not see is not offered — the page would only tell them so.
     if (mod.viewPermission && !permissions.includes(mod.viewPermission)) continue;
+    // Nor a section unticked for their role (src/lib/permissions.ts, "Sections").
+    if (!permissions.includes(sectionPermission(mod.key) as PermissionKey)) continue;
     const list = groups.get(mod.navGroup) ?? [];
     list.push(mod);
     groups.set(mod.navGroup, list);

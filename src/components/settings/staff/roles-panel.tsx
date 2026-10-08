@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Columns3, Eye, MoreHorizontal, Pencil, Plus, ShieldCheck } from "lucide-react";
 import { deleteRole } from "@/actions/role";
+import { PERMISSIONS } from "@/lib/permissions";
+
+/** The sections (src/lib/permissions.ts `everyone`) — seen by every role until unticked. */
+const SECTION_KEYS = new Set(PERMISSIONS.filter((p) => p.everyone).map((p) => p.key));
 import { Badge, Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
@@ -100,9 +104,11 @@ export function RolesPanel({
           )}
 
           {roles.map((role) => {
-            const count = role.held.length;
+            // Capabilities counted; sections are seen by every role, so only those hidden are worth saying.
+            const count = role.held.filter((k) => !SECTION_KEYS.has(k)).length;
+            const hidden = SECTION_KEYS.size - role.held.filter((k) => SECTION_KEYS.has(k)).length;
             const deletable = mayManage && !role.isSystem && role.headcount === 0;
-            const summary = `${count} permission${count === 1 ? "" : "s"}`;
+            const summary = `${count} permission${count === 1 ? "" : "s"}${hidden > 0 ? ` · ${hidden} section${hidden === 1 ? "" : "s"} hidden` : ""}`;
             return (
               <li key={role.key} className="flex flex-wrap items-center gap-3 rounded-xl border border-line px-4 py-3">
                 <RoleShield />

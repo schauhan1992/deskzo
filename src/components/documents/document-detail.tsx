@@ -28,6 +28,7 @@ import { FollowUpPanel } from "@/components/collections/follow-up-panel";
 import { getBillSettlement } from "@/actions/payable";
 import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
 import { workspaceClock } from "@/lib/time/workspace";
+import { cancellationOf } from "@/lib/documents/cancellation";
 import { formatMoney, formatRate, isBaseCurrency, toBase } from "@/lib/currency";
 import { GST_STATE_CODES, amountInWords } from "@/lib/gst-engine";
 import { gstTreatmentLabels } from "@/lib/gst";
@@ -66,6 +67,8 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
     workspaceClock(),
   ]);
   if (!document) notFound();
+  // Why it was cancelled, by whom and when (src/lib/documents/cancellation.ts).
+  const cancellation = document.status === "CANCELLED" ? await cancellationOf(document.id) : null;
 
   /**
    * Which of the two GSTIN snapshots is ours. On a sale we are the seller; on a purchase we are the
@@ -193,6 +196,17 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
         </div>
       </div>
 
+      {cancellation && (
+        <div className="mt-4 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm">
+          <span className="font-medium text-text">
+            Cancelled
+            {cancellation.at ? ` on ${clock.date(cancellation.at)}` : ""}
+            {cancellation.by ? ` by ${cancellation.by}` : ""}
+          </span>
+          <span className="text-muted"> — {cancellation.reason ?? "no reason was recorded (cancelled before reasons were asked for)."}</span>
+        </div>
+      )}
+
       {/* Where the "What's next?" banner would be, and instead of it while sign-off is outstanding. */}
       {/* Approval is on for the type, but this one is under its limits — say so, once, and quietly. */}
       {approval?.enabled && !approval.required && document.status === "DRAFT" && (
@@ -303,8 +317,10 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
 
       <div className="mt-5 grid grid-cols-1 gap-5 @4xl:grid-cols-3">
         <div className="space-y-5 @4xl:col-span-2">
-          <Card className="@container p-0">
-            <table className="w-full text-sm">
+          {/* Kept within its card: a long item name wraps, and on a narrow screen the table scrolls rather than
+              running past the card's edge (owner, 8 Oct 2026). */}
+          <Card className="@container overflow-x-auto p-0">
+            <table className="w-full min-w-[34rem] text-sm">
               <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <th className="py-2.5 pl-4 pr-2">#</th>
@@ -321,7 +337,7 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
                 {document.lines.map((line, index) => (
                   <tr key={line.id} className="border-b border-line last:border-0">
                     <td className="py-2.5 pl-4 pr-2 align-top text-subtle">{index + 1}</td>
-                    <td className="px-2 py-2.5 align-top text-text">
+                    <td className="break-words px-2 py-2.5 align-top text-text [overflow-wrap:anywhere]">
                       {line.name}
                       {line.description && (
                         <div className="mt-0.5 whitespace-pre-line text-xs text-muted">{line.description}</div>

@@ -368,7 +368,8 @@ async function main() {
     const DIALOG = createdRole.data.key;
     const heldBy = async (role: string) => {
       const held: string[] = [];
-      for (const def of PERMISSIONS) if (await rolePermits(role, def.key)) held.push(def.key);
+      // Its permissions: the sections every role sees until unticked are no capability of its own.
+      for (const def of PERMISSIONS) if (!def.everyone && (await rolePermits(role, def.key))) held.push(def.key);
       return held.sort();
     };
     const same = (x: string[], y: string[]) => x.length === y.length && [...x].sort().every((k, i) => k === [...y].sort()[i]);
@@ -379,7 +380,7 @@ async function main() {
     ok("Save role writes the ticked boxes", savedFirst.ok && savedFirst.data.changed === 4, savedFirst.ok ? savedFirst.data : savedFirst.error);
     ok("  and the role then grants exactly those — the wider-reach box included", same(await heldBy(DIALOG), first), await heldBy(DIALOG));
     const matrix = await PERM.getPermissionMatrix();
-    ok("  which is what the dialog opens with next time", same(matrix.filter((p) => p.roles[DIALOG]).map((p) => p.key), first));
+    ok("  which is what the dialog opens with next time", same(matrix.filter((p) => p.roles[DIALOG] && !p.key.startsWith("section.")).map((p) => p.key), first));
 
     const second = ["leads.view", "visits.view", "contacts.view"];
     const diff = PERMISSIONS.filter((p) => first.includes(p.key) !== second.includes(p.key)).map((p) => ({ key: p.key, allowed: second.includes(p.key) }));
@@ -485,7 +486,7 @@ async function main() {
     ok("  and Save role in the footer", asAdmin.includes(">Save role<") && asAdmin.includes("sticky bottom-0"));
     const fresh = html(createElement(RoleDialog, { ...asAdminProps, role: null }));
     keep("role-dialog-new", fresh);
-    ok("New role opens empty", fresh.includes('aria-label="New role"') && fresh.includes("Permissions (0 selected)") && fresh.includes("A new role starts holding nothing."));
+    ok("New role opens empty", fresh.includes('aria-label="New role"') && fresh.includes("Permissions (0 selected)") && fresh.includes("A new role sees every section and holds no permission."));
     const adminRoleCard = { ...card, key: "ADMIN", name: "Admin", isSystem: true, held: PERMISSIONS.map((p) => p.key) };
     const adminByAdmin = html(createElement(RoleDialog, { ...asAdminProps, role: adminRoleCard }));
     ok("Admin's own role is locked for a non-super admin, who may still rename it", adminByAdmin.includes("Only a super admin can change what admins can do") && count(adminByAdmin, /<input type="checkbox"[^>]*disabled=""/g) === PERMISSIONS.length + groups.size && adminByAdmin.includes(">Save role<"));

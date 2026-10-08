@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type TradeDocumentType, type TradeDocumentStatus, type DocumentOrigin } from "@prisma/client";
 import { db } from "@/lib/db";
+import { notifyUser } from "@/lib/notify";
+import { cancelReasonOrRefusal } from "@/lib/documents/cancellation";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { can } from "@/lib/authz/resolve";
 import { canSeeCompany, companyScope, viaCompanyScope } from "@/lib/authz/company-scope";
@@ -750,6 +752,8 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
       total: true,
       docNumber: true,
       branchId: true,
+      salespersonId: true,
+      company: { select: { name: true } },
       againstDocument: { select: { branchId: true } },
       lines: { select: { id: true } },
     },
@@ -839,6 +843,18 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
     entityLabel: `Issued ${tradeDocumentLabels[existing.docType]} ${docNumber}`      + (posting ? ` · posted as ${posting.entryNumber}` : "")
       + (underLimits ? " · under the approval limits, so no sign-off was needed" : ""),
   });
+
+  // A proforma issued by somebody else — accounts, usually — is ready for its salesperson to send to the
+  // client (owner, 8 Oct 2026): told in the app and by email (src/lib/email.ts).
+  if (existing.docType === "PROFORMA" && existing.salespersonId && existing.salespersonId !== user.id) {
+    await notifyUser({
+      userId: existing.salespersonId,
+      type: "PROFORMA_ISSUED",
+      title: `PI ${docNumber} issued — ready to send to ${existing.company.name}`,
+      message: `${user.name} issued proforma invoice ${docNumber} for ${existing.company.name}. It's ready to be sent to the client.`,
+      link: `/documents/${id}`,
+    });
+  }
 
   let einvoiceError: string | undefined;
   if (withEInvoice && isEInvoiceEligible(existing.docType)) {
@@ -1069,6 +1085,10 @@ export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id:
         einvoiceCancelledAt: new Date(),
         einvoiceCancelReason: remark,
         status: "CANCELLED",
+        // The e-invoice's remark is why the document was cancelled, too.
+        cancelReason: remark,
+        cancelledAt: new Date(),
+        cancelledById: user.id,
       },
     });
     await reverseDocumentPosting(tx, id, user.id);
@@ -1245,7 +1265,11 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
   return { ok: true, data: { id: created.id } };
 }
 
-export async function setTradeDocumentStatus(id: string, status: TradeDocumentStatus): Promise<ActionResult<{ id: string }>> {
+/**
+ * A document's status by hand. Cancelling needs a reason (src/lib/documents/cancellation.ts), kept on the
+ * document with who and when; moving it on from cancelled clears them — the audit keeps the history.
+ */
+export async function setTradeDocumentStatus(id: string, status: TradeDocumentStatus, reason?: string): Promise<ActionResult<{ id: string }>> {
   const gate = await mayWrite("documents.void");
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
@@ -1262,9 +1286,17 @@ export async function setTradeDocumentStatus(id: string, status: TradeDocumentSt
   if (status === "CANCELLED" && document.einvoiceStatus === "GENERATED") {
     return { ok: false, error: "This invoice has an active IRN — cancel that with the portal first." };
   }
+  // Why, once nothing else stands in the way (src/lib/documents/cancellation.ts).
+  const why = status === "CANCELLED" ? cancelReasonOrRefusal(reason) : null;
+  if (why && !why.ok) return { ok: false, error: why.error };
 
+  const cancelled = why?.ok
+    ? { cancelReason: why.reason, cancelledAt: new Date(), cancelledById: user.id }
+    : document.status === "CANCELLED"
+      ? { cancelReason: null, cancelledAt: null, cancelledById: null }
+      : {};
   await db.$transaction(async (tx) => {
-    await tx.tradeDocument.update({ where: { id }, data: { status } });
+    await tx.tradeDocument.update({ where: { id }, data: { status, ...cancelled }, select: { id: true } });
     // A cancelled document is reversed rather than unposted: the original entry stays in the
     // journal and a dated reversal sits beside it, which is what an audit trail means.
     if (status === "CANCELLED") await reverseDocumentPosting(tx, id, user.id);
@@ -1276,7 +1308,7 @@ export async function setTradeDocumentStatus(id: string, status: TradeDocumentSt
     action: "UPDATE",
     entityType: "TradeDocument",
     entityId: id,
-    entityLabel: `${document.docNumber} → ${status.toLowerCase().replace(/_/g, " ")}`,
+    entityLabel: `${document.docNumber} → ${status.toLowerCase().replace(/_/g, " ")}${why?.ok ? `: ${why.reason}` : ""}`,
   });
   revalidateDocument(document.docType, id);
   return { ok: true, data: { id } };
@@ -1613,8 +1645,13 @@ export async function bulkUpdateTradeDocuments(input: unknown): Promise<ActionRe
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { documentIds, action, status } = parsed.data;
+  const { documentIds, action, status, reason } = parsed.data;
   if (action === "status" && !status) return { ok: false, error: "Pick a status to apply." };
+  // One reason for all of them, asked before any is touched.
+  if (action === "status" && status === "CANCELLED") {
+    const why = cancelReasonOrRefusal(reason);
+    if (!why.ok) return { ok: false, error: why.error };
+  }
 
   const org = await getOrganisation();
   let changed = 0;
@@ -1626,7 +1663,7 @@ export async function bulkUpdateTradeDocuments(input: unknown): Promise<ActionRe
         ? await issueTradeDocument({ id, generateEInvoice: org.einvoiceEnabled })
         : action === "delete"
           ? await deleteTradeDocument(id)
-          : await setTradeDocumentStatus(id, status as TradeDocumentStatus);
+          : await setTradeDocumentStatus(id, status as TradeDocumentStatus, reason);
     if (result.ok) changed += 1;
     else skipped += 1;
   }

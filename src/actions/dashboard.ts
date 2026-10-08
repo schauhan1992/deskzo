@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db, getTenantDb } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-import { isModuleEnabled, getModuleStates } from "@/actions/module";
+import { isModuleEnabled } from "@/actions/module";
 import { paymentsSnapshot } from "@/actions/payment";
 import { addDays } from "@/lib/date-range-presets";
 import { SLA_HOURS } from "@/lib/tickets";
@@ -549,10 +549,12 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
  */
 export async function getDashboardWidgetOptions(): Promise<DashboardWidgetDefinition[]> {
   const user = await requireUser();
-  const modules = await getModuleStates();
-  const enabledModuleKeys = new Set(modules.filter((m) => m.enabled).map((m) => m.key));
+  // A widget is offered for a module this person may open — on, its section not unticked for their role,
+  // its view permission held (owner, 8 Oct 2026) — not merely one switched on for the company.
+  const moduleKeys = [...new Set(DASHBOARD_WIDGET_REGISTRY.map((w) => w.moduleKey).filter((k): k is string => !!k))];
+  const open = new Set((await Promise.all(moduleKeys.map(async (k) => ((await isModuleEnabled(k)) ? k : null)))).filter(Boolean));
 
-  const withModule = DASHBOARD_WIDGET_REGISTRY.filter((w) => w.moduleKey === null || enabledModuleKeys.has(w.moduleKey));
+  const withModule = DASHBOARD_WIDGET_REGISTRY.filter((w) => w.moduleKey === null || open.has(w.moduleKey));
   const allowed = await Promise.all(withModule.map(async (w) => (w.permission ? can(user.id, w.permission) : true)));
   return withModule.filter((_, i) => allowed[i]);
 }

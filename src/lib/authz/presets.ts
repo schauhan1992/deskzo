@@ -408,6 +408,8 @@ export function presetDiff(
   let unchanged = 0;
 
   for (const def of PERMISSIONS) {
+    // Sections are a role's own choice, held by every role until unticked — no preset touches them.
+    if (def.everyone) continue;
     const shouldHave = wanted.has(def.key);
     const has = current[def.key] === true;
     if (shouldHave && !has) willGrant.push(def.key as PermissionKey);

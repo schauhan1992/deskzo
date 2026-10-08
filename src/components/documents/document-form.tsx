@@ -1011,7 +1011,8 @@ export function DocumentForm({
             <table className="w-full min-w-[980px] text-sm">
               <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <th className="px-3 py-2">Item details</th>
+                  {/* Wide enough for a service period's two dates side by side. */}
+                  <th className="min-w-[19rem] px-3 py-2">Item details</th>
                   <th className="w-24 px-3 py-2">HSN/SAC</th>
                   <th className="w-20 px-3 py-2 text-right">Quantity</th>
                   <th className="w-28 px-3 py-2 text-right">Rate</th>
@@ -1368,16 +1369,18 @@ function LineLinks({
       {periodShown &&
         (showPeriod ? (
           <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-subtle">Service period</span>
+            {/* The label above, the two dates side by side on one row: they share the column's width
+                rather than each taking a fixed 144px, which wrapped them onto two lines (owner, 8 Oct 2026). */}
+            <span className="block text-xs text-subtle">Service period</span>
+            <div className="flex items-center gap-1.5">
               <Input
                 type="date"
                 aria-label={`Service period from, line ${lineNumber}`}
                 value={line.servicePeriodFrom}
                 onChange={(e) => onPeriod({ servicePeriodFrom: e.target.value })}
-                className="h-8 w-36 text-xs"
+                className="h-8 min-w-0 flex-1 px-2 text-xs"
               />
-              <span className="text-xs text-subtle" aria-hidden="true">
+              <span className="shrink-0 text-xs text-subtle" aria-hidden="true">
                 –
               </span>
               <Input
@@ -1385,7 +1388,7 @@ function LineLinks({
                 aria-label={`Service period to, line ${lineNumber}`}
                 value={line.servicePeriodTo}
                 onChange={(e) => onPeriod({ servicePeriodTo: e.target.value })}
-                className="h-8 w-36 text-xs"
+                className="h-8 min-w-0 flex-1 px-2 text-xs"
               />
             </div>
             {problem ? (

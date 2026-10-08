@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { featureAvailable, moduleEntitled } from "@/lib/entitlements";
 import { getModuleDefinition, type CountryFeature } from "@/lib/modules";
+import { isPermissionKey, sectionPermission } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { currentTenant } from "@/lib/tenancy/resolve";
 
@@ -62,6 +63,9 @@ export async function moduleAccessFor(userId: string, key: string): Promise<Modu
   if (!(await isModuleEntitled(key))) return "not-entitled";
   if (!(await switchedOn(key))) return "switched-off";
   if (def.viewPermission && !(await can(userId, def.viewPermission))) return "no-permission";
+  // The section itself, untickable per role (owner, 8 Oct 2026): hidden from the menu, and its pages
+  // say there's no access — as for a missing view permission.
+  if (isPermissionKey(sectionPermission(key)) && !(await can(userId, sectionPermission(key)))) return "no-permission";
   return "available";
 }
 

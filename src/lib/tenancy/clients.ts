@@ -267,7 +267,8 @@ const NOT_YET_EVERYWHERE = {
   // src/lib/banking/organisation-accounts.ts, which fall back when the column is not there yet.
   organisationSettings: { vendorCodePrefix: true },
   branch: { defaultBankAccountId: true },
-  tradeDocument: { bankAccountId: true },
+  // and 20261029120000_document_cancel_reason_pi_issued: read by name in src/lib/documents/cancellation.ts.
+  tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

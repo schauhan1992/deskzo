@@ -2,7 +2,7 @@ import { cache } from "react";
 import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { getDownlineUserIds } from "@/lib/org-chart";
-import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
+import { getPermissionDefinition, PERMISSIONS, type PermissionKey, heldByDefault } from "@/lib/permissions";
 import type { Clock } from "@/lib/time/zone";
 
 /**
@@ -199,7 +199,7 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
       continue;
     }
 
-    if ((def.defaultRoles as readonly Role[]).includes(user.role)) {
+    if (heldByDefault(def, user.role)) {
       sources.set(def.key, { via: "roleDefault", role: user.role });
       continue;
     }
@@ -220,7 +220,7 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
     let inherited: PermissionSource | null = null;
     for (const report of reports) {
       const explicit = overrides.get(`${report.role}:${def.key}`);
-      const grants = explicit !== undefined ? explicit : (def.defaultRoles as readonly Role[]).includes(report.role);
+      const grants = explicit !== undefined ? explicit : heldByDefault(def, report.role);
       if (grants) {
         inherited = { via: "downline", role: report.role, through: report.through };
         break;

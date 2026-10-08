@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { Lock, Search } from "lucide-react";
 import { createRole, updateRole } from "@/actions/role";
 import { setRolePermissions } from "@/actions/permission";
-import { PERMISSION_GROUP_ORDER } from "@/lib/permissions";
+import { PERMISSION_GROUP_ORDER, PERMISSIONS } from "@/lib/permissions";
+
+/** The sections — held by every role until unticked for one. */
+const HELD_BY_EVERY_ROLE = PERMISSIONS.filter((p) => p.everyone).map((p) => p.key);
 import { moduleNote } from "@/lib/staff/permission-modules";
 import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -78,12 +81,13 @@ export function RoleDialog({
   const roleKey = role?.key ?? createdKey;
   const initialName = role?.name ?? "";
   const initialDescription = role?.description ?? "";
-  const [savedHeld, setSavedHeld] = useState<Set<string>>(() => new Set(role?.held ?? []));
+  // A new role sees every section (src/lib/permissions.ts `everyone`) and holds no other permission.
+  const [savedHeld, setSavedHeld] = useState<Set<string>>(() => new Set(role?.held ?? HELD_BY_EVERY_ROLE));
   const [savedDetails, setSavedDetails] = useState({ name: initialName, description: initialDescription });
 
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
-  const [ticked, setTicked] = useState<Set<string>>(() => new Set(role?.held ?? []));
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set(role?.held ?? HELD_BY_EVERY_ROLE));
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -178,7 +182,7 @@ export function RoleDialog({
         key = made.data.key;
         setCreatedKey(key);
         setSavedDetails({ name: name.trim(), description: description.trim() });
-        setSavedHeld(new Set());
+        setSavedHeld(new Set(HELD_BY_EVERY_ROLE));
       } else if (detailsDirty && !detailsLocked) {
         const renamed = await updateRole({ key, name, description });
         if (!renamed.ok) {
@@ -189,7 +193,8 @@ export function RoleDialog({
       }
 
       if (!permissionsLocked) {
-        const before = createdKey || !role ? new Set<string>() : savedHeld;
+        // What a role holds with nothing written for it: the sections, every one.
+        const before = createdKey || !role ? new Set<string>(HELD_BY_EVERY_ROLE) : savedHeld;
         const changes = catalogue
           .filter((entry) => ticked.has(entry.key) !== before.has(entry.key))
           .map((entry) => ({ key: entry.key, allowed: ticked.has(entry.key) }));
@@ -212,7 +217,8 @@ export function RoleDialog({
     : readOnly
       ? `Role: ${savedDetails.name || initialName}`
       : `Edit role: ${savedDetails.name || initialName}`;
-  const selectedCount = ticked.size;
+  // Permissions, not the sections every role sees (counted apart, in their own group).
+  const selectedCount = [...ticked].filter((k) => !HELD_BY_EVERY_ROLE.includes(k)).length;
 
   return (
     <Dialog open onClose={requestClose} title={title} large>
@@ -290,7 +296,10 @@ export function RoleDialog({
             </div>
           </div>
           {!roleKey && (
-            <p className="text-xs text-subtle">A new role starts holding nothing. Tick what it needs.</p>
+            <p className="text-xs text-subtle">
+              A new role sees every section and holds no permission. Untick the sections it shouldn&apos;t see, and tick what it
+              needs.
+            </p>
           )}
           {roleKey && !readOnly && (
             <p className="text-xs text-subtle">

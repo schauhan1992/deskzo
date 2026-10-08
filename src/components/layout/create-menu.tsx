@@ -22,6 +22,8 @@ import { MenuLabel, MenuSeparator } from "@/components/ui/menu";
 import { NoteDialog } from "@/components/notes/note-dialog";
 import { useWording } from "@/components/terms/wording-provider";
 import { slot, type TermKey } from "@/lib/terms/dictionary";
+import { getModuleDefinition } from "@/lib/modules";
+import { sectionPermission, type PermissionKey } from "@/lib/permissions";
 
 /**
  * The header's "Create" button: one place to start any of the records somebody makes several times
@@ -54,7 +56,7 @@ const SECTIONS: { group: string; entries: CreateEntry[] }[] = [
   {
     group: "Sales",
     entries: [
-      { label: "New lead", term: { key: "lead", template: "New {one:lower}" }, icon: Target, module: "companies", href: "/leads/new" },
+      { label: "New lead", term: { key: "lead", template: "New {one:lower}" }, icon: Target, module: "companies", permission: "leads.view", href: "/leads/new" },
       // One entry, not two. There is no separate "customer" record to create: /customers lists
       // CLIENT companies that have bought something (`customerListWhere` in src/actions/company.ts
       // filters on `products: { some: {} }`), and a company becomes one by ordering, not by being
@@ -127,14 +129,24 @@ export function CreateMenu({
     };
   }, [open]);
 
+  /**
+   * Only what this person may open (owner, 8 Oct 2026): the module on, its section not unticked for
+   * their role, its view permission held — as the sidebar decides — and the entry's own permission.
+   */
+  const mayOpen = (moduleKey: string) => {
+    const def = getModuleDefinition(moduleKey);
+    return (
+      enabledKeys.includes(moduleKey) &&
+      permissions.includes(sectionPermission(moduleKey) as PermissionKey) &&
+      (!def?.viewPermission || permissions.includes(def.viewPermission))
+    );
+  };
   const sections = SECTIONS.map(({ group, entries }) => ({
     group,
-    entries: entries.filter(
-      (e) => enabledKeys.includes(e.module) && (!e.permission || permissions.includes(e.permission)),
-    ),
+    entries: entries.filter((e) => mayOpen(e.module) && (!e.permission || permissions.includes(e.permission))),
   })).filter((section) => section.entries.length > 0);
 
-  const notesEnabled = enabledKeys.includes("notes");
+  const notesEnabled = mayOpen("notes");
 
   // Every module off and every permission missing leaves a button that opens an empty panel, which
   // reads as broken rather than as absent.

@@ -305,7 +305,7 @@ async function run(scratchName: string) {
   };
   const cancelDoc = async (doc: { id: string; docNumber: string }) => {
     as(sa);
-    const result = await docs.setTradeDocumentStatus(doc.id, "CANCELLED");
+    const result = await docs.setTradeDocumentStatus(doc.id, "CANCELLED", "Raised in error");
     if (!result.ok) throw new Error(`Cancelling ${doc.docNumber} failed: ${result.error}`);
   };
   const liveEntry = (documentId: string) =>

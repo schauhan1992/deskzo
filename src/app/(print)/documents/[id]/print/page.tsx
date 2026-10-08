@@ -169,7 +169,7 @@ export default async function PrintDocumentPage({
       : null;
 
   return (
-    <div className="relative mx-auto max-w-[820px] bg-white p-8 text-[13px] text-neutral-900 print:p-0">
+    <div className="relative mx-auto max-w-[820px] bg-white p-8 text-[13px] text-neutral-900 print:max-w-none print:p-0">
       {embed !== "1" && (
         <div className="mb-4 flex justify-end print:hidden">
           <PrintButton />
@@ -199,7 +199,8 @@ export default async function PrintDocumentPage({
         </div>
       )}
 
-      <div className="relative z-0 border border-neutral-300">
+      {/* Clips nothing in practice — every part keeps to the frame — but a long word never draws past its border. */}
+      <div className="relative z-0 overflow-hidden border border-neutral-300">
         <div className="flex items-start justify-between gap-6 border-b border-neutral-300 p-5">
           <div className="flex items-start gap-3">
             {logoDataUrl && (
@@ -281,31 +282,54 @@ export default async function PrintDocumentPage({
           </div>
         </div>
 
-        <table className="w-full">
-          <thead className="border-b border-neutral-300 bg-neutral-100 text-left text-[11px] uppercase tracking-wide text-neutral-600">
+        {/*
+          Fixed columns (owner, 8 Oct 2026): an automatic table grew past the bordered frame whenever its
+          amounts needed more room than the page had — on A4 in the PDF above all — and its borders no
+          longer met the frame's. The amounts keep their own widths on one line; the description takes what
+          is left and wraps.
+        */}
+        <table className="w-full table-fixed">
+          <colgroup>
+            <col className="w-7" />
+            <col />
+            <col className="w-16" />
+            <col className="w-12" />
+            <col className="w-[5.5rem]" />
+            <col className="w-[5.75rem]" />
+            {isIntraState ? (
+              <>
+                <col className="w-[4.75rem]" />
+                <col className="w-[4.75rem]" />
+              </>
+            ) : (
+              <col className="w-[5.25rem]" />
+            )}
+            <col className="w-24" />
+          </colgroup>
+          <thead className="border-b border-neutral-300 bg-neutral-100 text-left text-[10px] uppercase tracking-wide text-neutral-600">
             <tr>
-              <th className="px-3 py-2">#</th>
-              <th className="px-3 py-2">Description</th>
-              <th className="px-3 py-2">HSN/SAC</th>
-              <th className="px-3 py-2 text-right">Qty</th>
-              <th className="px-3 py-2 text-right">Rate</th>
-              <th className="px-3 py-2 text-right">Taxable</th>
+              <th className="px-2 py-2">#</th>
+              <th className="px-2 py-2">Description</th>
+              <th className="px-2 py-2">HSN/SAC</th>
+              <th className="px-2 py-2 text-right">Qty</th>
+              <th className="px-2 py-2 text-right">Rate</th>
+              <th className="px-2 py-2 text-right">Taxable</th>
               {isIntraState ? (
                 <>
-                  <th className="px-3 py-2 text-right">CGST</th>
-                  <th className="px-3 py-2 text-right">SGST</th>
+                  <th className="px-2 py-2 text-right">CGST</th>
+                  <th className="px-2 py-2 text-right">SGST</th>
                 </>
               ) : (
-                <th className="px-3 py-2 text-right">IGST</th>
+                <th className="px-2 py-2 text-right">IGST</th>
               )}
-              <th className="px-3 py-2 text-right">Amount</th>
+              <th className="px-2 py-2 text-right">Amount</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="text-[12px]">
             {document.lines.map((line, index) => (
-              <tr key={line.id} className="border-b border-neutral-200">
-                <td className="px-3 py-2 text-neutral-500">{index + 1}</td>
-                <td className="px-3 py-2">
+              <tr key={line.id} className="border-b border-neutral-200 align-top">
+                <td className="px-2 py-2 text-neutral-500">{index + 1}</td>
+                <td className="break-words px-2 py-2">
                   {line.name}
                   {line.description && (
                     <div className="mt-0.5 whitespace-pre-line text-[11px] text-neutral-600">{line.description}</div>
@@ -320,13 +344,13 @@ export default async function PrintDocumentPage({
                       </div>
                     )}
                 </td>
-                <td className="px-3 py-2 font-mono text-[11px]">{line.hsnCode ?? "—"}</td>
-                <td className="px-3 py-2 text-right">
+                <td className="break-all px-2 py-2 font-mono text-[10px]">{line.hsnCode ?? "—"}</td>
+                <td className="break-words px-2 py-2 text-right">
                   {line.quantity}
                   {line.unit ? ` ${line.unit}` : ""}
                 </td>
-                <td className="px-3 py-2 text-right">{money(line.unitPrice)}</td>
-                <td className="px-3 py-2 text-right">
+                <td className="whitespace-nowrap px-2 py-2 text-right text-[11px]">{money(line.unitPrice)}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right text-[11px]">
                   {money(line.taxableValue)}
                   {line.discountAmount > 0 && (
                     <div className="text-[10px] text-neutral-500">less {money(line.discountAmount)}</div>
@@ -334,22 +358,22 @@ export default async function PrintDocumentPage({
                 </td>
                 {isIntraState ? (
                   <>
-                    <td className="px-3 py-2 text-right">
+                    <td className="whitespace-nowrap px-2 py-2 text-right text-[11px]">
                       {money(line.cgstAmount)}
                       <div className="text-[10px] text-neutral-500">{line.taxRatePercent / 2}%</div>
                     </td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="whitespace-nowrap px-2 py-2 text-right text-[11px]">
                       {money(line.sgstAmount)}
                       <div className="text-[10px] text-neutral-500">{line.taxRatePercent / 2}%</div>
                     </td>
                   </>
                 ) : (
-                  <td className="px-3 py-2 text-right">
+                  <td className="whitespace-nowrap px-2 py-2 text-right text-[11px]">
                     {money(line.igstAmount)}
                     <div className="text-[10px] text-neutral-500">{line.taxRatePercent}%</div>
                   </td>
                 )}
-                <td className="px-3 py-2 text-right font-medium">{money(line.lineTotal)}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right text-[11px] font-medium">{money(line.lineTotal)}</td>
               </tr>
             ))}
           </tbody>

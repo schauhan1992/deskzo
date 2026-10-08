@@ -1,6 +1,6 @@
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { PERMISSIONS } from "@/lib/permissions";
+import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
 import type { PermissionSource } from "@/lib/authz/resolve";
 
 /**
@@ -143,7 +143,7 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
         continue;
       }
 
-      if ((def.defaultRoles as readonly Role[]).includes(user.role)) {
+      if (heldByDefault(def, user.role)) {
         sources.set(def.key, { via: "roleDefault", role: user.role });
         continue;
       }
@@ -158,7 +158,7 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
       let inherited: PermissionSource | null = null;
       for (const report of reports) {
         const explicit = roleOverride.get(`${report.role}:${def.key}`);
-        const grantsIt = explicit !== undefined ? explicit : (def.defaultRoles as readonly Role[]).includes(report.role);
+        const grantsIt = explicit !== undefined ? explicit : heldByDefault(def, report.role);
         if (grantsIt) {
           inherited = { via: "downline", role: report.role, through: report.through };
           break;

@@ -20,7 +20,7 @@ import "dotenv/config";
 import Module from "node:module";
 import { createElement, type ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { PERMISSION_REGISTRY } from "../src/lib/permissions";
+import { PERMISSION_REGISTRY, PERMISSIONS } from "../src/lib/permissions";
 import { ROLE_PRESETS } from "../src/lib/authz/presets";
 import { MODULE_REGISTRY, getModuleDefinition } from "../src/lib/modules";
 import { DEFAULT_BRANDING } from "../src/lib/branding";
@@ -335,8 +335,11 @@ async function main() {
       ).includes(`href="${link}"`);
     };
     const links = ["/orders", "/payments", "/projects", "/calls", "/visits", "/tickets", "/leads", "/contacts", "/verifications"];
-    const missing = links.filter((l) => !offers(l, [...VIEWS]));
-    const shown = links.filter((l) => offers(l, []));
+    // Everybody holds every section until it's unticked for their role (src/lib/permissions.ts): the
+    // view permissions are what's under test here.
+    const SECTIONS = PERMISSIONS.filter((p) => p.everyone).map((p) => p.key);
+    const missing = links.filter((l) => !offers(l, [...VIEWS, ...SECTIONS]));
+    const shown = links.filter((l) => offers(l, SECTIONS));
     ok("the sidebar offers the modules to someone who has them", missing.length === 0, missing.join(", "));
     ok("  and not to someone who doesn't", shown.length === 0, shown.join(", "));
 

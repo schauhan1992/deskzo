@@ -16,7 +16,7 @@ import {
   OWN_ACCESS_KEYS,
 } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
-import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
+import { getPermissionDefinition, PERMISSIONS, type PermissionKey, heldByDefault, heldByDefaultKey } from "@/lib/permissions";
 import { getPreset, presetDiff } from "@/lib/authz/presets";
 import { workspaceClock } from "@/lib/time/workspace";
 
@@ -234,7 +234,7 @@ export async function previewPreset(presetKey: string) {
   const overrides = new Map(rows.map((r) => [r.permission, r.allowed]));
   const current: Record<string, boolean> = {};
   for (const def of PERMISSIONS) {
-    current[def.key] = overrides.get(def.key) ?? (def.defaultRoles as readonly Role[]).includes(preset.role);
+    current[def.key] = overrides.get(def.key) ?? heldByDefault(def, preset.role);
   }
 
   return { preset, ...presetDiff(preset, current) };
@@ -276,7 +276,7 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
   try {
     for (const key of OWN_ACCESS_KEYS) {
       const byDefault =
-        preset.role === "ADMIN" || ((getPermissionDefinition(key)?.defaultRoles ?? []) as readonly Role[]).includes(preset.role);
+        preset.role === "ADMIN" || heldByDefaultKey(key, preset.role);
       await assertKeepsOwnAccessAdmin(actor, preset.role, key, wanted.has(key) || byDefault);
     }
   } catch (err) {
@@ -300,6 +300,8 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
    */
   await db.$transaction(async (tx) => {
     for (const def of PERMISSIONS) {
+      // Which sections the role sees is left as it is (src/lib/permissions.ts `everyone`).
+      if (def.everyone) continue;
       const shouldHave = wanted.has(def.key);
       const was = await rolePermits(preset.role, def.key);
       if (was !== shouldHave) {

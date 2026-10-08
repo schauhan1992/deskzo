@@ -607,7 +607,7 @@ async function main() {
       ok("  and the credit taken off, INVOICED again", !!removed?.ok && uncreditedStage.status === "INVOICED", uncreditedStage.status);
     }
 
-    const cancelled = await td.setTradeDocumentStatus(raised.data.id, "CANCELLED");
+    const cancelled = await td.setTradeDocumentStatus(raised.data.id, "CANCELLED", "Raised in error");
     ok("the invoice is cancelled", cancelled.ok, cancelled.ok ? "" : cancelled.error);
     const released = await db.projectBillingMilestone.findUniqueOrThrow({ where: { id: stage.id }, select: { status: true, documentId: true } });
     ok("  and its stage is released: DUE, with no document", released.status === "DUE" && released.documentId === null, `${released.status} / ${released.documentId}`);

@@ -211,7 +211,8 @@ export const DASHBOARD_WIDGET_REGISTRY: DashboardWidgetDefinition[] = [
     key: "companies",
     label: "Companies",
     description: "The sourcing pool — prospects, leads, and won deals still awaiting their first order.",
-    moduleKey: null,
+    // The Companies section's: hidden with it when a role's "Companies & Leads" section is unticked.
+    moduleKey: "companies",
     scope: "company",
     roles: ["ADMIN", "MANAGEMENT", "PROFILE", "CALLING", "SALES"],
     size: "stat",
@@ -220,7 +221,7 @@ export const DASHBOARD_WIDGET_REGISTRY: DashboardWidgetDefinition[] = [
     key: "customers",
     label: "Customers",
     description: "Companies that have actually purchased something.",
-    moduleKey: null,
+    moduleKey: "companies",
     scope: "company",
     roles: ["ADMIN", "MANAGEMENT", "SALES", "ACCOUNTS", "SUPPORT"],
     size: "stat",
