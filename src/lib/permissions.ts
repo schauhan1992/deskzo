@@ -380,7 +380,9 @@ export const PERMISSION_REGISTRY = [
     label: "Manage IT assets",
     description:
       "Add and edit assets, assign them to people, record movements, and run consignments — for our own estate and for clients we manage. Includes seeing licence keys.",
-    defaultRoles: ["SUPPORT", "PURCHASE"],
+    // Not Support's by default since 9 Oct 2026 (owner): the licence keys make it the support lead's,
+    // given by the "Support lead" preset or a tick on Staff & roles.
+    defaultRoles: ["PURCHASE"],
   },
   {
     key: "assets.viewAll",
@@ -779,8 +781,10 @@ export const PERMISSION_REGISTRY = [
   // follows the permission with no second check to forget. Contacts and leads are part of the core
   // Companies module, so they are checked where they are read.
   //
-  // Every role holds all nine by default, so nobody lost anything when they arrived; restricting a
-  // role is unticking a box in Users & access.
+  // Every role held all nine by default, so nobody lost anything when they arrived; restricting a
+  // role is unticking a box in Users & access. Since 9 Oct 2026 (owner) the profiler and the calling
+  // agent hold neither payments nor quotes & invoices by default: they build and call the records, and
+  // never needed the money.
   {
     key: "contacts.view",
     label: "View contacts",
@@ -813,7 +817,7 @@ export const PERMISSION_REGISTRY = [
     key: "payments.view",
     label: "View payments",
     description: "Money in and owed — the Payments, Receivables and Payables modules, and a customer's Payments and Statement tabs with the billed and outstanding figures.",
-    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    defaultRoles: ["SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
     group: "Finance",
   },
   {
@@ -842,7 +846,7 @@ export const PERMISSION_REGISTRY = [
     key: "documents.view",
     label: "View quotes & invoices",
     description: "Proposals, proformas, invoices and purchase documents — their modules, and a customer's Documents tab.",
-    defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
+    defaultRoles: ["SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
     group: "Finance",
   },
   {

@@ -222,7 +222,9 @@ async function main() {
           email: `${name}${MAIL}`,
           role: "PROFILE",
           passwordHash: "x".repeat(60),
-          permissionGrants: { create: Object.entries(grants).map(([permission, allowed]) => ({ permission, allowed, reason: TAG })) },
+          // The money views the profiler held by default until 9 Oct 2026, on the person, so these people
+          // start where they always did; a check's own answer for either still wins.
+          permissionGrants: { create: Object.entries({ "payments.view": true, "documents.view": true, ...grants }).map(([permission, allowed]) => ({ permission, allowed, reason: TAG })) },
         },
       });
     const sales = await make("sales", { "companies.viewAll": false, "credit.override": false });

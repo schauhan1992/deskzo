@@ -298,6 +298,16 @@ async function main() {
     const addStaff = await outcome(page("settings/access/new")(props));
     ok("  while Add a staff account opens for them, rather than saying they can't", !/^(notFound|error)/.test(addStaff) && !addStaff.includes("You can&#x27;t add staff") && !addStaff.includes("You can't add staff"), addStaff.slice(0, 80));
 
+    section("A calling agent, as the role starts");
+    // Nothing set on the person: the CALLING role's defaults, which hold no money views since 9 Oct 2026.
+    const caller = await person("Caller", "CALLING");
+    const calling = await accessContextFor(caller.id);
+    const money = ["payments", "receivables", "payables", "sales_documents", "purchase_documents"];
+    ok("their menu has no payments, receivables, payables, quotes or invoices", !money.some((k) => calling.openModules.includes(k)), money.filter((k) => calling.openModules.includes(k)).join(", "));
+    ok("  but keeps the calls, the companies and the leads they work", ["calls", "companies"].every((k) => calling.openModules.includes(k)) && hrefs(buildNavigation(calling)).includes("/leads"));
+    actorId = caller.id;
+    ok("  and /payments by its address is a 404 for them", (await outcome(page("payments")(props))) === "notFound");
+
     section("3–4. View without create");
     actorId = clerk.id;
     const ticketsPage = await outcome(page("tickets")(props));
