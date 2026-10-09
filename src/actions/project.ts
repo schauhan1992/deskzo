@@ -17,6 +17,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { visibleProjectsWhere } from "@/lib/projects/visibility";
+import { companyAccess, mayAccess } from "@/lib/authz/access";
 import { milestonesFromTemplate, projectStatusLabels } from "@/lib/projects/status";
 import { partyDetails } from "@/lib/proposals/party";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -37,6 +38,17 @@ async function access(userId: string) {
     hasEffectivePermission(userId, "projects.manage"),
   ]);
   return { viewAll, manage };
+}
+
+/**
+ * Whether this person may work with a company's name and people here: one their account access
+ * reaches, or the customer of a project they're on. A project's people work with its customer
+ * whoever the account is assigned to — that is the module's own rule (src/lib/projects/visibility.ts)
+ * — but a company id from anywhere else was answered with that company's contacts.
+ */
+async function mayWorkWith(userId: string, viewAll: boolean, companyId: string): Promise<boolean> {
+  if (await mayAccess(userId, "companies", "view", companyId)) return true;
+  return (await db.project.count({ where: { AND: [{ companyId }, visibleProjectsWhere(userId, viewAll)] } })) > 0;
 }
 
 /** A project this person may open, or null — the single gate every detail action goes through. */
@@ -207,6 +219,22 @@ export async function saveProject(input: {
   const date = (v?: string) => (v ? new Date(`${v}T00:00:00.000Z`) : null);
   const startDate = date(input.startDate);
 
+  // The customer and the order it delivers. A new project, or one moved to another customer, is for a
+  // company this person can open; an order linked to it is that company's, and one they can open.
+  // Neither was checked: a project could be pointed at any account and show its order back.
+  const stored = input.id
+    ? await db.project.findUnique({ where: { id: input.id }, select: { companyId: true, companyProductId: true } })
+    : null;
+  if ((!stored || stored.companyId !== input.companyId) && !(await mayAccess(user.id, "companies", "view", input.companyId))) {
+    return { ok: false, error: "That company no longer exists." };
+  }
+  if (input.companyProductId && input.companyProductId !== stored?.companyProductId) {
+    const order = await db.companyProduct.findUnique({ where: { id: input.companyProductId }, select: { companyId: true } });
+    if (!order || order.companyId !== input.companyId || !(await mayAccess(user.id, "orders", "view", input.companyProductId))) {
+      return { ok: false, error: "That order isn't this company's." };
+    }
+  }
+
   const scalars = {
     companyId: input.companyId,
     typeId: input.typeId || null,
@@ -329,6 +357,12 @@ export async function addStakeholder(input: {
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.userId && !input.contactId) return { ok: false, error: "Choose a colleague or a customer contact." };
   if (input.userId && input.contactId) return { ok: false, error: "A stakeholder is one person, not two." };
+  // A customer stakeholder is one of this project's customer's people — any contact id was taken, and
+  // the project page then showed that person's email and phone.
+  if (input.contactId) {
+    const contact = await db.contact.findUnique({ where: { id: input.contactId }, select: { companyId: true } });
+    if (!contact || contact.companyId !== project.companyId) return { ok: false, error: "That contact isn't one of this customer's." };
+  }
 
   try {
     await db.projectStakeholder.create({
@@ -822,20 +856,26 @@ export async function raiseBillingMilestoneInvoice(id: string): Promise<ActionRe
 // ─── Options ────────────────────────────────────────────────────────────────────────────────────
 
 export async function projectFormOptions(companyId?: string) {
-  await requireModuleUser("projects");
-  const [types, users, contacts, companies] = await Promise.all([
+  const user = await requireModuleUser("projects");
+  const { viewAll } = await access(user.id);
+  // A company's people only for a company this person works with; the picker only the companies they
+  // reach, plus that one — so a project whose customer is outside their accounts still shows it.
+  const listed = companyId && (await mayWorkWith(user.id, viewAll, companyId)) ? companyId : null;
+  const [types, users, contacts, reached, current] = await Promise.all([
     db.projectType.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    companyId
+    listed
       ? db.contact.findMany({
-          where: { companyId },
+          where: { companyId: listed },
           orderBy: { name: "asc" },
           select: { id: true, name: true, designation: true },
         })
       : Promise.resolve([]),
     // Not filtered by relationship type: work gets delivered to resellers and partners as readily
     // as to end customers, and a picker that silently omits them reads as a missing company.
-    db.company.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true }, take: 500 }),
+    db.company.findMany({ where: await companyAccess(user.id, "view"), orderBy: { name: "asc" }, select: { id: true, name: true }, take: 500 }),
+    listed ? db.company.findUnique({ where: { id: listed }, select: { id: true, name: true } }) : Promise.resolve(null),
   ]);
+  const companies = current && !reached.some((c) => c.id === current.id) ? [current, ...reached] : reached;
   return toPlain({ types, users, contacts, companies });
 }

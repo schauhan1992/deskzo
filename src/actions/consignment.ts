@@ -7,6 +7,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
+import { companyAccess, mayAccess, type AccessAction } from "@/lib/authz/access";
 import { canMove, consignmentReasonLabels, ewayBillRequired, isSupply, paperworkFor } from "@/lib/assets/lifecycle";
 import { intraStateThreshold } from "@/lib/eway/settings";
 import { nextDocumentNumber } from "@/lib/trade-number";
@@ -31,6 +32,25 @@ import type { ActionResult } from "@/actions/company";
 async function access() {
   const user = await requireModuleUser("it_assets");
   return { user, manage: await hasEffectivePermission(user.id, "assets.manage") };
+}
+
+/**
+ * Which consignments a person reaches: every one between our own sites, and those going to an account
+ * they reach for the action. `assets.manage` says they may move kit about — it said nothing about
+ * whose, and a consignment carries its customer's site, contact and address, and raises a numbered
+ * challan in their name.
+ */
+async function consignmentScope(userId: string, action: AccessAction): Promise<Prisma.ConsignmentWhereInput> {
+  const accounts = await companyAccess(userId, action);
+  // Reaching every account is no condition at all. Written as `toCompany: {}` inside the OR it is
+  // worse than none: Prisma drops an empty relation filter from an OR, and the OR then matched only
+  // the transfers between our own sites — every customer consignment refused, for a super admin too.
+  if (Object.keys(accounts).length === 0) return {};
+  return { OR: [{ toCompanyId: null }, { toCompany: { is: accounts } }] };
+}
+
+async function reachesConsignment(userId: string, id: string, action: AccessAction): Promise<boolean> {
+  return (await db.consignment.count({ where: { AND: [{ id }, await consignmentScope(userId, action)] } })) > 0;
 }
 
 const consignmentSelect = {
@@ -67,13 +87,18 @@ const consignmentSelect = {
 } satisfies Prisma.ConsignmentSelect;
 
 export async function listConsignments(filters?: { status?: string; companyId?: string }) {
-  const { manage } = await access();
+  const { user, manage } = await access();
   if (!manage) return [];
   return toPlain(
     await db.consignment.findMany({
       where: {
-        ...(filters?.status ? { status: filters.status as ConsignmentStatus } : {}),
-        ...(filters?.companyId ? { toCompanyId: filters.companyId } : {}),
+        AND: [
+          {
+            ...(filters?.status ? { status: filters.status as ConsignmentStatus } : {}),
+            ...(filters?.companyId ? { toCompanyId: filters.companyId } : {}),
+          },
+          await consignmentScope(user.id, "view"),
+        ],
       },
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
       take: 200,
@@ -83,8 +108,8 @@ export async function listConsignments(filters?: { status?: string; companyId?: 
 }
 
 export async function getConsignment(id: string) {
-  const { manage } = await access();
-  if (!manage) return null;
+  const { user, manage } = await access();
+  if (!manage || !(await reachesConsignment(user.id, id, "view"))) return null;
   const row = await db.consignment.findUnique({
     where: { id },
     select: {
@@ -180,6 +205,28 @@ export async function createConsignment(input: {
       siteCompanyId: true, locationId: true, custodianUserId: true,
     },
   });
+  // Where it is going: an account this person reaches to edit, and a site, contact and document that
+  // are that account's — none of them was checked, so a consignment could name any account's people.
+  if (input.toCompanyId) {
+    if (!(await mayAccess(user.id, "companies", "edit", input.toCompanyId))) return { ok: false, error: "That company no longer exists." };
+    if (input.toLocationId) {
+      const location = await db.companyLocation.findUnique({ where: { id: input.toLocationId }, select: { companyId: true } });
+      if (!location || location.companyId !== input.toCompanyId) return { ok: false, error: "That location doesn't belong to this company." };
+    }
+    if (input.toContactId) {
+      const contact = await db.contact.findUnique({ where: { id: input.toContactId }, select: { companyId: true } });
+      if (!contact || contact.companyId !== input.toCompanyId) return { ok: false, error: "That contact doesn't belong to this company." };
+    }
+  } else if (input.toLocationId || input.toContactId) {
+    return { ok: false, error: "Pick the company that site or contact belongs to." };
+  }
+  if (input.documentId) {
+    const document = await db.tradeDocument.findUnique({ where: { id: input.documentId }, select: { companyId: true } });
+    if (!document || document.companyId !== input.toCompanyId || !(await mayAccess(user.id, "documents", "view", input.documentId))) {
+      return { ok: false, error: "That document doesn't belong to this company." };
+    }
+  }
+
   if (assets.length !== input.assetIds.length) {
     return { ok: false, error: "One of those assets no longer exists." };
   }
@@ -299,7 +346,9 @@ export async function dispatchConsignment(input: {
       movements: { select: { assetId: true } },
     },
   });
-  if (!consignment) return { ok: false, error: "That consignment no longer exists." };
+  if (!consignment || !(await reachesConsignment(user.id, consignment.id, "edit"))) {
+    return { ok: false, error: "That consignment no longer exists." };
+  }
   if (consignment.status !== "DRAFT") return { ok: false, error: "It has already gone." };
 
   const eway = ewayBillRequired(
@@ -381,7 +430,9 @@ export async function deliverConsignment(input: {
       movements: { select: { assetId: true } },
     },
   });
-  if (!consignment) return { ok: false, error: "That consignment no longer exists." };
+  if (!consignment || !(await reachesConsignment(user.id, consignment.id, "edit"))) {
+    return { ok: false, error: "That consignment no longer exists." };
+  }
   if (consignment.status === "DRAFT") return { ok: false, error: "It hasn't been dispatched yet." };
   if (consignment.status === "DELIVERED") return { ok: false, error: "It has already been delivered." };
 
@@ -449,7 +500,9 @@ export async function cancelConsignment(id: string, reason: string): Promise<Act
     where: { id },
     select: { id: true, consignmentNumber: true, status: true, movements: { select: { assetId: true, id: true } } },
   });
-  if (!consignment) return { ok: false, error: "That consignment no longer exists." };
+  if (!consignment || !(await reachesConsignment(user.id, consignment.id, "edit"))) {
+    return { ok: false, error: "That consignment no longer exists." };
+  }
   if (consignment.status === "DELIVERED") {
     return { ok: false, error: "It has already been delivered — record a return instead." };
   }
@@ -517,7 +570,9 @@ export async function raiseDeliveryChallan(consignmentId: string): Promise<Actio
       },
     },
   });
-  if (!consignment) return { ok: false, error: "That consignment no longer exists." };
+  if (!consignment || !(await reachesConsignment(user.id, consignment.id, "edit"))) {
+    return { ok: false, error: "That consignment no longer exists." };
+  }
   if (consignment.documentId) return { ok: false, error: "A document is already attached to this consignment." };
   if (isSupply(consignment.reason)) {
     return {

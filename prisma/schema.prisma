@@ -446,6 +446,10 @@ enum NotificationType {
    * The day somebody planned to chase a client's payment again has come (when no task reminds them).
    */
   PAYMENT_FOLLOW_UP_DUE
+  /**
+   * The day's draft invoices raised by recurring billing, in one notice, for everybody who issues them.
+   */
+  RECURRING_DRAFTS_RAISED
 }
 
 model User {
@@ -836,6 +840,8 @@ model User {
   orderStepChanges              OrderStepChange[]
   calendarAccount               CalendarAccount?         @relation("UserCalendarAccount")
   calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
+  recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
+
   @@index([departmentId])
   @@index([managerId])
   @@map("users")
@@ -1949,6 +1955,10 @@ enum DocumentOrigin {
    * The delivery challan raised automatically when a consignment is dispatched.
    */
   CONSIGNMENT
+  /**
+   * Raised as a draft by recurring billing — a subscription's next term, or one instalment of it.
+   */
+  RECURRING_BILLING
 }
 
 /**
@@ -2254,6 +2264,8 @@ model TradeDocument {
   revenueAdjustments  RevenueScheduleAdjustment[] @relation("RevenueAdjustmentCreditNote")
   accountingSchedules AccountingSchedule[]        @relation("AccountingScheduleSource")
   paymentFollowUps    PaymentFollowUp[]
+
+  recurringBillingPeriods RecurringBillingPeriod[]
 
   @@index([companyId])
   @@index([leadId])
@@ -2894,6 +2906,8 @@ model CompanyProduct {
   priceChanges   OrderPriceChange[]
   purchaseSaving PurchaseSaving?
   paymentFollowUps PaymentFollowUp[]
+  recurringBilling        RecurringBilling?
+  recurringBillingPeriods RecurringBillingPeriod[]
 
   /**
    * Internal stakeholders (e.g. Tech Support, HR) who should have visibility into this order for installation/demo/delivery coordination — notified when added.
@@ -12575,4 +12589,66 @@ model DailyJobRun {
 
   @@id([job, day])
   @@map("daily_job_runs")
+}
+
+/**
+ * How a subscription order bills itself (owner, 9 Oct 2026). Set on one order at a time; nothing
+ * recurs until somebody switches it on, and nothing is ever issued by it — every invoice it raises is
+ * a draft for the team to check and issue (src/lib/recurring-billing/run.ts).
+ */
+enum RecurringBillingMode {
+  /**
+   * At the end of its term the order renews itself: the next term's renewal order is punched (for
+   * approval, like any renewal) and its invoice raised as a draft. The renewal carries the switch on.
+   */
+  AUTO_RENEW
+  /**
+   * One longer term invoiced in parts — monthly or quarterly — each part a draft on the day it begins.
+   */
+  INSTALMENTS
+}
+
+/** One order's recurring billing — present only while it is switched on. */
+model RecurringBilling {
+  companyProductId String               @id
+  order            CompanyProduct       @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
+  mode             RecurringBillingMode
+  /**
+   * Instalments only: how often a part is raised — MONTHLY or QUARTERLY.
+   */
+  cycle            BillingCycle?
+  /**
+   * Instalments only: parts beginning before this day are never raised — what was invoiced before
+   * the switch went on stays as it was.
+   */
+  billFrom         DateTime?            @db.Date
+  setById          String
+  setBy            User                 @relation("RecurringBillingSetBy", fields: [setById], references: [id])
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@map("recurring_billings")
+}
+
+/**
+ * A period recurring billing has raised — the record that makes the daily job safe to run twice. Kept
+ * when its draft is deleted (`documentId` goes null): deleting the draft is how a period is skipped.
+ */
+model RecurringBillingPeriod {
+  id               String         @id @default(cuid())
+  companyProductId String
+  order            CompanyProduct @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
+  periodStart      DateTime       @db.Date
+  periodEnd        DateTime       @db.Date
+  documentId       String?
+  document         TradeDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  /**
+   * Auto-renew only: the renewal order punched for the new term.
+   */
+  renewalOrderId   String?
+  createdAt        DateTime       @default(now())
+
+  @@unique([companyProductId, periodStart])
+  @@index([documentId])
+  @@map("recurring_billing_periods")
 }

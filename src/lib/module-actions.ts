@@ -22,6 +22,8 @@ export type ActionScope = "core" | "public" | "platform" | readonly string[];
 export const ACTION_MODULES: Record<string, ActionScope> = {
   "access-control.ts": "core",
   "access-gate.ts": "core",
+  // The role editor's record grid and My access (roles and permissions are core).
+  "access-levels.ts": "core",
   "access-lock.ts": "core",
   "access.ts": "core",
   // Revenue & Close: prepaids and accruals (src/lib/close/schedules.ts).
@@ -157,6 +159,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "project.ts": ["projects"],
   "receivable.ts": ["receivables"],
   "reconcile.ts": ["purchase_documents"],
+  // Switching a subscription order's recurring billing on or off (src/lib/recurring-billing/run.ts).
+  "recurring-billing.ts": ["orders"],
   "reference-data.ts": "core",
   "regularisation.ts": ["hr"],
   "renewal-order.ts": ["renewals"],

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { companyAccess, documentAccess, mayAccess } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { formatOrderId } from "@/lib/order-id";
@@ -162,6 +163,24 @@ async function settle(
   return null;
 }
 
+/**
+ * The record half of a vendor-credit write, asked before anything is written. `rebates.manage` says
+ * somebody may record and settle credits — not whose: the vendor has to be one they reach to edit,
+ * each order whose rebate it pays one they can open, and each bill it reduces one they could change.
+ * Each refusal is worded as the missing record would be.
+ */
+async function outOfReach(userId: string, vendorId: string, s?: Partial<Settlement>): Promise<string | null> {
+  if (!(await mayAccess(userId, "vendors", "edit", vendorId))) return "That credit's vendor no longer exists.";
+  for (const a of s?.allocations ?? []) {
+    const rebate = await db.orderRebate.findUnique({ where: { id: a.orderRebateId }, select: { companyProductId: true } });
+    if (!rebate || !(await mayAccess(userId, "orders", "view", rebate.companyProductId))) return "One of those rebates no longer exists.";
+  }
+  for (const a of s?.applications ?? []) {
+    if (!(await mayAccess(userId, "documents", "edit", a.billId))) return "One of those bills no longer exists.";
+  }
+  return null;
+}
+
 /** Refusals thrown inside a transaction, so it rolls back, and answered in words. */
 class Refused extends Error {}
 
@@ -179,6 +198,7 @@ export async function listVendorCredits() {
   const user = await creditUser("view");
   if (!user) return null;
   const credits = await db.vendorCredit.findMany({
+    where: { vendor: await companyAccess(user.id, "view") },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     take: 500,
     select: {
@@ -223,7 +243,7 @@ export async function getVendorCredit(id: string) {
       journalEntries: { orderBy: { createdAt: "asc" }, select: { id: true, entryNumber: true, date: true, reversesId: true } },
     },
   });
-  if (!credit) return null;
+  if (!credit || !(await mayAccess(user.id, "vendors", "view", credit.vendorId))) return null;
   return toPlain({ credit, canManage: await hasEffectivePermission(user.id, "rebates.manage") });
 }
 
@@ -236,7 +256,7 @@ export async function vendorCreditOptions(vendorId: string) {
   const user = await creditUser("view");
   if (!user) return null;
   const vendor = await db.company.findUnique({ where: { id: vendorId }, select: { id: true, name: true } });
-  if (!vendor) return null;
+  if (!vendor || !(await mayAccess(user.id, "vendors", "view", vendorId))) return null;
   const orders = await db.companyProduct.findMany({
     where: {
       ...(await viaCompanyScope(user.id)),
@@ -260,7 +280,12 @@ export async function vendorCreditOptions(vendorId: string) {
       .map((r) => ({ orderRebateId: r.id, orderId: o.id, orderLabel: formatOrderId(o.orderSeq), customer: o.company.name, item: o.item.name, expected: r.expected, received: r.received, outstanding: r.outstanding })),
   );
   const bills = await db.tradeDocument.findMany({
-    where: { docType: "BILL", direction: "PURCHASE", companyId: vendorId, status: { in: ["ISSUED", "PARTIALLY_PAID"] }, currency: "INR" },
+    where: {
+      AND: [
+        { docType: "BILL", direction: "PURCHASE", companyId: vendorId, status: { in: ["ISSUED", "PARTIALLY_PAID"] }, currency: "INR" },
+        await documentAccess(user.id, "view"),
+      ],
+    },
     orderBy: { issueDate: "asc" },
     select: billSettlementSelect,
   });
@@ -278,7 +303,7 @@ export async function vendorCreditIssuers() {
   const user = await creditUser("view");
   if (!user) return [];
   const companies = await db.company.findMany({
-    where: { relationshipType: { in: ["VENDOR", "OEM", "DISTRIBUTOR"] } },
+    where: { AND: [{ relationshipType: { in: ["VENDOR", "OEM", "DISTRIBUTOR"] } }, await companyAccess(user.id, "view")] },
     orderBy: { name: "asc" },
     select: { id: true, name: true, relationshipType: true },
   });
@@ -296,6 +321,8 @@ export async function createVendorCredit(input: unknown): Promise<ActionResult<{
 
   const vendor = await db.company.findUnique({ where: { id: data.vendorId }, select: { id: true, name: true, relationshipType: true } });
   if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) return { ok: false, error: "Choose a distributor or an OEM from your vendors." };
+  const unreachable = await outOfReach(user.id, vendor.id, data);
+  if (unreachable) return { ok: false, error: unreachable };
   const date = calendarDay(data.date);
   if (!date) return { ok: false, error: "Enter its date." };
   if (data.date > (await workspaceClock()).today()) return { ok: false, error: "Its date can't be in the future." };
@@ -360,8 +387,10 @@ export async function settleVendorCredit(input: unknown): Promise<ActionResult<n
     where: { id: parsed.data.vendorCreditId },
     select: { id: true, vendorId: true, form: true, taxableAmount: true, total: true, cancelledAt: true, reference: true },
   });
-  if (!credit) return { ok: false, error: "That credit no longer exists." };
+  if (!credit || !(await mayAccess(user.id, "vendors", "view", credit.vendorId))) return { ok: false, error: "That credit no longer exists." };
   if (credit.cancelledAt) return { ok: false, error: "It's cancelled." };
+  const unreachable = await outOfReach(user.id, credit.vendorId, parsed.data);
+  if (unreachable) return { ok: false, error: unreachable };
   try {
     await db.$transaction(async (tx) => {
       const refused = await settle(
@@ -386,15 +415,25 @@ export async function removeVendorCreditSettlement(input: { kind: "allocation" |
   const user = await creditUser("manage");
   if (!user) return { ok: false, error: "You can't settle vendor credits." };
   if (input.kind === "allocation") {
-    const row = await db.rebateAllocation.findUnique({ where: { id: input.id }, select: { id: true, vendorCreditId: true } });
-    if (!row) return { ok: false, error: "That's no longer set against anything." };
+    const row = await db.rebateAllocation.findUnique({
+      where: { id: input.id },
+      select: { id: true, vendorCreditId: true, vendorCredit: { select: { vendorId: true } }, orderRebateId: true },
+    });
+    if (!row || (await outOfReach(user.id, row.vendorCredit.vendorId, { allocations: [{ orderRebateId: row.orderRebateId, amount: 0 }] }))) {
+      return { ok: false, error: "That's no longer set against anything." };
+    }
     await db.rebateAllocation.delete({ where: { id: row.id } });
     await recordAudit({ userId: user.id, action: "UPDATE", entityType: "VendorCredit", entityId: row.vendorCreditId, entityLabel: "Taken off an order's rebate" });
     revalidateCredit(row.vendorCreditId);
     return { ok: true, data: null };
   }
-  const row = await db.vendorCreditApplication.findUnique({ where: { id: input.id }, select: { id: true, vendorCreditId: true, billId: true } });
-  if (!row) return { ok: false, error: "That's no longer set against anything." };
+  const row = await db.vendorCreditApplication.findUnique({
+    where: { id: input.id },
+    select: { id: true, vendorCreditId: true, billId: true, vendorCredit: { select: { vendorId: true } } },
+  });
+  if (!row || (await outOfReach(user.id, row.vendorCredit.vendorId, { applications: [{ billId: row.billId, amount: 0 }] }))) {
+    return { ok: false, error: "That's no longer set against anything." };
+  }
   await db.$transaction(async (tx) => {
     await tx.vendorCreditApplication.delete({ where: { id: row.id } });
     await syncBill(tx, row.billId);
@@ -416,9 +455,12 @@ export async function cancelVendorCredit(input: unknown): Promise<ActionResult<n
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const credit = await db.vendorCredit.findUnique({
     where: { id: parsed.data.vendorCreditId },
-    select: { id: true, reference: true, cancelledAt: true, applications: { select: { billId: true } } },
+    select: { id: true, reference: true, cancelledAt: true, vendorId: true, applications: { select: { billId: true } } },
   });
-  if (!credit) return { ok: false, error: "That credit no longer exists." };
+  // Cancelling makes every bill it reduced owe again, so those have to be this person's to change too.
+  if (!credit || (await outOfReach(user.id, credit.vendorId, { applications: credit.applications.map((a) => ({ billId: a.billId, amount: 0 })) }))) {
+    return { ok: false, error: "That credit no longer exists." };
+  }
   if (credit.cancelledAt) return { ok: false, error: "It's cancelled already." };
   await db.$transaction(async (tx) => {
     await tx.rebateAllocation.deleteMany({ where: { vendorCreditId: credit.id } });

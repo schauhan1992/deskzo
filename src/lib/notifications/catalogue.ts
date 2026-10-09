@@ -87,6 +87,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "EXPENSE_REIMBURSED", label: "My expense is paid", when: "A claim of yours is reimbursed.", group: "money" },
   { type: "PAYMENT_PROMISE_BROKEN", label: "A client broke a promise to pay", when: "The date a client promised to pay by passes without the money — on a follow-up you, or somebody who reports to you, logged.", group: "money" },
   { type: "PAYMENT_PROMISES_SUMMARY", label: "Broken promises to pay, once a day", when: "Clients' promised dates passed without the money — one summary a day, for whoever records payments.", group: "money" },
+  { type: "RECURRING_DRAFTS_RAISED", label: "Recurring billing raised drafts, once a day", when: "Subscriptions renewed or instalments fell due, and their invoices are waiting as drafts — one notice a day, for whoever issues documents.", group: "money" },
   { type: "PAYMENT_FOLLOW_UP_DUE", label: "A payment follow-up is due", when: "The day you planned to chase a client's payment again arrives, when no task reminds you.", group: "money" },
 
   // ─── People ─────────────────────────────────────────────────────────────────────────────────

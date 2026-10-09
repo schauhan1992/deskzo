@@ -80,6 +80,7 @@ export const documentOriginLabels: Record<DocumentOrigin, string> = {
   ADDON_CALCULATOR: "Add-on calculator",
   RENEWAL: "Renewals list",
   CONSIGNMENT: "Consignment",
+  RECURRING_BILLING: "Recurring billing",
 };
 
 /** Muted throughout: provenance is context, not status, and should not compete with the status badge. */
@@ -89,6 +90,7 @@ export const documentOriginTone: Record<DocumentOrigin, "default" | "blue"> = {
   ADDON_CALCULATOR: "blue",
   RENEWAL: "blue",
   CONSIGNMENT: "default",
+  RECURRING_BILLING: "blue",
 };
 
 export const statusTone: Record<TradeDocumentStatus, "default" | "green" | "blue" | "red" | "amber" | "brand"> = {

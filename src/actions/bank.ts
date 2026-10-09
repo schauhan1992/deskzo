@@ -6,6 +6,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
+import { mayAccess, paymentAccess } from "@/lib/authz/access";
 import { ensureChartOfAccounts, postChequeClearingToLedger } from "@/lib/ledger/journal";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { indiaClock } from "@/lib/time/zone";
@@ -189,12 +190,17 @@ export async function setDefaultBankAccount(id: string): Promise<ActionResult<nu
 
 // ─── Cheques ──────────────────────────────────────────────────────────────────
 
-/** Cheques written or received that the bank hasn't shown yet. */
+/**
+ * Cheques written or received that the bank hasn't shown yet — those on the accounts this person
+ * reaches, like every other list of payments (`paymentAccess`). Whoever runs Banking usually reaches
+ * every account, and then nothing is left out.
+ */
 export async function unclearedCheques() {
-  if (!(await requireAccounts()).allowed) return [];
+  const { user, allowed } = await requireAccounts();
+  if (!allowed) return [];
   return toPlain(
     await db.payment.findMany({
-      where: { method: "CHEQUE", clearedOn: null },
+      where: { AND: [{ method: "CHEQUE", clearedOn: null }, await paymentAccess(user.id, "view")] },
       orderBy: { paidOn: "asc" },
       include: { company: { select: { id: true, name: true } }, bankAccount: { select: { id: true, name: true } } },
     }),
@@ -219,7 +225,9 @@ export async function clearCheque(input: {
     where: { id: input.paymentId },
     select: { id: true, method: true, clearedOn: true, paidOn: true },
   });
-  if (!payment) return { ok: false, error: "That payment no longer exists." };
+  if (!payment || !(await mayAccess(user.id, "payments", "edit", payment.id))) {
+    return { ok: false, error: "That payment no longer exists." };
+  }
   if (payment.method !== "CHEQUE") return { ok: false, error: "Only a cheque needs clearing." };
   if (payment.clearedOn) return { ok: false, error: "That cheque is already cleared." };
 

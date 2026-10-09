@@ -3,6 +3,8 @@ import { effectivePermissionsFor } from "@/actions/permission";
 import { userPermissionOverrides } from "@/actions/access";
 import { Card } from "@/components/ui/card";
 import { MyAccess } from "@/components/settings/my-access";
+import { personAccessLevels } from "@/actions/access-levels";
+import { RecordReach } from "@/components/settings/record-reach";
 
 /**
  * What you yourself are allowed to do.
@@ -22,9 +24,10 @@ export default async function MyAccessPage() {
     return <Card className="px-6 py-10 text-center text-sm text-muted">Sign in to see your access.</Card>;
   }
 
-  const [resolved, exceptions] = await Promise.all([
+  const [resolved, exceptions, reach] = await Promise.all([
     effectivePermissionsFor(user.id),
     userPermissionOverrides(user.id),
+    personAccessLevels(user.id),
   ]);
 
   if (!resolved) {
@@ -33,5 +36,11 @@ export default async function MyAccessPage() {
 
   // Lapsed exceptions are not access; `userPermissionOverrides` flags them so neither this page
   // nor the component has to read a clock while rendering.
-  return <MyAccess resolved={resolved} exceptions={exceptions.filter((e) => !e.expired)} />;
+  // Then which records each of those reaches, from the same engine every list and action asks.
+  return (
+    <div className="space-y-6">
+      <MyAccess resolved={resolved} exceptions={exceptions.filter((e) => !e.expired)} />
+      {reach && <RecordReach rows={reach} />}
+    </div>
+  );
 }

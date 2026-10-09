@@ -9,7 +9,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
-import { orderAccess } from "@/lib/authz/access";
+import { mayAccess, orderAccess } from "@/lib/authz/access";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -404,8 +404,9 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
   }
   const { orderId, approved, notes, creditOverrideReason } = parsed.data;
 
+  // The permission says they may approve orders, not whose: the order has to be one they reach to edit.
   const order = await db.companyProduct.findUnique({ where: { id: orderId }, include: { company: true } });
-  if (!order) {
+  if (!order || !(await mayAccess(user.id, "orders", "edit", orderId))) {
     return { ok: false, error: "Order not found." };
   }
   if (order.orderStatus !== "PENDING_APPROVAL") {
@@ -1023,7 +1024,7 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
     where: { id: orderId },
     include: { company: true, watchers: { select: { id: true } } },
   });
-  if (!order) {
+  if (!order || !(await mayAccess(user.id, "orders", "edit", orderId))) {
     return { ok: false, error: "Order not found." };
   }
   if (!order.vendorId || order.purchasePrice === null) {

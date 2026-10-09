@@ -10,10 +10,9 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { bookOnFirstPayment } from "@/lib/orders/handoff";
 import {
   canSeeCompany,
-  paymentScope,
   viaCompanyScope,
 } from "@/lib/authz/company-scope";
-import { paymentAccess } from "@/lib/authz/access";
+import { mayAccess, mayAddTo, paymentAccess } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { pageOf } from "@/lib/pagination";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
@@ -83,8 +82,10 @@ export async function recordPayment(
     allocateToOrderId,
   } = parsed.data;
 
+  // A payment is recorded against an account this person reaches, like every other payment write: the
+  // permission says they may record payments, not whose.
   const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  if (!company || !(await mayAddTo(user.id, "payments", company))) {
     return { ok: false, error: "Company not found." };
   }
 
@@ -179,7 +180,7 @@ export async function allocatePayment(
     where: { id: paymentId },
     include: { allocations: true },
   });
-  if (!payment) {
+  if (!payment || !(await mayAccess(user.id, "payments", "edit", paymentId))) {
     return { ok: false, error: "Payment not found." };
   }
   // An order is priced in rupees. A receipt taken in a foreign invoice's currency (and freed again
@@ -266,7 +267,8 @@ export async function deleteAllocation(
     where: { id },
     include: { payment: { select: { companyId: true } } },
   });
-  if (!allocation) {
+  // Taking an allocation off changes the payment it came from.
+  if (!allocation || !(await mayAccess(user.id, "payments", "edit", allocation.paymentId))) {
     return { ok: false, error: "Allocation not found." };
   }
 
@@ -339,7 +341,7 @@ export async function deletePayment(id: string): Promise<ActionResult<null>> {
       allocations: { select: { documentId: true } },
     },
   });
-  if (!payment) {
+  if (!payment || !(await mayAccess(user.id, "payments", "delete", id))) {
     return { ok: false, error: "Payment not found." };
   }
 
@@ -726,7 +728,7 @@ export async function bulkDeletePayments(
    * allowed to see is the same rule broken in the other direction.
    */
   const payments = await db.payment.findMany({
-    where: { id: { in: paymentIds }, ...(await paymentScope(user.id)) },
+    where: { AND: [{ id: { in: paymentIds } }, await paymentAccess(user.id, "delete")] },
     select: { id: true, companyId: true, amount: true, currency: true, paymentSeq: true, allocations: { select: { documentId: true } } },
   });
 

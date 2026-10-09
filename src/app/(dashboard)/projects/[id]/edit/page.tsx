@@ -12,13 +12,11 @@ export default async function EditProjectPage({ params }: { params: Promise<{ id
 
   const { id } = await params;
   const user = await requireUser();
-  const [project, canManage, options] = await Promise.all([
-    getProject(id),
-    hasEffectivePermission(user.id, "projects.manage"),
-    projectFormOptions(),
-  ]);
+  const [project, canManage] = await Promise.all([getProject(id), hasEffectivePermission(user.id, "projects.manage")]);
   if (!project) notFound();
   if (!canManage) redirect(`/projects/${id}`);
+  // With its customer, so the company picker shows it even when the account isn't this person's.
+  const options = await projectFormOptions(project.companyId);
 
   return (
     <div className="animate-fade-rise">

@@ -6,7 +6,7 @@ import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationship
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
-import { accessLevel, leadAccess, mayAccessContactsOf, orderAccess } from "@/lib/authz/access";
+import { accessLevel, leadAccess, mayAccess, mayAccessContactsOf, mayAddTo, orderAccess } from "@/lib/authz/access";
 import { scopeUserIds } from "@/lib/authz/scope";
 import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -905,9 +905,12 @@ export async function setCompanyOwner(companyId: string, userId: string | null):
 }
 
 export async function setVendorStatus(companyId: string, status: VendorStatus): Promise<ActionResult<null>> {
-  await requireUser();
+  // Anybody who can open the vendor sees the control, so no permission of its own — but it has to be a
+  // vendor they reach to edit. It asked only for a session: any signed-in person could blacklist any
+  // vendor by its id.
+  const user = await requireUser();
   const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  if (!company || !(await mayAccess(user.id, "vendors", "edit", companyId))) {
     return { ok: false, error: "Company not found." };
   }
   if (company.relationshipType === "CLIENT") {
@@ -1705,6 +1708,12 @@ export async function getCompany(id: string) {
 
 export async function addCompanyProduct(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireUser();
+  // Nothing calls this from a screen any more, and it asked for nothing but a session: any signed-in
+  // person could add an order to any account. Now the same permission editing one takes, on an
+  // account the order would be theirs to edit on.
+  if (!(await hasEffectivePermission(user.id, "products.edit"))) {
+    return { ok: false, error: "You don't have permission to edit products." };
+  }
   const itemsEnabled = await isModuleEnabled("items");
   if (!itemsEnabled) {
     return { ok: false, error: "The Items & Inventory module is disabled." };
@@ -1716,7 +1725,7 @@ export async function addCompanyProduct(input: unknown): Promise<ActionResult<{ 
   const { companyId, locationId, itemId, vendorId, quantity, notes, poNumber, startDate, endDate } = parsed.data;
 
   const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  if (!company || !(await mayAddTo(user.id, "orders", company))) {
     return { ok: false, error: "Company not found." };
   }
   const location = await db.companyLocation.findUnique({ where: { id: locationId } });
@@ -1762,7 +1771,7 @@ export async function updateCompanyProduct(input: unknown): Promise<ActionResult
   const { id, locationId, quantity, notes, poNumber, startDate, endDate } = parsed.data;
 
   const product = await db.companyProduct.findUnique({ where: { id } });
-  if (!product) {
+  if (!product || !(await mayAccess(user.id, "orders", "edit", id))) {
     return { ok: false, error: "Product not found." };
   }
   const location = await db.companyLocation.findUnique({ where: { id: locationId } });
@@ -1804,7 +1813,7 @@ export async function removeCompanyProduct(id: string): Promise<ActionResult<nul
       allocations: { select: { id: true, amount: true, paymentId: true } },
     },
   });
-  if (!product) {
+  if (!product || !(await mayAccess(user.id, "orders", "delete", id))) {
     return { ok: false, error: "Product not found." };
   }
 

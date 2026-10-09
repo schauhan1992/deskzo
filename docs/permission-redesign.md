@@ -389,4 +389,46 @@ For example, the Calling role has orders, documents and payments unticked, yet a
 - `payablesAging`, `listOpenBills`, `vendorStatement` and `getBillSettlement` check only that the module is on.
 - `unclearedCheques` checks only that accounting is on.
 
-Each is reachable by a direct action call with an id from another account. Closing them is the next recommended change. Purchase bills need care: their vendor parties are often unowned, and unowned companies are hidden from anyone who doesn't reach every account.
+Each was reachable by a direct action call with an id from another account. All are closed; see the next section. Purchase bills follow the same rule as their lists: a vendor with no account manager is reached only by someone who reaches every account.
+
+### Writes scoped by record (closed 9 Oct 2026, owner's sign-off)
+
+Every write above now asks the access engine which record it may touch, after the permission check that says what it may do. A record out of reach answers as a missing one, the way its page does. The rule is the engine's own: **you can only change what you can see**. With no levels stored, an edit reaches exactly the records a person's lists show, so no screen loses anything. A probe of the local workspace found nobody holding a write permission without its view permission.
+
+| Write | Asks |
+|---|---|
+| Changing, issuing, converting or reporting a document | `mayAccess(documents, edit)` |
+| Deleting or cancelling a document, cancelling its IRN | `mayAccess(documents, delete)` |
+| Raising a document for a party, or moving a draft to one | `mayAddTo(documents, party)` |
+| Recording a payment against a customer | `mayAddTo(payments, company)` |
+| Allocating, unallocating or clearing a payment | `mayAccess(payments, edit)` |
+| Deleting a payment, one or in bulk | `mayAccess(payments, delete)` |
+| Approving or fulfilling an order; changing a customer's product | `mayAccess(orders, edit)` |
+| Removing a customer's product | `mayAccess(orders, delete)` |
+| Adding a customer's product | `products.edit`, plus `mayAddTo(orders, company)` |
+| A vendor's status | `mayAccess(vendors, edit)` |
+
+`mayAddTo` (src/lib/authz/access.ts) is new. It answers "may this person add one of these to this account": a level that follows the account asks the account, and a level by person is met by the new record being their own.
+
+**The same hole elsewhere**, found by an audit of the other money and document actions and closed in the same change:
+
+- **Receivables:** recording a payment on an invoice, applying a payment or a credit note, and taking a credit note off. Each now asks for the invoice, the payment and the customer.
+- **Payables:** paying a bill, the aging, a vendor's statement, open bills, and a bill's settlement.
+- **Banking:** the uncleared-cheque list and clearing one. Reconciliation matches ledger lines, which belong to the workspace and not to an account.
+- **Vendor credits:**
+  - recording, settling, undoing and cancelling one asks for the vendor (edit), each order whose rebate it pays (view), and each bill it reduces (edit);
+  - the list, a credit, the options and the issuers show only vendors in reach.
+- **Consignments:**
+  - one going to an account is in reach only if the account is; transfers between our own sites are everyone's with `assets.manage`;
+  - a new one checks that its site, contact and document belong to the company it goes to.
+- **Projects:**
+  - a project is created for, or moved to, a company the person can open; a linked order must be that company's;
+  - a customer stakeholder must be one of the project's own customer's contacts;
+  - the form's company picker and contacts follow account reach, plus the customer of any project the person is on, which is the module's own rule.
+
+**Proof:** `npm run check:write-scope`. A rep and a peer each reach only their own accounts. Every write above is tried, as the rep, against the peer's records and must answer as missing; the rep's own records go through as the control.
+
+**Still open, deliberately:**
+- `raiseDeliveryChallan` issues a numbered challan under `assets.manage` alone, without "Issue documents".
+- `submitForApproval` asks for the account, not `documents` edit.
+- Both are permission questions, not scope ones, and are for the owner to decide.

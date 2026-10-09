@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { Lock, Search } from "lucide-react";
 import { createRole, updateRole } from "@/actions/role";
 import { setRolePermissions } from "@/actions/permission";
+import { roleAccessLevels, setRoleAccessLevels } from "@/actions/access-levels";
+import { RecordAccessGrid, slotOf, type CellChoice } from "@/components/settings/staff/record-access-grid";
+import { claimsMoreThan, UNDER } from "@/lib/authz/level-order";
 import { PERMISSION_GROUP_ORDER, PERMISSIONS } from "@/lib/permissions";
 
 /** The sections — held by every role until unticked for one. */
@@ -92,6 +95,20 @@ export function RoleDialog({
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [saving, startSave] = useTransition();
+  // Which records the role reaches (src/actions/access-levels.ts): loaded for a role that exists, and
+  // the cells picked since — a cell left alone is never written.
+  const [grid, setGrid] = useState<Awaited<ReturnType<typeof roleAccessLevels>>>(null);
+  const [levelChoices, setLevelChoices] = useState<Map<string, CellChoice>>(() => new Map());
+  useEffect(() => {
+    if (!roleKey) return;
+    let live = true;
+    roleAccessLevels(roleKey).then((g) => {
+      if (live) setGrid(g);
+    });
+    return () => {
+      live = false;
+    };
+  }, [roleKey]);
   // The question replaces the buttons it is about, so focus goes to the safe answer rather than to <body>.
   const keepEditingRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -139,7 +156,38 @@ export function RoleDialog({
   const permissionsDirty =
     ticked.size !== savedHeld.size || [...ticked].some((k) => !savedHeld.has(k));
   const detailsDirty = name.trim() !== savedDetails.name.trim() || description.trim() !== savedDetails.description.trim();
-  const dirty = !readOnly && (permissionsDirty || detailsDirty || (!roleKey && name.trim().length > 0));
+  const levelChanges = (grid?.rows ?? []).flatMap((row) =>
+    (["view", "edit", "delete", "assign"] as const).flatMap((action) => {
+      const choice = levelChoices.get(slotOf(row.key, action));
+      const saved = row.cells[action].stored ?? "";
+      return choice === undefined || choice === saved ? [] : [{ record: row.key, action, level: choice === "" ? null : choice }];
+    }),
+  );
+  const dirty = !readOnly && (permissionsDirty || detailsDirty || levelChanges.length > 0 || (!roleKey && name.trim().length > 0));
+
+  /**
+   * Picks a level for one cell, and pulls down the cells under it that would now claim more — Edit
+   * narrowed with View, Delete and Assign with Edit — which is what the engine would do to them anyway,
+   * and what the server insists on (src/actions/access-levels.ts).
+   */
+  function chooseLevel(record: string, action: string, choice: CellChoice) {
+    setLevelChoices((prev) => {
+      const next = new Map(prev).set(slotOf(record, action), choice);
+      const row = grid?.rows.find((r) => r.key === record);
+      if (!row) return next;
+      const effective = (a: "view" | "edit" | "delete" | "assign") => {
+        const picked = next.get(slotOf(record, a));
+        const cell = row.cells[a];
+        return picked === undefined ? (cell.stored ?? cell.derived) : picked === "" ? cell.derived : picked;
+      };
+      for (const dependent of ["edit", "delete", "assign"] as const) {
+        for (const parent of UNDER[dependent]) {
+          if (claimsMoreThan(effective(dependent), effective(parent))) next.set(slotOf(record, dependent), effective(parent));
+        }
+      }
+      return next;
+    });
+  }
 
   function toggle(key: string, on: boolean) {
     setTicked((prev) => {
@@ -205,6 +253,15 @@ export function RoleDialog({
             setError(role ? result.error : `The role was created, but its permissions weren't saved: ${result.error}`);
             return;
           }
+        }
+      }
+
+      if (grid?.editable && levelChanges.length > 0) {
+        const result = await setRoleAccessLevels(key, levelChanges);
+        if (!result.ok) {
+          router.refresh();
+          setError(permissionsDirty ? `The permissions were saved, but not which records it reaches: ${result.error}` : result.error);
+          return;
         }
       }
       router.refresh();
@@ -278,6 +335,28 @@ export function RoleDialog({
             />
           </div>
         </div>
+
+        {grid && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium text-text">Which records</h3>
+            <p className="text-xs text-subtle">
+              How far each action reaches. &ldquo;As its permissions&rdquo; is what the role&apos;s permissions below have always
+              meant, and what every cell does until you choose. Edit can&apos;t reach further than View, nor Delete and Assign
+              further than Edit.
+            </p>
+            {!readOnly && grid.why && <p className="text-xs text-warning">{grid.why}</p>}
+            <RecordAccessGrid
+              rows={grid.rows}
+              choices={levelChoices}
+              lockedWhy={grid.editable ? null : grid.why}
+              disabled={saving}
+              onChange={chooseLevel}
+            />
+          </div>
+        )}
+        {!roleKey && (
+          <p className="text-xs text-subtle">Which records the role reaches can be chosen once it has been saved.</p>
+        )}
 
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">

@@ -7,6 +7,7 @@ import { announcePrizes } from "@/lib/wins/prize-announce";
 import { runRevenueAndClose } from "@/lib/close/nightly";
 import { runOrderReleases } from "@/lib/orders/handoff";
 import { runCollectionsDaily } from "@/lib/collections/daily";
+import { runRecurringBilling } from "@/lib/recurring-billing/run";
 import { calendarChores } from "@/lib/calendar/chores";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -90,6 +91,15 @@ export async function runHeartbeat() {
     return { ran: false, broken: 0 };
   });
   /**
+   * Recurring billing, once a day: subscriptions switched on to renew themselves are renewed on the
+   * first day of their next term, and instalments that have begun are raised — all as drafts, with one
+   * notice to whoever issues documents. Its own claim row decides who runs it; it asks after its modules.
+   */
+  const recurringBilling = await runRecurringBilling().catch((err) => {
+    console.error("recurring billing failed", err);
+    return { ran: false, drafts: 0 };
+  });
+  /**
    * Calendars: whoever is due is kept in step with Outlook, Google or Zoho — as many as a minute allows,
    * the longest-waiting first, the rest on the next beat — and meetings held go on their leads' timelines.
    * Only where Calendar is on; it asks for itself.
@@ -108,6 +118,7 @@ export async function runHeartbeat() {
     revenueAndCloseRan: revenueAndClose.ran,
     ordersReleased: orderReleases.released,
     promisesBroken: collections.broken,
+    recurringDrafts: recurringBilling.drafts,
     calendarsSynced: calendars?.synced ?? 0,
     meetingsHeld: calendars?.held ?? 0,
   };

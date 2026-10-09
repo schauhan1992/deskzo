@@ -34,6 +34,8 @@ import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card"
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 import { OrderProgress } from "@/components/orders/order-progress";
+import { RecurringBillingCard } from "@/components/orders/recurring-billing-card";
+import { recurringBillingFor } from "@/actions/recurring-billing";
 import { orderSteps, stepHistory, stepsOfOrders } from "@/lib/pipeline/order-steps-server";
 import { stepStatusLabel, stepsOf, takesSteps } from "@/lib/pipeline/order-steps";
 
@@ -85,6 +87,8 @@ export async function OrderDetail({
     hasEffectivePermission(userId, "orders.approveLoss"),
   ]);
   if (!order) notFound();
+  // A subscription's recurring billing (null for anything else, or with nothing to show this viewer).
+  const recurring = await recurringBillingFor(order.id);
 
   /**
    * Where the order stands on credit, while it waits for approval — computed by the same function
@@ -306,6 +310,8 @@ export async function OrderDetail({
             editable={stepEditable}
             history={moves.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() }))}
           />
+
+          {recurring && <RecurringBillingCard view={recurring} />}
 
           <CustomFieldsCard
             groups={customShown}

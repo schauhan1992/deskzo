@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany, paymentScope, viaCompanyScope } from "@/lib/authz/company-scope";
+import { mayAccess, mayAddTo } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
@@ -91,9 +92,14 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
     select: {
       id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true,
       currency: true, exchangeRate: true, ...invoiceSettlementInclude,
+      company: { select: { ownerUserId: true, relationshipType: true } },
     },
   });
-  if (!invoice) return { ok: false, error: "That invoice no longer exists." };
+  // An invoice this person can open, on a customer they may record payments for: the permission says
+  // they may record payments, not whose.
+  if (!invoice || !(await mayAccess(user.id, "documents", "view", invoice.id)) || !(await mayAddTo(user.id, "payments", invoice.company))) {
+    return { ok: false, error: "That invoice no longer exists." };
+  }
   if (invoice.docType !== "INVOICE") return { ok: false, error: "Payments are recorded against a tax invoice." };
   if (invoice.status === "DRAFT") return { ok: false, error: "Issue the invoice before recording a payment." };
   if (invoice.status === "CANCELLED") return { ok: false, error: "This invoice has been cancelled." };
@@ -234,8 +240,9 @@ export async function applyPaymentToInvoice(
       },
     }),
   ]);
-  if (!payment) return { ok: false, error: "That payment no longer exists." };
-  if (!invoice) return { ok: false, error: "That invoice no longer exists." };
+  // Applying money changes the payment and settles the invoice: both have to be this person's to touch.
+  if (!payment || !(await mayAccess(user.id, "payments", "edit", payment.id))) return { ok: false, error: "That payment no longer exists." };
+  if (!invoice || !(await mayAccess(user.id, "documents", "edit", invoice.id))) return { ok: false, error: "That invoice no longer exists." };
   if (payment.direction !== "RECEIVED") return { ok: false, error: "That is a payment made, not one received." };
   if (invoice.companyId !== payment.companyId) {
     return { ok: false, error: "That invoice belongs to a different customer." };
@@ -350,6 +357,9 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
       select: { id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, currency: true, ...invoiceSettlementInclude },
     }),
   ]);
+  // Both documents are this person's to touch, or neither is found — the same answer a made-up id gets.
+  if (creditNote && !(await mayAccess(user.id, "documents", "edit", creditNote.id))) return { ok: false, error: "That isn't a credit note." };
+  if (invoice && !(await mayAccess(user.id, "documents", "edit", invoice.id))) return { ok: false, error: "That isn't a tax invoice." };
   if (!creditNote || creditNote.docType !== "CREDIT_NOTE") return { ok: false, error: "That isn't a credit note." };
   if (!invoice || invoice.docType !== "INVOICE") return { ok: false, error: "That isn't a tax invoice." };
   if (creditNote.status === "DRAFT") return { ok: false, error: "Issue the credit note before applying it." };
@@ -411,7 +421,10 @@ export async function removeCreditNoteApplication(id: string): Promise<ActionRes
     return { ok: false, error: "You don't have permission to remove a credit application." };
   }
   const application = await db.creditNoteApplication.findUnique({ where: { id }, select: { invoiceId: true, creditNoteId: true } });
-  if (!application) return { ok: false, error: "That application no longer exists." };
+  // Taking the credit off reopens the invoice, so the invoice has to be this person's to change.
+  if (!application || !(await mayAccess(user.id, "documents", "edit", application.invoiceId))) {
+    return { ok: false, error: "That application no longer exists." };
+  }
 
   await db.creditNoteApplication.delete({ where: { id } });
   await syncInvoiceStatus(application.invoiceId);

@@ -10,6 +10,7 @@ import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledge
 import { bookingRate, settlementRateError } from "@/lib/ledger/posting";
 import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { hasEffectivePermission } from "@/actions/permission";
+import { documentAccess, mayAccess, mayAddTo, paymentAccess } from "@/lib/authz/access";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import { calendarDayRange } from "@/lib/time/zone";
 import {
@@ -86,9 +87,14 @@ export async function recordBillPayment(input: {
     select: {
       id: true, companyId: true, docType: true, status: true, docNumber: true, total: true, branchId: true,
       currency: true, exchangeRate: true, ...billSettlementInclude,
+      company: { select: { ownerUserId: true, relationshipType: true } },
     },
   });
-  if (!bill) return { ok: false, error: "That bill no longer exists." };
+  // A bill this person can open, on a vendor they may record payments for — the permission says they
+  // may pay bills, not whose.
+  if (!bill || !(await mayAccess(user.id, "documents", "view", bill.id)) || !(await mayAddTo(user.id, "payments", bill.company))) {
+    return { ok: false, error: "That bill no longer exists." };
+  }
   if (bill.docType !== "BILL") return { ok: false, error: "Payments out are recorded against a vendor bill." };
   if (bill.status === "DRAFT") return { ok: false, error: "Record the bill before paying it." };
   if (bill.status === "CANCELLED") return { ok: false, error: "This bill has been cancelled." };
@@ -185,7 +191,8 @@ async function payablesViewer() {
 }
 
 export async function getBillSettlement(billId: string) {
-  if (!(await payablesViewer())) return null;
+  const user = await payablesViewer();
+  if (!user || !(await mayAccess(user.id, "documents", "view", billId))) return null;
   const bill = await db.tradeDocument.findUnique({
     where: { id: billId },
     select: {
@@ -228,13 +235,18 @@ export async function getBillSettlement(billId: string) {
  */
 export async function payablesAging(params?: { search?: string }) {
   const asOf = new Date();
-  if (!(await payablesViewer())) return toPlain({ rows: [], totals: { buckets: emptyAging(), total: 0 }, asOf });
+  const user = await payablesViewer();
+  if (!user) return toPlain({ rows: [], totals: { buckets: emptyAging(), total: 0 }, asOf });
 
+  // The bills this person reaches, as the document lists have them (`documentAccess`) — inside an AND,
+  // because the engine's fragment may itself name `company`, and the search does too.
   const bills = await db.tradeDocument.findMany({
     where: {
-      docType: "BILL",
-      status: { notIn: ["DRAFT", "CANCELLED", "PAID"] },
-      ...(params?.search ? { company: { name: { contains: params.search, mode: "insensitive" } } } : {}),
+      AND: [
+        { docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
+        ...(params?.search ? [{ company: { name: { contains: params.search, mode: "insensitive" as const } } }] : []),
+        await documentAccess(user.id, "view"),
+      ],
     },
     select: {
       id: true,
@@ -280,7 +292,11 @@ export async function payablesAging(params?: { search?: string }) {
 
 /** A vendor's account: bills credit what we owe, payments out debit it back down. */
 export async function vendorStatement(companyId: string, opts?: { from?: string; to?: string }) {
-  if (!(await payablesViewer())) return null;
+  const user = await payablesViewer();
+  // A vendor out of reach answers as one that doesn't exist; its bills and payments are then narrowed
+  // as their own lists are, for when those are set narrower than the vendor.
+  if (!user || !(await mayAccess(user.id, "vendors", "view", companyId))) return null;
+  const [billScope, paymentScope] = await Promise.all([documentAccess(user.id, "view"), paymentAccess(user.id, "view")]);
   // A bill's and a payment's dates are typed days held at UTC midnight: From and To are those days,
   // both ends in.
   const dateFilter = calendarDayRange(opts?.from, opts?.to) ?? undefined;
@@ -288,12 +304,12 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
   const [company, bills, payments] = await Promise.all([
     db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true } }),
     db.tradeDocument.findMany({
-      where: { companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED"] }, ...(dateFilter ? { issueDate: dateFilter } : {}) },
+      where: { AND: [{ companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED"] }, ...(dateFilter ? { issueDate: dateFilter } : {}) }, billScope] },
       orderBy: { issueDate: "asc" },
       select: { id: true, docNumber: true, issueDate: true, total: true, reference: true },
     }),
     db.payment.findMany({
-      where: { companyId, direction: "PAID", ...(dateFilter ? { paidOn: dateFilter } : {}) },
+      where: { AND: [{ companyId, direction: "PAID", ...(dateFilter ? { paidOn: dateFilter } : {}) }, paymentScope] },
       orderBy: { paidOn: "asc" },
       select: { id: true, amount: true, paidOn: true, method: true, reference: true },
     }),
@@ -340,9 +356,10 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
 
 /** Bills a payment can still be put against, for the record-payment picker. */
 export async function listOpenBills(companyId: string) {
-  if (!(await payablesViewer())) return [];
+  const user = await payablesViewer();
+  if (!user || !(await mayAccess(user.id, "vendors", "view", companyId))) return [];
   const bills = await db.tradeDocument.findMany({
-    where: { companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
+    where: { AND: [{ companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } }, await documentAccess(user.id, "view")] },
     orderBy: { issueDate: "asc" },
     select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, ...billSettlementInclude },
   });

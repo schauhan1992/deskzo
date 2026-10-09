@@ -519,6 +519,23 @@ export async function mayAccessContactsOf(userId: string, action: AccessAction, 
 }
 
 /**
+ * Whether this person may add a record of this kind to one account — a document raised for it, an
+ * order or a payment recorded against it. The question is what editing the new record would ask, of a
+ * record that would be theirs: a level that follows the account asks the account; one by person is
+ * met by the record being their own; NONE refuses. Under view as well, as everywhere: nobody adds what
+ * they could not then open.
+ */
+export async function mayAddTo(userId: string, record: Exclude<ChildRecord, "contacts">, account: AccountFacts): Promise<boolean> {
+  const { levels } = await resolveAccess(userId);
+  for (const a of ["edit", ...UNDER.edit] as AccessAction[]) {
+    const level = levels.get(slot(record, a))!.level;
+    if (level === "NONE") return false;
+    if (level === "FOLLOW" && !(await mayAccessAccount(userId, a, account))) return false;
+  }
+  return true;
+}
+
+/**
  * Whether this person may act this way on one record, by id — the single-record twin of the
  * fragments above, asked of the same fragment so a list and a detail page can never disagree.
  */
