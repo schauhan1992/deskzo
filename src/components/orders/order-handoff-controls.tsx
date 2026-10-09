@@ -234,12 +234,12 @@ export function OrderQuoteEditor({
       <Dialog open={open} onClose={() => setOpen(false)} title="Distributor price">
         <div className="space-y-3">
           {error && <p className="text-sm text-danger">{error}</p>}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="min-w-0 space-y-1">
               <Label htmlFor={`quote-price-${orderId}`} className="text-xs">Price per unit</Label>
               <Input id={`quote-price-${orderId}`} type="number" step="0.01" min={0} value={price} onChange={(e) => setPrice(e.target.value)} />
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Label htmlFor={`quote-on-${orderId}`} className="text-xs">Date quoted</Label>
               <Input
                 id={`quote-on-${orderId}`}
@@ -288,7 +288,7 @@ export function OrderQuoteEditor({
           ) : (
             <span />
           )}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={isPending}>
               Cancel
             </Button>

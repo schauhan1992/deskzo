@@ -55,6 +55,28 @@ export function stepOfOrder<S extends OrderStepDef>(steps: S[], order: { orderSt
   return stepsOf(steps, order.orderStatus)[0] ?? null;
 }
 
+/**
+ * Where an order may go from its step: the steps after it within its status, in order — never back,
+ * never the step it is at. Skipping ahead is allowed (a licence issued the day the PO went out); going
+ * back is not: a step is something that happened, and the menu offering an earlier one made a finished
+ * order look as if it was still going round. `setOrderStep` holds the server to the same rule.
+ */
+export function nextStepsOf<S extends OrderStepDef>(steps: S[], status: OrderStatus, currentId: string | null): S[] {
+  const ofStatus = stepsOf(steps, status);
+  const at = ofStatus.findIndex((s) => s.id === currentId);
+  return ofStatus.slice(at + 1);
+}
+
+/**
+ * What moves an order on once it is at the last step of its status. That is the status's own action,
+ * not another step, and it is somebody else's button — so the page says so instead of offering a move.
+ */
+export function afterLastStep(status: OrderStatus): string {
+  if (status === "APPROVED") return "It moves on when purchase takes it on.";
+  if (status === "PROCESSING") return "It moves on when purchase marks it fulfilled.";
+  return "Nothing further to do — this is the order's last step.";
+}
+
 export type StepInput = { label: string; status: OrderStatus; color: StageColor };
 
 /**

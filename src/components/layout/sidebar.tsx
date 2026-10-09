@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X, ChevronRight, LayoutDashboard, Search, PanelLeftClose, PanelLeftOpen, Headset } from "lucide-react";
 import { MODULE_REGISTRY } from "@/lib/modules";
 import { DASHBOARD_HREF, hasModuleNavigation, navIcon, type VisibleNavSection } from "@/lib/navigation";
+import { RailFlyout } from "@/components/ui/rail-flyout";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { useWording } from "@/components/terms/wording-provider";
@@ -122,6 +123,7 @@ export function Sidebar({
   navigation,
   branding,
   support = false,
+  drawerExtras,
 }: {
   /**
    * The menu, already decided on the server for whoever the request acts as —
@@ -131,6 +133,8 @@ export function Sidebar({
    */
   navigation: VisibleNavSection[];
   branding: Branding;
+  /** Controls the header has no room for on a phone (the theme), shown at the foot of the menu drawer. */
+  drawerExtras?: React.ReactNode;
   /**
    * Whether to offer "Contact Support" at the foot of the menu, below xl (the tool rail has it from xl) —
    * the layout's answer from `supportLauncherState()`. The dialog itself is the layout's
@@ -355,27 +359,40 @@ export function Sidebar({
         )}
 
         {matching.map(({ group, items }) => {
-          // In the icon rail there are no labels to put a chevron beside and no room to, so the
-          // sections stay open and a rule separates them. Collapsing a rail of icons would hide
-          // them behind a control that is itself unlabelled.
+          // In the icon rail a group of several pages is one button that opens them, named, beside the
+          // rail (src/components/ui/rail-flyout.tsx) — a column of forty unlabelled icons, several
+          // alike, was the rail's whole problem. A group of one is just its link.
           if (isCollapsed) {
+            if (items.length === 1) {
+              const only = items[0]!;
+              return (
+                <NavLink
+                  key={group}
+                  href={only.href}
+                  label={only.label}
+                  Icon={only.Icon}
+                  active={only.exact ? pathname === only.href : isActive(only.href)}
+                  isCollapsed
+                  onNavigate={onNavigate}
+                />
+              );
+            }
+            const FirstIcon = items[0]!.Icon;
             return (
-              <div key={group}>
-                <div className="mx-2 mb-1.5 border-t border-line" />
-                <div className="space-y-0.5">
-                  {items.map((item) => (
-                    <NavLink
-                      key={item.href}
-                      href={item.href}
-                      label={item.label}
-                      Icon={item.Icon}
-                      active={item.exact ? pathname === item.href : isActive(item.href)}
-                      isCollapsed
-                      onNavigate={onNavigate}
-                    />
-                  ))}
-                </div>
-              </div>
+              <RailFlyout
+                key={group}
+                label={group}
+                icon={<FirstIcon className="h-4 w-4 shrink-0" />}
+                className="py-2"
+                onNavigate={onNavigate}
+                items={items.map((item) => ({
+                  key: item.href,
+                  href: item.href,
+                  label: item.label,
+                  icon: <item.Icon className="h-4 w-4 shrink-0" />,
+                  active: item.exact ? pathname === item.href : isActive(item.href),
+                }))}
+              />
             );
           }
 
@@ -502,6 +519,7 @@ export function Sidebar({
             {renderNav(false, () => setMobileOpen(false))}
             {/* The drawer closes first, so the dialog opens over the page rather than over the menu. */}
             {support && <div className="border-t border-line p-2">{supportButton(false, () => setMobileOpen(false))}</div>}
+            {drawerExtras && <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2 text-xs text-muted sm:hidden">Theme {drawerExtras}</div>}
           </aside>
         </div>
       )}

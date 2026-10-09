@@ -1,3 +1,4 @@
+import { cache } from "react";
 import NextAuth, { type Session } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
@@ -287,14 +288,32 @@ const nextAuth = NextAuth(buildConfig);
 export const { handlers, signIn, signOut } = nextAuth;
 
 /**
+ * Who the signed-in person is now, read from this workspace's own database once per request.
+ *
+ * The token is written at sign-in and kept for the life of the session, so the name and role in it
+ * are the ones somebody had when they signed in. An admin who moved Vishal from Sales to HR head saw
+ * HR head on his profile and "Sales" under his name in the header — and every check written against
+ * the session's role (the DLP policy, a lead's default owner, an admin override) went on treating him
+ * as Sales until he signed out. The token still proves *who* is signed in; *what* they are is read here.
+ */
+const currentIdentity = cache(async (userId: string) =>
+  db.user.findUnique({ where: { id: userId }, select: { name: true, role: true, kind: true } }),
+);
+
+/**
  * The signed-in session — only when this workspace issued it. The token already only decrypts under
- * this workspace's session secret; this is the second check, on the workspace it names.
+ * this workspace's session secret; this is the second check, on the workspace it names. Only then is
+ * the person read, from this same workspace's database: their current name and role replace the
+ * token's, and an account no longer here ends the session.
  */
 export async function auth(): Promise<Session | null> {
   const session = await nextAuth.auth();
   if (!session?.user) return null;
   const tenant = await currentTenantOrNull();
-  return tenant && session.user.tid === tenant.id ? session : null;
+  if (!tenant || session.user.tid !== tenant.id) return null;
+  const person = session.user.id ? await currentIdentity(session.user.id) : null;
+  if (!person || isAutomationKind(person.kind)) return null;
+  return { ...session, user: { ...session.user, name: person.name, role: person.role } };
 }
 
 /** Moved to src/lib/roles.ts — a form needing the list should not import this module. */

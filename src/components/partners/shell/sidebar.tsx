@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { ChevronRight, Handshake, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { useModalA11y } from "@/components/ui/use-modal-a11y";
+import { RailFlyout } from "@/components/ui/rail-flyout";
 import type { PlatformEnv } from "@/lib/console-shared/types";
 import { PARTNER_NAV_GROUPS, PARTNER_PAGES, activePartnerPageKey, type PartnerNavGroup, type PartnerNavPage, type PartnerPageKey } from "@/lib/partners/nav";
 import { cn } from "@/lib/utils";
@@ -116,6 +117,21 @@ export function PartnerSidebar({
         {sections.map((section) => {
           const items = section.pages.map((page) => <NavItem key={page.key} page={page} active={page.key === activeKey} rail={rail} onNavigate={onNavigate} />);
 
+          // In the rail, a group of several pages is one button that opens them, named, beside it
+          // (src/components/ui/rail-flyout.tsx) rather than a run of unlabelled icons.
+          if (rail && section.label && section.pages.length > 1) {
+            return (
+              <div key={section.key} className="mt-2 border-t border-line pt-2">
+                <RailFlyout
+                  label={section.label}
+                  icon={<PartnerNavIcon name={section.pages[0]!.icon} />}
+                  className="h-8"
+                  onNavigate={onNavigate}
+                  items={section.pages.map((page) => ({ key: page.key, href: page.href, label: page.label, icon: <PartnerNavIcon name={page.icon} />, active: page.key === activeKey }))}
+                />
+              </div>
+            );
+          }
           if (!section.label || rail) {
             return (
               <div key={section.key} className={cn("space-y-0.5", rail && section.label && "mt-2 border-t border-line pt-2")}>

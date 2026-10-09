@@ -106,7 +106,7 @@ export default async function ProfilePage({
               </div>
               <div className="flex justify-between sm:block">
                 <span className="text-muted">Role</span>
-                <span className="text-text sm:ml-2">{profile.role}</span>
+                <span className="text-text sm:ml-2">{profile.roleRef.name}</span>
               </div>
               <div className="flex justify-between sm:block">
                 <span className="text-muted">Department</span>

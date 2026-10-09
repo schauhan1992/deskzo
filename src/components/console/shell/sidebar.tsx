@@ -7,6 +7,7 @@ import { ChevronRight, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useOpenNavGroups } from "@/components/console/kit/prefs";
 import { IconButton } from "@/components/ui/icon-button";
 import { useModalA11y } from "@/components/ui/use-modal-a11y";
+import { RailFlyout } from "@/components/ui/rail-flyout";
 import { CONSOLE_PAGES, NAV_GROUPS, activePageKey, type ConsolePage, type ConsolePageKey, type NavGroup } from "@/lib/console-shared/nav";
 import type { NavBadge, NavCounts, PlatformEnv } from "@/lib/console-shared/types";
 import { cn } from "@/lib/utils";
@@ -162,6 +163,31 @@ export function Sidebar({
             return <NavItem key={page.key} page={page} active={page.key === activeKey} badge={shown(badge) ? badge : undefined} rail={rail} onNavigate={onNavigate} />;
           });
 
+          // In the rail, a group of several pages is one button that opens them, named, beside it
+          // (src/components/ui/rail-flyout.tsx) rather than a run of unlabelled icons.
+          if (rail && section.label && section.pages.length > 1) {
+            return (
+              <div key={section.key} className="mt-2 border-t border-line pt-2">
+                <RailFlyout
+                  label={section.label}
+                  icon={<NavIcon name={section.pages[0]!.icon} />}
+                  className="h-8"
+                  onNavigate={onNavigate}
+                  items={section.pages.map((page) => {
+                    const badge = page.badge ? counts.badges[page.badge] : undefined;
+                    return {
+                      key: page.key,
+                      href: page.href,
+                      label: page.label,
+                      icon: <NavIcon name={page.icon} />,
+                      active: page.key === activeKey,
+                      badge: shown(badge) ? { text: badge.count === null ? "•" : badge.count > 99 ? "99+" : String(badge.count), label: badge.label } : undefined,
+                    };
+                  })}
+                />
+              </div>
+            );
+          }
           // Overview and Alerts have no heading; in the rail no group has one — a rule separates them.
           if (!section.label || rail) {
             return (

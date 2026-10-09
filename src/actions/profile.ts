@@ -28,6 +28,8 @@ export async function getOwnProfile() {
       email: true,
       phone: true,
       role: true,
+      // The role's own name, as the header shows it ("HR head" rather than HR_HEAD).
+      roleRef: { select: { name: true } },
       department: { select: { name: true } },
       manager: { select: { name: true } },
       mustChangePassword: true,

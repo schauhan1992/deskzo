@@ -186,14 +186,14 @@ export function PaymentsDialog({
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-2 rounded-md border border-line p-3">
             <p className="text-xs font-medium text-text">Record a new payment for this order</p>
             {serverError && <p className="text-xs text-danger">{serverError}</p>}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="min-w-0 space-y-1">
                 <Label htmlFor={`${fieldId}-amount`} className="text-xs">
                   Amount
                 </Label>
                 <Input id={`${fieldId}-amount`} type="number" min={0.01} step="0.01" {...register("amount")} />
               </div>
-              <div className="space-y-1">
+              <div className="min-w-0 space-y-1">
                 <Label htmlFor={`${fieldId}-paidOn`} className="text-xs">
                   Date received
                 </Label>

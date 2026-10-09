@@ -187,7 +187,9 @@ export function OrderActionsPanel({
   const cancelNeedsReason = released;
 
   return (
-    <div className="space-y-4">
+    // A size container: the panel sits in the order page's side column, so its own width — not the
+    // window's — decides whether the purchasing fields sit side by side.
+    <div className="@container min-w-0 space-y-4">
       {error && <p className="text-sm text-danger">{error}</p>}
 
       {order.orderStatus === "PENDING_APPROVAL" && canApprove && (
@@ -233,7 +235,7 @@ export function OrderActionsPanel({
             value={approveNotes}
             onChange={(e) => setApproveNotes(e.target.value)}
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
@@ -272,7 +274,7 @@ export function OrderActionsPanel({
                   }.`}
             </p>
           )}
-          <div className="space-y-1">
+          <div className="min-w-0 space-y-1">
             <Label className="text-xs">Vendor</Label>
             <CompanyCombobox
               companies={vendorOptions.map((v) => ({
@@ -285,8 +287,10 @@ export function OrderActionsPanel({
               placeholder="Type to search vendors…"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
+          {/* One column in a narrow panel, two from 24rem. `min-w-0` lets a field shrink to its track —
+              a number input's own width otherwise pushes the grid past the card. */}
+          <div className="grid grid-cols-1 gap-2 @sm:grid-cols-2">
+            <div className="min-w-0 space-y-1">
               <Label htmlFor="order-purchase-price" className="text-xs">Purchase price / unit</Label>
               <Input
                 id="order-purchase-price"
@@ -296,7 +300,7 @@ export function OrderActionsPanel({
                 onChange={(e) => setPurchasePrice(e.target.value)}
               />
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Label htmlFor="order-our-po" className="text-xs">Our PO to vendor</Label>
               <Input id="order-our-po" value={ourPoNumber} onChange={(e) => setOurPoNumber(e.target.value)} />
             </div>
@@ -331,7 +335,7 @@ export function OrderActionsPanel({
               />
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
@@ -371,18 +375,22 @@ export function OrderActionsPanel({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {(canRecordPayments || canDeletePayments) && (
-          <Button type="button" variant="secondary" size="sm" onClick={() => setShowPayments(true)}>
-            Payments
-          </Button>
-        )}
-        {canCancel && (
-          <Button type="button" variant="ghost" size="sm" className="text-danger" onClick={() => setShowCancel(true)}>
-            Cancel order
-          </Button>
-        )}
-      </div>
+      {/* The customer's money, kept apart from the vendor's: the purchasing box above is what we pay the
+          distributor; this is what the customer has paid us. They sat on one row and read as one thing. */}
+      {(canRecordPayments || canDeletePayments || canCancel) && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          {(canRecordPayments || canDeletePayments) && (
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowPayments(true)}>
+              Customer payments
+            </Button>
+          )}
+          {canCancel && (
+            <Button type="button" variant="ghost" size="sm" className="ml-auto text-danger" onClick={() => setShowCancel(true)}>
+              Cancel order
+            </Button>
+          )}
+        </div>
+      )}
 
       <Dialog open={showReject} onClose={() => setShowReject(false)} title="Reject order">
         <p className="text-sm text-muted">This tells the sales person the order needs rework before it can proceed.</p>

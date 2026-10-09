@@ -231,8 +231,9 @@ export async function OrderDetail({
       )}
 
       <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-3">
+        <div className="min-w-0">
+          {/* Wraps: the order number and up to six badges are wider than a phone. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <h1 className="text-xl font-semibold text-text">{formatOrderId(order.orderSeq)}</h1>
             {viaReseller && <Badge tone="blue">Via reseller</Badge>}
             <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>{statusSlot(await getWording(), order.orderStatus, order.orderStatus.replaceAll("_", " "))}</Badge>
@@ -254,7 +255,9 @@ export async function OrderDetail({
       </div>
 
       <div className="grid grid-cols-1 gap-6 @3xl:grid-cols-3">
-        <div className="space-y-6 @3xl:col-span-2">
+        {/* min-w-0 on both columns: a grid item is as wide as its widest content by default, so one
+            row of buttons that can't shrink would widen the column past the page. */}
+        <div className="min-w-0 space-y-6 @3xl:col-span-2">
           <Card>
             <CardHeader className="text-sm font-medium text-text">Order details</CardHeader>
             <CardContent className="grid grid-cols-1 gap-x-6 gap-y-2 @lg:grid-cols-2 text-sm">
@@ -304,6 +307,7 @@ export async function OrderDetail({
 
           <OrderProgress
             orderId={order.id}
+            status={order.orderStatus}
             statusLabel={stepStatusLabel(order.orderStatus)}
             steps={statusSteps.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
             currentId={stepOf.get(order.id)?.id ?? null}
@@ -602,7 +606,7 @@ export async function OrderDetail({
                   <span className="font-medium text-text">{formatCurrency(String(total))}</span>
                 </div>
               </div>
-              <div className="flex items-center justify-between border-t border-line pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
                 <Badge tone={paymentStatus.tone}>{paymentStatus.label}</Badge>
                 <span className="text-muted">
                   Paid {formatCurrency(String(paid))}
@@ -666,7 +670,7 @@ export async function OrderDetail({
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <Card>
             <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
               <span>Actions</span>

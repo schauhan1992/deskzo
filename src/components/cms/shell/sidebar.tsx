@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { ChevronRight, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { useModalA11y } from "@/components/ui/use-modal-a11y";
+import { RailFlyout } from "@/components/ui/rail-flyout";
 import type { PlatformEnv } from "@/lib/console-shared/types";
 import { CMS_NAV_GROUPS, CMS_PAGES, activeCmsPageKey, type CmsNavBadgeKey, type CmsNavGroup, type CmsNavPage, type CmsPageKey } from "@/lib/cms/nav";
 import { cn } from "@/lib/utils";
@@ -136,6 +137,31 @@ export function CmsSidebar({
             return <NavItem key={page.key} page={page} active={page.key === activeKey} badge={badge && badge.count > 0 ? badge : undefined} rail={rail} onNavigate={onNavigate} />;
           });
 
+          // In the rail, a group of several pages is one button that opens them, named, beside it
+          // (src/components/ui/rail-flyout.tsx) rather than a run of unlabelled icons.
+          if (rail && section.label && section.pages.length > 1) {
+            return (
+              <div key={section.key} className="mt-2 border-t border-line pt-2">
+                <RailFlyout
+                  label={section.label}
+                  icon={<CmsNavIcon name={section.pages[0]!.icon} />}
+                  className="h-8"
+                  onNavigate={onNavigate}
+                  items={section.pages.map((page) => {
+                    const badge = page.badge ? badges[page.badge] : undefined;
+                    return {
+                      key: page.key,
+                      href: page.href,
+                      label: page.label,
+                      icon: <CmsNavIcon name={page.icon} />,
+                      active: page.key === activeKey,
+                      badge: badge && badge.count > 0 ? { text: badge.count > 99 ? "99+" : String(badge.count), label: badge.label } : undefined,
+                    };
+                  })}
+                />
+              </div>
+            );
+          }
           if (!section.label || rail) {
             return (
               <div key={section.key} className={cn("space-y-0.5", rail && section.label && "mt-2 border-t border-line pt-2")}>

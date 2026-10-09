@@ -56,6 +56,13 @@ export function AnchoredPopover({
   maxHeight = 320,
   /** "end" right-aligns the panel with the anchor, for a menu that sits near the viewport's edge. */
   align = "start",
+  /**
+   * "right" opens beside the anchor instead of under it — a collapsed sidebar's group, whose pages
+   * have nowhere to go below. Kept on screen: moved up when the anchor is near the bottom.
+   */
+  side = "bottom",
+  /** How far from the anchor's right edge a "right" panel opens — past the padding of what holds it. */
+  offset = 6,
 }: {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
@@ -63,6 +70,8 @@ export function AnchoredPopover({
   width?: number;
   maxHeight?: number;
   align?: "start" | "end";
+  side?: "bottom" | "right";
+  offset?: number;
 }) {
   const [position, setPosition] = useState<{
     top: number;
@@ -87,6 +96,13 @@ export function AnchoredPopover({
       const anchor = anchorRef.current;
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect();
+      if (side === "right") {
+        const want = Math.min(maxHeight, window.innerHeight - 16);
+        const top = Math.max(8, Math.min(rect.top, window.innerHeight - want - 8));
+        // `top - 4` because the panel is drawn 4px below `top` (the gap a dropdown keeps from its field).
+        setPosition({ top: top - 4, left: rect.right + offset, width: width ?? rect.width, flipped: false, available: window.innerHeight - top - 8 });
+        return;
+      }
       const spaceBelow = window.innerHeight - rect.bottom;
       // Flip up only when below genuinely can't fit and above has more room, so the panel doesn't
       // jump around as the page scrolls past the midpoint.
@@ -110,11 +126,15 @@ export function AnchoredPopover({
     // table it was opened from.
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
+    // And once something animates into place — a sidebar easing to its collapsed width moves the
+    // anchor without a scroll or a resize.
+    window.addEventListener("transitionend", place, true);
     return () => {
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
+      window.removeEventListener("transitionend", place, true);
     };
-  }, [open, anchorRef, width, maxHeight, align]);
+  }, [open, anchorRef, width, maxHeight, align, side, offset]);
 
   if (!isClient || !open || !position) return null;
 

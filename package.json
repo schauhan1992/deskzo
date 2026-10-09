@@ -120,6 +120,7 @@
     "check:view-permissions": "tsx scripts/check-view-permissions.ts",
     "check:permission-gates": "tsx scripts/check-permission-gates.ts",
     "check:navigation-access": "tsx scripts/check-navigation-access.ts",
+    "check:role-sync": "tsx scripts/check-role-sync.ts",
     "check:access-levels": "tsx scripts/check-access-levels.ts",
     "check:write-scope": "tsx scripts/check-write-scope.ts",
     "check:access-editor": "tsx scripts/check-access-editor.ts",

@@ -335,6 +335,41 @@ async function run(scratchUrl: string) {
     const early = await progress.setOrderStep(waiting.id, ordered);
     ok("an order still waiting for approval has no steps yet", !early.ok, errorOf(early));
 
+    // ── Forward only, exactly once ─────────────────────────────────────────────────────────────
+    // A reseller's "PO placed with distributor → Licences issued": at the last step the page offered the
+    // step before it, and a page left open could still move it. Moves now go forward only, decided on
+    // the locked row, and the page says the order is done here.
+    section("Forward only, exactly once");
+    as(purchase);
+    const historyOf = async (id: string) => (await server.stepHistory(id)).length;
+    const atLast = textOf(renderToStaticMarkup((await OrderDetail({ id: inProcess.id })) as ReactElement));
+    ok("at the last step of Processing the page says so, and what moves it on", atLast.includes("Installed on site is the last step of Processing") && atLast.includes("marks it fulfilled"));
+    ok("  and offers no move — not the step it is at, nor an earlier one", !atLast.includes("Choose the next step") && !atLast.includes("Move to"));
+    const before = await historyOf(inProcess.id);
+    const back = await progress.setOrderStep(inProcess.id, received);
+    ok("moving it back by a hand-made request is refused", !back.ok && /only moves forward/.test(errorOf(back) ?? ""), errorOf(back));
+    const same = await progress.setOrderStep(inProcess.id, installed, "again");
+    ok("  and asking for the step it is at records nothing", same.ok && (await historyOf(inProcess.id)) === before);
+    as(viewer);
+    ok("  nor may somebody who only looks move it", !(await progress.setOrderStep(inProcess.id, installed)).ok);
+    as(purchase);
+
+    const racer = await order("PROCESSING");
+    const raced = await Promise.all(Array.from({ length: 6 }, () => progress.setOrderStep(racer.id, received, "issued", ordered)));
+    const racerSteps = await server.stepHistory(racer.id);
+    ok("six clicks at once move it once", raced.every((r) => r.ok) && racerSteps.length === 1 && racerSteps[0]?.toLabel === "Material received", `${racerSteps.length} recorded`);
+    const stale = await progress.setOrderStep(racer.id, installed, null, ordered);
+    ok("a page still showing the step it has left is refused, not applied", !stale.ok && /moved on/.test(errorOf(stale) ?? "") && (await historyOf(racer.id)) === 1, errorOf(stale));
+    const fresh = await progress.setOrderStep(racer.id, installed, null, received);
+    const racerNow = textOf(renderToStaticMarkup((await OrderDetail({ id: racer.id })) as ReactElement));
+    ok("  from the step it is at, it goes on — and the page, read again, agrees", fresh.ok && racerNow.includes("Installed on site is the last step of Processing") && racerNow.includes("Material received → Installed on site"));
+    const cancelled = await orders.cancelOrder(racer.id, "Customer withdrew the order");
+    ok("an order at its last step can still be cancelled", cancelled.ok, errorOf(cancelled));
+    ok("  and, cancelled, takes no step", !(await progress.setOrderStep(racer.id, ordered)).ok);
+    // Gone again, so the list checks below see the orders they always have.
+    await db.orderStepChange.deleteMany({ where: { orderId: racer.id } });
+    await db.companyProduct.delete({ where: { id: racer.id } });
+
     // ── The list ───────────────────────────────────────────────────────────────────────────────
     section("The orders list by step");
     const keyOf = async (id: string) => (await server.orderSteps()).steps.find((s) => s.id === id)!.key;

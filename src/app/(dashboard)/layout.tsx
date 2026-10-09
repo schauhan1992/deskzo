@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Eye } from "lucide-react";
+import { Eye, LogOut } from "lucide-react";
 import { auth, signOut } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
@@ -164,7 +164,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // that person's face in the header, for the same reason the name and role already change.
   // The same read carries the account's kind, for the workspace switcher below.
   const viewer = shownUser
-    ? await db.user.findUnique({ where: { id: shownUser.id }, select: { photoUpdatedAt: true, kind: true, onboardingCompletedAt: true } })
+    ? await db.user.findUnique({ where: { id: shownUser.id }, select: { photoUpdatedAt: true, kind: true, onboardingCompletedAt: true, roleRef: { select: { name: true } } } })
     : null;
   const viewerPhotoUpdatedAt = viewer?.photoUpdatedAt ?? null;
   // Linked sign-in's workspace switcher (spec §2.1): the person's own member account only — never while
@@ -240,7 +240,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
           )}
         </>
       )}
-      <Sidebar navigation={navigation} branding={branding} support={!!supportLauncher} />
+      <Sidebar
+        navigation={navigation}
+        branding={branding}
+        support={!!supportLauncher}
+        // On a phone the header has no room for it; it is in the menu drawer instead.
+        drawerExtras={<ThemeToggle defaultTheme={branding.defaultTheme} />}
+      />
 
       <div className={`flex min-w-0 flex-1 flex-col${viewAs ? " ring-2 ring-inset ring-warning/50" : ""}`}>
         {/* Sticky so the controls stay reachable when a long table scrolls. */}
@@ -257,7 +263,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </span>
             </span>
           )}
-          <div className="ml-auto flex items-center gap-2 md:gap-3">
+          {/* `min-w-0` so the name below can give way; nothing here may push the page sideways. */}
+          <div className="ml-auto flex min-w-0 items-center gap-2 md:gap-3">
             {canSwitch && (
               <WorkspaceSwitcher
                 // The workspace's own name, as the panel lists every workspace: an unbranded workspace's app
@@ -279,20 +286,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
               viewingAs={viewAs ? { userName: viewAs.user.name, actorName: viewAs.actor.name } : null}
             />
             {copilot && <CopilotButton availability={copilot} />}
-            <ThemeToggle defaultTheme={branding.defaultTheme} />
+            {/* In the menu drawer below `sm` — seven controls and the search don't fit a phone's header. */}
+            <div className="hidden sm:block">
+              <ThemeToggle defaultTheme={branding.defaultTheme} />
+            </div>
             <NotificationBell />
             <Link
               href="/profile"
-              className="group flex items-center gap-2 rounded-base px-1.5 py-1 transition-colors hover:bg-surface-sunken"
+              className="group flex min-w-0 items-center gap-2 rounded-base px-1.5 py-1 transition-colors hover:bg-surface-sunken"
             >
               <Avatar
                 user={shownUser ? { id: shownUser.id, name: shownUser.name, photoUpdatedAt: viewerPhotoUpdatedAt } : null}
                 size="sm"
                 tone={viewAs ? "warning" : "default"}
               />
-              <span className="hidden text-left leading-tight sm:block">
-                <span className="block text-[13px] font-medium text-text">{shownUser?.name}</span>
-                <span className="block text-[11px] text-subtle">{shownUser?.role}</span>
+              <span className="hidden min-w-0 text-left leading-tight sm:block">
+                <span className="block truncate text-[13px] font-medium text-text">{shownUser?.name}</span>
+                {/* The role's own name ("HR head"), read with the photo on this request — the same row Staff & roles
+                    and the profile page show, so a role changed there is the one shown here on the next page. */}
+                <span className="block truncate text-[11px] text-subtle">{viewer?.roleRef.name ?? shownUser?.role}</span>
               </span>
             </Link>
             <form
@@ -304,8 +316,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 await signOut({ redirectTo: "/login" });
               }}
             >
-              <Button type="submit" variant="ghost" size="sm">
-                Sign out
+              {/* An icon on a phone, its words from `sm`; named either way. */}
+              <Button type="submit" variant="ghost" size="sm" aria-label="Sign out" title="Sign out" className="px-2 sm:px-3">
+                <LogOut aria-hidden="true" className="h-4 w-4 sm:hidden" />
+                <span className="hidden sm:inline">Sign out</span>
               </Button>
             </form>
           </div>
