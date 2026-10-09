@@ -138,6 +138,8 @@ A People-only customer gets none of these three, although onboarding and the set
 
 ## 3. Defects found while taking the inventory
 
+**Items 1–4 fixed in code on 9 Oct 2026, awaiting the CA:** professional tax is now dated rules per state (src/lib/hr/professional-tax.ts). It also fixes a fifth error found while doing it: Maharashtra's ₹300 February was being charged on the ₹175 slab as ₹275. Every state is still marked `awaitingCa`, and the CA review in section 7 decides the figures. Items 5 and 6 are open.
+
 These are in today's payroll and would reach a customer's payslips. They are separate from the gaps in section 6 because they are wrong rather than missing. Each needs a CA's confirmation before the fix. The sources are secondary (law-firm notes and payroll publishers), as marked.
 
 1. **Tamil Nadu professional tax is charged as if it were monthly.**

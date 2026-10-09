@@ -52,8 +52,9 @@ const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const num = (v: unknown) => Number(v ?? 0);
 
 async function cleanup() {
-  await db.payslip.deleteMany({ where: { run: { month: 3, year: 2001 } } });
-  await db.payrollRun.deleteMany({ where: { month: 3, year: 2001 } });
+  const fixtureMonths = [{ month: 3, year: 2001 }, { month: 10, year: 2000 }, { month: 1, year: 2001 }];
+  await db.payslip.deleteMany({ where: { run: { OR: fixtureMonths } } });
+  await db.payrollRun.deleteMany({ where: { OR: fixtureMonths } });
   // Balances and settlements go with the people and types (onDelete: Cascade).
   await db.leaveType.deleteMany({ where: { code: { in: CODES } } });
   await db.user.deleteMany({ where: { email: { endsWith: MAIL } } });
@@ -62,7 +63,7 @@ async function cleanup() {
 
 async function main() {
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const { alsoPaidBySettlement, finalMonthFor, paidAfterLeaving, payrollMonth, settlementsRelyingOn } =
+  const { alsoPaidBySettlement, finalMonthFor, monthsBefore, paidAfterLeaving, payrollMonth, ptHistoryFor, settlementsRelyingOn, workStateOf } =
     require("../src/lib/hr/payroll-month") as typeof import("../src/lib/hr/payroll-month");
   const { accruedTo, ensureBalance } = require("../src/lib/hr/leave-balance") as typeof import("../src/lib/hr/leave-balance");
   /* eslint-enable @typescript-eslint/no-require-imports */
@@ -95,7 +96,7 @@ async function main() {
     const steady = await person("Steady", { joinedOn: "2000-01-10" });
     await person("Joiner", { joinedOn: "2001-03-20" });
     await person("Future", { joinedOn: "2001-04-05" });
-    await person("Leaver", { joinedOn: "2000-01-10", exitedOn: "2001-03-10" });
+    const leaverId = (await person("Leaver", { joinedOn: "2000-01-10", exitedOn: "2001-03-10" })).id;
     const goneKept = await person("GoneLoginKept", { joinedOn: "2000-01-10", exitedOn: "2001-02-15" }, true);
     await person("GoneLoginOff", { joinedOn: "2000-01-10", exitedOn: "2001-02-15" }, false);
     const settled = await person("Settled", { joinedOn: "2000-01-10", exitedOn: "2001-03-12" });
@@ -183,6 +184,25 @@ async function main() {
     const lateSlips = await paidAfterLeaving(goneKept.id, d("2001-02-15"));
     ok("an exit recorded late: March's locked payslip is reported as paid after leaving", lateSlips.length === 1 && lateSlips[0]!.label === "March 2001" && lateSlips[0]!.days === 31 && lateSlips[0]!.gross === 62000, JSON.stringify(lateSlips));
     ok("...and nothing for somebody who left after it", (await paidAfterLeaving(steady.id, d("2001-03-31"))).length === 0);
+
+    section("Professional tax's look back at the year");
+    ok("March's financial year began eleven months before it", monthsBefore(2001, 3).length === 11 && monthsBefore(2000, 4).length === 0);
+    // October and January, both in the second half of FY 2000: ₹50,000 and ₹200 of tax on each.
+    for (const month of [{ month: 10, year: 2000 }, { month: 1, year: 2001 }]) {
+      const earlier = await db.payrollRun.create({ data: { ...month, status: "LOCKED" } });
+      await db.payslip.create({
+        data: { runId: earlier.id, userId: steady.id, monthDays: 31, paidDays: 31, basic: 25000, grossEarnings: 50000, professionalTax: 200, totalDeductions: 200, netPay: 49800, employerCost: 50000 },
+      });
+    }
+    const march2001 = (await ptHistoryFor([steady.id, leaverId], 2001, 3)).get(steady.id);
+    ok("March's half so far: October and January, 1,00,000", march2001?.halfYearGrossBefore === 100000, march2001?.halfYearGrossBefore);
+    ok("...and 400 of tax already this year, for the ₹2,500 cap", march2001?.paidThisYear === 400, march2001?.paidThisYear);
+    const september2000 = (await ptHistoryFor([steady.id], 2000, 9)).get(steady.id);
+    ok("September 2000 looks back at April to August only — none of it", september2000?.halfYearGrossBefore === 0 && september2000.paidThisYear === 0);
+    ok("somebody with no payslips starts at nothing", (await ptHistoryFor([leaverId], 2001, 3)).get(leaverId)?.paidThisYear === 0);
+    const tnWorker = await person("TnWorker", { joinedOn: "2000-01-10" });
+    await db.employeeProfile.update({ where: { userId: tnWorker.id }, data: { state: "Tamil Nadu" } });
+    ok("with no branch, their work state is the one on their record", (await workStateOf(tnWorker.id)) === "Tamil Nadu");
 
     section("Leave carried into a year");
     const type = (code: string, data: { annualQuota: number; accrual: "ANNUAL" | "MONTHLY"; carryForward: boolean; maxCarryForward?: number }) =>

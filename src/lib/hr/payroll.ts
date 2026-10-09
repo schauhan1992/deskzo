@@ -1,4 +1,5 @@
 import { formatCalendarDay } from "@/lib/time/zone";
+import { computeProfessionalTax } from "@/lib/hr/professional-tax";
 
 /**
  * Indian payroll arithmetic: gross, the statutory deductions, and what actually reaches the bank.
@@ -171,100 +172,9 @@ export function computeEsi(gross: number, opts: { applicable: boolean; wageRate?
 
 // ─── Professional tax ─────────────────────────────────────────────────────────
 
-/**
- * Professional tax is a state levy, so the slab depends on where the employee works — not where the
- * company is registered. Only the states this business actually employs in are listed; anywhere
- * else returns zero and says so, rather than quietly applying Maharashtra's rates to Karnataka.
- */
-export type PtSlab = { upTo: number | null; amount: number };
-
-export const PT_SLABS: Record<string, { label: string; slabs: PtSlab[]; februaryTopUp?: number }> = {
-  MAHARASHTRA: {
-    label: "Maharashtra",
-    slabs: [
-      { upTo: 7500, amount: 0 },
-      { upTo: 10000, amount: 175 },
-      { upTo: null, amount: 200 },
-    ],
-    // Maharashtra charges 300 in February so the year totals 2,500.
-    februaryTopUp: 100,
-  },
-  KARNATAKA: {
-    label: "Karnataka",
-    slabs: [
-      { upTo: 24999, amount: 0 },
-      { upTo: null, amount: 200 },
-    ],
-  },
-  WEST_BENGAL: {
-    label: "West Bengal",
-    slabs: [
-      { upTo: 10000, amount: 0 },
-      { upTo: 15000, amount: 110 },
-      { upTo: 25000, amount: 130 },
-      { upTo: 40000, amount: 150 },
-      { upTo: null, amount: 200 },
-    ],
-  },
-  TAMIL_NADU: {
-    label: "Tamil Nadu",
-    slabs: [
-      { upTo: 21000, amount: 0 },
-      { upTo: 30000, amount: 135 },
-      { upTo: 45000, amount: 315 },
-      { upTo: 60000, amount: 690 },
-      { upTo: 75000, amount: 1025 },
-      { upTo: null, amount: 1250 },
-    ],
-  },
-  TELANGANA: {
-    label: "Telangana",
-    slabs: [
-      { upTo: 15000, amount: 0 },
-      { upTo: 20000, amount: 150 },
-      { upTo: null, amount: 200 },
-    ],
-  },
-  GUJARAT: {
-    label: "Gujarat",
-    slabs: [
-      { upTo: 12000, amount: 0 },
-      { upTo: null, amount: 200 },
-    ],
-  },
-};
-
-/** States with no professional tax at all — named so the UI can say so rather than look broken. */
-export const PT_EXEMPT_STATES = ["DELHI", "HARYANA", "UTTAR PRADESH", "RAJASTHAN", "PUNJAB", "GOA"];
-
-export function normaliseState(state: string | null | undefined) {
-  return (state ?? "").trim().toUpperCase().replace(/\s+/g, "_");
-}
-
-export type PtResult = { amount: number; known: boolean; stateLabel: string | null };
-
-export function computeProfessionalTax(
-  gross: number,
-  state: string | null | undefined,
-  month: number,
-  opts: { applicable: boolean },
-): PtResult {
-  if (!opts.applicable) return { amount: 0, known: true, stateLabel: null };
-
-  const key = normaliseState(state);
-  if (!key) return { amount: 0, known: false, stateLabel: null };
-  if (PT_EXEMPT_STATES.includes(key.replace(/_/g, " "))) {
-    return { amount: 0, known: true, stateLabel: key.replace(/_/g, " ") };
-  }
-
-  const config = PT_SLABS[key];
-  if (!config) return { amount: 0, known: false, stateLabel: key.replace(/_/g, " ") };
-
-  const slab = config.slabs.find((s) => s.upTo === null || gross <= s.upTo);
-  let amount = slab?.amount ?? 0;
-  if (amount > 0 && month === 2 && config.februaryTopUp) amount += config.februaryTopUp;
-  return { amount, known: true, stateLabel: config.label };
-}
+// Dated rules per state, half-yearly Tamil Nadu, Punjab's development tax and the ₹2,500 cap: their own
+// module (./professional-tax.ts), re-exported here for the callers that import it from payroll.
+export { computeProfessionalTax, normaliseState, PT_ANNUAL_CAP, PT_EXEMPT_STATES, PT_STATES, type PtResult } from "@/lib/hr/professional-tax";
 
 // ─── Joining and leaving ──────────────────────────────────────────────────────
 
@@ -323,6 +233,18 @@ export type PayslipInput = {
   salaryInSettlement?: boolean;
   /** Where the employee works, for professional tax. */
   state?: string | null;
+  /** For Maharashtra's women's table (./professional-tax.ts). */
+  gender?: "FEMALE" | "MALE" | "OTHER" | "UNDISCLOSED" | null;
+  /**
+   * Professional tax's look back at this financial year's earlier payslips: the gross of this half-year
+   * (Tamil Nadu is charged on the half's income), and the tax already taken (the ₹2,500 annual cap).
+   */
+  ptHistory?: { halfYearGrossBefore: number; paidThisYear: number };
+  /**
+   * Their last working day is in this month — when a half-yearly professional tax falls due early. Left
+   * out, it is read from `employment`, which can't tell a leaver on the month's last day.
+   */
+  leavingThisMonth?: boolean;
   /** The wage month (1–12) and its year: professional tax's slab and the PF wage ceiling in force. */
   month: number;
   year: number;
@@ -407,7 +329,19 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   // ESI's coverage is on the full month's rate, its contribution on what was earned (computeEsi).
   const wageRate = round2(monthlyGross(c) + incentive);
   const esi = computeEsi(grossEarnings, { applicable: input.flags.esiApplicable, wageRate });
-  const pt = computeProfessionalTax(grossEarnings, input.state, input.month, { applicable: input.flags.ptApplicable });
+  const pt = computeProfessionalTax({
+    monthGross: grossEarnings,
+    state: input.state,
+    month: input.month,
+    year: input.year,
+    applicable: input.flags.ptApplicable,
+    gender: input.gender,
+    halfYearGrossBefore: input.ptHistory?.halfYearGrossBefore,
+    paidThisYear: input.ptHistory?.paidThisYear,
+    deductsIncomeTax: (input.incomeTax ?? 0) > 0,
+    leavingThisMonth: input.leavingThisMonth ?? (input.employment !== undefined && input.employment.lastDay < monthDays),
+  });
+  warnings.push(...pt.notes);
 
   // The ceiling rise brings people into PF who were outside it: from 17 Sep 2026, basic above ₹15,000
   // and up to ₹25,000 (EPF, EPS and EDLI are all compulsory; FAQ Q28–Q31). Flagged, not switched on —

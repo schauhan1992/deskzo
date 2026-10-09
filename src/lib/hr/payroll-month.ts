@@ -4,6 +4,8 @@ import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
 import { employmentInMonth, type Employment } from "@/lib/hr/payroll";
 import { finalMonthDays, type FinalMonthDays } from "@/lib/hr/settlement";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { branchIdentity } from "@/lib/branches/identity";
+import { GST_STATE_CODES } from "@/lib/gst-engine";
 
 /**
  * Deliberately NOT in a "use server" module, like loss-of-pay.ts beside it: it lists everybody's
@@ -26,6 +28,10 @@ export type PayrollPerson = {
   employment: Employment;
   /** Their full and final settlement pays this month's days; a payslip may carry only an incentive. */
   salaryInSettlement: boolean;
+  /** Their last working day is in this month. */
+  leaving: boolean;
+  /** For professional tax: Maharashtra has a table of its own for women. */
+  gender: "FEMALE" | "MALE" | "OTHER" | "UNDISCLOSED" | null;
 };
 
 /**
@@ -61,7 +67,7 @@ export async function payrollMonth(year: number, month: number): Promise<{ peopl
       id: true,
       name: true,
       branchId: true,
-      employeeProfile: { select: { state: true, joinedOn: true, exitedOn: true } },
+      employeeProfile: { select: { state: true, joinedOn: true, exitedOn: true, gender: true } },
     },
     orderBy: { name: "asc" },
   });
@@ -94,7 +100,8 @@ export async function payrollMonth(year: number, month: number): Promise<{ peopl
     }
     const settlementDay = settledOn.get(c.id);
     const salaryInSettlement = !!settlementDay && !!profile?.exitedOn && settlementDay === toKey(profile.exitedOn);
-    people.push({ id: c.id, name: c.name, branchId: c.branchId, state: profile?.state ?? null, employment, salaryInSettlement });
+    const leaving = !!profile?.exitedOn && profile.exitedOn >= from && profile.exitedOn <= to;
+    people.push({ id: c.id, name: c.name, branchId: c.branchId, state: profile?.state ?? null, employment, salaryInSettlement, leaving, gender: profile?.gender ?? null });
   }
   return { people, skipped };
 }
@@ -196,4 +203,69 @@ export async function paidAfterLeaving(userId: string, lastWorkingDay: Date): Pr
     // The salary part only: an incentive on the same payslip was earned before they left.
     gross: Math.round(Number(s.grossEarnings) - Number(s.incentive)),
   }));
+}
+
+/** The months of a financial year before this one, oldest first; and those of its half-year. */
+export function monthsBefore(year: number, month: number): { year: number; month: number }[] {
+  const months: { year: number; month: number }[] = [];
+  // The financial year starts in April.
+  let y = month >= 4 ? year : year - 1;
+  let m = 4;
+  while (y * 100 + m < year * 100 + month) {
+    months.push({ year: y, month: m });
+    if (m === 12) {
+      m = 1;
+      y += 1;
+    } else {
+      m += 1;
+    }
+  }
+  return months;
+}
+
+function sameHalf(a: number, b: number) {
+  const half = (m: number) => (m >= 4 && m <= 9 ? 1 : 2);
+  return half(a) === half(b);
+}
+
+/**
+ * Professional tax's look back, for each person: the gross of this half-year's earlier payslips (Tamil
+ * Nadu is charged on the half's income) and the tax this financial year's earlier payslips took (the
+ * ₹2,500 cap counts down from it). Every earlier month's payslip counts, locked or not — a draft month
+ * that is later locked is the same money.
+ */
+export async function ptHistoryFor(userIds: string[], year: number, month: number): Promise<Map<string, { halfYearGrossBefore: number; paidThisYear: number }>> {
+  const history = new Map(userIds.map((id) => [id, { halfYearGrossBefore: 0, paidThisYear: 0 }]));
+  const earlier = monthsBefore(year, month);
+  if (userIds.length === 0 || earlier.length === 0) return history;
+  const slips = await db.payslip.findMany({
+    where: { userId: { in: userIds }, run: { OR: earlier } },
+    select: { userId: true, grossEarnings: true, professionalTax: true, run: { select: { month: true } } },
+  });
+  for (const slip of slips) {
+    const h = history.get(slip.userId)!;
+    h.paidThisYear += Number(slip.professionalTax);
+    if (sameHalf(slip.run.month, month)) h.halfYearGrossBefore += Number(slip.grossEarnings);
+  }
+  for (const h of history.values()) {
+    h.paidThisYear = Math.round(h.paidThisYear * 100) / 100;
+    h.halfYearGrossBefore = Math.round(h.halfYearGrossBefore * 100) / 100;
+  }
+  return history;
+}
+
+/**
+ * Where somebody works, for professional tax: the state of their branch (its GST state, where it has
+ * one), otherwise the state on their employee record. The same answer `runPayroll` reads, for a
+ * payslip changed after the run.
+ */
+export async function workStateOf(userId: string): Promise<string | null> {
+  const person = await db.user.findUnique({ where: { id: userId }, select: { branchId: true, employeeProfile: { select: { state: true } } } });
+  if (!person) return null;
+  if (person.branchId) {
+    const identity = await branchIdentity(person.branchId);
+    const fromBranch = identity.stateCode ? (GST_STATE_CODES[identity.stateCode] ?? null) : identity.state;
+    if (fromBranch) return fromBranch;
+  }
+  return person.employeeProfile?.state ?? null;
 }
