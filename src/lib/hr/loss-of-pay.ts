@@ -15,9 +15,15 @@ export /**
  * Counts what was actually recorded as unpaid: an ABSENT day, and a day of leave whose type is not
  * paid. Days nobody recorded are NOT counted as loss of pay — docking somebody's salary because HR
  * forgot to mark a day would be the worst possible default.
+ *
+ * `employed` narrows it to the days of the month they were employed (src/lib/hr/payroll.ts
+ * `employmentInMonth`): a day before joining or after leaving is already unpaid, and counting an
+ * absence recorded on it would take it off twice.
  */
-async function lossOfPayDays(userId: string, year: number, month: number) {
-  const { from, to } = monthRange(year, month);
+async function lossOfPayDays(userId: string, year: number, month: number, employed?: { firstDay: number; lastDay: number }) {
+  const whole = monthRange(year, month);
+  const from = employed ? new Date(Date.UTC(year, month - 1, employed.firstDay)) : whole.from;
+  const to = employed ? new Date(Date.UTC(year, month - 1, employed.lastDay)) : whole.to;
   const rows = await db.attendanceDay.findMany({
     where: { userId, date: { gte: from, lte: to } },
     select: { status: true, leaveRequestId: true },

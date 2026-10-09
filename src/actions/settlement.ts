@@ -7,10 +7,11 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
-import { dateOnly, daysInMonth } from "@/lib/hr/calendar";
+import { dateOnly, financialYearOf, monthLabel, toKey } from "@/lib/hr/calendar";
 import { monthlyGross } from "@/lib/hr/payroll";
 import { computeSettlement, type EncashableBalance } from "@/lib/hr/settlement";
-import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
+import { finalMonthFor, paidAfterLeaving } from "@/lib/hr/payroll-month";
+import { accruedTo, ensureBalance } from "@/lib/hr/leave-balance";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -98,29 +99,58 @@ export async function buildSettlement(
     otherAllowance: n(structure.otherAllowance),
   });
 
-  // Days of the final month actually payable: everything up to the last working day, less whatever
-  // attendance says was unpaid.
-  const month = lastWorkingDay.getUTCMonth() + 1;
-  const year = lastWorkingDay.getUTCFullYear();
-  const monthDays = daysInMonth(year, month);
-  const lop = await lossOfPayDays(userId, year, month);
-  const salaryDays = Math.max(0, lastWorkingDay.getUTCDate() - lop);
+  // Days of the final month still owed (src/lib/hr/payroll-month.ts, `finalMonthFor`): the days
+  // employed in it up to the last working day, less loss of pay, less what that month's locked payslip
+  // already paid. The month is paid once — by a locked payroll run if it got there first, otherwise
+  // here, and then the run pays them no days of it.
+  const { month, year, monthDays, days: finalMonth } = await finalMonthFor(userId, profile.joinedOn, lastWorkingDay);
+  const salaryDays = finalMonth.salaryDays;
+  const notes: string[] = [];
+  if (finalMonth.onPayslip > 0) {
+    notes.push(
+      `${monthLabel(month, year)}'s locked payslip already pays ${finalMonth.onPayslip} day(s), so ${finalMonth.salaryDays > 0 ? `only the other ${finalMonth.salaryDays} are` : "none of that month is"} paid here.`,
+    );
+  }
+  if (finalMonth.overpaidDays > 0) {
+    const overpaid = Math.round((gross / monthDays) * finalMonth.overpaidDays);
+    notes.push(
+      `${monthLabel(month, year)}'s payslip paid ${finalMonth.overpaidDays} day(s) past what they were owed (about ₹${overpaid.toLocaleString("en-IN")} gross) — that month was locked before the exit was recorded. Add it under other deductions to recover it.`,
+    );
+  }
+  // An exit recorded late, after the months that followed it were locked: each paid salary for days
+  // after they had gone.
+  for (const later of await paidAfterLeaving(userId, lastWorkingDay)) {
+    notes.push(
+      `${later.label}'s locked payslip paid ${later.days} day(s) after they left (₹${later.gross.toLocaleString("en-IN")} gross). Add it under other deductions to recover it.`,
+    );
+  }
 
-  // Only balances on a type marked encashable are paid out; the rest are reported and dropped.
-  const balances = await db.leaveBalance.findMany({
-    where: { userId },
-    include: { type: { select: { code: true, name: true, encashable: true, paid: true } } },
-    orderBy: { year: "desc" },
+  // Only balances on a type marked encashable are paid out; the rest are reported and dropped. Read
+  // for the year they left in, brought up to date first and opened with what the year before carried
+  // forward. What a year grants is counted only to the last working day: the stored figure keeps
+  // growing each time somebody opens the record after the exit, and never comes back down. An
+  // encashable type is counted even if nobody ever opened their balance of it; any other type only
+  // where a balance exists, as before.
+  const leaveYear = financialYearOf(lastWorkingDay);
+  const leaveTypes = await db.leaveType.findMany({
+    where: {
+      paid: true,
+      OR: [{ active: true, encashable: true }, { balances: { some: { userId, year: leaveYear } } }],
+    },
+    orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
   });
-  const latestYear = balances[0]?.year;
-  const encashable: EncashableBalance[] = balances
-    .filter((b) => b.year === latestYear && b.type.paid)
-    .map((b) => ({
-      code: b.type.code,
-      name: b.type.name,
-      days: Math.max(0, n(b.opening) + n(b.credited) + n(b.adjustment) - n(b.used)),
-      encashable: b.type.encashable,
-    }));
+  const encashable: EncashableBalance[] = [];
+  for (const type of leaveTypes) {
+    const b = await ensureBalance(userId, type.id, leaveYear, lastWorkingDay);
+    if (!b) continue;
+    const earned = Math.min(n(b.credited), accruedTo(type, leaveYear, lastWorkingDay, profile));
+    encashable.push({
+      code: type.code,
+      name: type.name,
+      days: Math.max(0, n(b.opening) + earned + n(b.adjustment) - n(b.used)),
+      encashable: type.encashable,
+    });
+  }
 
   const resignedOn = overrides?.resignedOn
     ? dateOnly(overrides.resignedOn)
@@ -145,6 +175,7 @@ export async function buildSettlement(
     professionalTax: overrides?.professionalTax,
     pfDeduction: overrides?.pfDeduction,
   });
+  const warnings = [...notes, ...result.warnings];
 
   const data = {
     userId,
@@ -171,7 +202,7 @@ export async function buildSettlement(
     otherDeductionNote: overrides?.otherDeductionNote?.trim() || null,
     totalDeductions: dec(result.totalDeductions),
     netPayable: dec(result.netPayable),
-    note: overrides?.note?.trim() || (result.warnings.length ? result.warnings.join(" ") : null),
+    note: overrides?.note?.trim() || (warnings.length ? warnings.join(" ") : null),
     createdById: user.id,
   };
 
@@ -191,7 +222,7 @@ export async function buildSettlement(
   });
   revalidatePath(`/people/${userId}`);
   revalidatePath(`/people/${userId}/settlement`);
-  return { ok: true, data: { id: row.id, netPayable: result.netPayable, warnings: result.warnings } };
+  return { ok: true, data: { id: row.id, netPayable: result.netPayable, warnings } };
 }
 
 export async function getSettlement(userId: string) {
@@ -221,10 +252,37 @@ export async function setSettlementStatus(
   const { user, allowed } = await payrollAccess();
   if (!allowed) return { ok: false, error: "You can't change a settlement." };
 
-  const row = await db.finalSettlement.findUnique({ where: { userId }, select: { status: true, user: { select: { name: true } } } });
+  const row = await db.finalSettlement.findUnique({
+    where: { userId },
+    select: {
+      status: true,
+      lastWorkingDay: true,
+      salaryDays: true,
+      user: { select: { name: true, employeeProfile: { select: { joinedOn: true, exitedOn: true } } } },
+    },
+  });
   if (!row) return { ok: false, error: "There's no settlement to change." };
   if (status === "PAID" && row.status === "DRAFT") {
     return { ok: false, error: "Approve it before marking it paid." };
+  }
+  // Approval is where a figure becomes a promise, so the draft is checked against the record as it
+  // stands now. The things that move under a draft: the exit date, and the last month's payslip — a
+  // run locked, unlocked or recalculated since the settlement was worked out.
+  if (status === "APPROVED" && row.status === "DRAFT") {
+    const profile = row.user.employeeProfile;
+    if (!profile?.exitedOn || toKey(profile.exitedOn) !== toKey(row.lastWorkingDay)) {
+      return {
+        ok: false,
+        error: "The last working day on their record has changed since this settlement was worked out. Recalculate it, then approve it.",
+      };
+    }
+    const now = await finalMonthFor(userId, profile.joinedOn, row.lastWorkingDay);
+    if (now.days.salaryDays !== n(row.salaryDays)) {
+      return {
+        ok: false,
+        error: `${monthLabel(now.month, now.year)} now leaves ${now.days.salaryDays} salary day(s) to this settlement, not ${n(row.salaryDays)} — that month's payroll or attendance has changed since it was worked out. Recalculate it, then approve it.`,
+      };
+    }
   }
   if (status === "DRAFT" && row.status === "PAID") {
     return { ok: false, error: "A settlement that has been paid can't go back to draft." };

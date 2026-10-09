@@ -10,6 +10,7 @@ import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { addDays, countLeaveDays, dateOnly, eachDay, financialYearOf, toKey } from "@/lib/hr/calendar";
+import { ensureBalance } from "@/lib/hr/leave-balance";
 import { workspaceClock } from "@/lib/time/workspace";
 import { leaveDecisionSchema, leaveRequestSchema } from "@/lib/validation/hr";
 import type { ActionResult } from "@/actions/company";
@@ -46,50 +47,7 @@ async function canDecide(deciderId: string, requesterId: string) {
 
 // ─── Balances ─────────────────────────────────────────────────────────────────
 
-/**
- * The balance row for one person, type and year, created on first use.
- *
- * Credited is filled from the type's quota — the whole thing for an annual grant, or a twelfth per
- * elapsed month for one that accrues. Accrual is computed rather than run by a scheduled job,
- * because this app has no scheduler and a balance that silently depends on a cron having fired is
- * worse than one that is worked out when somebody looks at it.
- *
- * `today` is the workspace's day, as a `@db.Date` holds it — `clock.calendarDate(new Date())`. The
- * UTC day credited a month's accrual five and a half hours late in India.
- */
-async function ensureBalance(userId: string, typeId: string, year: number, today: Date) {
-  const existing = await db.leaveBalance.findUnique({
-    where: { userId_typeId_year: { userId, typeId, year } },
-  });
-  const type = await db.leaveType.findUnique({ where: { id: typeId } });
-  if (!type) return null;
-
-  const credited = accruedTo(type, year, today);
-  if (!existing) {
-    return db.leaveBalance.create({
-      data: { userId, typeId, year, credited: new Prisma.Decimal(credited), opening: new Prisma.Decimal(0) },
-    });
-  }
-  // Top up as months pass, never down — taking back leave somebody has already been granted (and
-  // may already have booked) because a quota was edited mid-year is not something to do silently.
-  if (credited > n(existing.credited)) {
-    return db.leaveBalance.update({
-      where: { id: existing.id },
-      data: { credited: new Prisma.Decimal(credited) },
-    });
-  }
-  return existing;
-}
-
-function accruedTo(type: { annualQuota: Prisma.Decimal; accrual: string }, year: number, on: Date) {
-  const quota = n(type.annualQuota);
-  if (type.accrual === "ANNUAL") return quota;
-  // The financial year starts in April, so April is month 1 of 12.
-  const fyStart = new Date(Date.UTC(year, 3, 1));
-  if (on < fyStart) return 0;
-  const months = Math.min(12, (on.getUTCFullYear() - year) * 12 + (on.getUTCMonth() - 3) + 1);
-  return Math.round((quota / 12) * months * 100) / 100;
-}
+// A balance row is made, accrued and carried forward by ensureBalance (src/lib/hr/leave-balance.ts).
 
 export type BalanceRow = {
   typeId: string;

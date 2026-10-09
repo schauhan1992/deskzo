@@ -8,7 +8,8 @@ import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
-import { dateOnly } from "@/lib/hr/calendar";
+import { dateOnly, toKey } from "@/lib/hr/calendar";
+import { formatCalendarDay } from "@/lib/time/zone";
 import { employeeProfileSchema, exitEmployeeSchema, holidaySchema, leaveTypeSchema } from "@/lib/validation/hr";
 import { OFFBOARDING_TASKS, offboardingChecklist, onboardingChecklist } from "@/lib/hr/onboarding";
 import type { ActionResult } from "@/actions/company";
@@ -273,6 +274,22 @@ export async function recordExit(input: unknown): Promise<ActionResult<null>> {
 
   const target = await db.user.findUnique({ where: { id: data.userId }, select: { id: true, name: true } });
   if (!target) return { ok: false, error: "That user no longer exists." };
+
+  // An approved settlement paid the last month to the day it was worked out for, and the payroll left
+  // that month to it. Moving the day under it would leave the days in between to nobody, or to both.
+  const settlement = await db.finalSettlement.findUnique({
+    where: { userId: data.userId },
+    select: { status: true, lastWorkingDay: true },
+  });
+  if (settlement && settlement.status !== "DRAFT" && toKey(settlement.lastWorkingDay) !== toKey(data.exitedOn)) {
+    return {
+      ok: false,
+      error:
+        settlement.status === "PAID"
+          ? `Their full and final settlement has been paid for a last working day of ${formatCalendarDay(settlement.lastWorkingDay)}, so that day can't change now.`
+          : `Their full and final settlement is approved for a last working day of ${formatCalendarDay(settlement.lastWorkingDay)}. Put it back to draft first, then change the day and recalculate it.`,
+    };
+  }
 
   await db.$transaction(async (tx) => {
     await tx.employeeProfile.upsert({

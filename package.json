@@ -42,6 +42,7 @@
     "ledger:repost-fx": "tsx scripts/ledger-repost-fx.ts",
     "check:links": "node scripts/check-outbound-links.mjs",
     "check:payroll": "tsx scripts/check-payroll.ts",
+    "check:pay-periods": "tsx scripts/check-pay-periods.ts",
     "check:iclock": "tsx scripts/check-iclock.ts",
     "db:seed:hr": "tsx prisma/seed-hr.ts",
     "check:settlement": "tsx scripts/check-settlement.ts",

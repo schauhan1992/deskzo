@@ -14,6 +14,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
 import { annualCtcOf, computePayslip, suggestStructure } from "@/lib/hr/payroll";
+import { alsoPaidBySettlement, payrollMonth, settlementsRelyingOn } from "@/lib/hr/payroll-month";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { branchIdentity } from "@/lib/branches/identity";
 import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema } from "@/lib/validation/hr";
@@ -178,17 +179,8 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
   const { to } = monthRange(year, month);
   const monthDays = daysInMonth(year, month);
 
-  // Anyone employed during the month: still active, or exited part-way through it.
-  const people = await db.user.findMany({
-    where: {
-      OR: [
-        { active: true },
-        { employeeProfile: { exitedOn: { gte: monthRange(year, month).from } } },
-      ],
-    },
-    select: { id: true, name: true, branchId: true, employeeProfile: { select: { state: true, exitedOn: true } } },
-    orderBy: { name: "asc" },
-  });
+  // Anyone employed for part of the month at least, and for which days (src/lib/hr/payroll-month.ts).
+  const { people, skipped } = await payrollMonth(year, month);
 
   // Professional tax follows the place of work (src/lib/hr/payroll.ts:101-103): the state of the branch
   // someone works at, for people whose branch is set. Nobody else changes — owner decision Q5, pending
@@ -207,7 +199,6 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
     existing ??
     (await db.payrollRun.create({ data: { month, year, createdById: user.id } }));
 
-  const skipped: string[] = [];
   const slips: Prisma.PayslipCreateManyInput[] = [];
 
   // Read before anything is replaced. Income tax and any manual deduction are typed in by whoever
@@ -236,13 +227,21 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
   }
 
   for (const person of people) {
+    const incentive = incentiveByUser.get(person.id)?.total ?? 0;
+    // Their settlement pays this month's days. Nothing else to pay means no payslip; an approved
+    // incentive still goes out here, on a payslip of no days, so it is taxed and marked paid like
+    // anyone else's — a settlement has no line that would do either.
+    if (person.salaryInSettlement && incentive <= 0) {
+      skipped.push(`${person.name} — this month's salary is in their full and final settlement`);
+      continue;
+    }
     const structure = await structureOn(person.id, to);
     if (!structure) {
       skipped.push(`${person.name} — no salary structure`);
       continue;
     }
 
-    const lop = await lossOfPayDays(person.id, year, month);
+    const lop = person.salaryInSettlement ? 0 : await lossOfPayDays(person.id, year, month, person.employment);
     const result = computePayslip({
       components: {
         basic: n(structure.basic),
@@ -259,10 +258,12 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       },
       monthDays,
       lopDays: lop,
-      state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.employeeProfile?.state ?? null,
+      employment: person.employment,
+      salaryInSettlement: person.salaryInSettlement,
+      state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.state ?? null,
       month,
       year,
-      incentive: incentiveByUser.get(person.id)?.total ?? 0,
+      incentive,
     });
 
     const prior = carried.get(person.id);
@@ -453,8 +454,29 @@ export async function setPayrollStatus(id: string, status: "LOCKED" | "PAID" | "
   if (status === "LOCKED" && run._count.payslips === 0) {
     return { ok: false, error: "There's nothing to lock — run the payroll first." };
   }
+  // A run calculated before somebody's full and final settlement was made still pays them the month
+  // the settlement pays too. Recalculating leaves them out (src/lib/hr/payroll-month.ts); locking
+  // first would make the double payment a statement.
+  if (status === "LOCKED" && run.status === "DRAFT") {
+    const paidTwice = await alsoPaidBySettlement(id, run.year, run.month);
+    if (paidTwice.length > 0) {
+      return {
+        ok: false,
+        error: `${paidTwice.join(", ")} ${paidTwice.length === 1 ? "is" : "are"} also paid for ${monthLabel(run.month, run.year)} in a full and final settlement. Recalculate the run so it leaves them out, then lock it.`,
+      };
+    }
+  }
   if (status === "DRAFT" && run.status === "PAID") {
     return { ok: false, error: "A run that has been paid can't go back to draft." };
+  }
+  if (status === "DRAFT" && run.status === "LOCKED") {
+    const relying = await settlementsRelyingOn(id, run.year, run.month);
+    if (relying.length > 0) {
+      return {
+        ok: false,
+        error: `${relying.join(", ")}'s full and final settlement is approved and leaves part of ${monthLabel(run.month, run.year)} to this run's payslip. Recalculating would pay those days to nobody — put the settlement back to draft first, and recalculate it once this run is locked again.`,
+      };
+    }
   }
   if (status === "PAID" && run.status === "DRAFT") {
     return { ok: false, error: "Lock the run before marking it paid." };
