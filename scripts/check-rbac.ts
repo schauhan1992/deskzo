@@ -84,7 +84,7 @@ console.log("\n— Roles —\n");
 // There is no enum any more: roles are rows. What the code still names by hand is
 // `SYSTEM_ROLE_KEYS`, and the drift to guard against is between that list and the database, which
 // is checked in `rolesAreData()` below because it needs a query.
-eq("The application names twelve roles of its own — the eight it shipped with, HR, Recruiter, Renewal specialist and Sales manager", SYSTEM_ROLE_KEYS.length, 12);
+eq("The application names thirteen roles of its own — the eight it shipped with, HR, Recruiter, Renewal specialist, Sales manager and HR head", SYSTEM_ROLE_KEYS.length, 13);
 
 /**
  * The three added on 8 Oct 2026 start with their preset applied, written by the migration as role rows
@@ -114,6 +114,21 @@ eq("The application names twelve roles of its own — the eight it shipped with,
   ok("  with the menu Sales has in the workspace", /rp\."role" = 'SALES' AND rp\."permission" LIKE 'section\.%'/.test(managerSql));
   const executive = (getPreset("sales-executive")?.permissions ?? []) as readonly string[];
   ok("  and everything a sales executive has, so moving up never takes anything away", executive.every((k) => managerWanted.includes(k)), executive.filter((k) => !managerWanted.includes(k)).join(", "));
+
+  // HR head (9 Oct 2026): the preset, and HR's starting menu with the vault the preset uses.
+  const headSql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030130000_built_in_hr_head_role", "migration.sql"), "utf8");
+  const headRows = [...headSql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
+  const headGranted = headRows.filter((r) => r.role === "HR_HEAD" && r.allowed).map((r) => r.key).sort();
+  const headWanted = [...(getPreset("hr-head")?.permissions ?? [])].map(String).sort();
+  ok("HR_HEAD starts as the hr-head preset", headRows.every((r) => r.role === "HR_HEAD") && headGranted.join() === headWanted.join(), `migration ${headGranted.length}, preset ${headWanted.length}`);
+  const headUnticked = headRows.filter((r) => !r.allowed).map((r) => r.key).sort();
+  const hrUnticked = rows.filter((r) => r.role === "HR" && !r.allowed).map((r) => r.key).filter((k) => k !== "section.vault").sort();
+  ok("  with HR's starting menu, the credential vault kept", headUnticked.join() === hrUnticked.join() && !headUnticked.includes("section.vault"), `${headUnticked.length} unticked`);
+  for (const below of ["hr-executive", "hr-manager"]) {
+    const lower = (getPreset(below)?.permissions ?? []) as readonly string[];
+    ok(`  and everything the ${below} preset has, so moving up never takes anything away`, lower.every((k) => headWanted.includes(k)), lower.filter((k) => !headWanted.includes(k)).join(", "));
+  }
+  ok("  and still no customer views — HR sees no customers", !headWanted.some((k) => /^(contacts|leads|orders|payments|documents|projects|calls|visits|tickets|emails)\.view$/.test(k)));
 }
 
 console.log("\n— Presets —\n");
@@ -149,13 +164,19 @@ const uncovered = PERMISSIONS.filter(
 ).map((p) => p.key);
 ok("Every non-admin permission appears in at least one preset", uncovered.length === 0, uncovered.join(", ") || "all covered");
 
+// Adding a staff account takes "Create and edit users" and "Review who can do what" together
+// (src/app/(dashboard)/settings/access/new/page.tsx): a preset with the first alone hands out a key with
+// no screen — which HR manager did until 9 Oct 2026.
+const usersWithoutScreen = ROLE_PRESETS.filter((p) => (p.permissions as readonly string[]).includes("users.manage") && !(p.permissions as readonly string[]).includes("permissions.view")).map((p) => p.key);
+ok("Every preset that manages users can open Staff & roles to do it", usersWithoutScreen.length === 0, usersWithoutScreen.join(", ") || `${ROLE_PRESETS.filter((p) => (p.permissions as readonly string[]).includes("users.manage")).length} presets`);
+
 const rolesWithPresets = new Set(ROLE_PRESETS.map((p) => p.role));
 const rolesWithout = (SYSTEM_ROLE_KEYS as readonly string[]).filter((r) => r !== "ADMIN" && !rolesWithPresets.has(r as never));
 ok("Every assignable role has a preset to start from", rolesWithout.length === 0, rolesWithout.join(", ") || "all covered");
 
 // HR has two (executive and manager); Sales and Sales manager one each since the manager got a role.
 const hrPresets = presetsForRole("HR");
-ok("presetsForRole finds them", hrPresets.length >= 2 && presetsForRole("SALES").length === 1 && presetsForRole("SALES_MANAGER").length === 1, `${hrPresets.length} for HR`);
+ok("presetsForRole finds them", hrPresets.length >= 2 && presetsForRole("SALES").length === 1 && presetsForRole("SALES_MANAGER").length === 1 && presetsForRole("HR_HEAD").length === 1, `${hrPresets.length} for HR`);
 ok("getPreset resolves a known key", getPreset("accounts-manager")?.role === "ACCOUNTS");
 ok("  and returns undefined for an unknown one", getPreset("not-a-preset") === undefined);
 

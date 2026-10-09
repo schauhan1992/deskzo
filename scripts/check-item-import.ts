@@ -122,6 +122,11 @@ async function main() {
   const BrandsPage = (require("../src/app/(dashboard)/items/brands/page") as { default: (p: unknown) => Promise<ReactElement> }).default;
   const ListsPage = (require("../src/app/(dashboard)/settings/lists/page") as { default: () => Promise<ReactElement> }).default;
   const { Sidebar } = require("../src/components/layout/sidebar") as typeof import("../src/components/layout/sidebar");
+  const { buildNavigation, openModuleKeys } = require("../src/lib/navigation") as typeof import("../src/lib/navigation");
+  // The menu as the layout builds it, for a workspace with every module on: the same pure rule over
+  // the permissions given, then drawn by the sidebar.
+  const menuFor = (permissions: string[]) =>
+    buildNavigation({ openModules: openModuleKeys(() => ({ entitled: true, switchedOn: true }), new Set(permissions)), permissions, country: "IN" });
 
   const importCsv = async (rows: string[]) => {
     const form = new FormData();
@@ -280,7 +285,7 @@ async function main() {
     pathname = "/items/brands";
     const nav = renderToStaticMarkup(
       // The sections every role holds until unticked — without them the menu shows nothing (owner, 8 Oct 2026).
-      createElement(Sidebar, { enabledKeys: MODULE_REGISTRY.map((m) => m.key), canViewPerformance: false, permissions: PERMISSIONS.filter((d) => d.everyone).map((d) => d.key), branding: DEFAULT_BRANDING }),
+      createElement(Sidebar, { navigation: menuFor(PERMISSIONS.filter((d) => d.everyone).map((d) => d.key)), branding: DEFAULT_BRANDING }),
     );
     const current = [...nav.matchAll(/<a [^>]*href="([^"]+)"[^>]*aria-current="page"|<a [^>]*aria-current="page"[^>]*href="([^"]+)"/g)].map((m) => m[1] ?? m[2]);
     ok("  and on it, it alone is marked as where you are", current.length === 1 && current[0] === "/items/brands", current.join(", "));

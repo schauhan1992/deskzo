@@ -9,12 +9,15 @@ import { Badge, Card, CardContent } from "@/components/ui/card";
 import { ExceptionList, type ExceptionRow } from "@/components/reconcile/exception-list";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export const dynamic = "force-dynamic";
 
 const BILLING_LABEL = { MONTHLY: "monthly", ANNUAL: "annually", ONE_OFF: "one-off" } as const;
 
 export default async function StatementPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!(await isModuleEnabled("purchase_documents"))) return <ModuleDisabledNotice moduleKey="purchase_documents" />;
   const { id } = await params;
   const user = await requireUser();
   if (!(await can(user.id, "purchase.reconcile"))) notFound();

@@ -13,6 +13,8 @@ import { monthName } from "@/lib/ledger/period";
 import { formatCurrency } from "@/lib/utils";
 import { previousIstMonth } from "@/lib/india-time";
 import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
+import { notFound } from "next/navigation";
+import { viewerHas } from "@/actions/permission";
 
 /** Money to the paisa, so a sum of three heads can't show a floating-point tail. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -38,6 +40,9 @@ export default async function GstPage({
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
+  // The finance function's (`payments.manage`), like every action behind the page: without it the
+  // page is not there, the same as its link (owner, 8 Oct 2026 — pages you can't open are a 404).
+  if (!(await viewerHas("payments.manage"))) notFound();
 
   const params = await searchParams;
   const now = new Date();
@@ -57,13 +62,7 @@ export default async function GstPage({
     listReturnRegistrations(),
   ]);
 
-  if (!one || !threeB) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        GST returns sit behind the same permission as payments and the ledger.
-      </Card>
-    );
-  }
+  if (!one || !threeB) notFound();
 
   // The 11th of the month after: a calendar day, built and shown as the day itself.
   const filingDue = new Date(Date.UTC(year, month, 11));

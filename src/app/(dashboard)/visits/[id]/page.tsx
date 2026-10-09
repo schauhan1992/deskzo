@@ -24,8 +24,10 @@ import { viewerHas } from "@/actions/permission";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { companyPath, expensePath, leadPath } from "@/lib/record-links";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  if (!(await isModuleEnabled("visits"))) return <ModuleDisabledNotice moduleKey="visits" />;
   const [{ id }, query] = await Promise.all([params, searchParams]);
   if (!(await viewerHas("visits.view"))) notFound();
   /**

@@ -25,6 +25,8 @@ import { requireUser } from "@/lib/session";
 import { listColumns } from "@/lib/custom-fields/server";
 import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function CompaniesPage({
   searchParams,
@@ -44,6 +46,7 @@ export default async function CompaniesPage({
     tab?: string;
   } & CustomFilterParams>;
 }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const params = await searchParams;
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);

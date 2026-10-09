@@ -193,6 +193,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   {
     key: "payables",
     requires: ["purchase_documents"],
+    // What we owe, as Receivables is what we're owed — the same permission for both directions.
+    viewPermission: "payments.view",
     label: "Payables",
     description:
       "What we owe vendors, aged from each bill's due date — bills settled by payments out, with a statement of account per vendor.",
@@ -213,16 +215,19 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navItems: [
       { href: "/accounting", label: "Overview", icon: BookOpen, permission: "ledger.viewReports" },
       { href: "/accounting/journal", label: "Journal", icon: NotebookPen, permission: "ledger.viewReports" },
-      { href: "/accounting/accounts", label: "Chart of Accounts", icon: ListTree, permission: "ledger.viewReports" },
+      // Its page opens for either: the reports' readers, and whoever keeps the chart.
+      { href: "/accounting/accounts", label: "Chart of Accounts", icon: ListTree, permission: ["ledger.viewReports", "ledger.manageAccounts"] },
       { href: "/accounting/trial-balance", label: "Trial Balance", icon: Scale, permission: "ledger.viewReports" },
       { href: "/accounting/profit-loss", label: "Profit & Loss", icon: TrendingUp, permission: "ledger.viewReports" },
       { href: "/accounting/balance-sheet", label: "Balance Sheet", icon: Landmark, permission: "ledger.viewReports" },
       { href: "/accounting/cash-flow", label: "Cash Flow", icon: Waves, permission: "ledger.viewReports" },
-      { href: "/accounting/banking", label: "Banking", icon: Building2 },
-      { href: "/accounting/assets", label: "Fixed Assets", icon: Boxes },
-      { href: "/accounting/gst", label: "GST Returns", icon: FileSpreadsheet },
-      { href: "/accounting/tds", label: "TDS", icon: Percent },
-      { href: "/accounting/books", label: "Close the Books", icon: Lock },
+      // The finance function's (`payments.manage`): the pages and their actions refuse without it, so
+      // the links went to an empty page — or, for Banking, to every bank account and cheque.
+      { href: "/accounting/banking", label: "Banking", icon: Building2, permission: "payments.manage" },
+      { href: "/accounting/assets", label: "Fixed Assets", icon: Boxes, permission: "payments.manage" },
+      { href: "/accounting/gst", label: "GST Returns", icon: FileSpreadsheet, permission: "payments.manage" },
+      { href: "/accounting/tds", label: "TDS", icon: Percent, permission: "payments.manage" },
+      { href: "/accounting/books", label: "Close the Books", icon: Lock, permission: ["books.close", "ledger.viewReports"] },
     ],
   },
   {

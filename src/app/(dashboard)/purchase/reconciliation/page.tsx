@@ -9,10 +9,13 @@ import { Badge, Card, CardContent } from "@/components/ui/card";
 import { UploadStatement } from "@/components/reconcile/upload-statement";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReconciliationPage() {
+  if (!(await isModuleEnabled("purchase_documents"))) return <ModuleDisabledNotice moduleKey="purchase_documents" />;
   const user = await requireUser();
   if (!(await can(user.id, "purchase.reconcile"))) notFound();
 

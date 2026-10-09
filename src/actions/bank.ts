@@ -35,8 +35,10 @@ async function requireAccounts() {
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
+// The reads take the same "Manage finance records" as the writes: bank balances and the cheques
+// waiting to clear are the finance function's, not everybody's with the ledger in the plan.
 export async function listBankAccounts() {
-  await requireModuleUser("accounting");
+  if (!(await requireAccounts()).allowed) return [];
   return toPlain(
     await db.bankAccount.findMany({
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -189,7 +191,7 @@ export async function setDefaultBankAccount(id: string): Promise<ActionResult<nu
 
 /** Cheques written or received that the bank hasn't shown yet. */
 export async function unclearedCheques() {
-  await requireModuleUser("accounting");
+  if (!(await requireAccounts()).allowed) return [];
   return toPlain(
     await db.payment.findMany({
       where: { method: "CHEQUE", clearedOn: null },
@@ -321,7 +323,7 @@ export async function importStatement(input: {
 
 /** Everything the reconciliation screen needs: both sides, what is matched, and what is suggested. */
 export async function reconciliationView(params: { bankAccountId: string; to?: string; statementBalance?: number }) {
-  await requireModuleUser("accounting");
+  if (!(await requireAccounts()).allowed) return null;
   const account = await db.bankAccount.findUnique({
     where: { id: params.bankAccountId },
     select: { id: true, name: true, ledgerAccountId: true },

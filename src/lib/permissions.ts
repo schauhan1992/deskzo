@@ -812,7 +812,7 @@ export const PERMISSION_REGISTRY = [
   {
     key: "payments.view",
     label: "View payments",
-    description: "Money in and owed — the Payments and Receivables modules, and a customer's Payments and Statement tabs with the billed and outstanding figures.",
+    description: "Money in and owed — the Payments, Receivables and Payables modules, and a customer's Payments and Statement tabs with the billed and outstanding figures.",
     defaultRoles: ["PROFILE", "CALLING", "SALES", "SUPPORT", "MANAGEMENT", "ACCOUNTS", "PURCHASE"],
     group: "Finance",
   },

@@ -5,6 +5,7 @@ import { Prisma, type TicketStatus, type TicketPriority, type TicketType } from 
 import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
+import { isModuleEnabled } from "@/actions/module";
 import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
@@ -43,6 +44,9 @@ export async function listSupportAgents() {
 
 export async function createTicket(input: unknown): Promise<ActionResult<{ id: string; ticketSeq: number }>> {
   const user = await requireModuleUser("helpdesk");
+  // Only somebody who may open the Helpdesk: the Create menu and the form are hidden otherwise, and this
+  // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
+  if (!(await isModuleEnabled("helpdesk"))) return { ok: false, error: "You don't have access to the Helpdesk." };
   if (!(await hasEffectivePermission(user.id, "tickets.create"))) {
     return { ok: false, error: "You don't have permission to create tickets." };
   }

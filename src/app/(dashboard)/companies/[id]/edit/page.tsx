@@ -8,8 +8,11 @@ import { EditCompanyForm } from "@/components/companies/edit-company-form";
 import { customerTermsAdvice } from "@/actions/credit";
 import { isCustomerRelationshipType } from "@/lib/validation/company";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function EditCompanyPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const { id } = await params;
   const [company, industries, user, categories] = await Promise.all([getCompany(id), listIndustries(), requireUser(), listCustomerCategories()]);
   if (!company) notFound();

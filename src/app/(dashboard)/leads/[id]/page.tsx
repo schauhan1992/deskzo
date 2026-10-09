@@ -6,8 +6,11 @@ import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { formatLeadId } from "@/lib/order-id";
 import { LeadDetail } from "@/components/leads/lead-detail";
 import { hasEffectivePermission } from "@/actions/permission";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const [{ id }, query, user] = await Promise.all([params, searchParams, requireUser()]);
   if (!(await hasEffectivePermission(user.id, "leads.view"))) notFound();
   const ref = parseRecordRef(id);

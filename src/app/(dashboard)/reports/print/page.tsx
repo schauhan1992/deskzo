@@ -12,6 +12,8 @@ import { formatCurrency } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import { currentUser } from "@/lib/session";
 import { PrintButton } from "@/components/reports/print-button";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 /**
  * The report as a sheet of paper.
@@ -30,6 +32,7 @@ export default async function ReportPrintPage({
 }: {
   searchParams: Promise<{ r?: string }>;
 }) {
+  if (!(await isModuleEnabled("reports"))) return <ModuleDisabledNotice moduleKey="reports" />;
   const { r } = await searchParams;
   if (!r) notFound();
 

@@ -8,6 +8,8 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { workspaceClock } from "@/lib/time/workspace";
 import { companyPath } from "@/lib/record-links";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 /**
  * Everyone who can open a portal.
@@ -22,6 +24,7 @@ export default async function CustomerPortalPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  if (!(await isModuleEnabled("customer_portal"))) return <ModuleDisabledNotice moduleKey="customer_portal" />;
   const { q } = await searchParams;
   const user = await requireUser();
   if (!(await can(user.id, "portal.manage"))) notFound();

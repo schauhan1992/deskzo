@@ -7,6 +7,8 @@ import { MAIL_STATUS_LABEL, MAIL_STATUS_TONE, mailPreviewDocument } from "@/lib/
 import { formatOrderId } from "@/lib/order-id";
 import { companyPath, orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 const EVENT_LABEL: Record<string, string> = {
   DELIVERED: "Delivered",
@@ -26,6 +28,7 @@ const EVENT_LABEL: Record<string, string> = {
  * customer reading it.
  */
 export default async function MailMessagePage({ params }: { params: Promise<{ id: string }> }) {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   if (!(await viewerHas("emails.view"))) notFound();
   const { id } = await params;
   const [m, clock] = await Promise.all([getMailMessage(id), workspaceClock()]);

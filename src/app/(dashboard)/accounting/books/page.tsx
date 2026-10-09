@@ -6,10 +6,15 @@ import { getOrganisation } from "@/lib/organisation";
 import { ReportHeader } from "@/components/accounting/report-chrome";
 import { BooksManager } from "@/components/accounting/books-manager";
 import { can } from "@/lib/authz/resolve";
+import { notFound } from "next/navigation";
+import { viewerHas } from "@/actions/permission";
 
 export default async function BooksPage() {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
+  // For whoever closes the books, and the ledger reports' readers who see what is locked — its link's
+  // terms. Anybody else gets the 404 any address they can't open gets.
+  if (!(await viewerHas("books.close")) && !(await viewerHas("ledger.viewReports"))) notFound();
 
   const [status, user, org] = await Promise.all([getBooksStatus(), currentUser(), getOrganisation()]);
 

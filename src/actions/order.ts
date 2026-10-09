@@ -6,6 +6,7 @@ import { Prisma, type OrderStatus, type OrderBusinessType } from "@prisma/client
 import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
+import { isModuleEnabled } from "@/actions/module";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
 import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
 import { orderAccess } from "@/lib/authz/access";
@@ -196,6 +197,9 @@ async function resolveQuote(data: QuoteData, now: Date, clock: Clock) {
 /** The order-punching form (sales). Vendor/purchase price aren't collected here — that's the purchase team's job once accounts approves. */
 export async function createOrder(input: unknown): Promise<ActionResult<{ id: string; orderSeq: number }>> {
   const user = await requireModuleUser("orders");
+  // Only somebody who may open Orders: the Create menu and the form are hidden otherwise, and this
+  // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
+  if (!(await isModuleEnabled("orders"))) return { ok: false, error: "You don't have access to Orders." };
   const parsed = createOrderSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

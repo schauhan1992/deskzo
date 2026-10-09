@@ -7,8 +7,11 @@ import { clientRelationshipTypeValues } from "@/lib/validation/company";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { requireUser } from "@/lib/session";
 import { formSetup } from "@/lib/custom-fields/server";
+import { isModuleEnabled } from "@/actions/module";
+import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function NewCompanyPage() {
+  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const user = await requireUser();
   const [industries, canAddContacts, termsAdvice, categories, customFields] = await Promise.all([listIndustries(), viewerHas("contacts.view"), isModuleEntitled("receivables").then((has) => (has ? newCustomerTermsAdvice() : null)), listCustomerCategories(), formSetup("COMPANY", user.id)]);
 
