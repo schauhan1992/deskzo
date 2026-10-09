@@ -14,7 +14,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
 import { annualCtcOf, computePayslip, suggestStructure } from "@/lib/hr/payroll";
-import { alsoPaidBySettlement, payrollMonth } from "@/lib/hr/payroll-month";
+import { alsoPaidBySettlement, payrollMonth, settlementsRelyingOn } from "@/lib/hr/payroll-month";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { branchIdentity } from "@/lib/branches/identity";
 import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema } from "@/lib/validation/hr";
@@ -227,13 +227,21 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
   }
 
   for (const person of people) {
+    const incentive = incentiveByUser.get(person.id)?.total ?? 0;
+    // Their settlement pays this month's days. Nothing else to pay means no payslip; an approved
+    // incentive still goes out here, on a payslip of no days, so it is taxed and marked paid like
+    // anyone else's — a settlement has no line that would do either.
+    if (person.salaryInSettlement && incentive <= 0) {
+      skipped.push(`${person.name} — this month's salary is in their full and final settlement`);
+      continue;
+    }
     const structure = await structureOn(person.id, to);
     if (!structure) {
       skipped.push(`${person.name} — no salary structure`);
       continue;
     }
 
-    const lop = await lossOfPayDays(person.id, year, month, person.employment);
+    const lop = person.salaryInSettlement ? 0 : await lossOfPayDays(person.id, year, month, person.employment);
     const result = computePayslip({
       components: {
         basic: n(structure.basic),
@@ -251,10 +259,11 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       monthDays,
       lopDays: lop,
       employment: person.employment,
+      salaryInSettlement: person.salaryInSettlement,
       state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.state ?? null,
       month,
       year,
-      incentive: incentiveByUser.get(person.id)?.total ?? 0,
+      incentive,
     });
 
     const prior = carried.get(person.id);
@@ -459,6 +468,15 @@ export async function setPayrollStatus(id: string, status: "LOCKED" | "PAID" | "
   }
   if (status === "DRAFT" && run.status === "PAID") {
     return { ok: false, error: "A run that has been paid can't go back to draft." };
+  }
+  if (status === "DRAFT" && run.status === "LOCKED") {
+    const relying = await settlementsRelyingOn(id, run.year, run.month);
+    if (relying.length > 0) {
+      return {
+        ok: false,
+        error: `${relying.join(", ")}'s full and final settlement is approved and leaves part of ${monthLabel(run.month, run.year)} to this run's payslip. Recalculating would pay those days to nobody — put the settlement back to draft first, and recalculate it once this run is locked again.`,
+      };
+    }
   }
   if (status === "PAID" && run.status === "DRAFT") {
     return { ok: false, error: "Lock the run before marking it paid." };

@@ -282,6 +282,33 @@ console.log("\n— Joining and leaving part-way through a month —");
   const plain = computePayslip(october);
   eq("a whole month given as employment", whole.grossEarnings, plain.grossEarnings, "the same as giving none");
   truthy("...with no joining or leaving note", !whole.warnings.some((w) => w.includes("paid for")), "nothing to explain");
+
+  // September 2026, the month the PF ceiling rose on the 17th: only the days they were employed count.
+  const sep = { year: 2026, month: 9 };
+  const pfOnly = { pfApplicable: true, esiApplicable: false, ptApplicable: false };
+  const sept = { components: { ...base, basic: 50000 }, flags: pfOnly, monthDays: 30, lopDays: 0, state: "Delhi", ...sep, incomeTax: 1 };
+  const sepJoiner = computePayslip({ ...sept, employment: { firstDay: 20, lastDay: 30 } });
+  eq("joined 20 Sep 2026 on ₹50,000 basic: PF", sepJoiner.pfEmployee, 2200, "12% of the 18,333 earned — every day of it under the ₹25,000 ceiling");
+  const sepLeaver = computePayslip({ ...sept, employment: { firstDay: 1, lastDay: 10 } });
+  eq("left 10 Sep 2026 on ₹50,000 basic: PF", sepLeaver.pfEmployee, 1800, "16,667 earned, all under the ₹15,000 ceiling, which isn't cut for a short month");
+  eq("...the ceiling parts of a joiner's September", computePf(18333.33, { applicable: true, period: sep, employed: { firstDay: 20, lastDay: 30 } }).wages, 18333.33, "one part, 11 days at ₹25,000");
+
+  // ESI: in or out by the month's rate, paid on what was earned.
+  const esiOnly = { pfApplicable: false, esiApplicable: true, ptApplicable: false };
+  const rate = (gross: number) => ({ basic: gross, hra: 0, conveyance: 0, medical: 0, specialAllowance: 0, otherAllowance: 0 });
+  const above = computePayslip({ ...october, flags: esiOnly, components: rate(30000), employment: { firstDay: 20, lastDay: 31 } });
+  eq("₹30,000 a month, joined the 20th: ESI", above.esiEmployee, 0, "11,613 earned, but the rate is above ₹21,000 — not covered");
+  const below = computePayslip({ ...october, flags: esiOnly, components: rate(18000), employment: { firstDay: 20, lastDay: 31 } });
+  eq("₹18,000 a month, joined the 20th: ESI", below.esiEmployee, 53, "covered; 0.75% of the 6,967.74 earned, rounded up");
+  const lopAbove = computePayslip({ ...october, flags: esiOnly, components: rate(30000), lopDays: 10 });
+  eq("₹30,000 a month with 10 days' loss of pay: ESI", lopAbove.esiEmployee, 0, "20,323 earned, still outside — loss of pay doesn't bring anyone into ESI");
+
+  // A month their full and final settlement pays: an incentive still goes out, on a payslip of no days.
+  const settledSlip = computePayslip({ ...october, flags: { pfApplicable: true, esiApplicable: false, ptApplicable: false }, salaryInSettlement: true, incentive: 5000 });
+  eq("salary in the settlement, ₹5,000 incentive: paid days", settledSlip.paidDays, 0, "the settlement pays the days");
+  eq("...gross", settledSlip.grossEarnings, 5000, "the incentive alone");
+  eq("...PF", settledSlip.pfEmployee, 0, "PF is on basic, and there is none");
+  truthy("...and says why", settledSlip.warnings.some((w) => w.includes("full and final settlement")), settledSlip.warnings.join(" | "));
 }
 
 console.log("\n— Leave day counting —");

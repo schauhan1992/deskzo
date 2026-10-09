@@ -70,11 +70,18 @@ export const PF_WAGE_CEILING = PF_WAGE_CEILINGS[PF_WAGE_CEILINGS.length - 1]!.ce
 /**
  * A month split where the ceiling changes within it: each part's days and ceiling. One part for any
  * month without a change; two for September 2026 (16 days at ₹15,000, 14 at ₹25,000).
+ *
+ * `employed` narrows it to the days somebody was employed: joining on 20 September 2026 is one part,
+ * 11 days at ₹25,000 — none of their wages were earned under the old ceiling.
  */
-export function pfCeilingParts(year: number, month: number): { days: number; ceiling: number }[] {
+export function pfCeilingParts(
+  year: number,
+  month: number,
+  employed?: { firstDay: number; lastDay: number },
+): { days: number; ceiling: number }[] {
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const parts: { days: number; ceiling: number }[] = [];
-  for (let day = 1; day <= daysInMonth; day++) {
+  for (let day = Math.max(1, employed?.firstDay ?? 1); day <= Math.min(daysInMonth, employed?.lastDay ?? daysInMonth); day++) {
     const ceiling = pfWageCeilingOn(year, month, day);
     const last = parts[parts.length - 1];
     if (last && last.ceiling === ceiling) last.days += 1;
@@ -97,16 +104,28 @@ export type PfResult = { employee: number; employer: number; eps: number; epf: n
  * and for a month the ceiling changes in, each part's ceiling on its share of the days (EPFO's FAQ Q7:
  * ₹20,000 in September 2026 is ₹15,000 × 16/30 + ₹20,000 × 14/30 = ₹17,333.33). Without a period, the
  * newest ceiling: a salary structure being planned now.
+ *
+ * In a month somebody joined or left in, the parts are their employed days only, shared out over
+ * those days: the ceiling caps the wages they earned, and is not itself cut down for a short month —
+ * a leaver on 10 September 2026 with ₹16,667 of basic pays PF on ₹15,000, not on a third of it.
  */
 export function computePf(
   basicForPf: number,
-  opts: { applicable: boolean; onFullBasic?: boolean; period?: { year: number; month: number } },
+  opts: {
+    applicable: boolean;
+    onFullBasic?: boolean;
+    period?: { year: number; month: number };
+    employed?: { firstDay: number; lastDay: number };
+  },
 ): PfResult {
   if (!opts.applicable || basicForPf <= 0) {
     return { employee: 0, employer: 0, eps: 0, epf: 0, wages: 0 };
   }
-  const parts = opts.period ? pfCeilingParts(opts.period.year, opts.period.month) : [{ days: 1, ceiling: PF_WAGE_CEILING }];
+  const parts = opts.period
+    ? pfCeilingParts(opts.period.year, opts.period.month, opts.employed)
+    : [{ days: 1, ceiling: PF_WAGE_CEILING }];
   const monthDays = parts.reduce((t, p) => t + p.days, 0);
+  if (monthDays <= 0) return { employee: 0, employer: 0, eps: 0, epf: 0, wages: 0 };
   // The wage within the ceiling, taken part by part — what EPS is always on, and what PF is on unless
   // the employer contributes on the full basic.
   const capped = round2(parts.reduce((t, p) => t + (Math.min(basicForPf, p.ceiling) * p.days) / monthDays, 0));
@@ -132,8 +151,14 @@ export const ESI_EMPLOYER_RATE = 0.0325;
 
 export type EsiResult = { employee: number; employer: number; applied: boolean };
 
-export function computeEsi(gross: number, opts: { applicable: boolean }): EsiResult {
-  if (!opts.applicable || gross <= 0 || gross > ESI_WAGE_LIMIT) {
+/**
+ * Coverage is decided on the wage *rate* — a full month's pay — and the contribution is on what was
+ * actually earned. Somebody on ₹30,000 a month who joins on the 20th earns ₹11,613 that month, and is
+ * still outside ESI; somebody on ₹18,000 who loses ten days to loss of pay is still inside it.
+ * `wageRate` is that full month; without it, the gross passed is taken as the rate.
+ */
+export function computeEsi(gross: number, opts: { applicable: boolean; wageRate?: number }): EsiResult {
+  if (!opts.applicable || gross <= 0 || (opts.wageRate ?? gross) > ESI_WAGE_LIMIT) {
     return { employee: 0, employer: 0, applied: false };
   }
   // Rounded up to the rupee, which is what the ESI rules require of the employee's share.
@@ -291,6 +316,11 @@ export type PayslipInput = {
    * job they did not yet have.
    */
   employment?: { firstDay: number; lastDay: number };
+  /**
+   * The month's salary is paid in their full and final settlement, so this payslip pays no days —
+   * only what the settlement does not: an approved incentive going out this month.
+   */
+  salaryInSettlement?: boolean;
   /** Where the employee works, for professional tax. */
   state?: string | null;
   /** The wage month (1–12) and its year: professional tax's slab and the PF wage ceiling in force. */
@@ -346,7 +376,7 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   const monthDays = input.monthDays > 0 ? input.monthDays : 30;
   const firstDay = Math.max(1, input.employment?.firstDay ?? 1);
   const lastDay = Math.min(monthDays, input.employment?.lastDay ?? monthDays);
-  const employedDays = Math.max(0, lastDay - firstDay + 1);
+  const employedDays = input.salaryInSettlement ? 0 : Math.max(0, lastDay - firstDay + 1);
   const lopDays = Math.max(0, Math.min(input.lopDays, employedDays));
   const paidDays = round2(employedDays - lopDays);
   const factor = paidDays / monthDays;
@@ -368,8 +398,15 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   // PF is on basic, so an incentive never touches it. ESI and professional tax are on gross, so it
   // does — a monthly incentive is remuneration, and treating it otherwise would under-deduct both.
   const period = { year: input.year, month: input.month };
-  const pf = computePf(components.basic, { applicable: input.flags.pfApplicable, onFullBasic: input.pfOnFullBasic, period });
-  const esi = computeEsi(grossEarnings, { applicable: input.flags.esiApplicable });
+  const pf = computePf(components.basic, {
+    applicable: input.flags.pfApplicable,
+    onFullBasic: input.pfOnFullBasic,
+    period,
+    employed: { firstDay, lastDay },
+  });
+  // ESI's coverage is on the full month's rate, its contribution on what was earned (computeEsi).
+  const wageRate = round2(monthlyGross(c) + incentive);
+  const esi = computeEsi(grossEarnings, { applicable: input.flags.esiApplicable, wageRate });
   const pt = computeProfessionalTax(grossEarnings, input.state, input.month, { applicable: input.flags.ptApplicable });
 
   // The ceiling rise brings people into PF who were outside it: from 17 Sep 2026, basic above ₹15,000
@@ -396,7 +433,7 @@ export function computePayslip(input: PayslipInput): PayslipResult {
         : "No work state on this employee, so professional tax was not deducted.",
     );
   }
-  if (input.flags.esiApplicable && !esi.applied && grossEarnings > ESI_WAGE_LIMIT) {
+  if (input.flags.esiApplicable && !esi.applied && wageRate > ESI_WAGE_LIMIT) {
     warnings.push(
       `Gross is above the ₹${ESI_WAGE_LIMIT.toLocaleString("en-IN")} ESI limit, so no ESI was deducted. If they were covered earlier in this contribution period, it may still be due.`,
     );
@@ -404,7 +441,9 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   if (!input.incomeTax) {
     warnings.push("No income tax entered. This payslip deducts no TDS.");
   }
-  if (employedDays < monthDays) {
+  if (input.salaryInSettlement) {
+    warnings.push("This month's salary is in their full and final settlement — this payslip pays only their incentive.");
+  } else if (employedDays < monthDays) {
     const day = (d: number) => formatCalendarDay(new Date(Date.UTC(input.year, input.month - 1, d)));
     const span =
       firstDay > 1 && lastDay < monthDays
