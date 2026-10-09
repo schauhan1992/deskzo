@@ -13,6 +13,7 @@ import {
   computePayslip,
   computeProfessionalTax,
   countLeaveDaysProbe,
+  PT_STATES,
   employmentInMonth,
 } from "./payroll-cases";
 
@@ -111,16 +112,52 @@ console.log("\n— Employees' State Insurance —");
 
 console.log("\n— Professional tax —");
 {
-  eq("Maharashtra, 30,000, June", computeProfessionalTax(30000, "Maharashtra", 6, { applicable: true }).amount, 200, "top slab");
-  eq("Maharashtra, 30,000, February", computeProfessionalTax(30000, "Maharashtra", 2, { applicable: true }).amount, 300, "the February top-up that makes the year 2,500");
-  eq("Maharashtra, 8,000", computeProfessionalTax(8000, "Maharashtra", 6, { applicable: true }).amount, 175, "middle slab");
-  eq("Maharashtra, 7,000", computeProfessionalTax(7000, "Maharashtra", 6, { applicable: true }).amount, 0, "below the threshold");
-  eq("Karnataka, 30,000", computeProfessionalTax(30000, "Karnataka", 6, { applicable: true }).amount, 200, "flat above 25,000");
-  eq("Karnataka, 20,000", computeProfessionalTax(20000, "Karnataka", 6, { applicable: true }).amount, 0, "below 25,000");
-  eq("Delhi, 100,000", computeProfessionalTax(100000, "Delhi", 6, { applicable: true }).amount, 0, "Delhi levies none");
+  // The 2026-27 year unless a case says otherwise: June is an ordinary month, February the top-up's.
+  const pt = (state: string, monthGross: number, month: number, more: Partial<Parameters<typeof computeProfessionalTax>[0]> = {}) =>
+    computeProfessionalTax({ monthGross, state, month, year: month >= 4 ? 2026 : 2027, applicable: true, ...more });
 
-  const unknown = computeProfessionalTax(50000, "Assam", 6, { applicable: true });
+  eq("Maharashtra, 30,000, June", pt("Maharashtra", 30000, 6).amount, 200, "top slab");
+  eq("Maharashtra, 30,000, February", pt("Maharashtra", 30000, 2).amount, 300, "the February amount that makes the year 2,500");
+  eq("Maharashtra, 8,000", pt("Maharashtra", 8000, 6).amount, 175, "middle slab");
+  eq("Maharashtra, 8,000, February", pt("Maharashtra", 8000, 2).amount, 175, "the ₹300 is the top slab's — the old engine charged 275 here");
+  eq("Maharashtra, 7,000", pt("Maharashtra", 7000, 6).amount, 0, "below the threshold");
+
+  eq("Maharashtra, a woman on 20,000", pt("Maharashtra", 20000, 6, { gender: "FEMALE" }).amount, 0, "women up to 25,000 pay nothing, from 1 April 2023");
+  eq("...on 30,000", pt("Maharashtra", 30000, 6, { gender: "FEMALE" }).amount, 200, "above 25,000, the same 200");
+  eq("...on 30,000, February", pt("Maharashtra", 30000, 2, { gender: "FEMALE" }).amount, 300, "and the same February");
+  eq("...on 20,000 in June 2022", computeProfessionalTax({ monthGross: 20000, state: "Maharashtra", month: 6, year: 2022, applicable: true, gender: "FEMALE" }).amount, 200, "before the exemption, the general table");
+  const noGender = pt("Maharashtra", 20000, 6);
+  eq("a man, or nobody recorded, on 20,000", noGender.amount, 200, "the general table");
+  truthy("...and with no gender recorded, the payslip says what a woman would pay", noGender.notes.some((n) => n.includes("No gender")), noGender.notes.join(" | "));
+  truthy("...but not where the two tables agree", pt("Maharashtra", 30000, 6).notes.length === 0, "30,000 is 200 either way");
+
+  eq("Karnataka, 30,000, June", pt("Karnataka", 30000, 6).amount, 200, "flat above 25,000");
+  eq("Karnataka, 30,000, February 2026", pt("Karnataka", 30000, 2, { year: 2026 }).amount, 300, "₹300 in February from 2025-26, so the year is 2,500");
+  eq("Karnataka, 30,000, February 2025", pt("Karnataka", 30000, 2, { year: 2025 }).amount, 200, "before that, 200 like any month");
+  eq("Karnataka, 20,000", pt("Karnataka", 20000, 6).amount, 0, "below 25,000");
+
+  // Tamil Nadu: ₹50,000 a month is ₹3,00,000 a half-year — the top band, ₹1,250 a half, ₹2,500 a year.
+  eq("Tamil Nadu, 50,000, June", pt("Tamil Nadu", 50000, 6).amount, 0, "half-yearly: nothing until the half is out — the old engine charged 690 every month");
+  const september = pt("Tamil Nadu", 50000, 9, { halfYearGrossBefore: 250000 });
+  eq("Tamil Nadu, 50,000, September", september.amount, 1250, "the half's 3,00,000 is the top band");
+  truthy("...and says on what", september.notes.some((n) => n.includes("half-yearly") && n.includes("April to September")), september.notes.join(" | "));
+  eq("Tamil Nadu, 50,000, March", pt("Tamil Nadu", 50000, 3, { halfYearGrossBefore: 250000 }).amount, 1250, "the second half's; the year is 2,500, never 8,280");
+  eq("Tamil Nadu, 8,333 a month, September 2024", computeProfessionalTax({ monthGross: 8333, state: "Tamil Nadu", month: 9, year: 2024, applicable: true, halfYearGrossBefore: 41667 }).amount, 690, "50,000 a half, the band before Chennai's revision");
+  eq("...March 2025", computeProfessionalTax({ monthGross: 8333, state: "Tamil Nadu", month: 3, year: 2025, applicable: true, halfYearGrossBefore: 41667 }).amount, 930, "the same band after it, from October 2024");
+  eq("Tamil Nadu, leaving in July", pt("Tamil Nadu", 20000, 7, { halfYearGrossBefore: 40000, leavingThisMonth: true }).amount, 930, "their last month: the half so far, 60,000, charged now");
+
+  eq("Punjab, income tax on the payslip", pt("Punjab", 80000, 6, { deductsIncomeTax: true }).amount, 200, "the development tax, from anyone whose income is taxable");
+  eq("Punjab, no income tax", pt("Punjab", 80000, 6).amount, 0, "nothing where none is deducted");
+
+  const capped = pt("Maharashtra", 30000, 2, { paidThisYear: 2400 });
+  eq("the ₹2,500 cap: February after 2,400", capped.amount, 100, "only what the year has left");
+  truthy("...and says so", capped.notes.some((n) => n.includes("capped")), capped.notes.join(" | "));
+  eq("...nothing once 2,500 is reached", pt("Karnataka", 30000, 3, { paidThisYear: 2500 }).amount, 0, "the year is paid");
+
+  eq("Delhi, 100,000", pt("Delhi", 100000, 6).amount, 0, "Delhi levies none");
+  const unknown = pt("Assam", 50000, 6);
   truthy("an unlisted state is flagged, not guessed", !unknown.known, "returns zero and says it does not know");
+  truthy("every state's rule is marked awaiting the CA until one confirms it", Object.values(PT_STATES).every((s) => s.awaitingCa), Object.entries(PT_STATES).filter(([, s]) => !s.awaitingCa).map(([k]) => k).join(", "));
 }
 
 console.log("\n— A full payslip —");
@@ -309,6 +346,22 @@ console.log("\n— Joining and leaving part-way through a month —");
   eq("...gross", settledSlip.grossEarnings, 5000, "the incentive alone");
   eq("...PF", settledSlip.pfEmployee, 0, "PF is on basic, and there is none");
   truthy("...and says why", settledSlip.warnings.some((w) => w.includes("full and final settlement")), settledSlip.warnings.join(" | "));
+}
+
+console.log("\n— Professional tax on a payslip —");
+{
+  const flags = { pfApplicable: false, esiApplicable: false, ptApplicable: true };
+  const comps = { basic: 25000, hra: 12500, conveyance: 0, medical: 0, specialAllowance: 12500, otherAllowance: 0 };
+  const slip = (state: string, month: number, more: object = {}) =>
+    computePayslip({ components: comps, flags, monthDays: 30, lopDays: 0, state, month, year: 2026, ...more });
+  eq("Tamil Nadu payslip in June", slip("Tamil Nadu", 6).professionalTax, 0, "half-yearly: not this month");
+  eq("...in September, with the half's history", slip("Tamil Nadu", 9, { ptHistory: { halfYearGrossBefore: 250000, paidThisYear: 0 } }).professionalTax, 1250, "3,00,000 for the half");
+  eq("...the net carries it", slip("Tamil Nadu", 9, { ptHistory: { halfYearGrossBefore: 250000, paidThisYear: 0 }, incomeTax: 1 }).netPay, 48749, "50,000 less 1,250 and the 1 of income tax");
+  eq("...leaving in July, their last month", slip("Tamil Nadu", 7, { ptHistory: { halfYearGrossBefore: 150000, paidThisYear: 0 }, leavingThisMonth: true }).professionalTax, 1250, "the half so far, charged now");
+  eq("Punjab payslip with income tax entered", slip("Punjab", 6, { incomeTax: 5000 }).professionalTax, 200, "the development tax follows income tax");
+  eq("...and without", slip("Punjab", 6).professionalTax, 0, "none where none is deducted");
+  eq("Maharashtra payslip for a woman on 20,000", computePayslip({ components: { ...comps, basic: 10000, hra: 5000, specialAllowance: 5000 }, flags, monthDays: 30, lopDays: 0, state: "Maharashtra", month: 6, year: 2026, gender: "FEMALE" }).professionalTax, 0, "exempt up to 25,000");
+  eq("a payslip after 2,400 this year, in February", slip("Maharashtra", 2, { year: 2027, ptHistory: { halfYearGrossBefore: 0, paidThisYear: 2400 } }).professionalTax, 100, "capped at the year's 2,500");
 }
 
 console.log("\n— Leave day counting —");

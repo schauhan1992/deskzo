@@ -14,7 +14,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
 import { annualCtcOf, computePayslip, suggestStructure } from "@/lib/hr/payroll";
-import { alsoPaidBySettlement, payrollMonth, settlementsRelyingOn } from "@/lib/hr/payroll-month";
+import { computeProfessionalTax, normaliseState, ptRuleFor } from "@/lib/hr/professional-tax";
+import { alsoPaidBySettlement, payrollMonth, ptHistoryFor, settlementsRelyingOn, workStateOf } from "@/lib/hr/payroll-month";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { branchIdentity } from "@/lib/branches/identity";
 import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema } from "@/lib/validation/hr";
@@ -226,6 +227,10 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
     incentiveByUser.set(row.userId, bucket);
   }
 
+  // Professional tax looks back at this financial year's earlier payslips: Tamil Nadu charges on the
+  // half-year's income, and nobody pays more than ₹2,500 a year (src/lib/hr/professional-tax.ts).
+  const ptHistory = await ptHistoryFor(people.map((p) => p.id), year, month);
+
   for (const person of people) {
     const incentive = incentiveByUser.get(person.id)?.total ?? 0;
     // Their settlement pays this month's days. Nothing else to pay means no payslip; an approved
@@ -242,6 +247,7 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
     }
 
     const lop = person.salaryInSettlement ? 0 : await lossOfPayDays(person.id, year, month, person.employment);
+    const prior = carried.get(person.id);
     const result = computePayslip({
       components: {
         basic: n(structure.basic),
@@ -261,12 +267,17 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       employment: person.employment,
       salaryInSettlement: person.salaryInSettlement,
       state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.state ?? null,
+      gender: person.gender,
+      ptHistory: ptHistory.get(person.id),
+      leavingThisMonth: person.leaving,
+      // The income tax typed on this month's draft before, carried across: Punjab's development tax
+      // is charged only where income tax is deducted.
+      incomeTax: n(prior?.incomeTax),
       month,
       year,
       incentive,
     });
 
-    const prior = carried.get(person.id);
     const incomeTax = n(prior?.incomeTax);
     const otherDeduction = n(prior?.otherDeduction);
     const totalDeductions =
@@ -412,12 +423,32 @@ export async function adjustPayslip(input: unknown): Promise<ActionResult<null>>
     return { ok: false, error: "That month is locked. A locked payslip is a record, not a draft." };
   }
 
-  const statutory = n(slip.pfEmployee) + n(slip.esiEmployee) + n(slip.professionalTax);
+  // Punjab's development tax follows income tax (src/lib/hr/professional-tax.ts): typing income tax in,
+  // or taking it out, decides whether this payslip owes it. Every other state's stands as the run set it.
+  let professionalTax = n(slip.professionalTax);
+  const state = await workStateOf(slip.userId);
+  const rule = state ? ptRuleFor(normaliseState(state), slip.run.year, slip.run.month) : null;
+  if (rule?.rule.kind === "INCOME_TAX_PAYERS") {
+    const structure = await structureOn(slip.userId, monthRange(slip.run.year, slip.run.month).to);
+    const history = (await ptHistoryFor([slip.userId], slip.run.year, slip.run.month)).get(slip.userId);
+    professionalTax = computeProfessionalTax({
+      monthGross: n(slip.grossEarnings),
+      state,
+      month: slip.run.month,
+      year: slip.run.year,
+      applicable: structure?.ptApplicable ?? false,
+      paidThisYear: history?.paidThisYear,
+      deductsIncomeTax: data.incomeTax > 0,
+    }).amount;
+  }
+
+  const statutory = n(slip.pfEmployee) + n(slip.esiEmployee) + professionalTax;
   const totalDeductions = statutory + data.incomeTax + data.otherDeduction;
 
   await db.payslip.update({
     where: { id: data.id },
     data: {
+      professionalTax: dec(professionalTax),
       incomeTax: dec(data.incomeTax),
       otherDeduction: dec(data.otherDeduction),
       otherDeductionNote: data.otherDeductionNote?.trim() || null,
