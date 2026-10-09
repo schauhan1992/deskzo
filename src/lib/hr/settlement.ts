@@ -185,6 +185,29 @@ export function computeStatutoryBonus(monthlyBasic: number, monthsWorked: number
   };
 }
 
+// ─── The final month's salary ─────────────────────────────────────────────────
+
+export type FinalMonthDays = { salaryDays: number; onPayslip: number; overpaidDays: number };
+
+/**
+ * The days of the last month the settlement still owes salary for.
+ *
+ * Owed is the days employed in that month up to the last working day, less loss of pay. Whatever a
+ * locked payslip for the same month already paid comes off it, so the month is paid once — by the
+ * payroll run if it was locked first, by the settlement otherwise (src/lib/hr/payroll-month.ts is the
+ * other half). A payslip that paid more than was owed — a month locked before the exit was recorded —
+ * is reported as overpaid days, not taken back here: recovering salary already paid is a decision.
+ */
+export function finalMonthDays(input: { employedDays: number; lopDays: number; paidOnPayslip: number | null }): FinalMonthDays {
+  const owed = Math.max(0, input.employedDays - input.lopDays);
+  const onPayslip = Math.max(0, input.paidOnPayslip ?? 0);
+  return {
+    salaryDays: round2(Math.max(0, owed - onPayslip)),
+    onPayslip,
+    overpaidDays: round2(Math.max(0, onPayslip - owed)),
+  };
+}
+
 // ─── The settlement ───────────────────────────────────────────────────────────
 
 export type SettlementInput = {

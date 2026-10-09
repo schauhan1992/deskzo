@@ -13,6 +13,7 @@ import {
   computeNotice,
   computeSettlement,
   computeStatutoryBonus,
+  finalMonthDays,
   serviceYears,
 } from "../src/lib/hr/settlement";
 
@@ -189,6 +190,31 @@ console.log("\n— Warnings —");
     nearMiss.warnings.some((w) => w.includes("SL")),
     "so the employee gets an answer, not a silence",
   );
+}
+
+console.log("\n— The last month is paid once —");
+{
+  // Last working day 25 September: 25 days employed in the month.
+  const alone = finalMonthDays({ employedDays: 25, lopDays: 0, paidOnPayslip: null });
+  eq("no payslip for September: the settlement pays the 25 days", alone.salaryDays, 25, "nothing else has paid them");
+
+  const covered = finalMonthDays({ employedDays: 25, lopDays: 0, paidOnPayslip: 25 });
+  eq("September's payslip paid the 25 days", covered.salaryDays, 0, "so the settlement pays none of them again");
+  eq("...and says how many it found", covered.onPayslip, 25, "for the note on the statement");
+
+  const withLop = finalMonthDays({ employedDays: 25, lopDays: 2, paidOnPayslip: null });
+  eq("2 days' loss of pay, no payslip", withLop.salaryDays, 23, "25 employed, less 2");
+
+  const lockedFull = finalMonthDays({ employedDays: 25, lopDays: 0, paidOnPayslip: 30 });
+  eq("September locked at a full month before the exit was recorded", lockedFull.salaryDays, 0, "nothing more is owed");
+  eq("...5 days overpaid, reported", lockedFull.overpaidDays, 5, "30 paid, 25 owed — recovering it is a decision");
+
+  const partial = finalMonthDays({ employedDays: 25, lopDays: 0, paidOnPayslip: 20 });
+  eq("a payslip that paid 20 of the 25", partial.salaryDays, 5, "the settlement pays the other 5");
+  eq("...and nothing overpaid", partial.overpaidDays, 0, "");
+
+  const joinedAndLeft = finalMonthDays({ employedDays: 16, lopDays: 0, paidOnPayslip: null });
+  eq("joined the 5th and left the 20th", joinedAndLeft.salaryDays, 16, "not the 20 a count from the 1st would pay");
 }
 
 console.log(failures === 0 ? "\nAll settlement checks passed.\n" : `\n${failures} check(s) FAILED.\n`);

@@ -7,10 +7,11 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
-import { dateOnly, daysInMonth } from "@/lib/hr/calendar";
-import { monthlyGross } from "@/lib/hr/payroll";
-import { computeSettlement, type EncashableBalance } from "@/lib/hr/settlement";
+import { dateOnly, daysInMonth, financialYearOf, monthLabel } from "@/lib/hr/calendar";
+import { employmentInMonth, monthlyGross } from "@/lib/hr/payroll";
+import { computeSettlement, finalMonthDays, type EncashableBalance } from "@/lib/hr/settlement";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
+import { ensureBalance } from "@/lib/hr/leave-balance";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -98,29 +99,62 @@ export async function buildSettlement(
     otherAllowance: n(structure.otherAllowance),
   });
 
-  // Days of the final month actually payable: everything up to the last working day, less whatever
-  // attendance says was unpaid.
+  // Days of the final month still owed: the days employed in it up to the last working day, less
+  // whatever attendance says was unpaid, less whatever that month's locked payslip already paid. The
+  // month is paid once — by a locked payroll run if it got there first, otherwise here, and then the
+  // run leaves them out (src/lib/hr/payroll-month.ts) and refuses to lock while it still pays them
+  // (setPayrollStatus). A draft payslip is not counted: it is a calculation that will be redone.
   const month = lastWorkingDay.getUTCMonth() + 1;
   const year = lastWorkingDay.getUTCFullYear();
   const monthDays = daysInMonth(year, month);
-  const lop = await lossOfPayDays(userId, year, month);
-  const salaryDays = Math.max(0, lastWorkingDay.getUTCDate() - lop);
-
-  // Only balances on a type marked encashable are paid out; the rest are reported and dropped.
-  const balances = await db.leaveBalance.findMany({
-    where: { userId },
-    include: { type: { select: { code: true, name: true, encashable: true, paid: true } } },
-    orderBy: { year: "desc" },
+  const employed = employmentInMonth(year, month, profile.joinedOn, lastWorkingDay);
+  const lop = employed ? await lossOfPayDays(userId, year, month, employed) : 0;
+  const payslip = await db.payslip.findFirst({
+    where: { userId, run: { month, year, status: { in: ["LOCKED", "PAID"] } } },
+    select: { paidDays: true },
   });
-  const latestYear = balances[0]?.year;
-  const encashable: EncashableBalance[] = balances
-    .filter((b) => b.year === latestYear && b.type.paid)
-    .map((b) => ({
-      code: b.type.code,
-      name: b.type.name,
+  const finalMonth = finalMonthDays({
+    employedDays: employed?.days ?? 0,
+    lopDays: lop,
+    paidOnPayslip: payslip ? n(payslip.paidDays) : null,
+  });
+  const salaryDays = finalMonth.salaryDays;
+  const notes: string[] = [];
+  if (finalMonth.onPayslip > 0) {
+    notes.push(
+      `${monthLabel(month, year)}'s locked payslip already pays ${finalMonth.onPayslip} day(s), so ${finalMonth.salaryDays > 0 ? `only the other ${finalMonth.salaryDays} are` : "none of that month is"} paid here.`,
+    );
+  }
+  if (finalMonth.overpaidDays > 0) {
+    const overpaid = Math.round((gross / monthDays) * finalMonth.overpaidDays);
+    notes.push(
+      `${monthLabel(month, year)}'s payslip paid ${finalMonth.overpaidDays} day(s) past what they were owed (about ₹${overpaid.toLocaleString("en-IN")} gross) — that month was locked before the exit was recorded. Add it under other deductions to recover it.`,
+    );
+  }
+
+  // Only balances on a type marked encashable are paid out; the rest are reported and dropped. Read
+  // for the year they left in, brought up to date first — accrued to the last working day, and opened
+  // with what the year before carried forward. An encashable type is counted even if nobody ever
+  // opened their balance of it; any other type only where a balance exists, as before.
+  const leaveYear = financialYearOf(lastWorkingDay);
+  const leaveTypes = await db.leaveType.findMany({
+    where: {
+      paid: true,
+      OR: [{ active: true, encashable: true }, { balances: { some: { userId, year: leaveYear } } }],
+    },
+    orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
+  });
+  const encashable: EncashableBalance[] = [];
+  for (const type of leaveTypes) {
+    const b = await ensureBalance(userId, type.id, leaveYear, lastWorkingDay);
+    if (!b) continue;
+    encashable.push({
+      code: type.code,
+      name: type.name,
       days: Math.max(0, n(b.opening) + n(b.credited) + n(b.adjustment) - n(b.used)),
-      encashable: b.type.encashable,
-    }));
+      encashable: type.encashable,
+    });
+  }
 
   const resignedOn = overrides?.resignedOn
     ? dateOnly(overrides.resignedOn)
@@ -145,6 +179,7 @@ export async function buildSettlement(
     professionalTax: overrides?.professionalTax,
     pfDeduction: overrides?.pfDeduction,
   });
+  const warnings = [...notes, ...result.warnings];
 
   const data = {
     userId,
@@ -171,7 +206,7 @@ export async function buildSettlement(
     otherDeductionNote: overrides?.otherDeductionNote?.trim() || null,
     totalDeductions: dec(result.totalDeductions),
     netPayable: dec(result.netPayable),
-    note: overrides?.note?.trim() || (result.warnings.length ? result.warnings.join(" ") : null),
+    note: overrides?.note?.trim() || (warnings.length ? warnings.join(" ") : null),
     createdById: user.id,
   };
 
@@ -191,7 +226,7 @@ export async function buildSettlement(
   });
   revalidatePath(`/people/${userId}`);
   revalidatePath(`/people/${userId}/settlement`);
-  return { ok: true, data: { id: row.id, netPayable: result.netPayable, warnings: result.warnings } };
+  return { ok: true, data: { id: row.id, netPayable: result.netPayable, warnings } };
 }
 
 export async function getSettlement(userId: string) {

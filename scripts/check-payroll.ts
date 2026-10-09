@@ -13,6 +13,7 @@ import {
   computePayslip,
   computeProfessionalTax,
   countLeaveDaysProbe,
+  employmentInMonth,
 } from "./payroll-cases";
 
 let failures = 0;
@@ -233,6 +234,55 @@ console.log("\n— Incentives on a payslip —");
   eq("...and the gross is unchanged", none.grossEarnings, 50000, "nothing about the old behaviour moved");
 }
 
+console.log("\n— Joining and leaving part-way through a month —");
+{
+  const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
+  const span = (e: ReturnType<typeof employmentInMonth>) => (e ? `${e.firstDay}–${e.lastDay}` : "none");
+  // October 2026 has 31 days.
+  truthy("here all October", span(employmentInMonth(2026, 10, d("2024-05-01"), null)) === "1–31", "joined long before, still here");
+  truthy("no dates at all", span(employmentInMonth(2026, 10, null, null)) === "1–31", "paid the whole month, as before");
+  truthy("joined 20 October", span(employmentInMonth(2026, 10, d("2026-10-20"), null)) === "20–31", "the 20th to the end, both in");
+  truthy("joined 1 October", span(employmentInMonth(2026, 10, d("2026-10-01"), null)) === "1–31", "a whole month");
+  truthy("joins 3 November", span(employmentInMonth(2026, 10, d("2026-11-03"), null)) === "none", "not on October's payroll at all");
+  truthy("left 10 October", span(employmentInMonth(2026, 10, d("2024-05-01"), d("2026-10-10"))) === "1–10", "to the last working day");
+  truthy("left 30 September", span(employmentInMonth(2026, 10, d("2024-05-01"), d("2026-09-30"))) === "none", "gone before October began");
+  truthy("joined 5th, left 20th", span(employmentInMonth(2026, 10, d("2026-10-05"), d("2026-10-20"))) === "5–20", "both ends in one month");
+  eq("joined 15 February 2027, days", employmentInMonth(2027, 2, d("2027-02-15"), null)?.days ?? 0, 14, "15th to the 28th");
+
+  // Every component in round figures over a 31-day month: 31,000 + 15,500 + 15,500.
+  const base = { basic: 31000, hra: 15500, conveyance: 0, medical: 0, specialAllowance: 15500, otherAllowance: 0 };
+  const flags = { pfApplicable: true, esiApplicable: false, ptApplicable: false };
+  const october = { components: base, flags, monthDays: 31, lopDays: 0, state: "Delhi", month: 10, year: 2026, incomeTax: 1 };
+
+  const joiner = computePayslip({ ...october, employment: { firstDay: 20, lastDay: 31 } });
+  eq("joiner on the 20th, paid days", joiner.paidDays, 12, "the 20th to the 31st");
+  eq("...loss of pay", joiner.lopDays, 0, "days before joining aren't absence");
+  eq("...basic", joiner.components.basic, 12000, "12/31 of 31,000");
+  eq("...gross", joiner.grossEarnings, 24000, "12/31 of 62,000 — not a whole month's 62,000");
+  eq("...PF on the basic earned", joiner.pfEmployee, 1440, "12% of 12,000, under the October ceiling");
+  truthy("...and says why", joiner.warnings.some((w) => w.startsWith("Joined on") && w.includes("paid for 12 of 31 days")), joiner.warnings.join(" | "));
+
+  const joinerLop = computePayslip({ ...october, lopDays: 2, employment: { firstDay: 20, lastDay: 31 } });
+  eq("joiner with 2 days loss of pay, paid days", joinerLop.paidDays, 10, "12 employed, less 2");
+  eq("...basic", joinerLop.components.basic, 10000, "10/31 of 31,000");
+
+  const tooMuchLop = computePayslip({ ...october, lopDays: 15, employment: { firstDay: 20, lastDay: 31 } });
+  eq("more loss of pay than days employed", tooMuchLop.lopDays, 12, "capped at the 12 days they were here");
+  eq("...pays nothing, never less", tooMuchLop.grossEarnings, 0, "not a negative salary");
+
+  const leaver = computePayslip({ ...october, employment: { firstDay: 1, lastDay: 10 } });
+  eq("leaver on the 10th, gross", leaver.grossEarnings, 20000, "10/31 of 62,000");
+  truthy("...and says why", leaver.warnings.some((w) => w.startsWith("Last working day") && w.includes("paid for 10 of 31 days")), leaver.warnings.join(" | "));
+
+  const both = computePayslip({ ...october, employment: { firstDay: 5, lastDay: 20 } });
+  eq("joined the 5th, left the 20th, paid days", both.paidDays, 16, "5th to the 20th");
+  truthy("...and says both", both.warnings.some((w) => w.startsWith("Joined on") && w.includes("and left on")), both.warnings.join(" | "));
+
+  const whole = computePayslip({ ...october, employment: { firstDay: 1, lastDay: 31 } });
+  const plain = computePayslip(october);
+  eq("a whole month given as employment", whole.grossEarnings, plain.grossEarnings, "the same as giving none");
+  truthy("...with no joining or leaving note", !whole.warnings.some((w) => w.includes("paid for")), "nothing to explain");
+}
 
 console.log("\n— Leave day counting —");
 countLeaveDaysProbe(eq, truthy);

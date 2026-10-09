@@ -1,5 +1,5 @@
 /** Re-exports plus the leave-calendar cases, kept apart so check-payroll.ts stays readable. */
-export { computeEsi, computePf, computePayslip, computeProfessionalTax } from "../src/lib/hr/payroll";
+export { computeEsi, computePf, computePayslip, computeProfessionalTax, employmentInMonth } from "../src/lib/hr/payroll";
 import { countLeaveDays } from "../src/lib/hr/calendar";
 
 type Eq = (label: string, actual: number, expected: number, why: string) => void;

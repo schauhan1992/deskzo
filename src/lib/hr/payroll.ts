@@ -241,6 +241,42 @@ export function computeProfessionalTax(
   return { amount, known: true, stateLabel: config.label };
 }
 
+// ─── Joining and leaving ──────────────────────────────────────────────────────
+
+/** The days of one month somebody was employed for, as days of that month (1–31), both ends in. */
+export type Employment = { firstDay: number; lastDay: number; days: number };
+
+/**
+ * The part of a month somebody was on the payroll: from their joining day, or the 1st, to their last
+ * working day, or the month's end. Null when they were not employed for any of it — joined after it
+ * ended, or left before it began.
+ *
+ * Dates are calendar days as a `@db.Date` holds them, at UTC midnight. A missing joining date means
+ * "before this month", which is how a record entered without one has always been paid.
+ */
+export function employmentInMonth(
+  year: number,
+  month: number,
+  joinedOn: Date | null | undefined,
+  exitedOn: Date | null | undefined,
+): Employment | null {
+  const monthDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const thisMonth = year * 100 + month;
+  const monthOf = (d: Date) => d.getUTCFullYear() * 100 + d.getUTCMonth() + 1;
+  let firstDay = 1;
+  let lastDay = monthDays;
+  if (joinedOn) {
+    if (monthOf(joinedOn) > thisMonth) return null;
+    if (monthOf(joinedOn) === thisMonth) firstDay = joinedOn.getUTCDate();
+  }
+  if (exitedOn) {
+    if (monthOf(exitedOn) < thisMonth) return null;
+    if (monthOf(exitedOn) === thisMonth) lastDay = exitedOn.getUTCDate();
+  }
+  if (lastDay < firstDay) return null;
+  return { firstDay, lastDay, days: lastDay - firstDay + 1 };
+}
+
 // ─── The payslip ──────────────────────────────────────────────────────────────
 
 export type PayslipInput = {
@@ -249,6 +285,12 @@ export type PayslipInput = {
   /** Calendar days in the month, and the days not paid for. */
   monthDays: number;
   lopDays: number;
+  /**
+   * The days of the month they were employed, when that is not all of it — the month they joined or
+   * left in. Days outside it are not paid and are not loss of pay either: nobody was absent from a
+   * job they did not yet have.
+   */
+  employment?: { firstDay: number; lastDay: number };
   /** Where the employee works, for professional tax. */
   state?: string | null;
   /** The wage month (1–12) and its year: professional tax's slab and the PF wage ceiling in force. */
@@ -295,12 +337,18 @@ export type PayslipResult = {
  * It has to work this way: PF is a percentage of basic, and ESI of gross, so a month with unpaid
  * days genuinely has a smaller basic and a smaller gross. Deducting a day's pay at the end instead
  * would over-contribute PF on wages that were never earned.
+ *
+ * A month somebody joined or left in is pro-rated the same way, over the calendar days of the whole
+ * month: joining on the 20th of a 31-day month is 12/31 of every component.
  */
 export function computePayslip(input: PayslipInput): PayslipResult {
   const warnings: string[] = [];
   const monthDays = input.monthDays > 0 ? input.monthDays : 30;
-  const lopDays = Math.max(0, Math.min(input.lopDays, monthDays));
-  const paidDays = round2(monthDays - lopDays);
+  const firstDay = Math.max(1, input.employment?.firstDay ?? 1);
+  const lastDay = Math.min(monthDays, input.employment?.lastDay ?? monthDays);
+  const employedDays = Math.max(0, lastDay - firstDay + 1);
+  const lopDays = Math.max(0, Math.min(input.lopDays, employedDays));
+  const paidDays = round2(employedDays - lopDays);
   const factor = paidDays / monthDays;
 
   const c = input.components;
@@ -355,6 +403,16 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   }
   if (!input.incomeTax) {
     warnings.push("No income tax entered. This payslip deducts no TDS.");
+  }
+  if (employedDays < monthDays) {
+    const day = (d: number) => formatCalendarDay(new Date(Date.UTC(input.year, input.month - 1, d)));
+    const span =
+      firstDay > 1 && lastDay < monthDays
+        ? `Joined on ${day(firstDay)} and left on ${day(lastDay)}`
+        : firstDay > 1
+          ? `Joined on ${day(firstDay)}`
+          : `Last working day ${day(lastDay)}`;
+    warnings.push(`${span} — paid for ${employedDays} of ${monthDays} days.`);
   }
   if (lopDays > 0) {
     warnings.push(
