@@ -331,3 +331,31 @@ console's Plans, as for every product).
 
 Not built yet from phase 1's list: the Staff & roles "Digital card" column (issuing lives on Digital
 cards instead), and telling cardholders when their template changes.
+
+**Phase 2 — event lead capture (11 Oct 2026).** Called "Card events" in the app, so they aren't mistaken
+for the events a company hosts in Forms & Events.
+
+- **An event** (`CardCampaign`): name, venue, first and last day, goal (people to meet), cost, its team
+  (`CardCampaignMember`) and up to five booth questions. Made and changed by `cards.manage`; an event
+  anybody was met at can't be deleted.
+- **Counted against it:** a share-back from a team member's card on the event's days (when they work
+  exactly one event that day); the **booth form** — `/c/<name>?e=<code>`, the card with the form first,
+  the event's questions, and "Next visitor" after each; and a **scan** by one of the team.
+- **Scanning** (`/cards/events/<id>/capture`): the browser's own QR reader where it has one (Chrome and
+  Edge, Android included; not Safari yet), or a pasted link or contact text. Reads vCard, MECARD, this
+  workspace's cards from the database and another Deskzo workspace's card by asking its contact file —
+  nothing off the platform's domain is fetched. Open while the event runs and for 7 days after; the
+  same email or phone twice at one event is refused.
+- **Leads** are source **Event**, titled "… — met at <event>", with the event in the source detail, owned
+  by whoever met them. `CardContact.via` says how (share-back, booth, scan); a scan needs no card.
+- **Results** (`/cards/events/<id>`): people met against the goal, leads made, by person and by day,
+  cost per person, each card's booth link and QR, everybody met (the team sees only their own), CSV
+  export for managers. My card lists the holder's events with their booth form and capture link.
+- **Menu:** "Card events" shows to whoever manages cards and to anybody on the team of an event that
+  ended less than a week ago (`NavItem.onlyFor: "eventTeam"`).
+- **Limits:** a booth form takes 60 a card in 10 minutes (a queue at a stand is the point); 60 a
+  minute across the workspace.
+
+Still open from section 4: paper business cards by photo (OCR — the owner said later), and hidden
+source fields beyond the event code. iPhone scanning would need a QR-reading library (a new
+dependency, for the owner to approve); until then iPhone users scan with the camera and paste the link.

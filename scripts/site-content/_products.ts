@@ -57,7 +57,7 @@ export const MODULES: Record<string, ModuleInfo> = {
   hr: { label: "HR", icon: "users", blurb: "Employee records, joining and exit checklists, HR letters, holidays, leave, attendance and hiring.", page: "/product/hr" },
   payroll: { label: "Payroll", icon: "rupee", blurb: "Salary structures, the monthly run and payslips, with PF, ESI and professional tax worked out.", page: "/product/payroll" },
   visitors: { label: "Visitor management", icon: "door", blurb: "A sign-in tablet for reception: visitors leave their details and a photo, and their host is told they have arrived.", page: null },
-  cards: { label: "Digital cards", icon: "card", blurb: "Business cards issued by HR in the company's design, with a QR code, one-tap Save contact, and leads from whoever shares back.", page: null },
+  cards: { label: "Digital cards", icon: "card", blurb: "Business cards issued by HR in the company's design, with a QR code, one-tap Save contact, leads from whoever shares back, and booth forms for events.", page: null },
   engagement: { label: "Speak up & forms", icon: "mail", blurb: "An anonymous feedback channel, and forms, polls and votes HR can send to one person, a department or everyone.", page: null },
   vault: { label: "Credential vault", icon: "key", blurb: "The company's own logins, encrypted, opened with your own password, shared deliberately, every opening logged.", page: "/product/security" },
   // ── Every product's own ──

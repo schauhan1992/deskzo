@@ -73,15 +73,30 @@ export type CardContactRow = {
   answers: { label: string; answer: string }[];
   note: string | null;
   createdAt: string;
+  /** Whoever met them: the card's holder, or whoever scanned them. */
   holder: string;
   owner: string;
   leadLink: string | null;
+  via: "SHARE_BACK" | "BOOTH" | "SCAN";
+  event: string | null;
 };
 
-/** Who shared back: one person's (whoever holds them now), or everybody's for a card manager. */
-export async function cardContacts(scope: { ownerUserId: string } | "all", take = 200): Promise<CardContactRow[]> {
+/**
+ * The people met through cards: one person's (whoever holds them now), everybody's for a card manager,
+ * or one event's — all of it, or one person's part of it.
+ */
+export async function cardContacts(
+  scope: { ownerUserId: string } | "all" | { campaignId: string; ownerUserId?: string },
+  take = 200,
+): Promise<CardContactRow[]> {
+  const where =
+    scope === "all"
+      ? {}
+      : "campaignId" in scope
+        ? { campaignId: scope.campaignId, ...(scope.ownerUserId ? { ownerUserId: scope.ownerUserId } : {}) }
+        : { ownerUserId: scope.ownerUserId };
   const rows = await db.cardContact.findMany({
-    where: scope === "all" ? {} : { ownerUserId: scope.ownerUserId },
+    where,
     orderBy: { createdAt: "desc" },
     take,
     select: {
@@ -98,6 +113,8 @@ export async function cardContacts(scope: { ownerUserId: string } | "all", take 
       owner: { select: { name: true } },
       card: { select: { user: { select: { name: true } } } },
       lead: { select: { leadSeq: true } },
+      via: true,
+      campaign: { select: { name: true } },
     },
   });
   return rows.map((r) => ({
@@ -116,9 +133,11 @@ export async function cardContacts(scope: { ownerUserId: string } | "all", take 
       : [],
     note: r.note,
     createdAt: r.createdAt.toISOString(),
-    holder: r.card.user.name,
+    holder: r.card?.user.name ?? r.owner.name,
     owner: r.owner.name,
     leadLink: r.lead ? leadPath(r.lead.leadSeq) : null,
+    via: r.via,
+    event: r.campaign?.name ?? null,
   }));
 }
 

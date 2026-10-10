@@ -13,6 +13,9 @@ import { CardShare } from "@/components/cards/card-share";
 import { MyCardEditor } from "@/components/cards/my-card-editor";
 import { CardContactsList } from "@/components/cards/card-contacts-list";
 import { CardNumbersStrip } from "@/components/cards/card-numbers";
+import { MyEvents } from "@/components/cards/my-events";
+import { eventsFor } from "@/lib/cards/events-server";
+import { workspaceClock } from "@/lib/time/workspace";
 
 /**
  * My card: the card as people see it, its QR and link, what it has done this week, the holder's own
@@ -53,6 +56,7 @@ export default async function MyCardPage({ searchParams }: { searchParams: Promi
   }
 
   const contacts = tab === "contacts" ? await cardContacts({ ownerUserId: me.id }) : [];
+  const [events, today] = tab === "card" ? await Promise.all([eventsFor(me.id), workspaceClock().then((c) => c.today())]) : [[], ""];
   const logoUrl = view.template.showLogo && branding.logoDataUrl ? "/api/brand/mark" : null;
   const photoUrl = view.card.showPhoto && view.photoVersion ? `/api/users/${me.id}/photo?v=${view.photoVersion}` : null;
   const hideable = view.template.recordFields
@@ -95,6 +99,7 @@ export default async function MyCardPage({ searchParams }: { searchParams: Promi
           </div>
           <div className="space-y-6">
             <CardShare url={view.url} qr={view.qr} logoUrl={logoUrl} name={view.card.name} live={view.live} />
+            <MyEvents events={events} cardUrl={view.url} today={today} />
             <MyCardEditor
               hideable={hideable}
               hidden={view.hidden}

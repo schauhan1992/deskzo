@@ -25,6 +25,22 @@ export function liveCardWhere(today: string): Prisma.DigitalCardWhereInput {
   };
 }
 
+/**
+ * Whether this person is on the team of a card event that hasn't been over for more than a week — the
+ * days its people can still be added. False in a workspace whose tables aren't there yet.
+ */
+export async function onEventTeam(userId: string): Promise<boolean> {
+  try {
+    const today = (await workspaceClock()).today();
+    const weekAgo = new Date(Date.parse(`${today}T00:00:00Z`) - 7 * 86_400_000);
+    const row = await db.cardCampaignMember.findFirst({ where: { userId, campaign: { endsOn: { gte: weekAgo } } }, select: { userId: true } });
+    return row !== null;
+  } catch (err) {
+    if (notMigratedYet(err)) return false;
+    throw err;
+  }
+}
+
 /** Whether this person holds a live card. False, not an error, in a workspace whose tables aren't there yet. */
 export async function holdsLiveCard(userId: string): Promise<boolean> {
   try {

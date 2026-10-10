@@ -8,9 +8,16 @@ import { CardFace } from "@/components/cards/card-face";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 
+/** An event's booth form: the card opened at the stand, for visitors to leave their details. */
+export type Booth = { code: string; name: string; questions: CardQuestion[] };
+
 /**
  * The card's public page, interactive: Save contact first and biggest, the card's links (each tap
  * counted, nothing more), and sharing back underneath — offered, never in the way.
+ *
+ * On an event's booth form (/c/<name>?e=<code>, opened by the card's holder at the stand) it is the
+ * other way round: the form first, with the event's questions, and after each visitor a fresh one for
+ * the next. The card is still there underneath.
  */
 export function PublicCardView({
   handle,
@@ -22,6 +29,7 @@ export function PublicCardView({
   shareBack,
   questions,
   firstName,
+  booth = null,
 }: {
   handle: string;
   card: DrawnCard;
@@ -32,41 +40,70 @@ export function PublicCardView({
   shareBack: boolean;
   questions: CardQuestion[];
   firstName: string;
+  booth?: Booth | null;
 }) {
   const ink = inkOn(color);
+  const face = (
+    <CardFace
+      card={card}
+      color={color}
+      layout={layout}
+      logoUrl={logoUrl}
+      photoUrl={photoUrl}
+      onTap={(kind) => {
+        void recordCardTap(handle, kind).catch(() => undefined);
+      }}
+    >
+      <a
+        href={`/c/${handle}/vcard`}
+        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl text-base font-semibold shadow-sm"
+        style={{ backgroundColor: color, color: ink }}
+      >
+        <UserPlus className="h-5 w-5" aria-hidden />
+        Save contact
+      </a>
+    </CardFace>
+  );
+
+  if (booth) {
+    return (
+      <div className="mx-auto w-full max-w-md space-y-6">
+        <ShareBackForm handle={handle} firstName={firstName} questions={booth.questions.length ? booth.questions : questions} booth={booth} color={color} />
+        {face}
+      </div>
+    );
+  }
   return (
     <div className="mx-auto w-full max-w-md space-y-6">
-      <CardFace
-        card={card}
-        color={color}
-        layout={layout}
-        logoUrl={logoUrl}
-        photoUrl={photoUrl}
-        onTap={(kind) => {
-          void recordCardTap(handle, kind).catch(() => undefined);
-        }}
-      >
-        <a
-          href={`/c/${handle}/vcard`}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl text-base font-semibold shadow-sm"
-          style={{ backgroundColor: color, color: ink }}
-        >
-          <UserPlus className="h-5 w-5" aria-hidden />
-          Save contact
-        </a>
-      </CardFace>
-      {shareBack && <ShareBackForm handle={handle} firstName={firstName} questions={questions} />}
+      {face}
+      {shareBack && <ShareBackForm handle={handle} firstName={firstName} questions={questions} booth={null} color={color} />}
     </div>
   );
 }
 
-function ShareBackForm({ handle, firstName, questions }: { handle: string; firstName: string; questions: CardQuestion[] }) {
-  // Set once the form is on screen: how long it took to fill is one of the two bot checks.
+const EMPTY = { name: "", email: "", phone: "", company: "", jobTitle: "", message: "", website: "" };
+
+function ShareBackForm({
+  handle,
+  firstName,
+  questions,
+  booth,
+  color,
+}: {
+  handle: string;
+  firstName: string;
+  questions: CardQuestion[];
+  booth: Booth | null;
+  color: string;
+}) {
+  // Set when the form is on screen, and again for each visitor at a booth: how long it took to fill
+  // is one of the two bot checks.
   const opened = useRef<number | null>(null);
+  const [round, setRound] = useState(0);
   useEffect(() => {
     opened.current = Date.now();
-  }, []);
-  const [values, setValues] = useState({ name: "", email: "", phone: "", company: "", jobTitle: "", message: "", website: "" });
+  }, [round]);
+  const [values, setValues] = useState(EMPTY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -74,28 +111,55 @@ function ShareBackForm({ handle, firstName, questions }: { handle: string; first
   const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setValues((v) => ({ ...v, [key]: e.target.value }));
 
+  function next() {
+    setValues(EMPTY);
+    setAnswers({});
+    setError(null);
+    setSent(false);
+    setRound((r) => r + 1);
+  }
+
   if (sent) {
     return (
-      <section className="flex items-start gap-3 rounded-2xl border border-line bg-surface px-5 py-4">
-        <Check className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden />
-        <p className="text-sm text-text">
-          Sent — {firstName} has your details.
-        </p>
+      <section className="space-y-3 rounded-2xl border border-line bg-surface px-5 py-4">
+        <div className="flex items-start gap-3">
+          <Check className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden />
+          <p className="text-sm text-text">{booth ? `Thank you — ${firstName} will be in touch.` : `Sent — ${firstName} has your details.`}</p>
+        </div>
+        {booth && (
+          <Button type="button" className="w-full" onClick={next}>
+            Next visitor
+          </Button>
+        )}
       </section>
     );
   }
 
   return (
     <section className="rounded-2xl border border-line bg-surface px-5 py-5">
-      <h2 className="text-base font-semibold text-text">Share your details with {firstName}</h2>
-      <p className="mt-1 text-sm text-muted">So {firstName} can get back to you. You don&apos;t need to, to save the card.</p>
+      {booth && (
+        <p className="mb-2 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ backgroundColor: `${color}1a`, color }}>
+          {booth.name}
+        </p>
+      )}
+      <h2 className="text-base font-semibold text-text">{booth ? "Leave your details" : `Share your details with ${firstName}`}</h2>
+      <p className="mt-1 text-sm text-muted">
+        {booth ? `So ${firstName} and the team can follow up after the event.` : `So ${firstName} can get back to you. You don't need to, to save the card.`}
+      </p>
       <form
+        key={round}
         className="mt-4 space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
           start(async () => {
-            const result = await shareBackFromCard({ handle, ...values, answers, elapsedMs: opened.current === null ? undefined : Date.now() - opened.current });
+            const result = await shareBackFromCard({
+              handle,
+              ...values,
+              answers,
+              event: booth?.code,
+              elapsedMs: opened.current === null ? undefined : Date.now() - opened.current,
+            });
             if (!result.ok) {
               setError(result.error);
               return;
@@ -155,7 +219,7 @@ function ShareBackForm({ handle, firstName, questions }: { handle: string; first
         {error && <p className="text-sm text-danger">{error}</p>}
         <p className="text-xs text-subtle">An email address or a phone number is enough. Only {firstName}&apos;s company sees what you send.</p>
         <Button type="submit" className="w-full" disabled={pending}>
-          {pending ? "Sending…" : `Send to ${firstName}`}
+          {pending ? "Sending…" : booth ? "Send" : `Send to ${firstName}`}
         </Button>
       </form>
     </section>

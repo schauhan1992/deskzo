@@ -68,23 +68,26 @@ const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g
 async function cleanup() {
   const userIds = (await db.user.findMany({ where: { email: { endsWith: MAIL } }, select: { id: true } })).map((u) => u.id);
   const cardIds = (await db.digitalCard.findMany({ where: { userId: { in: userIds } }, select: { id: true } })).map((c) => c.id);
-  const leadIds = (await db.cardContact.findMany({ where: { cardId: { in: cardIds }, leadId: { not: null } }, select: { leadId: true } })).map((c) => c.leadId!);
+  const contactWhere = { OR: [{ cardId: { in: cardIds } }, { ownerUserId: { in: userIds } }] };
+  const leadIds = (await db.cardContact.findMany({ where: { AND: [contactWhere, { leadId: { not: null } }] }, select: { leadId: true } })).map((c) => c.leadId!);
   const companyIds = (await db.lead.findMany({ where: { id: { in: leadIds } }, select: { companyId: true } })).map((l) => l.companyId);
-  await db.cardContact.deleteMany({ where: { cardId: { in: cardIds } } });
+  await db.cardContact.deleteMany({ where: contactWhere });
+  await db.cardCampaign.deleteMany({ where: { name: { startsWith: TAG } } });
   await db.cardEvent.deleteMany({ where: { cardId: { in: cardIds } } });
   await db.digitalCard.deleteMany({ where: { id: { in: cardIds } } });
   await db.cardTemplate.deleteMany({ where: { OR: [{ name: { startsWith: TAG } }, { createdById: { in: userIds } }] } });
   await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: userIds } }, { entityId: { in: leadIds } }] } });
   await db.lead.deleteMany({ where: { id: { in: leadIds } } });
-  // Only the companies the share-backs made, and only when nothing else of theirs is left.
-  for (const id of new Set(companyIds)) {
-    const company = await db.company.findUnique({ where: { id }, select: { name: true, _count: { select: { leads: true } } } });
-    if (company && company.name.startsWith(TAG) && company._count.leads === 0) {
-      await db.contact.deleteMany({ where: { companyId: id } });
-      await db.companyLocation.deleteMany({ where: { companyId: id } });
-      await db.company.delete({ where: { id } });
-    }
-  }
+  // The companies the share-backs made: the fixture's own people created them, whatever they are named —
+  // a share-back without a company is filed under its email's domain, or as "<name> (individual)".
+  const made = (await db.company.findMany({ where: { OR: [{ id: { in: companyIds } }, { createdById: { in: userIds } }] }, select: { id: true, createdById: true, name: true } }))
+    .filter((c) => userIds.includes(c.createdById) || c.name.startsWith(TAG))
+    .map((c) => c.id);
+  await db.auditLog.deleteMany({ where: { entityId: { in: made } } });
+  await db.lead.deleteMany({ where: { companyId: { in: made } } });
+  await db.contact.deleteMany({ where: { companyId: { in: made } } });
+  await db.companyLocation.deleteMany({ where: { companyId: { in: made } } });
+  await db.company.deleteMany({ where: { id: { in: made } } });
   await db.notification.deleteMany({ where: { userId: { in: userIds } } });
   await db.userPermission.deleteMany({ where: { userId: { in: userIds } } });
   await db.employeeProfile.deleteMany({ where: { userId: { in: userIds } } });
@@ -102,6 +105,12 @@ async function main() {
   const { areaByKey } = require("../src/lib/handover/areas") as typeof import("../src/lib/handover/areas");
   const { workspaceClock } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
   const { buildNavigation } = require("../src/lib/navigation") as typeof import("../src/lib/navigation");
+  const ev = require("../src/lib/cards/events") as typeof import("../src/lib/cards/events");
+  const evServer = require("../src/lib/cards/events-server") as typeof import("../src/lib/cards/events-server");
+  const { tenantOrigin } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");
+  const EventsPage = (require("../src/app/(dashboard)/cards/events/page") as typeof import("../src/app/(dashboard)/cards/events/page")).default;
+  const EventPage = (require("../src/app/(dashboard)/cards/events/[id]/page") as typeof import("../src/app/(dashboard)/cards/events/[id]/page")).default;
+  const CapturePage = (require("../src/app/(dashboard)/cards/events/[id]/capture/page") as typeof import("../src/app/(dashboard)/cards/events/[id]/capture/page")).default;
   const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
   const MyCardPage = (require("../src/app/(dashboard)/cards/page") as typeof import("../src/app/(dashboard)/cards/page")).default;
   const ManagePage = (require("../src/app/(dashboard)/cards/manage/page") as typeof import("../src/app/(dashboard)/cards/manage/page")).default;
@@ -191,9 +200,16 @@ async function main() {
     ok("a manager issues three — the switched-off account is skipped", first.ok && first.data.issued === 3 && first.data.skipped === 1, JSON.stringify(first));
     const repCard = await db.digitalCard.findUniqueOrThrow({ where: { userId: rep.id }, include: { template: true } });
     ok("the address comes from the name", repCard.handle.startsWith("zzprobe-rep-one"), repCard.handle);
-    ok("from the default template, made when there was none", repCard.template.isDefault);
+    ok("from the workspace's default template (made when there was none)", repCard.template.isDefault);
+    const defaultTemplateId = repCard.templateId;
     const again = await actions.issueDigitalCards({ userIds: [rep.id] });
     ok("issuing again leaves a live card as it is", again.ok && again.data.skipped === 1 && again.data.issued === 0, JSON.stringify(again));
+    // The workspace's default is whatever its people made it: everything below that depends on a
+    // template's settings uses the fixture's own, and the default itself is never changed.
+    const fixtureMade = await actions.saveCardTemplate({ id: null, name: `${TAG} Fixture`, color: "#1d4ed8", layout: "CLASSIC", showLogo: true, recordFields: fields.DEFAULT_RECORD_FIELDS, sharedFields: [], allowOwnFields: true, shareBack: true, questions: [] });
+    const fixtureTemplateId = fixtureMade.ok ? fixtureMade.data.id : "";
+    const toFixture = await actions.issueDigitalCards({ userIds: [rep.id, other.id, leaver.id], templateId: fixtureTemplateId });
+    ok("the fixture's cards move to a template of its own", toFixture.ok && toFixture.data.moved === 3, JSON.stringify(toFixture));
     const both = await actions.issueDigitalCards({ userIds: [rep.id], departmentId: "x" });
     ok("saying who two ways at once is refused", !both.ok);
     ok("a second default template is refused by the database", await throws(() => db.cardTemplate.create({ data: { name: `${TAG} second default`, isDefault: true } })));
@@ -261,7 +277,7 @@ async function main() {
     ok("...and the card counts it", (await db.cardEvent.count({ where: { cardId: repCard.id, kind: "SHARE_BACK" } })) === 1);
 
     actorId = manager.id;
-    const template = await db.cardTemplate.findUniqueOrThrow({ where: { id: repCard.templateId } });
+    const template = await db.cardTemplate.findUniqueOrThrow({ where: { id: fixtureTemplateId } });
     const spec = server.readTemplate(template);
     const asked = await actions.saveCardTemplate({ ...spec, id: spec.id, questions: [{ id: "budget1", label: "Your budget?", required: true }] });
     ok("a manager adds a required question to the template", asked.ok, JSON.stringify(asked));
@@ -311,11 +327,101 @@ async function main() {
     const moved = await actions.issueDigitalCards({ userIds: [rep.id], templateId: extra.ok ? extra.data.id : null });
     ok("naming a template moves a live card onto it", moved.ok && moved.data.moved === 1);
     ok("a template a card uses can't be deleted", !(await actions.deleteCardTemplate(extra.ok ? extra.data.id : "")).ok);
-    ok("nor can the default", !(await actions.deleteCardTemplate(spec.id)).ok);
+    ok("nor can the default", !(await actions.deleteCardTemplate(defaultTemplateId)).ok);
     const badTemplate = await actions.saveCardTemplate({ ...spec, id: spec.id, sharedFields: [{ kind: "website", label: "Site", value: "nope" }] });
     ok("a shared field that isn't usable refuses the template", !badTemplate.ok);
     await actions.issueDigitalCards({ userIds: [rep.id], templateId: spec.id });
     ok("...and one nobody uses can go", (await actions.deleteCardTemplate(extra.ok ? extra.data.id : "")).ok);
+
+    section("Card events");
+    const showName = `${TAG} Expo`;
+    const draft = { id: null, name: showName, venue: "Hall 5, stand B12", startsOn: ev.addDays(today, -1), endsOn: ev.addDays(today, 1), goal: 50, cost: 20000, memberIds: [rep.id, other.id], questions: [{ id: "need1", label: "What are you looking for?", required: true }] };
+    actorId = rep.id;
+    ok("somebody who doesn't manage cards can't make an event", !(await actions.saveCardEvent(draft)).ok);
+    actorId = manager.id;
+    ok("an event can't end before it starts", !(await actions.saveCardEvent({ ...draft, startsOn: today, endsOn: ev.addDays(today, -1) })).ok);
+    const made = await actions.saveCardEvent(draft);
+    const show = made.ok ? await evServer.loadEvent(made.data.id) : null;
+    ok("a manager makes an event, running today, with a team of two", !!show && show.state === "live" && show.memberIds.length === 2, JSON.stringify(made));
+    ok("...its booth code is random letters and digits", !!show && /^[a-z0-9]{10}$/.test(show.code));
+    ok("its team are told apart in the menu: the rep is on it, the successor isn't", (await holder.onEventTeam(rep.id)) && !(await holder.onEventTeam(successor.id)));
+
+    const otherHandle = (await db.digitalCard.findUniqueOrThrow({ where: { userId: other.id } })).handle;
+    const handed = await pub.shareBackFromCard({ handle: otherHandle, name: "Kiran Visitor", email: `kiran${MAIL}`, company: companyName, elapsedMs: 5000 });
+    const handedRow = await db.cardContact.findFirst({ where: { email: `kiran${MAIL}` }, include: { lead: { select: { source: true, title: true, sourceDetail: true } } } });
+    ok("a share-back from a team member's card on the event's days counts towards it", handed.ok && handedRow?.campaignId === show?.id && handedRow?.via === "SHARE_BACK", JSON.stringify(handed));
+    ok("...and its lead says Event, and where", handedRow?.lead?.source === "EVENT" && /met at/.test(handedRow.lead.title) && (handedRow.lead.sourceDetail ?? "").includes(showName), JSON.stringify(handedRow?.lead));
+
+    const boothNoAnswer = await pub.shareBackFromCard({ handle: repCard.handle, name: "Booth Visitor", phone: "+91 91111 22222", event: show?.code, elapsedMs: 5000 });
+    ok("the booth form asks the event's questions, not the card's", !boothNoAnswer.ok && /looking for/.test(boothNoAnswer.ok ? "" : boothNoAnswer.error));
+    const boothed = await pub.shareBackFromCard({ handle: repCard.handle, name: "Booth Visitor", phone: "+91 91111 22222", event: show?.code, answers: { need1: "Firewalls" }, elapsedMs: 5000 });
+    const boothRow = await db.cardContact.findFirst({ where: { phone: "+91 91111 22222" } });
+    ok("a visitor at the booth form: kept against the event, as the booth", boothed.ok && boothRow?.via === "BOOTH" && boothRow.campaignId === show?.id, JSON.stringify(boothed));
+    ok("...past the card's ten-in-ten-minutes, which a busy stand would hit", (await db.cardContact.count({ where: { cardId: repCard.id } })) > 10);
+    await actions.issueDigitalCards({ userIds: [manager.id] });
+    const managerHandle = (await db.digitalCard.findUniqueOrThrow({ where: { userId: manager.id } })).handle;
+    const notTeam = await pub.shareBackFromCard({ handle: managerHandle, name: "Wrong Booth", email: `wrong${MAIL}`, event: show?.code, elapsedMs: 5000 });
+    const notTeamRow = await db.cardContact.findFirst({ where: { email: `wrong${MAIL}` } });
+    ok("a booth code on the card of somebody not on the team is just the card", notTeam.ok && notTeamRow?.via === "SHARE_BACK" && notTeamRow.campaignId === null);
+
+    section("Scanning at an event");
+    const vcard = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Rao;Sunita;;;\r\nORG:" + TAG + " Scan Co;IT\r\nTITLE:CIO\r\nTEL;TYPE=WORK:+91 90000 11111\r\nEMAIL:Sunita@Scan.test\r\nEND:VCARD\r\n";
+    const parsed = ev.parseVCard(vcard);
+    ok("a vCard is read: the name from N when there's no FN, the company before its department", parsed?.name === "Sunita Rao" && parsed.company === `${TAG} Scan Co` && parsed.email === "sunita@scan.test", JSON.stringify(parsed));
+    ok("a folded, escaped line is put back together", ev.parseVCard("BEGIN:VCARD\r\nFN:Ana\r\n  Lucia\r\nORG:Smith\\, Jones & Co\r\nEND:VCARD")?.company === "Smith, Jones & Co" && ev.parseVCard("BEGIN:VCARD\r\nFN:Ana\r\n  Lucia\r\nEND:VCARD")?.name === "Ana Lucia");
+    ok("a MECARD is read too", (() => { const s = ev.readScan("MECARD:N:Doe,John;TEL:+91 98000 00000;EMAIL:j@d.test;;"); return s.kind === "vcard" && s.contact.name === "John Doe" && s.contact.phone === "+91 98000 00000"; })());
+    ok("a card's address is recognised as a card; another address as a link; words as words", ev.readScan("https://acme.deskzo.com/c/priya-sharma").kind === "card" && ev.readScan("https://linkedin.com/in/x").kind === "url" && ev.readScan("hello").kind === "text");
+    actorId = rep.id;
+    const fromVcard = show ? await actions.readScannedCode(show.id, vcard) : null;
+    ok("the team reads a scanned vCard into the form", fromVcard?.ok === true && fromVcard.data.name === "Sunita Rao");
+    const sameWorkspace = show ? await actions.readScannedCode(show.id, `${await tenantOrigin()}/c/${otherHandle}`) : null;
+    ok("...and a card of this workspace's by its address", sameWorkspace?.ok === true && sameWorkspace.data.name === "Zzprobe Rep Two", JSON.stringify(sameWorkspace));
+    ok("...but nothing from an address off the platform", show ? !(await actions.readScannedCode(show.id, "https://evil.example/c/someone")).ok : false);
+    const before = await db.notification.count({ where: { userId: rep.id } });
+    const scanned = show ? await actions.captureEventContact({ eventId: show.id, name: "Sunita Rao", email: "sunita@scan.test", phone: "", company: `${TAG} Scan Co`, jobTitle: "CIO", note: "Wants a demo", answers: { need1: "SIEM" } }) : null;
+    const scannedRow = await db.cardContact.findFirst({ where: { email: "sunita@scan.test" }, include: { lead: { select: { ownerUserId: true, source: true } } } });
+    ok("a scanned person is saved as the rep's, against the event, with their lead", scanned?.ok === true && scannedRow?.via === "SCAN" && scannedRow.ownerUserId === rep.id && scannedRow.lead?.source === "EVENT", JSON.stringify(scanned));
+    ok("...and nobody is told what they did themselves", (await db.notification.count({ where: { userId: rep.id } })) === before);
+    const again2 = show ? await actions.captureEventContact({ eventId: show.id, name: "Sunita R", email: "SUNITA@scan.test", phone: "", company: "", jobTitle: "", note: "" }) : null;
+    ok("the same person twice at one event is refused, naming who has them", again2?.ok === false && /already/.test(again2.error));
+    actorId = successor.id;
+    ok("somebody not on the team can't add people to it", show ? !(await actions.captureEventContact({ eventId: show.id, name: "X", email: `x2${MAIL}`, phone: "", company: "", jobTitle: "", note: "" })).ok : false);
+
+    actorId = manager.id;
+    const old = await actions.saveCardEvent({ ...draft, name: `${TAG} Old Show`, startsOn: ev.addDays(today, -20), endsOn: ev.addDays(today, -10) });
+    actorId = rep.id;
+    ok("ten days after an event ends, nobody can be added to it", old.ok && !(await actions.captureEventContact({ eventId: old.data.id, name: "Late", email: `late3${MAIL}`, phone: "", company: "", jobTitle: "", note: "" })).ok);
+
+    section("Results");
+    const results = show ? await evServer.eventResults(show) : null;
+    ok("three met: one shared back, one at the booth, one scanned", results?.met === 3 && results.byVia.SHARE_BACK === 1 && results.byVia.BOOTH === 1 && results.byVia.SCAN === 1, JSON.stringify(results?.byVia));
+    ok("...credited to who met them: two to the rep, one to the other", results?.byPerson.find((p) => p.userId === rep.id)?.met === 2 && results.byPerson.find((p) => p.userId === other.id)?.met === 1);
+    ok("...today's count, and the cost per person", results?.byDay.find((d) => d.day === today)?.met === 3 && results.costPerPerson === 6666.67, JSON.stringify(results?.byDay));
+    actorId = rep.id;
+    ok("the team can't export", show ? !(await actions.exportEventContacts(show.id)).ok : false);
+    actorId = manager.id;
+    const csv = show ? await actions.exportEventContacts(show.id) : null;
+    const csvLines = csv?.ok ? csv.data.csv.split("\r\n") : [];
+    ok("a manager exports everybody met, with the event's question as a column", csvLines.length === 4 && csvLines[0]!.includes("What are you looking for?") && csvLines.some((l) => l.includes("SIEM")), csvLines[0]);
+    ok("an event people were met at can't be deleted", show ? !(await actions.deleteCardEvent(show.id)).ok : false);
+    ok("one nobody was met at can", old.ok && (await actions.deleteCardEvent(old.data.id)).ok);
+
+    section("Event pages, rendered");
+    const list = await render(EventsPage);
+    ok("Card events lists it for a manager, with its count", list.includes(showName) && list.includes("New event") && /3 of 50 met/.test(list), list.slice(0, 300));
+    const renderEvent = async (tab?: string) =>
+      textOf(renderToStaticMarkup((await resolveAsync(await EventPage({ params: Promise.resolve({ id: show!.id }), searchParams: Promise.resolve(tab ? { tab } : {}) } as never))) as ReactElement));
+    const asManager = await renderEvent();
+    ok("its page: the numbers, each person, each booth form", asManager.includes("People met") && asManager.includes("Zzprobe Rep One") && asManager.includes("Booth forms") && asManager.includes("Export CSV"), asManager.slice(0, 300));
+    actorId = rep.id;
+    const asRep = await renderEvent("people");
+    ok("the rep sees the people they met, not their teammate's", asRep.includes("Sunita Rao") && !asRep.includes("Kiran Visitor"));
+    const capturePage = textOf(renderToStaticMarkup((await resolveAsync(await CapturePage({ params: Promise.resolve({ id: show!.id }) } as never))) as ReactElement));
+    ok("...and can open the capture page", capturePage.includes("Add someone you met") && capturePage.includes("Your note"));
+    const myCardNow = await render(MyCardPage);
+    ok("My card lists the rep's event, with its booth form", myCardNow.includes("Your events") && myCardNow.includes(showName) && myCardNow.includes("Booth form"));
+    actorId = successor.id;
+    ok("somebody not on the team gets a 404 for the event", await throws(() => renderEvent()));
   } finally {
     await cleanup();
     await db.$disconnect();

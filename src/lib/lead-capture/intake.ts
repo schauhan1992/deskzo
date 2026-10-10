@@ -205,6 +205,8 @@ export type IntakeOptions = {
   leadTitle?: string;
   /** What the owner is told, in place of "A website lead was assigned to you". */
   notifyTitle?: string;
+  /** False when the owner made it themselves — a card they scanned — and needs no telling. */
+  notify?: boolean;
 };
 
 export async function intakeLead(key: IntakeSource, p: LeadPayload, options: IntakeOptions = {}): Promise<IntakeResult> {
@@ -389,7 +391,7 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
   }
 
   await refreshLeadScore(created.id);
-  if (owner) {
+  if (owner && options.notify !== false) {
     await notifyUser({
       userId: owner.userId,
       type: "LEAD_ASSIGNED",

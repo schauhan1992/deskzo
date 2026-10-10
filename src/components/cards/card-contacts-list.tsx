@@ -28,6 +28,7 @@ export function CardContactsList({ rows, showHolder, empty }: { rows: CardContac
               <p className="text-xs text-muted">{[row.jobTitle, row.company].filter(Boolean).join(" · ") || "—"}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-subtle">
+              {row.event && <Badge tone="blue">{row.event}</Badge>}
               {row.leadLink ? (
                 <Link href={row.leadLink} className="text-brand hover:underline">
                   Open the lead
@@ -62,9 +63,10 @@ export function CardContactsList({ rows, showHolder, empty }: { rows: CardContac
               {row.message && <p className="whitespace-pre-wrap">{row.message}</p>}
             </div>
           )}
-          {showHolder && (
+          {(showHolder || row.via !== "SHARE_BACK") && (
             <p className="mt-2 text-xs text-subtle">
-              From {row.holder}&apos;s card{row.owner !== row.holder ? ` · now with ${row.owner}` : ""}
+              {row.via === "SCAN" ? `Scanned by ${row.holder}` : row.via === "BOOTH" ? `Booth form on ${row.holder}'s card` : `From ${row.holder}'s card`}
+              {row.owner !== row.holder ? ` · now with ${row.owner}` : ""}
             </p>
           )}
           <NoteField id={row.id} note={row.note} />

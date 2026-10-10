@@ -36,13 +36,14 @@ export type NavItem = {
   term?: { key: TermKey; template?: string };
   /**
    * Shown only to somebody something is true of — not a permission, a fact about them. "cardholder":
-   * they have a live digital card. HR issues cards to people, so My card is a link only they need.
+   * they have a live digital card — HR issues cards to people, so My card is a link only they need.
+   * "eventTeam": they manage cards, or are on the team of a card event that ended less than a week ago.
    */
   onlyFor?: NavFact;
 };
 
 /** What `NavItem.onlyFor` can ask. Worked out once per request with the rest of the menu (modules-access.ts). */
-export type NavFact = "cardholder";
+export type NavFact = "cardholder" | "eventTeam";
 
 export type ModuleDefinition = {
   key: string;
@@ -556,6 +557,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navItems: [
       { href: "/cards", label: "My card", icon: IdCard, onlyFor: "cardholder" },
       { href: "/cards/manage", label: "Digital cards", icon: WalletCards, permission: "cards.manage" },
+      { href: "/cards/events", label: "Card events", icon: CalendarRange, onlyFor: "eventTeam" },
     ],
   },
   {

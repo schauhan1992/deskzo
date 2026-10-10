@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { permissionsFor } from "@/lib/authz/resolve";
 import { featureAvailable, moduleEntitled } from "@/lib/entitlements";
 import { getModuleDefinition, type CountryFeature, type NavFact } from "@/lib/modules";
-import { holdsLiveCard } from "@/lib/cards/holder";
+import { holdsLiveCard, onEventTeam } from "@/lib/cards/holder";
 import { decideModuleAccess, openModuleKeys, type ModuleAccess, type NavAccess } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
@@ -86,7 +86,10 @@ export const accessContextFor = cache(async (userId: string): Promise<AccessCont
     new Set<string>(permissions),
   );
   const facts: NavFact[] = [];
-  if (openModules.includes("cards") && (await holdsLiveCard(userId))) facts.push("cardholder");
+  if (openModules.includes("cards")) {
+    if (await holdsLiveCard(userId)) facts.push("cardholder");
+    if (permissions.includes("cards.manage") || (await onEventTeam(userId))) facts.push("eventTeam");
+  }
   return { userId, country: tenant.country, permissions, openModules, facts };
 });
 

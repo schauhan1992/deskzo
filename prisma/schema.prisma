@@ -673,6 +673,7 @@ model User {
   employeeProfile          EmployeeProfile?           @relation("UserEmployeeProfile")
   digitalCard              DigitalCard?               @relation("DigitalCardHolder")
   cardContacts             CardContact[]              @relation("CardContactOwner")
+  cardCampaigns            CardCampaignMember[]       @relation("CardCampaignMember")
   leaveBalances            LeaveBalance[]             @relation("UserLeaveBalances")
   leaveRequests            LeaveRequest[]             @relation("UserLeaveRequests")
   leaveApprovals           LeaveRequest[]             @relation("LeaveApprover")
@@ -12773,16 +12774,23 @@ model CardEvent {
 }
 
 /**
- * Somebody who shared their details back from a card. Always kept here, so a workspace without the
- * CRM still has them; with the CRM it is also a lead (source Digital card) owned by the card's holder.
+ * Somebody met through a card: who shared their details back from it, filled in its form at an event's
+ * stand, or had their own card scanned by one of the team. Always kept here, so a workspace without the
+ * CRM still has them; with the CRM it is also a lead owned by whoever met them — source Digital card,
+ * or Event when it came from one.
  *
  * `ownerUserId` starts as the holder and moves in the exit hand-over, like their accounts do. A card
  * with contacts is never deleted with its holder: they are the company's, whoever holds them now.
  */
 model CardContact {
-  id          String      @id @default(cuid())
-  cardId      String
-  card        DigitalCard @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  id          String         @id @default(cuid())
+  /// The card it came through. Null for a scan by somebody without a card of their own.
+  cardId      String?
+  card        DigitalCard?   @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  via         CardContactVia @default(SHARE_BACK)
+  /// The event it was met at, when there was one.
+  campaignId  String?
+  campaign    CardCampaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   ownerUserId String
   owner       User        @relation("CardContactOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   name        String
@@ -12802,5 +12810,59 @@ model CardContact {
   @@index([ownerUserId, createdAt])
   @@index([cardId, createdAt])
   @@index([leadId])
+  @@index([campaignId, createdAt])
   @@map("card_contacts")
+}
+
+enum CardContactVia {
+  /// Shared back from the card's own page.
+  SHARE_BACK
+  /// Filled in on the card's booth form at an event (/c/<name>?e=<code>).
+  BOOTH
+  /// Keyed or scanned in by one of the team — the visitor's own card, read from its QR.
+  SCAN
+}
+
+/**
+ * Deskzo Cards: an event the team works — a trade show, a conference — and the people met there. Not
+ * an event the company hosts (that is Forms & Events): this one is somewhere else, with a stand.
+ *
+ * Anybody met while it runs is counted against it: a share-back from a team member's card on the
+ * event's days, a visitor at the stand on the booth form, a card a team member scans.
+ */
+model CardCampaign {
+  id          String               @id @default(cuid())
+  name        String
+  venue       String?
+  /// The first and last day, in the workspace's time zone.
+  startsOn    DateTime             @db.Date
+  endsOn      DateTime             @db.Date
+  /// The number of people the team hopes to meet.
+  goal        Int?
+  /// What it cost, for the cost per lead.
+  cost        Decimal?             @db.Decimal(14, 2)
+  /// The booth form's key: /c/<name>?e=<code>. Random, so the link names nothing about the event.
+  code        String               @unique
+  /// Up to five questions the booth form asks, in place of the card's own: [{ id, label, required }].
+  questions   Json                 @default("[]")
+  createdById String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  members     CardCampaignMember[]
+  contacts    CardContact[]
+
+  @@index([startsOn, endsOn])
+  @@map("card_campaigns")
+}
+
+/// Who works an event: their card's share-backs count towards it while it runs, and they can scan.
+model CardCampaignMember {
+  campaignId String
+  campaign   CardCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User         @relation("CardCampaignMember", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, userId])
+  @@index([userId])
+  @@map("card_campaign_members")
 }

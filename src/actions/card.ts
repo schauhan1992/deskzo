@@ -19,6 +19,12 @@ import {
   type RecordFieldSetting,
 } from "@/lib/cards/fields";
 import { defaultTemplate, issueCards, readTemplate, type IssueOutcome } from "@/lib/cards/server";
+import { captureOpen, readScan, type ScannedContact } from "@/lib/cards/events";
+import { contactFromCardAddress, loadEvent, newEventCode } from "@/lib/cards/events-server";
+import { recordCardContact } from "@/lib/cards/capture";
+import { workspaceClock } from "@/lib/time/workspace";
+import { csvRow } from "@/lib/csv";
+import { formatLeadId } from "@/lib/order-id";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -286,4 +292,224 @@ export async function ensureDefaultCardTemplate(): Promise<ActionResult<{ id: st
   if (!user) return { ok: false, error: MANAGE_REFUSED };
   const template = await defaultTemplate(user.id);
   return { ok: true, data: { id: template.id } };
+}
+
+// ── Events ──────────────────────────────────────────────────────────────────────────────────────────
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+const eventSchema = z
+  .object({
+    id: z.string().min(1).nullable(),
+    name: z.string().trim().min(1, "Give the event a name").max(120, "Keep the name under 120 characters"),
+    venue: z.string().trim().max(160, "Keep the venue under 160 characters"),
+    startsOn: z.string().regex(DAY, "Choose the first day"),
+    endsOn: z.string().regex(DAY, "Choose the last day"),
+    goal: z.number().int().positive("A goal is a number of people").max(1_000_000).nullable(),
+    cost: z.number().nonnegative("A cost can't be negative").max(1_000_000_000).nullable(),
+    memberIds: z.array(z.string().min(1)).max(500),
+    questions: z
+      .array(z.object({ id: z.string().regex(/^[a-z0-9]{1,12}$/), label: z.string().trim().min(1, "A question is empty").max(120), required: z.boolean() }))
+      .max(MAX_QUESTIONS, `At most ${MAX_QUESTIONS} questions`),
+  })
+  .refine((e) => e.endsOn >= e.startsOn, { message: "The last day is before the first", path: ["endsOn"] })
+  .refine((e) => Date.parse(`${e.endsOn}T00:00:00Z`) - Date.parse(`${e.startsOn}T00:00:00Z`) <= 59 * 86_400_000, {
+    message: "An event runs for 60 days at most",
+    path: ["endsOn"],
+  });
+
+/**
+ * An event the team works, made or changed. Its team are the people whose cards count towards it and
+ * who may scan; only people with a live card are offered, but anybody active may be on it.
+ */
+export async function saveCardEvent(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: MANAGE_REFUSED };
+  const parsed = eventSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const e = parsed.data;
+  const members = await db.user.findMany({ where: { id: { in: [...new Set(e.memberIds)] }, active: true, kind: "MEMBER" }, select: { id: true } });
+  const data = {
+    name: e.name,
+    venue: e.venue || null,
+    startsOn: new Date(`${e.startsOn}T00:00:00Z`),
+    endsOn: new Date(`${e.endsOn}T00:00:00Z`),
+    goal: e.goal,
+    cost: e.cost,
+    questions: e.questions as unknown as Prisma.InputJsonValue,
+  };
+
+  let id: string;
+  if (e.id) {
+    const existing = await db.cardCampaign.findUnique({ where: { id: e.id }, select: { id: true } });
+    if (!existing) return { ok: false, error: "That event no longer exists." };
+    id = e.id;
+    await db.$transaction(async (tx) => {
+      await tx.cardCampaign.update({ where: { id }, data });
+      await tx.cardCampaignMember.deleteMany({ where: { campaignId: id, userId: { notIn: members.map((m) => m.id) } } });
+      await tx.cardCampaignMember.createMany({ data: members.map((m) => ({ campaignId: id, userId: m.id })), skipDuplicates: true });
+    });
+  } else {
+    id = (
+      await db.cardCampaign.create({
+        data: { ...data, code: newEventCode(), createdById: user.id, members: { create: members.map((m) => ({ userId: m.id })) } },
+        select: { id: true },
+      })
+    ).id;
+  }
+  await recordAudit({ userId: user.id, action: e.id ? "UPDATE" : "CREATE", entityType: "CardCampaign", entityId: id, entityLabel: e.name });
+  refresh();
+  revalidatePath("/cards/events");
+  return { ok: true, data: { id } };
+}
+
+/** An event nobody was met at can go. One with people stays, for its numbers. */
+export async function deleteCardEvent(id: string): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: MANAGE_REFUSED };
+  const event = await db.cardCampaign.findUnique({ where: { id }, select: { name: true, _count: { select: { contacts: true } } } });
+  if (!event) return { ok: false, error: "That event no longer exists." };
+  if (event._count.contacts > 0) return { ok: false, error: `${event._count.contacts} ${event._count.contacts === 1 ? "person was" : "people were"} met at it, so it stays with its numbers.` };
+  await db.cardCampaign.delete({ where: { id } });
+  await recordAudit({ userId: user.id, action: "DELETE", entityType: "CardCampaign", entityId: id, entityLabel: event.name });
+  revalidatePath("/cards/events");
+  return { ok: true, data: null };
+}
+
+/** Whether this person may add people met at this event: its team, or whoever manages cards. */
+async function mayCapture(userId: string, eventId: string): Promise<{ id: string; name: string; memberIds: string[] } | string> {
+  const event = await loadEvent(eventId);
+  if (!event) return "That event no longer exists.";
+  const member = event.memberIds.includes(userId);
+  if (!member && !(await hasEffectivePermission(userId, "cards.manage"))) return "That event no longer exists.";
+  const today = (await workspaceClock()).today();
+  if (!captureOpen(event, today)) {
+    return today < event.startsOn ? "The event hasn't started yet." : "The event ended more than a week ago, so people met there can't be added now.";
+  }
+  return event;
+}
+
+/**
+ * What a scanned QR holds, read into a contact to check before saving: a vCard or MECARD as it is, a
+ * Deskzo card's address by asking that card (see `contactFromCardAddress`), anything else as a link.
+ */
+export async function readScannedCode(eventId: string, raw: string): Promise<ActionResult<ScannedContact & { note: string }>> {
+  const user = await requireModuleUser("cards");
+  const event = await mayCapture(user.id, eventId);
+  if (typeof event === "string") return { ok: false, error: event };
+  const scan = readScan(String(raw ?? ""));
+  const blank = { name: "", email: "", phone: "", company: "", jobTitle: "", link: "" };
+  if (scan.kind === "vcard") return { ok: true, data: { ...scan.contact, note: "" } };
+  if (scan.kind === "card") {
+    const contact = await contactFromCardAddress(scan.host, scan.handle);
+    if (contact) return { ok: true, data: { ...contact, note: "" } };
+    return { ok: false, error: "That card couldn't be read — it may be switched off. Type their details in instead." };
+  }
+  if (scan.kind === "url") return { ok: true, data: { ...blank, link: scan.url, note: `Scanned: ${scan.url}` } };
+  return { ok: false, error: "That code doesn't hold a contact or a link." };
+}
+
+const captureSchema = z.object({
+  eventId: z.string().min(1),
+  name: z.string().trim().min(1, "Their name, please").max(120),
+  email: z.string().trim().toLowerCase().max(200).refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "That email address doesn't look right"),
+  phone: z.string().trim().max(32).refine((v) => !v || /^\+?[0-9][0-9 ()-]{5,30}$/.test(v), "That phone number doesn't look right"),
+  company: z.string().trim().max(160),
+  jobTitle: z.string().trim().max(80),
+  note: z.string().trim().max(1000),
+  answers: z.record(z.string(), z.string().max(500)).optional(),
+});
+
+/**
+ * Somebody one of the team met at the event, scanned or typed in: kept as theirs, and — with the CRM —
+ * a lead in their name, source Event. The same person twice at one event is refused rather than doubled.
+ */
+export async function captureEventContact(input: unknown): Promise<ActionResult<{ leadLink: string | null }>> {
+  const user = await requireModuleUser("cards");
+  const parsed = captureSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const c = parsed.data;
+  if (!c.email && !c.phone) return { ok: false, error: "An email address or a phone number, so they can be reached." };
+  const event = await mayCapture(user.id, c.eventId);
+  if (typeof event === "string") return { ok: false, error: event };
+
+  const already = await db.cardContact.findFirst({
+    where: { campaignId: event.id, OR: [...(c.email ? [{ email: c.email }] : []), ...(c.phone ? [{ phone: c.phone }] : [])] },
+    select: { owner: { select: { name: true } } },
+  });
+  if (already) return { ok: false, error: `${c.name} is already in for this event, with ${already.owner.name}.` };
+
+  const full = await loadEvent(event.id);
+  const answers = (full?.questions ?? []).flatMap((q) => {
+    const answer = c.answers?.[q.id]?.trim();
+    return answer ? [{ label: q.label, answer }] : [];
+  });
+  const [me, card] = await Promise.all([
+    db.user.findUniqueOrThrow({ where: { id: user.id }, select: { id: true, name: true } }),
+    db.digitalCard.findUnique({ where: { userId: user.id }, select: { id: true } }),
+  ]);
+  const saved = await recordCardContact({
+    cardId: card?.id ?? null,
+    owner: me,
+    via: "SCAN",
+    event: { id: event.id, name: event.name },
+    person: { name: c.name, email: c.email, phone: c.phone, company: c.company, jobTitle: c.jobTitle, message: c.note, answers },
+  });
+  revalidatePath(`/cards/events/${event.id}`);
+  return { ok: true, data: { leadLink: saved.leadLink } };
+}
+
+const VIA_WORDS = { SHARE_BACK: "Shared back from a card", BOOTH: "Booth form", SCAN: "Scanned" } as const;
+
+/** Everybody met at an event, as a CSV — for whoever manages cards. The export is recorded. */
+export async function exportEventContacts(eventId: string): Promise<ActionResult<{ filename: string; csv: string }>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: MANAGE_REFUSED };
+  const event = await loadEvent(eventId);
+  if (!event) return { ok: false, error: "That event no longer exists." };
+  const clock = await workspaceClock();
+  const rows = await db.cardContact.findMany({
+    where: { campaignId: event.id },
+    orderBy: { createdAt: "asc" },
+    select: {
+      createdAt: true,
+      name: true,
+      email: true,
+      phone: true,
+      company: true,
+      jobTitle: true,
+      via: true,
+      message: true,
+      note: true,
+      answers: true,
+      owner: { select: { name: true } },
+      card: { select: { user: { select: { name: true } } } },
+      lead: { select: { leadSeq: true } },
+    },
+  });
+  const header = ["Met", "Name", "Email", "Phone", "Company", "Job title", "How", "Met by", "Now with", "Lead", ...event.questions.map((q) => q.label), "Note from them", "Our note"];
+  const lines = [csvRow(header)];
+  for (const r of rows) {
+    const answers = Array.isArray(r.answers) ? (r.answers as { label?: string; answer?: string }[]) : [];
+    lines.push(
+      csvRow([
+        clock.dateTimeShort(r.createdAt),
+        r.name,
+        r.email ?? "",
+        r.phone ?? "",
+        r.company ?? "",
+        r.jobTitle ?? "",
+        VIA_WORDS[r.via],
+        r.card?.user.name ?? r.owner.name,
+        r.owner.name,
+        r.lead ? formatLeadId(r.lead.leadSeq) : "",
+        ...event.questions.map((q) => answers.find((a) => a.label === q.label)?.answer ?? ""),
+        r.message ?? "",
+        r.note ?? "",
+      ]),
+    );
+  }
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "CardCampaign", entityId: event.id, entityLabel: `Exported ${rows.length} people met at ${event.name}` });
+  const slug = event.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "event";
+  return { ok: true, data: { filename: `${slug}-people-met-${clock.today()}.csv`, csv: lines.join("\r\n") } };
 }

@@ -5,9 +5,11 @@ import { Mail, Phone } from "lucide-react";
 import { getBranding } from "@/actions/branding";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { publicCard, recordCardEvent } from "@/lib/cards/server";
+import { boothEvent } from "@/lib/cards/events-server";
+import { workspaceClock } from "@/lib/time/workspace";
 import { PublicCardView } from "@/components/cards/public-card";
 
-type Props = { params: Promise<{ handle: string }> };
+type Props = { params: Promise<{ handle: string }>; searchParams: Promise<{ e?: string }> };
 
 /** Link previews and crawlers open the page too; they aren't somebody looking at the card. */
 const NOT_A_PERSON = /bot|crawl|spider|preview|facebookexternalhit|whatsapp|slack|linkedin|telegram|discord|skype/i;
@@ -31,8 +33,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  * details, so a saved link or an NFC tag keeps pointing somewhere useful; an address that was never a
  * card is a 404.
  */
-export default async function PublicCardPage({ params }: Props) {
+export default async function PublicCardPage({ params, searchParams }: Props) {
   const { handle } = await params;
+  const { e: eventCode } = await searchParams;
   const card = await cardFor(handle);
   if (!card) notFound();
   const branding = await getBranding();
@@ -73,6 +76,8 @@ export default async function PublicCardPage({ params }: Props) {
 
   const agent = (await headers()).get("user-agent") ?? "";
   if (!NOT_A_PERSON.test(agent)) await recordCardEvent(card.cardId, "VIEW");
+  // A booth form only while its event runs and for one of its team; any other code is just the card.
+  const booth = eventCode ? await boothEvent(eventCode, card.userId, (await workspaceClock()).today()) : null;
 
   return (
     <PublicCardView
@@ -85,6 +90,7 @@ export default async function PublicCardPage({ params }: Props) {
       shareBack={card.shareBack}
       questions={card.questions}
       firstName={card.firstName}
+      booth={booth ? { code: eventCode!, name: booth.name, questions: booth.questions } : null}
     />
   );
 }

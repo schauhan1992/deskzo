@@ -2,11 +2,11 @@
 
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
-import { notifyUser } from "@/lib/notify";
+import { workspaceClock } from "@/lib/time/workspace";
 import { FIELD_KINDS } from "@/lib/cards/fields";
 import { loadCard, publicCard, recordCardEvent } from "@/lib/cards/server";
-import { intakeLead, leadPayloadSchema } from "@/lib/lead-capture/intake";
-import { leadPath } from "@/lib/record-links";
+import { boothEvent, liveEventOf } from "@/lib/cards/events-server";
+import { recordCardContact } from "@/lib/cards/capture";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -17,9 +17,11 @@ import type { ActionResult } from "@/actions/company";
  *
  *   · No CAPTCHA, as on the public forms: a hidden field and a minimum fill time, and both answer a bot
  *     with the same thanks a person gets.
- *   · Counted in the database rather than by address: at most ten share-backs a card in ten minutes,
- *     and thirty a minute across the workspace. Nothing about who sent them is kept.
- *   · Saving the card never needs this. Sharing back is offered below it, never in front of it.
+ *   · Counted in the database rather than by address: at most ten share-backs a card in ten minutes —
+ *     sixty on an event's booth form, where a queue at the stand is the point — and sixty a minute
+ *     across the workspace. Nothing about who sent them is kept.
+ *   · Saving the card never needs this. Sharing back is offered below it, never in front of it — except
+ *     on a booth form, which a team member opened on purpose for visitors to fill in.
  */
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -33,8 +35,10 @@ export type ShareBackInput = {
   company?: string;
   jobTitle?: string;
   message?: string;
-  /** The template's questions, by id. */
+  /** The questions asked — the event's on a booth form, the template's otherwise — by id. */
   answers?: Record<string, string>;
+  /** A booth form's event code (/c/<handle>?e=<code>). */
+  event?: string;
   /** Hidden field. A real person never fills it in. */
   website?: string;
   /** Milliseconds the form was on screen. */
@@ -46,7 +50,16 @@ const BUSY = "A lot of people have shared their details with this card just now.
 export async function shareBackFromCard(input: ShareBackInput): Promise<ActionResult<{ firstName: string }>> {
   if (!(await moduleAvailableForTenant("cards"))) return { ok: false, error: "This card isn't available." };
   const card = await publicCard(String(input.handle ?? ""));
-  if (!card || card.state !== "live" || !card.shareBack) return { ok: false, error: "This card isn't taking details just now." };
+  if (!card || card.state !== "live") return { ok: false, error: "This card isn't taking details just now." };
+  const holder = await db.digitalCard.findUnique({ where: { id: card.cardId }, select: { userId: true, user: { select: { name: true } } } });
+  if (!holder) return { ok: false, error: "This card isn't taking details just now." };
+
+  // A booth form while its event runs; otherwise the one event the holder is working today, if any.
+  const today = (await workspaceClock()).today();
+  const booth = await boothEvent(input.event, holder.userId, today);
+  if (!booth && !card.shareBack) return { ok: false, error: "This card isn't taking details just now." };
+  const event = booth ? { id: booth.id, name: booth.name } : await liveEventOf(holder.userId, today);
+  const questions = booth?.questions.length ? booth.questions : card.questions;
   const thanks = { ok: true as const, data: { firstName: card.firstName } };
 
   // Both bot checks answer with success. Telling a bot it was detected only teaches it.
@@ -64,9 +77,9 @@ export async function shareBackFromCard(input: ShareBackInput): Promise<ActionRe
   if (email && !EMAIL.test(email)) return { ok: false, error: "That email address doesn't look right." };
   if (phone && !PHONE.test(phone)) return { ok: false, error: "That phone number doesn't look right." };
 
-  // Only the questions the card asks, and every required one answered.
+  // Only the questions the form asks, and every required one answered.
   const answers: { label: string; answer: string }[] = [];
-  for (const q of card.questions) {
+  for (const q of questions) {
     const answer = String(input.answers?.[q.id] ?? "").trim().slice(0, 500);
     if (!answer && q.required) return { ok: false, error: `Please answer: ${q.label}` };
     if (answer) answers.push({ label: q.label, answer });
@@ -76,76 +89,16 @@ export async function shareBackFromCard(input: ShareBackInput): Promise<ActionRe
     db.cardContact.count({ where: { cardId: card.cardId, createdAt: { gte: new Date(Date.now() - 10 * 60_000) } } }),
     db.cardContact.count({ where: { createdAt: { gte: new Date(Date.now() - 60_000) } } }),
   ]);
-  if (lately >= 10 || everywhere >= 30) return { ok: false, error: BUSY };
+  if (lately >= (booth ? 60 : 10) || everywhere >= 60) return { ok: false, error: BUSY };
 
-  const holder = await db.digitalCard.findUnique({ where: { id: card.cardId }, select: { userId: true, user: { select: { name: true } } } });
-  if (!holder) return { ok: false, error: "This card isn't taking details just now." };
-
-  const contact = await db.cardContact.create({
-    data: {
-      cardId: card.cardId,
-      ownerUserId: holder.userId,
-      name,
-      email: email || null,
-      phone: phone || null,
-      company: company || null,
-      jobTitle: jobTitle || null,
-      message: message || null,
-      answers,
-    },
-    select: { id: true },
+  await recordCardContact({
+    cardId: card.cardId,
+    owner: { id: holder.userId, name: holder.user.name },
+    via: booth ? "BOOTH" : "SHARE_BACK",
+    event,
+    person: { name, email, phone, company, jobTitle, message, answers },
   });
   await recordCardEvent(card.cardId, "SHARE_BACK");
-
-  /**
-   * With the CRM, a lead in the holder's name: they met. The contact above is kept either way, so the
-   * card's list is whole whether or not the lead could be made — and a lead that fails costs nobody the
-   * details they left.
-   */
-  let leadLink: string | null = null;
-  if (await moduleAvailableForTenant("companies")) {
-    const payload = leadPayloadSchema.safeParse({
-      name,
-      email,
-      phone,
-      company,
-      designation: jobTitle,
-      message: [message, ...answers.map((a) => `${a.label}: ${a.answer}`)].filter(Boolean).join("\n") || undefined,
-      source: "DIGITAL_CARD",
-    });
-    if (payload.success) {
-      try {
-        const result = await intakeLead(
-          { id: null, name: `${holder.user.name}'s digital card`, sourceLabel: "Digital card", createdById: holder.userId },
-          payload.data,
-          {
-            ownerUserId: holder.userId,
-            leadTitle: `${company || name} — from your digital card`,
-            notifyTitle: `${name} shared their details from your card`,
-          },
-        );
-        if (result.status !== "reseller") {
-          const lead = await db.lead.findUnique({ where: { id: result.leadId }, select: { id: true, leadSeq: true } });
-          if (lead) {
-            await db.cardContact.update({ where: { id: contact.id }, data: { leadId: lead.id } });
-            leadLink = leadPath(lead.leadSeq);
-          }
-        }
-      } catch (err) {
-        console.error("[cards] a share-back could not become a lead", err);
-      }
-    }
-  }
-
-  if (!leadLink) {
-    await notifyUser({
-      userId: holder.userId,
-      type: "CARD_SHARED_BACK",
-      title: `${name} shared their details from your card`,
-      message: [company, email, phone].filter(Boolean).join(" · ").slice(0, 300),
-      link: "/cards?tab=contacts",
-    });
-  }
   return thanks;
 }
 

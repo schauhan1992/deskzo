@@ -210,6 +210,8 @@ export type PublicCard =
   | {
       state: "live";
       cardId: string;
+      /** The holder — server-side only, for the booth form; never sent to the browser. */
+      userId: string;
       handle: string;
       card: DrawnCard;
       color: string;
@@ -254,6 +256,7 @@ export async function publicCard(handle: string): Promise<PublicCard | null> {
   return {
     state: "live",
     cardId: card.id,
+    userId: card.userId,
     handle: card.handle,
     card: drawn,
     color: card.spec.color,
