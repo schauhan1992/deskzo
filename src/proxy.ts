@@ -98,7 +98,7 @@ const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platf
 const REFERRAL_COOKIE = "deskzo_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal", "/c"];
+const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal", "/c", "/sig"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

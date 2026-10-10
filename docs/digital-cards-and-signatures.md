@@ -1,6 +1,6 @@
 # Digital cards, event lead capture and email signatures — proposal
 
-**Status:** suggestion for the owner, 10 Oct 2026. Phases 0 and 1 built the same day (§8); the rest is not.
+**Status:** suggestion for the owner, 10 Oct 2026. Phases 0, 1 and 3 built the same day, with an in-app signature page ahead of phase 4 (§8–9); the rest is not.
 **Asked for:** a Blinq-style digital card that HR or an admin switches on per person; Blinq's event lead
 capture; and team email signatures — a free public generator that leads to a paid module syncing
 signatures into Microsoft 365, Google Workspace and Zoho Mail mailboxes. Both products are sold on their
@@ -302,4 +302,35 @@ phases 0–1 first.
 - Cards as a product sold on its own (products.ts, its website page and plan) — waits on prices (§7.1).
 - Seats per card (§3.1), "tell the cardholders" when a template changes, a second card per person.
 - Phases 2–6.
+
+---
+
+## 9. Status: the generator and in-app signatures (10 Oct 2026)
+
+Decided by the owner, 10 Oct 2026: the public generator has free templates and premium ones; premium
+ones can be looked at but only used with a paid plan — Deskzo Signatures, or Deskzo One. Until
+mailbox sync (phases 4–5), a paying workspace copies its signatures from an in-app page.
+
+**Built**
+- **Templates:** 4 free (Simple, Divider, Compact, Classic) and 8 premium (Portrait, Executive, Card
+  link, Campaign, Centred, Accent bar, Split, Legal), as layout descriptions rendered to email-safe
+  HTML (tables, inline styles, every value escaped, links only to http(s), checked mailto: and tel:).
+  The premium layouts are server-only (`src/lib/signatures/premium.ts`).
+- **The generator, `deskzo.com/email-signature-generator`:** indexable, no sign-up. The free four
+  preview live and copy as rich text or HTML, with a "Made with Deskzo" line. The premium eight show
+  the visitor's own details as a watermarked PNG drawn on the server — their HTML never reaches the
+  browser — with "See plans" and "Book a demo".
+- **In-app, `/signatures`** (the `signatures` module; `signatures.manage` for the company's part):
+  each person's signature filled from their record — name, title, department, work phone, email,
+  branch address, profile photo, a live digital card's link and QR — in any of the twelve, or the one
+  the company locks; an own mobile; copy into Gmail, Outlook or Apple Mail. The company sets template
+  and lock, colour, website, social links, banner and disclaimer.
+- **Images for email:** `/sig/logo` (letterhead logo), `/sig/p/<token>` (a person's photo; the token
+  is a MAC under the workspace's key) and `/c/<slug>/qr`.
+- `check:signatures`.
+
+**Not yet**
+- Mailbox sync (phases 4–5), rules by department/branch/role, banner campaigns with click counts.
+- Uploading a logo on the public generator (it takes an image address — an email can't carry a file).
+- Signatures as a product sold on its own — waits on prices (§7.1).
 

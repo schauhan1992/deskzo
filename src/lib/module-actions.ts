@@ -198,6 +198,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "cards.ts": ["cards"],
   // A card's public page: somebody with no account sharing their details back.
   "cards-public.ts": "public",
+  // Deskzo Signatures (docs/digital-cards-and-signatures.md §5): your signature, the company's settings.
+  "signatures.ts": ["signatures"],
   "verification.ts": ["workspace"],
   "view-mode.ts": "core",
   "visit.ts": ["visits"],

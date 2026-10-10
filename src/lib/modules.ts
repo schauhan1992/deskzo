@@ -553,6 +553,16 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     ],
   },
   {
+    // Deskzo Signatures (owner, 10 Oct 2026; docs/digital-cards-and-signatures.md §5). Everybody in a
+    // workspace with it gets their signature from their record; premium templates come with it.
+    key: "signatures",
+    label: "Email Signatures",
+    description:
+      "One email signature design for the whole company, filled in from each person's record — photo, title, phone, digital card — with every premium template. Copy it into Gmail, Outlook or Apple Mail.",
+    navGroup: "My work",
+    navItems: [{ href: "/signatures", label: "Email signature", icon: Mail }],
+  },
+  {
     key: "helpdesk",
     viewPermission: "tickets.view",
     label: "Helpdesk / Tickets",

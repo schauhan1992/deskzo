@@ -843,6 +843,7 @@ model User {
   recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
   digitalCard          DigitalCard?       @relation("DigitalCardHolder")
   digitalCardsIssued   DigitalCard[]      @relation("DigitalCardIssuedBy")
+  signature            UserSignature?     @relation("UserSignatureOwner")
 
   @@index([departmentId])
   @@index([managerId])
@@ -12758,3 +12759,44 @@ model CardContact {
   @@index([leadId])
   @@map("card_contacts")
 }
+
+// ─── Deskzo Signatures (docs/digital-cards-and-signatures.md §5) ──────────────────────────────────
+
+/**
+ * The company's email signature: the template everybody starts from (and whether they may pick
+ * another), the colour, and what is the same for everyone — website, social links, a disclaimer, a
+ * banner. One row. Each person's own part comes from their record (src/lib/signatures/server.ts).
+ */
+model SignatureSettings {
+  id             String   @id @default("global")
+  templateKey    String   @default("simple")
+  /// Everybody uses `templateKey`; nobody picks their own.
+  lockTemplate   Boolean  @default(false)
+  accentColor    String   @default("#2563eb")
+  website        String?
+  /// { linkedin, x, instagram, facebook, youtube } — the company's own profiles.
+  socials        Json     @default("{}")
+  disclaimer     String?
+  bannerImageUrl String?
+  bannerLink     String?
+  showPhoto      Boolean  @default(true)
+  /// Link each person's digital card (Deskzo Cards) when they have a live one.
+  showCard       Boolean  @default(true)
+  updatedById    String?
+  updatedAt      DateTime @updatedAt
+
+  @@map("signature_settings")
+}
+
+/** What a person chose for their own signature, where the company lets them. */
+model UserSignature {
+  userId      String   @id
+  user        User     @relation("UserSignatureOwner", fields: [userId], references: [id], onDelete: Cascade)
+  templateKey String?
+  /// A mobile number of their own for the signature — never read from the HR record's personal phone.
+  mobile      String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("user_signatures")
+}
+

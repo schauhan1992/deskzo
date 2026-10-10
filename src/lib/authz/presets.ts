@@ -400,6 +400,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "companies.viewAll",
       // Digital cards (10 Oct 2026): runs them for the company, and carries one.
       "cards.use", "cards.manage", "cards.viewLeads",
+      "signatures.manage",
       "accounts.reassign",
       "credit.override",
       "products.edit",
