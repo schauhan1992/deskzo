@@ -10,7 +10,7 @@ import { wouldCreateCycle } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
 import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
 import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, assertNotSelf, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
-import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/user";
+import { updateUserAssignmentSchema, createUserSchema, updateWorkProfileSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
@@ -151,6 +151,51 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
 
   revalidatePath("/settings/access");
   revalidatePath("/", "layout");
+  return { ok: true, data: null };
+}
+
+/**
+ * Somebody's job title and work phone, from Staff & roles — what their digital card, their email
+ * signature and a printed quote show. Neither confers anything, so `users.manage` is the whole rule,
+ * with the usual one that only a super admin edits a super admin.
+ *
+ * The title is the HR record's designation: a person without an HR record gets one holding only that,
+ * which People fills in the rest of later. Clearing the title of somebody without a record writes nothing.
+ */
+export async function updateWorkProfile(input: unknown): Promise<ActionResult<null>> {
+  const session = await requireUser();
+  const admin = await actorContext(session.id);
+  if (!(await hasEffectivePermission(admin.id, "users.manage"))) {
+    return { ok: false, error: "You can't change somebody's job title or work phone." };
+  }
+  const parsed = updateWorkProfileSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const { id, jobTitle, phone } = parsed.data;
+
+  const target = await db.user.findUnique({
+    where: { id },
+    select: { id: true, isSuperAdmin: true, employeeProfile: { select: { id: true } } },
+  });
+  if (!target) return { ok: false, error: "That user no longer exists." };
+  try {
+    assertMayActOnTarget(admin, target);
+  } catch (err) {
+    return refuse(err);
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id }, data: { phone: phone || null } });
+    if (target.employeeProfile) {
+      await tx.employeeProfile.update({ where: { userId: id }, data: { designation: jobTitle || null } });
+    } else if (jobTitle) {
+      await tx.employeeProfile.create({ data: { userId: id, designation: jobTitle } });
+    }
+  });
+
+  revalidatePath("/settings/access");
+  revalidatePath("/cards");
   return { ok: true, data: null };
 }
 

@@ -450,6 +450,11 @@ enum NotificationType {
    * The day's draft invoices raised by recurring billing, in one notice, for everybody who issues them.
    */
   RECURRING_DRAFTS_RAISED
+  /**
+   * Somebody shared their details back from your digital card (Deskzo Cards). With the CRM it is a
+   * lead in your name, and that lead says so instead.
+   */
+  CARD_SHARED_BACK
 }
 
 model User {
@@ -666,6 +671,8 @@ model User {
   candidateRecord          Candidate?                 @relation("CandidateConverted")
   hrTasksAbout             Task[]                     @relation("TaskAboutUser")
   employeeProfile          EmployeeProfile?           @relation("UserEmployeeProfile")
+  digitalCard              DigitalCard?               @relation("DigitalCardHolder")
+  cardContacts             CardContact[]              @relation("CardContactOwner")
   leaveBalances            LeaveBalance[]             @relation("UserLeaveBalances")
   leaveRequests            LeaveRequest[]             @relation("UserLeaveRequests")
   leaveApprovals           LeaveRequest[]             @relation("LeaveApprover")
@@ -1480,6 +1487,7 @@ model Lead {
 
   calls           CallLog[]
   formSubmissions FormSubmission[] @relation("FormSubmissionLead")
+  cardContacts    CardContact[]    @relation("CardContactLead")
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
   calendarEvents     CalendarEvent[]
 
@@ -10737,6 +10745,8 @@ enum LeadSource {
   ADVERTISEMENT
   EXISTING_CUSTOMER
   WALK_IN
+  /// Shared back from somebody's digital card (Deskzo Cards).
+  DIGITAL_CARD
   OTHER
 }
 
@@ -12651,4 +12661,146 @@ model RecurringBillingPeriod {
   @@unique([companyProductId, periodStart])
   @@index([documentId])
   @@map("recurring_billing_periods")
+}
+
+/**
+ * Deskzo Cards: a company's card design. Every card is drawn from one, so the brand stays the company's.
+ *
+ * What a card shows comes from three places: the holder's own record (name, photo, job title, work
+ * phone, email, branch address — kept in step, never typed twice), the template's shared fields (one
+ * value for everybody: the website, the head-office number), and the holder's own additions
+ * (LinkedIn, WhatsApp) where the template allows them.
+ */
+model CardTemplate {
+  id             String        @id @default(cuid())
+  name           String
+  /// The one a new card is drawn from unless somebody picks another. Exactly one per workspace.
+  isDefault      Boolean       @default(false)
+  /// The card's colour, #rrggbb.
+  color          String        @default("#1d4ed8")
+  /// CLASSIC: photo beside the name. CENTRED: photo above it.
+  layout         String        @default("CLASSIC")
+  showLogo       Boolean       @default(true)
+  /**
+   * The record's fields, in order: [{ key, show, locked }]. key is one of src/lib/cards/fields.ts
+   * RECORD_FIELDS; locked means the holder cannot hide it.
+   */
+  recordFields   Json          @default("[]")
+  /// One value for every card: [{ kind, label, value }].
+  sharedFields   Json          @default("[]")
+  /// Whether holders may add their own links and numbers.
+  allowOwnFields Boolean       @default(true)
+  /// Whether the card asks the person who opens it to share their details back.
+  shareBack      Boolean       @default(true)
+  /// Up to five questions the share-back form also asks: [{ id, label, required }].
+  questions      Json          @default("[]")
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  cards          DigitalCard[]
+
+  @@map("card_templates")
+}
+
+enum DigitalCardStatus {
+  ACTIVE
+  /// Switched off by whoever manages cards. The address answers that the card is no longer in use.
+  OFF
+}
+
+/**
+ * Somebody's digital card. HR, an admin or anybody holding `cards.manage` issues it — a card is a
+ * thing the company gives, not a permission, because the super admin holds every permission and the
+ * owner's rule is that nobody has a card until somebody switches it on (10 Oct 2026).
+ *
+ * The public page is /c/<handle> on the workspace's own address. A card whose holder has left — their
+ * account switched off, or their exit date passed — answers as no longer with the company, whatever
+ * its status.
+ */
+model DigitalCard {
+  id              String            @id @default(cuid())
+  userId          String            @unique
+  user            User              @relation("DigitalCardHolder", fields: [userId], references: [id], onDelete: Cascade)
+  templateId      String
+  template        CardTemplate      @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  /// The address: lower-case letters, digits and hyphens. Kept for the life of the card.
+  handle          String            @unique
+  status          DigitalCardStatus @default(ACTIVE)
+  /// The holder's own additions, in order: [{ kind, label, value }].
+  ownFields       Json              @default("[]")
+  /// The record fields the holder hides — only those their template leaves unlocked.
+  hidden          String[]          @default([])
+  issuedById      String?
+  issuedAt        DateTime          @default(now())
+  switchedOffAt   DateTime?
+  switchedOffById String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  events          CardEvent[]
+  contacts        CardContact[]
+
+  @@index([templateId])
+  @@index([status])
+  @@map("digital_cards")
+}
+
+enum CardEventKind {
+  /// The public page was opened.
+  VIEW
+  /// Save contact — the vCard was downloaded.
+  SAVE
+  /// One of the card's links or numbers was tapped. `detail` says which kind.
+  TAP
+  /// Somebody shared their details back.
+  SHARE_BACK
+}
+
+/**
+ * What happened on a card's public page, for its numbers. Nothing about who: no address, no browser,
+ * no cookie — a count, and the moment.
+ */
+model CardEvent {
+  id     String        @id @default(cuid())
+  cardId String
+  card   DigitalCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  kind   CardEventKind
+  detail String?
+  at     DateTime      @default(now())
+
+  @@index([cardId, at])
+  @@index([at])
+  @@map("card_events")
+}
+
+/**
+ * Somebody who shared their details back from a card. Always kept here, so a workspace without the
+ * CRM still has them; with the CRM it is also a lead (source Digital card) owned by the card's holder.
+ *
+ * `ownerUserId` starts as the holder and moves in the exit hand-over, like their accounts do. A card
+ * with contacts is never deleted with its holder: they are the company's, whoever holds them now.
+ */
+model CardContact {
+  id          String      @id @default(cuid())
+  cardId      String
+  card        DigitalCard @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  ownerUserId String
+  owner       User        @relation("CardContactOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  name        String
+  email       String?
+  phone       String?
+  company     String?
+  jobTitle    String?
+  message     String?
+  /// The template's questions and what they answered: [{ label, answer }].
+  answers     Json        @default("[]")
+  /// The holder's own note on them.
+  note        String?
+  leadId      String?
+  lead        Lead?       @relation("CardContactLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+
+  @@index([ownerUserId, createdAt])
+  @@index([cardId, createdAt])
+  @@index([leadId])
+  @@map("card_contacts")
 }

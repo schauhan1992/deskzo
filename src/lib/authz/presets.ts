@@ -442,6 +442,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "fields.manage",
       "fields.seeRestricted",
       "pipeline.manage",
+      "cards.manage",
     ],
   },
   {

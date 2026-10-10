@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { BarChart3, FileSpreadsheet, LayoutDashboard, ScrollText, Settings as SettingsIcon, ShieldCheck, UserCog } from "lucide-react";
-import { MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavItem } from "@/lib/modules";
+import { MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavFact, type NavItem } from "@/lib/modules";
 import { PERMISSION_KEYS, isPermissionKey, sectionPermission } from "@/lib/permissions";
 
 /**
@@ -55,6 +55,8 @@ export type NavAccess = {
   permissions: readonly string[];
   /** The workspace's, for links that only exist in some countries (the e-way bill register). */
   country: string;
+  /** What is true of this person for `NavItem.onlyFor` — they hold a live digital card. */
+  facts?: readonly NavFact[];
 };
 
 /** Every export permission: any one of them opens Import & export. */
@@ -114,9 +116,13 @@ export type VisibleNavSection = {
   system?: boolean;
 };
 
-/** Whether a link is for this person: in their country, and — if it names permissions — holding one. */
-function linkAllowed(item: Pick<NavItem, "permission" | "countries">, access: { held: ReadonlySet<string>; country: string }) {
+/** Whether a link is for this person: in their country, true of them, and — if it names permissions — holding one. */
+function linkAllowed(
+  item: Pick<NavItem, "permission" | "countries" | "onlyFor">,
+  access: { held: ReadonlySet<string>; country: string; facts?: ReadonlySet<NavFact> },
+) {
   if (item.countries && !item.countries.includes(access.country)) return false;
+  if (item.onlyFor && !access.facts?.has(item.onlyFor)) return false;
   const keys = navPermissionKeys(item);
   // An array means any one of them will do — the same rule the settings catalogue uses.
   return keys.length === 0 || keys.some((k) => access.held.has(k));
@@ -132,7 +138,7 @@ function linkAllowed(item: Pick<NavItem, "permission" | "countries">, access: { 
 export function buildNavigation(access: NavAccess): VisibleNavSection[] {
   const open = new Set(access.openModules);
   const held = new Set(access.permissions);
-  const ctx = { held, country: access.country };
+  const ctx = { held, country: access.country, facts: new Set(access.facts ?? []) };
 
   const groups = new Map<string, VisibleNavItem[]>();
   for (const mod of MODULE_REGISTRY) {

@@ -12,8 +12,20 @@ import { Button } from "@/components/ui/button";
  *
  * The preview updates before the upload finishes, because a file picker that appears to do nothing
  * for a second gets clicked again — and the second click uploads the same file twice.
+ *
+ * With `forUserId` it is somebody else's photo — Staff & roles' edit dialog — and the actions apply
+ * their own rule: `users.manage`, and never a super admin's photo unless you are one.
  */
-export function PhotoManager({ user, onSaved }: { user: AvatarUser; /** After a photo is saved or removed — the onboarding wizard re-checks its step. */ onSaved?: () => void }) {
+export function PhotoManager({
+  user,
+  onSaved,
+  forUserId,
+}: {
+  user: AvatarUser;
+  /** After a photo is saved or removed — the onboarding wizard re-checks its step. */
+  onSaved?: () => void;
+  forUserId?: string;
+}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -36,7 +48,7 @@ export function PhotoManager({ user, onSaved }: { user: AvatarUser; /** After a 
       const dataUrl = String(reader.result);
       setPreview(dataUrl);
       startTransition(async () => {
-        const result = await setProfilePhoto(dataUrl);
+        const result = await setProfilePhoto(dataUrl, forUserId);
         if (!result.ok) {
           setError(result.error);
           setPreview(null);
@@ -92,7 +104,7 @@ export function PhotoManager({ user, onSaved }: { user: AvatarUser; /** After a 
                 setError(null);
                 setPreview(null);
                 startTransition(async () => {
-                  const result = await removeProfilePhoto();
+                  const result = await removeProfilePhoto(forUserId);
                   if (!result.ok) {
                     setError(result.error);
                     return;
@@ -110,7 +122,9 @@ export function PhotoManager({ user, onSaved }: { user: AvatarUser; /** After a 
 
         <p className="max-w-sm text-xs text-subtle">
           PNG, JPEG, WebP or GIF, under 96KB. Square images look best — anything else is cropped to
-          the circle. Without one you get your initials, which is a perfectly good answer.
+          the circle. {forUserId
+            ? "Without one, their initials show — on their digital card too."
+            : "Without one you get your initials, which is a perfectly good answer."}
         </p>
 
         {error && <p className="text-sm text-danger">{error}</p>}

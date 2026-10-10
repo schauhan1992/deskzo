@@ -132,6 +132,16 @@ export const HANDOVER_AREAS: HandoverArea[] = [
       tx.lead.updateMany({ where: { id: { in: ids } }, data: { ownerUserId: toUserId } }).then(() => undefined),
   },
   {
+    // The company's, not the leaver's: their card goes dark, and the people they met stay looked after.
+    key: "card-contacts",
+    label: "Digital card contacts",
+    detail: "People who shared their details back from their digital card. The leads made from them move with open leads.",
+    splittable: true,
+    hold: (c, userId) => c.cardContact.findMany({ where: { ownerUserId: userId }, orderBy: byId, select: { id: true } }),
+    give: (tx, ids, toUserId) =>
+      tx.cardContact.updateMany({ where: { id: { in: ids } }, data: { ownerUserId: toUserId } }).then(() => undefined),
+  },
+  {
     key: "tickets",
     label: "Open tickets",
     detail: "Open, in progress and on hold. Resolved and closed tickets keep the agent who worked them.",

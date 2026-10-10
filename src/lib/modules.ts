@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -34,7 +34,15 @@ export type NavItem = {
    * page and billing share it — and is what shows until the word is renamed.
    */
   term?: { key: TermKey; template?: string };
+  /**
+   * Shown only to somebody something is true of — not a permission, a fact about them. "cardholder":
+   * they have a live digital card. HR issues cards to people, so My card is a link only they need.
+   */
+  onlyFor?: NavFact;
 };
+
+/** What `NavItem.onlyFor` can ask. Worked out once per request with the rest of the menu (modules-access.ts). */
+export type NavFact = "cardholder";
 
 export type ModuleDefinition = {
   key: string;
@@ -538,6 +546,17 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       "The company's own logins — registrars, hosting panels, partner portals, tax accounts. Encrypted at rest, opened with your own password, every access recorded and reported to the owner. Records belong to a person and are shared deliberately.",
     navGroup: "My work",
     navItems: [{ href: "/vault", label: "Credential vault", icon: KeyRound, permission: "vault.use" }],
+  },
+  {
+    key: "cards",
+    label: "Digital Cards",
+    description:
+      "Digital business cards for the people the company chooses. Their photo, title and work numbers come from their record, the design from the company's template; a QR code and a link save the contact in one tap. Whoever they meet can share their details back, and that becomes a lead in their name.",
+    navGroup: "My work",
+    navItems: [
+      { href: "/cards", label: "My card", icon: IdCard, onlyFor: "cardholder" },
+      { href: "/cards/manage", label: "Digital cards", icon: WalletCards, permission: "cards.manage" },
+    ],
   },
   {
     key: "helpdesk",

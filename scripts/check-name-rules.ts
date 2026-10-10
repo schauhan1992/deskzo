@@ -148,6 +148,8 @@ const BRIEF_HOSTS = (
   "privacy legal terms abuse postmaster hostmaster webmaster noreply no-reply null undefined default example"
 ).split(" ");
 const ADDED_HOSTS = ["autodiscover", "autoconfig", "mta-sts"];
+/** Product words reserved since the split: Deskzo Cards, and the signatures product to come (10 Oct 2026). */
+const ADDED_WORDS = ["cards", "card", "businesscard", "signatures", "signature"];
 
 async function main() {
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -229,7 +231,7 @@ async function main() {
     const hosts = [...names.PLATFORM_HOSTS].sort();
     ok(`PLATFORM_HOSTS is the brief's list, plus ${ADDED_HOSTS.join(", ")}`, JSON.stringify(hosts) === JSON.stringify([...BRIEF_HOSTS, ...ADDED_HOSTS].sort()), hosts.filter((h) => !BRIEF_HOSTS.includes(h) && !ADDED_HOSTS.includes(h)));
     const words = [...names.RESERVED_WORDS];
-    ok("RESERVED_WORDS is every other word of the old list — none lost, none added", JSON.stringify([...words].sort()) === JSON.stringify(OLD_RESERVED.filter((w) => !names.PLATFORM_HOSTS.has(w)).sort()));
+    ok(`RESERVED_WORDS is every other word of the old list, plus ${ADDED_WORDS.join(", ")} — none lost`, JSON.stringify([...words].sort()) === JSON.stringify([...OLD_RESERVED.filter((w) => !names.PLATFORM_HOSTS.has(w)), ...ADDED_WORDS].sort()));
     ok("  and every old word is in one of the two", OLD_RESERVED.every((w) => names.PLATFORM_HOSTS.has(w) || names.RESERVED_WORDS.has(w)));
     ok("no word is in two lists", words.every((w) => !names.PLATFORM_HOSTS.has(w)) && [...names.OUR_NAMES, ...names.COMPETITOR_NAMES].every((w) => !names.PLATFORM_HOSTS.has(w) && !names.RESERVED_WORDS.has(w)));
     ok('"deskzo" is never a platform address — the platform\'s own workspace is called that', !names.PLATFORM_HOSTS.has("deskzo"));

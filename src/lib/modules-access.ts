@@ -2,7 +2,8 @@ import { cache } from "react";
 import { db } from "@/lib/db";
 import { permissionsFor } from "@/lib/authz/resolve";
 import { featureAvailable, moduleEntitled } from "@/lib/entitlements";
-import { getModuleDefinition, type CountryFeature } from "@/lib/modules";
+import { getModuleDefinition, type CountryFeature, type NavFact } from "@/lib/modules";
+import { holdsLiveCard } from "@/lib/cards/holder";
 import { decideModuleAccess, openModuleKeys, type ModuleAccess, type NavAccess } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
@@ -84,7 +85,9 @@ export const accessContextFor = cache(async (userId: string): Promise<AccessCont
     (def) => ({ entitled: moduleEntitled(tenant.entitlements, tenant.country, def.key), switchedOn: on.get(def.key) ?? true }),
     new Set<string>(permissions),
   );
-  return { userId, country: tenant.country, permissions, openModules };
+  const facts: NavFact[] = [];
+  if (openModules.includes("cards") && (await holdsLiveCard(userId))) facts.push("cardholder");
+  return { userId, country: tenant.country, permissions, openModules, facts };
 });
 
 /**

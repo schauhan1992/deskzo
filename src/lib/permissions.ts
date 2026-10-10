@@ -284,6 +284,20 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT"],
   },
   {
+    /**
+     * Deskzo Cards. Having a card is not a permission: a card is something the company issues, because
+     * the super admin holds every permission and the owner's rule is that nobody has a card until
+     * somebody switches it on (10 Oct 2026). This is who does the switching.
+     */
+    key: "cards.manage",
+    label: "Manage digital cards",
+    description:
+      "Issue digital cards and switch them off, design the company's card templates, and see every card's views, saves and the people who shared their details back. HR and admins.",
+    defaultRoles: ["MANAGEMENT", "HR", "HR_HEAD"],
+    // Managing the person who runs the cards is not running them.
+    delegable: false,
+  },
+  {
     key: "vault.use",
     label: "Use the credential vault",
     description:
@@ -1167,6 +1181,7 @@ export const PERMISSION_REGISTRY = [
   { key: "section.tasks", label: "My work › Tasks", description: "See Tasks in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.calendar", label: "My work › Calendar", description: "See Calendar in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.notes", label: "My work › Sticky Notes", description: "See Sticky Notes in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.cards", label: "My work › Digital Cards", description: "See Digital Cards in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.vault", label: "My work › Credential Vault", description: "See Credential Vault in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.targets", label: "Performance › Targets", description: "See Targets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.incentives", label: "Performance › Incentives", description: "See Incentives in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
@@ -1274,6 +1289,7 @@ const GROUP_BY_PREFIX: Record<string, string> = {
   // These five had no prefix entry, so eleven keys — including the credential vault's — were
   // filed under a heading called "Other" on the permission screen.
   vault: "Administration",
+  cards: "People & HR",
   visitors: "Support",
   engagement: "People & HR",
   projects: "Orders & fulfilment",

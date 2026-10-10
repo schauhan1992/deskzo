@@ -997,6 +997,7 @@ function sourceDetail(source: LeadSource, book: BookCompany[], company: BookComp
     case "ADVERTISEMENT": return pick(["Search ad — Microsoft 365 reseller", "Sponsored LinkedIn post", "Print ad in the chamber newsletter"]);
     case "EXISTING_CUSTOMER": return pick(["Came up in the renewal call", "Asked for it at the quarterly review", "Raised by their IT head on a support call"]);
     case "WALK_IN": return pick(["Walked into the Pune office", "Stopped at our stall at the IT mall"]);
+    case "DIGITAL_CARD": return pick(["Shared back from a digital card at the partner day", "Scanned a card's QR at the CIO roundtable"]);
     case "OTHER": return pick(["Trade directory listing", "Old enquiry found in the shared inbox"]);
   }
 }

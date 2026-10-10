@@ -2,14 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resendSetupEmail, resetPasswordToTemporary, resetUserTwoFactor, sendPasswordResetEmail, updateUserAssignment } from "@/actions/user";
+import {
+  resendSetupEmail,
+  resetPasswordToTemporary,
+  resetUserTwoFactor,
+  sendPasswordResetEmail,
+  updateUserAssignment,
+  updateWorkProfile,
+} from "@/actions/user";
 import { setUserBranch } from "@/actions/branch";
 import { branchLabel } from "@/lib/branches/format";
-import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Label, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
+import { PhotoManager } from "@/components/profile/photo-manager";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { ResetLinkOnce, SetupLinkOnce, TemporaryPasswordOnce } from "@/components/settings/setup-link-once";
 import type { DepartmentChoice, RoleChoice, StaffRow, WorkBranch } from "@/components/settings/staff/types";
@@ -20,7 +27,10 @@ import { PersonSignInRule } from "@/components/settings/staff/person-sign-in-rul
  * reporting manager, where they work, two-factor and the setup email — in one dialog, with their
  * password: a reset email, or a temporary password shown once.
  *
- * Every change goes through the action it always did (`updateUserAssignment`, `setUserBranch`,
+ * And their work profile — photo, job title, work phone — what their digital card and email signature
+ * show. It is here rather than only in People so a workspace that bought Cards alone can fill it in.
+ *
+ * Every change goes through the action it always did (`updateUserAssignment`, `updateWorkProfile`, `setUserBranch`,
  * `resetUserTwoFactor`, `resendSetupEmail`, `sendPasswordResetEmail`, `resetPasswordToTemporary`), so
  * every rule they enforce still applies. The fields the viewer can't change are shown disabled with the
  * reason, rather than offered and then refused.
@@ -52,6 +62,8 @@ export function EditStaffDialog({
   const [departmentId, setDepartmentId] = useState(row.departmentId ?? "");
   const [managerId, setManagerId] = useState(row.managerId ?? "");
   const [branchId, setBranchId] = useState(row.branchId ?? "");
+  const [jobTitle, setJobTitle] = useState(row.jobTitle ?? "");
+  const [phone, setPhone] = useState(row.phone ?? "");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
@@ -67,7 +79,8 @@ export function EditStaffDialog({
   const assignmentDirty =
     role !== row.role || departmentId !== (row.departmentId ?? "") || managerId !== (row.managerId ?? "");
   const branchDirty = branches !== null && branchId !== (row.branchId ?? "");
-  const dirty = assignmentDirty || branchDirty;
+  const profileDirty = jobTitle.trim() !== (row.jobTitle ?? "") || phone.trim() !== (row.phone ?? "");
+  const dirty = assignmentDirty || branchDirty || profileDirty;
 
   const roleLocked = !mayAssignRole || row.isYou;
   const roleHint = row.isYou
@@ -91,10 +104,18 @@ export function EditStaffDialog({
           return;
         }
       }
+      if (profileDirty) {
+        const result = await updateWorkProfile({ id: row.id, jobTitle, phone });
+        if (!result.ok) {
+          setError(assignmentDirty ? `Saved, except the job title and phone: ${result.error}` : result.error);
+          router.refresh();
+          return;
+        }
+      }
       if (branchDirty) {
         const result = await setUserBranch(row.id, branchId || null);
         if (!result.ok) {
-          setError(assignmentDirty ? `Saved, except where they work: ${result.error}` : result.error);
+          setError(assignmentDirty || profileDirty ? `Saved, except where they work: ${result.error}` : result.error);
           router.refresh();
           return;
         }
@@ -169,17 +190,38 @@ export function EditStaffDialog({
   return (
     <Dialog open onClose={onClose} title={`Edit ${row.name}`} large>
       <div className="space-y-5">
-        <div className="flex items-center gap-3">
-          <Avatar user={{ id: row.id, name: row.name, photoUpdatedAt: row.photoUpdatedAt }} size="md" />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-text">{row.name}</p>
-            <p className="truncate text-xs text-muted">
-              {[row.email, row.jobTitle, row.phone].filter(Boolean).join(" · ")}
-            </p>
-          </div>
+        <div className="space-y-3">
+          <PhotoManager user={{ id: row.id, name: row.name, photoUpdatedAt: row.photoUpdatedAt }} forUserId={row.id} />
+          <p className="truncate text-xs text-muted">{row.email}</p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={idFor("title")}>Job title</Label>
+            <Input
+              id={idFor("title")}
+              value={jobTitle}
+              maxLength={80}
+              onChange={(e) => setJobTitle(e.target.value)}
+              placeholder="e.g. Sales manager"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={idFor("phone")}>Work phone</Label>
+            <Input
+              id={idFor("phone")}
+              type="tel"
+              value={phone}
+              maxLength={32}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+91 98765 43210"
+              aria-describedby={idFor("phone-hint")}
+            />
+            <p id={idFor("phone-hint")} className="text-xs text-subtle">
+              The number quotes, their card and their signature show — never a personal mobile.
+            </p>
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor={idFor("role")}>Role</Label>
             <Select

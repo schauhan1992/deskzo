@@ -19,7 +19,7 @@ const entry = (path: string, label: string, tagline: string, summary: string): C
 export const PRODUCT_GROUP_TITLES: Record<Product["group"], string> = { suite: "The suite", sell: "Sell & serve", run: "Run the business", people: "People & security" };
 
 /** The order the website lists products in within a group, by key (owner's brief, 1 Oct 2026); one not listed goes last. */
-const PRODUCT_MENU_ORDER: readonly Product["key"][] = ["one", "crm", "desk", "campaigns", "subscriptions", "books", "inventory", "projects", "analytics", "people", "vault"];
+const PRODUCT_MENU_ORDER: readonly Product["key"][] = ["one", "crm", "desk", "campaigns", "cards", "subscriptions", "books", "inventory", "projects", "analytics", "people", "vault"];
 const menuRank = (p: Product) => {
   const i = PRODUCT_MENU_ORDER.indexOf(p.key);
   return i === -1 ? PRODUCT_MENU_ORDER.length : i;

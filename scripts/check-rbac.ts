@@ -377,6 +377,16 @@ const PUBLIC_ACTIONS = new Set([
    */
   "src/actions/geo.ts",
   /**
+   * A digital card's public page (/c/<name>).
+   *
+   * Whoever was handed the card has no account and never will. What it takes is bounded, and
+   * `check:cards` holds it: a share-back reaches only a live card that asks for one, is checked field
+   * by field, answers a bot with the thanks a person gets, is limited per card and per workspace by
+   * count rather than by address, and writes the person's own details and nothing else; a tap is a
+   * count against a card of a known kind.
+   */
+  "src/actions/card-public.ts",
+  /**
    * The customer portal.
    *
    * The largest public surface in the app, and the one with the most to lose: it returns a

@@ -26,7 +26,8 @@ export type ProductKey =
   | "projects"
   | "campaigns"
   | "analytics"
-  | "vault";
+  | "vault"
+  | "cards";
 
 export type Product = {
   key: ProductKey;
@@ -161,6 +162,16 @@ export const PRODUCTS: readonly Product[] = [
     tagline: "Shared passwords and credentials, with owners and rotation",
     modules: ["vault"],
     group: "people",
+  },
+  {
+    // Sold on its own and in One (owner, 10 Oct 2026). Leads from a card need the CRM; without it,
+    // whoever shares back is kept as a card contact.
+    key: "cards",
+    name: "Deskzo Cards",
+    path: "/cards",
+    tagline: "Branded digital business cards, a QR code each, and leads from every meeting",
+    modules: ["cards"],
+    group: "sell",
   },
 ];
 

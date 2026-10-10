@@ -47,6 +47,9 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "call.ts": ["calls"],
   "calling-activity.ts": ["calls"],
   "candidate.ts": ["hr"],
+  // Deskzo Cards: issuing cards, templates, My card (src/lib/cards); the card page itself is public.
+  "card.ts": ["cards"],
+  "card-public.ts": "public",
   "celebration.ts": ["hr"],
   // Revenue & Close: the month-end checklist, closing a month, flux and the close settings (src/lib/close).
   "close.ts": ["revenue_close"],

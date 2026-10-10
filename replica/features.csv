@@ -1,0 +1,58 @@
+feature,area,priority,original,clone,notes
+Card with photo logo cover name title company and contact fields,card,must,yes,no,fields filled from the employee record
+Add remove and reorder fields; several of each type with labels,card,must,yes,no,
+Social and link fields (LinkedIn WhatsApp website calendar link),card,must,yes,no,
+Brand colour and layout,card,must,yes,no,
+QR code with the company logo in it,card,must,yes,no,
+Public card page that works in any browser with no app or sign-in,sharing,must,yes,no,
+Save contact as a .vcf in one tap on iPhone and Android,sharing,must,yes,no,
+Share by link copy text and email,sharing,must,yes,no,
+Share back: recipient leaves name and email or phone,receiving,must,yes,no,save must never require it — the top Blinq complaint
+Share-back becomes a lead or contact in the CRM with source Digital card,receiving,must,yes,no,Deskzo has the CRM itself — no sync needed
+Admin decides who may have a card (role permission plus per-person),admin,must,yes,no,owner's ask: HR or admin grants it
+Company templates: brand images colour layout and shared fields,admin,must,yes,no,
+Locked fields the employee cannot change,admin,must,yes,no,
+Fields linked to the employee record and kept in step,admin,must,yes,no,Blinq calls these linked fields
+Create cards in bulk for a department branch or role,admin,must,yes,no,Blinq uses CSV or SCIM; Deskzo has the staff list already
+Leaver: card switched off the day they exit; contacts stay with the company,admin,must,yes,no,
+Template change shows fields changed and cards affected before saving,admin,must,yes,no,
+Card views and saves per card,analytics,must,yes,no,Blinq documents this only for campaigns
+Notes on a captured contact,receiving,must,yes,no,
+Contact list: mine and the company's,receiving,must,yes,no,
+Card link that never breaks while the person is employed,sharing,must,yes,no,
+Privacy: card shows only fields the admin allows; no personal phone by default,admin,must,partial,no,
+Standalone product and included in One,commercial,must,n/a,no,owner's decision 10 Oct 2026
+Per-card seat count for billing,commercial,must,yes,no,
+Mobile-first page to show my card's QR quickly,sharing,must,yes,no,Deskzo has no native app
+Apple Wallet pass,sharing,should,yes,no,needs an Apple pass certificate
+Google Wallet pass,sharing,should,yes,no,needs a Google Wallet issuer account
+NFC: write the card link to any NFC tag,sharing,should,yes,no,no hardware to sell
+Lead form fields chosen by the admin (up to 5) and hidden source fields,receiving,should,yes,no,
+Lead-capture mode: form before the card (for a booth),receiving,should,yes,no,
+Event campaign: dates team tag form and a lead count,campaigns,should,yes,no,
+Campaign insights: views contacts by source by rep,analytics,should,yes,no,
+Leaderboard of views by rep,analytics,should,yes,no,
+Book a meeting after share-back (calendar link),receiving,should,yes,no,Deskzo calendar integration exists
+Hand a leaver's captured contacts to another rep,admin,should,no,no,Blinq has no documented way — a gap to win on
+Virtual background with the card QR,sharing,should,yes,no,
+Card in the email signature,sharing,should,yes,no,links to the Email signatures product
+Multiple cards per person (work events personal),card,should,yes,no,
+Card in several languages,card,should,no,no,not in Blinq
+Field click tracking,analytics,should,yes,no,
+Scan a paper business card into a contact (OCR),receiving,could,yes,no,owner earlier declined OCR for vendor PDFs — ask
+Scan a LinkedIn QR,receiving,could,yes,no,
+Workspace tags on captured contacts,receiving,could,yes,no,
+Custom fonts,card,could,yes,no,
+Pronouns accreditations and name parts,card,could,yes,no,
+Home-screen shortcut (PWA) to the card,sharing,could,yes,no,stands in for the widget
+Offline QR,sharing,could,yes,no,a saved image of the QR
+Export captured contacts to CSV,receiving,could,yes,no,
+Subteam admins,admin,could,yes,no,Deskzo roles cover it
+Blinq-to-Blinq exchange network,receiving,skip,yes,no,the network is Blinq's
+App Clip widgets Apple Watch Wear OS NameDrop,sharing,skip,yes,no,native apps; Deskzo is a web app
+Contact enrichment from data providers,receiving,skip,yes,no,paid third-party data
+Per-lead credits,commercial,skip,yes,no,Deskzo charges per card
+Cvent badge scanning,campaigns,skip,yes,no,partner integration
+Event badge printing for organisers,campaigns,skip,yes,no,separate product
+NFC hardware shop,sharing,skip,yes,no,hardware
+AI notetaker,receiving,skip,yes,no,separate product

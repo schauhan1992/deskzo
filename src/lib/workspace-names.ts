@@ -87,7 +87,7 @@ export const RESERVED_WORD_GROUPS = [
       "pay", "payroll", "people", "hr", "hrms", "recruit", "hiring", "expense", "expenses", "inventory", "stock",
       "orders", "purchase", "procurement", "projects", "tasks", "desk", "helpdesk", "servicedesk", "tickets",
       "ticketing", "marketing", "campaigns", "mailer", "survey", "surveys", "forms", "analytics", "reports",
-      "insights", "vault", "sign", "esign", "drive", "workdrive", "chat", "meet", "connect", "workplace",
+      "insights", "vault", "cards", "card", "businesscard", "signatures", "signature", "sign", "esign", "drive", "workdrive", "chat", "meet", "connect", "workplace",
       "office", "commerce", "pos", "gst", "einvoice", "ewaybill", "copilot", "ai", "assistant",
     ],
   },

@@ -125,6 +125,7 @@
     "check:write-scope": "tsx scripts/check-write-scope.ts",
     "check:access-editor": "tsx scripts/check-access-editor.ts",
     "check:recurring-billing": "tsx scripts/check-recurring-billing.ts",
+    "check:cards": "tsx scripts/check-cards.ts",
     "check:item-import": "tsx scripts/check-item-import.ts",
     "check:credit": "tsx scripts/check-credit.ts",
     "check:support-load": "tsx scripts/check-support-load.ts",

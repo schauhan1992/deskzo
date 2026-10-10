@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { newLeadStage } from "@/lib/pipeline/server";
-import { Prisma, type ContactDesignation, type LeadCaptureKey, type LeadSource } from "@prisma/client";
+import { Prisma, type ContactDesignation, type LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizeCompanyName } from "@/lib/company-name";
 import { isResellerManaged } from "@/lib/reseller";
@@ -189,9 +189,27 @@ function onFileNote(record: string, own: OutsideFields): string | null {
   return given.length ? `Sent for the ${record}, which was already on file, so not saved to it: ${given.join(" · ")}` : null;
 }
 
-export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sourceLabel" | "createdById">, p: LeadPayload): Promise<IntakeResult> {
-  // A retry of something already received.
-  if (p.external_id) {
+/**
+ * What an enquiry came through: a website's capture key — or, with no key (`id: null`), somebody's
+ * digital card (src/lib/cards), whose holder is `createdById`.
+ */
+export type IntakeSource = { id: string | null; name: string; sourceLabel: string | null; createdById: string | null };
+
+export type IntakeOptions = {
+  /**
+   * The lead goes to this person rather than through the assignment rules: a card's holder, who met
+   * them. The rules would hand a contact somebody made in person to whoever covers the region.
+   */
+  ownerUserId?: string;
+  /** In place of "<product> — <company>". */
+  leadTitle?: string;
+  /** What the owner is told, in place of "A website lead was assigned to you". */
+  notifyTitle?: string;
+};
+
+export async function intakeLead(key: IntakeSource, p: LeadPayload, options: IntakeOptions = {}): Promise<IntakeResult> {
+  // A retry of something already received. Only a key makes a retry recognisable.
+  if (p.external_id && key.id) {
     const existing = await db.lead.findUnique({
       where: { captureKeyId_externalId: { captureKeyId: key.id, externalId: p.external_id } },
       select: { id: true, leadSeq: true },
@@ -244,14 +262,16 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
   const unknownSkus = (p.products ?? []).filter((sku) => !items.some((i) => i.sku.toLowerCase() === sku.toLowerCase()));
   const designation = designationFromTitle(p.designation);
   const source: LeadSource = p.source ?? "WEBSITE";
-  const owner = await chooseOwner({
-    brandIds: [...new Set(items.map((i) => i.brandId).filter((b): b is string => !!b))],
-    itemTypes: [...new Set(items.map((i) => i.type))],
-    designation,
-    source,
-    state: p.state || null,
-    companyOwnerId: existingCompany?.ownerUserId ?? null,
-  });
+  const owner = options.ownerUserId
+    ? { userId: options.ownerUserId, note: `Shared back from ${key.name}.` }
+    : await chooseOwner({
+        brandIds: [...new Set(items.map((i) => i.brandId).filter((b): b is string => !!b))],
+        itemTypes: [...new Set(items.map((i) => i.type))],
+        designation,
+        source,
+        state: p.state || null,
+        companyOwnerId: existingCompany?.ownerUserId ?? null,
+      });
 
   const sourceDetail = [
     key.sourceLabel || key.name,
@@ -337,7 +357,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
         data: {
           companyId: company.id,
           contactId: contact.id,
-          title: `${p.product_interest || "Website enquiry"} — ${companyName}`.slice(0, 200),
+          title: (options.leadTitle ?? `${p.product_interest || "Website enquiry"} — ${companyName}`).slice(0, 200),
           description: description || null,
           ...entry,
           estimatedValue: p.budget ?? null,
@@ -348,7 +368,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
           sourcedByUserId: actorId,
           createdByUserId: actorId,
           captureKeyId: key.id,
-          externalId: p.external_id || null,
+          externalId: key.id ? p.external_id || null : null,
           requirements: { create: items.map((i) => ({ itemId: i.id, quantity: p.quantity ?? 1 })) },
           ...leadOwn.data,
         },
@@ -358,7 +378,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
   } catch (error) {
     // Two copies of one request racing: the unique index let exactly one through. Answer the other
     // with the lead that won, as a duplicate — which is what it is.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && p.external_id) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && p.external_id && key.id) {
       const winner = await db.lead.findUnique({
         where: { captureKeyId_externalId: { captureKeyId: key.id, externalId: p.external_id } },
         select: { id: true, leadSeq: true },
@@ -373,8 +393,8 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
     await notifyUser({
       userId: owner.userId,
       type: "LEAD_ASSIGNED",
-      title: "A website lead was assigned to you",
-      message: `${p.product_interest || "Website enquiry"} — ${companyName}`,
+      title: options.notifyTitle ?? "A website lead was assigned to you",
+      message: options.leadTitle ?? `${p.product_interest || "Website enquiry"} — ${companyName}`,
       link: leadPath(created.leadSeq),
     });
   }
@@ -383,7 +403,7 @@ export async function intakeLead(key: Pick<LeadCaptureKey, "id" | "name" | "sour
     action: "CREATE",
     entityType: "Lead",
     entityId: created.id,
-    entityLabel: `Website lead via “${key.name}”`,
+    entityLabel: key.id ? `Website lead via “${key.name}”` : `Lead from ${key.name}`,
   });
 
   return {

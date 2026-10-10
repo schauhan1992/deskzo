@@ -172,11 +172,13 @@ async function main() {
 
   const SECTIONS = PERMISSIONS.filter((p) => p.everyone).map((p) => p.key as string);
   type Plan = { notEntitled?: string[]; off?: string[] };
-  const menu = (holds: string[], plan: Plan = {}) =>
+  // `facts`: what is true of the person beyond their permissions — "cardholder" (NavItem.onlyFor).
+  const menu = (holds: string[], plan: Plan = {}, facts: "cardholder"[] = []) =>
     buildNavigation({
       openModules: openModuleKeys((def) => ({ entitled: !plan.notEntitled?.includes(def.key), switchedOn: !plan.off?.includes(def.key) }), new Set(holds)),
       permissions: holds,
       country: "IN",
+      facts,
     });
   const hrefs = (nav: ReturnType<typeof menu>) => nav.flatMap((s) => s.items.map((i) => i.href));
   const groups = (nav: ReturnType<typeof menu>) => nav.map((s) => s.group);
@@ -217,10 +219,12 @@ async function main() {
   const allMenus = [bare, leadsMenu, menu([]), menu([...PERMISSION_KEYS]), menu(["ledger.viewReports", ...SECTIONS])];
   ok("   and no menu ever has an empty group", allMenus.every((nav) => nav.every((s) => s.items.length > 0)));
 
-  // 7. An admin: everything the plan has.
-  const everything = menu([...PERMISSION_KEYS]);
+  // 7. An admin: everything the plan has — and, holding a card, My card too.
+  const everything = menu([...PERMISSION_KEYS], {}, ["cardholder"]);
   const everyHref = MODULE_REGISTRY.flatMap((m) => m.navItems.filter((i) => !i.countries || i.countries.includes("IN")).map((i) => i.href));
   ok("7. holding everything, every module link is in the menu", everyHref.every((h) => hrefs(everything).includes(h)), everyHref.filter((h) => !hrefs(everything).includes(h)).join(", "));
+  const onlyFor = MODULE_REGISTRY.flatMap((m) => m.navItems.filter((i) => i.onlyFor).map((i) => i.href));
+  ok("   but a link for cardholders isn't a permission: an admin without a card doesn't get My card", onlyFor.length > 0 && onlyFor.every((h) => !hrefs(menu([...PERMISSION_KEYS])).includes(h)), onlyFor.join(", "));
   const smallPlan = menu([...PERMISSION_KEYS], { notEntitled: ["accounting", "revenue_close", "hr", "payroll"] });
   ok("   but not past the plan: no Accounting, no People (HR) for an admin on a plan without them", !groups(smallPlan).includes("Accounting") && !getModuleDefinition("hr")!.navItems.some((i) => hrefs(smallPlan).includes(i.href)));
   ok("   and the administration links come with their permissions", ["/settings", "/settings/access", "/settings/security", "/settings/data", "/performance"].every((h) => hrefs(everything).includes(h)));

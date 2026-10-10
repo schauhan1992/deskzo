@@ -26,6 +26,7 @@ const projects = product("projects");
 const campaigns = product("campaigns");
 const analytics = product("analytics");
 const vault = product("vault");
+const cards = product("cards");
 
 /** "Deskzo CRM: leads, pipeline, calls…" — the name, then the tagline as the rest of the sentence. */
 function headline(p: Product): string {
@@ -176,6 +177,7 @@ const crmPage = productLinePage({
       pair(desk, "Support tickets raised against the same companies and contacts, with SLA targets."),
       pair(campaigns, "Journeys and campaigns sent to your contacts, with every send checked against consent."),
       pair(analytics, "Leads and visits broken down any way you like, and a forecast from each stage's win rate."),
+      pair(cards, "Digital business cards whose share-backs arrive as leads in the card holder's name."),
     ],
   },
   faqHeading: `Questions about ${crm.name}`,
@@ -287,6 +289,7 @@ const peoplePage = productLinePage({
       pair(books, "The salary journal, employer contributions and statutory payables posted to the ledger."),
       pair(crm, "Sales incentives approved in the CRM and paid on the next payslip."),
       pair(vault, "A leaver's stored logins handed to a colleague and flagged for a change."),
+      pair(cards, "Digital cards issued from the employee record, and dark the day after a leaver's last day."),
     ],
   },
   faqHeading: `Questions about ${people.name}`,
@@ -552,6 +555,7 @@ const campaignsPage = productLinePage({
     intro: "Other products whose records start a journey or hold a message back.",
     links: [
       pair(crm, "The contacts you mail, and the leads an enquiry form creates."),
+      pair(cards, "Business cards for the stand, where whoever shares back becomes a lead."),
       pair(subscriptions, "Renewals coming due, the trigger for a renewal journey."),
       pair(desk, "Complaints and tickets past their SLA, which hold a message back."),
       pair(books, "Overdue invoices, which keep a customer out of a promotion."),
@@ -695,7 +699,83 @@ const vaultPage = productLinePage({
   cta: { heading: `Move your team's passwords into ${vault.name}`, body: `Store your first shared logins, share them with the right people and set their rotation. ${trial}` },
 });
 
-export const PRODUCT_LINE_PAGES: SeedPage[] = [onePage, crmPage, booksPage, peoplePage, deskPage, inventoryPage, subscriptionsPage, projectsPage, campaignsPage, analyticsPage, vaultPage];
+// ─── Deskzo Cards ────────────────────────────────────────────────────────────────────────────────
+
+const cardsPage = productLinePage({
+  slug: cards.path.slice(1),
+  name: cards.name,
+  seo: {
+    title: `${cards.name}: digital business cards for teams`,
+    description: `${cards.name} gives your people digital business cards in the company's design, with a QR code, one-tap Save contact, and leads from whoever shares back.`,
+    keywords: [cards.name, "digital business cards for teams", "QR code business card"],
+  },
+  eyebrow: PRODUCT_GROUP_TITLES.sell,
+  h1: headline(cards),
+  lead: "A business card that never runs out: the person's photo, title and work numbers from their record, the company's colours and logo, a QR code and a link. Whoever they meet saves the contact in one tap, and can send their own details back.",
+  answer: {
+    question: `What is ${cards.name}?`,
+    answer: `${cards.name} gives the people a company chooses a digital business card on the company's own address. HR or an admin issues the cards and designs them; each card shows what the person's record says and the design allows, and works in any phone's browser, with no app and no sign-in.`,
+    more: [
+      "Nobody has a card until somebody issues one. When a person leaves, their card stops showing them the day after their last day and shows the company's details instead, and the people who shared back stay with the company.",
+    ],
+  },
+  contents: { heading: `What's in ${cards.name}`, intro: contentsIntro(cards), items: moduleCards(cards) },
+  extra: [
+    {
+      id: "cards-features",
+      type: "featureGrid",
+      props: {
+        heading: "What a card does",
+        intro: "One card per person, in a design the company sets.",
+        columns: 3,
+        items: [
+          { icon: "users", title: "Issued, not self-made", body: "Issue cards to one person, a department, a branch, a role or everyone at once. Switch one off, and its link shows the company instead." },
+          { icon: "layers", title: "Templates and locked fields", body: "The colour, layout and logo, the fields every card shows, and the ones a person can't leave off. Change a template and every card on it changes." },
+          { icon: "check", title: "Kept in step with the record", body: "Name, photo, job title, work phone, email and office address come from the person's record, so a new title is on the card the moment it changes." },
+          { icon: "card", title: "QR code and link", body: "A QR code with the company logo in it, a link that stays the same for the life of the card, and a page that works on any phone." },
+          { icon: "file-text", title: "Save contact in one tap", body: "The contact, with the photo, goes straight into an iPhone or Android phone's contacts. Saving never asks for anything in return." },
+          { icon: "mail", title: "Leads from sharing back", body: "Under the card, an optional form: name, email or phone, and up to five questions of your own. With the CRM, it is a lead in the card holder's name." },
+          { icon: "chart", title: "Views, saves and taps", body: "Each card counts its views, saves, link taps and share-backs, this week and in all. Counts only — nothing about who." },
+          { icon: "door", title: "When somebody leaves", body: "The card goes dark after their last working day, and the people they met move to whoever takes over their accounts." },
+          { icon: "lock", title: "Nothing personal by default", body: "A card shows a work number and a work email. A personal number is on it only if the person adds it themselves." },
+        ],
+      },
+    },
+  ],
+  how: [
+    {
+      heading: "How a team gets its cards",
+      intro: "A company's cards are one design, issued from one list.",
+      steps: [
+        "Design the card: colour, layout, logo, and which fields every card shows.",
+        "Issue cards to the people who meet customers, one by one or a department at a time.",
+        "Each person opens My card, adds their LinkedIn or WhatsApp if they like, and saves the QR to their phone.",
+        "The people they meet save the contact, and those who share back arrive as leads or card contacts.",
+      ],
+    },
+  ],
+  worksWith: {
+    heading: `What ${cards.name} works with`,
+    intro: "A card reads the person's record and hands what it collects to the products that use it.",
+    links: [
+      pair(crm, "Share-backs become leads in the card holder's name, with the source Digital card."),
+      pair(people, "Job titles, photos and exits from the HR record, so a leaver's card goes dark on time."),
+      pair(one, "Every product in one workspace, cards included."),
+    ],
+  },
+  faqHeading: `Questions about ${cards.name}`,
+  faq: [
+    ["Does the person I meet need an app?", "No. The card is a web page on your company's own address. It opens in any phone's browser, and Save contact works on iPhone and Android."],
+    ["Who decides who gets a card?", "Whoever manages cards in your workspace, usually HR or an admin. Nobody has one until it is issued, and it can be switched off at any time."],
+    [`Do I need ${crm.name} to collect leads?`, `No. Without it, whoever shares back is kept as a card contact with their details and answers. With ${crm.name}, each one is also a lead.`],
+    ["Can a card work with an NFC tag?", "Yes. Write the card's link to any NFC card or sticker with a free NFC app, and a tap on a phone opens the card. Nothing to buy from us."],
+    ["Are Apple Wallet and Google Wallet supported?", "Not yet. Today a card is its link and its QR code; on a phone it can be added to the home screen to open in one tap."],
+  ],
+  related: ["/product/crm", "/product/hr", "/pricing"],
+  cta: { heading: `Give your team ${cards.name}`, body: `Design the card, issue it to the people who meet customers, and see who saved it. ${trial}` },
+});
+
+export const PRODUCT_LINE_PAGES: SeedPage[] = [onePage, crmPage, booksPage, peoplePage, deskPage, inventoryPage, subscriptionsPage, projectsPage, campaignsPage, analyticsPage, vaultPage, cardsPage];
 
 // Every product in products.ts has its page here, at its own path: a product added there and not here fails the seed.
 const missing = PRODUCTS.filter((p) => !PRODUCT_LINE_PAGES.some((page) => `/${page.slug}` === p.path));

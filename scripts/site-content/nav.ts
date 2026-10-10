@@ -1,6 +1,6 @@
 import type { NavItem, NavMenu, NavMenuItem, SiteSettings } from "../../src/components/site/blocks/types";
-import { ADD_ONS, PRODUCTS } from "../../src/lib/products";
-import { COMPARE_ENTRIES, PRODUCT_LINE_GROUPS, RESOURCE_ENTRIES, SOLUTION_GROUPS, byPath, type CatalogEntry } from "./_catalog";
+import { ADD_ONS } from "../../src/lib/products";
+import { COMPARE_ENTRIES, PRODUCT_GROUP_TITLES, PRODUCT_LINE_GROUPS, RESOURCE_ENTRIES, SOLUTION_GROUPS, byPath, type CatalogEntry } from "./_catalog";
 import { ADD_ON_PAGES, CAPABILITY_PAGES } from "./_products";
 
 /**
@@ -35,22 +35,26 @@ export function productMenu(): NavMenu {
 }
 
 /**
- * The footer's product columns. Eleven products don't fit one column (ten links at most), so there
- * are two: the suite with the add-ons, every module and pricing; then the ten products.
+ * The footer's product columns. Twelve products and their add-ons don't fit one column (ten links at
+ * most), so there are two, split along the Product menu's groups: the suite and the products that sell
+ * and serve, with every module and pricing; then the products that run the business and look after its
+ * people, with the add-ons.
  */
 export function productFooterColumns(): SiteSettings["footer"]["columns"] {
-  const suite = PRODUCTS.filter((p) => p.group === "suite");
+  const links = (titles: string[]) =>
+    PRODUCT_LINE_GROUPS.filter((g) => titles.includes(g.title)).flatMap((g) => g.entries.map((e) => ({ label: e.label, href: e.path })));
   return [
     {
-      title: "Suite & add-ons",
+      title: "Products",
+      links: [...links([PRODUCT_GROUP_TITLES.suite, PRODUCT_GROUP_TITLES.sell]), { label: "Every module", href: "/product" }, { label: "Pricing", href: "/pricing" }],
+    },
+    {
+      title: "More products",
       links: [
-        ...suite.map((p) => ({ label: p.name, href: p.path })),
+        ...links([PRODUCT_GROUP_TITLES.run, PRODUCT_GROUP_TITLES.people]),
         ...ADD_ONS.flatMap((a) => (ADD_ON_PAGES[a.key] ? [{ label: a.name, href: ADD_ON_PAGES[a.key]! }] : [])),
-        { label: "Every module", href: "/product" },
-        { label: "Pricing", href: "/pricing" },
       ],
     },
-    { title: "Products", links: PRODUCT_LINE_GROUPS.filter((g) => !g.entries.some((e) => suite.some((p) => p.path === e.path))).flatMap((g) => g.entries.map((e) => ({ label: e.label, href: e.path }))) },
   ];
 }
 

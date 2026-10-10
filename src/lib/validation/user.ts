@@ -22,6 +22,17 @@ export const updateUserAssignmentSchema = z.object({
 export type UpdateUserAssignmentInput = z.infer<typeof updateUserAssignmentSchema>;
 
 /**
+ * The work profile a card and a signature print: the job title (the HR record's designation) and the
+ * work phone on the account. Editable from Staff & roles, so a workspace without People can still fill
+ * them in. Empty clears either.
+ */
+export const updateWorkProfileSchema = z.object({
+  id: z.string().min(1),
+  jobTitle: z.string().trim().max(80, "Keep the job title under 80 characters"),
+  phone: z.string().trim().max(32, "That is too long for a phone number"),
+});
+
+/**
  * No password: the person chooses their own from the setup email (src/lib/account-setup.ts). A
  * `temporaryPassword` an older caller still sends is dropped, like any other key the schema doesn't know.
  */
