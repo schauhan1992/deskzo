@@ -121,17 +121,25 @@ function pure() {
   const vcf = tpl.buildVCard({ ...card, name: "Priya; Sharma", about: "Line one\nline two" }, "Acme, Inc.", "https://acme.deskzo.com/c/priya", null);
   ok("the vCard escapes what vCard reserves", vcf.includes("ORG:Acme\\, Inc.") && vcf.includes("NOTE:Line one\\nline two") && vcf.includes("FN:Priya\\; Sharma"));
   ok("  ends lines CRLF and folds long ones", vcf.split("\r\n").every((l) => l.length <= 75) && vcf.startsWith("BEGIN:VCARD\r\nVERSION:3.0"));
+  const injected = tpl.buildVCard({ ...card, about: "hi\rEND:VCARD\r\nBEGIN:VCARD" }, null, "https://x.example/c/p", null);
+  ok("  a typed line break never starts a vCard line of its own", injected.split("\r\n").filter((l) => l === "END:VCARD").length === 1 && !/\r(?!\n)/.test(injected));
+  const wide = tpl.buildVCard({ ...card, about: "प्रिया ".repeat(30) + "🙂".repeat(10) }, null, "https://x.example/c/p", null);
+  ok("  folds at 75 octets without splitting a character", wide.split("\r\n").every((l) => new TextEncoder().encode(l).length <= 75) && !wide.includes("\uFFFD") && wide.replace(/\r\n /g, "").includes("🙂".repeat(10)));
   ok("  and a file name no header chokes on", tpl.vcardFileName('Priya "P" Sharma\r\n') === "Priya P Sharma.vcf");
 
   section("A card speaks for somebody only while they're here");
-  const now = new Date("2026-10-10T08:00:00Z");
+  const today = "2026-10-10";
   const live = { active: true, switchedOffWhy: null };
   const here = { active: true, employeeProfile: null };
-  ok("a live card for somebody here is live", server.cardOffReason(live, here, now) === null);
-  ok("  through their last working day", server.cardOffReason(live, { active: true, employeeProfile: { exitedOn: new Date("2026-10-10T00:00:00Z") } }, now) === null);
-  ok("  and dark the day after, with no job run", server.cardOffReason(live, { active: true, employeeProfile: { exitedOn: new Date("2026-10-09T00:00:00Z") } }, now) === "exit");
-  ok("  dark with their account", server.cardOffReason(live, { active: false, employeeProfile: null }, now) === "account");
-  ok("  and when switched off by hand", server.cardOffReason({ active: false, switchedOffWhy: "manual" }, here, now) === "manual");
+  ok("a live card for somebody here is live", server.cardOffReason(live, here, today) === null);
+  ok("  through their last working day", server.cardOffReason(live, { active: true, employeeProfile: { exitedOn: new Date("2026-10-10T00:00:00Z") } }, today) === null);
+  ok("  and dark the day after, with no job run", server.cardOffReason(live, { active: true, employeeProfile: { exitedOn: new Date("2026-10-09T00:00:00Z") } }, today) === "exit");
+  ok("  dark with their account — without saying they left", server.cardOffReason(live, { active: false, employeeProfile: null }, today) === "account");
+  ok("  an exit switched off on the day, with the login off too, still reads as an exit", server.cardOffReason({ active: false, switchedOffWhy: "exit" }, { active: false, employeeProfile: { exitedOn: new Date("2026-10-10T00:00:00Z") } }, today) === "exit");
+  ok("  and off by hand is just off", server.cardOffReason({ active: false, switchedOffWhy: "manual" }, here, today) === "manual");
+  ok("issuing and the exit hook read 'left' the same way", server.hasLeft(new Date("2026-10-09T00:00:00Z"), today) && !server.hasLeft(new Date("2026-10-10T00:00:00Z"), today) && !server.hasLeft(null, today));
+  const page = readFileSync(join(__dirname, "..", "src", "app", "(public)", "c", "[slug]", "page.tsx"), "utf8");
+  ok("the public page names a departure only for a recorded exit", /offReason === "exit" \?/.test(page));
 
   section("Registered everywhere it must be");
   const root = join(__dirname, "..");

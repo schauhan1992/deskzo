@@ -10,6 +10,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { recordPermissionChange } from "@/lib/authz/audit";
+import { actorContext, assertMayActOnTarget, AuthzError } from "@/lib/authz/guards";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { isSystemAddress } from "@/lib/people";
 import type { ActionResult } from "@/actions/company";
@@ -28,8 +29,10 @@ import {
 } from "@/lib/cards/template";
 import {
   cardCompany,
+  cardOffReason,
   cardStats,
   daysAgo,
+  workspaceToday,
   ensureDefaultTemplate,
   issueCardsTo,
   loadCardForUser,
@@ -151,7 +154,8 @@ export async function getMyCard(): Promise<ActionResult<MyCard>> {
         name: loaded.resolved.name,
         title: loaded.resolved.title,
         about: loaded.resolved.about,
-        photoUrl: loaded.resolved.showPhoto && loaded.photoVersion ? `/c/${loaded.slug}/photo?v=${loaded.photoVersion}` : null,
+        // The photo route serves only a live card's photo, so a switched-off card shows initials.
+        photoUrl: loaded.offReason === null && loaded.resolved.showPhoto && loaded.photoVersion ? `/c/${loaded.slug}/photo?v=${loaded.photoVersion}` : null,
         lines: loaded.resolved.lines,
         editable: {
           hideable: hideable.map((k) => ({ key: k, label: label(k), hidden: loaded.values.hidden.includes(k) })),
@@ -252,7 +256,7 @@ export async function getCardsOverview(): Promise<ActionResult<CardsOverview>> {
         departmentId: true,
         department: { select: { name: true } },
         branchId: true,
-        employeeProfile: { select: { designation: true } },
+        employeeProfile: { select: { designation: true, exitedOn: true } },
         digitalCard: { select: { id: true, slug: true, active: true, templateId: true, switchedOffWhy: true, _count: { select: { contacts: { where: { leadId: { not: null } } } } } } },
       },
     }),
@@ -262,6 +266,7 @@ export async function getCardsOverview(): Promise<ActionResult<CardsOverview>> {
     db.role.findMany({ orderBy: { name: "asc" }, select: { key: true, name: true } }),
     tenantOrigin(),
   ]);
+  const today = await workspaceToday();
   // System accounts (platform support, Automation) have no face to put on a card.
   const humans = people.filter((p) => !isSystemPerson(p.email));
   const cardIds = humans.flatMap((p) => (p.digitalCard ? [p.digitalCard.id] : []));
@@ -294,9 +299,10 @@ export async function getCardsOverview(): Promise<ActionResult<CardsOverview>> {
         card: p.digitalCard
           ? {
               slug: p.digitalCard.slug,
-              active: p.digitalCard.active,
+              // What the public page shows, not the stored switch: an exit date passed is off already.
+              active: cardOffReason(p.digitalCard, p, today) === null,
               templateId: p.digitalCard.templateId,
-              switchedOffWhy: p.digitalCard.switchedOffWhy,
+              switchedOffWhy: cardOffReason(p.digitalCard, p, today),
               week: week.get(p.digitalCard.id)!,
               allTime: allTime.get(p.digitalCard.id)!,
               leads: p.digitalCard._count.contacts,
@@ -361,9 +367,25 @@ export async function issueCards(input: unknown): Promise<ActionResult<IssueResu
         : target.kind === "branch"
           ? { branchId: target.id, active: true }
           : { role: target.key, active: true };
+  const actor = await actorContext(user.id);
   const people = await db.user.findMany({ where, select: { id: true, name: true, email: true, isSuperAdmin: true } });
-  const ids = people.filter((p) => !isSystemPerson(p.email)).map((p) => p.id);
-  if (!ids.length) return { ok: false, error: "Nobody there to issue a card to." };
+  // Somebody an admin has deliberately denied a card stays without one: issuing never overrides a "no".
+  const denied = new Set(
+    (await db.userPermission.findMany({ where: { userId: { in: people.map((p) => p.id) }, permission: "cards.use", allowed: false }, select: { userId: true } })).map((r) => r.userId),
+  );
+  const preSkipped: { name: string; why: string }[] = [];
+  const ids: string[] = [];
+  for (const p of people) {
+    if (isSystemPerson(p.email)) continue;
+    if (denied.has(p.id)) preSkipped.push({ name: p.name, why: "they are denied a digital card in Staff & roles" });
+    else if (p.isSuperAdmin && !actor.isSuperAdmin) preSkipped.push({ name: p.name, why: "only a super admin can issue a super admin's card" });
+    else ids.push(p.id);
+  }
+  if (!ids.length) {
+    return preSkipped.length
+      ? { ok: true, data: { issued: 0, reissued: 0, skipped: preSkipped } }
+      : { ok: false, error: "Nobody there to issue a card to." };
+  }
 
   const result = await issueCardsTo(ids, template.id, user.id);
 
@@ -372,6 +394,8 @@ export async function issueCards(input: unknown): Promise<ActionResult<IssueResu
   for (const id of [...new Set(given)]) {
     const person = people.find((p) => p.id === id);
     if (!person || person.isSuperAdmin || (await can(id, "cards.use"))) continue;
+    // Not a deny (those were skipped above): no row, or a grant that has lapsed.
+    const before = await db.userPermission.findUnique({ where: { user_permission: { userId: id, permission: "cards.use" } }, select: { allowed: true } });
     await db.userPermission.upsert({
       where: { user_permission: { userId: id, permission: "cards.use" } },
       update: { allowed: true, reason: "Digital card issued", grantedById: user.id, expiresAt: null },
@@ -382,7 +406,7 @@ export async function issueCards(input: unknown): Promise<ActionResult<IssueResu
       subjectType: "USER",
       subjectUserId: id,
       permission: "cards.use",
-      fromAllowed: null,
+      fromAllowed: before?.allowed ?? null,
       toAllowed: true,
       changeKind: "GRANT",
       detail: `Have a digital card granted to ${person.name} — digital card issued`,
@@ -398,15 +422,24 @@ export async function issueCards(input: unknown): Promise<ActionResult<IssueResu
   });
   revalidatePath("/cards");
   revalidatePath("/cards/manage");
-  return { ok: true, data: { issued: result.issued.length, reissued: result.reissued.length, skipped: result.skipped.map(({ name, why }) => ({ name, why })) } };
+  return {
+    ok: true,
+    data: { issued: result.issued.length, reissued: result.reissued.length, skipped: [...preSkipped, ...result.skipped.map(({ name, why }) => ({ name, why }))] },
+  };
 }
 
 /** Switches one person's card off (it then says they are no longer with the company) or back on. */
 export async function setCardActive(userId: string, active: boolean): Promise<ActionResult<null>> {
   const user = await requireModuleUser("cards");
   if (!(await holds(user.id, "cards.manage"))) return { ok: false, error: "You can't switch digital cards on or off." };
-  const card = await db.digitalCard.findUnique({ where: { userId }, select: { id: true, templateId: true, user: { select: { name: true } } } });
+  const card = await db.digitalCard.findUnique({ where: { userId }, select: { id: true, templateId: true, user: { select: { id: true, name: true, isSuperAdmin: true } } } });
   if (!card) return { ok: false, error: "They don't have a card." };
+  try {
+    assertMayActOnTarget(await actorContext(user.id), card.user);
+  } catch (err) {
+    if (err instanceof AuthzError) return { ok: false, error: err.message };
+    throw err;
+  }
   if (active) {
     const result = await issueCardsTo([userId], card.templateId, user.id);
     if (result.skipped.length) return { ok: false, error: `Not switched on: ${result.skipped[0]!.why}.` };

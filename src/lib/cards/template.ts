@@ -267,7 +267,8 @@ export function freeSlug(name: string, taken: ReadonlySet<string>): string {
 
 /** vCard 3.0 — what iPhone and Android both open as "add contact". */
 export function buildVCard(card: ResolvedCard, company: string | null, url: string, photo: { mime: string; base64: string } | null): string {
-  const esc = (v: string) => v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/([,;])/g, "\\$1");
+  // Any line break — CRLF, CR or LF — is one escaped \n, so a typed value can never start a vCard line of its own.
+  const esc = (v: string) => v.replace(/\\/g, "\\\\").replace(/\r\n|\r|\n/g, "\\n").replace(/([,;])/g, "\\$1");
   const parts = card.name.trim().split(/\s+/);
   const family = parts.length > 1 ? parts[parts.length - 1]! : "";
   const given = parts.length > 1 ? parts.slice(0, -1).join(" ") : parts[0] ?? "";
@@ -308,11 +309,27 @@ export function buildVCard(card: ResolvedCard, company: string | null, url: stri
   return out.map(fold).join("\r\n") + "\r\n";
 }
 
+/** Folds at 75 octets, between characters — never inside one, so a name in Devanagari or an emoji survives. */
 function fold(lineText: string): string {
-  if (lineText.length <= 75) return lineText;
-  const chunks: string[] = [lineText.slice(0, 75)];
-  for (let i = 75; i < lineText.length; i += 74) chunks.push(` ${lineText.slice(i, i + 74)}`);
-  return chunks.join("\r\n");
+  const encoder = new TextEncoder();
+  if (encoder.encode(lineText).length <= 75) return lineText;
+  const chunks: string[] = [];
+  let current = "";
+  let bytes = 0;
+  for (const ch of lineText) {
+    const size = encoder.encode(ch).length;
+    // The first line holds 75 octets; continuation lines start with a space, so 74 more.
+    const limit = chunks.length === 0 ? 75 : 74;
+    if (bytes + size > limit) {
+      chunks.push(current);
+      current = "";
+      bytes = 0;
+    }
+    current += ch;
+    bytes += size;
+  }
+  chunks.push(current);
+  return chunks.map((c, i) => (i === 0 ? c : ` ${c}`)).join("\r\n");
 }
 
 /** A file name for the vCard: "Priya Sharma.vcf", nothing a header could choke on. */

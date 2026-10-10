@@ -41,9 +41,8 @@ export default async function DigitalCardPage({ params }: { params: Promise<{ sl
     return (
       <Card className="mx-auto max-w-sm px-6 py-12 text-center">
         <h1 className="text-lg font-semibold text-text">
-          {card.offReason === "manual"
-            ? "This card is no longer in use"
-            : `${card.resolved.name} is no longer with ${company.name || "the company"}`}
+          {/* Only a recorded exit says they've left; a paused account or a card switched off by hand says nothing about why. */}
+          {card.offReason === "exit" ? `${card.resolved.name} is no longer with ${company.name || "the company"}` : "This card is no longer in use"}
         </h1>
         {company.name && (
           <p className="mt-2 text-sm text-muted">

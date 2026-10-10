@@ -74,6 +74,7 @@ export function MyCardView({ data, card }: { data: MyCard; card: CardData }) {
               coverColor: card.coverColor,
             }}
             saveHref={null}
+            heading="h2"
           />
           <p className="text-xs text-subtle">The preview shows what you last saved.</p>
         </div>
@@ -241,7 +242,7 @@ export function ContactsTable({ contacts, showHolder }: { contacts: (MyCard["con
               <td className="py-2 pr-3 text-text">{c.companyName ?? "—"}</td>
               {showHolder && <td className="py-2 pr-3 text-text">{c.cardholder}</td>}
               <td className="py-2 pr-3 text-muted">{new Date(c.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</td>
-              <td className="py-2 text-muted">{c.leadId ? "Lead made" : "No company given"}</td>
+              <td className="py-2 text-muted">{c.leadId ? "Lead made" : c.companyName ? "No lead" : "No company given"}</td>
             </tr>
           ))}
         </tbody>

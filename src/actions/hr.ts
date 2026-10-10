@@ -14,7 +14,7 @@ import { employeeProfileSchema, exitEmployeeSchema, holidaySchema, leaveTypeSche
 import { OFFBOARDING_TASKS, offboardingChecklist, onboardingChecklist } from "@/lib/hr/onboarding";
 import type { ActionResult } from "@/actions/company";
 import { accountsChanged } from "@/lib/platform/account-hooks";
-import { switchOffCardFor } from "@/lib/cards/server";
+import { hasLeft, switchOffCardFor, workspaceToday } from "@/lib/cards/server";
 
 /**
  * Employee records, the holiday calendar, and the leave types everything else is measured against.
@@ -322,9 +322,10 @@ export async function recordExit(input: unknown): Promise<ActionResult<null>> {
   // it is due on the last working day. A failure is not worth losing the exit over — the record
   // offers the same button if this did not run.
   await raiseOffboardingTasksFor(user.id, data.userId);
-  // Their digital card goes dark on their last working day (docs/digital-cards-and-signatures.md §3.7):
-  // now, if that day has come or their login is off; otherwise the card page reads the exit date itself.
-  if (data.deactivateLogin || dateOnly(data.exitedOn).getTime() <= Date.now()) await switchOffCardFor(data.userId, "exit");
+  // Their digital card works through their last working day and goes dark after it
+  // (docs/digital-cards-and-signatures.md §3.7): now, if that day is behind them or their login is off;
+  // otherwise every card screen reads the exit date itself (cardOffReason).
+  if (data.deactivateLogin || hasLeft(dateOnly(data.exitedOn), await workspaceToday())) await switchOffCardFor(data.userId, "exit");
 
   revalidatePath("/people");
   revalidatePath(`/people/${data.userId}`);

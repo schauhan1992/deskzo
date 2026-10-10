@@ -12,7 +12,9 @@ import { notifyUser } from "@/lib/notify";
 import { leadPath } from "@/lib/record-links";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { readQuestions } from "@/lib/cards/template";
-import { cardOffReason } from "@/lib/cards/server";
+import { cardOffReason, isUniqueViolation, workspaceToday } from "@/lib/cards/server";
+import { headers } from "next/headers";
+import { clientIpFrom } from "@/lib/client-ip";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -27,6 +29,32 @@ import type { ActionResult } from "@/actions/company";
 
 /** How many share-backs one card takes in ten minutes before it stops listening — a stand at an event is busy, not this busy. */
 const SHARE_BACKS_PER_TEN_MINUTES = 30;
+/** Across every card in the workspace, an hour: the ceiling a script cycling through guessable addresses meets. */
+const SHARE_BACKS_PER_HOUR_WORKSPACE = 300;
+/** From one address, ten minutes. Generous, because an event's wifi puts a whole hall behind one. */
+const SHARE_BACKS_PER_ADDRESS = 20;
+const ADDRESS_WINDOW_MS = 10 * 60_000;
+
+/**
+ * Share-backs per caller address, in memory — rough by design (one server's view, reset on restart),
+ * and only a second line behind the database counts. No address, no limit here: we never guess one.
+ */
+const byAddress = new Map<string, number[]>();
+function addressAllows(ip: string | null, now = Date.now()): boolean {
+  if (!ip) return true;
+  const key = createHash("sha256").update(ip).digest("hex").slice(0, 24);
+  const recent = (byAddress.get(key) ?? []).filter((t) => now - t < ADDRESS_WINDOW_MS);
+  if (recent.length >= SHARE_BACKS_PER_ADDRESS) {
+    byAddress.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  byAddress.delete(key);
+  byAddress.set(key, recent);
+  // Bounded: the oldest addresses go first.
+  if (byAddress.size > 10_000) byAddress.delete(byAddress.keys().next().value!);
+  return true;
+}
 
 async function liveCard(slug: string) {
   if (typeof slug !== "string" || slug.length > 80) return null;
@@ -42,7 +70,7 @@ async function liveCard(slug: string) {
       user: { select: { name: true, active: true, employeeProfile: { select: { exitedOn: true } } } },
     },
   });
-  return card && cardOffReason(card, card.user) === null ? card : null;
+  return card && cardOffReason(card, card.user, await workspaceToday()) === null ? card : null;
 }
 
 /** A tap on one of the card's links. Counted, never who. Silent whatever happens. */
@@ -88,8 +116,19 @@ export async function shareBack(slug: string, input: unknown): Promise<ActionRes
   if (v.website?.trim()) return { ok: true, data: { firstName } };
   if (typeof v.elapsedMs === "number" && v.elapsedMs < 2000) return { ok: true, data: { firstName } };
 
-  const recent = await db.cardContact.count({ where: { cardId: card.id, createdAt: { gt: new Date(Date.now() - 10 * 60_000) } } });
-  if (recent >= SHARE_BACKS_PER_TEN_MINUTES) return { ok: false, error: "Too many people at once — try again in a few minutes." };
+  const busy = { ok: false as const, error: "Too many people at once — try again in a few minutes." };
+  let ip: string | null = null;
+  try {
+    ip = clientIpFrom(await headers());
+  } catch {
+    // Called outside a request (a check script): no address to count by.
+  }
+  if (!addressAllows(ip)) return busy;
+  const [recent, workspaceHour] = await Promise.all([
+    db.cardContact.count({ where: { cardId: card.id, createdAt: { gt: new Date(Date.now() - 10 * 60_000) } } }),
+    db.cardContact.count({ where: { createdAt: { gt: new Date(Date.now() - 3600_000) } } }),
+  ]);
+  if (recent >= SHARE_BACKS_PER_TEN_MINUTES || workspaceHour >= SHARE_BACKS_PER_HOUR_WORKSPACE) return busy;
 
   const email = v.email ? v.email.toLowerCase() : null;
   const phone = v.phone || null;
@@ -108,7 +147,7 @@ export async function shareBack(slug: string, input: unknown): Promise<ActionRes
   const ownerId = card.userId;
 
   const entry = companyName ? await newLeadStage() : null;
-  const made = await db.$transaction(async (tx) => {
+  const record = () => db.$transaction(async (tx) => {
     let leadId: string | null = null;
     let leadSeq: number | null = null;
     let reseller = false;
@@ -124,8 +163,14 @@ export async function shareBack(slug: string, input: unknown): Promise<ActionRes
       if (isResellerManaged(company)) {
         reseller = true;
       } else {
+        // The same person on the company already — by email, or by phone when that is all they gave.
+        const known = email
+          ? await tx.contact.findFirst({ where: { companyId: company.id, email }, select: { id: true } })
+          : phone
+            ? await tx.contact.findFirst({ where: { companyId: company.id, phone }, select: { id: true } })
+            : null;
         const contact =
-          (email ? await tx.contact.findFirst({ where: { companyId: company.id, email }, select: { id: true } }) : null) ??
+          known ??
           (await tx.contact.create({ data: { companyId: company.id, name: v.name, email, phone, createdByUserId: ownerId }, select: { id: true } }));
         const description = [
           ...answers.map((a) => `${a.question}: ${a.answer}`),
@@ -155,6 +200,14 @@ export async function shareBack(slug: string, input: unknown): Promise<ActionRes
     await tx.cardEvent.create({ data: { cardId: card.id, kind: "SHARE_BACK" } });
     return { leadId, leadSeq, reseller };
   });
+  let made: Awaited<ReturnType<typeof record>>;
+  try {
+    made = await record();
+  } catch (err) {
+    // Somebody else created the same company a moment ago: it exists now, so the second try finds it.
+    if (!isUniqueViolation(err)) throw err;
+    made = await record();
+  }
 
   if (made.leadId) await refreshLeadScore(made.leadId);
   await notifyUser({

@@ -38,7 +38,19 @@ export type CardFaceProps = {
  * The card itself — cover, logo, photo, name, title and its lines. Shared by the public page and the
  * preview on "My card", so what somebody sees there is what the person they meet will see.
  */
-export function CardFace({ face, onTap, saveHref }: { face: CardFaceProps; onTap?: () => void; saveHref?: string | null }) {
+export function CardFace({
+  face,
+  onTap,
+  saveHref,
+  heading = "h1",
+}: {
+  face: CardFaceProps;
+  onTap?: () => void;
+  saveHref?: string | null;
+  /** The page's own heading on the public page; a section's inside "My card", which has its own. */
+  heading?: "h1" | "h2";
+}) {
+  const Heading = heading;
   const initials = face.name
     .split(/\s+/)
     .map((p) => p[0])
@@ -70,7 +82,7 @@ export function CardFace({ face, onTap, saveHref }: { face: CardFaceProps; onTap
             </div>
           )}
         </div>
-        <h1 className="mt-3 text-xl font-semibold text-text">{face.name}</h1>
+        <Heading className="mt-3 text-xl font-semibold text-text">{face.name}</Heading>
         {(face.title || face.company) && (
           <p className="text-sm text-muted">{[face.title, face.company].filter(Boolean).join(" · ")}</p>
         )}

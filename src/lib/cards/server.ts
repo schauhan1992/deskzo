@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getOrganisation } from "@/lib/organisation";
+import { workspaceClock } from "@/lib/time/workspace";
 import {
   defaultTemplateFields,
   freeSlug,
@@ -33,10 +34,16 @@ export async function ensureDefaultTemplate(tx: Tx = db): Promise<{ id: string }
     await tx.cardTemplate.update({ where: { id: any.id }, data: { isDefault: true } });
     return any;
   }
-  return tx.cardTemplate.create({
-    data: { name: DEFAULT_TEMPLATE_NAME, isDefault: true, fields: defaultTemplateFields() as unknown as Prisma.InputJsonValue },
-    select: { id: true },
-  });
+  try {
+    return await tx.cardTemplate.create({
+      data: { name: DEFAULT_TEMPLATE_NAME, isDefault: true, fields: defaultTemplateFields() as unknown as Prisma.InputJsonValue },
+      select: { id: true },
+    });
+  } catch (err) {
+    // Two first visits at once: the other made it.
+    if (!isUniqueViolation(err)) throw err;
+    return tx.cardTemplate.findFirstOrThrow({ where: { name: DEFAULT_TEMPLATE_NAME }, select: { id: true } });
+  }
 }
 
 /** The company a card speaks for: the employer's name and mark, as the letterhead uses them. */
@@ -84,20 +91,40 @@ function personFrom(user: PersonRow): CardPerson {
   };
 }
 
+/** `yyyy-mm-dd` of a `@db.Date` — the calendar day it names, whatever the server's zone. */
+function dayKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Today on the workspace's own clock, `yyyy-mm-dd` — what "their last working day has passed" is read against. */
+export async function workspaceToday(): Promise<string> {
+  try {
+    return (await workspaceClock()).today();
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/** Whether somebody's last working day is behind them, on the workspace's calendar. */
+export function hasLeft(exitedOn: Date | null | undefined, today: string): boolean {
+  return !!exitedOn && dayKey(exitedOn) < today;
+}
+
 /**
- * Whether a card speaks for somebody today. Off when switched off, when their account is off, or once
- * their last working day has passed — read from the exit date, so a card goes dark on the day with no
- * job having to run (docs/digital-cards-and-signatures.md §3.7).
+ * Whether a card speaks for somebody today — the one rule every screen and action uses. Off when
+ * switched off, when their account is off, or once their last working day is behind them (it works
+ * through that day). Read from the exit date, so a card goes dark with no job having to run
+ * (docs/digital-cards-and-signatures.md §3.7).
  */
 export function cardOffReason(
   card: { active: boolean; switchedOffWhy: string | null },
   user: { active: boolean; employeeProfile: { exitedOn: Date | null } | null },
-  now = new Date(),
+  today: string,
 ): "exit" | "account" | "manual" | null {
-  const exitedOn = user.employeeProfile?.exitedOn;
-  if (exitedOn && now.getTime() >= exitedOn.getTime() + 24 * 60 * 60 * 1000) return "exit";
+  // A recorded exit is the reason whenever there is one — it is the only one the public page names.
+  if (hasLeft(user.employeeProfile?.exitedOn, today) || (!card.active && card.switchedOffWhy === "exit")) return "exit";
   if (!user.active) return "account";
-  if (!card.active) return card.switchedOffWhy === "exit" || card.switchedOffWhy === "account" ? card.switchedOffWhy : "manual";
+  if (!card.active) return card.switchedOffWhy === "account" ? "account" : "manual";
   return null;
 }
 
@@ -117,14 +144,14 @@ export type LoadedCard = {
 const CARD_INCLUDE = { user: { select: PERSON_SELECT }, template: true } satisfies Prisma.DigitalCardInclude;
 type CardRow = Prisma.DigitalCardGetPayload<{ include: typeof CARD_INCLUDE }>;
 
-function loaded(card: CardRow): LoadedCard {
+function loaded(card: CardRow, today: string): LoadedCard {
   const fields = readTemplateFields(card.template.fields);
   const values = readCardValues(card.values);
   return {
     id: card.id,
     slug: card.slug,
     active: card.active,
-    offReason: cardOffReason(card, card.user),
+    offReason: cardOffReason(card, card.user, today),
     userId: card.userId,
     photoVersion: card.user.photoUpdatedAt?.getTime() ?? null,
     template: {
@@ -142,13 +169,13 @@ function loaded(card: CardRow): LoadedCard {
 }
 
 export async function loadCardBySlug(slug: string): Promise<LoadedCard | null> {
-  const card = await db.digitalCard.findUnique({ where: { slug }, include: CARD_INCLUDE });
-  return card ? loaded(card) : null;
+  const [card, today] = await Promise.all([db.digitalCard.findUnique({ where: { slug }, include: CARD_INCLUDE }), workspaceToday()]);
+  return card ? loaded(card, today) : null;
 }
 
 export async function loadCardForUser(userId: string): Promise<LoadedCard | null> {
-  const card = await db.digitalCard.findUnique({ where: { userId }, include: CARD_INCLUDE });
-  return card ? loaded(card) : null;
+  const [card, today] = await Promise.all([db.digitalCard.findUnique({ where: { userId }, include: CARD_INCLUDE }), workspaceToday()]);
+  return card ? loaded(card, today) : null;
 }
 
 /**
@@ -161,6 +188,27 @@ export async function issueCardsTo(
   templateId: string,
   byUserId: string,
 ): Promise<{ issued: string[]; reissued: string[]; skipped: { id: string; name: string; why: string }[] }> {
+  // Two admins issuing at once can pick the same address, or both reach the same person: the database's
+  // unique indexes refuse the second, and the run starts again from what is there now.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await issueOnce(userIds, templateId, byUserId);
+    } catch (err) {
+      if (attempt < 3 && isUniqueViolation(err)) continue;
+      throw err;
+    }
+  }
+}
+
+export function isUniqueViolation(err: unknown): boolean {
+  return !!err && typeof err === "object" && (err as { code?: unknown }).code === "P2002";
+}
+
+async function issueOnce(
+  userIds: readonly string[],
+  templateId: string,
+  byUserId: string,
+): Promise<{ issued: string[]; reissued: string[]; skipped: { id: string; name: string; why: string }[] }> {
   const people = await db.user.findMany({
     where: { id: { in: [...userIds] } },
     select: { id: true, name: true, active: true, employeeProfile: { select: { exitedOn: true } }, digitalCard: { select: { id: true, active: true } } },
@@ -168,10 +216,10 @@ export async function issueCardsTo(
   const issued: string[] = [];
   const reissued: string[] = [];
   const skipped: { id: string; name: string; why: string }[] = [];
-  const today = new Date();
+  const today = await workspaceToday();
   for (const p of people) {
     if (!p.active) skipped.push({ id: p.id, name: p.name, why: "their account is switched off" });
-    else if (p.employeeProfile?.exitedOn && p.employeeProfile.exitedOn <= today) skipped.push({ id: p.id, name: p.name, why: "they have left" });
+    else if (hasLeft(p.employeeProfile?.exitedOn, today)) skipped.push({ id: p.id, name: p.name, why: "they have left" });
   }
   const eligible = people.filter((p) => !skipped.some((s) => s.id === p.id));
 
