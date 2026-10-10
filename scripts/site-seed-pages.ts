@@ -8,6 +8,8 @@
  *   npm run site:seed-pages -- --no-nav          leave the navigation and footer alone
  *   npm run site:seed-pages -- --no-scores       don't recalculate the SEO scores afterwards
  *   npm run site:seed-pages -- --json <file>     also write the result (outcomes, scores, top issues) to a file
+ *   npm run site:seed-pages -- --restore cards   publish these pages (comma-separated addresses) even though a person
+ *                                                deleted or moved them in the CMS — when the page is wanted back
  *
  * It runs against the control plane in CONTROL_DATABASE_URL — the site this installation serves.
  * The content is in scripts/site-content/ (one module per section); the rules are in
@@ -50,6 +52,7 @@ async function main() {
   const report = await runSiteSeed({
     sections,
     nav: has("no-nav") ? null : siteNav({ partnerPortal: `${partnerOrigin()}/` }),
+    restore: value("restore")?.split(",").map((s) => s.trim()).filter(Boolean),
     dryRun,
     scores: !dryRun && !has("no-scores"),
     log: (line) => console.log(line),

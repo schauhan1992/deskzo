@@ -67,6 +67,11 @@ export type SeedOptions = {
   sections: SeedSection[];
   /** The navigation and footer to publish; null leaves the settings alone. */
   nav: SeedNav | null;
+  /**
+   * Page addresses to publish even though a person moved or deleted them in the CMS — when somebody
+   * asks for the seed's page back. A page a person edited or archived is still left alone.
+   */
+  restore?: readonly string[];
   dryRun?: boolean;
   /** Recalculate every SEO score afterwards and report the seeded entities' (default: when not a dry run). */
   scores?: boolean;
@@ -109,7 +114,7 @@ async function personEdit(updatedBy: string, updatedAt: Date): Promise<string> {
 
 // ─── Pages ───────────────────────────────────────────────────────────────────────────────────────
 
-async function seedPage(page: SeedPage, me: CmsMe, dryRun: boolean): Promise<SeedResult> {
+async function seedPage(page: SeedPage, me: CmsMe, dryRun: boolean, restore: ReadonlySet<string>): Promise<SeedResult> {
   const base = { kind: "page" as const, key: page.slug, title: page.document.title };
   const slugProblem = pageSlugProblem(page.slug);
   if (slugProblem) return { ...base, outcome: "failed", reason: slugProblem };
@@ -119,8 +124,8 @@ async function seedPage(page: SeedPage, me: CmsMe, dryRun: boolean): Promise<See
   const row = await controlDb().sitePage.findUnique({ where: { slug: page.slug } });
   if (!row) {
     const gone = await movedOrDeleted("page", page.slug);
-    if (gone) return { ...base, outcome: "skipped", reason: gone };
-    if (dryRun) return { ...base, outcome: "created", reason: "would create and publish" };
+    if (gone && !restore.has(page.slug)) return { ...base, outcome: "skipped", reason: gone };
+    if (dryRun) return { ...base, outcome: "created", reason: gone ? `would bring back and publish (${gone})` : "would create and publish" };
     const made = await createPage({ slug: page.slug, title: doc.title }, me);
     const saved = await savePageDraft(made.id, { document: doc, version: made.version }, me);
     await publishPage(made.id, { version: saved.version, note: NOTE }, me);
@@ -287,6 +292,7 @@ async function scoresFor(sections: SeedSection[]): Promise<SeedScore[]> {
 export async function runSiteSeed(options: SeedOptions): Promise<SeedReport> {
   const log = options.log ?? (() => {});
   const dryRun = !!options.dryRun;
+  const restore = new Set((options.restore ?? []).map((s) => s.replace(/^\/+|\/+$/g, "")));
   const admin = await firstAdmin();
   /** The seed acts as a script; its posts are by the first admin. With no admin it still publishes pages as "script". */
   const me: CmsMe = admin ? { id: admin.id, email: admin.email, name: admin.name, role: "ADMIN", script: true } : { id: SEED_ACTOR, email: "", name: "Script", role: "ADMIN", script: true };
@@ -316,7 +322,7 @@ export async function runSiteSeed(options: SeedOptions): Promise<SeedReport> {
 
   for (const section of options.sections) {
     log(`\n${section.name}`);
-    for (const page of section.pages ?? []) await guarded({ kind: "page", key: page.slug, title: page.document.title }, () => seedPage(page, me, dryRun));
+    for (const page of section.pages ?? []) await guarded({ kind: "page", key: page.slug, title: page.document.title }, () => seedPage(page, me, dryRun, restore));
   }
 
   const categoryIds = new Map<string, string | null>();
