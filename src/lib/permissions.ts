@@ -291,6 +291,26 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT", "SALES", "SUPPORT", "ACCOUNTS", "PURCHASE"],
   },
   {
+    key: "cards.use",
+    label: "Have a digital card",
+    description:
+      "Use the digital card issued to you: its QR code and link, your own fields, and the people who shared their details back. Nobody has a card until HR or an admin issues one; this lets them.",
+    defaultRoles: [],
+  },
+  {
+    key: "cards.manage",
+    label: "Manage digital cards",
+    description:
+      "Design card templates, issue cards to people, switch them off, and see every card's numbers. A card speaks for the company in public, so it is HR's or an admin's.",
+    defaultRoles: ["MANAGEMENT", "HR", "HR_HEAD"],
+  },
+  {
+    key: "cards.viewLeads",
+    label: "See leads from every card",
+    description: "See who shared their details back from anybody's card, not just your own.",
+    defaultRoles: ["MANAGEMENT", "SALES_MANAGER"],
+  },
+  {
     key: "vault.viewAll",
     label: "See every vault record",
     description:
@@ -1167,6 +1187,7 @@ export const PERMISSION_REGISTRY = [
   { key: "section.tasks", label: "My work › Tasks", description: "See Tasks in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.calendar", label: "My work › Calendar", description: "See Calendar in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.notes", label: "My work › Sticky Notes", description: "See Sticky Notes in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.cards", label: "My work › Digital Cards", description: "See Digital Cards in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.vault", label: "My work › Credential Vault", description: "See Credential Vault in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.targets", label: "Performance › Targets", description: "See Targets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.incentives", label: "Performance › Incentives", description: "See Incentives in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
@@ -1274,6 +1295,7 @@ const GROUP_BY_PREFIX: Record<string, string> = {
   // These five had no prefix entry, so eleven keys — including the credential vault's — were
   // filed under a heading called "Other" on the permission screen.
   vault: "Administration",
+  cards: "People & HR",
   visitors: "Support",
   engagement: "People & HR",
   projects: "Orders & fulfilment",

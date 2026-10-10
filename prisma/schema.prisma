@@ -841,6 +841,8 @@ model User {
   calendarAccount               CalendarAccount?         @relation("UserCalendarAccount")
   calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
   recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
+  digitalCard          DigitalCard?       @relation("DigitalCardHolder")
+  digitalCardsIssued   DigitalCard[]      @relation("DigitalCardIssuedBy")
 
   @@index([departmentId])
   @@index([managerId])
@@ -1482,6 +1484,7 @@ model Lead {
   formSubmissions FormSubmission[] @relation("FormSubmissionLead")
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
   calendarEvents     CalendarEvent[]
+  cardContacts       CardContact[]
 
   @@unique([captureKeyId, externalId])
   @@index([companyId])
@@ -10738,6 +10741,8 @@ enum LeadSource {
   EXISTING_CUSTOMER
   WALK_IN
   OTHER
+  /// Shared back from somebody's digital card (docs/digital-cards-and-signatures.md §3.5).
+  DIGITAL_CARD
 }
 
 /// A website's credential for the lead capture API (POST /api/v1/leads).
@@ -12651,4 +12656,105 @@ model RecurringBillingPeriod {
   @@unique([companyProductId, periodStart])
   @@index([documentId])
   @@map("recurring_billing_periods")
+}
+
+// ─── Deskzo Cards (docs/digital-cards-and-signatures.md §3) ──────────────────────────────────────
+
+/**
+ * A company's card design: colours, whether the logo shows, and which fields a card carries.
+ * `fields` is the field list src/lib/cards/template.ts reads and validates — each field shared (one
+ * value for everyone), from the person's record, or the person's own, and locked or open. Several
+ * templates per company: one per brand, branch or department.
+ */
+model CardTemplate {
+  id          String        @id @default(cuid())
+  name        String        @unique
+  accentColor String        @default("#2563eb")
+  coverColor  String        @default("#0f172a")
+  showLogo    Boolean       @default(true)
+  fields      Json
+  /// Up to five questions the share-back form asks (strings), never required.
+  questions   Json          @default("[]")
+  isDefault   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  cards       DigitalCard[]
+
+  @@map("card_templates")
+}
+
+/**
+ * A person's digital card. One per person to start. `slug` is the address — /c/<slug> on the
+ * workspace's own domain — and never changes for the life of the card. Switching it off keeps the row
+ * (and the address, which then says the person is no longer with the company) and frees the seat.
+ */
+model DigitalCard {
+  id             String          @id @default(cuid())
+  userId         String          @unique
+  user           User            @relation("DigitalCardHolder", fields: [userId], references: [id], onDelete: Cascade)
+  templateId     String
+  template       CardTemplate    @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  slug           String          @unique
+  active         Boolean         @default(true)
+  /// The person's own values and the record fields they chose to hide — src/lib/cards/template.ts.
+  values         Json            @default("{}")
+  issuedAt       DateTime        @default(now())
+  issuedById     String?
+  issuedBy       User?           @relation("DigitalCardIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+  switchedOffAt  DateTime?
+  /// "exit" (their exit was recorded), "account" (their account was switched off) or "manual".
+  switchedOffWhy String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  events         CardEvent[]
+  contacts       CardContact[]
+
+  @@index([templateId])
+  @@index([issuedById])
+  @@map("digital_cards")
+}
+
+enum CardEventKind {
+  VIEW
+  SAVE
+  TAP
+  SHARE_BACK
+}
+
+/** What happened on a card's public page: the numbers "My card" and the company view show. No IP, no cookie. */
+model CardEvent {
+  id        String        @id @default(cuid())
+  cardId    String
+  card      DigitalCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  kind      CardEventKind
+  createdAt DateTime      @default(now())
+
+  @@index([cardId, kind, createdAt])
+  @@map("card_events")
+}
+
+/**
+ * Somebody who shared their details back from a card. Kept whether or not it became a lead: a lead
+ * needs a company, and nobody is made to give one.
+ */
+model CardContact {
+  id          String      @id @default(cuid())
+  cardId      String
+  card        DigitalCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  name        String
+  email       String?
+  phone       String?
+  companyName String?
+  /// Answers to the template's questions, as [{ question, answer }].
+  answers     Json        @default("[]")
+  note        String?
+  leadId      String?
+  lead        Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  /// Rate limiting needs how often, never who: a hash of the address, salted per card.
+  sourceHash  String
+  createdAt   DateTime    @default(now())
+
+  @@index([cardId, createdAt])
+  @@index([leadId])
+  @@map("card_contacts")
 }

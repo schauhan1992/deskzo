@@ -116,6 +116,7 @@
     "check:address": "tsx scripts/check-address.ts",
     "check:leads": "tsx scripts/check-leads.ts",
     "check:lead-capture": "tsx scripts/check-lead-capture.ts",
+    "check:cards": "tsx scripts/check-cards.ts",
     "check:reassign": "tsx scripts/check-reassign.ts",
     "check:view-permissions": "tsx scripts/check-view-permissions.ts",
     "check:permission-gates": "tsx scripts/check-permission-gates.ts",

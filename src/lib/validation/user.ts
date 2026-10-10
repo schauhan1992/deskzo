@@ -49,3 +49,17 @@ export const createUserSchema = z.object({
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+/**
+ * The work profile Staff & roles edits without the HR module (docs/digital-cards-and-signatures.md
+ * §2.3): the job title (`EmployeeProfile.designation`) and the work phone (`User.phone`). Digital cards
+ * and signatures fill themselves from these, so a workspace that buys only Cards still needs them.
+ * Empty clears the field.
+ */
+export const updateWorkProfileSchema = z.object({
+  id: z.string().min(1),
+  jobTitle: z.string().trim().max(80, "Keep the job title under 80 characters"),
+  phone: z.string().trim().max(32, "That is too long for a phone number"),
+});
+
+export type UpdateWorkProfileInput = z.infer<typeof updateWorkProfileSchema>;

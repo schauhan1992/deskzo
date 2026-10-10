@@ -10,7 +10,7 @@ import { wouldCreateCycle } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
 import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
 import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, assertNotSelf, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
-import { updateUserAssignmentSchema, createUserSchema } from "@/lib/validation/user";
+import { updateUserAssignmentSchema, createUserSchema, updateWorkProfileSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
@@ -21,6 +21,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
 import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { recordAudit } from "@/lib/audit";
+import { switchOffCardFor } from "@/lib/cards/server";
 import { logActivity } from "@/lib/activity";
 import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 import { lockedOut, waysIn } from "@/lib/workplace/sign-in-rules";
@@ -151,6 +152,53 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
 
   revalidatePath("/settings/access");
   revalidatePath("/", "layout");
+  return { ok: true, data: null };
+}
+
+/**
+ * The work profile — job title and work phone — from Staff & roles, without the HR module
+ * (docs/digital-cards-and-signatures.md §2.3). Digital cards fill themselves from it, so a workspace
+ * that buys only Cards must be able to set it. The title is the HR record's designation
+ * (`EmployeeProfile`, created bare when there is none), the phone the account's work number.
+ */
+export async function updateWorkProfile(input: unknown): Promise<ActionResult<null>> {
+  const session = await requireUser();
+  const admin = await actorContext(session.id);
+  if (!(await hasEffectivePermission(admin.id, "users.manage"))) {
+    return { ok: false, error: "You can't change somebody's job title or work phone." };
+  }
+  const parsed = updateWorkProfileSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const { id, jobTitle, phone } = parsed.data;
+
+  const target = await db.user.findUnique({
+    where: { id },
+    select: { id: true, name: true, isSuperAdmin: true, phone: true, employeeProfile: { select: { designation: true } } },
+  });
+  if (!target) return { ok: false, error: "That user no longer exists." };
+  try {
+    assertMayActOnTarget(admin, target);
+  } catch (err) {
+    return refuse(err);
+  }
+
+  const designation = jobTitle || null;
+  const workPhone = phone || null;
+  if (designation === (target.employeeProfile?.designation ?? null) && workPhone === (target.phone ?? null)) {
+    return { ok: true, data: null };
+  }
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id }, data: { phone: workPhone } });
+    await tx.employeeProfile.upsert({
+      where: { userId: id },
+      create: { userId: id, designation },
+      update: { designation },
+    });
+  });
+  await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "User", entityId: id, entityLabel: `${target.name} — work profile` });
+
+  revalidatePath("/settings/access");
+  revalidatePath("/cards");
   return { ok: true, data: null };
 }
 
@@ -339,6 +387,9 @@ export async function setUserActive(id: string, active: boolean): Promise<Action
   }
 
   await accountsChanged([id], { revoke: active ? undefined : "deactivated", by: `admin:${admin.id}` });
+  // A card speaks for the company: an account switched off takes its digital card with it. Switching
+  // the account back on leaves the card off — issuing it again is HR's decision.
+  if (!active) await switchOffCardFor(id, "account");
   revalidatePath("/settings/access");
   revalidatePath("/", "layout");
   return { ok: true, data: null };

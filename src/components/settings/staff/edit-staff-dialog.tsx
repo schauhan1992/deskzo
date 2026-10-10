@@ -2,14 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resendSetupEmail, resetPasswordToTemporary, resetUserTwoFactor, sendPasswordResetEmail, updateUserAssignment } from "@/actions/user";
+import { resendSetupEmail, resetPasswordToTemporary, resetUserTwoFactor, sendPasswordResetEmail, updateUserAssignment, updateWorkProfile } from "@/actions/user";
 import { setUserBranch } from "@/actions/branch";
 import { branchLabel } from "@/lib/branches/format";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Label, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { ResetLinkOnce, SetupLinkOnce, TemporaryPasswordOnce } from "@/components/settings/setup-link-once";
 import type { DepartmentChoice, RoleChoice, StaffRow, WorkBranch } from "@/components/settings/staff/types";
@@ -52,6 +52,9 @@ export function EditStaffDialog({
   const [departmentId, setDepartmentId] = useState(row.departmentId ?? "");
   const [managerId, setManagerId] = useState(row.managerId ?? "");
   const [branchId, setBranchId] = useState(row.branchId ?? "");
+  // The work profile (docs/digital-cards-and-signatures.md §2.3): what a digital card fills itself from.
+  const [jobTitle, setJobTitle] = useState(row.jobTitle ?? "");
+  const [phone, setPhone] = useState(row.phone ?? "");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
@@ -67,7 +70,8 @@ export function EditStaffDialog({
   const assignmentDirty =
     role !== row.role || departmentId !== (row.departmentId ?? "") || managerId !== (row.managerId ?? "");
   const branchDirty = branches !== null && branchId !== (row.branchId ?? "");
-  const dirty = assignmentDirty || branchDirty;
+  const profileDirty = jobTitle.trim() !== (row.jobTitle ?? "") || phone.trim() !== (row.phone ?? "");
+  const dirty = assignmentDirty || branchDirty || profileDirty;
 
   const roleLocked = !mayAssignRole || row.isYou;
   const roleHint = row.isYou
@@ -95,6 +99,14 @@ export function EditStaffDialog({
         const result = await setUserBranch(row.id, branchId || null);
         if (!result.ok) {
           setError(assignmentDirty ? `Saved, except where they work: ${result.error}` : result.error);
+          router.refresh();
+          return;
+        }
+      }
+      if (profileDirty) {
+        const result = await updateWorkProfile({ id: row.id, jobTitle, phone });
+        if (!result.ok) {
+          setError(assignmentDirty || branchDirty ? `Saved, except the job title and work phone: ${result.error}` : result.error);
           router.refresh();
           return;
         }
@@ -180,6 +192,25 @@ export function EditStaffDialog({
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={idFor("title")}>Job title</Label>
+            <Input id={idFor("title")} value={jobTitle} maxLength={80} onChange={(e) => setJobTitle(e.target.value)} placeholder="Sales manager" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={idFor("phone")}>Work phone</Label>
+            <Input
+              id={idFor("phone")}
+              type="tel"
+              value={phone}
+              maxLength={32}
+              onChange={(e) => setPhone(e.target.value)}
+              aria-describedby={idFor("phone-hint")}
+            />
+            <p id={idFor("phone-hint")} className="text-xs text-subtle">
+              The number quotes and their digital card show — never their personal mobile.
+            </p>
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor={idFor("role")}>Role</Label>
             <Select

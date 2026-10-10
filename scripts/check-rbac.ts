@@ -391,6 +391,16 @@ const PUBLIC_ACTIONS = new Set([
    * merely undrawn.
    */
   "src/actions/portal-public.ts",
+  /**
+   * A digital card's public page (docs/digital-cards-and-signatures.md §3.5).
+   *
+   * The person who met the cardholder has no account and never will; the card's address is all they
+   * have. What it can do is bounded: count a tap, or share their own details back — with a honeypot,
+   * a minimum fill time, one card's share-backs limited per ten minutes and the same person per day,
+   * nothing returned but a first name, and only while the module is on and the card live
+   * (`check:cards`).
+   */
+  "src/actions/cards-public.ts",
 ]);
 
 /**

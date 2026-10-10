@@ -540,6 +540,19 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navItems: [{ href: "/vault", label: "Credential vault", icon: KeyRound, permission: "vault.use" }],
   },
   {
+    // Deskzo Cards (owner, 10 Oct 2026; docs/digital-cards-and-signatures.md §3). Nobody has a card
+    // until HR or an admin issues one; "My card" shows only to somebody holding one.
+    key: "cards",
+    label: "Digital Cards",
+    description:
+      "A digital business card for each person HR or an admin switches on: one tap saves it, no app, and whoever shares their details back lands as a lead. Cards go dark the day somebody leaves.",
+    navGroup: "My work",
+    navItems: [
+      { href: "/cards", label: "My card", icon: IdCard, permission: "cards.use" },
+      { href: "/cards/manage", label: "Digital cards", icon: IdCard, permission: ["cards.manage", "cards.viewLeads"] },
+    ],
+  },
+  {
     key: "helpdesk",
     viewPermission: "tickets.view",
     label: "Helpdesk / Tickets",

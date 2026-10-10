@@ -398,6 +398,8 @@ export const ROLE_PRESETS: RolePreset[] = [
     role: "MANAGEMENT",
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "activities.viewAll", "meetings.schedule",
       "companies.viewAll",
+      // Digital cards (10 Oct 2026): runs them for the company, and carries one.
+      "cards.use", "cards.manage", "cards.viewLeads",
       "accounts.reassign",
       "credit.override",
       "products.edit",

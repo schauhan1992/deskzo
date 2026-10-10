@@ -13,6 +13,7 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
   EXISTING_CUSTOMER: "Existing customer",
   WALK_IN: "Walk-in",
   OTHER: "Other",
+  DIGITAL_CARD: "Digital card",
 };
 
 export const LEAD_SOURCE_VALUES = Object.keys(LEAD_SOURCE_LABELS) as [LeadSource, ...LeadSource[]];
