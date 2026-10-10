@@ -318,8 +318,10 @@ mailbox sync (phases 4–5), a paying workspace copies its signatures from an in
   The premium layouts are server-only (`src/lib/signatures/premium.ts`).
 - **The generator, `deskzo.com/email-signature-generator`:** indexable, no sign-up. The free four
   preview live and copy as rich text or HTML, with a "Made with Deskzo" line. The premium eight show
-  the visitor's own details as a watermarked PNG drawn on the server — their HTML never reaches the
-  browser — with "See plans" and "Book a demo".
+  the visitor's own details as a watermarked PNG drawn on the server — not HTML to copy — with "See
+  plans" and "Book a demo". The line is practical: the shared renderer ships to the browser, so a
+  determined visitor could rebuild a premium-like layout; what they can't get is the in-app part.
+  The preview draws Latin text only, so the renderer never fetches fonts or emoji from the web.
 - **In-app, `/signatures`** (the `signatures` module; `signatures.manage` for the company's part):
   each person's signature filled from their record — name, title, department, work phone, email,
   branch address, profile photo, a live digital card's link and QR — in any of the twelve, or the one

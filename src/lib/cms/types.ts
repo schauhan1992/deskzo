@@ -146,7 +146,7 @@ export const REQUIRED_BLOCKS: Partial<Record<BuiltinPageSlug, BlockType>> = {
  * the partner programme's "Become a partner" and "Find a partner", src/app/platform-site/partners),
  * the platform's folders, and addresses that are files. A built-in page's own slug is not free either.
  */
-export const RESERVED_PAGE_SEGMENTS = ["blog", "media", "preview", "partners", "api", "sitemap", "robots", "favicon", "platform-site", "platform-console", "platform-cms", "_next"] as const;
+export const RESERVED_PAGE_SEGMENTS = ["blog", "media", "preview", "partners", "email-signature-generator", "api", "sitemap", "robots", "favicon", "platform-site", "platform-console", "platform-cms", "_next"] as const;
 
 /**
  * "DEFAULT": a built-in page nobody has saved — the site shows its default content. `id` is then
@@ -418,7 +418,7 @@ export const REDIRECT_IMPORT_MAX_ROWS = 1_000;
  * The public site's own routes: never redirected, and a redirect from one (or from anything under it)
  * is refused — "That page is part of the site and can't be redirected". The home page is too.
  */
-export const SITE_BUILTIN_ROUTES = ["/signup", "/signin", "/contact", "/pricing", "/security", "/privacy", "/terms", "/partners"] as const;
+export const SITE_BUILTIN_ROUTES = ["/signup", "/signin", "/contact", "/pricing", "/security", "/privacy", "/terms", "/partners", "/email-signature-generator"] as const;
 
 /** What a redirect's form sends. `match` left out: PREFIX when `from` ends in "/*", else EXACT. */
 export type RedirectInput = { from: string; to: string; status?: number; match?: SiteRedirectMatch; enabled?: boolean; note?: string | null };

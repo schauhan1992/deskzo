@@ -406,7 +406,9 @@ async function handle(req: NextRequest & { auth: unknown }, pathname: string, te
   // /iclock with firmware user agents that look nothing like a browser, and the marketing cron and
   // provider webhooks are no different. Blocking those would stop attendance uploads and the
   // firmware would retry forever. They authenticate by registered serial and shared secret.
-  if (!isMachineEndpoint(pathname)) {
+  // Images mail clients and their proxies fetch for signatures and cards often send no browser agent
+  // at all; blocking them would leave a broken image in every email.
+  if (!isMachineEndpoint(pathname) && !/^\/sig\/|^\/c\/[a-z0-9-]+\/(qr|photo)$/.test(pathname)) {
     const verdict = classifyUserAgent(req.headers.get("user-agent"));
     if (verdict) {
       const policy = await getSecurityPolicy();

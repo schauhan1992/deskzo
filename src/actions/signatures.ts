@@ -74,7 +74,8 @@ export async function getMySignature(): Promise<ActionResult<MySignature>> {
 }
 
 const mineSchema = z.object({
-  templateKey: z.string().max(40).nullable(),
+  /** Left out: unchanged. Null: back to the company's template. */
+  templateKey: z.string().max(40).nullable().optional(),
   mobile: z.string().trim().max(32, "That is too long for a phone number"),
 });
 
@@ -91,8 +92,8 @@ export async function updateMySignature(input: unknown): Promise<ActionResult<nu
   }
   await db.userSignature.upsert({
     where: { userId: user.id },
-    create: { userId: user.id, templateKey: settings.lockTemplate ? null : templateKey, mobile: mobile || null },
-    update: { ...(settings.lockTemplate ? {} : { templateKey }), mobile: mobile || null },
+    create: { userId: user.id, templateKey: settings.lockTemplate ? null : (templateKey ?? null), mobile: mobile || null },
+    update: { ...(settings.lockTemplate || templateKey === undefined ? {} : { templateKey }), mobile: mobile || null },
   });
   revalidatePath("/signatures");
   return { ok: true, data: null };

@@ -4,7 +4,10 @@
  *
  * Client-safe on purpose — the public generator previews the free templates live in the browser. The
  * premium templates' layouts are NOT here: they live in src/lib/signatures/premium.ts, which only the
- * server reads, so the public page shows them as watermarked images and never ships what makes them.
+ * server reads, and the public page shows them as watermarked images, not HTML to copy. The renderer
+ * itself does ship, so the line is practical, not cryptographic: somebody determined could rebuild a
+ * premium-like layout from this code. What a paid workspace gets that they can't is the in-app page —
+ * signatures filled from each person's record, the company's lock, the hosted photo, card and QR.
  *
  * The HTML is written for mail clients, not browsers: tables, inline styles, no classes, no scripts,
  * nothing a client strips. Every value is escaped, and a link is a link only when it is http(s), a

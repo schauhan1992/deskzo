@@ -40,7 +40,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const blog = posts.length ? [{ url: `${origin}/blog`, lastModified: posts[0].updatedAt, changeFrequency: "weekly" as const, priority: 0.6 }] : [];
   const postEntries = posts.filter((post) => post.indexable).map((post) => ({ url: `${origin}${post.path}`, lastModified: post.updatedAt, changeFrequency: "monthly" as const, priority: 0.5 }));
   const archiveEntries = posts.length ? archives.map((archive) => ({ url: `${origin}${archive.path}`, lastModified: archive.updatedAt, changeFrequency: "weekly" as const, priority: 0.4 })) : [];
-  const entries: MetadataRoute.Sitemap = [...pageEntries, ...programmeEntries, ...blog, ...postEntries, ...archiveEntries];
+  // The free email signature generator (src/app/platform-site/email-signature-generator): a tool, not a CMS page.
+  const tools = [{ url: `${origin}/email-signature-generator`, changeFrequency: "monthly" as const, priority: 0.6 }];
+  const entries: MetadataRoute.Sitemap = [...pageEntries, ...programmeEntries, ...tools, ...blog, ...postEntries, ...archiveEntries];
   // A page or post whose address an editor has redirected by hand is still live, but its address now goes elsewhere.
   const redirected = await redirectedPaths(entries.map((e) => new URL(e.url).pathname));
   return redirected.size ? entries.filter((e) => !redirected.has(new URL(e.url).pathname)) : entries;

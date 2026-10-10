@@ -27,6 +27,7 @@ import { directClient } from "../src/lib/tenancy/direct-client";
 const db = directClient();
 let actorId = "";
 let mayManage = false;
+let cardsOn = true;
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
 const originalLoad = internals._load;
 internals._load = function (this: unknown, request: string, parent: unknown, isMain: boolean) {
@@ -37,7 +38,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   if (request === "@/lib/tenancy/resolve") return { tenantOrigin: async () => "https://acme.deskzo.test" };
   if (request === "@/lib/time/workspace") return { workspaceClock: async () => ({ today: () => new Date().toISOString().slice(0, 10) }) };
   if (request === "@/actions/permission") return { hasEffectivePermission: async (_u: string, key: string) => (key === "signatures.manage" ? mayManage : true) };
-  if (request === "@/lib/modules-access") return { requireModuleUser: async () => ({ id: actorId }), moduleAvailableForTenant: async () => true };
+  if (request === "@/lib/modules-access") return { requireModuleUser: async () => ({ id: actorId }), moduleAvailableForTenant: async (key: string) => key !== "cards" || cardsOn };
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 
@@ -136,7 +137,22 @@ async function previews() {
   ok("a premium template comes back as a PNG", img.status === 200 && img.headers.get("content-type") === "image/png" && bytes.subarray(1, 4).toString() === "PNG");
   ok("  a free one isn't drawn here", (await call("t=simple")).status === 404);
   ok("  nor a template that doesn't exist", (await call("t=nope")).status === 404);
-  ok("  junk or oversized details fall back to the example", (await call("t=portrait&d=%%%")).status === 200 && (await call(`t=portrait&d=${"A".repeat(5000)}`)).status === 200);
+  ok("  junk or oversized details fall back to the example", (await call("t=portrait&d=%%%")).status === 200 && (await call(`t=portrait&d=${"A".repeat(9000)}`)).status === 200);
+  // Fonts and emoji the bundled font lacks would be fetched from the web, with the visitor's text in the request.
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    fetched += 1;
+    return realFetch(...args);
+  }) as typeof fetch;
+  try {
+    const wide = Buffer.from(JSON.stringify({ name: "प्रिया शर्मा 🙂", title: "Directora de Ventas · São Paulo", company: "株式会社" })).toString("base64url");
+    const r = await call(`t=legal&d=${wide}`);
+    await r.arrayBuffer();
+    ok("  drawing non-Latin text and emoji fetches nothing from the web", r.status === 200 && fetched === 0, `${fetched} fetch(es)`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 async function withDb() {
@@ -161,6 +177,9 @@ async function withDb() {
   const tpl = await db.cardTemplate.create({ data: { name: `${TAG} t`, fields: [] } });
   await db.digitalCard.create({ data: { userId: person.id, templateId: tpl.id, slug: "zzprobe-sig-person" } });
   ok("  a live card is linked, with its QR", (await server.signatureDataFor(person.id, settings, "https://x.test"))?.qrUrl === "https://x.test/c/zzprobe-sig-person/qr");
+  cardsOn = false;
+  ok("  nor while the Cards module is off", !(await server.signatureDataFor(person.id, settings, "https://x.test"))?.cardUrl);
+  cardsOn = true;
   await db.digitalCard.update({ where: { userId: person.id }, data: { active: false } });
   ok("  and a switched-off one isn't", !(await server.signatureDataFor(person.id, settings, "https://x.test"))?.cardUrl);
 
@@ -187,6 +206,12 @@ async function withDb() {
   ok("unlocked, a person may pick any of the twelve", (await actions.updateMySignature({ templateKey: "centered", mobile: "" })).ok && (await actions.getMySignature()).ok);
   const picked = await actions.getMySignature();
   ok("  and their pick is their signature", picked.ok && picked.data.selectedKey === "centered" && picked.data.choices.length === 12);
+  await actions.updateMySignature({ mobile: "+91 97777 66666" });
+  const kept = await actions.getMySignature();
+  ok("  saving only a mobile leaves their pick alone", kept.ok && kept.data.selectedKey === "centered" && kept.data.html.includes("97777 66666"));
+  await actions.updateMySignature({ templateKey: null, mobile: "" });
+  const back = await actions.getMySignature();
+  ok("  and clearing it goes back to the company's template", back.ok && back.data.selectedKey === "portrait");
 }
 
 async function main() {

@@ -6,7 +6,7 @@ import { Check, Copy, Lock } from "lucide-react";
 import type { MySignature } from "@/actions/signatures";
 import { saveSignatureSettings, updateMySignature } from "@/actions/signatures";
 import { SOCIALS, type SocialKey } from "@/lib/signatures/render";
-import { SignatureFrame, copyRichHtml } from "@/components/signatures/frame";
+import { SignatureFrame, copyRichHtml, copyText } from "@/components/signatures/frame";
 import { Card, CardContent, Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -21,14 +21,14 @@ export function MySignatureView({ data }: { data: MySignature }) {
   const [pending, start] = useTransition();
 
   async function copy(kind: "rich" | "html") {
-    const ok = kind === "rich" ? await copyRichHtml(data.html, data.text) : await navigator.clipboard?.writeText(data.html).then(() => true, () => false);
+    const ok = kind === "rich" ? await copyRichHtml(data.html, data.text) : await copyText(data.html);
     if (ok) {
       setCopied(kind);
       setTimeout(() => setCopied(null), 2500);
     }
   }
 
-  function save(templateKey: string | null, nextMobile = mobile) {
+  function save(templateKey: string | undefined, nextMobile = mobile) {
     setError(null);
     setNotice(null);
     start(async () => {
@@ -59,7 +59,7 @@ export function MySignatureView({ data }: { data: MySignature }) {
             </Button>
           </div>
           <div className="overflow-hidden rounded-base border border-line bg-white">
-            <SignatureFrame html={data.html} height={260} title="Your signature" />
+            <SignatureFrame html={data.html} height={360} title="Your signature" />
           </div>
           <p className="text-xs text-muted">
             <strong>Gmail:</strong> Settings → See all settings → Signature → paste. <strong>Outlook:</strong> Settings → Mail → Compose and reply → paste.{" "}
@@ -75,7 +75,7 @@ export function MySignatureView({ data }: { data: MySignature }) {
               <Label htmlFor="sig-mobile">Mobile on your signature (optional)</Label>
               <Input id="sig-mobile" type="tel" value={mobile} maxLength={32} onChange={(e) => setMobile(e.target.value)} />
             </div>
-            <Button type="button" size="sm" variant="secondary" disabled={pending || mobile === data.mobile} onClick={() => save(data.locked ? null : data.selectedKey)}>
+            <Button type="button" size="sm" variant="secondary" disabled={pending || mobile === data.mobile} onClick={() => save(undefined)}>
               Save
             </Button>
           </div>
@@ -96,11 +96,18 @@ export function MySignatureView({ data }: { data: MySignature }) {
           ) : (
             <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {data.choices.map((c) => (
-                <button
+                <div
                   key={c.key}
-                  type="button"
-                  disabled={pending}
-                  onClick={() => save(c.key)}
+                  role="button"
+                  tabIndex={0}
+                  aria-disabled={pending}
+                  onClick={() => !pending && save(c.key)}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === " ") && !pending) {
+                      e.preventDefault();
+                      save(c.key);
+                    }
+                  }}
                   aria-pressed={c.key === data.selectedKey}
                   className={`rounded-base border p-3 text-left ${c.key === data.selectedKey ? "border-brand ring-2 ring-brand/30" : "border-line hover:border-line-strong"}`}
                 >
@@ -112,7 +119,7 @@ export function MySignatureView({ data }: { data: MySignature }) {
                   <span className="pointer-events-none mt-2 block overflow-hidden rounded border border-line bg-white">
                     <SignatureFrame html={c.html} height={140} scale={0.6} title={`${c.name} template`} />
                   </span>
-                </button>
+                </div>
               ))}
             </div>
           )}

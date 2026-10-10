@@ -8,8 +8,41 @@ import { cleanData, DEFAULT_ACCENT, SOCIALS, type SignatureData, type SignatureL
  * layout, under a "Premium" watermark, as a PNG — no HTML to copy.
  *
  * Images are placeholders — initials for a photo, a box for a logo, a pattern for a QR code — never
- * the URLs typed into the form: the server fetches nothing a visitor names.
+ * the URLs typed into the form. Text is cut to what the bundled font draws (Latin), because for
+ * anything else — Devanagari, an emoji — the renderer would fetch a font or an image from the web,
+ * sending the visitor's text with the request. So the server fetches nothing at all.
  */
+
+/** Latin letters, digits and everyday punctuation; accents folded; anything else dropped. */
+export function drawable(v: string | undefined): string | undefined {
+  if (!v) return v;
+  const out = v
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E\u00B7\u2013\u2014\u2019]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return out || undefined;
+}
+
+function drawableData(d: SignatureData): SignatureData {
+  const socials: SignatureData["socials"] = {};
+  for (const [k, v] of Object.entries(d.socials ?? {})) if (drawable(v)) socials[k as keyof typeof socials] = drawable(v);
+  return {
+    ...d,
+    name: drawable(d.name) ?? "Your name",
+    title: drawable(d.title),
+    department: drawable(d.department),
+    company: drawable(d.company),
+    phone: drawable(d.phone),
+    mobile: drawable(d.mobile),
+    email: drawable(d.email),
+    website: drawable(d.website),
+    address: drawable(d.address),
+    disclaimer: drawable(d.disclaimer),
+    socials,
+  };
+}
 
 export const PREVIEW_WIDTH = 640;
 export const PREVIEW_HEIGHT = 300;
@@ -203,7 +236,7 @@ function Layout({ layout, d }: { layout: SignatureLayout; d: SignatureData }) {
 
 /** The watermarked PNG for one premium template, filled with the visitor's details. */
 export function renderPremiumPreview(layout: SignatureLayout, raw: SignatureData): ImageResponse {
-  const d = cleanData(raw);
+  const d = drawableData(cleanData(raw));
   return new ImageResponse(
     (
       <div style={{ display: "flex", position: "relative", width: "100%", height: "100%", background: "#ffffff", padding: 24, fontFamily: "Geist, sans-serif" }}>

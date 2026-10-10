@@ -5,6 +5,7 @@ import { digestSecret } from "@/lib/crypto";
 import { cardCompany, cardOffReason, workspaceToday } from "@/lib/cards/server";
 import { SOCIALS, type SignatureData, type SocialKey } from "@/lib/signatures/render";
 import { layoutByKey } from "@/lib/signatures/premium";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 /**
  * Deskzo Signatures on the server: the company's settings, and a person's signature built from their
@@ -112,9 +113,13 @@ export async function signatureDataFor(userId: string, settings: SignatureSettin
     workspaceToday(),
   ]);
   if (!user) return null;
+  // A card link only where Cards is on — otherwise its page and QR answer 404 in every email.
+  const cardsOn = settings.showCard && !!user.digitalCard && (await moduleAvailableForTenant("cards"));
+  // /sig/logo serves only png, jpeg, webp or gif; an SVG letterhead would be a broken image.
+  const logoServable = !!company.logoDataUrl && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(company.logoDataUrl);
   const b = user.branch;
   const branchAddress = b ? [b.addressLine1, b.addressLine2, b.city, b.state, b.pincode].filter((p) => p?.trim()).join(", ") : "";
-  const card = user.digitalCard && cardOffReason(user.digitalCard, user, today) === null ? user.digitalCard : null;
+  const card = cardsOn && user.digitalCard && cardOffReason(user.digitalCard, user, today) === null ? user.digitalCard : null;
   return {
     name: user.name,
     title: user.employeeProfile?.designation ?? undefined,
@@ -125,7 +130,7 @@ export async function signatureDataFor(userId: string, settings: SignatureSettin
     email: user.email,
     website: settings.website ?? undefined,
     address: branchAddress || company.address || undefined,
-    logoUrl: company.logoDataUrl ? `${origin}/sig/logo` : undefined,
+    logoUrl: logoServable ? `${origin}/sig/logo` : undefined,
     photoUrl: settings.showPhoto && user.photoUpdatedAt ? `${origin}/sig/p/${await photoToken(user.id)}?v=${user.photoUpdatedAt.getTime()}` : undefined,
     accent: settings.accentColor,
     socials: settings.socials,

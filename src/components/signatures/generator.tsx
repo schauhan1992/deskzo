@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Lock } from "lucide-react";
 import {
   DEFAULT_ACCENT,
   SAMPLE_SIGNATURE,
   SOCIALS,
+  cleanData,
   renderSignatureHtml,
   renderSignatureText,
   type PremiumTeaser,
@@ -14,7 +15,7 @@ import {
   type SocialKey,
 } from "@/lib/signatures/render";
 import { buttonClasses } from "@/components/site/ui";
-import { SignatureFrame, copyRichHtml } from "@/components/signatures/frame";
+import { SignatureFrame, copyRichHtml, copyText } from "@/components/signatures/frame";
 
 type Form = Required<Pick<SignatureData, "name" | "title" | "company" | "phone" | "mobile" | "email" | "website" | "address" | "logoUrl">> & {
   accent: string;
@@ -42,9 +43,10 @@ function dataOf(form: Form): SignatureData {
   return { ...form, name: form.name.trim() || "Your name" };
 }
 
-/** Base64url of UTF-8 JSON — what the preview image route reads. */
+/** Base64url of UTF-8 JSON — what the preview image route reads — cut to what it draws anyway. */
 function encode(d: SignatureData): string {
-  const bytes = new TextEncoder().encode(JSON.stringify({ ...d, logoUrl: undefined, photoUrl: undefined }));
+  const c = cleanData(d);
+  const bytes = new TextEncoder().encode(JSON.stringify({ ...c, address: c.address?.slice(0, 120), logoUrl: undefined, photoUrl: undefined, banner: undefined, cardUrl: undefined, qrUrl: undefined }));
   let bin = "";
   bytes.forEach((b) => (bin += String.fromCharCode(b)));
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -73,6 +75,21 @@ export function SignatureGenerator({
   const [selected, setSelected] = useState<string>(freeLayouts[0]!.key);
   const [premiumOpen, setPremiumOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState<"rich" | "html" | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  // The premium dialog: focus moves in, Escape closes it, and focus goes back to the tile that opened it.
+  useEffect(() => {
+    if (!premiumOpen) return;
+    dialogRef.current?.querySelector<HTMLElement>("button, a")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPremiumOpen(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      openerRef.current?.focus();
+    };
+  }, [premiumOpen]);
   const data = useMemo(() => dataOf(form), [form]);
   // The pictures follow the typing, a beat behind, so each keystroke isn't eight image requests.
   const [imageData, setImageData] = useState(() => encode(data));
@@ -86,7 +103,7 @@ export function SignatureGenerator({
   const html = renderSignatureHtml(layout, data, { madeWith });
 
   async function copy(kind: "rich" | "html") {
-    const ok = kind === "rich" ? await copyRichHtml(html, renderSignatureText(data)) : await navigator.clipboard?.writeText(html).then(() => true, () => false);
+    const ok = kind === "rich" ? await copyRichHtml(html, renderSignatureText(data)) : await copyText(html);
     if (ok) {
       setCopied(kind);
       setTimeout(() => setCopied(null), 2500);
@@ -150,10 +167,17 @@ export function SignatureGenerator({
           </h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {freeLayouts.map((l) => (
-              <button
+              <div
                 key={l.key}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelected(l.key)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelected(l.key);
+                  }
+                }}
                 aria-pressed={selected === l.key}
                 className={`rounded-xl border bg-surface p-3 text-left transition ${selected === l.key ? "border-brand ring-2 ring-brand/30" : "border-line hover:border-line-strong"}`}
               >
@@ -162,7 +186,7 @@ export function SignatureGenerator({
                 <span className="pointer-events-none mt-2 block overflow-hidden rounded border border-line bg-white">
                   <SignatureFrame html={renderSignatureHtml(l, data)} height={150} scale={0.62} title={`${l.name} template`} />
                 </span>
-              </button>
+              </div>
             ))}
           </div>
 
@@ -178,7 +202,7 @@ export function SignatureGenerator({
               </button>
             </div>
             <div className="mt-3 overflow-hidden rounded border border-line bg-white">
-              <SignatureFrame html={html} height={layout.arrangement === "inline" ? 110 : 230} title="Your signature" />
+              <SignatureFrame html={html} height={layout.arrangement === "inline" ? 120 : layout.logo === "below" ? 300 : 240} title="Your signature" />
             </div>
             <p className="mt-3 text-xs text-muted">
               <strong>Gmail:</strong> Settings → See all settings → Signature → paste. <strong>Outlook:</strong> Settings → Mail → Compose and reply → paste.{" "}
@@ -201,7 +225,15 @@ export function SignatureGenerator({
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {premium.map((p) => (
-              <button key={p.key} type="button" onClick={() => setPremiumOpen(p.key)} className="rounded-xl border border-line bg-surface p-3 text-left hover:border-line-strong">
+              <button
+                key={p.key}
+                type="button"
+                onClick={(e) => {
+                  openerRef.current = e.currentTarget;
+                  setPremiumOpen(p.key);
+                }}
+                className="rounded-xl border border-line bg-surface p-3 text-left hover:border-line-strong"
+              >
                 <span className="flex items-center gap-1.5 text-sm font-medium text-text">
                   <Lock className="h-3.5 w-3.5 text-brand" aria-hidden />
                   {p.name}
@@ -218,7 +250,7 @@ export function SignatureGenerator({
 
       {premiumOpen && (
         <div role="dialog" aria-modal="true" aria-labelledby="premium-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPremiumOpen(null)}>
-          <div className="w-full max-w-xl rounded-xl bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div ref={dialogRef} className="w-full max-w-xl rounded-xl bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 id="premium-title" className="text-lg font-semibold text-text">
               {premium.find((p) => p.key === premiumOpen)?.name} is a premium template
             </h2>
