@@ -537,6 +537,8 @@ export type LeadRow = {
   company: string | null;
   phone: string | null;
   topic: string;
+  /** The product it is about (src/lib/products.ts key); null: none named. */
+  productKey: string | null;
   status: SiteLeadStatus;
   createdAt: Date;
   updatedAt: Date;

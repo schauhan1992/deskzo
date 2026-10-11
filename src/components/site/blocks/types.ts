@@ -259,6 +259,22 @@ export type SignatureGeneratorProps = {
   privacyNote?: string;
 };
 
+/**
+ * A product beside Deskzo One, on the product's page (src/components/site/blocks/product-vs-suite-view.tsx):
+ * the two side by side with their prices for the visitor's country, monthly or yearly, each with its own
+ * trial, then every module compared. Only the words around it are written; the rest is products.ts's.
+ */
+export type ProductVsSuiteProps = {
+  anchor?: string;
+  /** The product this page sells — any but Deskzo One. */
+  product: ProductKey;
+  eyebrow?: string;
+  heading: string;
+  intro?: string;
+  /** Before the "Book a demo of …" link under the cards. */
+  demoNote?: string;
+};
+
 export type BlockPropsMap = {
   hero: HeroProps;
   pageHeader: PageHeaderProps;
@@ -281,6 +297,7 @@ export type BlockPropsMap = {
   relatedLinks: RelatedLinksProps;
   moduleHighlights: ModuleHighlightsProps;
   signatureGenerator: SignatureGeneratorProps;
+  productVsSuite: ProductVsSuiteProps;
 };
 
 export type BlockType = keyof BlockPropsMap;
@@ -308,6 +325,7 @@ export const BLOCK_TYPES = [
   "relatedLinks",
   "moduleHighlights",
   "signatureGenerator",
+  "productVsSuite",
 ] as const satisfies readonly BlockType[];
 // Every block type is in the list: this fails to compile if one is added to BlockPropsMap and not here.
 type Assert<T extends true> = T;

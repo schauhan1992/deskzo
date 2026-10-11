@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { CONTACT_LIMITS, CONTACT_TOPICS, type ContactInput, type ContactResult, type ContactTopic } from "@/components/site/contact-fields";
+import { productByKey } from "@/lib/products";
 import { recordLead } from "@/lib/cms/leads";
 import { clientIpFrom } from "@/lib/client-ip";
 import { parseEmailAddress } from "@/lib/email-verification";
@@ -63,7 +64,9 @@ const TOPIC_TITLES: Record<ContactTopic, string> = { demo: "Demo", sales: "Sales
 
 /**
  * The contact form: checked, limited, kept in the CMS's leads inbox (src/lib/cms/leads.ts — with the
- * caller's address only when it is known), and mailed to PLATFORM_SALES_EMAIL (docs/runbook.md).
+ * caller's address only when it is known), and mailed to PLATFORM_SALES_EMAIL (docs/runbook.md). The
+ * product it is about (a product page's "Book a demo": `?product=books`) goes with it when products.ts
+ * knows it; anything else is no product, never a refusal.
  * Without one set the message is not mailed anywhere — a line is logged saying so, and the visitor is
  * still thanked. Once the lead is kept, a mail that fails is logged and the visitor is still thanked.
  * The platform's mailer sets no reply-to, so the visitor's address leads the message.
@@ -75,6 +78,7 @@ export async function sendContactRequest(input: ContactInput): Promise<ContactRe
   const company = oneLine(text(input?.company));
   const phone = oneLine(text(input?.phone));
   const topic = text(input?.topic) as ContactTopic;
+  const product = productByKey(text(input?.product).trim().toLowerCase());
   const message = text(input?.message).replace(/\r\n?/g, "\n").trim();
   const parsed = parseEmailAddress(text(input?.email));
   const email = parsed ? `${parsed.local}@${parsed.domain}` : null;
@@ -99,7 +103,7 @@ export async function sendContactRequest(input: ContactInput): Promise<ContactRe
 
   let stored = false;
   try {
-    stored = !!(await recordLead({ name, email, company: company || null, phone: phone || null, topic, message, ip }));
+    stored = !!(await recordLead({ name, email, company: company || null, phone: phone || null, topic, message, ip, productKey: product?.key ?? null }));
   } catch (err) {
     console.error(`[site] a contact request could not be kept in the leads inbox: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);
   }
@@ -113,12 +117,13 @@ export async function sendContactRequest(input: ContactInput): Promise<ContactRe
     await sendPlatformMail({
       type: "ALERTS",
       to,
-      subject: oneLine(`Contact form: ${TOPIC_TITLES[topic]} — ${company}`),
+      subject: oneLine(`Contact form: ${TOPIC_TITLES[topic]}${product ? ` of ${product.name}` : ""} — ${company}`),
       text: [
         `Reply to: ${email}`,
         "(Sent by the website's contact form. Replying to this email does not reach them — write to the address above.)",
         "",
         `Topic:    ${TOPIC_TITLES[topic]}`,
+        `Product:  ${product?.name ?? "—"}`,
         `Name:     ${name}`,
         `Company:  ${company}`,
         `Email:    ${email}`,

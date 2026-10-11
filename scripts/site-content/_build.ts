@@ -120,7 +120,7 @@ function ctaBlock(id: string, cta: { heading: string; body: string } | undefined
   };
 }
 
-function hero(id: string, eyebrow: string, heading: string, subheading: string, preview?: PreviewKind, primary: SiteAction = SIGNUP): SiteBlock {
+function hero(id: string, eyebrow: string, heading: string, subheading: string, preview?: PreviewKind, primary: SiteAction = SIGNUP, secondary: SiteAction = DEMO): SiteBlock {
   return {
     id,
     type: "hero",
@@ -129,7 +129,7 @@ function hero(id: string, eyebrow: string, heading: string, subheading: string, 
       heading,
       subheading,
       primary,
-      secondary: DEMO,
+      secondary,
       note: TRIAL_NOTE,
       noteInviteOnly: INVITE_NOTE,
       ...(preview ? { media: { kind: "preview", preview } } : {}),
@@ -280,16 +280,37 @@ export type ProductLineSpec = {
  * A product's page: the hero (its one h1), the answer-first opening, what is in it, how it works,
  * what it works with, the questions buyers ask, related pages, and the call to action — start a
  * trial, or talk to sales. Its trial buttons start a trial of this product alone (owner, 11 Oct 2026):
- * /signup?product=books.
+ * /signup?product=books; its demo and sales buttons name it on the contact form; and before the
+ * questions, the product beside Deskzo One — prices, trials and every module (the productVsSuite block).
  */
 export function productLinePage(spec: ProductLineSpec): SeedPage {
   const k = key(spec.slug);
   const product = PRODUCTS.find((p) => p.path === `/${spec.slug}`);
   if (!product) throw new Error(`No product in src/lib/products.ts has the path /${spec.slug}.`);
   const trial: SiteAction = { kind: "signup", product: product.key };
+  const ask = (topic: "demo" | "sales", label: string): SiteAction => ({ kind: "link", label, href: `/contact?topic=${topic}&product=${product.key}` });
+  const suite = PRODUCTS.find((p) => p.key === "one")!;
+  // Every product but Deskzo One is set beside it, as Adobe sets each app beside Creative Cloud (owner, 11 Oct 2026).
+  const besideSuite: SiteBlock[] =
+    product.key === "one"
+      ? []
+      : [
+          {
+            id: `${k}-plans`,
+            type: "productVsSuite",
+            props: {
+              anchor: "plans",
+              product: product.key,
+              eyebrow: "Plans",
+              heading: `${product.name} on its own, or every product with ${suite.name}`,
+              intro: `Pay for ${product.name} alone, monthly or yearly — or for ${suite.name}: every product in one workspace, on one set of records, so what one team enters the others already have.`,
+              demoNote: "Not sure which fits?",
+            },
+          },
+        ];
   const answer: RichNode[] = [p(spec.answer.answer), ...(spec.answer.more ?? []).map((m) => p(m)), ...(spec.answer.list?.length ? [ul(...spec.answer.list)] : [])];
   const blocks: SiteBlock[] = [
-    hero(`${k}-hero`, spec.eyebrow, spec.h1, spec.lead, spec.heroPreview, trial),
+    hero(`${k}-hero`, spec.eyebrow, spec.h1, spec.lead, spec.heroPreview, trial, ask("demo", "Book a demo")),
     { id: `${k}-answer`, type: "richText", props: { heading: spec.answer.question, content: answer } },
     ...(spec.contents
       ? [{ id: `${k}-contents`, type: "featureGrid" as const, props: { anchor: "modules", heading: spec.contents.heading, ...(spec.contents.intro ? { intro: spec.contents.intro } : {}), columns: 3 as const, items: spec.contents.items } }]
@@ -299,10 +320,11 @@ export function productLinePage(spec: ProductLineSpec): SeedPage {
     ...(spec.worksWith
       ? [{ id: `${k}-works-with`, type: "relatedLinks" as const, props: { heading: spec.worksWith.heading, ...(spec.worksWith.intro ? { intro: spec.worksWith.intro } : {}), links: spec.worksWith.links.map((l) => ({ label: l.label, href: l.path, description: l.description })) } }]
       : []),
+    ...besideSuite,
     faqBlock(`${k}-faq`, spec.faqHeading, spec.faq),
-    // Prices aren't stated on a product's page: the pricing page is always one of its related pages.
+    // No price is written into a product's page — the plans block reads them live — and the pricing page is always one of its related pages.
     related(`${k}-related`, "Related pages", spec.related.some((r) => (typeof r === "string" ? r : r.path) === "/pricing") ? spec.related : [...spec.related, "/pricing"]),
-    ctaBlock(`${k}-cta`, spec.cta, SALES, trial),
+    ctaBlock(`${k}-cta`, spec.cta, ask("sales", "Talk to sales"), trial),
   ];
   return { slug: spec.slug, document: { title: spec.name, seo: { title: spec.seo.title, absoluteTitle: true, description: spec.seo.description, keywords: [...spec.seo.keywords] }, blocks } };
 }

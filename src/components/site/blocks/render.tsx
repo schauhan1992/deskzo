@@ -21,6 +21,7 @@ import { SignatureGeneratorBlock } from "@/components/site/blocks/signature-gene
 import { StatsBlock } from "@/components/site/blocks/stats";
 import { TestimonialBlock } from "@/components/site/blocks/testimonial";
 import { WorkspaceSigninBlock } from "@/components/site/blocks/workspace-signin";
+import { ProductVsSuiteBlock } from "@/components/site/blocks/product-vs-suite";
 
 /**
  * A page's blocks, in order. A block of a type this code does not know — content saved by a newer
@@ -72,6 +73,8 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext, key: string): Rea
       return <RelatedLinksBlock key={key} props={block.props} ctx={ctx} />;
     case "moduleHighlights":
       return <ModuleHighlightsBlock key={key} props={block.props} ctx={ctx} />;
+    case "productVsSuite":
+      return <ProductVsSuiteBlock key={key} props={block.props} ctx={ctx} />;
     case "signatureGenerator":
       return <SignatureGeneratorBlock key={key} props={block.props} ctx={ctx} />;
     default:

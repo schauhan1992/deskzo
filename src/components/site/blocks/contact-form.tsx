@@ -1,16 +1,19 @@
 import { ArrowRight } from "lucide-react";
 import type { ContactFormProps, SiteRenderContext } from "@/components/site/blocks/types";
 import { CONTACT_TOPICS, type ContactTopic } from "@/components/site/contact-fields";
+import { productByKey } from "@/lib/products";
 import { ContactForm } from "@/components/site/forms/contact-form";
 import { anchorId, fill } from "@/components/site/links";
 import { Container, SiteAnchor } from "@/components/site/ui";
 import { parseEmailAddress } from "@/lib/email-verification";
 
-/** The contact form, and beside it the other ways in. `?topic=demo` (etc.) picks the topic. */
+/** The contact form, and beside it the other ways in. `?topic=demo` (etc.) picks the topic, `?product=books` the product. */
 export function ContactFormBlock({ props, ctx }: { props: ContactFormProps; ctx: SiteRenderContext }) {
   const t = (s?: string) => fill(s, ctx);
   const asked = String(ctx.searchParams.topic ?? "") as ContactTopic;
   const defaultTopic: ContactTopic = CONTACT_TOPICS.includes(asked) ? asked : "demo";
+  // A product page's "Book a demo" names its product (`?product=books`); only one products.ts knows is taken.
+  const defaultProduct = productByKey(String(ctx.searchParams.product ?? "").trim().toLowerCase())?.key ?? "";
   const topics = { demo: t(props.topics.demo), sales: t(props.topics.sales), support: t(props.topics.support), other: t(props.topics.other) };
   return (
     <section id={anchorId(props.anchor)} className="scroll-mt-20 py-12 sm:py-16">
@@ -20,7 +23,7 @@ export function ContactFormBlock({ props, ctx }: { props: ContactFormProps; ctx:
             <h2 className="text-xl font-semibold text-text">{t(props.heading)}</h2>
             {props.intro && <p className="mt-2 text-sm leading-6 text-muted">{t(props.intro)}</p>}
             <div className="mt-6">
-              <ContactForm topics={topics} defaultTopic={defaultTopic} submitLabel={t(props.submitLabel)} successHeading={t(props.successHeading)} successBody={t(props.successBody)} />
+              <ContactForm topics={topics} defaultTopic={defaultTopic} defaultProduct={defaultProduct} submitLabel={t(props.submitLabel)} successHeading={t(props.successHeading)} successBody={t(props.successBody)} />
             </div>
           </div>
           {!!props.aside?.length && (

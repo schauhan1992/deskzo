@@ -17,6 +17,7 @@ import { listLeads } from "@/lib/cms/leads";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, LEAD_TOPICS, LEAD_TOPIC_LABELS, cmsCapsFor, type LeadFilters, type SiteLeadStatus } from "@/lib/cms/types";
 import { consoleClock } from "@/lib/platform/console-clock";
+import { productByKey } from "@/lib/products";
 
 export const metadata: Metadata = { title: "Leads" };
 
@@ -108,6 +109,7 @@ export default async function CmsLeadsPage({ searchParams }: PageProps<"/platfor
                     <Td muted>{lead.company ?? "—"}</Td>
                     <Td muted nowrap>
                       {topicLabel(lead.topic)}
+                      {lead.productKey && <span className="block text-xs text-subtle">{productByKey(lead.productKey)?.name ?? lead.productKey}</span>}
                     </Td>
                     <Td>
                       <span className="inline-flex items-center gap-1.5">

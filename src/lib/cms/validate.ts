@@ -12,7 +12,7 @@ import {
 } from "@/components/site/blocks/types";
 import { BUILTIN_PAGE_SLUGS, RESERVED_PAGE_SEGMENTS, type CmsIssue, type PageDocument, type PostSeo } from "@/lib/cms/types";
 import { keywordProblems, MAX_KEYWORDS, normaliseKeywords } from "@/lib/seo/keywords";
-import { productByKey } from "@/lib/products";
+import { PRODUCT_KEYS, productByKey } from "@/lib/products";
 
 /**
  * Checking what an editor sends before it is stored — against the site's own content model
@@ -186,6 +186,8 @@ const BLOCK_SPECS = {
     privacyNote: text(300),
   },
   signupForm: { heading: text(HEADING, true), body: text(BODY), bodyInviteOnly: text(BODY), asideHeading: text(HEADING), asideItems: { k: "texts", max: 300, maxItems: 12 } },
+  // Any product but Deskzo One, which it is set beside.
+  productVsSuite: { anchor: { k: "anchor" }, product: { k: "enum", values: PRODUCT_KEYS.filter((k) => k !== "one"), req: true }, eyebrow: text(LABEL), heading: text(HEADING, true), intro: text(BODY), demoNote: text(300) },
   comparisonTable: {
     ...SECTION_HEAD,
     competitor: text(LABEL, true),

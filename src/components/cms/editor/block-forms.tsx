@@ -21,6 +21,7 @@ import type {
   RichTextProps,
   SecurityHighlightsProps,
   SignatureGeneratorProps,
+  ProductVsSuiteProps,
   SignupFormProps,
   SiteBlock,
   StatsProps,
@@ -47,6 +48,7 @@ import {
 } from "@/components/cms/editor/fields";
 import { RichTextField } from "@/components/cms/editor/rich-text-field";
 import { MODULE_REGISTRY } from "@/lib/modules";
+import { PRODUCTS, type ProductKey } from "@/lib/products";
 
 /**
  * One hand-written form per block type, producing exactly the props in
@@ -366,6 +368,32 @@ function CtaForm({ props, onChange }: FormProps<"cta">) {
       <TextField label="Words" name="body" value={props.body} onChange={(v) => set("body", v)} max={BODY} multiline rows={2} />
       <ActionField label="First button" name="primary" value={props.primary} onChange={(v) => set("primary", v)} />
       <ActionField label="Second button" name="secondary" value={props.secondary} onChange={(v) => set("secondary", v)} />
+    </>
+  );
+}
+
+function ProductVsSuiteForm({ props, onChange }: FormProps<"productVsSuite">) {
+  const set = <K extends keyof ProductVsSuiteProps>(key: K, value: ProductVsSuiteProps[K]) => onChange({ ...props, [key]: value });
+  return (
+    <>
+      <p className="rounded-md border border-info/30 bg-info-bg px-3 py-2 text-xs text-info">
+        The two cards, their prices and the module comparison are built from the product list and the plans on sale, for the visitor&apos;s country. These are the words around them.
+      </p>
+      <SelectField<ProductKey>
+        label="Product"
+        name="product"
+        value={props.product}
+        options={PRODUCTS.filter((p) => p.key !== "one").map((p) => ({ value: p.key, label: p.name }))}
+        onChange={(v) => v && set("product", v)}
+        hint="Set beside Deskzo One. Its trial button starts this product alone; Deskzo One's, every product."
+      />
+      <Row>
+        <TextField label="Eyebrow" name="eyebrow" value={props.eyebrow} onChange={(v) => set("eyebrow", v)} max={80} />
+        <AnchorField value={props.anchor} onChange={(v) => set("anchor", v)} />
+      </Row>
+      <TextField label="Heading" name="heading" value={props.heading} onChange={(v) => set("heading", v)} max={HEADING} required />
+      <TextField label="Introduction" name="intro" value={props.intro} onChange={(v) => set("intro", v)} max={BODY} multiline rows={2} />
+      <TextField label="Before the demo link" name="demoNote" value={props.demoNote} onChange={(v) => set("demoNote", v)} max={300} hint={'Followed by "Book a demo of …", which opens the contact form with this product chosen.'} />
     </>
   );
 }
@@ -793,6 +821,8 @@ export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (ne
       return <ModuleHighlightsForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     case "signatureGenerator":
       return <SignatureGeneratorForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "productVsSuite":
+      return <ProductVsSuiteForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     default:
       return <p className="text-sm text-muted">This block&apos;s type is not known to this editor. It is kept as it is.</p>;
   }

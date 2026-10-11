@@ -74,6 +74,12 @@ export const BLOCK_INFO: Record<BlockType, BlockInfo> = {
     group: "Sections",
   },
   relatedLinks: { label: "Related links", description: "Cards linking to other pages on this site, each with a line on what is there.", icon: Link2, group: "Sections" },
+  productVsSuite: {
+    label: "Product and Deskzo One",
+    description: "A product beside Deskzo One: both with their live prices, monthly or yearly, and their own trials — then every module compared. Built from the product list; you write the words around it.",
+    icon: Scale,
+    group: "Live data and forms",
+  },
   signatureGenerator: {
     label: "Email signature generator",
     description: "The free generator: visitors build a signature and copy it into their email. Built in the browser; nothing is sent anywhere.",
@@ -165,6 +171,12 @@ const STARTERS: { [K in BlockType]: () => BlockPropsMap[K] } = {
       { label: "Plans and pricing", href: "/pricing", description: "What each plan includes, in your country's currency." },
       { label: "Security", href: "/security", description: "How each company's data is kept apart and protected." },
     ],
+  }),
+  productVsSuite: () => ({
+    product: "crm",
+    anchor: "plans",
+    heading: "Deskzo CRM on its own, or every product with Deskzo One",
+    intro: "Start with the one you need. Deskzo One is every product in one workspace, on one set of records.",
   }),
   signatureGenerator: () => ({
     upsellHeading: "Signatures for your whole team",

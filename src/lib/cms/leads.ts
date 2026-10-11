@@ -1,6 +1,7 @@
 import type { Prisma, SiteLeadStatus } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CmsRefused, LEAD_STATUSES, LEAD_TOPICS, type LeadDetail, type LeadFilters, type LeadRow, type Paged } from "@/lib/cms/types";
+import { productByKey } from "@/lib/products";
 import { csvRow } from "@/lib/csv";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
@@ -18,7 +19,8 @@ export const LEADS_PAGE_SIZE = 30;
 export const LEADS_EXPORT_CAP = 10_000;
 
 /** What the contact form sends, already checked by it. */
-export type NewLead = { name: string; email: string; company: string | null; phone: string | null; topic: string; message: string; ip: string | null };
+/** `productKey`: the product it is about (src/lib/products.ts) — kept only when products.ts knows it. */
+export type NewLead = { name: string; email: string; company: string | null; phone: string | null; topic: string; message: string; ip: string | null; productKey?: string | null };
 
 /** Stores a contact request. Not an action: the site's action calls it after its own checks and limits. */
 export async function recordLead(lead: NewLead): Promise<string | null> {
@@ -32,6 +34,7 @@ export async function recordLead(lead: NewLead): Promise<string | null> {
       topic: (LEAD_TOPICS as readonly string[]).includes(lead.topic) ? lead.topic : "other",
       message: lead.message.slice(0, 4000),
       ip: lead.ip?.slice(0, 64) || null,
+      productKey: productByKey(lead.productKey)?.key ?? null,
     },
     select: { id: true, topic: true },
   });
@@ -67,7 +70,7 @@ async function whereOf(filters: LeadFilters, clock?: Clock): Promise<Prisma.Site
   };
 }
 
-const ROW_SELECT = { id: true, name: true, email: true, company: true, phone: true, topic: true, status: true, createdAt: true, updatedAt: true, handledBy: true, notes: true } as const;
+const ROW_SELECT = { id: true, name: true, email: true, company: true, phone: true, topic: true, productKey: true, status: true, createdAt: true, updatedAt: true, handledBy: true, notes: true } as const;
 
 /** The inbox: newest first, filtered, a page at a time — and how many there are of each status (over everything). */
 export async function listLeads(filters: LeadFilters = {}): Promise<Paged<LeadRow> & { counts: Record<SiteLeadStatus, number> }> {
@@ -100,6 +103,7 @@ export async function getLead(id: string): Promise<LeadDetail> {
     company: row.company,
     phone: row.phone,
     topic: row.topic,
+    productKey: row.productKey,
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -143,8 +147,8 @@ export async function exportLeadsCsv(filters: LeadFilters, actor: CmsActor, now 
   if (total > LEADS_EXPORT_CAP) throw new CmsRefused(`That is ${total.toLocaleString("en-IN")} leads — narrow the filters to ${LEADS_EXPORT_CAP.toLocaleString("en-IN")} or fewer.`);
   const rows = await controlDb().siteLead.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   const lines = [
-    csvRow([`Received (${clock.zone})`, "Name", "Email", "Company", "Phone", "Topic", "Status", "Message", "Notes"]),
-    ...rows.map((r) => csvRow([clock.dateTime(r.createdAt), r.name, r.email, r.company ?? "", r.phone ?? "", r.topic, r.status, r.message, r.notes ?? ""])),
+    csvRow([`Received (${clock.zone})`, "Name", "Email", "Company", "Phone", "Topic", "Product", "Status", "Message", "Notes"]),
+    ...rows.map((r) => csvRow([clock.dateTime(r.createdAt), r.name, r.email, r.company ?? "", r.phone ?? "", r.topic, productByKey(r.productKey)?.name ?? "", r.status, r.message, r.notes ?? ""])),
   ];
   await cmsAudit(actor, "lead.export", "lead", null, { rows: rows.length, filters: { status: filters.status ?? null, topic: filters.topic ?? null, from: filters.from ?? null, to: filters.to ?? null, q: !!filters.q } });
   return { filename: `website-leads-${clock.dateKey(now)}.csv`, csv: `${lines.join("\r\n")}\r\n`, rows: rows.length };

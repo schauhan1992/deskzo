@@ -1360,6 +1360,9 @@ model SiteLead {
   updatedAt DateTime       @updatedAt
   /// Who last changed its status or notes: "cms:<id>".
   handledBy String?
+  /// The product it is about — src/lib/products.ts keys, from a product page's "Book a demo" (/contact?topic=demo&product=books)
+  /// or chosen on the form. None: no product named.
+  productKey String?
 
   @@index([status, createdAt])
   @@index([createdAt])

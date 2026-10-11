@@ -11,6 +11,7 @@ import { getLead } from "@/lib/cms/leads";
 import { CMS_PAGE_ROLES, CMS_ROUTES } from "@/lib/cms/nav";
 import { CmsRefused, LEAD_STATUS_LABELS, LEAD_TOPIC_LABELS, cmsCapsFor, type LeadDetail } from "@/lib/cms/types";
 import { consoleClock } from "@/lib/platform/console-clock";
+import { productByKey } from "@/lib/products";
 
 export const metadata: Metadata = { title: "Lead" };
 
@@ -38,7 +39,8 @@ export default async function CmsLeadPage({ params }: PageProps<"/platform-cms/l
   }
 
   const clock = await consoleClock();
-  const subject = encodeURIComponent(`Re: your ${topicLabel(lead.topic).toLowerCase()} request`);
+  const product = productByKey(lead.productKey);
+  const subject = encodeURIComponent(`Re: your ${topicLabel(lead.topic).toLowerCase()} request${product ? ` for ${product.name}` : ""}`);
 
   return (
     <>
@@ -107,6 +109,7 @@ export default async function CmsLeadPage({ params }: PageProps<"/platform-cms/l
                   ),
                 },
                 { term: "Topic", value: topicLabel(lead.topic) },
+                { term: "Product", value: product ? product.name : <span className="text-subtle">None named</span> },
                 { term: "Received", value: clock.dateTime(lead.createdAt) },
                 { term: "Sent from", value: lead.ip ?? <span className="text-subtle">Not recorded</span> },
               ]}

@@ -17,6 +17,8 @@ export type ContactInput = {
   phone?: string;
   topic: string;
   message: string;
+  /** The product it is about (src/lib/products.ts key) — from a product page's "Book a demo", or chosen; empty: none. */
+  product?: string;
   /** Left empty by people; filled by bots that fill every field. */
   website?: string;
 };

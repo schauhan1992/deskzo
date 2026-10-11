@@ -9,6 +9,7 @@ import type { ContactTopicLabels } from "@/components/site/blocks/types";
 import { Honeypot } from "@/components/site/forms/honeypot";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { PRODUCTS } from "@/lib/products";
 
 type Props = {
   topics: ContactTopicLabels;
@@ -16,13 +17,15 @@ type Props = {
   submitLabel: string;
   successHeading: string;
   successBody: string;
+  /** The product it starts about — from a product page's "Book a demo" (`?product=books`); empty: none. */
+  defaultProduct?: string;
 };
 
-const EMPTY = (topic: ContactTopic): ContactInput => ({ name: "", email: "", company: "", phone: "", topic, message: "", website: "" });
+const EMPTY = (topic: ContactTopic, product = ""): ContactInput => ({ name: "", email: "", company: "", phone: "", topic, product, message: "", website: "" });
 
 /** The contact form: checked here for the obvious, and again by `sendContactRequest`, which decides. */
-export function ContactForm({ topics, defaultTopic, submitLabel, successHeading, successBody }: Props) {
-  const [form, setForm] = useState<ContactInput>(() => EMPTY(defaultTopic));
+export function ContactForm({ topics, defaultTopic, submitLabel, successHeading, successBody, defaultProduct = "" }: Props) {
+  const [form, setForm] = useState<ContactInput>(() => EMPTY(defaultTopic, defaultProduct));
   const [problem, setProblem] = useState<{ field?: ContactField; error: string } | null>(null);
   const [sent, setSent] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -49,7 +52,7 @@ export function ContactForm({ topics, defaultTopic, submitLabel, successHeading,
           type="button"
           variant="secondary"
           onClick={() => {
-            setForm(EMPTY(defaultTopic));
+            setForm(EMPTY(defaultTopic, defaultProduct));
             setSent(false);
           }}
         >
@@ -100,16 +103,31 @@ export function ContactForm({ topics, defaultTopic, submitLabel, successHeading,
           {fieldProblem("phone")}
         </div>
       </div>
-      <div>
-        <Label htmlFor="contact-topic">What is it about?</Label>
-        <Select id="contact-topic" className="mt-1.5" value={form.topic} onChange={set("topic")} {...invalid("topic")}>
-          {CONTACT_TOPICS.map((topic) => (
-            <option key={topic} value={topic}>
-              {topics[topic]}
-            </option>
-          ))}
-        </Select>
-        {fieldProblem("topic")}
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="contact-topic">What is it about?</Label>
+          <Select id="contact-topic" className="mt-1.5" value={form.topic} onChange={set("topic")} {...invalid("topic")}>
+            {CONTACT_TOPICS.map((topic) => (
+              <option key={topic} value={topic}>
+                {topics[topic]}
+              </option>
+            ))}
+          </Select>
+          {fieldProblem("topic")}
+        </div>
+        <div>
+          <Label htmlFor="contact-product">
+            Which product? <span className="font-normal text-subtle">(optional)</span>
+          </Label>
+          <Select id="contact-product" className="mt-1.5" value={form.product ?? ""} onChange={set("product")}>
+            <option value="">Not sure yet</option>
+            {PRODUCTS.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.key === "one" ? `${p.name} — every product` : p.name}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
       <div>
         <Label htmlFor="contact-message">Message</Label>

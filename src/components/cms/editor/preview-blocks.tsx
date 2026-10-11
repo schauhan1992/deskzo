@@ -20,6 +20,7 @@ import { RichTextBlock } from "@/components/site/blocks/rich-text";
 import { SecurityHighlightsBlock } from "@/components/site/blocks/security-highlights";
 import { SignupFormBlock } from "@/components/site/blocks/signup-form";
 import { SignatureGeneratorBlock } from "@/components/site/blocks/signature-generator";
+import { ProductVsSuiteView } from "@/components/site/blocks/product-vs-suite-view";
 import { StatsBlock } from "@/components/site/blocks/stats";
 import { TestimonialBlock } from "@/components/site/blocks/testimonial";
 import { WorkspaceSigninBlock } from "@/components/site/blocks/workspace-signin";
@@ -157,6 +158,9 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext): ReactNode {
       return <ModuleHighlightsBlock props={block.props} ctx={ctx} />;
     case "signatureGenerator":
       return <SignatureGeneratorBlock props={block.props} ctx={ctx} />;
+    case "productVsSuite":
+      // Prices are read when the page is served; the preview shows the rest, its cards pointing to the pricing page.
+      return <ProductVsSuiteView props={block.props} ctx={ctx} offer={null} />;
     default:
       return null;
   }

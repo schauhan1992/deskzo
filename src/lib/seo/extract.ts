@@ -19,6 +19,8 @@ import {
 import { normaliseKeywords } from "@/lib/seo/keywords";
 import { jsonLdFor, shownUpdatedAt } from "@/lib/seo/schema";
 import { countWords, squash } from "@/lib/seo/text";
+import { productByKey } from "@/lib/products";
+import { comparisonRows } from "@/components/site/blocks/product-vs-suite-view";
 import type {
   SeoContent,
   SeoContentImage,
@@ -519,6 +521,22 @@ function block(c: Collector, b: SiteBlock, index: number, root: "blocks" | "body
         }
       }
       break;
+    case "productVsSuite": {
+      // The cards and the table are products.ts's, so what a reader sees is read from there: both names,
+      // both taglines, and every module in the comparison.
+      sectionHead(c, p, t, field);
+      const product = productByKey(typeof p.product === "string" ? p.product : null);
+      const suite = productByKey("one");
+      if (product && suite && product.key !== "one") {
+        heading(c, 3, product.name, field);
+        paragraph(c, product.tagline, field);
+        heading(c, 3, suite.name, field);
+        paragraph(c, suite.tagline, field);
+        for (const g of comparisonRows(product, "IN")) paragraph(c, `${g.title}: ${g.rows.map((r) => r.label).join(", ")}.`, field);
+      }
+      paragraph(c, t(p.demoNote), field);
+      break;
+    }
     case "signatureGenerator":
       // The generator itself is drawn in the browser; what the content holds is the words around it.
       heading(c, 2, t(p.heading), field);

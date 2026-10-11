@@ -668,6 +668,86 @@ async function main() {
     ok("the form says whose trial it is, with every product a click away", booksText.includes("Your free trial: Deskzo Books") && booksText.includes(product("books").tagline) && booksText.includes("Try every product instead"), booksText.slice(0, 300));
     ok("  Deskzo One's says every product, with nothing to switch to; with no choice, nothing is said", oneText.includes("Your free trial: Deskzo One, every product") && !oneText.includes("Try every product instead") && !plainText.includes("Your free trial"));
 
+    // ─── A product beside Deskzo One, and a demo of it ─────────────────────────────────────
+    section("A product beside Deskzo One, on its page — and a demo of that product");
+    const { ProductVsSuiteBlock } = require("../src/components/site/blocks/product-vs-suite") as typeof import("../src/components/site/blocks/product-vs-suite");
+    const { comparisonRows } = require("../src/components/site/blocks/product-vs-suite-view") as typeof import("../src/components/site/blocks/product-vs-suite-view");
+    const { ContactFormBlock } = require("../src/components/site/blocks/contact-form") as typeof import("../src/components/site/blocks/contact-form");
+    const siteActions = require("../src/actions/platform/site") as typeof import("../src/actions/platform/site");
+    const beside = async (key: Key, searchParams: Record<string, string>) =>
+      html(await ProductVsSuiteBlock({ props: { product: key, anchor: "plans", heading: "Zz heading", demoNote: "Not sure which fits?" }, ctx: { ...siteCtx, searchParams, workspaceSuffix: ".localhost:3000" } }));
+    const crmIn = await beside("crm", { country: "IN" });
+    const crmYear = await beside("crm", { country: "IN", interval: "YEAR" });
+    const booksUs = await beside("books", { country: "US" });
+    const vaultIn = await beside("vault", { country: "IN" });
+    save("beside-one-crm-in", crmIn);
+    save("beside-one-crm-in-yearly", crmYear);
+    save("beside-one-books-us", booksUs);
+    const [crmText, yearText, usText] = [textOf(crmIn), textOf(crmYear), textOf(booksUs)];
+    ok(
+      "CRM beside Deskzo One, in India: each with its price this month, CRM first, each with its own trial",
+      inOrder(crmText, ["Deskzo CRM", "₹1,499 / month", "Deskzo One", "₹4,999 / month"]) && inOrder(crmIn, ['href="/signup?product=crm"', 'href="/signup?product=one"']),
+      crmText.slice(0, 500),
+    );
+    ok("  yearly: CRM's year with its saving; Deskzo One, with no yearly price, its month", yearText.includes("₹14,990") && yearText.includes("Save 17%") && yearText.includes("₹4,999") && crmYear.includes('aria-current="page" class=') && crmYear.includes("interval=MONTH#plans"));
+    ok("  a demo of CRM, and every plan for the country, under the cards", crmIn.includes('href="/contact?topic=demo&amp;product=crm"') && crmText.includes("Book a demo of Deskzo CRM") && crmIn.includes('href="/pricing?country=IN"'));
+    ok("  Deskzo One holds everything in CRM, plus every other product, and says Revenue & Close is included", inOrder(crmText, ["Everything in Deskzo CRM, plus", "Deskzo Books", "Deskzo Signatures", "Revenue & Close"]) && !crmText.slice(crmText.indexOf("Everything in Deskzo CRM, plus")).startsWith("Everything in Deskzo CRM, plus Deskzo CRM"));
+    ok("Books from the US: sold in India only, no Books trial — Deskzo One in dollars instead", usText.includes("Deskzo Books is sold in India only for now — every product is in Deskzo One.") && !booksUs.includes("/signup?product=books") && usText.includes("$99") && usText.includes("modules built on India's tax rules are left out"), usText.slice(0, 400));
+    ok("  and no India-only module in its table", ["accounting", "payroll", "revenue_close"].every((k) => !usText.includes(` ${label(k)} `)), usText.match(/Module.*/)?.[0]?.slice(0, 300));
+    ok("a product with no price here points to the pricing page", textOf(vaultIn).includes("Prices are on the pricing page."));
+    const listedOnce = (country: string, key: Key) => {
+      const keys = comparisonRows(product(key), country).flatMap((g) => g.rows.map((r) => r.key));
+      const wanted = modules.MODULE_REGISTRY.filter((m) => rules.soldIn(m, country)).map((m) => m.key);
+      return keys.length === new Set(keys).size && [...keys].sort().join() === [...wanted].sort().join();
+    };
+    ok("the table: every module sold in the country, each once — in India and abroad, for every product", products.PRODUCTS.filter((p) => p.key !== "one").every((p) => listedOnce("IN", p.key) && listedOnce("AE", p.key)));
+    const booksRows = comparisonRows(product("books"), "IN");
+    const rowOf = (title: string, key: string) => booksRows.find((g) => g.title === title)?.rows.find((r) => r.key === key)?.inProduct;
+    ok(
+      "  Books's own first and all its own; CRM's not in Books; Revenue & Close an add-on to Books; the basics last, in every product",
+      booksRows[0]!.title === "Deskzo Books" && booksRows[0]!.rows.every((r) => r.inProduct === true) && rowOf("Deskzo CRM", "calls") === false && rowOf("Add-ons included in Deskzo One", "revenue_close") === "addon" && booksRows.at(-1)!.title === "In every product" && booksRows.at(-1)!.rows.every((r) => r.inProduct === true),
+    );
+    ok("  for CRM, Revenue & Close is not an add-on — Books's", comparisonRows(product("crm"), "IN").find((g) => g.title === "Add-ons included in Deskzo One")?.rows[0]?.inProduct === false);
+
+    // Each product's page: the block before the questions, and its demo and sales buttons naming it.
+    const pageOf = (key: Key) => productPages.find((p) => p.slug === product(key).path.slice(1))!.document;
+    const secondaries = (key: Key) => pageOf(key).blocks.filter((b) => b.type === "hero" || b.type === "cta").map((b) => JSON.stringify((b.props as { secondary?: unknown }).secondary));
+    ok(
+      "each product's page: Book a demo and Talk to sales name the product",
+      products.PRODUCTS.every((p) => secondaries(p.key).join("|") === [JSON.stringify({ kind: "link", label: "Book a demo", href: `/contact?topic=demo&product=${p.key}` }), JSON.stringify({ kind: "link", label: "Talk to sales", href: `/contact?topic=sales&product=${p.key}` })].join("|")),
+      secondaries("books"),
+    );
+    const besideBlock = (key: Key) => pageOf(key).blocks.find((b) => b.type === "productVsSuite");
+    const blockTypes = (key: Key) => pageOf(key).blocks.map((b) => b.type);
+    ok(
+      "  and every product but Deskzo One is set beside it, just before the questions",
+      products.PRODUCTS.every((p) => (p.key === "one" ? !besideBlock(p.key) : (besideBlock(p.key)?.props as { product?: string } | undefined)?.product === p.key && blockTypes(p.key).indexOf("productVsSuite") === blockTypes(p.key).indexOf("faq") - 1)),
+    );
+    const besideChecked = checkPageDocument(pageOf("books"), "publish");
+    const asOne = JSON.parse(JSON.stringify(pageOf("books"))) as ReturnType<typeof pageOf>;
+    (asOne.blocks.find((b) => b.type === "productVsSuite")!.props as { product: string }).product = "one";
+    ok("  the CMS keeps the block as it saves the page, and refuses Deskzo One beside itself", besideChecked.ok && JSON.stringify(besideChecked.value.blocks.find((b) => b.type === "productVsSuite")?.props).includes('"product":"books"') && !checkPageDocument(asOne, "publish").ok);
+
+    // The contact form, opened from a product's "Book a demo": the product chosen, and kept with the lead.
+    const contactProps = siteDefaults.DEFAULT_SITE_PAGES.find((p) => p.slug === "contact")!.blocks.find((b) => b.type === "contactForm")!.props as import("../src/components/site/blocks/types").ContactFormProps;
+    const contactHtml = await html(ContactFormBlock({ props: contactProps, ctx: { ...siteCtx, searchParams: { topic: "demo", product: "books" }, workspaceSuffix: ".localhost:3000" } }));
+    save("contact-demo-books", contactHtml);
+    ok("the contact form from Books's Book a demo: a demo, of Deskzo Books, chosen", /<option value="demo" selected="">/.test(contactHtml) && /<option value="books" selected="">/.test(contactHtml));
+    ok("  with a product nobody knows, none is chosen", !/<option value="[a-z]+" selected="">[^<]*Deskzo/.test(await html(ContactFormBlock({ props: contactProps, ctx: { ...siteCtx, searchParams: { topic: "demo", product: "spreadsheets" }, workspaceSuffix: ".localhost:3000" } }))));
+    const salesMail: { to: string; subject: string; text: string }[] = [];
+    mailer.setTestPlatformMailer(async (m) => void salesMail.push(m));
+    const salesBefore = process.env.PLATFORM_SALES_EMAIL;
+    process.env.PLATFORM_SALES_EMAIL = "sales@zzprod.example";
+    const demoAsk = { name: "Kiran Zz", email: "kiran@zzdemo.example", company: "Zz Demo Traders", phone: "", topic: "demo", message: "Please show us invoicing and GST returns.", website: "" };
+    const sentDemo = await siteActions.sendContactRequest({ ...demoAsk, product: "books" });
+    const sentOdd = await siteActions.sendContactRequest({ ...demoAsk, email: "odd@zzdemo.example", product: "spreadsheets" });
+    process.env.PLATFORM_SALES_EMAIL = salesBefore ?? "";
+    mailer.setTestPlatformMailer(async () => {});
+    const demoLead = await control.siteLead.findFirst({ where: { email: demoAsk.email }, orderBy: { createdAt: "desc" } });
+    const oddLead = await control.siteLead.findFirst({ where: { email: "odd@zzdemo.example" }, orderBy: { createdAt: "desc" } });
+    ok("the request keeps its product for the leads inbox; one nobody knows is kept without", sentDemo.ok && demoLead?.productKey === "books" && demoLead.topic === "demo" && sentOdd.ok && oddLead?.productKey === null, { sentDemo, demoLead: demoLead?.productKey, oddLead: oddLead?.productKey });
+    ok("  and the mail to sales says which product", salesMail[0]?.subject === "Contact form: Demo of Deskzo Books — Zz Demo Traders" && salesMail[0]!.text.includes("Product:  Deskzo Books") && salesMail[1]?.text.includes("Product:  —") === true, salesMail.map((m) => m.subject));
+
     // ─── The console ────────────────────────────────────────────────────────────────────────
     section("The console: plans know their product");
     const actAs = async (userId: string) => {
