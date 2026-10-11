@@ -512,3 +512,18 @@ product had only the free generator's four layouts.
   Counting off: links go straight again; addresses already sent still send their readers on, uncounted.
 - Migration 20261031160000_signature_clicks. check:signature-sync 151 (the address and its MAC, the
   redirect, every rule for what counts, the button, the report, both tabs, counting off, removal).
+
+**Sample banners (11 Oct 2026).** Eight ready-made animated GIF banners, 600 × 140 and 20–30 KB each:
+We're hiring, Book a demo, Meet us at the expo, Live webinar, Just launched, Rate your experience,
+Season's greetings and Happy Diwali (src/lib/signatures/samples.ts; the GIFs in public/signature-banners).
+
+- **Starting from one.** A new banner opens on "Start from a sample". Picking one copies its GIF in as the
+  banner's upload, so the workspace serves it like any other, and fills in its name and words. The
+  sample's link (yourcompany.com/…) is only a placeholder — the company gives its own.
+- **Outlook.** Classic Outlook for Windows shows only a GIF's first frame, so each sample's first frame is
+  the whole banner, held; the movement (a shine on the button, a nudging arrow, a bouncing pin, a live dot,
+  sparkles, stars filling, snow, flickering diyas) comes after it.
+- **Made by** `npm run signatures:banners` (scripts/make-signature-banners.ts): each frame an SVG drawn by
+  sharp, joined into a GIF by sharp — the copy Next installs; nothing new was added. Run it again after
+  changing one; the GIFs are committed. check:signatures checks every sample is there, animated, the right
+  size and under 120 KB; check:signature-sync (152) saves one as a banner and gets the same bytes back.

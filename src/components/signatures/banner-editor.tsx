@@ -6,6 +6,7 @@ import { ImagePlus, Pause, Play, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { removeSignatureBanner, saveSignatureBanner, setSignatureBannerPaused } from "@/actions/signature";
 import { BANNER_WIDTH, imageNote, linkNote } from "@/lib/signatures/render";
+import { SAMPLE_BANNER_SIZE, SIGNATURE_BANNER_SAMPLES, sampleBannerPath, type SignatureBannerSample } from "@/lib/signatures/samples";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -209,6 +210,8 @@ function Editor({ initial, templates, sampleHtml, onDone }: { initial: Draft; te
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const file = useRef<HTMLInputElement | null>(null);
+  const [sample, setSample] = useState<SignatureBannerSample | null>(null);
+  const [loadingSample, setLoadingSample] = useState<string | null>(null);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setD((p) => ({ ...p, [key]: value }));
 
   const shownSrc = d.mode === "upload" ? d.dataUrl : d.mode === "url" ? d.url.trim() : d.currentSrc;
@@ -247,11 +250,60 @@ function Editor({ initial, templates, sampleHtml, onDone }: { initial: Draft; te
     });
   }
 
+  /**
+   * A sample's GIF taken as this banner's upload — the workspace then serves it like any other — with
+   * its name and words filled in where they are still empty. Its link is the company's to give.
+   */
+  async function takeSample(sample: SignatureBannerSample) {
+    setError(null);
+    setLoadingSample(sample.key);
+    try {
+      const response = await fetch(sampleBannerPath(sample.key));
+      if (!response.ok) throw new Error(String(response.status));
+      const blob = await response.blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      setD((p) => ({ ...p, mode: "upload", dataUrl, name: p.name || sample.name, altText: p.altText || sample.alt, width: BANNER_WIDTH.max }));
+      setSample(sample);
+    } catch {
+      setError("That sample couldn't be loaded. Try again, or upload a picture.");
+    } finally {
+      setLoadingSample(null);
+    }
+  }
+
   const modes: { key: Draft["mode"]; label: string }[] = [...(d.id ? [{ key: "keep" as const, label: "Keep this picture" }] : []), { key: "upload", label: "Upload a picture" }, { key: "url", label: "Use an https:// address" }];
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="space-y-5">
+        {!d.id && (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold text-text">Start from a sample</h3>
+            <p className="text-xs text-subtle">Animated, {SAMPLE_BANNER_SIZE.width} × {SAMPLE_BANNER_SIZE.height}. Classic Outlook for Windows shows only the first frame — each one says everything in it.</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {SIGNATURE_BANNER_SAMPLES.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => takeSample(s)}
+                  disabled={loadingSample !== null}
+                  aria-pressed={sample?.key === s.key}
+                  className={cn("overflow-hidden rounded-lg border text-left transition-colors", sample?.key === s.key ? "border-brand ring-2 ring-brand/30" : "border-line hover:border-line-strong")}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- the GIF as it moves */}
+                  <img src={sampleBannerPath(s.key)} alt={s.alt} width={SAMPLE_BANNER_SIZE.width} height={SAMPLE_BANNER_SIZE.height} className="block h-auto w-full" />
+                  <span className="block px-2 py-1 text-xs text-muted">{loadingSample === s.key ? "Loading…" : s.name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="sb-name">Name</Label>
           <Input id="sb-name" maxLength={60} value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Trade fair, March" />
@@ -295,7 +347,7 @@ function Editor({ initial, templates, sampleHtml, onDone }: { initial: Draft; te
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="sb-link">Links to (https://)</Label>
-            <Input id="sb-link" maxLength={500} value={d.linkUrl} onChange={(e) => set("linkUrl", e.target.value)} placeholder="yourcompany.com/fair" />
+            <Input id="sb-link" maxLength={500} value={d.linkUrl} onChange={(e) => set("linkUrl", e.target.value)} placeholder={sample?.link ?? "yourcompany.com/fair"} />
             {linkNote(d.linkUrl) && <p className="text-xs text-danger">{linkNote(d.linkUrl)}</p>}
           </div>
           <div className="space-y-1.5 sm:col-span-2">

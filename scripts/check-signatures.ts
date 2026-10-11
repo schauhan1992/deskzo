@@ -13,6 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -167,6 +168,36 @@ async function main() {
   ok("Spotlight keeps the name dark on a light colour, so it reads", premium.renderAnySignature(full, { template: "spotlight", color: "#facc15", font: "arial" }, null).includes("font-size:20px;font-weight:bold;color:#111111;"));
   ok("a premium layout given hostile text escapes it like every other", !/<script/i.test(premium.renderAnySignature({ ...full, name: "<script>alert(1)</script>" }, { template: "bold", color: "#0f766e", font: "arial" }, null)));
   ok("tint mixes the colour towards white", premium.tint("#000000", 0.5) === "#808080" && premium.tint("#1d4ed8", 1) === "#ffffff");
+
+  section("Sample banners");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const samples = require("../src/lib/signatures/samples") as typeof import("../src/lib/signatures/samples");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  for (const s of samples.SIGNATURE_BANNER_SAMPLES) {
+    const file = path.join(__dirname, "..", "public", samples.sampleBannerPath(s.key));
+    let bytes: Buffer | null = null;
+    try {
+      bytes = readFileSync(file);
+    } catch {
+      bytes = null;
+    }
+    const meta = bytes ? await sharp(bytes, { animated: true }).metadata() : null;
+    ok(
+      `${s.name}: an animated GIF, ${samples.SAMPLE_BANNER_SIZE.width} × ${samples.SAMPLE_BANNER_SIZE.height}, small enough to travel, its words said for blocked pictures`,
+      !!bytes &&
+        bytes.subarray(0, 6).toString("ascii") === "GIF89a" &&
+        meta?.format === "gif" &&
+        (meta.pages ?? 1) > 1 &&
+        meta.width === samples.SAMPLE_BANNER_SIZE.width &&
+        meta.pageHeight === samples.SAMPLE_BANNER_SIZE.height &&
+        bytes.length < 120 * 1024 &&
+        s.alt.length >= 10 &&
+        s.alt.length <= 150 &&
+        !!safeUrl(s.link),
+      bytes ? `${meta?.pages} frames, ${Math.round(bytes.length / 1024)} KB` : "missing — run npm run signatures:banners",
+    );
+  }
+  ok("each sample has its own name", new Set(samples.SIGNATURE_BANNER_SAMPLES.map((s) => s.key)).size === samples.SIGNATURE_BANNER_SAMPLES.length);
 
   section("The page and the block");
   /* eslint-disable @typescript-eslint/no-require-imports */
