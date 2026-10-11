@@ -249,6 +249,7 @@ async function main() {
       overdueLeads: null,
       lastSignIn: null,
       isYou: false,
+      card: null,
       ...over,
     });
     const dialog = (over: Record<string, unknown> = {}) =>

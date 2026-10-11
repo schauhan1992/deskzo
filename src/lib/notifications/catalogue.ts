@@ -63,6 +63,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "LEAD_STATUS_CHANGED", label: "A lead moves stage", when: "One of your leads is won, lost or moved along.", group: "sales" },
   { type: "LEAD_ACTIVITY", label: "Activity on my lead", when: "Somebody logs a call, note or meeting against your lead.", group: "sales" },
   { type: "CARD_SHARED_BACK", label: "Somebody shares their details from my card", when: "A person you gave your digital card to sends you their name and number. With the CRM on, you get the lead instead.", group: "sales" },
+  { type: "CARD_CHANGED", label: "My digital card is changed", when: "Whoever manages cards changes the design yours is drawn from — its look, what it shows, or its links.", group: "sales" },
   { type: "ACCOUNT_MANAGER_ASSIGNED", label: "I am made account manager", when: "A company is assigned to you.", group: "sales" },
   { type: "CALLER_ASSIGNED", label: "A calling list is assigned", when: "Companies are allocated to you to ring.", group: "sales" },
   { type: "ORDER_STATUS_CHANGED", label: "An order changes status", when: "An order you raised or watch is approved, processed or fulfilled.", group: "sales" },

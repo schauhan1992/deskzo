@@ -527,3 +527,35 @@ Season's greetings and Happy Diwali (src/lib/signatures/samples.ts; the GIFs in 
   sharp, joined into a GIF by sharp — the copy Next installs; nothing new was added. Run it again after
   changing one; the GIFs are committed. check:signatures checks every sample is there, animated, the right
   size and under 120 KB; check:signature-sync (152) saves one as a banner and gets the same bytes back.
+
+**Smaller pieces (11 Oct 2026).**
+
+- **Staff & roles → Digital card column** (for `cards.manage`, with Cards in the plan): each person's card
+  — Live with its /c/ address, Off with **Switch on**, Ended (past their last working day), or none with
+  **Issue card** — issued the same way Digital cards does it.
+- **"Your digital card changed"** (`CARD_CHANGED`, src/lib/cards/notices.ts): saving a template tells each
+  live cardholder on it what changed, in words — its look, what it shows from their record, the company's
+  links, their own links, what people are asked when they share back — linked to My card. A new name
+  alone tells nobody; whoever saved it isn't told; at most once in half an hour per person.
+- **Replies and forwards** (`SignatureTemplate.replyStyle`: FULL, SHORT, NONE): the short one is two lines
+  — name, title and company, then the phone — with the disclaimer, and no photo, logo, profiles, button
+  or banner. Outlook's add-in tells a reply or forward from a new message (getComposeTypeAsync) and puts
+  in the reply style; the Insert signature button always puts in the whole one. Gmail and Zoho Mail keep
+  one signature for both, and the editor says so. My email signature offers the short one to copy.
+- **Shared mailboxes in Outlook** (`SignatureMailbox`, on Who gets which): sales@, support@ and the like,
+  each with the name and number to sign with and a template. The manifest (now **1.1.0.0** — an uploaded
+  1.0 keeps working, but the administrator uploads the new file to get this) adds `OnMessageFromChanged`:
+  when somebody changes a message's From, the add-in asks for that address's signature — the mailbox's,
+  a person's own, or, for an address with none, it leaves what is there and says nothing. A person's own
+  address can't be listed; addresses are kept lower-case (a CHECK).
+- Migrations 20261031170000_card_changed_notice, 20261031180000_signature_reply_style,
+  20261031190000_signature_mailboxes. Checks: check:cards (the notice and the Staff column),
+  check:signature-sync 172 (replies, forwards, the button on a reply, none, shared mailboxes and From
+  changes run through the stand-in Outlook, the 1.1 manifest, the pages), check:admin-password.
+
+Not done from the list: the Exchange mail-flow-rule fallback (Exchange Online caps transport rules at 300
+and disclaimers at 5,000 characters, so one rule a person doesn't scale, and one shared rule can only use
+Entra ID's attributes, not Deskzo's records — worth it only if a customer can't deploy the add-in, and it
+needs a real tenant to try); iPhone QR scanning at events (needs a QR-reading library — a new dependency
+for the owner to approve); Apple and Google Wallet passes (need Deskzo's Apple pass certificate and a
+Google Wallet issuer account).

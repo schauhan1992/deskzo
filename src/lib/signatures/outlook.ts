@@ -4,7 +4,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
 import { COMPANY_NAME } from "@/lib/brand-names";
 import { getOrganisation } from "@/lib/organisation";
 import { signatureText } from "@/lib/signatures/render";
-import { PERSON_SELECT, personSignature, signatureContext, type Person } from "@/lib/signatures/person";
+import { PERSON_SELECT, mailboxSignature, personSignature, signatureContext, type Person } from "@/lib/signatures/person";
 import { readSignatureSettings } from "@/lib/signatures/sync";
 
 /**
@@ -26,8 +26,11 @@ import { readSignatureSettings } from "@/lib/signatures/sync";
  * stopped after a few. The add-in is off until a manager turns it on.
  */
 
-/** Bumped when the manifest's content changes; an uploaded manifest keeps working with the old one. */
-export const OUTLOOK_MANIFEST_VERSION = "1.0.0.0";
+/**
+ * Bumped when the manifest's content changes; an uploaded manifest keeps working with the old one, and
+ * the administrator uploads the new file to get what was added (1.1: a changed From).
+ */
+export const OUTLOOK_MANIFEST_VERSION = "1.1.0.0";
 
 /** Outlook refuses a signature longer than this (Office.Body.setSignatureAsync). */
 export const OUTLOOK_LIMIT = 30_000;
@@ -48,7 +51,7 @@ export const OUTLOOK_ICON_SIZES = [16, 32, 64, 80, 128] as const;
 export const OFFICE_JS = "https://appsforoffice.microsoft.com/lib/1/hosted/office.js";
 
 /** The names Outlook calls the script's handlers by — the manifest and the script must agree. */
-export const OUTLOOK_HANDLERS = { compose: "deskzoOnNewMessageCompose", button: "deskzoInsertSignature" } as const;
+export const OUTLOOK_HANDLERS = { compose: "deskzoOnNewMessageCompose", button: "deskzoInsertSignature", from: "deskzoOnMessageFromChanged" } as const;
 
 function xml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -72,9 +75,10 @@ export function addinName(company: string): string {
 
 /**
  * The add-in's manifest — the add-in only (XML) kind, because the unified one isn't taken by Outlook on
- * a Mac or a phone. One event, a new message (replies and forwards included), on every Outlook that runs
- * event-based add-ins; and a button in the message's ribbon to put the signature in again. Read/write
- * item is the least it can ask for to set a signature.
+ * a Mac or a phone. Two events on every Outlook that runs event-based add-ins — a new message (replies and
+ * forwards included, which get the template's reply signature) and a changed From (a shared mailbox, or
+ * another account) — and a button in the message's ribbon to put the signature in again. Read/write item
+ * is the least it can ask for to set a signature.
  */
 export function outlookManifest(p: { origin: string; addinId: string; company: string }): string {
   const o = p.origin.replace(/\/+$/, "");
@@ -83,6 +87,7 @@ export function outlookManifest(p: { origin: string; addinId: string; company: s
   const launchEvent = `<ExtensionPoint xsi:type="LaunchEvent">
               <LaunchEvents>
                 <LaunchEvent Type="OnNewMessageCompose" FunctionName="${OUTLOOK_HANDLERS.compose}"/>
+                <LaunchEvent Type="OnMessageFromChanged" FunctionName="${OUTLOOK_HANDLERS.from}"/>
               </LaunchEvents>
               <SourceLocation resid="Launch.Url"/>
             </ExtensionPoint>`;
@@ -198,8 +203,8 @@ export function outlookScript(origin: string): string {
   const o = JSON.stringify(origin.replace(/\/+$/, ""));
   const ask = JSON.stringify(OUTLOOK_PATHS.signature);
   return `/*
- * ${COMPANY_NAME} Signatures for Outlook. When somebody starts a message, or presses Insert signature,
- * it asks their workspace for their signature and puts it in.
+ * ${COMPANY_NAME} Signatures for Outlook. When somebody starts a message, changes its From, or presses
+ * Insert signature, it asks their workspace for the signature and puts it in.
  */
 var DESKZO_ORIGIN = ${o};
 var DESKZO_WAIT_MS = 20000;
@@ -243,7 +248,28 @@ function deskzoBodyType(item, then) {
   });
 }
 
-function deskzoInsert(event) {
+// A reply or a forward, when Outlook can say — the button always puts the whole signature in.
+function deskzoComposeType(item, mode, then) {
+  if (mode === "button" || typeof item.getComposeTypeAsync !== "function") return then("newMail");
+  item.getComposeTypeAsync(function (r) {
+    then(r.status === "succeeded" && r.value && r.value.composeType ? String(r.value.composeType) : "newMail");
+  });
+}
+
+// Whose signature: the mailbox Outlook runs in — or, when the From was changed (a shared mailbox, another
+// account), the address it was changed to.
+function deskzoAddress(item, mode, then) {
+  var own = "";
+  try {
+    own = Office.context.mailbox.userProfile.emailAddress;
+  } catch (e) {}
+  if (mode !== "from" || !item.from || typeof item.from.getAsync !== "function") return then(own);
+  item.from.getAsync(function (r) {
+    then(r.status === "succeeded" && r.value && r.value.emailAddress ? r.value.emailAddress : own);
+  });
+}
+
+function deskzoInsert(event, mode) {
   var run = { done: false, timer: null };
   if (typeof setTimeout === "function") {
     run.timer = setTimeout(function () {
@@ -251,14 +277,23 @@ function deskzoInsert(event) {
     }, DESKZO_WAIT_MS);
   }
   var item = null;
-  var email = "";
   try {
     item = Office.context.mailbox.item;
-    email = Office.context.mailbox.userProfile.emailAddress;
   } catch (e) {}
-  if (!item || !email || !item.body) return deskzoFinish(event, run);
+  if (!item || !item.body) return deskzoFinish(event, run);
 
-  deskzoBodyType(item, function (type) {
+  deskzoAddress(item, mode, function (email) {
+    if (!email) return deskzoFinish(event, run);
+    deskzoBodyType(item, function (type) {
+      deskzoComposeType(item, mode, function (composeType) {
+        deskzoFetchAndSet(event, run, item, mode, email, type, composeType === "reply" || composeType === "forward");
+      });
+    });
+  });
+}
+
+function deskzoFetchAndSet(event, run, item, mode, email, type, replying) {
+  (function () {
     fetch(DESKZO_ORIGIN + ${ask} + "?email=" + encodeURIComponent(email), { method: "GET", headers: { Accept: "application/json" }, credentials: "omit" })
       .then(function (response) {
         return response.json().then(
@@ -273,11 +308,15 @@ function deskzoInsert(event) {
       .then(function (r) {
         var a = r.answer || {};
         if (r.status !== 200) {
-          if (a.message) deskzoTell(item, a.message);
+          // A From changed to an address with no signature here keeps the one already in.
+          if (a.message && mode !== "from") deskzoTell(item, a.message);
           return deskzoFinish(event, run);
         }
-        var asText = type === "text" || !a.html;
-        var signature = asText ? a.text : a.html;
+        // On a reply or a forward, the template's reply signature — or none at all.
+        var source = replying ? a.reply : a;
+        if (!source) return deskzoFinish(event, run);
+        var asText = type === "text" || !source.html;
+        var signature = asText ? source.text : source.html;
         if (!signature) return deskzoFinish(event, run);
         item.body.setSignatureAsync(signature, { coercionType: asText ? "text" : "html" }, function (set) {
           if (set.status !== "succeeded") {
@@ -295,15 +334,19 @@ function deskzoInsert(event) {
         deskzoTell(item, "Your company signature couldn't be fetched. Press Insert signature to try again.");
         deskzoFinish(event, run);
       });
-  });
+  })();
 }
 
 function ${OUTLOOK_HANDLERS.compose}(event) {
-  deskzoInsert(event);
+  deskzoInsert(event, "compose");
 }
 
 function ${OUTLOOK_HANDLERS.button}(event) {
-  deskzoInsert(event);
+  deskzoInsert(event, "button");
+}
+
+function ${OUTLOOK_HANDLERS.from}(event) {
+  deskzoInsert(event, "from");
 }
 
 // In a page (Outlook on the web, the new Outlook, Mac, phones) Office.js waits to be told it may start;
@@ -311,6 +354,7 @@ function ${OUTLOOK_HANDLERS.button}(event) {
 if (typeof document !== "undefined" && typeof Office !== "undefined" && typeof Office.onReady === "function") Office.onReady();
 Office.actions.associate(${JSON.stringify(OUTLOOK_HANDLERS.compose)}, ${OUTLOOK_HANDLERS.compose});
 Office.actions.associate(${JSON.stringify(OUTLOOK_HANDLERS.button)}, ${OUTLOOK_HANDLERS.button});
+Office.actions.associate(${JSON.stringify(OUTLOOK_HANDLERS.from)}, ${OUTLOOK_HANDLERS.from});
 `;
 }
 
@@ -371,7 +415,7 @@ const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}\.[^\s@<>"]{2,63}$/;
 const NOTE_EVERY_MS = 60 * 60_000;
 
 export type OutlookAnswer =
-  | { status: 200; body: { html: string | null; text: string; replaceOwn: boolean } }
+  | { status: 200; body: { html: string | null; text: string; reply: { html: string | null; text: string } | null; replaceOwn: boolean } }
   | { status: 404 | 429 | 400; body: { message: string | null } };
 
 /**
@@ -392,19 +436,30 @@ export async function outlookSignature(rawEmail: string | null, caller: string |
   if (missesOf(key, now) >= MAX_MISSES) return { status: 429, body: { message: null } };
 
   const person = (await db.user.findFirst({ where: { email: { equals: email, mode: "insensitive" }, active: true, kind: "MEMBER" }, select: PERSON_SELECT })) as Person | null;
-  if (!person) {
+  // Nobody's own address: perhaps a shared mailbox's (sales@, support@), when a From was changed to it.
+  const mailbox = person ? null : await db.signatureMailbox.findUnique({ where: { address: email }, select: { id: true, address: true, name: true, phone: true, templateId: true } });
+  if (!person && !mailbox) {
     noteMiss(key, now);
     return { status: 404, body: { message: `There is no company signature for ${email.slice(0, 80)}. Ask whoever manages your company's email signatures.` } };
   }
 
-  const sig = await personSignature(person, await signatureContext());
-  const last = await db.signatureOutlook.findUnique({ where: { userId: person.id } });
-  if (!last || last.hash !== sig.hash || now - last.fetchedAt.getTime() >= NOTE_EVERY_MS) {
-    const data = { hash: sig.hash, fetchedAt: new Date(now) };
-    await db.signatureOutlook.upsert({ where: { userId: person.id }, create: { userId: person.id, ...data }, update: data });
+  const ctx = await signatureContext();
+  const sig = person ? await personSignature(person, ctx) : mailboxSignature(mailbox!, ctx);
+  if (person) {
+    const last = await db.signatureOutlook.findUnique({ where: { userId: person.id } });
+    if (!last || last.hash !== sig.hash || now - last.fetchedAt.getTime() >= NOTE_EVERY_MS) {
+      const data = { hash: sig.hash, fetchedAt: new Date(now) };
+      await db.signatureOutlook.upsert({ where: { userId: person.id }, create: { userId: person.id, ...data }, update: data });
+    }
   }
+  const fits = (html: string) => (html.length <= OUTLOOK_LIMIT ? html : null);
   return {
     status: 200,
-    body: { html: sig.html.length <= OUTLOOK_LIMIT ? sig.html : null, text: signatureText(sig.details, null), replaceOwn: settings.outlookReplaceOwn },
+    body: {
+      html: fits(sig.html),
+      text: signatureText(sig.details, null),
+      reply: sig.reply ? { html: fits(sig.reply.html), text: sig.reply.text } : null,
+      replaceOwn: settings.outlookReplaceOwn,
+    },
   };
 }

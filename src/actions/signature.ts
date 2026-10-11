@@ -9,7 +9,7 @@ import { encryptSecret } from "@/lib/crypto";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
-import { BANNER_WIDTH, SIGNATURE_FONTS, SOCIAL_NETWORKS, linkNote, safeImage, safeUrl } from "@/lib/signatures/render";
+import { BANNER_WIDTH, SIGNATURE_FONTS, SOCIAL_NETWORKS, linkNote, safeImage, safePhone, safeUrl } from "@/lib/signatures/render";
 import { LAYOUTS, RECORD_FIELDS, type LayoutKey } from "@/lib/signatures/person";
 import { BANNER_IMAGE_MAX_BYTES, BANNER_IMAGE_TYPES } from "@/lib/signatures/banners";
 import { checkGoogle, readServiceAccount } from "@/lib/signatures/google";
@@ -74,6 +74,7 @@ const templateSchema = z.object({
   ctaUrl: optionalUrl("The button's link"),
   signOff: z.string().trim().max(60),
   disclaimer: z.string().trim().max(600),
+  replyStyle: z.enum(["FULL", "SHORT", "NONE"]).optional(),
 });
 
 /** A template, made or changed — and everybody it reaches goes out again on the next run. */
@@ -103,6 +104,7 @@ export async function saveSignatureTemplate(input: unknown): Promise<ActionResul
     ctaUrl: t.ctaUrl || null,
     signOff: t.signOff || null,
     disclaimer: t.disclaimer || null,
+    ...(t.replyStyle ? { replyStyle: t.replyStyle } : {}),
   };
   let id: string;
   if (t.id) {
@@ -168,6 +170,60 @@ export async function setSignatureRule(input: unknown): Promise<ActionResult<nul
     await db.signatureRule.upsert({ where: { target_targetId: { target, targetId } }, create: { target, targetId, templateId }, update: { templateId } });
   }
   await everybodyPending();
+  refresh();
+  return { ok: true, data: null };
+}
+
+// ── Shared mailboxes (Outlook) ──────────────────────────────────────────────────────────────────────
+
+const mailboxSchema = z.object({
+  id: z.string().min(1).nullable(),
+  address: z.string().trim().toLowerCase().max(200).email("The shared mailbox's address, please"),
+  name: z.string().trim().min(1, "Give it the name its messages are signed with").max(80),
+  phone: z.string().trim().max(40),
+  templateId: z.string().min(1).nullable(),
+});
+
+/**
+ * A shared mailbox and the signature its messages carry in Outlook, when somebody changes the From to it
+ * (src/lib/signatures/person.ts, mailboxSignature). A person's own address can't be one: theirs is theirs.
+ */
+export async function saveSignatureMailbox(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  const parsed = mailboxSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const m = parsed.data;
+  if (m.phone && !safePhone(m.phone)) return { ok: false, error: "That isn't a phone number." };
+  const owner = await db.user.findFirst({ where: { email: { equals: m.address, mode: "insensitive" } }, select: { name: true } });
+  if (owner) return { ok: false, error: `${m.address} is ${owner.name}'s own address — messages from it carry their signature.` };
+  const templateId = m.templateId && (await db.signatureTemplate.findUnique({ where: { id: m.templateId }, select: { id: true } })) ? m.templateId : null;
+  const data = { address: m.address, name: m.name, phone: m.phone || null, templateId };
+  let id: string;
+  try {
+    if (m.id) {
+      const updated = await db.signatureMailbox.updateMany({ where: { id: m.id }, data });
+      if (updated.count === 0) return { ok: false, error: "That mailbox is no longer listed." };
+      id = m.id;
+    } else {
+      id = (await db.signatureMailbox.create({ data: { ...data, createdById: user.id }, select: { id: true } })).id;
+    }
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return { ok: false, error: "That mailbox is listed already." };
+    throw err;
+  }
+  await recordAudit({ userId: user.id, action: m.id ? "UPDATE" : "CREATE", entityType: "SignatureMailbox", entityId: id, entityLabel: m.address });
+  refresh();
+  return { ok: true, data: { id } };
+}
+
+export async function deleteSignatureMailbox(id: string): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  const mailbox = await db.signatureMailbox.findUnique({ where: { id: String(id) }, select: { address: true } });
+  if (!mailbox) return { ok: false, error: "That mailbox is no longer listed." };
+  await db.signatureMailbox.delete({ where: { id: String(id) } });
+  await recordAudit({ userId: user.id, action: "DELETE", entityType: "SignatureMailbox", entityId: String(id), entityLabel: mailbox.address });
   refresh();
   return { ok: true, data: null };
 }

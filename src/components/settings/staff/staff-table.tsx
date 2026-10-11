@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, Pencil, Power, Search, Trash2 } from "lucide-react";
 import { sendPasswordResetEmail, setUserActive } from "@/actions/user";
+import { issueDigitalCards } from "@/actions/card";
 import { ResetLinkOnce } from "@/components/settings/setup-link-once";
 import { STAFF_STATUS_LABEL, type StaffStatus } from "@/lib/staff/status";
 import { Avatar } from "@/components/ui/avatar";
@@ -49,6 +50,7 @@ export function StaffTable({
   viewerIsSuperAdmin,
   showLeads,
   showSignIns,
+  showCards = false,
 }: {
   rows: StaffRow[];
   roles: RoleChoice[];
@@ -63,6 +65,8 @@ export function StaffTable({
   viewerIsSuperAdmin: boolean;
   showLeads: boolean;
   showSignIns: boolean;
+  /** `cards.manage`, with Cards in the plan: each person's digital card, and issuing one from here. */
+  showCards?: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -137,7 +141,21 @@ export function StaffTable({
     });
   }
 
-  const columns = 4 + (showLeads ? 1 : 0) + (showSignIns ? 1 : 0);
+  /** A card for one person — or their switched-off one back on — the same as Digital cards does it. */
+  function issueCard(r: StaffRow) {
+    setNotice(null);
+    startTransition(async () => {
+      const result = await issueDigitalCards({ userIds: [r.id] });
+      if (!result.ok) {
+        setNotice({ tone: "error", message: result.error });
+        return;
+      }
+      setNotice({ tone: "success", message: r.card?.state === "off" ? `${r.name}'s digital card is switched back on.` : `${r.name} has a digital card now.` });
+      router.refresh();
+    });
+  }
+
+  const columns = 4 + (showLeads ? 1 : 0) + (showSignIns ? 1 : 0) + (showCards ? 1 : 0);
 
   return (
     <div className="space-y-3">
@@ -198,6 +216,11 @@ export function StaffTable({
               <th scope="col" className="px-4 py-2.5 font-medium">
                 Status
               </th>
+              {showCards && (
+                <th scope="col" className="px-4 py-2.5 font-medium">
+                  Digital card
+                </th>
+              )}
               {showSignIns && (
                 <th scope="col" className="px-4 py-2.5 font-medium">
                   Last signed in
@@ -270,6 +293,29 @@ export function StaffTable({
                     )}
                   </div>
                 </td>
+                {showCards && (
+                  <td className="px-4 py-3">
+                    {r.card?.state === "live" ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge tone="green">Live</Badge>
+                        <a href={`/c/${r.card.handle}`} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline">
+                          /c/{r.card.handle}
+                        </a>
+                      </div>
+                    ) : r.card?.state === "ended" ? (
+                      <Badge title="Their last working day has passed — the card shows the company's details.">Ended</Badge>
+                    ) : r.active && r.status !== "invited" ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {r.card?.state === "off" ? <Badge>Off</Badge> : <span className="text-subtle">None</span>}
+                        <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => issueCard(r)}>
+                          {r.card?.state === "off" ? "Switch on" : "Issue card"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-subtle">{r.card?.state === "off" ? "Off" : "None"}</span>
+                    )}
+                  </td>
+                )}
                 {showSignIns && (
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
                     {r.lastSignIn ? (

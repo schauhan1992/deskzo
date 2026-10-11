@@ -13,7 +13,7 @@
  */
 import "dotenv/config";
 import Module from "node:module";
-import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
 
 let actorId = "";
@@ -112,6 +112,8 @@ async function main() {
   const EventPage = (require("../src/app/(dashboard)/cards/events/[id]/page") as typeof import("../src/app/(dashboard)/cards/events/[id]/page")).default;
   const CapturePage = (require("../src/app/(dashboard)/cards/events/[id]/capture/page") as typeof import("../src/app/(dashboard)/cards/events/[id]/capture/page")).default;
   const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
+  const notices = require("../src/lib/cards/notices") as typeof import("../src/lib/cards/notices");
+  const { StaffTable } = require("../src/components/settings/staff/staff-table") as typeof import("../src/components/settings/staff/staff-table");
   const MyCardPage = (require("../src/app/(dashboard)/cards/page") as typeof import("../src/app/(dashboard)/cards/page")).default;
   const ManagePage = (require("../src/app/(dashboard)/cards/manage/page") as typeof import("../src/app/(dashboard)/cards/manage/page")).default;
   const render = async (page: (props: never) => Promise<unknown>, tab?: string) =>
@@ -334,6 +336,56 @@ async function main() {
     ok("a shared field that isn't usable refuses the template", !badTemplate.ok);
     await actions.issueDigitalCards({ userIds: [rep.id], templateId: spec.id });
     ok("...and one nobody uses can go", (await actions.deleteCardTemplate(extra.ok ? extra.data.id : "")).ok);
+
+    section("Telling cardholders their card changed");
+    const people = [rep.id, other.id, leaver.id, manager.id];
+    await db.notification.deleteMany({ where: { type: "CARD_CHANGED", userId: { in: people } } });
+    const fresh = server.readTemplate(await db.cardTemplate.findUniqueOrThrow({ where: { id: spec.id } }));
+    const changedCount = (userId: string) => db.notification.count({ where: { type: "CARD_CHANGED", userId } });
+    await actions.saveCardTemplate({ ...fresh, id: fresh.id, name: `${TAG} Fixture renamed` });
+    ok("a new name alone tells nobody — no card shows it", (await changedCount(rep.id)) === 0);
+    await actions.saveCardTemplate({ ...fresh, id: fresh.id, color: "#0f766e" });
+    const told = await db.notification.findFirst({ where: { type: "CARD_CHANGED", userId: rep.id } });
+    ok("a new colour tells each live cardholder on it what changed, with My card to see it", !!told && /its look/i.test(told.message ?? "") && told.link === "/cards" && (await changedCount(other.id)) === 1, told?.message);
+    ok("...but nobody whose card isn't live, nor anybody on another template", (await changedCount(leaver.id)) === 0 && (await changedCount(manager.id)) === 0);
+    await actions.saveCardTemplate({ ...fresh, id: fresh.id, color: "#be123c", allowOwnFields: false });
+    ok("saved again within half an hour: they aren't told twice", (await changedCount(rep.id)) === 1);
+    const look = { color: "#111111", layout: "CLASSIC", showLogo: true, recordFields: [], sharedFields: [], allowOwnFields: true, shareBack: true, questions: [] };
+    ok(
+      "each kind of change is said in words a cardholder knows",
+      notices.cardChanges(look, { ...look, recordFields: [{ key: "phone" }] }).join() === "what it shows from your record" &&
+        notices.cardChanges(look, { ...look, sharedFields: [{ kind: "website" }] }).join() === "the company's links on it" &&
+        notices.cardChanges(look, { ...look, allowOwnFields: false }).join() === "your own links are no longer shown" &&
+        notices.cardChanges(look, { ...look, questions: [{ id: "q" }] }).join() === "what people are asked when they share their details back" &&
+        notices.cardChanges(look, look).length === 0,
+    );
+    await db.notification.deleteMany({ where: { type: "CARD_CHANGED", userId: { in: people } } });
+
+    section("Staff & roles shows each person's card");
+    const staffRow = (over: Record<string, unknown>) => ({
+      id: "x", name: `${TAG} Person`, email: `p${MAIL}`, role: "SALES", roleName: "Sales", isSuperAdmin: false, status: "active", active: true, setupPending: false, setupLinkIssued: false,
+      tempPassword: false, photoUpdatedAt: null, jobTitle: null, phone: null, departmentId: null, departmentName: null, managerId: null, managerName: null, branchId: null,
+      twoFactorOn: false, holds: 1, total: 10, exceptions: 0, lapsingSoon: false, openLeads: null, overdueLeads: null, lastSignIn: null, isYou: false, card: null, ...over,
+    });
+    const staffTable = (showCards: boolean) =>
+      renderToStaticMarkup(
+        createElement(StaffTable, {
+          rows: [staffRow({ id: "a", name: `${TAG} Live`, card: { handle: "zz-live", state: "live" } }), staffRow({ id: "b", name: `${TAG} Off`, card: { handle: "zz-off", state: "off" } }), staffRow({ id: "c", name: `${TAG} None` })] as never,
+          roles: [],
+          departments: [],
+          branches: null,
+          mayEdit: true,
+          mayAssignRole: true,
+          mayManageAccess: true,
+          viewerIsSuperAdmin: false,
+          showLeads: false,
+          showSignIns: false,
+          showCards,
+        }),
+      );
+    const withCards = textOf(staffTable(true));
+    ok("for whoever manages cards: live with its address, off with Switch on, none with Issue card", withCards.includes("Digital card") && withCards.includes("/c/zz-live") && withCards.includes("Switch on") && withCards.includes("Issue card"));
+    ok("...and for anybody else, no card column at all", !textOf(staffTable(false)).includes("Digital card"));
 
     section("Card events");
     const showName = `${TAG} Expo`;

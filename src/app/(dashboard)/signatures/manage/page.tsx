@@ -17,6 +17,7 @@ import { SignatureTemplates, type SignatureTemplateDraft } from "@/components/si
 import { SignatureRulesEditor, type SignatureRuleRow } from "@/components/signatures/rules-editor";
 import { SignatureConnectionPanel } from "@/components/signatures/connection-panel";
 import { SignatureBanners, type BannerView } from "@/components/signatures/banner-editor";
+import { SignatureMailboxes, type MailboxView } from "@/components/signatures/mailboxes-editor";
 import { ClicksReport } from "@/components/signatures/clicks-report";
 import { CLICK_PERIODS, bannerClicks, clickDetail, clickItems } from "@/lib/signatures/clicks";
 
@@ -118,7 +119,21 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
       templateId: r.templateId,
       templateName: templateName(r.templateId),
     }));
-    body = <SignatureRulesEditor rules={rules} templates={[...ctx.templates.values()].map((t) => ({ id: t.id, name: t.name }))} choices={choices} />;
+    const templateList = [...ctx.templates.values()].map((t) => ({ id: t.id, name: t.name }));
+    const mailboxes: MailboxView[] = (await db.signatureMailbox.findMany({ orderBy: { address: "asc" } })).map((m) => ({
+      id: m.id,
+      address: m.address,
+      name: m.name,
+      phone: m.phone ?? "",
+      templateId: m.templateId,
+      templateName: (m.templateId && ctx.templates.get(m.templateId)?.name) || "The default",
+    }));
+    body = (
+      <div className="space-y-5">
+        <SignatureRulesEditor rules={rules} templates={templateList} choices={choices} />
+        <SignatureMailboxes mailboxes={mailboxes} templates={templateList} outlookOn={settings?.outlookOn ?? false} />
+      </div>
+    );
   } else if (tab === "connection") {
     const outlookSeen = await db.signatureOutlook.aggregate({ _count: { _all: true }, _max: { fetchedAt: true } });
     body = (

@@ -455,6 +455,11 @@ enum NotificationType {
    * lead in your name, and that lead says so instead.
    */
   CARD_SHARED_BACK
+  /**
+   * The template your digital card is drawn from changed — its look, what it shows, or its links. To
+   * each live cardholder, at most once in half an hour per template.
+   */
+  CARD_CHANGED
 }
 
 model User {
@@ -12890,6 +12895,8 @@ model SignatureTemplate {
   logoUrl     String?
   /// Where the logo goes when clicked (https only); the website when empty.
   logoLink    String?
+  /// On replies and forwards, where the mail program can tell (Outlook's add-in): FULL, SHORT (name, title, company, phone) or NONE.
+  replyStyle  String          @default("FULL")
   social      Json            @default("{}")
   ctaLabel    String?
   ctaUrl      String?
@@ -12934,6 +12941,27 @@ model SignatureBanner {
   updatedAt   DateTime  @updatedAt
 
   @@map("signature_banners")
+}
+
+/**
+ * A shared mailbox (sales@, support@) and the signature its messages carry in Outlook: when somebody changes
+ * a message's From to it, the add-in asks for this one instead of their own. Drawn from a template like a
+ * person's, with the mailbox's name and number where a person's would be.
+ */
+model SignatureMailbox {
+  id          String   @id @default(cuid())
+  /// Lower-case. Never a person's own address — theirs is their signature.
+  address     String   @unique
+  /// Where a person's name would be, e.g. "Acme Sales".
+  name        String
+  phone       String?
+  /// The template it is drawn from; the default when empty, or when that template is deleted.
+  templateId  String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("signature_mailboxes")
 }
 
 enum SignatureRuleTarget {

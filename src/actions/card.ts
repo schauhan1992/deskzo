@@ -24,6 +24,7 @@ import { contactFromCardAddress, loadEvent, newEventCode } from "@/lib/cards/eve
 import { recordCardContact } from "@/lib/cards/capture";
 import { workspaceClock } from "@/lib/time/workspace";
 import { csvRow } from "@/lib/csv";
+import { cardChanges, tellCardholders } from "@/lib/cards/notices";
 import { formatLeadId } from "@/lib/order-id";
 import type { ActionResult } from "@/actions/company";
 
@@ -245,9 +246,15 @@ export async function saveCardTemplate(input: unknown): Promise<ActionResult<{ i
 
   let id: string;
   if (t.id) {
+    const before = await db.cardTemplate.findUnique({
+      where: { id: t.id },
+      select: { color: true, layout: true, showLogo: true, recordFields: true, sharedFields: true, allowOwnFields: true, shareBack: true, questions: true },
+    });
     const updated = await db.cardTemplate.updateMany({ where: { id: t.id }, data });
-    if (updated.count === 0) return { ok: false, error: "That template no longer exists." };
+    if (updated.count === 0 || !before) return { ok: false, error: "That template no longer exists." };
     id = t.id;
+    // Everybody whose card it is hears what changed (src/lib/cards/notices.ts).
+    await tellCardholders(id, cardChanges(before, data), user.id);
   } else {
     // The first template a workspace makes is its default.
     const hasDefault = (await db.cardTemplate.count({ where: { isDefault: true } })) > 0;

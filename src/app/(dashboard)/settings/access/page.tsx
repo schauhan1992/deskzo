@@ -30,6 +30,8 @@ import { staffFacts } from "@/lib/staff/roster";
 import { relativeAgo, staffStatus } from "@/lib/staff/status";
 import { permissionModules } from "@/lib/staff/permission-modules";
 import { workspaceClock } from "@/lib/time/workspace";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { isLive } from "@/lib/cards/server";
 
 export const metadata = { title: "Staff & roles" };
 
@@ -140,7 +142,7 @@ async function StaffTab({
   viewerId: string;
   viewerIsSuperAdmin: boolean;
 }) {
-  const [roster, users, departments, roles, mayEdit, mayAssignRole, showLeads, viewAllActivity, viewSignIns, worksAt] =
+  const [roster, users, departments, roles, mayEdit, mayAssignRole, showLeads, viewAllActivity, viewSignIns, worksAt, cardsOn, manageCards] =
     await Promise.all([
       accessRoster(),
       listUsers(),
@@ -155,18 +157,32 @@ async function StaffTab({
       can(viewerId, "activity.viewAll"),
       can(viewerId, "access.viewSignIns"),
       worksAtColumn(mayManage, viewerId),
+      // The card column: for whoever issues cards, while Cards is in the plan and switched on.
+      moduleAvailableForTenant("cards"),
+      can(viewerId, "cards.manage"),
     ]);
   const showSignIns = viewAllActivity || viewSignIns;
+  const showCards = cardsOn && manageCards;
 
   const account = new Map(users.map((u) => [u.id, u]));
   const roleName = new Map(roles.map((r) => [r.key, r.name]));
-  const [facts, clock] = await Promise.all([
+  const [facts, clock, cardRows] = await Promise.all([
     staffFacts(
       roster.map((r) => r.id),
       { leads: showLeads, signIns: showSignIns },
     ),
     workspaceClock(),
+    showCards
+      ? db.digitalCard.findMany({
+          where: { userId: { in: roster.map((r) => r.id) } },
+          select: { userId: true, handle: true, status: true, user: { select: { active: true, kind: true, employeeProfile: { select: { exitedOn: true } } } } },
+        })
+      : Promise.resolve([]),
   ]);
+  const today = clock.today();
+  const cards = new Map(
+    cardRows.map((c) => [c.userId, { handle: c.handle, state: isLive(c, today) ? ("live" as const) : c.status === "ACTIVE" ? ("ended" as const) : ("off" as const) }]),
+  );
   const now = new Date();
 
   const rows: StaffRow[] = roster.map((r) => {
@@ -204,6 +220,7 @@ async function StaffTab({
         ? { label: relativeAgo(f.lastSignInAt, now), exact: clock.dateTime(f.lastSignInAt), iso: f.lastSignInAt.toISOString() }
         : null,
       isYou: r.id === viewerId,
+      card: cards.get(r.id) ?? null,
     };
   });
 
@@ -236,6 +253,7 @@ async function StaffTab({
             viewerIsSuperAdmin={viewerIsSuperAdmin}
             showLeads={showLeads}
             showSignIns={showSignIns}
+            showCards={showCards}
           />
         </div>
       </Card>

@@ -6,10 +6,11 @@ import { getOrganisation } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { workspaceClock } from "@/lib/time/workspace";
-import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, safeColor, safeUrl, type SignatureDetails, type SignatureFont, type SignatureStyle, type SocialNetwork } from "@/lib/signatures/render";
+import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, renderSignature, safeColor, safeUrl, signatureText, type SignatureDetails, type SignatureFont, type SignatureStyle, type SocialNetwork } from "@/lib/signatures/render";
 import { STORED_LAYOUTS, renderAnySignature, type SignatureLayout, type StoredLayout } from "@/lib/signatures/premium";
 import { liveBanners, pickBanner, type LiveBanner } from "@/lib/signatures/banners";
 import { clickLink } from "@/lib/signatures/clicks";
+import { REPLY_STYLES, type ReplyStyle } from "@/lib/signatures/reply-styles";
 import { readSignatureSettings } from "@/lib/signatures/sync";
 
 /**
@@ -50,7 +51,10 @@ export type TemplateSpec = {
   ctaUrl: string;
   signOff: string;
   disclaimer: string;
+  replyStyle: ReplyStyle;
 };
+
+export { REPLY_STYLES, type ReplyStyle };
 
 export function readTemplate(row: SignatureTemplate): TemplateSpec {
   const keys = new Set<string>(RECORD_FIELDS.map((f) => f.key));
@@ -78,6 +82,7 @@ export function readTemplate(row: SignatureTemplate): TemplateSpec {
     ctaUrl: row.ctaUrl ?? "",
     signOff: row.signOff ?? "",
     disclaimer: row.disclaimer ?? "",
+    replyStyle: (REPLY_STYLES.some((s) => s.key === row.replyStyle) ? row.replyStyle : "FULL") as ReplyStyle,
   };
 }
 
@@ -179,6 +184,8 @@ export type PersonSignature = {
   html: string;
   /** What changes when the signature does — compared with what was last put into the mailbox. */
   hash: string;
+  /** For replies and forwards (the template's reply style): the same, a short one, or null for none. */
+  reply: { html: string; text: string } | null;
 };
 
 /** Built once per batch: what every signature shares. */
@@ -261,7 +268,53 @@ export async function personSignature(person: Person, ctx: SignatureContext): Pr
   const style: SignatureStyle<SignatureLayout> = { template: LAYOUTS[t.layout] ?? "classic", color: t.color, font: t.font };
   // The paid product carries no credit.
   const html = renderAnySignature(details, style, null);
-  return { templateId: t.id, details, style, html, hash: createHash("sha256").update(html).digest("hex") };
+  return { templateId: t.id, details, style, html, hash: createHash("sha256").update(html).digest("hex"), reply: replySignature(t.replyStyle, details, style, html) };
+}
+
+export type MailboxRow = { id: string; address: string; name: string; phone: string | null; templateId: string | null };
+
+/**
+ * A shared mailbox's signature (`SignatureMailbox`): its template (the default when it names none, or a
+ * deleted one), the mailbox's name and number where a person's would be, its address as the email, and
+ * the company's office address — no photo, title or department, which are a person's. Its banner and
+ * button link straight: counted clicks are counted against a person.
+ */
+export function mailboxSignature(mailbox: MailboxRow, ctx: SignatureContext): Omit<PersonSignature, "templateId"> & { templateId: string } {
+  const t = (mailbox.templateId ? ctx.templates.get(mailbox.templateId) : undefined) ?? ctx.templates.get(ctx.defaultId)!;
+  const show = new Set(t.shown);
+  const banner = pickBanner(t.id, ctx.banners);
+  const details: SignatureDetails = {
+    ...EMPTY_DETAILS,
+    name: mailbox.name,
+    company: ctx.company,
+    phone: show.has("phone") ? (mailbox.phone ?? "") : "",
+    email: show.has("email") ? mailbox.address : "",
+    website: t.website,
+    address: show.has("address") ? ctx.orgAddress : "",
+    logo: t.logoUrl || ctx.brandLogo || "",
+    logoLink: t.logoLink,
+    social: t.social,
+    signOff: t.signOff,
+    ctaLabel: t.ctaLabel,
+    ctaUrl: t.ctaUrl,
+    disclaimer: t.disclaimer,
+    banner: banner?.spec ?? null,
+  };
+  const style: SignatureStyle<SignatureLayout> = { template: LAYOUTS[t.layout] ?? "classic", color: t.color, font: t.font };
+  const html = renderAnySignature(details, style, null);
+  return { templateId: t.id, details, style, html, hash: createHash("sha256").update(html).digest("hex"), reply: replySignature(t.replyStyle, details, style, html) };
+}
+
+/**
+ * The reply's signature: the whole one, or two lines — name, title and company, then phone — in the
+ * template's colour and font, with the disclaimer still under it (a legal line belongs on every message).
+ * No photo, logo, links, button or banner: the thread above already says who this is.
+ */
+function replySignature(replyStyle: ReplyStyle, d: SignatureDetails, style: SignatureStyle<SignatureLayout>, html: string): PersonSignature["reply"] {
+  if (replyStyle === "NONE") return null;
+  if (replyStyle === "FULL") return { html, text: signatureText(d, null) };
+  const short: SignatureDetails = { ...EMPTY_DETAILS, name: d.name, jobTitle: d.jobTitle, department: d.department, company: d.company, phone: d.phone, disclaimer: d.disclaimer };
+  return { html: renderSignature(short, { template: "compact", color: style.color, font: style.font }, null), text: signatureText(short, null) };
 }
 
 export async function loadPerson(userId: string): Promise<Person | null> {

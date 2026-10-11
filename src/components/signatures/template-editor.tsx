@@ -4,7 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { deleteSignatureTemplate, makeDefaultSignatureTemplate, saveSignatureTemplate } from "@/actions/signature";
-import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, imageNote, linkNote, type SignatureBannerSpec, type SignatureDetails, type SignatureFont } from "@/lib/signatures/render";
+import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, imageNote, linkNote, renderSignature, type SignatureBannerSpec, type SignatureDetails, type SignatureFont } from "@/lib/signatures/render";
+import { REPLY_STYLES, type ReplyStyle } from "@/lib/signatures/reply-styles";
 import { ALL_SIGNATURE_LAYOUTS, STORED_LAYOUTS, renderAnySignature, type StoredLayout } from "@/lib/signatures/premium";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ export type SignatureTemplateDraft = {
   ctaUrl: string;
   signOff: string;
   disclaimer: string;
+  replyStyle: ReplyStyle;
   /** People who get it now. */
   people: number;
   /** The banner its signatures carry today, for the preview. */
@@ -64,6 +66,7 @@ const BLANK: Omit<SignatureTemplateDraft, "banner"> = {
   ctaUrl: "",
   signOff: "",
   disclaimer: "",
+  replyStyle: "FULL",
   people: 0,
 };
 
@@ -200,6 +203,11 @@ function Editor({ initial, company, brand, onDone }: { initial: SignatureTemplat
   const renders = LAYOUTS.find((l) => l.key === d.layout)?.renders ?? "classic";
 
   const preview = useMemo(() => renderAnySignature(sample(d, company, brand), { template: renders, color: d.color, font: d.font }, null), [d, company, brand, renders]);
+  // The short reply signature, as person.ts draws it: two lines and the disclaimer.
+  const replyPreview = useMemo(() => {
+    const p = sample(d, company, brand);
+    return renderSignature({ ...EMPTY_DETAILS, name: p.name, jobTitle: p.jobTitle, department: p.department, company: p.company, phone: p.phone, disclaimer: p.disclaimer }, { template: "compact", color: d.color, font: d.font }, null);
+  }, [d, company, brand]);
   // Each layout drawn small, in this template's colour, font and logo, without the banner and disclaimer.
   const thumbs = useMemo(() => {
     const person = { ...sample(d, company, brand), banner: null, disclaimer: "", signOff: "" };
@@ -335,6 +343,17 @@ function Editor({ initial, company, brand, onDone }: { initial: SignatureTemplat
               <Label htmlFor="st-disclaimer">Disclaimer</Label>
               <Textarea id="st-disclaimer" rows={2} maxLength={600} value={d.disclaimer} onChange={(e) => set("disclaimer", e.target.value)} />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-reply">On replies and forwards</Label>
+              <Select id="st-reply" value={d.replyStyle} onChange={(e) => set("replyStyle", e.target.value as ReplyStyle)}>
+                {REPLY_STYLES.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-subtle">In Outlook, where the add-in can tell a reply from a new message. Gmail and Zoho Mail keep one signature for both.</p>
+            </div>
             <p className="text-xs text-muted">Banners under the signature are set once for the company, on the Banners tab.</p>
           </section>
 
@@ -355,6 +374,15 @@ function Editor({ initial, company, brand, onDone }: { initial: SignatureTemplat
             <div dangerouslySetInnerHTML={{ __html: preview }} />
           </Card>
           {d.banner && <p className="text-xs text-subtle">With the banner its signatures carry today.</p>}
+          {d.replyStyle === "SHORT" && (
+            <>
+              <p className="pt-2 text-xs font-medium uppercase tracking-wide text-subtle">On replies and forwards</p>
+              <Card className="overflow-x-auto bg-white px-5 py-4 text-[#333333]">
+                {/* Built by renderSignature, which escapes everything and allows only safe links. */}
+                <div dangerouslySetInnerHTML={{ __html: replyPreview }} />
+              </Card>
+            </>
+          )}
         </div>
       </div>
     </div>

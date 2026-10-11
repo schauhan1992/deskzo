@@ -43,6 +43,11 @@ export type StaffRow = {
   overdueLeads: number | null;
   /** Null when never, or when the viewer may not see sign-ins (see `showSignIns`). */
   lastSignIn: { label: string; exact: string; iso: string } | null;
+  /**
+   * Their digital card (Deskzo Cards), when the viewer manages cards (see `showCards`): live, switched
+   * off, or ended with their last working day. Null: none issued, or not shown.
+   */
+  card: { handle: string; state: "live" | "off" | "ended" } | null;
   isYou: boolean;
 };
 

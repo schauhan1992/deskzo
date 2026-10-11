@@ -552,7 +552,7 @@ async function run(scratchUrl: string, base: string) {
         }
       })());
       type Fetched = { status: number; json: () => Promise<unknown> };
-      const outlook = (o: { email: string; bodyType?: "html" | "text"; own?: boolean; failSet?: boolean; page?: boolean; fetchImpl?: (url: string) => Promise<Fetched> }) => {
+      const outlook = (o: { email: string; bodyType?: "html" | "text"; own?: boolean; failSet?: boolean; page?: boolean; compose?: "newMail" | "reply" | "forward"; from?: string; fetchImpl?: (url: string) => Promise<Fetched> }) => {
         const calls = { set: [] as { data: string; coercion: string }[], disabled: 0, notes: [] as string[], completed: 0, onReady: 0, fetched: [] as string[] };
         const handlers = new Map<string, (event: unknown) => void>();
         type Cb = (r: { status: string; value?: unknown; error?: { message: string } }) => void;
@@ -569,6 +569,8 @@ async function run(scratchUrl: string, base: string) {
             calls.disabled += 1;
             cb({ status: "succeeded" });
           },
+          getComposeTypeAsync: (cb: Cb) => cb({ status: "succeeded", value: { composeType: o.compose ?? "newMail", coercionType: o.bodyType ?? "html" } }),
+          from: { getAsync: (cb: Cb) => cb({ status: "succeeded", value: { emailAddress: o.from ?? o.email, displayName: "" } }) },
           notificationMessages: {
             replaceAsync: (_key: string, m: { message: string }, cb: Cb) => {
               calls.notes.push(m.message);
@@ -685,6 +687,65 @@ async function run(scratchUrl: string, base: string) {
       ok("My email signature: that it is in their Outlook", mineNow.includes("In your Outlook"), mineNow.slice(0, 300));
       actor = boss;
       ok("turned off, the add-in gets nothing again", (await actions.setOutlookAddin(false)).ok && (await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-a")).status === 404);
+
+      section("Outlook: replies, and sending from a shared mailbox");
+      actor = boss;
+      await actions.setOutlookAddin(true);
+      outlookLib.resetOutlookMisses();
+      ok("a template can give replies and forwards a short signature", (await actions.saveSignatureTemplate({ ...base0, id: salesId, replyStyle: "SHORT" })).ok && (await db.signatureTemplate.findUniqueOrThrow({ where: { id: salesId } })).replyStyle === "SHORT");
+      ok("...and only the three styles there are", !(await actions.saveSignatureTemplate({ ...base0, id: salesId, replyStyle: "TINY" })).ok);
+      const replying = outlook({ email: `rep@${DOMAIN}`, compose: "reply" });
+      await replying.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      const shortSig = replying.calls.set[0]?.data ?? "";
+      ok("a reply gets the short one: name, title and company, then the phone — no button, picture or profiles", shortSig.includes(`${TAG} Rep`) && shortSig.includes("+91 98765 43210") && !shortSig.includes("Book a demo") && !shortSig.includes("<img") && !shortSig.includes("linkedin"), shortSig.slice(0, 120));
+      const forwarding = outlook({ email: `rep@${DOMAIN}`, compose: "forward" });
+      await forwarding.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("...so does a forward", forwarding.calls.set[0]?.data === shortSig);
+      const fresh = outlook({ email: `rep@${DOMAIN}`, compose: "newMail" });
+      await fresh.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("a new message still gets the whole signature", (fresh.calls.set[0]?.data ?? "").includes("Book a demo"));
+      const pressed = outlook({ email: `rep@${DOMAIN}`, compose: "reply" });
+      await pressed.fire(outlookLib.OUTLOOK_HANDLERS.button);
+      ok("the Insert signature button on a reply puts the whole one in — somebody pressed it for that", (pressed.calls.set[0]?.data ?? "").includes("Book a demo"));
+      await actions.saveSignatureTemplate({ ...base0, id: salesId, replyStyle: "NONE" });
+      const bare = outlook({ email: `rep@${DOMAIN}`, compose: "reply" });
+      await bare.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("set to none, a reply gets nothing — and nothing is said about it", bare.calls.set.length === 0 && bare.calls.notes.length === 0 && bare.calls.completed === 1);
+      await actions.saveSignatureTemplate({ ...base0, id: salesId, replyStyle: "SHORT" });
+
+      actor = rep;
+      ok("somebody who doesn't manage signatures can't list a shared mailbox", !(await actions.saveSignatureMailbox({ id: null, address: `sales@${DOMAIN}`, name: "x", phone: "", templateId: null })).ok);
+      actor = boss;
+      const ownAddress = await actions.saveSignatureMailbox({ id: null, address: `Other@${DOMAIN}`, name: "x", phone: "", templateId: null });
+      ok("a person's own address can't be one — theirs is their signature", !ownAddress.ok && /own address/.test(errorOf(ownAddress) ?? ""), errorOf(ownAddress));
+      ok("...nor can a phone that isn't one", !(await actions.saveSignatureMailbox({ id: null, address: `sales@${DOMAIN}`, name: "x", phone: "call us", templateId: null })).ok);
+      const salesBox = await actions.saveSignatureMailbox({ id: null, address: `Sales@${DOMAIN}`, name: `${TAG} Sales desk`, phone: "+91 22 4000 1000", templateId: salesId });
+      ok("a manager lists sales@ — kept lower-case, with its own name and number", salesBox.ok && (await db.signatureMailbox.findUniqueOrThrow({ where: { address: `sales@${DOMAIN}` } })).name === `${TAG} Sales desk`, errorOf(salesBox));
+      ok("...once", /listed already/.test(errorOf(await actions.saveSignatureMailbox({ id: null, address: `sales@${DOMAIN}`, name: "again", phone: "", templateId: null })) ?? ""));
+      const seenBefore = await db.signatureOutlook.findUnique({ where: { userId: rep.id } });
+      const switched = outlook({ email: `rep@${DOMAIN}`, from: `sales@${DOMAIN}` });
+      await switched.fire(outlookLib.OUTLOOK_HANDLERS.from);
+      const boxSig = switched.calls.set[0]?.data ?? "";
+      ok("From changed to sales@: the mailbox's signature — its name, number and address, not the rep's", boxSig.includes(`${TAG} Sales desk`) && boxSig.includes("tel:+912240001000") && boxSig.includes(`mailto:sales@${DOMAIN}`) && !boxSig.includes(`${TAG} Rep`), boxSig.slice(0, 160));
+      ok("...and the rep's own Outlook record is left alone", JSON.stringify(await db.signatureOutlook.findUnique({ where: { userId: rep.id } })) === JSON.stringify(seenBefore));
+      const stranger2 = outlook({ email: `rep@${DOMAIN}`, from: "someone@elsewhere.example" });
+      await stranger2.fire(outlookLib.OUTLOOK_HANDLERS.from);
+      ok("From changed to an address with no signature here: what's in stays, and nothing is said", stranger2.calls.set.length === 0 && stranger2.calls.notes.length === 0 && stranger2.calls.completed === 1);
+      const backHome = outlook({ email: `rep@${DOMAIN}`, from: `rep@${DOMAIN}` });
+      await backHome.fire(outlookLib.OUTLOOK_HANDLERS.from);
+      ok("...and changed back to their own, their own signature again", (backHome.calls.set[0]?.data ?? "").includes(`${TAG} Rep`));
+      const manifest11 = outlookLib.outlookManifest({ origin: ORIGIN, addinId, company: "x" });
+      ok("the manifest asks for the From change on the desktop and on phones, as version 1.1", (manifest11.match(/<LaunchEvent Type="OnMessageFromChanged" FunctionName="deskzoOnMessageFromChanged"\/>/g) ?? []).length === 2 && manifest11.includes("<Version>1.1.0.0</Version>"));
+
+      actor = rep;
+      const mineReply = textOf(await renderHtml(await MyPage()));
+      ok("My email signature also offers the short one, for replies and forwards", mineReply.includes("On replies and forwards") && mineReply.includes("Outlook puts it in by itself"));
+      actor = boss;
+      const rulesTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "rules" }) })));
+      ok("the Who gets which tab lists the shared mailboxes", rulesTab.includes("Shared mailboxes (Outlook)") && rulesTab.includes(`sales@${DOMAIN}`) && rulesTab.includes(`${TAG} Sales desk`));
+      await actions.saveSignatureTemplate({ ...base0, id: salesId, replyStyle: "FULL" });
+      ok("removing the mailbox leaves From changes to it alone", (await actions.deleteSignatureMailbox(salesBox.ok ? salesBox.data.id : "")).ok && (await outlookLib.outlookSignature(`sales@${DOMAIN}`, "caller-m")).status === 404);
+      await actions.setOutlookAddin(false);
 
       section("Premium layouts, the logo's link and banners");
       actor = boss;

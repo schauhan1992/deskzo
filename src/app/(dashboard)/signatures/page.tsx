@@ -104,7 +104,18 @@ export default async function MySignaturePage() {
       </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <SignatureCopy html={sig.html} text={signatureText(sig.details, null)} />
+        <div className="space-y-6">
+          <SignatureCopy html={sig.html} text={signatureText(sig.details, null)} />
+          {sig.reply && sig.reply.html !== sig.html && (
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold text-text">On replies and forwards</h2>
+              <p className="text-sm text-muted">
+                A shorter one, for the replies-and-forwards signature in your mail program{outlookOn ? " — Outlook puts it in by itself" : ""}.
+              </p>
+              <SignatureCopy html={sig.reply.html} text={sig.reply.text} />
+            </div>
+          )}
+        </div>
         <div className="space-y-3">
           <p className="text-sm text-muted">
             Your name, title, phone and photo come from your profile — change them there and your signature follows. The design is your company&apos;s.
