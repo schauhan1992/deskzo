@@ -5,6 +5,7 @@ import { Container } from "@/components/site/ui";
 import { SignupFlow, type SignupReferral } from "@/components/platform/signup-flow";
 import { COUNTRIES } from "@/lib/geo/countries";
 import { SLUG_PATTERN } from "@/lib/workspace-names";
+import { productByKey, type ProductKey } from "@/lib/products";
 
 /**
  * A partner's referral, as the signup page put it in the query (src/app/platform-site/signup/page.tsx):
@@ -26,6 +27,11 @@ function invitationFrom(query: SiteRenderContext["searchParams"]): { invite: str
   const invite = String(query.invite ?? "").trim().slice(0, 100);
   const held = String(query.held ?? "").trim();
   return { invite, held: invite && SLUG_PATTERN.test(held) ? held : null };
+}
+
+/** The product chosen on its page, as the signup page passed it on (`?product=books`); anything else is no choice. */
+function productFrom(query: SiteRenderContext["searchParams"]): ProductKey | null {
+  return productByKey(String(query.product ?? "").trim().toLowerCase())?.key ?? null;
 }
 
 /**
@@ -58,7 +64,7 @@ export function SignupFormBlock({ props, ctx }: { props: SignupFormProps; ctx: S
             )}
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-lg sm:p-8">
-            <SignupFlow suffix={ctx.workspaceSuffix} countries={COUNTRIES} inviteRequired={!ctx.signupOpen} referral={referralFrom(ctx.searchParams)} brandName={ctx.settings.siteName} {...invitationFrom(ctx.searchParams)} />
+            <SignupFlow suffix={ctx.workspaceSuffix} countries={COUNTRIES} inviteRequired={!ctx.signupOpen} referral={referralFrom(ctx.searchParams)} brandName={ctx.settings.siteName} product={productFrom(ctx.searchParams)} {...invitationFrom(ctx.searchParams)} />
           </div>
         </div>
       </Container>

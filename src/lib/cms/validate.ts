@@ -12,6 +12,7 @@ import {
 } from "@/components/site/blocks/types";
 import { BUILTIN_PAGE_SLUGS, RESERVED_PAGE_SEGMENTS, type CmsIssue, type PageDocument, type PostSeo } from "@/lib/cms/types";
 import { keywordProblems, MAX_KEYWORDS, normaliseKeywords } from "@/lib/seo/keywords";
+import { productByKey } from "@/lib/products";
 
 /**
  * Checking what an editor sends before it is stored — against the site's own content model
@@ -552,7 +553,11 @@ function checkField(field: Field, value: unknown, path: string, ctx: Ctx): unkno
         issue(ctx, path, "A button is a link or the signup button.");
         return undefined;
       }
-      if (value.kind === "signup") return { kind: "signup" };
+      // A product's trial keeps its product while products.ts knows it; anything else is the plain button.
+      if (value.kind === "signup") {
+        const product = productByKey(typeof value.product === "string" ? value.product : null);
+        return product ? { kind: "signup", product: product.key } : { kind: "signup" };
+      }
       if (value.kind !== "link") {
         issue(ctx, path, "A button is a link or the signup button.");
         return undefined;

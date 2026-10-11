@@ -4,6 +4,7 @@ import { heldAddress } from "@/actions/platform/signup";
 import { SitePageView, sitePageMetadata } from "@/components/site/page-view";
 import { findActiveReferral } from "@/lib/partners/referrals";
 import { controlConfigured } from "@/lib/platform/control-db";
+import { productByKey } from "@/lib/products";
 
 /**
  * Setting up a workspace — src/actions/platform/signup.ts does the work. Kept out of search engines.
@@ -17,6 +18,10 @@ import { controlConfigured } from "@/lib/platform/control-db";
  * An invitation code may come in the link too (`?invite=`): it fills the form's code in, and when it
  * holds an address for its customer, the page looks that up and passes it on as `held` — any `held`
  * a visitor sends is dropped first — so the form opens with the address filled in and locked.
+ *
+ * A product chosen on its page (`?product=books`, owner 11 Oct 2026) goes on to the form only as a key
+ * src/lib/products.ts knows, which then says which product the trial is of; anything else is dropped,
+ * and so is the product beside an invitation in the link, which names its own plan.
  */
 
 const REFERRAL_COOKIE = "deskzo_ref";
@@ -71,5 +76,8 @@ export default async function SignupPage({ searchParams }: PageProps<"/platform-
   if (invite) query.invite = invite;
   const held = await heldFor(invite);
   if (held) query.held = held;
+  const product = productByKey(firstValue(query.product).toLowerCase());
+  delete query.product;
+  if (product && !invite) query.product = product.key;
   return <SitePageView slug="signup" searchParams={query} trustedReferral />;
 }

@@ -20,6 +20,7 @@ import {
   inviteRequiredProblem,
   ownerNameProblem,
   passwordProblem,
+  productCountryProblem,
   simpleSignupIssues,
   slugRequiredProblem,
   type SignupField,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/signup-fields";
 import type { Country } from "@/lib/geo/countries";
 import { INDUSTRY_TEMPLATES } from "@/lib/industry-templates/catalogue";
+import { productByKey, type ProductKey } from "@/lib/products";
 
 type Stage = { at: "form" } | { at: "code"; email: string } | { at: "progress"; step: string; ready?: boolean } | { at: "failed"; message: string };
 
@@ -114,6 +116,10 @@ function progressLine(step: string, ready: boolean): string {
  * you." It stays locked while that code is in the field; change the code and the address is the
  * visitor's own again. The registered business name is still asked for, but the address is no longer
  * made from it. `startSignup` holds it to the same rule.
+ *
+ * A product chosen on its page (`product`): the form says the trial is of that product alone, and offers
+ * every product instead. A product sold only in some countries (Books, People: India) says so at the
+ * country, as the server would — choosing every product instead is the other way out.
  */
 export function SignupFlow({
   suffix,
@@ -123,6 +129,7 @@ export function SignupFlow({
   invite = "",
   held = null,
   brandName = DEFAULT_BRAND_NAME,
+  product = null,
 }: {
   suffix: string;
   countries: Country[];
@@ -134,9 +141,11 @@ export function SignupFlow({
   held?: string | null;
   /** The site's name, for the floating mark — the same one the header shows. */
   brandName?: string;
+  /** The product chosen on its page, to start a trial of it alone; null: the default plan. */
+  product?: ProductKey | null;
 }) {
   const [stage, setStage] = useState<Stage>({ at: "form" });
-  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", industry: "", invite, referral: referral?.code ?? "", referralVia: referral?.via ?? "" });
+  const [form, setForm] = useState<SignupForm>({ companyName: "", slug: "", ownerName: "", email: "", password: "", country: "IN", industry: "", invite, referral: referral?.code ?? "", referralVia: referral?.via ?? "", product: product ?? "" });
   // The address an invitation code holds, with the code it belongs to — it applies only while that code is the one typed.
   const [hold, setHold] = useState<{ code: string; slug: string } | null>(held && invite.trim() ? { code: invite.trim(), slug: held } : null);
   const inviteCode = form.invite.trim();
@@ -160,6 +169,13 @@ export function SignupFlow({
 
   const countryKnown = (c: string) => countries.some((x) => x.code === c);
   const values = () => ({ ...form, slug: activeHold ? activeHold.slug : form.slug });
+  const chosen = productByKey(form.product);
+  /** The chosen product isn't sold in the country chosen — what the server would say, said as the country is left. */
+  const productCountryOf = (v: SignupForm): string | null => {
+    const p = productByKey(v.product);
+    if (!p?.soldOnlyIn?.length || p.soldOnlyIn.includes(String(v.country ?? "").toUpperCase())) return null;
+    return productCountryProblem(p.name, p.soldOnlyIn.map((code) => countries.find((c) => c.code === code)?.name ?? code));
+  };
   const problemOf = (field: SignupField, v: SignupForm): string | null => {
     switch (field) {
       case "companyName":
@@ -173,7 +189,7 @@ export function SignupFlow({
       case "password":
         return passwordProblem(v.password);
       case "country":
-        return countryProblem(v.country, countryKnown);
+        return countryProblem(v.country, countryKnown) ?? productCountryOf(v);
       case "invite":
         return inviteRequiredProblem(v.invite, inviteRequired);
       case "industry":
@@ -193,6 +209,14 @@ export function SignupFlow({
   /** A field was left: its own checks, now. */
   const leave = (field: SignupField) => setChecked((all) => ({ ...all, [field]: problemOf(field, form) ?? undefined }));
   const set = (field: SignupField) => (e: { target: { value: string } }) => change(field, { [field]: e.target.value });
+  /** Every product instead of the one chosen: the default plan, and whatever was said because of the product goes. */
+  const everyProduct = () => {
+    const next = { ...form, product: "" };
+    setForm(next);
+    setFromServer((all) => (all.country ? { ...all, country: undefined } : all));
+    setChecked((all) => (all.country ? { ...all, country: problemOf("country", next) ?? undefined } : all));
+    setFormError(null);
+  };
 
   function focusField(field: SignupField | null) {
     if (!field) return;
@@ -410,6 +434,8 @@ export function SignupFlow({
         setFormError(null);
         // The simple checks first, here — the same ones the server makes, so nothing goes out to be refused.
         const local = simpleSignupIssues(values(), { inviteRequired, countryKnown });
+        const productCountry = productCountryOf(values());
+        if (productCountry && !local.country) local.country = productCountry;
         setChecked(local);
         const first = firstIssue(local) as SignupField | null;
         if (first) {
@@ -419,6 +445,17 @@ export function SignupFlow({
         send();
       }}
     >
+      {chosen && (
+        <div className="rounded-base border border-line bg-surface-sunken px-3 py-2">
+          <p className="text-sm font-medium text-text">{chosen.key === "one" ? `Your free trial: ${chosen.name}, every product` : `Your free trial: ${chosen.name}`}</p>
+          <p className="mt-0.5 text-xs text-muted">{chosen.tagline}</p>
+          {chosen.key !== "one" && (
+            <button type="button" className="mt-1.5 text-xs font-medium text-brand hover:underline" onClick={everyProduct}>
+              Try every product instead
+            </button>
+          )}
+        </div>
+      )}
       <div>
         <Label htmlFor="company">Registered business name</Label>
         <Input

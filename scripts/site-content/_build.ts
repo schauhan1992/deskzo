@@ -1,4 +1,5 @@
 import type { IconName, PreviewKind, RichInline, RichNode, SiteAction, SiteBlock, SiteLink } from "../../src/components/site/blocks/types";
+import { PRODUCTS } from "../../src/lib/products";
 import { byPath, type CatalogGroup } from "./_catalog";
 import type { SeedPage } from "./types";
 
@@ -105,21 +106,21 @@ function faqBlock(id: string, heading: string, faqs: Faq[]): SiteBlock {
   return { id, type: "faq", props: { anchor: "faq", heading, items: faqs.map(([question, ...answer]) => ({ question, answer })) } };
 }
 
-function ctaBlock(id: string, cta: { heading: string; body: string } | undefined, secondary: SiteAction = DEMO): SiteBlock {
+function ctaBlock(id: string, cta: { heading: string; body: string } | undefined, secondary: SiteAction = DEMO, primary: SiteAction = SIGNUP): SiteBlock {
   return {
     id,
     type: "cta",
     props: {
       heading: cta?.heading ?? "See it with your own data",
       body: cta?.body ?? "Set up a workspace for your company and switch on the modules you need. Every workspace starts with a {trialDays}-day free trial.",
-      primary: SIGNUP,
+      primary,
       secondary,
       variant: "band",
     },
   };
 }
 
-function hero(id: string, eyebrow: string, heading: string, subheading: string, preview?: PreviewKind): SiteBlock {
+function hero(id: string, eyebrow: string, heading: string, subheading: string, preview?: PreviewKind, primary: SiteAction = SIGNUP): SiteBlock {
   return {
     id,
     type: "hero",
@@ -127,7 +128,7 @@ function hero(id: string, eyebrow: string, heading: string, subheading: string, 
       eyebrow,
       heading,
       subheading,
-      primary: SIGNUP,
+      primary,
       secondary: DEMO,
       note: TRIAL_NOTE,
       noteInviteOnly: INVITE_NOTE,
@@ -278,13 +279,17 @@ export type ProductLineSpec = {
 /**
  * A product's page: the hero (its one h1), the answer-first opening, what is in it, how it works,
  * what it works with, the questions buyers ask, related pages, and the call to action — start a
- * trial, or talk to sales.
+ * trial, or talk to sales. Its trial buttons start a trial of this product alone (owner, 11 Oct 2026):
+ * /signup?product=books.
  */
 export function productLinePage(spec: ProductLineSpec): SeedPage {
   const k = key(spec.slug);
+  const product = PRODUCTS.find((p) => p.path === `/${spec.slug}`);
+  if (!product) throw new Error(`No product in src/lib/products.ts has the path /${spec.slug}.`);
+  const trial: SiteAction = { kind: "signup", product: product.key };
   const answer: RichNode[] = [p(spec.answer.answer), ...(spec.answer.more ?? []).map((m) => p(m)), ...(spec.answer.list?.length ? [ul(...spec.answer.list)] : [])];
   const blocks: SiteBlock[] = [
-    hero(`${k}-hero`, spec.eyebrow, spec.h1, spec.lead, spec.heroPreview),
+    hero(`${k}-hero`, spec.eyebrow, spec.h1, spec.lead, spec.heroPreview, trial),
     { id: `${k}-answer`, type: "richText", props: { heading: spec.answer.question, content: answer } },
     ...(spec.contents
       ? [{ id: `${k}-contents`, type: "featureGrid" as const, props: { anchor: "modules", heading: spec.contents.heading, ...(spec.contents.intro ? { intro: spec.contents.intro } : {}), columns: 3 as const, items: spec.contents.items } }]
@@ -297,7 +302,7 @@ export function productLinePage(spec: ProductLineSpec): SeedPage {
     faqBlock(`${k}-faq`, spec.faqHeading, spec.faq),
     // Prices aren't stated on a product's page: the pricing page is always one of its related pages.
     related(`${k}-related`, "Related pages", spec.related.some((r) => (typeof r === "string" ? r : r.path) === "/pricing") ? spec.related : [...spec.related, "/pricing"]),
-    ctaBlock(`${k}-cta`, spec.cta, SALES),
+    ctaBlock(`${k}-cta`, spec.cta, SALES, trial),
   ];
   return { slug: spec.slug, document: { title: spec.name, seo: { title: spec.seo.title, absoluteTitle: true, description: spec.seo.description, keywords: [...spec.seo.keywords] }, blocks } };
 }

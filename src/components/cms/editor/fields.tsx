@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { isAllowedHref, isCalendarDate, isSitePath, mediaIdOf } from "@/lib/cms/validate";
+import { PRODUCTS, type ProductKey } from "@/lib/products";
 import { cn } from "@/lib/utils";
 
 /**
@@ -623,7 +624,21 @@ export function ActionField({ label, name, value, onChange }: { label: string; n
           { value: "link", label: "Link" },
         ]}
       />
-      {value?.kind === "signup" && <p className="text-xs text-subtle">Follows the signup setting: “Start free trial” while anyone can sign up, “Request an invitation” while signup is by invitation. Its words are set in Navigation.</p>}
+      {value?.kind === "signup" && (
+        <>
+          <p className="text-xs text-subtle">Follows the signup setting: “Start free trial” while anyone can sign up, “Request an invitation” while signup is by invitation. Its words are set in Navigation.</p>
+          <SelectField<ProductKey>
+            label="Trial of"
+            name={`${name}.product`}
+            value={value.product}
+            options={PRODUCTS.map((p) => ({ value: p.key, label: p.name }))}
+            onChange={(next) => onChange(next ? { kind: "signup", product: next } : { kind: "signup" })}
+            required={false}
+            emptyLabel="Whatever the default plan is"
+            hint="A product's page starts a trial of that product alone. The signup form says which, and offers every product instead."
+          />
+        </>
+      )}
       {value?.kind === "link" && (
         <IssueScope prefix={name}>
           <div className="grid gap-3 sm:grid-cols-2">

@@ -109,6 +109,11 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
   const groups = editionGroups(editions);
   const extras = offer.plans.filter((p) => p.kind !== "EDITION");
   const signup = resolveAction({ kind: "signup" }, ctx);
+  // A product's card starts a trial of that product alone; any other edition, the default.
+  const signupFor = (plan: OfferPlan) => {
+    const product = productByKey(plan.productKey);
+    return product ? resolveAction({ kind: "signup", product: product.key }, ctx) : signup;
+  };
   const empty = props.emptyAction ? resolveAction(props.emptyAction, ctx) : null;
   const query = (i: Interval) => `?${new URLSearchParams({ country: country.code, interval: i }).toString()}`;
 
@@ -167,7 +172,7 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
                                   <SavingChip plan={plan} interval={interval} />
                                 </div>
                                 {plan.description && plan.description !== product.tagline && <p className="mt-2 text-sm leading-6 text-muted">{plan.description}</p>}
-                                <EditionBody plan={plan} interval={interval} currency={offer.currency} country={country} signup={signup} suite={suite} />
+                                <EditionBody plan={plan} interval={interval} currency={offer.currency} country={country} signup={signupFor(plan)} suite={suite} />
                               </li>
                             ))}
                           </ul>
@@ -189,7 +194,7 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
                         {product && plan.name !== product.name && <p className="mt-0.5 text-xs font-medium text-subtle">{plan.name}</p>}
                         {description && <p className="mt-2 text-sm leading-6 text-muted">{description}</p>}
                         {more && <p className="mt-1 text-sm leading-6 text-muted">{more}</p>}
-                        <EditionBody plan={plan} interval={interval} currency={offer.currency} country={country} signup={signup} suite={suite} wide={wide} />
+                        <EditionBody plan={plan} interval={interval} currency={offer.currency} country={country} signup={signupFor(plan)} suite={suite} wide={wide} />
                       </li>
                     );
                   })}

@@ -394,6 +394,10 @@ model PendingSignup {
   referralVia  String?
   /// The industry template chosen on the form, if any — src/lib/industry-templates/catalogue.ts keys.
   industryTemplate String?
+  /// The product the visitor chose to start with — src/lib/products.ts keys, from its page's "Start free
+  /// trial" (/signup?product=books). The workspace starts on that product's trial plan; none: the default
+  /// plan. Never set when the invitation names a plan, which wins.
+  productKey String?
 
   @@index([email])
   @@index([slug])

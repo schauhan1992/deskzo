@@ -42,6 +42,9 @@ import { newSignupCode, signupCodeMail } from "@/lib/platform/signup-code";
 import { SIGNUP_BROWSER_MS } from "@/lib/console-shared/signup-browser";
 import { subdomainHost } from "@/lib/tenancy/registry";
 import { templateOf } from "@/lib/industry-templates/catalogue";
+import { productByKey } from "@/lib/products";
+import { productTrialPlan, signupPlanKey } from "@/lib/platform/product-plans";
+import { productCountryProblem, productUnavailableMessage } from "@/lib/signup-fields";
 
 /**
  * Signing up for a workspace — the public site on the platform's own address (src/app/platform-site).
@@ -52,6 +55,8 @@ import { templateOf } from "@/lib/industry-templates/catalogue";
  *      six-digit code and remembers the browser (a cookie whose secret only this browser has).
  *   2. `verifySignup`: the code. Spends the invitation if there is one, reserves the name, queues
  *      the workspace on a free trial (src/lib/platform/provisioning.ts) and starts the worker.
+ *      Its plan (`signupPlanKey`): the invitation's; else the product chosen on its page
+ *      (/signup?product=books — that product's trial alone); else a partner referral's; else the default.
  *   3. `signupProgress`: what the progress page polls. Once the workspace is up, it hands the owner
  *      a one-time pass to it — once, to this browser only — and the page follows it straight in.
  *
@@ -170,7 +175,12 @@ export type SignupForm = {
   /** A partner's referral code — from a /signup?ref= link, the referral cookie, or typed. Optional, so a form without it still works. */
   referral?: string;
   referralVia?: "link" | "cookie" | "typed" | "";
+  /** The product chosen on its page (src/lib/products.ts key), to start a trial of it alone; empty: the default plan. Optional, so a form without it still works. */
+  product?: string;
 };
+
+/** Country codes as the form names them: "India". */
+const countryNames = (codes: readonly string[]) => codes.map((code) => WORLD_COUNTRIES.find((c) => c.code === code)?.name ?? code);
 
 const inviteRefusal = (open: boolean) =>
   open ? "That invitation code isn't valid — leave it empty to sign up without one." : "That invitation code isn't valid. Signing up is by invitation for now.";
@@ -221,8 +231,18 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   // Without an invitation only once signup is open; one given is checked either way — and refused in
   // the same words whether it is mistyped, used up, expired or a suspended partner's.
   const open = await signupOpen();
-  const formError = !open && !inviteCode ? "Signing up is by invitation for now — enter the code from your invitation." : undefined;
+  let formError = !open && !inviteCode ? "Signing up is by invitation for now — enter the code from your invitation." : undefined;
   if (inviteCode) put("invite", await inviteProblem(inviteCode, open));
+  // The product chosen on its page: a trial of it alone, where it is sold — unless the invitation names
+  // a plan, which wins and makes the choice moot. An unknown key is no choice: the default plan.
+  const chosen = productByKey(String(form.product ?? "").trim().toLowerCase());
+  const invitePlan = chosen && inviteCode ? ((await controlDb().signupInvite.findUnique({ where: { codeHash: sha256(inviteCode) }, select: { planKey: true } }))?.planKey ?? null) : null;
+  const product = chosen && !invitePlan ? chosen : null;
+  if (product && country) {
+    const trial = await productTrialPlan(product.key, country.code);
+    if (!trial.ok && trial.reason === "country") put("country", productCountryProblem(product.name, countryNames(trial.soldIn)));
+    else if (!trial.ok) formError ??= productUnavailableMessage(product.name);
+  }
   // A partner's code on the form must be live; an empty one is simply no partner code.
   const referralInput = String(form.referral ?? "").trim();
   const referral = referralInput ? await findActiveReferral(referralInput, new Date()) : null;
@@ -249,6 +269,7 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
       referralCode: referral?.code ?? null,
       referralVia,
       industryTemplate: industry?.key ?? null,
+      productKey: product?.key ?? null,
     },
     select: { id: true },
   });
@@ -322,8 +343,12 @@ export async function verifySignup(input: string): Promise<SignupResult> {
     if (inviteCodeHash && (await partnerInviteProblem(inviteCodeHash, new Date()))) throw new ProvisioningRefused(inviteRefusal(await signupOpen()));
     const now = new Date();
     const attribution = await resolveSignupAttribution({ inviteCodeHash, referralCode: pending.referralCode, email: pending.email, country: pending.country }, now);
-    // The referral link is read again now: the plan it names applies when the invitation names none.
+    // The referral link is read again now: the plan it names applies when nothing before it does.
     const referral = pending.referralCode ? await findActiveReferral(pending.referralCode, now, pending.country) : null;
+    // The product chosen on its page, asked again: staff may have retired its plan since the form was sent.
+    const product = invite?.planKey ? null : productByKey(pending.productKey);
+    const trial = product ? await productTrialPlan(product.key, pending.country) : null;
+    if (product && !trial?.ok) throw new ProvisioningRefused(productUnavailableMessage(product.name));
     ({ tenantId } = await startProvisioning({
       slug: pending.slug,
       companyName: pending.companyName,
@@ -331,7 +356,7 @@ export async function verifySignup(input: string): Promise<SignupResult> {
       ownerEmail: pending.email,
       ownerPasswordHash: pending.passwordHash,
       country: pending.country,
-      planKey: invite?.planKey ?? referral?.planKey ?? null,
+      planKey: signupPlanKey({ invitePlan: invite?.planKey ?? null, productPlan: trial?.ok ? trial.planKey : null, referralPlan: referral?.planKey ?? null }),
       attribution,
       hold,
       industryTemplate: pending.industryTemplate,

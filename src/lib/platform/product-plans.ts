@@ -44,6 +44,34 @@ export const ADD_ON_PLAN_KEYS: Record<AddOnKey, string> = {
 /** Copilot tokens a month for each unit of the AI Copilot add-on, until staff say otherwise. */
 export const COPILOT_TOKENS_PER_UNIT = 1_000_000;
 
+/** A product's own trial, or why a signup can't start on it: not sold where the business is (with where it is), or not offered alone. */
+export type ProductTrial = { ok: true; planKey: string } | { ok: false; reason: "country"; soldIn: string[] } | { ok: false; reason: "unavailable" };
+
+/**
+ * The plan a signup for one product starts its free trial on (owner, 11 Oct 2026: a product's page
+ * starts a trial of that product alone) — the catalogue's own edition of it, `deskzo-<product>`, while it
+ * is offered and sold in the business's country. Nothing else under that key: an internal plan staff
+ * gave the key to (the catalogue leaves those alone) would be a workspace free for ever, and another
+ * product's edition the wrong product. No price is needed, as for the default plan's trial.
+ */
+export async function productTrialPlan(product: ProductKey, country: string): Promise<ProductTrial> {
+  const plan = await controlDb().plan.findUnique({ where: { key: productPlanKey(product) }, select: { key: true, kind: true, productKey: true, active: true, countries: true } });
+  if (!plan || !plan.active || plan.kind !== "EDITION" || plan.productKey !== product) return { ok: false, reason: "unavailable" };
+  if (plan.countries.length && !plan.countries.includes(country)) return { ok: false, reason: "country", soldIn: plan.countries };
+  return { ok: true, planKey: plan.key };
+}
+
+/**
+ * The plan a signup starts on, the first that applies: the one its invitation names (made for this
+ * customer); the trial of the product the visitor chose on its page; the one a partner's referral names;
+ * and otherwise none — the default plan (`planForNewWorkspace`). What the visitor clicked comes before a
+ * partner's choice, which is the partner's default for people who chose nothing; the partner is
+ * credited with the workspace either way (src/lib/partners/attribution.ts).
+ */
+export function signupPlanKey(choice: { invitePlan: string | null; productPlan: string | null; referralPlan: string | null }): string | null {
+  return choice.invitePlan ?? choice.productPlan ?? choice.referralPlan ?? null;
+}
+
 
 /** A plan as the catalogue makes it: every field given. */
 export type CataloguePlan = Required<Omit<PlanInput, "customDomains">>;

@@ -17,6 +17,8 @@
  *     sale, from the control plane) and the forms — fetch or post it themselves.
  */
 
+import type { ProductKey } from "@/lib/products";
+
 // ─── Links, actions, media ───────────────────────────────────────────────────────────────────────
 
 /** A path on this site, or an http(s) address. Anything else is not rendered as a link. */
@@ -27,8 +29,10 @@ export type SiteLink = { label: string; href: Href };
 /**
  * A button. `signup` is the site's own call to action, which follows whether signing up is open
  * (SiteSettings.signupCta): "Start free trial" while it is, "Request an invitation" while it is not.
+ * With `product` (a product's page, its pricing card), the trial is of that product alone: the button
+ * goes to /signup?product=books while signing up is open.
  */
-export type SiteAction = { kind: "link"; label: string; href: Href } | { kind: "signup" };
+export type SiteAction = { kind: "link"; label: string; href: Href } | { kind: "signup"; product?: ProductKey };
 
 export const ICON_NAMES = [
   "sparkles",

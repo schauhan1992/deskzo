@@ -1,4 +1,5 @@
 import type { SiteAction, SiteLink, SiteRenderContext } from "@/components/site/blocks/types";
+import { productByKey } from "@/lib/products";
 
 /**
  * What the site's content may link to and show — checked when rendered, because content comes from
@@ -113,11 +114,24 @@ export function calendarDateLabel(value: string | null | undefined): string | nu
   return `${day} ${LONG_MONTHS[month]} ${year}`;
 }
 
-/** An action as the link it is now: `signup` follows whether signing up is open. */
+/** "/signup" with the product to start with: "/signup?product=books" (before any "#…"). */
+function withProduct(href: string, product: string): string {
+  const at = href.indexOf("#");
+  const [path, hash] = at < 0 ? [href, ""] : [href.slice(0, at), href.slice(at)];
+  return `${path}${path.includes("?") ? "&" : "?"}product=${encodeURIComponent(product)}${hash}`;
+}
+
+/**
+ * An action as the link it is now: `signup` follows whether signing up is open — and a product's trial
+ * takes the product with it to the signup page, while that is where the button goes (staff may point
+ * it elsewhere in Navigation; then it goes there as it is).
+ */
 export function resolveAction(action: SiteAction, ctx: Pick<SiteRenderContext, "settings" | "signupOpen" | "trialDays">): SiteLink {
   if (action.kind === "signup") {
     const cta = ctx.signupOpen ? ctx.settings.signupCta.open : ctx.settings.signupCta.inviteOnly;
-    return { label: fill(cta.label, ctx), href: cta.href };
+    const product = ctx.signupOpen ? productByKey(action.product) : null;
+    const href = product && /^\/signup(?:[?#]|$)/.test(cta.href) && !/[?&]product=/.test(cta.href) ? withProduct(cta.href, product.key) : cta.href;
+    return { label: fill(cta.label, ctx), href };
   }
   return { label: fill(action.label, ctx), href: action.href };
 }

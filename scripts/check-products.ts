@@ -552,6 +552,122 @@ async function main() {
     ok("the US: dollars, and no Books, People or Revenue & Close — India's", txUS.includes("$29") && !txUS.includes("Deskzo Books") && !txUS.includes("Deskzo People") && !txUS.includes("Revenue & Close") && txUS.includes("Deskzo Desk"));
     ok("yearly: the CRM's year, with its saving", textOf(tYear).includes("₹14,990") && textOf(tYear).includes("Save 17%"));
 
+    // ─── Starting with one product ──────────────────────────────────────────────────────────
+    section("Starting with one product: a trial of it alone");
+    const signup = require("../src/actions/platform/signup") as typeof import("../src/actions/platform/signup");
+    const fields = require("../src/lib/signup-fields") as typeof import("../src/lib/signup-fields");
+    const names = require("../src/lib/workspace-names") as typeof import("../src/lib/workspace-names");
+    const { resolveAction } = require("../src/components/site/links") as typeof import("../src/components/site/links");
+    const { checkPageDocument } = require("../src/lib/cms/validate") as typeof import("../src/lib/cms/validate");
+    const { SignupFlow } = require("../src/components/platform/signup-flow") as typeof import("../src/components/platform/signup-flow");
+    const { COUNTRIES } = require("../src/lib/geo/countries") as typeof import("../src/lib/geo/countries");
+    const productPages = (require("./site-content/products") as typeof import("./site-content/products")).section.pages ?? [];
+    type Key = import("../src/lib/products").ProductKey;
+
+    ok(
+      "which plan: the invitation's, then the product chosen, then a partner's, then the default",
+      catalogue.signupPlanKey({ invitePlan: "a", productPlan: "b", referralPlan: "c" }) === "a" &&
+        catalogue.signupPlanKey({ invitePlan: null, productPlan: "b", referralPlan: "c" }) === "b" &&
+        catalogue.signupPlanKey({ invitePlan: null, productPlan: null, referralPlan: "c" }) === "c" &&
+        catalogue.signupPlanKey({ invitePlan: null, productPlan: null, referralPlan: null }) === null,
+    );
+    const trialOf = async (key: Key, country: string) => JSON.stringify(await catalogue.productTrialPlan(key, country));
+    ok(
+      "a product's trial is its own edition where it is sold — CRM anywhere, Deskzo One anywhere, Books and People in India",
+      (await trialOf("crm", "US")) === '{"ok":true,"planKey":"deskzo-crm"}' && (await trialOf("one", "AE")) === '{"ok":true,"planKey":"deskzo-one"}' && (await trialOf("books", "IN")) === '{"ok":true,"planKey":"deskzo-books"}' && (await trialOf("people", "IN")) === '{"ok":true,"planKey":"deskzo-people"}',
+    );
+    ok("  Books abroad: not there, and where it is", (await trialOf("books", "AE")) === '{"ok":false,"reason":"country","soldIn":["IN"]}', await trialOf("books", "AE"));
+    const withPlan = async (key: string, data: { active?: boolean; kind?: "INTERNAL" | "EDITION"; productKey?: string }, work: () => Promise<boolean>) => {
+      const before = await control.plan.findUniqueOrThrow({ where: { key }, select: { active: true, kind: true, productKey: true } });
+      await control.plan.update({ where: { key }, data });
+      try {
+        return await work();
+      } finally {
+        await control.plan.update({ where: { key }, data: before });
+      }
+    };
+    const unavailable = '{"ok":false,"reason":"unavailable"}';
+    ok("  a retired plan, an internal plan under its key, or another product's: no trial — never a workspace free for ever", (await withPlan("deskzo-cards", { active: false }, async () => (await trialOf("cards", "IN")) === unavailable)) && (await withPlan("deskzo-cards", { kind: "INTERNAL" }, async () => (await trialOf("cards", "IN")) === unavailable)) && (await withPlan("deskzo-cards", { productKey: "crm" }, async () => (await trialOf("cards", "IN")) === unavailable)) && (await trialOf("cards", "IN")) === '{"ok":true,"planKey":"deskzo-cards"}');
+
+    // The signup itself, start to code, on this control plane: the worker is never started (spawn is stubbed).
+    await settings.setSetting("signup.open", "1", ACTOR);
+    const sent: { to: string; subject: string; text: string }[] = [];
+    mailer.setTestPlatformMailer(async (m) => void sent.push(m));
+    const formFor = (companyName: string, email: string, country: string, productKey = "") => ({ companyName, slug: names.suggestedName(companyName), ownerName: "Meera Zz", email, password: "a long enough password", country, invite: "", product: productKey });
+    const startAndVerify = async (form: ReturnType<typeof formFor>) => {
+      sent.length = 0;
+      jar.delete("deskzo.signup");
+      const started = await signup.startSignup(form);
+      const verified = started.ok ? await signup.verifySignup(sent.at(-1)?.subject.match(/(\d{6})$/)?.[1] ?? "") : null;
+      const tenant = await control.tenant.findUnique({ where: { slug: form.slug }, include: { subscriptions: { include: { items: { include: { plan: { select: { key: true } } } } } } } });
+      const pending = await control.pendingSignup.findFirst({ where: { email: form.email }, orderBy: { createdAt: "desc" }, select: { productKey: true } });
+      return { started, verified, pending, trial: tenant?.subscriptions[0]?.status === "TRIALING" && !!tenant.subscriptions[0].trialEndsAt, plans: tenant ? tenant.subscriptions.flatMap((s) => s.items.map((i) => i.plan.key)).join() : null };
+    };
+    const booksSignup = await startAndVerify(formFor("Zzprod Kirana Traders Pvt Ltd", "meera@zzkirana.example", "IN", "books"));
+    ok("from Books's page: the signup keeps the product, and the workspace starts on a free trial of Deskzo Books alone", booksSignup.started.ok && booksSignup.verified?.ok === true && booksSignup.pending?.productKey === "books" && booksSignup.trial && booksSignup.plans === "deskzo-books", booksSignup);
+    const gulf = formFor("Zzprod Gulf Traders LLC", "omar@zzgulf.example", "AE", "books");
+    const booksAbroad = await signup.startSignup(gulf);
+    ok(
+      "Books from the UAE: refused at the country, in the form's words — and nothing kept",
+      !booksAbroad.ok && booksAbroad.issues?.country === fields.productCountryProblem("Deskzo Books", ["India"]) && (await control.pendingSignup.count({ where: { email: gulf.email } })) === 0,
+      booksAbroad,
+    );
+    const everything = await startAndVerify({ ...gulf, product: "" });
+    ok("  every product instead: Deskzo One's trial, as with no choice at all", everything.verified?.ok === true && everything.pending?.productKey === null && everything.plans === "deskzo-one", everything);
+    const crmUs = await startAndVerify(formFor("Zzprod Lakeside Dental Group", "jo@zzlakeside.example", "US", "crm"));
+    ok("CRM from the US: Deskzo CRM's trial — sold everywhere", crmUs.verified?.ok === true && crmUs.plans === "deskzo-crm", crmUs);
+    const unknown = await startAndVerify(formFor("Zzprod Harbour Logistics Ltd", "li@zzharbour.example", "IN", "spreadsheets"));
+    ok("an unknown product is no choice: the default plan", unknown.verified?.ok === true && unknown.pending?.productKey === null && unknown.plans === "deskzo-one", unknown);
+    const inviteCode = `zzprod-invite-${randomBytes(6).toString("hex")}`;
+    await control.signupInvite.create({ data: { codeHash: sha256(inviteCode), planKey: "deskzo-crm", maxUses: 1, createdBy: ACTOR } });
+    const invited = await startAndVerify({ ...formFor("Zzprod Invited Systems Ltd", "anil@zzinvited.example", "IN", "books"), invite: inviteCode });
+    ok("an invitation naming a plan wins over the product chosen — and the product isn't kept", invited.verified?.ok === true && invited.pending?.productKey === null && invited.plans === "deskzo-crm", invited);
+    const retired = await withPlan("deskzo-signatures", { active: false }, async () => {
+      const r = await signup.startSignup(formFor("Zzprod Retired Products Ltd", "ru@zzretired.example", "IN", "signatures"));
+      return !r.ok && r.formError === fields.productUnavailableMessage("Deskzo Signatures") && !r.issues?.country;
+    });
+    ok("a product whose plan is retired: the form says so, and offers every product", retired);
+    sent.length = 0;
+    jar.delete("deskzo.signup");
+    const deskForm = formFor("Zzprod Midway Support Services", "sam@zzmidway.example", "IN", "desk");
+    const deskStarted = await signup.startSignup(deskForm);
+    const midway = await withPlan("deskzo-desk", { active: false }, async () => {
+      const r = await signup.verifySignup(sent.at(-1)?.subject.match(/(\d{6})$/)?.[1] ?? "");
+      return !r.ok && r.error === fields.productUnavailableMessage("Deskzo Desk") && !(await control.tenant.findUnique({ where: { slug: deskForm.slug } }));
+    });
+    ok("  retired between the form and the code: refused at the code, and no workspace is made", deskStarted.ok && midway, deskStarted);
+    jar.delete("deskzo.signup");
+    mailer.setTestPlatformMailer(async () => {});
+
+    // The website: the buttons that start one product, the pricing cards, and the form.
+    const siteCtx = { settings: siteDefaults.DEFAULT_SITE_SETTINGS, signupOpen: true, trialDays: 14 };
+    const ctaTo = (href: string) => ({ ...siteCtx, settings: { ...siteDefaults.DEFAULT_SITE_SETTINGS, signupCta: { ...siteDefaults.DEFAULT_SITE_SETTINGS.signupCta, open: { label: "Start", href } } } });
+    ok("the site's trial button for a product goes to /signup?product=…; the plain one to /signup", resolveAction({ kind: "signup", product: "books" }, siteCtx).href === "/signup?product=books" && resolveAction({ kind: "signup" }, siteCtx).href === "/signup");
+    ok(
+      "  by invitation, the invitation button as it is; before an anchor; and never onto an address staff pointed it at that isn't signup",
+      resolveAction({ kind: "signup", product: "books" }, { ...siteCtx, signupOpen: false }).href === siteDefaults.DEFAULT_SITE_SETTINGS.signupCta.inviteOnly.href &&
+        resolveAction({ kind: "signup", product: "crm" }, ctaTo("/signup#form")).href === "/signup?product=crm#form" &&
+        resolveAction({ kind: "signup", product: "crm" }, ctaTo("/contact?topic=sales")).href === "/contact?topic=sales",
+    );
+    const primaries = (slug: string) => JSON.stringify(productPages.find((p) => p.slug === slug)?.document.blocks.filter((b) => b.type === "hero" || b.type === "cta").map((b) => (b.props as { primary?: unknown }).primary));
+    ok("each product's page: its hero and closing button start that product", products.PRODUCTS.every((p) => primaries(p.path.slice(1)) === JSON.stringify([{ kind: "signup", product: p.key }, { kind: "signup", product: p.key }])), products.PRODUCTS.map((p) => primaries(p.path.slice(1))).join(" "));
+    const booksDoc = productPages.find((p) => p.slug === "books")!.document;
+    const kept = checkPageDocument(booksDoc, "publish");
+    const strange = JSON.parse(JSON.stringify(booksDoc)) as typeof booksDoc;
+    (strange.blocks.find((b) => b.type === "hero")!.props as { primary: unknown }).primary = { kind: "signup", product: "spreadsheets" };
+    const dropped = checkPageDocument(strange, "publish");
+    const heroPrimary = (c: typeof kept) => (c.ok ? JSON.stringify((c.value.blocks.find((b) => b.type === "hero")!.props as { primary?: unknown }).primary) : "refused");
+    ok("  the CMS keeps the product as it saves a page; an unknown one becomes the plain button", heroPrimary(kept) === '{"kind":"signup","product":"books"}' && heroPrimary(dropped) === '{"kind":"signup"}', `${heroPrimary(kept)} ${heroPrimary(dropped)}`);
+    const tOpen = await html(await PricingTableBlock({ props: pricingProps, ctx: { ...siteCtx, searchParams: { country: "IN" }, workspaceSuffix: ".localhost:3000" } }));
+    save("pricing-in-signup-open", tOpen);
+    ok("the pricing table, signup open: each product's card starts that product, an edition of no product the default", ['href="/signup?product=one"', 'href="/signup?product=crm"', 'href="/signup?product=books"', 'href="/signup"'].every((h) => tOpen.includes(h)));
+    const flow = (choice: Key | null) => html(createElement(SignupFlow, { suffix: ".localhost:3000", countries: COUNTRIES, inviteRequired: false, product: choice }));
+    const booksForm = await flow("books");
+    save("signup-form-books", booksForm);
+    const [booksText, oneText, plainText] = [textOf(booksForm), textOf(await flow("one")), textOf(await flow(null))];
+    ok("the form says whose trial it is, with every product a click away", booksText.includes("Your free trial: Deskzo Books") && booksText.includes(product("books").tagline) && booksText.includes("Try every product instead"), booksText.slice(0, 300));
+    ok("  Deskzo One's says every product, with nothing to switch to; with no choice, nothing is said", oneText.includes("Your free trial: Deskzo One, every product") && !oneText.includes("Try every product instead") && !plainText.includes("Your free trial"));
+
     // ─── The console ────────────────────────────────────────────────────────────────────────
     section("The console: plans know their product");
     const actAs = async (userId: string) => {

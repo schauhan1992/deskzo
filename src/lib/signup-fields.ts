@@ -71,6 +71,22 @@ export function countryProblem(raw: string, known: (code: string) => boolean): s
   return value && known(value) ? null : "Choose the country your business is registered in.";
 }
 
+/** "India", "India or Nepal", "India, Nepal or Bhutan". */
+function eitherOf(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
+}
+
+/**
+ * A product chosen on its page (/signup?product=books) that isn't sold where the business is registered —
+ * said at the country, with the way out the form offers beside the product: every product instead.
+ */
+export function productCountryProblem(productName: string, soldIn: readonly string[]): string {
+  return `${productName} is sold only in ${eitherOf(soldIn)} for now — choose ${soldIn.length === 1 ? soldIn[0] : "one of them"} if your business is registered there, or try every product instead.`;
+}
+
+/** A product chosen on its page that can't be started on its own just now: its plan was retired, or isn't offered alone. */
+export const productUnavailableMessage = (productName: string) => `${productName} can't be started on its own just now — try every product instead, or contact us.`;
+
 export function slugRequiredProblem(raw: string): string | null {
   return String(raw ?? "").trim() ? null : `Choose your address — at least ${MIN_SIGNUP_NAME} letters or digits, made from your registered name.`;
 }
