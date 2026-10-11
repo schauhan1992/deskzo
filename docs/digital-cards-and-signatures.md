@@ -359,3 +359,20 @@ for the events a company hosts in Forms & Events.
 Still open from section 4: paper business cards by photo (OCR — the owner said later), and hidden
 source fields beyond the event code. iPhone scanning would need a QR-reading library (a new
 dependency, for the owner to approve); until then iPhone users scan with the camera and paste the link.
+
+**Phase 3 — the free signature generator (11 Oct 2026).** `/email-signature-generator` on the public
+website: a CMS page (scripts/site-content/tools.ts) around a new block, `signatureGenerator`, that the
+CMS can place and word like any other.
+
+- **In the browser only.** Nothing typed is sent anywhere or kept; a picked picture is shrunk and kept
+  in the page. Four layouts (classic, modern, stacked, compact), six colours or any, five mail-safe fonts.
+- **The signature** (src/lib/signatures/render.ts, shared with the paid product to come) is tables and
+  inline styles only; everything typed is escaped; links are only http(s), mailto: and tel:; pictures
+  only an address or png/jpeg/gif/webp (never SVG). Social profiles are letter badges in table cells,
+  so no one's logo is used. A plain-text twin goes on the clipboard with it.
+- **Copy** puts HTML and text on the clipboard (or selects and copies the preview where the clipboard API
+  is refused); **Copy HTML** and **Download** (.htm) too. It counts Gmail's 10,000-character limit and
+  says when a picked picture is why. Steps for Gmail, Outlook (new, web, classic) and Apple Mail.
+- **"Made with {siteName}"** links back to the page, as the owner decided; the paid product may take it off.
+- **The upsell** under it says Signatures for a team is on its way and links to sales.
+- Linked from Resources (menu, footer, hub), Deskzo Cards and Campaigns. `npm run check:signatures`.

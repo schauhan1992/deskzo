@@ -15,6 +15,7 @@ import {
   Megaphone,
   MonitorSmartphone,
   PanelTop,
+  PenLine,
   Quote,
   Scale,
   ShieldCheck,
@@ -73,6 +74,12 @@ export const BLOCK_INFO: Record<BlockType, BlockInfo> = {
     group: "Sections",
   },
   relatedLinks: { label: "Related links", description: "Cards linking to other pages on this site, each with a line on what is there.", icon: Link2, group: "Sections" },
+  signatureGenerator: {
+    label: "Email signature generator",
+    description: "The free generator: visitors build a signature and copy it into their email. Built in the browser; nothing is sent anywhere.",
+    icon: PenLine,
+    group: "Live data and forms",
+  },
   moduleHighlights: { label: "Page map", description: "For a hub page: groups of links to the pages under it, each with what it covers.", icon: LayoutGrid, group: "Sections" },
 };
 
@@ -159,6 +166,12 @@ const STARTERS: { [K in BlockType]: () => BlockPropsMap[K] } = {
       { label: "Security", href: "/security", description: "How each company's data is kept apart and protected." },
     ],
   }),
+  signatureGenerator: () => ({
+    upsellHeading: "Signatures for your whole team",
+    upsellBody: "One design for everybody, filled in from each person's record and kept in step.",
+    upsellAction: { kind: "link", label: "Talk to us", href: "/contact?topic=sales" },
+    privacyNote: "Nothing you type here leaves your browser.",
+  }),
   moduleHighlights: () => ({
     heading: "Section heading",
     groups: [{ title: "Group name", items: [{ label: "Page name", href: "/pricing", description: "What the page covers, in a line." }] }],
@@ -211,6 +224,8 @@ export function blockSummary(block: SiteBlock): string {
       return clip(first("heading") || (block.props.links ?? []).map((l) => l.label).join(", "));
     case "moduleHighlights":
       return clip(first("heading") || (block.props.groups ?? []).map((g) => g.title).join(", "));
+    case "signatureGenerator":
+      return clip(first("heading", "upsellHeading"));
     default:
       return clip(first("heading", "eyebrow", "intro"));
   }

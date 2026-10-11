@@ -175,6 +175,15 @@ const BLOCK_SPECS = {
     confirmationHeading: text(HEADING, true),
     confirmationBody: text(BODY, true),
   },
+  signatureGenerator: {
+    anchor: { k: "anchor" },
+    heading: text(HEADING),
+    intro: text(BODY),
+    upsellHeading: text(HEADING, true),
+    upsellBody: text(BODY),
+    upsellAction: { k: "action" },
+    privacyNote: text(300),
+  },
   signupForm: { heading: text(HEADING, true), body: text(BODY), bodyInviteOnly: text(BODY), asideHeading: text(HEADING), asideItems: { k: "texts", max: 300, maxItems: 12 } },
   comparisonTable: {
     ...SECTION_HEAD,

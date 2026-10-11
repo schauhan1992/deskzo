@@ -241,6 +241,20 @@ export type SignupFormProps = {
   asideItems?: string[];
 };
 
+/**
+ * The free email signature generator (src/components/site/signature-generator.tsx): built in the
+ * visitor's browser, never sent anywhere. Beside it, what the team product does — the upsell.
+ */
+export type SignatureGeneratorProps = {
+  anchor?: string;
+  heading?: string;
+  intro?: string;
+  upsellHeading: string;
+  upsellBody?: string;
+  upsellAction?: SiteAction;
+  privacyNote?: string;
+};
+
 export type BlockPropsMap = {
   hero: HeroProps;
   pageHeader: PageHeaderProps;
@@ -262,6 +276,7 @@ export type BlockPropsMap = {
   comparisonTable: ComparisonTableProps;
   relatedLinks: RelatedLinksProps;
   moduleHighlights: ModuleHighlightsProps;
+  signatureGenerator: SignatureGeneratorProps;
 };
 
 export type BlockType = keyof BlockPropsMap;
@@ -288,6 +303,7 @@ export const BLOCK_TYPES = [
   "comparisonTable",
   "relatedLinks",
   "moduleHighlights",
+  "signatureGenerator",
 ] as const satisfies readonly BlockType[];
 // Every block type is in the list: this fails to compile if one is added to BlockPropsMap and not here.
 type Assert<T extends true> = T;

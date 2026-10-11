@@ -20,6 +20,7 @@ import type {
   RelatedLinksProps,
   RichTextProps,
   SecurityHighlightsProps,
+  SignatureGeneratorProps,
   SignupFormProps,
   SiteBlock,
   StatsProps,
@@ -365,6 +366,28 @@ function CtaForm({ props, onChange }: FormProps<"cta">) {
       <TextField label="Words" name="body" value={props.body} onChange={(v) => set("body", v)} max={BODY} multiline rows={2} />
       <ActionField label="First button" name="primary" value={props.primary} onChange={(v) => set("primary", v)} />
       <ActionField label="Second button" name="secondary" value={props.secondary} onChange={(v) => set("secondary", v)} />
+    </>
+  );
+}
+
+function SignatureGeneratorForm({ props, onChange }: FormProps<"signatureGenerator">) {
+  const set = <K extends keyof SignatureGeneratorProps>(key: K, value: SignatureGeneratorProps[K]) => onChange({ ...props, [key]: value });
+  return (
+    <>
+      <p className="rounded-md border border-info/30 bg-info-bg px-3 py-2 text-xs text-info">
+        The generator itself is built in: the visitor&apos;s browser makes the signature, and nothing they type is sent anywhere. These are the words around it.
+      </p>
+      <Row>
+        <TextField label="Heading (optional)" name="heading" value={props.heading} onChange={(v) => set("heading", v)} max={HEADING} />
+        <AnchorField value={props.anchor} onChange={(v) => set("anchor", v)} />
+      </Row>
+      <TextField label="Introduction" name="intro" value={props.intro} onChange={(v) => set("intro", v)} max={BODY} multiline rows={2} />
+      <Section title="Under the generator — for a whole team">
+        <TextField label="Heading" name="upsellHeading" value={props.upsellHeading} onChange={(v) => set("upsellHeading", v)} max={HEADING} required />
+        <TextField label="Words" name="upsellBody" value={props.upsellBody} onChange={(v) => set("upsellBody", v)} max={BODY} multiline rows={2} />
+        <ActionField label="Button" name="upsellAction" value={props.upsellAction} onChange={(v) => set("upsellAction", v)} />
+      </Section>
+      <TextField label="Privacy note" name="privacyNote" value={props.privacyNote} onChange={(v) => set("privacyNote", v)} max={300} hint="Under the preview — say that nothing typed leaves the visitor's browser." />
     </>
   );
 }
@@ -768,6 +791,8 @@ export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (ne
       return <RelatedLinksForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     case "moduleHighlights":
       return <ModuleHighlightsForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "signatureGenerator":
+      return <SignatureGeneratorForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     default:
       return <p className="text-sm text-muted">This block&apos;s type is not known to this editor. It is kept as it is.</p>;
   }

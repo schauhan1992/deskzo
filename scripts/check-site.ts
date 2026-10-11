@@ -1191,11 +1191,11 @@ async function main() {
       ok("  switching: a link to the import and migration page", main.includes('href="/product/import-migration"'));
     }
 
-    // ─── The seeded pages and guides (scripts/site-content: product, solutions, resources, guides — W2) ───
+    // ─── The seeded pages and guides (scripts/site-content: product, solutions, resources, guides, tools — W2) ───
     section("The seeded pages and guides: product, solutions, resources, the glossary and six guides");
     at(ROOT);
     {
-      const seedSections = await (require("./site-content") as typeof import("./site-content")).loadSections(["product", "products", "solutions", "resources", "guides"]);
+      const seedSections = await (require("./site-content") as typeof import("./site-content")).loadSections(["product", "products", "solutions", "resources", "guides", "tools"]);
       const catalogue = require("./site-content/_catalog") as typeof import("./site-content/_catalog");
       const { siteNav: seedSiteNav } = require("./site-content/nav") as typeof import("./site-content/nav");
       const { PRODUCTS } = require("../src/lib/products") as typeof import("../src/lib/products");
@@ -1207,12 +1207,14 @@ async function main() {
         "solutions",
         "resources",
         "resources/glossary",
+        // The free tools (tools.ts): the email signature generator.
+        "email-signature-generator",
         ...[...catalogue.PRODUCT_GROUPS, ...catalogue.SOLUTION_GROUPS].flatMap((g) => g.entries.map((e) => e.path.slice(1))),
         ...PRODUCTS.map((p) => p.path.slice(1)),
       ].sort();
       ok(
-        `every page in the site map: the three hubs, 25 modules, 13 solutions and the glossary, a page for each of the ${PRODUCTS.length} products, and six guides`,
-        seedPages.map((p) => p.slug).sort().join(" ") === siteMap.join(" ") && siteMap.length === 42 + PRODUCTS.length && seedPosts.length === 6,
+        `every page in the site map: the three hubs, 25 modules, 13 solutions, the glossary and the signature generator, a page for each of the ${PRODUCTS.length} products, and six guides`,
+        seedPages.map((p) => p.slug).sort().join(" ") === siteMap.join(" ") && siteMap.length === 43 + PRODUCTS.length && seedPosts.length === 6,
         `${seedPages.length} pages, ${seedPosts.length} posts`,
       );
       const refusedPages = seedPages.map((p) => ({ slug: p.slug, checked: siteValidate.checkPageDocument(p.document, "publish") })).filter((r) => !r.checked.ok);

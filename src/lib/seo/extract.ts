@@ -519,6 +519,15 @@ function block(c: Collector, b: SiteBlock, index: number, root: "blocks" | "body
         }
       }
       break;
+    case "signatureGenerator":
+      // The generator itself is drawn in the browser; what the content holds is the words around it.
+      heading(c, 2, t(p.heading), field);
+      paragraph(c, t(p.intro), field);
+      heading(c, 2, t(p.upsellHeading), field);
+      paragraph(c, t(p.upsellBody), field);
+      action(c, p.upsellAction as SiteAction, ctx, field);
+      paragraph(c, t(p.privacyNote), field);
+      break;
   }
 }
 

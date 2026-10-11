@@ -568,7 +568,7 @@ const campaignsPage = productLinePage({
     ["Can the forms be embedded on our website?", "Forms are shared as links to their own pages, by public link or personal invitation. They can't be embedded in a frame on another website."],
     ["Can an enquiry form create leads?", "Yes. Enquiry forms can create leads in the workspace's lead pipeline, where the assignment rules pick them up."],
   ],
-  related: ["/product/marketing", "/product/crm", "/solutions/sales-teams", "/pricing"],
+  related: ["/product/marketing", "/product/crm", "/solutions/sales-teams", "/email-signature-generator", "/pricing"],
   cta: { heading: `Build your first journey in ${campaigns.name}`, body: `Import your contacts with their consent and start a renewal journey. ${trial}` },
 });
 
@@ -775,7 +775,7 @@ const cardsPage = productLinePage({
     ["Can the team use cards at a trade show?", "Yes. Make an event with its dates, team, goal and cost. Each card gets a booth form for the stand, with the event's own questions; the team can scan visitors' cards; and everybody met is counted against the event, by person and by day, with the cost per person."],
     ["Are Apple Wallet and Google Wallet supported?", "Not yet. Today a card is its link and its QR code; on a phone it can be added to the home screen to open in one tap."],
   ],
-  related: ["/product/crm", "/product/hr", "/pricing"],
+  related: ["/product/crm", "/product/hr", "/email-signature-generator", "/pricing"],
   cta: { heading: `Give your team ${cards.name}`, body: `Design the card, issue it to the people who meet customers, and see who saved it. ${trial}` },
 });
 

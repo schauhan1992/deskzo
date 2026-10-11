@@ -19,6 +19,7 @@ import { RelatedLinksBlock } from "@/components/site/blocks/related-links";
 import { RichTextBlock } from "@/components/site/blocks/rich-text";
 import { SecurityHighlightsBlock } from "@/components/site/blocks/security-highlights";
 import { SignupFormBlock } from "@/components/site/blocks/signup-form";
+import { SignatureGeneratorBlock } from "@/components/site/blocks/signature-generator";
 import { StatsBlock } from "@/components/site/blocks/stats";
 import { TestimonialBlock } from "@/components/site/blocks/testimonial";
 import { WorkspaceSigninBlock } from "@/components/site/blocks/workspace-signin";
@@ -154,6 +155,8 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext): ReactNode {
       return <RelatedLinksBlock props={block.props} ctx={ctx} />;
     case "moduleHighlights":
       return <ModuleHighlightsBlock props={block.props} ctx={ctx} />;
+    case "signatureGenerator":
+      return <SignatureGeneratorBlock props={block.props} ctx={ctx} />;
     default:
       return null;
   }

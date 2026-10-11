@@ -129,6 +129,7 @@ export const RESOURCE_ENTRIES: CatalogEntry[] = [
   entry("/blog/category/guides", "Guides", "E-invoicing, e-way bills, TDS, payroll and the close", "Step-by-step guides to e-invoicing, e-way bills, TDS, the month-end close, revenue recognition and payroll."),
   entry("/resources/glossary", "Glossary", "GST, accounting and payroll terms, defined", "Plain-language definitions of GST, TDS, payroll, accounting and CRM terms, with links to the official sources."),
   entry("/blog", "Blog", "News and articles from the {siteName} team", "Articles on running sales, finance and people in one workspace."),
+  entry("/email-signature-generator", "Email signature generator", "A free signature for Gmail, Outlook and Apple Mail", "Make a professional email signature in your browser and paste it into Gmail, Outlook or Apple Mail. Free; nothing is stored."),
 ];
 
 /** The six starter guides (posts in the Guides category: guides.ts). */
