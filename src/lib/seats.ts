@@ -21,9 +21,13 @@ export async function seatsInUse(): Promise<number> {
 
 /** Null when there is room for `adding` more; otherwise what to tell whoever tried. */
 export async function seatProblem(adding = 1): Promise<string | null> {
-  const limit = (await currentTenant()).entitlements.seats;
+  const { entitlements } = await currentTenant();
+  const limit = entitlements.seats;
   if (limit === null) return null;
   const used = await seatsInUse();
   if (used + adding <= limit) return null;
-  return `This workspace's plan includes ${limit} ${limit === 1 ? "user" : "users"}, and ${used >= limit ? "every seat is taken" : `only ${limit - used} ${limit - used === 1 ? "is" : "are"} free`}. Switch somebody off, or ask the workspace owner to add seats.`;
+  const free = used >= limit ? "every seat is taken" : `only ${limit - used} ${limit - used === 1 ? "is" : "are"} free`;
+  // A free trial's seats are the trial's, not a plan's: more come with choosing one (Settings › Billing).
+  if (entitlements.trial) return `The free trial includes ${limit} ${limit === 1 ? "user" : "users"}, and ${free}. Choose a plan in Settings › Billing for more, or switch somebody off.`;
+  return `This workspace's plan includes ${limit} ${limit === 1 ? "user" : "users"}, and ${free}. Switch somebody off, or ask the workspace owner to add seats.`;
 }

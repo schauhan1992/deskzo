@@ -3,7 +3,8 @@ import { standingOf, type Standing, type StandingSub } from "@/lib/billing/lifec
 import { entitledModuleKeys, soldIn, type Entitlements } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
 import { controlDb } from "@/lib/platform/control-db";
-import { ENTITLEMENT_PLAN_SELECT, LIVE_STATUSES, entitlementsFrom, type EntItem } from "@/lib/platform/entitlements";
+import { ENTITLEMENT_PLAN_SELECT, LIVE_STATUSES, entitlementsFrom, isFreeTrial, type EntItem } from "@/lib/platform/entitlements";
+import { trialSeats } from "@/lib/platform/settings";
 import { productRefusal } from "@/lib/billing/plan-choice";
 import {
   PLAN_CHOICE_SELECT,
@@ -104,7 +105,7 @@ const HAND_GIVEN: StandingSub = { gateway: "MANUAL", status: "ACTIVE", trialEnds
 /** One workspace, one change: what it has now, what it would have, and whether the save would take it. */
 export async function previewEntitlements(tenantId: string, change: EntitlementChange, now = new Date()): Promise<EntitlementPreview> {
   const control = controlDb();
-  const [tenant, subs, overrides, gateway] = await Promise.all([
+  const [tenant, subs, overrides, gateway, trialCap] = await Promise.all([
     control.tenant.findUnique({ where: { id: tenantId }, select: { isDefault: true, status: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
     control.subscription.findMany({
       where: { tenantId },
@@ -121,11 +122,13 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
     liveGatewaySubscription(tenantId, now),
+    trialSeats(),
   ]);
   if (!tenant) throw new ConsoleRefused("That workspace no longer exists.");
+  const ws = { ...tenant, trialSeats: trialCap };
 
-  const itemsOf = (list: typeof subs): EntItem[] => list.filter((s) => LIVE.includes(s.status)).flatMap((s) => s.items.map(({ quantity, price, plan }) => ({ quantity, perSeat: !!price?.perSeat, plan })));
-  const current = entitlementsFrom(tenant, itemsOf(subs), overrides);
+  const itemsOf = (list: typeof subs): EntItem[] => list.filter((s) => LIVE.includes(s.status)).flatMap((s) => s.items.map(({ quantity, price, plan }) => ({ quantity, perSeat: !!price?.perSeat, trial: isFreeTrial(s), plan })));
+  const current = entitlementsFrom(ws, itemsOf(subs), overrides);
 
   // Every refusal the save's checks would reach, in its order; the save stops at the first.
   const refusals: string[] = [];
@@ -154,11 +157,13 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     for (const plan of plans) refuse(planChoiceRefusal(plan, !!manual?.items.some((i) => i.planId === plan.id), tenant.country));
     refuse(productRefusal(plans.map(choicePlanOf)));
 
+    // Given on the live manual subscription — still the free trial, when that is what it is.
     const chosen: EntItem[] = plans.map(({ key, kind, allModules, seats, copilotTokens, customDomains, modules }) => ({
       quantity: wanted.get(key)!,
+      trial: !!manual && isFreeTrial(manual),
       plan: { key, kind, allModules, seats, copilotTokens, customDomains, modules },
     }));
-    next = entitlementsFrom(tenant, [...itemsOf(subs.filter((s) => s !== manual)), ...chosen], overrides);
+    next = entitlementsFrom(ws, [...itemsOf(subs.filter((s) => s !== manual)), ...chosen], overrides);
     subsAfter = manual ? subs : [...subs, HAND_GIVEN];
   } else if ("override" in change && change.override && typeof change.override === "object") {
     const moduleKey = String(change.override.moduleKey ?? "");
@@ -172,7 +177,7 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
       const others = overrides.filter((o) => o.moduleKey !== moduleKey);
       overridesAfter = granted === null ? others : [...others, { moduleKey, granted }];
     }
-    next = entitlementsFrom(tenant, itemsOf(subs), overridesAfter);
+    next = entitlementsFrom(ws, itemsOf(subs), overridesAfter);
   } else if ("limits" in change && change.limits && typeof change.limits === "object") {
     // A limit the save would refuse is left as it is.
     const limit = (value: unknown, what: string, keep: number | null): number | null => {
@@ -184,7 +189,7 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     const copilotTokenOverride = limit(change.limits.copilotTokens, "Copilot tokens", tenant.copilotTokenOverride);
     const customDomainOverride =
       change.limits.customDomains === undefined ? tenant.customDomainOverride : limit(change.limits.customDomains, "Custom domains", tenant.customDomainOverride);
-    next = entitlementsFrom({ country: tenant.country, seatOverride, copilotTokenOverride, customDomainOverride }, itemsOf(subs), overrides);
+    next = entitlementsFrom({ country: tenant.country, seatOverride, copilotTokenOverride, customDomainOverride, trialSeats: trialCap }, itemsOf(subs), overrides);
   } else {
     throw new ConsoleRefused("Say what to preview: its plans, a module, or its limits.");
   }
@@ -257,12 +262,13 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
   if (!tenants.length) return preview;
 
   const ids = tenants.map((t) => t.id);
-  const [items, overrides] = await Promise.all([
+  const [items, overrides, trialCap] = await Promise.all([
     control.subscriptionItem.findMany({
       where: { subscription: { tenantId: { in: ids }, status: { in: [...LIVE_STATUSES] } } },
-      select: { quantity: true, price: { select: { perSeat: true } }, subscription: { select: { tenantId: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
+      select: { quantity: true, price: { select: { perSeat: true } }, subscription: { select: { tenantId: true, gateway: true, status: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId: { in: ids } }, select: { tenantId: true, moduleKey: true, granted: true } }),
+    trialSeats(),
   ]);
   // The plan as the save leaves it: a plan of everything keeps no module list.
   const saved: EntItem["plan"] = {
@@ -275,10 +281,10 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     modules: data.allModules ? [] : modules.map((moduleKey) => ({ moduleKey })),
   };
   for (const t of tenants) {
-    const own: EntItem[] = items.filter((i) => i.subscription.tenantId === t.id).map(({ quantity, price, plan }) => ({ quantity, perSeat: !!price?.perSeat, plan }));
+    const own: EntItem[] = items.filter((i) => i.subscription.tenantId === t.id).map(({ quantity, price, subscription, plan }) => ({ quantity, perSeat: !!price?.perSeat, trial: isFreeTrial(subscription), plan }));
     const ownOverrides = overrides.filter((o) => o.tenantId === t.id);
-    const current = entitlementsFrom(t, own, ownOverrides);
-    const next = entitlementsFrom(t, own.map((i) => (i.plan.key === key ? { quantity: i.quantity, perSeat: i.perSeat, plan: saved } : i)), ownOverrides);
+    const current = entitlementsFrom({ ...t, trialSeats: trialCap }, own, ownOverrides);
+    const next = entitlementsFrom({ ...t, trialSeats: trialCap }, own.map((i) => (i.plan.key === key ? { ...i, plan: saved } : i)), ownOverrides);
     const { removed } = moduleDiff(current, next, t.country);
     if (removed.length) preview.losingModules.push({ slug: t.slug, modules: removed });
   }

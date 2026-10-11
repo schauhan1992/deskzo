@@ -27,7 +27,7 @@ import { consoleStaff, platformEnv } from "@/lib/platform/console-page";
 import { controlDb } from "@/lib/platform/control-db";
 import { configurationPresence, securityFacts } from "@/lib/platform/health";
 import { linkedSignInSetting } from "@/lib/platform/linked/groups";
-import { autoDeprovision, customDomainsOffered, gatewayModes, settingsOverview, signupOpen, staffTwoFactorPolicy, trialDays, type SettingRow } from "@/lib/platform/settings";
+import { autoDeprovision, customDomainsOffered, gatewayModes, settingsOverview, signupOpen, staffTwoFactorPolicy, trialDays, trialSeats, type SettingRow } from "@/lib/platform/settings";
 import { lastTick, type TickSummary } from "@/lib/platform/tick-summary";
 import { MAIL_STREAMS } from "@/lib/console-shared/mail-catalogue";
 import { mailSetup } from "@/lib/platform/mail/store";
@@ -64,12 +64,13 @@ export default async function ConsoleSettingsPage() {
   // First: signed out, the page ends here with a redirect to /login; support and read-only staff get "not found".
   const staff = await consoleStaff(PAGE_ROLES.settings);
   const caps = capsFor(staff.role);
-  const [rows, modes, policy, open, days, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail] = await Promise.all([
+  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
     signupOpen(),
     trialDays(),
+    trialSeats(),
     autoDeprovision(),
     configurationPresence(),
     lastTick(),
@@ -86,7 +87,7 @@ export default async function ConsoleSettingsPage() {
 
   const row = (key: SettingRow["key"]) => rows.find((r) => r.key === key) ?? null;
   // The three signup settings are always saved together, so the form says when it was last saved.
-  const lastSaved = changeOf(newest([row("signup.open"), row("trial.days"), row("billing.autoDeprovision")]));
+  const lastSaved = changeOf(newest([row("signup.open"), row("trial.days"), row("trial.seats"), row("billing.autoDeprovision")]));
   const tickBy = row("platform.lastTick")?.updatedByName ?? null;
   // The six support settings are saved together too.
   const supportSaved = changeOf(newest(SUPPORT_SETTING_KEYS.map((key) => row(key))));
@@ -111,7 +112,7 @@ export default async function ConsoleSettingsPage() {
         <div className="min-w-0 space-y-6">
           <Panel id="signup" title="Signup & trials" description="Who can create a workspace, and how long its trial lasts.">
             {caps.owner ? (
-              <SignupSettingsForm signupOpen={open} trialDays={days} autoDeprovision={autoClose} lastSaved={lastSaved} />
+              <SignupSettingsForm signupOpen={open} trialDays={days} trialSeats={people} autoDeprovision={autoClose} lastSaved={lastSaved} />
             ) : (
               <div className="space-y-4">
                 <DefinitionList

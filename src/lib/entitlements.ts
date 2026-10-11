@@ -24,6 +24,8 @@ export type Entitlements = {
   customDomains: number | null;
   /** The plans it came from, by key — for showing, never for deciding. */
   plans: string[];
+  /** Its seats are a free trial's (console › Settings): it pays for nothing yet. Absent: they are not. */
+  trial?: boolean;
 };
 
 /** A workspace from the environment — the installation as it was before workspaces — has everything. */
@@ -57,6 +59,7 @@ export function parseEntitlements(json: unknown): Entitlements {
     copilotTokens,
     customDomains,
     plans: Array.isArray(e.plans) ? e.plans.filter((p): p is string => typeof p === "string") : [],
+    ...(e.trial === true ? { trial: true } : {}),
   };
 }
 

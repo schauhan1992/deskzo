@@ -86,10 +86,17 @@ export function SettingSwitch({
   );
 }
 
-type Draft = { open: boolean; days: string; autoClose: boolean };
+type Draft = { open: boolean; days: string; people: string; autoClose: boolean };
 
 const OPEN_SENTENCE = "Anyone can create a workspace without an invitation.";
 const AUTO_CLOSE_SENTENCE = "Workspaces held for billing for 90 days are closed: final backup, database dropped.";
+
+/** A whole number of people from 1 to 1,000 (`TRIAL_SEATS_MAX`, src/lib/platform/settings.ts), or null. */
+function trialPeople(text: string): number | null {
+  if (!/^\d{1,4}$/.test(text.trim())) return null;
+  const n = Number(text.trim());
+  return n >= 1 && n <= 1000 ? n : null;
+}
 
 /** A whole number of days from 1 to 90, or null. */
 function trialLength(text: string): number | null {
@@ -99,9 +106,9 @@ function trialLength(text: string): number | null {
 }
 
 /**
- * Signup and trials, for an owner (spec §3.18): open signup, the trial's length and whether lapsed
- * workspaces are closed by themselves — one form, one Save (`consoleSaveBillingSettings` writes all
- * three together, which is why the form says when it was last saved rather than per setting).
+ * Signup and trials, for an owner (spec §3.18): open signup, the trial's length and the people it
+ * allows (owner, 11 Oct 2026: 25), and whether lapsed workspaces are closed by themselves — one form,
+ * one Save (`consoleSaveBillingSettings` writes them together, which is why the form says when it was last saved rather than per setting).
  *
  * Opening signup to everybody is confirmed with what it means; turning automatic closing on also
  * asks for `on` to be typed, because from then on the platform drops databases by itself. Turning
@@ -110,11 +117,14 @@ function trialLength(text: string): number | null {
 export function SignupSettingsForm({
   signupOpen,
   trialDays,
+  trialSeats,
   autoDeprovision,
   lastSaved,
 }: {
   signupOpen: boolean;
   trialDays: number;
+  /** The most people a workspace on its free trial may have. */
+  trialSeats: number;
   autoDeprovision: boolean;
   /** When the three were last written, and by whom. */
   lastSaved?: SettingChange | null;
@@ -125,22 +135,24 @@ export function SignupSettingsForm({
 
   // The saved values, as a draft to edit — reset whenever the page brings back different ones
   // (after a save, or somebody else's), adjusted while rendering rather than in an effect.
-  const saved = `${signupOpen}|${trialDays}|${autoDeprovision}`;
+  const saved = `${signupOpen}|${trialDays}|${trialSeats}|${autoDeprovision}`;
   const [synced, setSynced] = useState(saved);
-  const [draft, setDraft] = useState<Draft>({ open: signupOpen, days: String(trialDays), autoClose: autoDeprovision });
+  const [draft, setDraft] = useState<Draft>({ open: signupOpen, days: String(trialDays), people: String(trialSeats), autoClose: autoDeprovision });
   if (saved !== synced) {
     setSynced(saved);
-    setDraft({ open: signupOpen, days: String(trialDays), autoClose: autoDeprovision });
+    setDraft({ open: signupOpen, days: String(trialDays), people: String(trialSeats), autoClose: autoDeprovision });
   }
 
   const days = trialLength(draft.days);
+  const people = trialPeople(draft.people);
   const changes = {
     open: draft.open !== signupOpen,
     days: days !== null && days !== trialDays,
+    people: people !== null && people !== trialSeats,
     autoClose: draft.autoClose !== autoDeprovision,
   };
-  const dirty = changes.open || changes.autoClose || draft.days.trim() !== String(trialDays);
-  const valid = days !== null;
+  const dirty = changes.open || changes.autoClose || draft.days.trim() !== String(trialDays) || draft.people.trim() !== String(trialSeats);
+  const valid = days !== null && people !== null;
   const opening = draft.open && !signupOpen;
   const autoClosing = draft.autoClose && !autoDeprovision;
 
@@ -151,12 +163,12 @@ export function SignupSettingsForm({
 
   function discard() {
     action.reset();
-    setDraft({ open: signupOpen, days: String(trialDays), autoClose: autoDeprovision });
+    setDraft({ open: signupOpen, days: String(trialDays), people: String(trialSeats), autoClose: autoDeprovision });
   }
 
   function commit() {
-    if (days === null) return;
-    action.run(() => consoleSaveBillingSettings({ signupOpen: draft.open, trialDays: days, autoDeprovision: draft.autoClose }), {
+    if (days === null || people === null) return;
+    action.run(() => consoleSaveBillingSettings({ signupOpen: draft.open, trialDays: days, trialSeats: people, autoDeprovision: draft.autoClose }), {
       success: "Signup and trial settings saved.",
       onDone: () => setConfirming(false),
     });
@@ -177,12 +189,15 @@ export function SignupSettingsForm({
   const openHelp = `${id}-open-help`;
   const daysField = `${id}-days`;
   const daysHelp = `${id}-days-help`;
+  const peopleField = `${id}-people`;
+  const peopleHelp = `${id}-people-help`;
   const closeLabel = `${id}-close`;
   const closeHelp = `${id}-close-help`;
 
   const impact = [
     ...(changes.open ? [{ label: "Open signup", value: draft.open ? "Invite-only → Open" : "Open → Invite-only", tone: draft.open ? ("warning" as const) : undefined }] : []),
     ...(changes.days && days !== null ? [{ label: "Trial length", value: `${trialDays} → ${plural(days, "day")}` }] : []),
+    ...(changes.people && people !== null ? [{ label: "People in a trial", value: `${trialSeats} → ${people}` }] : []),
     ...(changes.autoClose ? [{ label: "Close lapsed workspaces automatically", value: draft.autoClose ? "Off → On" : "On → Off", tone: draft.autoClose ? ("danger" as const) : undefined }] : []),
   ];
 
@@ -210,8 +225,8 @@ export function SignupSettingsForm({
               </label>
             }
             help={
-              <p id={daysHelp} className={cn("text-xs", valid ? "text-muted" : "text-danger")}>
-                {valid ? "New workspaces start with a trial this long. Trials already running keep their end date." : "A trial is 1 to 90 days, in whole days."}
+              <p id={daysHelp} className={cn("text-xs", days !== null ? "text-muted" : "text-danger")}>
+                {days !== null ? "New workspaces start with a trial this long. Trials already running keep their end date." : "A trial is 1 to 90 days, in whole days."}
               </p>
             }
             control={
@@ -226,11 +241,44 @@ export function SignupSettingsForm({
                   value={draft.days}
                   onChange={(e) => edit({ days: e.target.value.slice(0, 3) })}
                   readOnly={action.pending}
-                  aria-invalid={!valid || undefined}
+                  aria-invalid={days === null || undefined}
                   aria-describedby={daysHelp}
-                  className={cn("w-20 text-right tabular-nums", !valid && "border-danger")}
+                  className={cn("w-20 text-right tabular-nums", days === null && "border-danger")}
                 />
                 <span className="text-sm text-muted">days</span>
+              </span>
+            }
+          />
+          <Row
+            label={
+              <label htmlFor={peopleField} className="text-sm font-medium text-text">
+                People in a trial
+              </label>
+            }
+            help={
+              <p id={peopleHelp} className={cn("text-xs", people !== null ? "text-muted" : "text-danger")}>
+                {people !== null
+                  ? "The most active users a workspace may have on its free trial; choosing a plan lifts it. Running trials take a new number at once — nobody is switched off."
+                  : "A trial allows 1 to 1,000 people, in whole numbers."}
+              </p>
+            }
+            control={
+              <span className="inline-flex items-center gap-2">
+                <Input
+                  id={peopleField}
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={1000}
+                  step={1}
+                  value={draft.people}
+                  onChange={(e) => edit({ people: e.target.value.slice(0, 4) })}
+                  readOnly={action.pending}
+                  aria-invalid={people === null || undefined}
+                  aria-describedby={peopleHelp}
+                  className={cn("w-20 text-right tabular-nums", people === null && "border-danger")}
+                />
+                <span className="text-sm text-muted">people</span>
               </span>
             }
           />

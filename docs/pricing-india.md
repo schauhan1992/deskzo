@@ -15,7 +15,7 @@ This page covers:
 **Each product and Deskzo One is priced per person per month.**
 - **Before 18% GST**, which Indian businesses claim back.
 - **A year costs ten months**: two months free, about 17% off. Zoho Books, Zoho Inventory, Zoho Billing, myBillBook and Freshworks all give 17–20%.
-- **No minimum** and **no free plan**. Every new workspace still gets its free trial (14 days, set in the console).
+- **No minimum** and **no free plan**. Every new workspace still gets its free trial: 14 days, for **up to 25 people** (owner, 11 Oct 2026). Both are set in the console (Settings › Signup and trials). A trial workspace can't add a 26th active user until it chooses a plan.
 
 | Product | A month, per person | A year, per person (a month) | Set against (yearly-billed / monthly-billed, a user a month) |
 |---|---|---|---|

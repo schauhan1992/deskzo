@@ -499,6 +499,13 @@ async function main() {
     const owner = await inWs(() => db.user.findFirstOrThrow({ where: { isSuperAdmin: true } }));
     actor = { id: owner.id, name: owner.name, email: owner.email, role: owner.role };
     const view = await inWs(() => billingActions.getBilling());
+    ok("  a free trial: 25 people at most, and says so — whatever its plan allows", wsEnt.seats === 25 && wsEnt.trial === true, wsEnt);
+    await settings.setSetting("trial.seats", "30", ACTOR);
+    const refreshedTrials = await ent.refreshTrialWorkspaces();
+    const wsAfter = rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id: WS } })).entitlements);
+    ok("  staff choose 30: every running trial takes it at once", refreshedTrials >= 1 && wsAfter.seats === 30 && wsAfter.trial === true, { refreshedTrials, seats: wsAfter.seats });
+    await settings.setSetting("trial.seats", "25", ACTOR);
+    await ent.refreshTrialWorkspaces();
     ok("its owner is offered the products, each with its product", !!view && view.offer.some((p) => p.key === "deskzo-one" && p.productKey === "one") && view.offer.some((p) => p.key === "deskzo-books" && p.productKey === "books"));
     const BillingPage = (require("../src/app/(dashboard)/settings/billing/page") as { default: Page }).default;
     const billingHtml = await inWs(() => renderPage(BillingPage));
@@ -772,6 +779,20 @@ async function main() {
         ent.entitlementsFrom(nobody, [{ quantity: 7, perSeat: true, plan: unit(null) }, { quantity: 3, perSeat: true, plan: unit(null) }], []).seats === 10 &&
         ent.entitlementsFrom(nobody, [{ quantity: 1, plan: unit(null) }], []).seats === null &&
         ent.entitlementsFrom(nobody, [{ quantity: 2, plan: unit(5) }], []).seats === 10,
+    );
+
+    const onTrial = (seats: number | null) => ({ quantity: 1, trial: true, plan: unit(seats) });
+    const capped = { ...nobody, trialSeats: 25 };
+    ok(
+      "a free trial: at most the trial's people, whatever its plan says; fewer if its plan has fewer; a staff override, paying or the internal plan lifts it",
+      ent.entitlementsFrom(capped, [onTrial(null)], []).seats === 25 &&
+        ent.entitlementsFrom(capped, [onTrial(null)], []).trial === true &&
+        ent.entitlementsFrom(capped, [onTrial(10)], []).seats === 10 &&
+        ent.entitlementsFrom({ ...capped, seatOverride: 60 }, [onTrial(null)], []).seats === 60 &&
+        ent.entitlementsFrom({ ...capped, seatOverride: 60 }, [onTrial(null)], []).trial === undefined &&
+        ent.entitlementsFrom(capped, [{ quantity: 40, perSeat: true, plan: unit(null) }], []).seats === 40 &&
+        ent.entitlementsFrom(capped, [{ quantity: 40, perSeat: true, plan: unit(null) }], []).trial === undefined &&
+        ent.entitlementsFrom(capped, [{ quantity: 1, trial: true, plan: { ...unit(null), kind: "INTERNAL" as const } }], []).seats === null,
     );
 
     const testBook = [

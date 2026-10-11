@@ -15,7 +15,8 @@ import { giveTrialPlans, liveGatewaySubscription, savePlan, setLimitOverrides, s
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { addPlanPrice, retirePlanPrice } from "@/lib/billing/prices";
 import { ConsoleRefused } from "@/lib/platform/refused";
-import { SECRET_KEYS, setSecret, setSetting, type SecretKey } from "@/lib/platform/settings";
+import { SECRET_KEYS, TRIAL_SEATS_MAX, setSecret, setSetting, trialSeats, type SecretKey } from "@/lib/platform/settings";
+import { refreshTrialWorkspaces } from "@/lib/platform/entitlements";
 import { forgetRegistry } from "@/lib/tenancy/registry";
 import { holdProblem, openInviteWhere } from "@/lib/platform/name-rules";
 import { removePinApiKey, savePinApiKey, startPinSync, startWorldSync } from "@/lib/platform/reference-sync";
@@ -431,17 +432,26 @@ export async function consoleSetStaffTwoFactor(mode: "required" | "off") {
   });
 }
 
-/** Open signup, the trial's length, and whether ended workspaces are closed by themselves. Owners only. */
-export async function consoleSaveBillingSettings(input: { signupOpen: boolean; trialDays: number; autoDeprovision: boolean }) {
+/**
+ * Open signup, the trial's length and the people it allows, and whether ended workspaces are closed by
+ * themselves. Owners only. A new number of people is applied to every running trial at once.
+ */
+export async function consoleSaveBillingSettings(input: { signupOpen: boolean; trialDays: number; trialSeats?: number; autoDeprovision: boolean }) {
   return asStaff(OWNERS, async (staff) => {
     const days = Math.round(Number(input?.trialDays));
     if (!Number.isInteger(days) || days < 1 || days > 90) throw new StaffChangeRefused("A trial is 1 to 90 days.");
+    // Left out by an older form: kept as it is.
+    const people = input?.trialSeats === undefined ? await trialSeats() : Math.round(Number(input.trialSeats));
+    if (!Number.isInteger(people) || people < 1 || people > TRIAL_SEATS_MAX) throw new StaffChangeRefused(`A trial allows 1 to ${TRIAL_SEATS_MAX.toLocaleString("en-IN")} people.`);
+    const peopleBefore = await trialSeats();
     const open = !!input?.signupOpen;
     const autoClose = !!input?.autoDeprovision;
     await setSetting("signup.open", open ? "1" : "0", staff.id);
     await setSetting("trial.days", String(days), staff.id);
+    await setSetting("trial.seats", String(people), staff.id);
     await setSetting("billing.autoDeprovision", autoClose ? "1" : "0", staff.id);
-    await consoleAudit(staff, "billing.settings", { signupOpen: open, trialDays: days, autoDeprovision: autoClose });
+    await consoleAudit(staff, "billing.settings", { signupOpen: open, trialDays: days, trialSeats: people, autoDeprovision: autoClose });
+    if (people !== peopleBefore) await refreshTrialWorkspaces();
     return null;
   });
 }

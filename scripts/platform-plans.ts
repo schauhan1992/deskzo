@@ -4,6 +4,7 @@
  *   npm run platform:plans -- products [--dry-run] [--allow-removals]   the products as plans, made or brought up to date
  *   npm run platform:plans -- list                                      every plan: key, kind, product, default, on sale
  *   npm run platform:plans -- prices [--apply] [--remake]               the launch prices for India (src/lib/platform/price-book.ts)
+ *   npm run platform:plans -- refresh                                   every workspace's entitlements worked out again
  *
  * `products` makes Deskzo One, a plan for each product and the add-ons (src/lib/platform/product-plans.ts,
  * which says what it owns and what it leaves to staff). It is safe to run again: a run that finds them
@@ -21,6 +22,7 @@ import "dotenv/config";
 import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
 import { syncProductPlans } from "../src/lib/platform/product-plans";
 import { INDIA_LAUNCH_PRICES, applyPriceBook } from "../src/lib/platform/price-book";
+import { refreshAllWorkspaces } from "../src/lib/platform/entitlements";
 
 const args = process.argv.slice(2);
 const ACTOR = "script:platform:plans";
@@ -71,8 +73,13 @@ Dry run: ${priced} to price, nothing written and no gateway called. Add --apply 
       }
       return;
     }
+    case "refresh": {
+      // After a deploy that changes how entitlements are worked out (a free trial's people, 11 Oct 2026).
+      console.log(`${await refreshAllWorkspaces()} workspaces worked out again.`);
+      return;
+    }
     default:
-      console.log("Commands: products [--dry-run] [--allow-removals], list, prices [--apply] [--remake] — see the top of scripts/platform-plans.ts.");
+      console.log("Commands: products [--dry-run] [--allow-removals], list, prices [--apply] [--remake], refresh — see the top of scripts/platform-plans.ts.");
       process.exitCode = 1;
   }
 }

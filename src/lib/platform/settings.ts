@@ -21,6 +21,7 @@ export type SecretKey = (typeof SECRET_KEYS)[number];
 export const PLAIN_KEYS = [
   "signup.open",
   "trial.days",
+  "trial.seats",
   "billing.autoDeprovision",
   "billing.dailyRanOn",
   "staff.twoFactor",
@@ -164,6 +165,15 @@ export async function signupOpen(): Promise<boolean> {
 export async function trialDays(): Promise<number> {
   const n = Number(await getSetting("trial.days"));
   return Number.isInteger(n) && n >= 1 && n <= 90 ? n : 14;
+}
+
+/** The most people a workspace on its free trial may have (owner, 11 Oct 2026: 25), until it pays. */
+export const TRIAL_SEATS_DEFAULT = 25;
+export const TRIAL_SEATS_MAX = 1000;
+
+export async function trialSeats(): Promise<number> {
+  const n = Number(await getSetting("trial.seats"));
+  return Number.isInteger(n) && n >= 1 && n <= TRIAL_SEATS_MAX ? n : TRIAL_SEATS_DEFAULT;
 }
 
 /**

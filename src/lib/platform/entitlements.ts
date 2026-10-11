@@ -3,6 +3,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { dependentsOf, soldIn, withDependencies, type Entitlements } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
 import { forgetRegistry } from "@/lib/tenancy/registry";
+import { trialSeats } from "@/lib/platform/settings";
 
 /**
  * Working out what a workspace may use, and writing it on its control-plane row — whenever its plans,
@@ -18,6 +19,9 @@ import { forgetRegistry } from "@/lib/tenancy/registry";
  *   · Seats charged per person (a per-person price) are what was bought: the quantity, times the
  *     plan's seats or one — never "no limit" because the plan names none. A trial or a plan given by
  *     hand has no price, so the plan's own number holds as before.
+ *   · A workspace on its free trial and paying for nothing has no more people than a trial allows
+ *     (`trialSeats`, console › Settings — 25 to start with), whatever its plan says. A staff override,
+ *     or paying for an edition, lifts it.
  *
  * The working out itself is `entitlementsFrom`, which reads nothing: the console's previews
  * (entitlement-preview.ts) run it on a change that has not been made, so what they show is what the
@@ -40,9 +44,14 @@ export const ENTITLEMENT_PLAN_SELECT = {
   modules: { select: { moduleKey: true } },
 } as const satisfies Prisma.PlanSelect;
 
-/** One plan on a live subscription, with its quantity — and whether it is charged per person. */
+/** The free trial a signup starts on: a subscription made by hand, trialing (src/lib/platform/plans.ts `startOnPlan`). */
+export const isFreeTrial = (sub: { gateway: string; status: string }) => sub.gateway === "MANUAL" && sub.status === "TRIALING";
+
+/** One plan on a live subscription, with its quantity — and whether it is charged per person, or a free trial's. */
 export type EntItem = {
   quantity: number;
+  /** On the free trial (`isFreeTrial`). */
+  trial?: boolean;
   /** Charged per person: the quantity is the people bought (the item's price, src/lib/billing/prices.ts). */
   perSeat?: boolean;
   plan: { key: string; kind: PlanKind; allModules: boolean; seats: number | null; copilotTokens: number | null; customDomains: number | null; modules: { moduleKey: string }[] };
@@ -62,7 +71,14 @@ function sumLimit(items: { quantity: number; perSeat?: boolean; plan: PlanForSum
  * subscriptions, and its module overrides — the rules above, and nothing read.
  */
 export function entitlementsFrom(
-  tenant: { country: string; seatOverride: number | null; copilotTokenOverride: number | null; customDomainOverride: number | null },
+  tenant: {
+    country: string;
+    seatOverride: number | null;
+    copilotTokenOverride: number | null;
+    customDomainOverride: number | null;
+    /** The most people a free trial allows (`trialSeats`); absent or null: a trial is not capped. */
+    trialSeats?: number | null;
+  },
   items: EntItem[],
   overrides: { moduleKey: string; granted: boolean }[],
 ): Entitlements {
@@ -76,30 +92,42 @@ export function entitlementsFrom(
     for (const dependent of dependentsOf(key)) modules.delete(dependent);
   }
   const sold = [...modules].filter((key) => soldIn(getModuleDefinition(key)!, tenant.country));
+  // On its free trial, paying for no edition: no more people than a trial allows — unless staff said otherwise.
+  // An internal plan is never a trial, whatever subscription it sits on (provisioning starts it without one).
+  const onTrial = (i: EntItem) => !!i.trial && i.plan.kind !== "INTERNAL";
+  const trialOnly = items.some(onTrial) && !items.some((i) => !onTrial(i) && BASE_KINDS.includes(i.plan.kind));
+  const trialCap = trialOnly && tenant.seatOverride === null && typeof tenant.trialSeats === "number" ? tenant.trialSeats : null;
+  const counted = sumLimit(items, "seats");
 
   return {
     v: 1,
     // "All" survives only while nothing is taken away; otherwise the list says exactly what is left.
     all: everything && taken.length === 0,
     modules: sold.sort(),
-    seats: tenant.seatOverride ?? sumLimit(items, "seats"),
+    seats: tenant.seatOverride ?? (trialCap === null ? counted : counted === null ? trialCap : Math.min(counted, trialCap)),
     copilotTokens: tenant.copilotTokenOverride ?? sumLimit(items, "copilotTokens"),
     customDomains: tenant.customDomainOverride ?? sumLimit(items, "customDomains"),
     plans: [...new Set(items.map((i) => i.plan.key))].sort(),
+    ...(trialCap !== null ? { trial: true } : {}),
   };
 }
 
 export async function computeEntitlements(tenantId: string): Promise<Entitlements> {
   const control = controlDb();
-  const [tenant, items, overrides] = await Promise.all([
+  const [tenant, items, overrides, trialCap] = await Promise.all([
     control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
     control.subscriptionItem.findMany({
       where: { subscription: { tenantId, status: { in: [...LIVE_STATUSES] } } },
-      select: { quantity: true, price: { select: { perSeat: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
+      select: { quantity: true, price: { select: { perSeat: true } }, subscription: { select: { gateway: true, status: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
+    trialSeats(),
   ]);
-  return entitlementsFrom(tenant, items.map(({ price, ...item }) => ({ ...item, perSeat: !!price?.perSeat })), overrides);
+  return entitlementsFrom(
+    { ...tenant, trialSeats: trialCap },
+    items.map(({ price, subscription, ...item }) => ({ ...item, perSeat: !!price?.perSeat, trial: isFreeTrial(subscription) })),
+    overrides,
+  );
 }
 
 /** Works it out and writes it, where every request for the workspace reads it within the minute. */
@@ -108,6 +136,20 @@ export async function refreshEntitlements(tenantId: string): Promise<Entitlement
   await controlDb().tenant.update({ where: { id: tenantId }, data: { entitlements } });
   forgetRegistry();
   return entitlements;
+}
+
+/** After the people a trial allows change (console › Settings): every workspace on its free trial. */
+export async function refreshTrialWorkspaces(): Promise<number> {
+  const tenants = await controlDb().subscription.findMany({ where: { gateway: "MANUAL", status: "TRIALING" }, select: { tenantId: true }, distinct: ["tenantId"] });
+  for (const t of tenants) await refreshEntitlements(t.tenantId);
+  return tenants.length;
+}
+
+/** Every workspace not closed, worked out again — after a deploy changes how entitlements are worked out. */
+export async function refreshAllWorkspaces(): Promise<number> {
+  const tenants = await controlDb().tenant.findMany({ where: { status: { not: "DEPROVISIONED" } }, select: { id: true } });
+  for (const t of tenants) await refreshEntitlements(t.id);
+  return tenants.length;
 }
 
 /** After a plan itself changes: every workspace on it. */
