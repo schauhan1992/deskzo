@@ -7,6 +7,7 @@ import { ewayEnabled, intraStateThreshold } from "@/lib/eway/settings";
 import { EWAY_CLAIM_STALE_MS } from "@/lib/eway/rules";
 import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
+import { documentAccess, mayAccess } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { eInvoiceConfigFor } from "@/lib/organisation";
 import { branchIdentity, listRegistrationChoices } from "@/lib/branches/identity";
@@ -57,6 +58,16 @@ async function gate() {
     return { user, error: "You don't have access to despatch and its paperwork." };
   }
   return { user, error: null };
+}
+
+/**
+ * Whether this person may act on the document a bill is for — the document rule
+ * (src/lib/authz/access.ts): its register lists the documents they may open, and raising, changing or
+ * cancelling a bill is changing the document's paperwork. One out of reach reads as missing, as its
+ * page does.
+ */
+async function reachesDocument(userId: string, documentId: string, action: "view" | "edit"): Promise<boolean> {
+  return mayAccess(userId, "documents", action, documentId);
 }
 
 /** The GST state code from a GSTIN, which is its first two digits. */
@@ -158,7 +169,7 @@ export async function ewayDocuments(params: {
   page: number;
   pageSize: number;
 }): Promise<ActionResult<EwayList>> {
-  const { error } = await gate();
+  const { user, error } = await gate();
   if (error) return { ok: false, error };
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
@@ -173,6 +184,8 @@ export async function ewayDocuments(params: {
   const to = params.to ? endOfIndianDay(params.to) : null;
 
   const where: Prisma.TradeDocumentWhereInput = {
+    // The documents this person may open, under AND so the search below can't replace it.
+    AND: [await documentAccess(user.id, "view")],
     docType: { in: docType },
     direction: "SALES",
     // A draft is our workings; nothing has moved against it.
@@ -381,12 +394,12 @@ async function loadDocument(documentId: string) {
 }
 
 export async function ewayForDocument(documentId: string): Promise<ActionResult<EwayDocumentView>> {
-  const { error } = await gate();
+  const { user, error } = await gate();
   if (error) return { ok: false, error };
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
   const doc = await loadDocument(documentId);
-  if (!doc) return { ok: false, error: "That document no longer exists." };
+  if (!doc || !(await reachesDocument(user.id, doc.id, "view"))) return { ok: false, error: "That document no longer exists." };
 
   const bill = doc.ewayBills[0] ?? null;
   const sellerState = await sellerStateOf(doc, headOfficeStateOnce());
@@ -513,7 +526,7 @@ export async function saveEwayDetails(input: {
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
   const doc = await db.tradeDocument.findUnique({ where: { id: input.documentId }, select: { id: true } });
-  if (!doc) return { ok: false, error: "That document no longer exists." };
+  if (!doc || !(await reachesDocument(user.id, doc.id, "edit"))) return { ok: false, error: "That document no longer exists." };
 
   if (!Number.isFinite(input.declaredValue) || input.declaredValue < 0) {
     return { ok: false, error: "The value of the goods should be a positive number." };
@@ -637,7 +650,7 @@ export async function generateEwayBill(
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
   const doc = await loadDocument(documentId);
-  if (!doc) return { ok: false, error: "That document no longer exists." };
+  if (!doc || !(await reachesDocument(user.id, doc.id, "edit"))) return { ok: false, error: "That document no longer exists." };
 
   // The login of the GSTIN the document was issued under; the refusal names that GSTIN.
   const connection = await eInvoiceConfigFor(doc.gstRegistrationId);
@@ -804,14 +817,14 @@ export async function lookupEwayBill(ewayBillNumber: string, documentId?: string
     transporterName: string | null;
   }>
 > {
-  const { error } = await gate();
+  const { user, error } = await gate();
   if (error) return { ok: false, error };
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
   let gstRegistrationId: string | null;
   if (typeof documentId === "string" && documentId) {
     const doc = await db.tradeDocument.findUnique({ where: { id: documentId }, select: { gstRegistrationId: true } });
-    if (!doc) return { ok: false, error: "That document no longer exists." };
+    if (!doc || !(await reachesDocument(user.id, documentId, "view"))) return { ok: false, error: "That document no longer exists." };
     gstRegistrationId = doc.gstRegistrationId;
   } else {
     gstRegistrationId = (await branchIdentity(null)).gstRegistrationId;
@@ -872,7 +885,7 @@ export async function associateEwayBill(input: {
       consignments: { select: { declaredValue: true, interstate: true } },
     },
   });
-  if (!doc) return { ok: false, error: "That document no longer exists." };
+  if (!doc || !(await reachesDocument(user.id, doc.id, "edit"))) return { ok: false, error: "That document no longer exists." };
 
   const existing = await db.ewayBill.findFirst({
     where: { documentId: doc.id, status: { not: "CANCELLED" } },
@@ -940,7 +953,9 @@ export async function updateEwayVehicle(input: {
     orderBy: { createdAt: "desc" },
     include: { document: { select: { branchId: true, gstRegistrationId: true } } },
   });
-  if (!bill?.ewayBillNumber) return { ok: false, error: "There is no live e-way bill on this document." };
+  if (!bill?.ewayBillNumber || !(await reachesDocument(user.id, input.documentId, "edit"))) {
+    return { ok: false, error: "There is no live e-way bill on this document." };
+  }
 
   // The bill was raised under its document's GSTIN, so only that GSTIN's login can change it.
   const connection = await eInvoiceConfigFor(bill.document.gstRegistrationId);
@@ -996,7 +1011,9 @@ export async function cancelEwayBill(input: {
     orderBy: { createdAt: "desc" },
     include: { document: { select: { gstRegistrationId: true } } },
   });
-  if (!bill?.ewayBillNumber) return { ok: false, error: "There is no e-way bill to cancel." };
+  if (!bill?.ewayBillNumber || !(await reachesDocument(user.id, input.documentId, "edit"))) {
+    return { ok: false, error: "There is no e-way bill to cancel." };
+  }
 
   // Under the GSTIN it was raised with — even one deactivated since: withdrawing a bill it already
   // filed is the one thing an inactive registration's login is kept for.

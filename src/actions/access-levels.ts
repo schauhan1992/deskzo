@@ -6,10 +6,9 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { actorContext } from "@/lib/authz/guards";
-import { rolePermits } from "@/lib/authz/role-permission";
 import { roleExists } from "@/lib/authz/role-registry";
 import { recordPermissionChange } from "@/lib/authz/audit";
-import { getPermissionDefinition } from "@/lib/permissions";
+import { getPermissionDefinition, heldByDefault } from "@/lib/permissions";
 import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
@@ -18,6 +17,7 @@ import {
   ACCESS_ACTIONS,
   ACCESS_RECORDS,
   accessRecordDefinition,
+  derivedLevel,
   explainAccess,
   isAccessAction,
   isAccessRecord,
@@ -32,7 +32,7 @@ import type { ActionResult } from "@/actions/company";
  *
  * For each record type and each of View, Edit, Delete and Assign, a role either has a **stored**
  * level (a `RoleAccessLevel` row an admin chose here) or follows the **derived** one: what its
- * permissions have always meant (`ACCESS_RECORDS[].derivedFrom`). Nothing is stored until an admin
+ * permissions have always meant (`derivedLevel` in src/lib/authz/access.ts). Nothing is stored until an admin
  * saves a cell, which is why the grid changed nobody's access by appearing.
  *
  * Saving follows `setRolePermissions` (src/actions/permission.ts) rule for rule: "Change roles and
@@ -58,15 +58,25 @@ export type AccessRow = {
   label: string;
   ownMeans: string;
   levels: AccessLevel[];
+  /** The actions the record has — the cells drawn; the others are nobody's and can't be set. */
+  actions: AccessAction[];
   cells: Record<AccessAction, AccessCell>;
 };
 
-async function derivedFor(role: Role, record: AccessRecord) {
-  const { derivedFrom } = accessRecordDefinition(record);
-  const held = await rolePermits(role, derivedFrom.key);
-  return {
-    level: held ? derivedFrom.held : derivedFrom.missing,
-    from: { key: derivedFrom.key, label: getPermissionDefinition(derivedFrom.key)?.label ?? derivedFrom.key, held },
+/**
+ * Whether a role holds a permission, with no person involved — `rolePermits` for every key at once: the
+ * role's stored answers, read once, over the registry's defaults, and everything for Admin unless taken
+ * away.
+ */
+async function rolePermissions(role: Role): Promise<(key: string) => boolean> {
+  const rows = await db.rolePermission.findMany({ where: { role }, select: { permission: true, allowed: true } });
+  const stored = new Map(rows.map((r) => [r.permission, r.allowed]));
+  return (key) => {
+    const def = getPermissionDefinition(key);
+    if (!def) return false;
+    const answer = stored.get(key);
+    if (role === "ADMIN") return answer ?? true;
+    return answer ?? heldByDefault(def, role);
   };
 }
 
@@ -86,14 +96,19 @@ export async function roleAccessLevels(role: string): Promise<{ rows: AccessRow[
   }
   const bySlot = new Map(stored.map((r) => [`${r.record}:${r.action}`, r.level]));
 
+  const has = await rolePermissions(role as Role);
   const rows: AccessRow[] = [];
   for (const def of ACCESS_RECORDS) {
-    const derived = await derivedFor(role as Role, def.key);
     const cells = {} as Record<AccessAction, AccessCell>;
     for (const action of ACCESS_ACTIONS) {
-      cells[action] = { stored: bySlot.get(`${def.key}:${action}`) ?? null, derived: derived.level, derivedFrom: derived.from };
+      const d = derivedLevel(def.key, action, has);
+      cells[action] = {
+        stored: def.actions.includes(action) ? (bySlot.get(`${def.key}:${action}`) ?? null) : null,
+        derived: d.level,
+        derivedFrom: { key: d.from, label: getPermissionDefinition(d.from)?.label ?? d.from, held: d.held },
+      };
     }
-    rows.push({ key: def.key, label: def.label, ownMeans: def.ownMeans, levels: [...def.levels], cells });
+    rows.push({ key: def.key, label: def.label, ownMeans: def.ownMeans, levels: [...def.levels], actions: [...def.actions], cells });
   }
 
   const mayManage = actor.isSuperAdmin || (await can(actor.id, "permissions.manage"));
@@ -147,6 +162,7 @@ export async function setRoleAccessLevels(role: string, changes: AccessChange[])
   for (const [, change] of wanted) {
     const row = rowOf.get(change.record)!;
     const cell = row.cells[change.action];
+    if (!row.actions.includes(change.action)) return { ok: false, error: `${row.label} has no ${change.action}.` };
     if (change.level !== null && !row.levels.includes(change.level)) {
       return { ok: false, error: `${row.label} can't be set to "${LEVEL_WORDS[change.level]}".` };
     }
@@ -174,7 +190,7 @@ export async function setRoleAccessLevels(role: string, changes: AccessChange[])
 
   // You can only change what you can see: checked on the grid as it would stand after the save.
   for (const row of current.rows) {
-    for (const action of ACCESS_ACTIONS) {
+    for (const action of row.actions) {
       for (const parent of UNDER[action]) {
         const mine = effective(row.key, action);
         const above = effective(row.key, parent);
@@ -216,7 +232,8 @@ export async function setRoleAccessLevels(role: string, changes: AccessChange[])
   return { ok: true, data: { changed: writes.length } };
 }
 
-export type PersonAccessCell = { level: AccessLevel; why: string };
+/** `absent`: an action the record doesn't have (nobody deletes a project), shown as a dash. */
+export type PersonAccessCell = { level: AccessLevel; why: string; absent?: boolean };
 
 /**
  * One person's reach over every record type, and why — the record half of "why can X do Y", for the
@@ -231,6 +248,10 @@ export async function personAccessLevels(userId: string): Promise<{ key: AccessR
   for (const def of ACCESS_RECORDS) {
     const cells = {} as Record<AccessAction, PersonAccessCell>;
     for (const action of ACCESS_ACTIONS) {
+      if (!def.actions.includes(action)) {
+        cells[action] = { level: "NONE", why: "Not an action this record has.", absent: true };
+        continue;
+      }
       const { level, source } = await explainAccess(userId, def.key, action);
       cells[action] = { level, why: describeAccessSource(source, day) };
     }

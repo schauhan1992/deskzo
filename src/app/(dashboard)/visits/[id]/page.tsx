@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { getVisit } from "@/actions/visit";
-import { getDownlineUserIds } from "@/lib/org-chart";
+import { reachesPerson } from "@/lib/authz/access";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { VisitActions } from "@/components/visits/visit-actions";
 import { RecordMeetings } from "@/components/calendar/record-meetings";
@@ -51,7 +51,8 @@ export default async function VisitDetailPage({ params, searchParams }: { params
   canonicalise(id, "/visits", formatVisitId(visit.visitSeq), query);
 
   const userId = session!.user.id;
-  const canEdit = visit.userId === userId || (await getDownlineUserIds(userId)).includes(visit.userId);
+  // The visit rule's answer for changing it (src/lib/authz/access.ts) — the same one the actions ask.
+  const canEdit = await reachesPerson(userId, "visits", "edit", visit.userId);
   // The visit goes into the calendar of whoever is making it, and only they put it there.
   const calendarEnabled = await isModuleEnabled("calendar");
   const canCalendar = calendarEnabled && visit.userId === userId && visit.status === "PLANNED";

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { orderAccess } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { RENEWAL_STAGES, SETTABLE_RENEWAL_STAGES, renewalStageMeta, type RenewalStageKey } from "@/lib/renewals";
@@ -74,9 +74,10 @@ export async function setRenewalStage(input: {
   }
 
   const order = await db.companyProduct.findFirst({
-    // Scoped as well as filtered by id — the id is posted from the browser, and the refusal for a
-    // record outside the caller's book has to read the same as for one that does not exist.
-    where: { id: input.companyProductId, ...(await viaCompanyScope(user.id)) },
+    // An order this person may change (the order rule, src/lib/authz/access.ts) — the id is posted
+    // from the browser, and the refusal for a record outside the caller's book has to read the same as
+    // for one that does not exist.
+    where: { AND: [{ id: input.companyProductId }, await orderAccess(user.id, "edit")] },
     select: {
       id: true,
       orderSeq: true,

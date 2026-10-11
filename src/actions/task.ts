@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
-import { hasEffectivePermission } from "@/actions/permission";
+import { taskAccess, type AccessAction } from "@/lib/authz/access";
 import { pageSlice } from "@/lib/pagination";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -18,6 +18,15 @@ function revalidateTaskPaths(task: { companyId: string | null; leadId: string | 
   if (task.companyId) revalidatePath(`/companies/${task.companyId}`);
   if (task.leadId) revalidatePath(`/leads/${task.leadId}`);
   if (task.ticketId) revalidatePath(`/tickets/${task.ticketId}`);
+}
+
+/**
+ * The task, when this person may act on it this way — the task rule (src/lib/authz/access.ts, "tasks"):
+ * everybody's to see, change and hand on, and deleting one that isn't yours needs "Delete any task",
+ * until a role sets levels of its own. A task out of reach is missing, as one that never existed.
+ */
+async function reachableTask(userId: string, id: string, action: AccessAction) {
+  return db.task.findFirst({ where: { AND: [{ id }, await taskAccess(userId, action)] } });
 }
 
 async function assertValidAssignee(userId: string) {
@@ -92,9 +101,13 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
   }
   const data = parsed.data;
 
-  const existing = await db.task.findUnique({ where: { id: data.id } });
+  const existing = await reachableTask(user.id, data.id, "edit");
   if (!existing) {
     return { ok: false, error: "Task not found." };
+  }
+  // Handing it to somebody else is assigning, and asks for that.
+  if ((data.assignedToUserId || null) !== existing.assignedToUserId && !(await reachableTask(user.id, data.id, "assign"))) {
+    return { ok: false, error: "You can't hand this task to somebody else." };
   }
   if (data.assignedToUserId && !(await assertValidAssignee(data.assignedToUserId))) {
     return { ok: false, error: "That person is not a valid, active user." };
@@ -130,8 +143,8 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
-  await requireModuleUser("tasks");
-  const task = await db.task.findUnique({ where: { id } });
+  const user = await requireModuleUser("tasks");
+  const task = await reachableTask(user.id, id, "edit");
   if (!task) {
     return { ok: false, error: "Task not found." };
   }
@@ -148,12 +161,12 @@ export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
 
 export async function deleteTask(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("tasks");
-  const task = await db.task.findUnique({ where: { id } });
-  if (!task) {
+  // Your own (made by you or given to you), or anybody's with "Delete any task" — the task rule's delete.
+  if (!(await db.task.findUnique({ where: { id }, select: { id: true } }))) {
     return { ok: false, error: "Task not found." };
   }
-  const isOwnTask = task.createdByUserId === user.id || task.assignedToUserId === user.id;
-  if (!isOwnTask && !(await hasEffectivePermission(user.id, "tasks.delete"))) {
+  const task = await reachableTask(user.id, id, "delete");
+  if (!task) {
     return { ok: false, error: "You don't have permission to delete this task." };
   }
 
@@ -173,9 +186,11 @@ type TaskListParams = {
   ticketId?: string;
 };
 
-function taskListWhere(params?: TaskListParams): Prisma.TaskWhereInput {
+async function taskListWhere(userId: string, params?: TaskListParams): Promise<Prisma.TaskWhereInput> {
   const dueDate = dueDayRange(params?.dueFrom, params?.dueTo);
   return {
+    // The task rule, under AND so the assignee filter narrows it and never stands in for it.
+    AND: [await taskAccess(userId, "view")],
     ...(params?.assignedToUserId
       ? params.assignedToUserId === "unassigned"
         ? { assignedToUserId: null }
@@ -238,17 +253,17 @@ export async function myOpenTasks(): Promise<RailTask[]> {
 }
 
 export async function listTasks(params?: TaskListParams) {
-  await requireModuleUser("tasks");
+  const user = await requireModuleUser("tasks");
   return db.task.findMany({
-    where: taskListWhere(params),
+    where: await taskListWhere(user.id, params),
     orderBy: [{ done: "asc" }, { dueDate: "asc" }],
     include: taskListInclude,
   });
 }
 
 export async function listTasksPaged(params: TaskListParams & { page: number; pageSize: number }) {
-  await requireModuleUser("tasks");
-  const where = taskListWhere(params);
+  const user = await requireModuleUser("tasks");
+  const where = await taskListWhere(user.id, params);
   const [rows, total] = await Promise.all([
     db.task.findMany({
       where,
@@ -263,8 +278,8 @@ export async function listTasksPaged(params: TaskListParams & { page: number; pa
 
 /** Open and overdue counts across the whole filtered set, so the header holds steady while paging. */
 export async function countTasks(params?: TaskListParams) {
-  await requireModuleUser("tasks");
-  const where = taskListWhere(params);
+  const user = await requireModuleUser("tasks");
+  const where = await taskListWhere(user.id, params);
   // Overdue is due before today on the workspace's calendar, as the list's badge and the rail say. Before
   // now, a day held at UTC midnight was overdue from the evening before it west of UTC.
   const today = (await workspaceClock()).calendarDate(new Date());

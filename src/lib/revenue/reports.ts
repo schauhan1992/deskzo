@@ -30,7 +30,7 @@ import {
  * revenue roll-forward, the waterfall of revenue still to come, and a customer's revenue.
  *
  * Plain functions over a client. The actions in src/actions/revenue.ts check who is asking and pass a
- * `scope` — the customers that person may see (`viaCompanyScope`) — for anything that lists customers.
+ * `scope` — the customers that person may see (`throughAccount`) — for anything that lists customers.
  */
 
 type Client = Pick<

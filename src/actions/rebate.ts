@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { orderAccess } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { formatOrderId } from "@/lib/order-id";
@@ -38,10 +38,10 @@ async function rebateUser(level: "view" | "manage") {
   return ok ? user : null;
 }
 
-/** An order the caller may see, by the account scope, with what its rebates are worked out from. */
+/** An order the caller may see — the order rule (src/lib/authz/access.ts) — with what its rebates are worked out from. */
 async function scopedOrder(userId: string, orderId: string) {
   return db.companyProduct.findFirst({
-    where: { id: orderId, ...(await viaCompanyScope(userId)) },
+    where: { AND: [{ id: orderId }, await orderAccess(userId, "view")] },
     select: { ...ORDER_REBATE_SELECT, orderSeq: true, orderStatus: true, companyId: true },
   });
 }
@@ -281,7 +281,7 @@ export async function rebatesReport(params: { from: string; to: string }) {
   if (!from || !before) return null;
   const orders = await db.companyProduct.findMany({
     where: {
-      ...(await viaCompanyScope(user.id)),
+      AND: [await orderAccess(user.id, "view")],
       rebates: { some: {} },
       orderStatus: { notIn: [...DONE_STATUSES] },
       bookedAt: { gte: from, lt: before },

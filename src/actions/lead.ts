@@ -5,11 +5,10 @@ import { detectSalesWins } from "@/lib/wins/detect";
 import Papa from "papaparse";
 import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { scopeUserIds } from "@/lib/authz/scope";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
-import { leadAccess, mayAccess, type AccessAction } from "@/lib/authz/access";
+import { leadAccess, mayAccess, timelineAccess, type AccessAction } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -416,8 +415,9 @@ export async function getLead(id: string) {
   const user = await requireUser();
   if (!(await canViewLeads(user.id))) return null;
   // The timeline shows their own and their team's activity, or everybody's with "See everyone's calls,
-  // notes & meetings" (owner, 8 Oct 2026) — as on the customer's Activity pane (`getCompany`).
-  const activityBy = await scopeUserIds(user.id, "activities.viewAll");
+  // notes & meetings" (owner, 8 Oct 2026) — as on the customer's Activity pane (`getCompany`). The
+  // calls, notes & meetings rule (src/lib/authz/access.ts, "activities") answers it.
+  const activityWhere = await timelineAccess(user.id, "view");
   const lead = await db.lead.findUnique({
     where: { id },
     include: {
@@ -437,7 +437,7 @@ export async function getLead(id: string) {
       sourcedBy: { select: { id: true, name: true } },
       qualifiedBy: { select: { id: true, name: true } },
       activities: {
-        where: activityBy ? { userId: { in: activityBy } } : undefined,
+        where: activityWhere,
         orderBy: { occurredAt: "desc" },
         include: { user: { select: { id: true, name: true } } },
       },

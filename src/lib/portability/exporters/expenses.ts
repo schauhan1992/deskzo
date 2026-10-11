@@ -1,6 +1,5 @@
 import { db } from "@/lib/db";
-import { can } from "@/lib/authz/resolve";
-import { getDownlineUserIds } from "@/lib/org-chart";
+import { expenseAccess } from "@/lib/authz/access";
 import type { Exporter } from "./types";
 
 /**
@@ -9,10 +8,10 @@ import type { Exporter } from "./types";
  * ## Scoped by whose claim it is, because that is how the screen is scoped
  *
  * An expense is somebody's money rather than an account's record, so it does not follow the
- * account-manager scoping the rest of this folder uses. `expenseListWhere` in
- * `src/actions/expense.ts` filters on the claimant — your own and your team's, with
- * `expenses.viewAll` lifting the restriction for company-wide spend reporting — and this reproduces
- * exactly that rule, from the same two primitives, so the export is the list.
+ * account scoping the companies in this folder use. `expenseListWhere` in `src/actions/expense.ts`
+ * asks the expense rule (src/lib/authz/access.ts) — your own and your team's, with
+ * `expenses.viewAll` lifting the restriction for company-wide spend reporting, until a role sets a
+ * level of its own — and this asks the same rule, so the export is the list.
  *
  * The obvious alternative is wrong in a way worth spelling out, because it looks right. Scoping
  * through the company relation means (a) filtering on who manages the *account* rather than who
@@ -25,8 +24,8 @@ import type { Exporter } from "./types";
  * wide is never reported by anyone, which is why it is written here once and against the screen's
  * own rule.
  *
- * Claims with no company still export, which was the point of reaching for `viaOptionalCompany`:
- * they are in scope because they are yours, not because of a company they do not have.
+ * Claims with no company still export: they are in scope because they are yours, not because of a
+ * company they do not have.
  *
  * ## Columns
  *
@@ -37,12 +36,8 @@ import type { Exporter } from "./types";
  * to edit a column that goes nowhere.
  */
 export const expensesExporter: Exporter = async (scope) => {
-  const claimants = (await can(scope.userId, "expenses.viewAll"))
-    ? null
-    : [scope.userId, ...(await getDownlineUserIds(scope.userId))];
-
   const rows = await db.expense.findMany({
-    where: claimants === null ? {} : { userId: { in: claimants } },
+    where: await expenseAccess(scope.userId, "view"),
     include: { user: { select: { name: true } }, company: { select: { name: true } } },
     orderBy: { expenseSeq: "asc" },
   });

@@ -3,7 +3,6 @@
 import { db } from "@/lib/db";
 import { toPlain } from "@/lib/serialize";
 import { requireModuleUser } from "@/lib/modules-access";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
 import { orderAccess } from "@/lib/authz/access";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { resolveRenewalStage, type RenewalStageKey } from "@/lib/renewals";
@@ -360,7 +359,7 @@ export async function bulkCreateRenewalTasks(input: unknown): Promise<ActionResu
     // Scoped as well as filtered by id. The rows were ticked on a list that is account-scoped now,
     // so a real selection is unaffected — but the ids are posted from the browser, and the task
     // this writes carries the customer's name onto a task list and onto their account.
-    where: { id: { in: orderIds }, ...(await viaCompanyScope(user.id)) },
+    where: { AND: [{ id: { in: orderIds } }, await orderAccess(user.id, "view")] },
     select: {
       id: true,
       orderSeq: true,

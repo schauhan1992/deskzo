@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
-import { canSeeCompany, paymentScope, viaCompanyScope } from "@/lib/authz/company-scope";
-import { mayAccess, mayAddTo } from "@/lib/authz/access";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { documentAccess, mayAccess, mayAddTo, paymentAccess, throughAccount } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
@@ -453,10 +453,10 @@ export async function getInvoiceSettlement(invoiceId: string) {
   const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
   const invoice = await db.tradeDocument.findFirst({
-    // Reached through the party, like the invoice itself: what has been paid and what is still
-    // outstanding is the account's business, not everybody's. `findFirst` so the scope can travel
-    // beside the id, and an invoice outside the viewer's book reads as missing.
-    where: { id: invoiceId, ...(await viaCompanyScope(user.id)) },
+    // An invoice this person may open (the document rule, src/lib/authz/access.ts): what has been
+    // paid and what is still outstanding is the account's business, not everybody's. `findFirst` so
+    // the scope can travel beside the id, and an invoice outside the viewer's book reads as missing.
+    where: { AND: [{ id: invoiceId }, await documentAccess(user.id, "view")] },
     select: {
       id: true,
       total: true,
@@ -505,7 +505,7 @@ export async function getCreditNoteBalance(creditNoteId: string) {
   const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
   const creditNote = await db.tradeDocument.findFirst({
-    where: { id: creditNoteId, ...(await viaCompanyScope(user.id)) },
+    where: { AND: [{ id: creditNoteId }, await documentAccess(user.id, "view")] },
     select: {
       total: true,
       currency: true,
@@ -534,7 +534,7 @@ export async function listOpenInvoices(companyId: string) {
   // from a credit note the viewer is already on, so this only refuses an id passed in by hand.
   if (!(await maySeeCustomer(user.id, companyId))) return [];
   const invoices = await db.tradeDocument.findMany({
-    where: { companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
+    where: { AND: [{ companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } }, await documentAccess(user.id, "view")] },
     orderBy: { issueDate: "asc" },
     select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, currency: true, ...invoiceSettlementInclude },
   });
@@ -563,26 +563,28 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
    * Scoped rather than refused, because the statement's shape is what the page is built on and a
    * customer outside the viewer's book should read as one they have no history with.
    *
-   * Spread into all five queries below, not just the first: the aging comes from the invoices, but
-   * the closing balance comes from the payments and the unapplied figures from two aggregates, and
-   * a statement scoped in four places out of five still publishes what the account has paid us.
+   * Into every query below, not just the first: the aging comes from the invoices, but the closing
+   * balance comes from the payments and the unapplied figures from two aggregates, and a statement
+   * scoped in four places out of five still publishes what the account has paid us. Each by its own
+   * record's rule (src/lib/authz/access.ts) — documents for invoices and credit notes, payments for
+   * receipts — which today all follow the account.
    */
-  const documentScope = await viaCompanyScope(user.id);
-  const receiptScope = await paymentScope(user.id);
+  const documentScope = await documentAccess(user.id, "view");
+  const receiptScope = await paymentAccess(user.id, "view");
 
   const [invoices, payments, creditNotes] = await Promise.all([
     db.tradeDocument.findMany({
-      where: { companyId, ...documentScope, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } },
+      where: { AND: [{ companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } }, documentScope] },
       orderBy: { issueDate: "asc" },
       select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, currency: true, ...invoiceSettlementInclude },
     }),
     db.payment.findMany({
-      where: { companyId, ...receiptScope },
+      where: { AND: [{ companyId }, receiptScope] },
       orderBy: { paidOn: "asc" },
       select: { id: true, amount: true, paidOn: true, method: true, reference: true },
     }),
     db.tradeDocument.findMany({
-      where: { companyId, ...documentScope, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } },
+      where: { AND: [{ companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } }, documentScope] },
       orderBy: { issueDate: "asc" },
       select: { id: true, docNumber: true, issueDate: true, total: true },
     }),
@@ -671,17 +673,17 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
   // What each allocation took out of its payment (`takenFromPayment`): rupees on account set against a
   // USD invoice settle dollars but spend rupees, and it is the rupees that leave the payment.
   const [appliedPayments, appliedCredits] = await Promise.all([
-    db.paymentAllocation.findMany({ where: { payment: { companyId, ...receiptScope } }, select: { amount: true, paymentAmount: true } }),
-    db.creditNoteApplication.aggregate({ where: { creditNote: { companyId, ...documentScope } }, _sum: { amount: true } }),
+    db.paymentAllocation.findMany({ where: { payment: { AND: [{ companyId }, receiptScope] } }, select: { amount: true, paymentAmount: true } }),
+    db.creditNoteApplication.aggregate({ where: { creditNote: { AND: [{ companyId }, documentScope] } }, _sum: { amount: true } }),
   ]);
   const unappliedPayments = Math.max(received - appliedPayments.reduce((t, a) => t + takenFromPayment(a), 0), 0);
   const unappliedCredits = Math.max(credited - Number(appliedCredits._sum.amount ?? 0), 0);
   const outstanding = Object.values(aging).reduce((t, v) => t + v, 0);
 
   // Collections: every follow-up on this account's invoices and orders — one history for sales and
-  // accounts, to anybody who can see the account (the same scope, spread in as above).
+  // accounts, to anybody who can see the account (collections' own rule: the account's, not a record's).
   const [followUps, canLogFollowUps] = await Promise.all([
-    loadFollowUps({ companyId, ...(documentScope as Prisma.PaymentFollowUpWhereInput) }, asOf),
+    loadFollowUps({ AND: [{ companyId }, (await throughAccount(user.id, "view")) as Prisma.PaymentFollowUpWhereInput] }, asOf),
     mayLogFollowUps(user.id),
   ]);
 
@@ -719,9 +721,9 @@ export async function agingReport(params?: { search?: string; promise?: string }
       docType: "INVOICE",
       status: { notIn: ["DRAFT", "CANCELLED", "PAID"] },
       /**
-       * Both conditions reach the company, so they go in an `AND` rather than side by side.
+       * Both conditions can reach the company, so they go in an `AND` rather than side by side.
        *
-       * They were side by side, and a spread is an assignment: `viaCompanyScope` writes `company`,
+       * They were side by side, and a spread is an assignment: the scope wrote `company`,
        * the search wrote `company` again a line later, and the second one won. The report was
        * correctly scoped until somebody typed in the search box, at which point the scope silently
        * vanished — measured at the time: 8 rows became 54, of which 48 were other people's
@@ -731,7 +733,8 @@ export async function agingReport(params?: { search?: string; promise?: string }
        * why the check now exercises the searched one too.
        */
       AND: [
-        await viaCompanyScope(user.id),
+        // The invoices this person may open (the document rule, src/lib/authz/access.ts).
+        await documentAccess(user.id, "view"),
         ...(params?.search
           ? [{ company: { name: { contains: params.search, mode: "insensitive" as const } } }]
           : []),
@@ -800,7 +803,7 @@ export async function listAvailableCredits(companyId: string) {
   if (!(await viewerHas("payments.view"))) return [];
   if (!(await maySeeCustomer(user.id, companyId))) return [];
   const creditNotes = await db.tradeDocument.findMany({
-    where: { companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } },
+    where: { AND: [{ companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } }, await documentAccess(user.id, "view")] },
     orderBy: { issueDate: "asc" },
     select: { id: true, docNumber: true, total: true, currency: true, creditsApplied: { select: { amount: true } } },
   });

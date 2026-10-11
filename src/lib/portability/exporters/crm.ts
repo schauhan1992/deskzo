@@ -3,7 +3,8 @@ import { formatContactId } from "@/lib/order-id";
 import { contactDetailFieldKeys, seesResellerContactDetails } from "@/lib/authz/contact-access";
 import { exportCells } from "@/lib/custom-fields/sheets";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
-import { ownScope, viaCompany, type Exporter, type ExportScope } from "./types";
+import { companyAccess, contactAccess, ticketAccess } from "@/lib/authz/access";
+import type { Exporter, ExportScope } from "./types";
 
 /**
  * The four kinds of party, their people, and the records that hang off them.
@@ -26,7 +27,8 @@ function partyExporter(area: string): Exporter {
   return async (scope: ExportScope) => {
     const rows = await db.company.findMany({
       where: {
-        ...ownScope(scope),
+        // The accounts this person may open — customers and vendors each at their own level.
+        AND: [await companyAccess(scope.userId, "view")],
         relationshipType,
         // A customer is a company that has actually bought something, as distinct from one marked
         // CUSTOMER by somebody optimistic.
@@ -77,7 +79,7 @@ export const commissionPartiesExporter = partyExporter("commission-parties");
  */
 export const contactsExporter: Exporter = async (scope) => {
   const stored = await db.contact.findMany({
-    where: viaCompany(scope),
+    where: await contactAccess(scope.userId, "view"),
     include: { company: { select: { name: true, managedByResellerId: true } } },
     orderBy: { contactSeq: "asc" },
   });
@@ -103,7 +105,7 @@ export const contactsExporter: Exporter = async (scope) => {
 
 export const ticketsExporter: Exporter = async (scope) => {
   const rows = await db.ticket.findMany({
-    where: viaCompany(scope),
+    where: await ticketAccess(scope.userId, "view"),
     include: { company: { select: { name: true } }, assignedTo: { select: { name: true } } },
     orderBy: { ticketSeq: "asc" },
   });

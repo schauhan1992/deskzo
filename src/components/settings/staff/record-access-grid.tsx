@@ -65,6 +65,14 @@ export function RecordAccessGrid({
                 <span className="block text-xs text-subtle">Own: {row.ownMeans}</span>
               </th>
               {ACTIONS.map((a) => {
+                // An action the record doesn't have — nobody deletes a project — isn't a choice.
+                if (!row.actions.includes(a.key)) {
+                  return (
+                    <td key={a.key} className="px-2 py-2 text-subtle" aria-label={`${row.label}, ${a.label}: not an action it has`}>
+                      —
+                    </td>
+                  );
+                }
                 const cell = row.cells[a.key];
                 const slot = slotOf(row.key, a.key);
                 const choice = choices.get(slot) ?? cell.stored ?? "";

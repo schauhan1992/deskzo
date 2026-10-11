@@ -7,7 +7,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { checkUpload } from "@/lib/hr/document-upload";
-import { visibleProjectsWhere } from "@/lib/projects/visibility";
+import { projectAccess, type AccessAction } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import type { ActionResult } from "@/actions/company";
 
@@ -19,13 +19,10 @@ import type { ActionResult } from "@/actions/company";
  * second place for the size and MIME checks to drift apart.
  */
 
-async function reachable(projectId: string, userId: string) {
-  const [viewAll, manage] = await Promise.all([
-    hasEffectivePermission(userId, "projects.viewAll"),
-    hasEffectivePermission(userId, "projects.manage"),
-  ]);
+async function reachable(projectId: string, userId: string, action: AccessAction = "edit") {
+  const manage = await hasEffectivePermission(userId, "projects.manage");
   const project = await db.project.findFirst({
-    where: { AND: [{ id: projectId }, visibleProjectsWhere(userId, viewAll)] },
+    where: { AND: [{ id: projectId }, await projectAccess(userId, action)] },
     select: { id: true, code: true },
   });
   return { project, manage };
@@ -88,7 +85,7 @@ export async function getProjectDocumentFile(
   });
   if (!doc) return { ok: false, error: "That document no longer exists." };
 
-  const { project } = await reachable(doc.projectId, user.id);
+  const { project } = await reachable(doc.projectId, user.id, "view");
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
 
   return { ok: true, data: { name: doc.name, mimeType: doc.mimeType, fileDataUrl: doc.fileDataUrl } };

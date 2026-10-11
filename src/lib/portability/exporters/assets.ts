@@ -6,11 +6,11 @@ import type { Exporter, ExportScope } from "./types";
  *
  * ## Scoping, and why the shared helper is not called
  *
- * `viaOptionalCompany` encodes the rule this needs: a record with no company at all is ours, and
- * dropping it would silently take the whole internal estate out of the file. But it is written for a
- * model that reaches a company through one `company` relation, and an asset reaches two — the
- * customer who owns it and the site it sits at, neither of which is called `company`. So the same
- * rule is spelled out here against those two relations rather than the helper being bent to fit.
+ * A record with no company at all is ours, and dropping it would silently take the whole internal
+ * estate out of the file. An asset reaches two companies — the customer who owns it and the site it
+ * sits at, neither of which is called `company` — so that rule is spelled out here against those two
+ * relations. Assets have no level of their own on the role screen, so it is the account's rule, from
+ * `ownerUserIds`.
  * An asset counts as in scope when either of its companies is one this person manages, because a
  * customer's machine parked at our workshop is still their machine.
  *

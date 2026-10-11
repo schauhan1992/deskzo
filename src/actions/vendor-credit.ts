@@ -5,8 +5,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
-import { companyAccess, documentAccess, mayAccess } from "@/lib/authz/access";
+import { companyAccess, documentAccess, mayAccess, orderAccess } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { formatOrderId } from "@/lib/order-id";
@@ -259,7 +258,7 @@ export async function vendorCreditOptions(vendorId: string) {
   if (!vendor || !(await mayAccess(user.id, "vendors", "view", vendorId))) return null;
   const orders = await db.companyProduct.findMany({
     where: {
-      ...(await viaCompanyScope(user.id)),
+      AND: [await orderAccess(user.id, "view")],
       orderStatus: { notIn: ["CANCELLED", "REJECTED"] },
       rebates: {
         some: {

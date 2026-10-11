@@ -1,8 +1,7 @@
 import { db } from "@/lib/db";
-import { can } from "@/lib/authz/resolve";
-import { getDownlineUserIds } from "@/lib/org-chart";
+import { throughAccount, visitAccess } from "@/lib/authz/access";
 import { workspaceClock } from "@/lib/time/workspace";
-import { viaCompany, type Exporter } from "./types";
+import type { Exporter } from "./types";
 
 /**
  * Field visits — who went where, when they were due, and what came of it.
@@ -10,9 +9,10 @@ import { viaCompany, type Exporter } from "./types";
  * Scoped two ways, and it has to be both.
  *
  * The account scope is the obvious one: a visit belongs to the company it was to. On its own,
- * though, it is wider than the visits screen, which limits reading to yourself and your downline
- * unless you hold `visits.viewAll` — on the stated grounds that a visit log is a record of where a
- * person spent their day, not only of what happened to an account. Exporting on account scope alone
+ * though, it is wider than the visits screen, which asks the visit rule (src/lib/authz/access.ts) —
+ * yourself and your line unless you hold `visits.viewAll`, until a role sets a level of its own — on
+ * the stated grounds that a visit log is a record of where a person spent their day, not only of what
+ * happened to an account. Exporting on account scope alone
  * would hand somebody their colleagues' movements, which is precisely the thing export must never
  * do: the permission decides whether rows may leave the building, never which rows exist.
  *
@@ -29,16 +29,9 @@ import { viaCompany, type Exporter } from "./types";
  * India read as the evening before, and came back from the file as that day's.
  */
 export const visitsExporter: Exporter = async (scope) => {
-  // The same rule as visibleUserIds() in src/actions/visit.ts, which is what the screen uses.
-  const visitors = (await can(scope.userId, "visits.viewAll"))
-    ? null
-    : [scope.userId, ...(await getDownlineUserIds(scope.userId))];
-
+  // The visit rule, as the screen asks it, and the account's.
   const rows = await db.visit.findMany({
-    where: {
-      ...viaCompany(scope),
-      ...(visitors ? { userId: { in: visitors } } : {}),
-    },
+    where: { AND: [await throughAccount(scope.userId, "view"), await visitAccess(scope.userId, "view")] },
     include: { company: { select: { name: true } }, user: { select: { name: true } } },
     orderBy: { visitSeq: "asc" },
   });

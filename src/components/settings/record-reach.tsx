@@ -48,6 +48,13 @@ export function RecordReach({
                 </th>
                 {actions.map(([key]) => {
                   const cell = row.cells[key];
+                  if (cell.absent) {
+                    return (
+                      <td key={key} className="px-2 py-2 text-subtle" title={cell.why}>
+                        —
+                      </td>
+                    );
+                  }
                   const differs = key !== "view" && cell.why !== row.cells.view.why;
                   return (
                     <td key={key} className="px-2 py-2" title={cell.why}>

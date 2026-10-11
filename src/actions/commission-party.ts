@@ -4,13 +4,25 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { mayAccess, orderAccess, type AccessAction } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { commissionPartyAccountSchema } from "@/lib/validation/commission-party";
 import type { ActionResult } from "@/actions/company";
 
+/**
+ * Whether this person may act this way on one end of a commission — the party (its accounts, its
+ * links, its earnings) or the customer (its referral sources, its payouts). Both are accounts, so it
+ * is the account rule (src/lib/authz/access.ts): what the page that shows either asks first. One out
+ * of reach answers as missing. The names on the other end stay unscoped, as the party picker is.
+ */
+async function reaches(userId: string, companyId: string, action: AccessAction): Promise<boolean> {
+  return mayAccess(userId, "companies", action, companyId);
+}
+
 /** The customer companies a commission party is linked to (referral source) — shown on the commission party's own page. */
 export async function listLinkedCompanies(commissionPartyId: string) {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
+  if (!(await reaches(user.id, commissionPartyId, "view"))) return [];
   const links = await db.commissionPartyLink.findMany({
     where: { commissionPartyId },
     orderBy: { createdAt: "desc" },
@@ -36,6 +48,10 @@ export async function linkCommissionPartyToCompany(commissionPartyId: string, co
   if (company.relationshipType !== "CLIENT") {
     return { ok: false, error: "A commission party can only be linked to a customer company." };
   }
+  // A change to whichever end this person may change — the customer's referral sources, or the party's.
+  if (!(await reaches(user.id, companyId, "edit")) && !(await reaches(user.id, commissionPartyId, "edit"))) {
+    return { ok: false, error: "Company not found." };
+  }
 
   try {
     const link = await db.commissionPartyLink.create({ data: { commissionPartyId, companyId } });
@@ -58,9 +74,9 @@ export async function linkCommissionPartyToCompany(commissionPartyId: string, co
 }
 
 export async function unlinkCommissionPartyFromCompany(linkId: string): Promise<ActionResult<null>> {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
   const link = await db.commissionPartyLink.findUnique({ where: { id: linkId } });
-  if (!link) {
+  if (!link || (!(await reaches(user.id, link.companyId, "edit")) && !(await reaches(user.id, link.commissionPartyId, "edit")))) {
     return { ok: false, error: "Link not found." };
   }
   await db.commissionPartyLink.delete({ where: { id: linkId } });
@@ -71,7 +87,9 @@ export async function unlinkCommissionPartyFromCompany(linkId: string): Promise<
 
 /** A commission party's payee accounts (related parties) — label, PAN, bank, UPI — for display. The order form's picker uses `listCommissionPartyAccountOptions`. */
 export async function listCommissionPartyAccounts(commissionPartyId: string) {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
+  // PAN and bank details: only to somebody who may open the party.
+  if (!(await reaches(user.id, commissionPartyId, "view"))) return [];
   return db.commissionPartyAccount.findMany({
     where: { commissionPartyId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
@@ -99,7 +117,7 @@ export async function createCommissionPartyAccount(commissionPartyId: string, in
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const commissionParty = await db.company.findUnique({ where: { id: commissionPartyId } });
-  if (!commissionParty || commissionParty.relationshipType !== "COMMISSION_PARTY") {
+  if (!commissionParty || commissionParty.relationshipType !== "COMMISSION_PARTY" || !(await reaches(user.id, commissionPartyId, "edit"))) {
     return { ok: false, error: "Not a commission party." };
   }
 
@@ -136,7 +154,7 @@ export async function updateCommissionPartyAccount(id: string, input: unknown): 
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const existing = await db.commissionPartyAccount.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || !(await reaches(user.id, existing.commissionPartyId, "edit"))) {
     return { ok: false, error: "Account not found." };
   }
 
@@ -170,9 +188,9 @@ export async function updateCommissionPartyAccount(id: string, input: unknown): 
 }
 
 export async function deleteCommissionPartyAccount(id: string): Promise<ActionResult<null>> {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
   const existing = await db.commissionPartyAccount.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || !(await reaches(user.id, existing.commissionPartyId, "edit"))) {
     return { ok: false, error: "Account not found." };
   }
   // The expense FK is ON DELETE SET NULL, so deleting an account that's been paid into would
@@ -196,7 +214,8 @@ export async function deleteCommissionPartyAccount(id: string): Promise<ActionRe
  * 360 view should show who gets paid on their deals without having to open every commission party.
  */
 export async function listCompanyCommissionParties(companyId: string) {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
+  if (!(await reaches(user.id, companyId, "view"))) return [];
   const links = await db.commissionPartyLink.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
@@ -220,9 +239,11 @@ export async function listCommissionPartyOptions() {
  * the relationship. Read from the customer's end, so `companyProduct.companyId` is the filter.
  */
 export async function listCompanyCommissions(companyId: string) {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
+  if (!(await reaches(user.id, companyId, "view"))) return [];
   const rows = await db.orderExpense.findMany({
-    where: { type: "COMMISSION", companyProduct: { companyId } },
+    // Paid on the orders this person may open (the order rule, src/lib/authz/access.ts).
+    where: { type: "COMMISSION", companyProduct: { AND: [{ companyId }, await orderAccess(user.id, "view")] } },
     orderBy: { createdAt: "desc" },
     include: {
       payee: { select: { id: true, companySeq: true, name: true } },
@@ -253,9 +274,11 @@ export async function listCompanyCommissions(companyId: string) {
  * which customer each payout came from.
  */
 export async function listCommissionPartyEarnings(commissionPartyId: string) {
-  await requireModuleUser("commission_parties");
+  const user = await requireModuleUser("commission_parties");
+  if (!(await reaches(user.id, commissionPartyId, "view"))) return [];
   const rows = await db.orderExpense.findMany({
-    where: { type: "COMMISSION", payeeCompanyId: commissionPartyId },
+    // On the orders this person may open — each payout names the customer it came from.
+    where: { type: "COMMISSION", payeeCompanyId: commissionPartyId, companyProduct: { AND: [await orderAccess(user.id, "view")] } },
     orderBy: { createdAt: "desc" },
     include: {
       payeeAccount: { select: { id: true, label: true } },

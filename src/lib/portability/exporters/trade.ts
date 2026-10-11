@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { exportCells } from "@/lib/custom-fields/sheets";
-import { viaCompany, type Exporter } from "./types";
+import { orderAccess, paymentAccess } from "@/lib/authz/access";
+import type { Exporter } from "./types";
 
 /**
  * The catalog, and the records of what was sold and paid for.
@@ -38,7 +39,7 @@ function orderExporter(renewalsOnly: boolean): Exporter {
     const rows = await db.companyProduct.findMany({
       // A renewal is a subscription with an end date, and only a parent — a mid-term addition
       // co-terminates with its parent and is not separately renewable.
-      where: { ...viaCompany(scope), ...(renewalsOnly ? { endDate: { not: null }, parentId: null } : {}) },
+      where: { AND: [await orderAccess(scope.userId, "view")], ...(renewalsOnly ? { endDate: { not: null }, parentId: null } : {}) },
       include: {
         company: { select: { name: true } },
         item: { select: { name: true } },
@@ -69,7 +70,7 @@ export const renewalsExporter = orderExporter(true);
 
 export const paymentsExporter: Exporter = async (scope) => {
   const rows = await db.payment.findMany({
-    where: viaCompany(scope),
+    where: await paymentAccess(scope.userId, "view"),
     include: { company: { select: { name: true } } },
     orderBy: { paymentSeq: "asc" },
   });

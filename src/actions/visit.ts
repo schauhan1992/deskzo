@@ -8,9 +8,9 @@ import { isModuleEnabled } from "@/actions/module";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { workspaceClock } from "@/lib/time/workspace";
-import { getDownlineUserIds } from "@/lib/org-chart";
 import { canSeeCompany } from "@/lib/authz/company-scope";
-import { hasEffectivePermission, viewerHas } from "@/actions/permission";
+import { viewerHas } from "@/actions/permission";
+import { peopleReached, reachesPerson, visitAccess } from "@/lib/authz/access";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatVisitId, visitPurposeLabels } from "@/lib/visits";
@@ -20,20 +20,16 @@ import { followVisitCancel, followVisitMove } from "@/lib/calendar/meetings";
 import type { ActionResult } from "@/actions/company";
 
 /**
- * Whose visits you can see: your own and your team's, unless you hold `visits.viewAll`. A field
- * visit log is a record of where someone spent their day, so it isn't open to the whole company by
- * default — but a manager can't run a team without seeing their team's.
+ * Whose visits you can see and change: the visit rule (src/lib/authz/access.ts, "visits") — your own
+ * and your team's, everyone's to see with `visits.viewAll`, until a role sets a level of its own. A
+ * field visit log is a record of where someone spent their day, so it isn't open to the whole company
+ * by default — but a manager can't run a team without seeing their team's.
+ *
+ * Changing one — planning it for somebody, checking in, completing, cancelling — is the visitor's
+ * line's, whoever may see it: "See all visits" has never widened a change.
  */
-async function visibleUserIds(userId: string): Promise<string[] | null> {
-  if (await hasEffectivePermission(userId, "visits.viewAll")) return null;
-  return [userId, ...(await getDownlineUserIds(userId))];
-}
-
-/** Who you're allowed to log a visit for: yourself, or someone who reports to you. */
-async function canActFor(actorId: string, targetUserId: string) {
-  if (actorId === targetUserId) return true;
-  const downline = await getDownlineUserIds(actorId);
-  return downline.includes(targetUserId);
+async function canActFor(actorId: string, targetUserId: string, action: "edit" | "delete" = "edit") {
+  return reachesPerson(actorId, "visits", action, targetUserId);
 }
 
 type VisitListParams = {
@@ -61,11 +57,11 @@ type VisitListParams = {
  * and not in here. `visitFormOptions` below is the exception, and says why.
  */
 async function visitListWhere(viewerId: string, params?: VisitListParams): Promise<Prisma.VisitWhereInput> {
-  const allowed = await visibleUserIds(viewerId);
   // The workspace's days, half-open — whatever zone the server runs in.
   const scheduledFor = (await workspaceClock()).dayRange(params?.from, params?.to);
   return {
-    ...(allowed ? { userId: { in: allowed } } : {}),
+    // Inside an AND, so a "visits by" filter narrows the rule and can never stand in for it.
+    AND: [await visitAccess(viewerId, "view")],
     ...(params?.userId ? { userId: params.userId } : {}),
     ...(params?.status ? { status: params.status } : {}),
     ...(params?.purpose ? { purpose: params.purpose } : {}),
@@ -135,8 +131,8 @@ export async function listLeadVisits(leadId: string) {
 export async function getVisit(id: string) {
   const user = await requireModuleUser("visits");
   if (!(await viewerHas("visits.view"))) return null;
-  const visit = await db.visit.findUnique({
-    where: { id },
+  const visit = await db.visit.findFirst({
+    where: { AND: [{ id }, await visitAccess(user.id, "view")] },
     include: {
       company: { select: { id: true, companySeq: true, name: true, relationshipType: true } },
       contact: {
@@ -156,9 +152,6 @@ export async function getVisit(id: string) {
     },
   });
   if (!visit) return null;
-
-  const allowed = await visibleUserIds(user.id);
-  if (allowed && !allowed.includes(visit.userId)) return null;
   return toPlain(visit);
 }
 
@@ -377,7 +370,7 @@ export async function deleteVisit(id: string): Promise<ActionResult<{ id: string
     select: { userId: true, companyId: true, status: true, _count: { select: { expenses: true } } },
   });
   if (!visit) return { ok: false, error: "That visit no longer exists." };
-  if (!(await canActFor(user.id, visit.userId))) return { ok: false, error: "That isn't your visit." };
+  if (!(await canActFor(user.id, visit.userId, "delete"))) return { ok: false, error: "That isn't your visit." };
   if (visit.status === "COMPLETED") {
     return { ok: false, error: "A completed visit is a record — cancel it instead of deleting it." };
   }
@@ -393,12 +386,12 @@ export async function deleteVisit(id: string): Promise<ActionResult<{ id: string
   return { ok: true, data: { id } };
 }
 
-/** People a manager can plan visits for: themselves plus their downline. */
+/** People somebody can plan visits for: whose visits they may change — themselves and their line, by default. */
 export async function listVisitAssignees() {
   const user = await requireModuleUser("visits");
-  const ids = [user.id, ...(await getDownlineUserIds(user.id))];
+  const ids = await peopleReached(user.id, "visits", "edit");
   return db.user.findMany({
-    where: { id: { in: ids }, active: true },
+    where: { ...(ids === null ? {} : { id: { in: ids } }), active: true },
     orderBy: { name: "asc" },
     select: { id: true, name: true, role: true },
   });

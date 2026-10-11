@@ -64,11 +64,28 @@ import { vendorRelationshipTypeValues } from "@/lib/validation/company";
 export const ACCESS_ACTIONS = ["view", "edit", "delete", "assign"] as const;
 export type AccessAction = (typeof ACCESS_ACTIONS)[number];
 
-export const ACCESS_RECORD_KEYS = ["companies", "vendors", "contacts", "leads", "orders", "documents", "payments"] as const;
+export const ACCESS_RECORD_KEYS = [
+  "companies",
+  "vendors",
+  "contacts",
+  "leads",
+  "orders",
+  "documents",
+  "payments",
+  "tickets",
+  "projects",
+  "visits",
+  "activities",
+  "tasks",
+  "expenses",
+] as const;
 export type AccessRecord = (typeof ACCESS_RECORD_KEYS)[number];
 
-/** The record types whose rows hang off an account, and so may FOLLOW it. */
+/** Every record type but the two account rows themselves — each has a shape below. */
 type ChildRecord = Exclude<AccessRecord, "companies" | "vendors">;
+
+/** What a level is derived from, for one action: the permission that decides it, and whether it is held. */
+export type Derived = { level: AccessLevel; from: string; held: boolean };
 
 type RecordDefinition = {
   key: AccessRecord;
@@ -77,12 +94,23 @@ type RecordDefinition = {
   ownMeans: string;
   /** The levels an admin may choose — anything else stored for it answers NONE. */
   levels: readonly AccessLevel[];
-  /** The permission whose holders reach it today (rule 6). */
-  derivedFrom: { key: string; held: AccessLevel; missing: AccessLevel };
+  /**
+   * The actions it has — the cells the role screen draws. An action a record doesn't have (nobody
+   * deletes a project or assigns an expense) answers NONE and can't be stored.
+   */
+  actions: readonly AccessAction[];
+  /** What reaches it today, by action (rule 6), from the permissions held. */
+  derive: (has: (key: string) => boolean, action: AccessAction) => Derived;
 };
 
 const OWNED_LEVELS: readonly AccessLevel[] = ["NONE", "OWN", "TEAM", "BRANCH", "ALL"];
 const CHILD_LEVELS: readonly AccessLevel[] = ["NONE", "OWN", "TEAM", "BRANCH", "ALL", "FOLLOW"];
+const EVERY_ACTION = ["view", "edit", "delete", "assign"] as const;
+
+/** One permission decides every action alike: held, one level; not held, another. */
+const byKey =
+  (key: string, held: AccessLevel, missing: AccessLevel) =>
+  (has: (k: string) => boolean): Derived => ({ level: has(key) ? held : missing, from: key, held: has(key) });
 
 export const ACCESS_RECORDS: readonly RecordDefinition[] = [
   {
@@ -90,49 +118,133 @@ export const ACCESS_RECORDS: readonly RecordDefinition[] = [
     label: "Customers & companies",
     ownMeans: "the account manager",
     levels: OWNED_LEVELS,
-    derivedFrom: { key: "companies.viewAll", held: "ALL", missing: "TEAM" },
+    actions: EVERY_ACTION,
+    derive: byKey("companies.viewAll", "ALL", "TEAM"),
   },
   {
     key: "vendors",
     label: "Vendors & distributors",
     ownMeans: "the account manager",
     levels: OWNED_LEVELS,
-    derivedFrom: { key: "companies.viewAll", held: "ALL", missing: "TEAM" },
+    actions: EVERY_ACTION,
+    derive: byKey("companies.viewAll", "ALL", "TEAM"),
   },
   {
     key: "contacts",
     label: "Contacts",
     ownMeans: "— (contacts follow their company)",
     levels: ["NONE", "FOLLOW", "ALL"],
-    derivedFrom: { key: "contacts.view", held: "FOLLOW", missing: "NONE" },
+    actions: EVERY_ACTION,
+    derive: byKey("contacts.view", "FOLLOW", "NONE"),
   },
   {
     key: "leads",
     label: "Leads",
     ownMeans: "the lead's owner",
     levels: CHILD_LEVELS,
-    derivedFrom: { key: "leads.view", held: "FOLLOW", missing: "NONE" },
+    actions: EVERY_ACTION,
+    derive: byKey("leads.view", "FOLLOW", "NONE"),
   },
   {
     key: "orders",
     label: "Orders & subscriptions",
     ownMeans: "the person who added it",
     levels: CHILD_LEVELS,
-    derivedFrom: { key: "orders.view", held: "FOLLOW", missing: "NONE" },
+    actions: EVERY_ACTION,
+    derive: byKey("orders.view", "FOLLOW", "NONE"),
   },
   {
     key: "documents",
     label: "Sales & purchase documents",
     ownMeans: "its salesperson or the person who raised it",
     levels: CHILD_LEVELS,
-    derivedFrom: { key: "documents.view", held: "FOLLOW", missing: "NONE" },
+    actions: EVERY_ACTION,
+    derive: byKey("documents.view", "FOLLOW", "NONE"),
   },
   {
     key: "payments",
     label: "Payments",
     ownMeans: "the person who recorded it",
     levels: CHILD_LEVELS,
-    derivedFrom: { key: "payments.view", held: "FOLLOW", missing: "NONE" },
+    actions: EVERY_ACTION,
+    derive: byKey("payments.view", "FOLLOW", "NONE"),
+  },
+  // ── Phase 3: the rest of the records ──────────────────────────────────────────────────────────────
+  {
+    // A ticket has always followed its company; the people on it gave nothing.
+    key: "tickets",
+    label: "Support tickets",
+    ownMeans: "its assignee or the person who logged it",
+    levels: CHILD_LEVELS,
+    actions: EVERY_ACTION,
+    derive: byKey("tickets.view", "FOLLOW", "NONE"),
+  },
+  {
+    // Projects have always been their members': the manager, the stakeholders and whoever made it.
+    key: "projects",
+    label: "Projects",
+    ownMeans: "its manager, a member, or the person who made it",
+    levels: OWNED_LEVELS,
+    actions: ["view", "edit"],
+    derive: (has) => {
+      if (!has("projects.view")) return { level: "NONE", from: "projects.view", held: false };
+      return has("projects.viewAll") ? { level: "ALL", from: "projects.viewAll", held: true } : { level: "OWN", from: "projects.viewAll", held: false };
+    },
+  },
+  {
+    // Visits are seen by the visitor's line — or everyone's with "See all visits" — but only ever
+    // changed by the visitor's line: that permission has never widened a write.
+    key: "visits",
+    label: "Field visits",
+    ownMeans: "the person visiting",
+    levels: OWNED_LEVELS,
+    actions: ["view", "edit", "delete"],
+    derive: (has, action) => {
+      if (!has("visits.view")) return { level: "NONE", from: "visits.view", held: false };
+      if (action === "view") return has("visits.viewAll") ? { level: "ALL", from: "visits.viewAll", held: true } : { level: "TEAM", from: "visits.viewAll", held: false };
+      return { level: "TEAM", from: "visits.view", held: true };
+    },
+  },
+  {
+    // Calls, the notes and meetings on a lead's timeline, and meetings booked from a record: the person
+    // who logged or organised them, and their line — or everyone's with "See all activity". The record
+    // they sit on is asked separately (a call's company, a note's lead).
+    key: "activities",
+    label: "Calls, notes & meetings",
+    ownMeans: "the person who logged or organised it",
+    levels: OWNED_LEVELS,
+    actions: ["view", "edit"],
+    derive: byKey("activities.viewAll", "ALL", "TEAM"),
+  },
+  {
+    // Every task has always been everybody's to see, change and hand on; only deleting one that isn't
+    // yours has needed a permission.
+    key: "tasks",
+    label: "Tasks",
+    ownMeans: "its assignee or the person who made it",
+    levels: OWNED_LEVELS,
+    actions: EVERY_ACTION,
+    derive: (has, action) =>
+      action === "delete"
+        ? has("tasks.delete")
+          ? { level: "ALL", from: "tasks.delete", held: true }
+          : { level: "OWN", from: "tasks.delete", held: false }
+        : { level: "ALL", from: "section.tasks", held: has("section.tasks") },
+  },
+  {
+    // A claim is seen by the claimant's line — or everyone's with "See all expenses" — and changed or
+    // deleted by the claimant alone. Deciding and reimbursing are actions of their own.
+    key: "expenses",
+    label: "Expense claims",
+    ownMeans: "the person claiming",
+    levels: OWNED_LEVELS,
+    actions: ["view", "edit", "delete"],
+    derive: (has, action) =>
+      action === "view"
+        ? has("expenses.viewAll")
+          ? { level: "ALL", from: "expenses.viewAll", held: true }
+          : { level: "TEAM", from: "expenses.viewAll", held: false }
+        : { level: "OWN", from: "section.expenses", held: has("section.expenses") },
   },
 ];
 
@@ -235,16 +347,15 @@ export const resolveAccess = cache(async (userId: string): Promise<ResolvedAcces
   }
 
   const held = new Set<string>((await permissionsFor(userId)).map(String));
-  const derive = (record: AccessRecord): ResolvedLevel => {
-    const { derivedFrom } = accessRecordDefinition(record);
-    const has = held.has(derivedFrom.key);
-    return { level: has ? derivedFrom.held : derivedFrom.missing, source: { via: "derived", from: derivedFrom.key, held: has } };
+  const derive = (record: AccessRecord, action: AccessAction): ResolvedLevel => {
+    const d = derivedLevel(record, action, (key) => held.has(key));
+    return { level: d.level, source: { via: "derived", from: d.from, held: d.held } };
   };
 
   if (user.role === SUPPORT_READONLY_ROLE) {
     for (const record of ACCESS_RECORD_KEYS) {
       for (const action of ACCESS_ACTIONS) {
-        levels.set(slot(record, action), action === "view" ? derive(record) : { level: "NONE", source: { via: "supportReadOnly" } });
+        levels.set(slot(record, action), action === "view" ? derive(record, action) : { level: "NONE", source: { via: "supportReadOnly" } });
       }
     }
     return { person, levels };
@@ -259,6 +370,11 @@ export const resolveAccess = cache(async (userId: string): Promise<ResolvedAcces
   for (const record of ACCESS_RECORD_KEYS) {
     for (const action of ACCESS_ACTIONS) {
       const key = slot(record, action);
+      // An action the record doesn't have is nobody's, whatever is stored for it.
+      if (!accessRecordDefinition(record).actions.includes(action)) {
+        levels.set(key, derive(record, action));
+        continue;
+      }
       const own = personalBySlot.get(key);
       if (own) {
         levels.set(key, { level: allowed(record, own.level), source: { via: "userLevel", reason: own.reason, expiresAt: own.expiresAt } });
@@ -269,11 +385,21 @@ export const resolveAccess = cache(async (userId: string): Promise<ResolvedAcces
         levels.set(key, { level: allowed(record, fromRole.level), source: { via: "roleLevel", role: user.role } });
         continue;
       }
-      levels.set(key, derive(record));
+      levels.set(key, derive(record, action));
     }
   }
   return { person, levels };
 });
+
+/**
+ * What a record type's action is with nothing stored — rule 6 — given which permissions are held. An
+ * action the record doesn't have is NONE. The role screen asks this too, with the role's permissions.
+ */
+export function derivedLevel(record: AccessRecord, action: AccessAction, has: (key: string) => boolean): Derived {
+  const def = accessRecordDefinition(record);
+  if (!def.actions.includes(action)) return { level: "NONE", from: "", held: false };
+  return def.derive(has, action);
+}
 
 /** One person's level for one record type and action, with where it came from. */
 export async function explainAccess(userId: string, record: AccessRecord, action: AccessAction): Promise<ResolvedLevel> {
@@ -452,6 +578,23 @@ const CHILD_SHAPES: Record<ChildRecord, ChildShape> = {
     inBranch: ownBranch,
   },
   payments: { ownedBy: (ids) => ({ recordedByUserId: { in: ids } }), inBranch: ownBranch },
+  tickets: {
+    ownedBy: (ids) => ({ OR: [{ assignedToUserId: { in: ids } }, { createdByUserId: { in: ids } }] }),
+    inBranch: (p) => peopleBranch(p, "assignedToUserId"),
+  },
+  projects: {
+    // The same three relations the project screens always asked, for a set of people at once.
+    ownedBy: (ids) => ({ OR: [{ stakeholders: { some: { userId: { in: ids } } } }, { managerId: { in: ids } }, { createdById: { in: ids } }] }),
+    inBranch: (p) => peopleBranch(p, "managerId"),
+  },
+  visits: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
+  // Calls, timeline rows and record meetings all say whose they are in `userId`.
+  activities: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
+  tasks: {
+    ownedBy: (ids) => ({ OR: [{ assignedToUserId: { in: ids } }, { createdByUserId: { in: ids } }] }),
+    inBranch: (p) => peopleBranch(p, "assignedToUserId"),
+  },
+  expenses: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
 };
 
 async function childClause(userId: string, record: ChildRecord, action: AccessAction): Promise<object> {
@@ -501,6 +644,73 @@ export async function documentAccess(userId: string, action: AccessAction = "vie
 /** For a query on `Payment`. */
 export async function paymentAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.PaymentWhereInput> {
   return (await childAccess(userId, "payments", action)) as Prisma.PaymentWhereInput;
+}
+
+/** For a query on `Ticket`. */
+export async function ticketAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.TicketWhereInput> {
+  return (await childAccess(userId, "tickets", action)) as Prisma.TicketWhereInput;
+}
+
+/** For a query on `Project`. */
+export async function projectAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.ProjectWhereInput> {
+  return (await childAccess(userId, "projects", action)) as Prisma.ProjectWhereInput;
+}
+
+/** For a query on `Visit`. */
+export async function visitAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.VisitWhereInput> {
+  return (await childAccess(userId, "visits", action)) as Prisma.VisitWhereInput;
+}
+
+/**
+ * For a query on `CallLog`: whose calls. The company a call sits on is a question of its own — the
+ * call screens ask both, as they always have.
+ */
+export async function callAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.CallLogWhereInput> {
+  return (await childAccess(userId, "activities", action)) as Prisma.CallLogWhereInput;
+}
+
+/** For a query on `Activity` — a lead's timeline: whose rows. The lead is asked by the lead screens. */
+export async function timelineAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.ActivityWhereInput> {
+  return (await childAccess(userId, "activities", action)) as Prisma.ActivityWhereInput;
+}
+
+/** For a query on `CalendarEvent` — meetings booked from a record: whose. The record is asked by its page. */
+export async function meetingAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.CalendarEventWhereInput> {
+  return (await childAccess(userId, "activities", action)) as Prisma.CalendarEventWhereInput;
+}
+
+/** For a query on `Task`. */
+export async function taskAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.TaskWhereInput> {
+  return (await childAccess(userId, "tasks", action)) as Prisma.TaskWhereInput;
+}
+
+/** For a query on `Expense`. */
+export async function expenseAccess(userId: string, action: AccessAction = "view"): Promise<Prisma.ExpenseWhereInput> {
+  return (await childAccess(userId, "expenses", action)) as Prisma.ExpenseWhereInput;
+}
+
+/**
+ * The people whose records of this kind this person reaches for an action — null for everybody's — for
+ * the screens that pick a person rather than list records: "log a visit for", "calls by". Under the
+ * actions it sits beneath, as everywhere. A level that follows the account picks nobody by person.
+ */
+export async function peopleReached(userId: string, record: ChildRecord, action: AccessAction): Promise<string[] | null> {
+  const { person, levels } = await resolveAccess(userId);
+  let reached: string[] | null = null;
+  for (const a of [action, ...UNDER[action]]) {
+    const level = levels.get(slot(record, a))!.level;
+    if (level === "FOLLOW") return [];
+    const ids = await reachedPeople(person, level);
+    if (ids === null) continue;
+    reached = reached === null ? ids : reached.filter((id) => ids.includes(id));
+  }
+  return reached;
+}
+
+/** Whether a record of this kind owned by `ownerId` would be within this person's reach for an action. */
+export async function reachesPerson(userId: string, record: ChildRecord, action: AccessAction, ownerId: string): Promise<boolean> {
+  const people = await peopleReached(userId, record, action);
+  return people === null || people.includes(ownerId);
 }
 
 /**
@@ -554,6 +764,19 @@ export async function mayAccess(userId: string, record: AccessRecord, action: Ac
       return (await db.tradeDocument.count({ where: { AND: [{ id }, await documentAccess(userId, action)] } })) > 0;
     case "payments":
       return (await db.payment.count({ where: { AND: [{ id }, await paymentAccess(userId, action)] } })) > 0;
+    case "tickets":
+      return (await db.ticket.count({ where: { AND: [{ id }, await ticketAccess(userId, action)] } })) > 0;
+    case "projects":
+      return (await db.project.count({ where: { AND: [{ id }, await projectAccess(userId, action)] } })) > 0;
+    case "visits":
+      return (await db.visit.count({ where: { AND: [{ id }, await visitAccess(userId, action)] } })) > 0;
+    case "activities":
+      // The one kind of activity row acted on by id is a call (its callback, done).
+      return (await db.callLog.count({ where: { AND: [{ id }, await callAccess(userId, action)] } })) > 0;
+    case "tasks":
+      return (await db.task.count({ where: { AND: [{ id }, await taskAccess(userId, action)] } })) > 0;
+    case "expenses":
+      return (await db.expense.count({ where: { AND: [{ id }, await expenseAccess(userId, action)] } })) > 0;
   }
 }
 

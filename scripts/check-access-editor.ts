@@ -89,7 +89,7 @@ async function main() {
     section("Reading the grid");
     actor = { id: admin.id, role: "SALES" };
     const grid = await editor.roleAccessLevels(ROLE);
-    ok("every record type is a row", grid?.rows.length === 7, grid?.rows.map((r) => r.key).join(", "));
+    ok("every record type is a row", grid?.rows.length === 13, grid?.rows.map((r) => r.key).join(", "));
     ok("nothing is stored until somebody chooses", !!grid && grid.rows.every((r) => Object.values(r.cells).every((c) => c.stored === null)));
     const docs = grid?.rows.find((r) => r.key === "documents");
     ok("documents follow the account, from \"View documents\"", docs?.cells.view.derived === "FOLLOW" && docs.cells.view.derivedFrom.held === true, docs?.cells.view.derived);
@@ -99,7 +99,7 @@ async function main() {
     ok("the admin may edit it", grid?.editable === true, grid?.why ?? "");
     // The grid as the role dialog draws it — nobody signs in to look, so the HTML is the proof.
     const html = grid ? renderToStaticMarkup(createElement(RecordAccessGrid, { rows: grid.rows, choices: new Map(), lockedWhy: null, disabled: false, onChange: () => {} })) : "";
-    ok("the grid draws a choice for every cell", (html.match(/data-access-slot=/g) ?? []).length === 28, (html.match(/data-access-slot=/g) ?? []).length);
+    ok("the grid draws a choice for every cell", (html.match(/data-access-slot=/g) ?? []).length === 46, (html.match(/data-access-slot=/g) ?? []).length);
     ok("...each starting at its permissions, saying what that is", html.includes("As its permissions — Team") && html.includes("As its permissions — As the account"));
     const contactsView = html.slice(html.indexOf("data-access-slot=\"contacts:view\""));
     const contactsSelect = contactsView.slice(0, contactsView.indexOf("</select>"));
@@ -130,13 +130,15 @@ async function main() {
     ok("Edit All over View Team is refused", !tooWide.ok && tooWide.error.includes("can't be wider than View"), tooWide.ok ? "it saved" : tooWide.error);
     const overFollow = await editor.setRoleAccessLevels(ROLE, [{ record: "payments", action: "delete", level: "ALL" }]);
     ok("Delete All over Edit \"as the account\" is refused", !overFollow.ok && overFollow.error.includes("can't be wider than Edit"), overFollow.ok ? "it saved" : overFollow.error);
-    const unknown = await editor.setRoleAccessLevels(ROLE, [{ record: "tickets", action: "view", level: "ALL" }]);
+    const unknown = await editor.setRoleAccessLevels(ROLE, [{ record: "notes", action: "view", level: "ALL" }]);
     ok("a record type the grid doesn't have is refused", !unknown.ok);
+    const absent = await editor.setRoleAccessLevels(ROLE, [{ record: "projects", action: "delete", level: "OWN" }]);
+    ok("an action a record doesn't have is refused — projects have no delete", !absent.ok && absent.error.includes("has no delete"), absent.ok ? "it saved" : absent.error);
 
     section("Who may save what");
     actor = { id: reviewer.id, role: "SALES" };
     const asReviewer = await editor.roleAccessLevels(ROLE);
-    ok("a reviewer reads the grid", (asReviewer?.rows.length ?? 0) === 7);
+    ok("a reviewer reads the grid", (asReviewer?.rows.length ?? 0) === 13);
     ok("...not editable, and says why", asReviewer?.editable === false && (asReviewer.why ?? "").includes("review"), asReviewer?.why);
     const reviewerSave = await editor.setRoleAccessLevels(ROLE, [{ record: "leads", action: "view", level: "NONE" }]);
     ok("...and can't save", !reviewerSave.ok);

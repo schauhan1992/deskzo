@@ -4,7 +4,8 @@ import type { Prisma, RevenueScheduleKind, RevenueScheduleStatus } from "@prisma
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
-import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { documentAccess, throughAccount } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isMonthKey, lastCompletedMonth, monthLabel, round2, type MonthKey } from "@/lib/revenue/periods";
@@ -47,7 +48,8 @@ import type { ActionResult } from "@/actions/company";
  * Every export is behind the `revenue_close` plan check. Reading needs `revenue.viewReports` (or
  * `revenue.manage`); anything that changes a schedule or posts an entry needs `revenue.manage`, which
  * is sensitive and not delegable. Lists and a customer's figures are limited to the customers the
- * caller may see, as receivables are (`viaCompanyScope`).
+ * caller may see (`throughAccount`): a schedule is the account's, not a record with a level of its
+ * own. The invoices that might open one are the invoices the caller may see (the document rule).
  *
  * The work itself is in src/lib/revenue — these check who is asking, record it, and refresh the pages.
  */
@@ -78,7 +80,7 @@ function failure(error: unknown, fallback: string): { ok: false; error: string }
 }
 
 async function scope(userId: string): Promise<Prisma.RevenueScheduleWhereInput> {
-  return (await viaCompanyScope(userId)) as Prisma.RevenueScheduleWhereInput;
+  return (await throughAccount(userId, "view")) as Prisma.RevenueScheduleWhereInput;
 }
 
 /** "INV-0042 · Annual support" — how the audit log names a schedule. */
@@ -327,7 +329,7 @@ export async function openingCandidates(input: { asAt: string }): Promise<Action
   const { user, allowed } = await manager();
   if (!allowed) return { ok: false, error: NOT_MANAGER };
   try {
-    const documentScope = (await viaCompanyScope(user.id)) as Prisma.TradeDocumentWhereInput;
+    const documentScope = await documentAccess(user.id, "view");
     return { ok: true, data: await openingCandidatesOf(db, { asAt: input?.asAt, scope: documentScope }) };
   } catch (error) {
     return failure(error, "Could not list the invoices.");

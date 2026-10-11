@@ -5,7 +5,7 @@ import type { Prisma, VerifiedField, VerificationStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { canViewContacts, mayWorkWithContactsOf } from "@/lib/authz/contact-access";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { accessLevel, throughAccount } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { looksLikeEmail } from "@/lib/email-verification";
@@ -194,12 +194,17 @@ export async function dismissVerification(id: string): Promise<ActionResult<null
 }
 
 /**
- * The verifications this person may see: those on accounts in their scope, and none at all without
- * `contacts.view`. The queue used to list every account's corrections to anybody.
+ * The verifications this person may see: the contacts rule (src/lib/authz/access.ts) — none, the
+ * account's, or everybody's — and none at all without `contacts.view`. A check can outlive the contact
+ * it was about, so it is asked of the account rather than through the contact. The queue used to list
+ * every account's corrections to anybody.
  */
 async function verificationScope(userId: string): Promise<Prisma.ContactVerificationWhereInput> {
   if (!(await canViewContacts(userId))) return { id: { in: [] } };
-  return (await viaCompanyScope(userId)) as Prisma.ContactVerificationWhereInput;
+  const level = await accessLevel(userId, "contacts", "view");
+  if (level === "NONE") return { id: { in: [] } };
+  if (level === "ALL") return {};
+  return (await throughAccount(userId, "view")) as Prisma.ContactVerificationWhereInput;
 }
 
 const verificationSelect = {

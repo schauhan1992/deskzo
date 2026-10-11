@@ -9,7 +9,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { calendarDayRange } from "@/lib/time/zone";
-import { getDownlineUserIds } from "@/lib/org-chart";
+import { expenseAccess, peopleReached, reachesPerson } from "@/lib/authz/access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { isModuleEnabled } from "@/actions/module";
 import { ensureChartOfAccounts, postExpenseReimbursementToLedger, postExpenseToLedger } from "@/lib/ledger/journal";
@@ -37,8 +37,9 @@ import type { ActionResult } from "@/actions/company";
  * who need company-wide spend reporting. Returning null means "no restriction".
  */
 async function visibleUserIds(userId: string): Promise<string[] | null> {
-  if (await hasEffectivePermission(userId, "expenses.viewAll")) return null;
-  return [userId, ...(await getDownlineUserIds(userId))];
+  // Whose claims: the expense rule (src/lib/authz/access.ts, "expenses") — your own and your team's,
+  // everyone's with `expenses.viewAll`, until a role sets a level of its own.
+  return peopleReached(userId, "expenses", "view");
 }
 
 /**
@@ -78,10 +79,9 @@ async function canDecide(userId: string, expense: { userId: string; approverUser
   return hasEffectivePermission(userId, "expenses.approve");
 }
 
+/** Whether this person may act for a visit's visitor — the visit rule's answer for changing it. */
 async function canActFor(actorId: string, targetUserId: string) {
-  if (actorId === targetUserId) return true;
-  const downline = await getDownlineUserIds(actorId);
-  return downline.includes(targetUserId);
+  return reachesPerson(actorId, "visits", "edit", targetUserId);
 }
 
 function validateReceipt(dataUrl: string | undefined): string | null {
@@ -116,12 +116,13 @@ export type ExpenseListParams = {
 };
 
 async function expenseListWhere(viewerId: string, params?: ExpenseListParams): Promise<Prisma.ExpenseWhereInput> {
-  const allowed = await visibleUserIds(viewerId);
   // Calendar days, as the column holds them.
   const spentOn = calendarDayRange(params?.from, params?.to);
   return {
-    ...(allowed ? { userId: { in: allowed } } : {}),
-    ...(params?.userId ? { userId: params.userId } : {}),
+    // The claims this person may see, under AND — so "claims by" narrows it and can never stand in for
+    // it. The approval queue below is its own path: a claim submitted to you, whoever's it is.
+    ...(params?.awaitingMyDecision ? {} : { AND: [await expenseAccess(viewerId, "view")] }),
+    ...(params?.userId && !params?.awaitingMyDecision ? { userId: params.userId } : {}),
     ...(params?.status ? { status: params.status } : {}),
     ...(params?.category ? { category: params.category } : {}),
     ...(params?.companyId ? { companyId: params.companyId } : {}),
@@ -219,12 +220,13 @@ export async function expenseByCategory(params?: ExpenseListParams) {
 
 export async function getExpense(id: string) {
   const user = await requireModuleUser("expenses");
-  const expense = await db.expense.findUnique({ where: { id }, include: expenseListInclude });
+  // The approver has to be able to open a claim even when the claimant isn't in their reach — which
+  // happens whenever the override permission routed it to them.
+  const expense = await db.expense.findFirst({
+    where: { AND: [{ id }, { OR: [await expenseAccess(user.id, "view"), { approverUserId: user.id }] }] },
+    include: expenseListInclude,
+  });
   if (!expense) return null;
-  const allowed = await visibleUserIds(user.id);
-  // The approver has to be able to open a claim even when the claimant isn't in their downline —
-  // which happens whenever the override permission routed it to them.
-  if (allowed && !allowed.includes(expense.userId) && expense.approverUserId !== user.id) return null;
   return toPlain(expense);
 }
 
@@ -315,7 +317,10 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
 
   const existing = await db.expense.findUnique({ where: { id }, select: { userId: true, status: true, visitId: true } });
   if (!existing) return { ok: false, error: "That expense no longer exists." };
-  if (existing.userId !== user.id) return { ok: false, error: "You can only edit your own claims." };
+  // The claimant's, unless a role widens it (the expense rule's edit).
+  if (!(await db.expense.count({ where: { AND: [{ id }, await expenseAccess(user.id, "edit")] } }))) {
+    return { ok: false, error: "You can only edit your own claims." };
+  }
   if (!isExpenseEditable(existing.status)) {
     return { ok: false, error: "A submitted claim can't be edited while it's being reviewed." };
   }
@@ -511,7 +516,9 @@ export async function deleteExpense(id: string): Promise<ActionResult<{ id: stri
   const user = await requireModuleUser("expenses");
   const expense = await db.expense.findUnique({ where: { id }, select: { userId: true, status: true, visitId: true } });
   if (!expense) return { ok: false, error: "That expense no longer exists." };
-  if (expense.userId !== user.id) return { ok: false, error: "You can only delete your own claims." };
+  if (!(await db.expense.count({ where: { AND: [{ id }, await expenseAccess(user.id, "delete")] } }))) {
+    return { ok: false, error: "You can only delete your own claims." };
+  }
   if (!isExpenseEditable(expense.status)) {
     return { ok: false, error: "A claim that's been submitted or decided is a record — it can't be deleted." };
   }

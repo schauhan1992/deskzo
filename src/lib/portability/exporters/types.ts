@@ -1,21 +1,25 @@
 /**
  * The contract every exporter satisfies.
  *
- * ## Scope is handed in, never worked out
+ * ## Scope is the screen's, never worked out here
  *
- * `ownerUserIds` is the set of **account managers** this person may see the accounts of — their own
- * id plus their downline — already resolved by the caller through the same scoping the screens use,
- * or `null` meaning no restriction. Note what it is not: it is not a list of companies. An account
- * is in scope because of who manages it, which is why adding a company to somebody's patch changes
- * what they can export without anything here being touched.
+ * An exporter of a record the role screen governs — accounts, contacts, orders, payments, tickets,
+ * visits, expenses, documents — asks that record's rule in src/lib/authz/access.ts with `userId`, the
+ * same fragment its list screen asks, so the file is the list. Nothing here re-derives who may see what.
+ *
+ * `ownerUserIds` is for the rest that hang off an account without a rule of their own (the managed
+ * estate): the **account managers** whose customers this person may see — their own id plus their
+ * downline — or `null` meaning no restriction. Not a list of companies: an account is in scope because
+ * of who manages it, which is why adding a company to somebody's patch changes what they can export
+ * without anything here being touched.
  *
  * An exporter's job is to return rows within that, and it must never widen it. Export answers "may
  * these rows leave the building", which is a different question from "which rows exist", and this is
  * the layer where the two would be easiest to confuse.
  *
- * An exporter that draws on something other than companies — users, the chart of accounts, the
- * catalog — says so by ignoring `ownerUserIds`, which is legitimate: a catalog is not somebody's
- * account. Where a record belongs to a company, it must be filtered.
+ * An exporter that draws on something other than accounts — users, the chart of accounts, the catalog
+ * — says so by asking neither, which is legitimate: a catalog is not somebody's account. Where a
+ * record belongs to a company, it must be filtered.
  *
  * ## Columns are the import template
  *
@@ -32,26 +36,3 @@ export type ExportScope = {
 
 export type Exporter = (scope: ExportScope) => Promise<Record<string, unknown>[]>;
 
-/** `where` fragment for the Company model itself. */
-export function ownScope(scope: ExportScope) {
-  return scope.ownerUserIds === null ? {} : { ownerUserId: { in: scope.ownerUserIds } };
-}
-
-/** `where` fragment for a model that reaches a company through a required `company` relation. */
-export function viaCompany(scope: ExportScope) {
-  return scope.ownerUserIds === null ? {} : { company: { ownerUserId: { in: scope.ownerUserIds } } };
-}
-
-/**
- * `where` fragment for a model whose company relation is **optional**.
- *
- * `{ company: { ownerUserId: { in: [...] } } }` on a nullable relation excludes rows with no company
- * at all, which for assets or expenses would silently drop every internal record — the ones that
- * belong to us rather than to a customer. Those are in scope for anybody who can see the area, so
- * they are included explicitly.
- */
-export function viaOptionalCompany(scope: ExportScope) {
-  return scope.ownerUserIds === null
-    ? {}
-    : { OR: [{ companyId: null }, { company: { ownerUserId: { in: scope.ownerUserIds } } }] };
-}

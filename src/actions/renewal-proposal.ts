@@ -3,7 +3,7 @@
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { orderAccess } from "@/lib/authz/access";
 import { renewalGroup } from "@/lib/subscriptions/proration";
 import { renewalOrderDraft } from "@/lib/subscriptions/renewal-order";
 import { partyDetails } from "@/lib/proposals/party";
@@ -48,7 +48,7 @@ export async function createProposalFromRenewal(input: {
      * Scoped as well as filtered by id. The id is posted from the browser, and what this writes is a
      * customer-facing document carrying their name, their address and what they pay.
      */
-    where: { id: input.companyProductId, ...(await viaCompanyScope(user.id)) },
+    where: { AND: [{ id: input.companyProductId }, await orderAccess(user.id, "view")] },
     select: {
       id: true,
       orderSeq: true,

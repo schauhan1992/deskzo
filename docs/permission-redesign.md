@@ -1,6 +1,6 @@
 # Permissions redesign — design note
 
-**Status:** proposal, 8 Oct 2026. Nothing here is built yet. Section 11 lists the decisions needed before anything is.
+**Status:** proposed 8 Oct 2026 and approved. Phases 0 to 3 are built; section 12 says what each did and how it was proved.
 
 ---
 
@@ -318,7 +318,7 @@ Each phase ships on its own, and none changes what anyone can do unless an admin
 
 ---
 
-## 12. Status: phases 0 and 1
+## 12. Status
 
 ### Phase 0: the snapshot (done)
 
@@ -357,7 +357,7 @@ Rule 5 is why nothing changed for anybody. "See all companies" derives All, and 
 
 **Deliberately not in phase 1:**
 - **Order, document and payment writes keep today's checks.** Some of them ask only about the account; others ask nothing at all beyond the permission (listed below). Tightening them narrows what someone can do, so it's an owner decision, not part of "nothing changes".
-- **Screens that cut across modules stay on the account rule until phase 3:** dashboard, analytics, forecast, exports, receivables, payables, statements, collections, revenue, rebates, e-way bills, tax reports, and payments shown against orders.
+- **Screens that cut across modules stay on the account rule until phase 3:** dashboard, analytics, forecast, exports, receivables, payables, statements, collections, revenue, rebates, e-way bills, tax reports, and payments shown against orders. (Moved in phase 3, below.)
 - **No screen or action sets a level yet.** That is phase 2, the editor. Until then only the check suite stores levels, under a probe role of its own.
 
 **Intended differences** (every other answer was proved unchanged by the snapshots):
@@ -432,3 +432,82 @@ Every write above now asks the access engine which record it may touch, after th
 - `raiseDeliveryChallan` issues a numbered challan under `assets.manage` alone, without "Issue documents".
 - `submitForApproval` asks for the account, not `documents` edit.
 - Both are permission questions, not scope ones, and are for the owner to decide.
+
+### Phase 3: the rest of the records (built 11 Oct 2026)
+
+Tickets, projects, visits, calls/notes/meetings, tasks and expenses are rows on the grid now. Each has only the actions it really has: nobody deletes a project or assigns an expense. The grid draws "—" for an action a record lacks, and saving one is refused ("Projects has no delete."). Anything stored for one answers None.
+
+**What each derives from today's permissions**, which is why nothing changed:
+
+| Record | Actions | With no level stored |
+|---|---|---|
+| Tickets | view, edit, delete, assign | Follow the account, with "View tickets"; nobody's without it. |
+| Projects | view, edit | Its members' (manager, member or maker); every project with "See every project"; none without "View projects". |
+| Visits | view, edit, delete | View: the visitor's line, everyone's with "See all visits". Edit and delete: the line. "See all visits" has never widened a change. |
+| Calls, notes & meetings | view, edit | The line; everyone's with "See all activity". |
+| Tasks | view, edit, delete, assign | Everybody's, as before (tasks had no scope). Delete: your own, or anyone's with "Delete any task". |
+| Expenses | view, edit, delete | View: the claimant's line, everyone's with "See all expenses". Edit and delete: the claimant's own. |
+
+**What "own" and "branch" mean for each** is in `CHILD_SHAPES` (src/lib/authz/access.ts):
+- a ticket is its assignee's or its logger's, and its branch is the assignee's;
+- a project is its manager's, a member's or its maker's, and its branch is the manager's;
+- a visit, a call or a claim is its person's;
+- a task is its assignee's or its maker's, and its branch is the assignee's.
+
+**The six modules' own screens and actions** ask these rules:
+- **Tickets:** the list, the page, the dashboard card, support mail, and every write: status, priority, assign, comment, delete and bulk.
+- **Projects:** the list, the page, documents and credentials. Every write asks for edit.
+- **Visits:** the list, the page, who a visit can be planned for, and check-in through to delete.
+- **Calls, notes and meetings:** the call list and summary, a company's calls, the callers picker, marking a follow-up done, the lead and company timelines, and meetings on a record.
+- **Tasks:** the list, every write, and handing a task on, which asks for assign.
+- **Expenses:** the list, a claim, editing, deleting, and the claimants picker.
+
+**Cross-module screens, each on its record's own rule:**
+
+| Screen | Asks |
+|---|---|
+| Dashboard: companies, customers, vendors, renewals, orders needing action, quotations, open and recent leads | The account, order, document and lead rules. The lead cards keep their "whose pipeline" narrowing on top. |
+| Reports: orders, leads, tickets, invoices, payments | Each record's rule. The scope note is worded from the same level. |
+| Reports: visits | The visit rule and the account rule, as before. |
+| Exports: every area, and the one-account workbook | Each record's rule. Managed assets keep the account rule. |
+| Receivables: aging, invoice settlement, credit-note balance, open invoices, available credits, the statement | Documents for invoices and credit notes; payments for receipts. |
+| Payments against orders, and the outstanding tile | Orders. |
+| Rebates, vendor-credit options, purchase savings, renewal stage, renewal proposal and tasks, order-punch pickers | Orders; proposals ask the lead rule. |
+| E-way register and every e-way write | Documents: view for the register, edit to raise, change or cancel. |
+| Commissions | The party or customer must be reachable, and payouts are listed on orders the person may open. |
+| Resellers | The reseller must be reachable: view to read, edit to change. Its credit summary counts all its orders, because a partial balance would read as headroom. |
+| Revenue: invoices that might open a schedule | Documents. |
+| Contact checks | Contacts: none, the account's, or all. |
+
+**Kept on their own rules, deliberately:**
+- **Forecast:** deals owned by your team or on your team's accounts. This is the owner's rule.
+- **Collections:** invoices on your accounts or orders you added, also the owner's rule. The follow-ups on a statement are the account's.
+- **Revenue schedules:** the account's. A schedule isn't a record with a level of its own.
+- **Tax reports and close-month loaders:** company-wide, because they are statutory.
+- **On the account rule, with no grid record:** sticky notes, attachments (`mayAttachTo`), the mail log and managed assets.
+- **Payables:** on record rules since 9 Oct.
+
+**Proof:**
+- `npm run access:snapshot -- --compare`, taken before the engine change and after all of phase 3, came out identical: 13 roles, 53 people, 15 record types, every permission and every reach.
+- A one-off probe ran each cross-module screen the old way and the new way for every person in the local workspace. Every report, export, receivables, payments, rebates, e-way and commission screen came out identical. The dashboard cards below are the only differences.
+- `npm run check:access-levels` covers each new record: every level, a list agreeing with one-by-one checks, today's derived answers, and actions a record lacks answering None.
+- `npm run check:access-editor` checks the editor: 13 rows, 46 cells, and refusal of an action a record lacks.
+
+**Intended differences:**
+1. **Dashboard cards count what the page they link to shows.**
+   - Companies, customers, vendors and renewals were company-wide, including the five upcoming renewals with customers' names.
+   - The open-leads and recent-leads cards used "See all targets" and the lead's owner rather than the lead rule.
+   - Locally, 20 of 48 people now see smaller numbers. A sales manager's open leads went from 263 to 48; the 215 dropped were on accounts they can't open, and the recent-five list named some of them.
+   - A sales rep's renewals went from 31 to their own.
+   - Callers' Companies card went from 187 to 0, which is what their Companies list already shows. Phase 4's "assigned caller counts as own" is what would give them their pool.
+2. **Write gaps closed:**
+   - ticket writes had no row check;
+   - logging a call checked neither the company nor that its lead, ticket or order was that company's;
+   - marking a follow-up done had no row check;
+   - bulk ticket assign sent the wrong field and unassigned every ticket;
+   - e-way writes checked no document;
+   - commission-party links and payee accounts (PAN, bank), and reseller profile, status and prices, had no record check at all.
+3. **URL-parameter leaks fixed:** visits `?userId=` and expenses `?user=` replaced the scope instead of narrowing it.
+4. **Direct-call reads closed:** the e-way register (every sales document), commission payouts and a party's payee accounts, and a reseller's onboarding, credit and prices.
+5. **A write needs the record's view as well, as for phase 1's records.** For example, a renewal stage change needs the order to be visible.
+6. **Inactive people and the Automation account reach nothing**, as in phase 1.

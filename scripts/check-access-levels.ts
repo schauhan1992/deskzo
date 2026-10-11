@@ -7,7 +7,8 @@
  *
  *   · with no level stored, every answer is the one the old helpers gave (derived from permissions);
  *   · each level reaches exactly the records it names — no more — for customers, vendors, contacts,
- *     leads, orders, documents and payments;
+ *     leads, orders, documents and payments, and (phase 3) tickets, projects, visits, calls, tasks and
+ *     expenses — each with what "own" and "branch" mean for it;
  *   · a list and a single-record check never disagree: for every probe record, "is it in the list"
  *     and "may I open it" give the same answer at every level;
  *   · edit never reaches wider than view, nor delete and assign wider than edit;
@@ -57,6 +58,12 @@ async function cleanup() {
   const companyIds = companies.map((c) => c.id);
   await db.userAccessLevel.deleteMany({ where: { userId: { in: userIds } } });
   await db.roleAccessLevel.deleteMany({ where: { role: ROLE } });
+  await db.callLog.deleteMany({ where: { companyId: { in: companyIds } } });
+  await db.visit.deleteMany({ where: { companyId: { in: companyIds } } });
+  await db.ticket.deleteMany({ where: { companyId: { in: companyIds } } });
+  await db.project.deleteMany({ where: { companyId: { in: companyIds } } });
+  await db.task.deleteMany({ where: { title: { startsWith: TAG } } });
+  await db.expense.deleteMany({ where: { description: { startsWith: TAG } } });
   await db.payment.deleteMany({ where: { companyId: { in: companyIds } } });
   await db.tradeDocument.deleteMany({ where: { companyId: { in: companyIds } } });
   await db.companyProduct.deleteMany({ where: { companyId: { in: companyIds } } });
@@ -73,7 +80,20 @@ async function cleanup() {
 }
 
 type Level = "NONE" | "OWN" | "TEAM" | "BRANCH" | "ALL" | "FOLLOW";
-type Record = "companies" | "vendors" | "contacts" | "leads" | "orders" | "documents" | "payments";
+type Record =
+  | "companies"
+  | "vendors"
+  | "contacts"
+  | "leads"
+  | "orders"
+  | "documents"
+  | "payments"
+  | "tickets"
+  | "projects"
+  | "visits"
+  | "activities"
+  | "tasks"
+  | "expenses";
 type Action = "view" | "edit" | "delete" | "assign";
 
 async function main() {
@@ -87,9 +107,19 @@ async function main() {
 
   section("The record types");
   ok("every record type the engine names is described, once", same(access.ACCESS_RECORDS.map((r) => r.key), [...access.ACCESS_RECORD_KEYS]));
-  ok("each one is derived from a real permission", access.ACCESS_RECORDS.every((r) => !!getPermissionDefinition(r.derivedFrom.key)), access.ACCESS_RECORDS.map((r) => r.derivedFrom.key).join(", "));
+  const derivations = access.ACCESS_RECORDS.flatMap((r) => r.actions.map((a) => ({ r: r.key, a, from: access.derivedLevel(r.key, a, () => true).from })));
+  ok("each action is derived from a real permission", derivations.every((d) => !!getPermissionDefinition(d.from)), derivations.filter((d) => !getPermissionDefinition(d.from)).map((d) => `${d.r}:${d.a}`).join(", "));
   ok("each offers NONE and ALL", access.ACCESS_RECORDS.every((r) => r.levels.includes("NONE") && r.levels.includes("ALL")));
-  ok("records that hang off an account may follow it; accounts themselves may not", access.ACCESS_RECORDS.every((r) => r.levels.includes("FOLLOW") === !["companies", "vendors"].includes(r.key)));
+  ok("records that hang off an account may follow it; accounts themselves, and records by person, may not", access.ACCESS_RECORDS.every((r) => r.levels.includes("FOLLOW") === ["contacts", "leads", "orders", "documents", "payments", "tickets"].includes(r.key)));
+  ok("every record has View, and an action it lacks is nobody's", access.ACCESS_RECORDS.every((r) => r.actions.includes("view")) && access.derivedLevel("projects", "delete", () => true).level === "NONE" && access.derivedLevel("expenses", "assign", () => true).level === "NONE");
+  // What each new record reaches with nothing stored — today's rules, one by one.
+  const held = (...keys: string[]) => (k: string) => keys.includes(k);
+  ok("tickets follow the account with View tickets, and are nobody's without it", access.derivedLevel("tickets", "edit", held("tickets.view")).level === "FOLLOW" && access.derivedLevel("tickets", "view", held()).level === "NONE");
+  ok("projects are their members' — all of them with See every project — and nobody's without View projects", access.derivedLevel("projects", "view", held("projects.view")).level === "OWN" && access.derivedLevel("projects", "edit", held("projects.view", "projects.viewAll")).level === "ALL" && access.derivedLevel("projects", "view", held("projects.viewAll")).level === "NONE");
+  ok("visits: the visitor's line, everyone's with See all visits — but that never widened a change", access.derivedLevel("visits", "view", held("visits.view")).level === "TEAM" && access.derivedLevel("visits", "view", held("visits.view", "visits.viewAll")).level === "ALL" && access.derivedLevel("visits", "edit", held("visits.view", "visits.viewAll")).level === "TEAM");
+  ok("calls, notes and meetings: the line, or everyone's with See all activity", access.derivedLevel("activities", "view", held()).level === "TEAM" && access.derivedLevel("activities", "view", held("activities.viewAll")).level === "ALL");
+  ok("tasks: everybody's to see, change and hand on; deleting another's needs Delete any task", access.derivedLevel("tasks", "view", held()).level === "ALL" && access.derivedLevel("tasks", "assign", held()).level === "ALL" && access.derivedLevel("tasks", "delete", held()).level === "OWN" && access.derivedLevel("tasks", "delete", held("tasks.delete")).level === "ALL");
+  ok("expenses: the claimant's line to see (all with See all expenses), the claimant alone to change", access.derivedLevel("expenses", "view", held()).level === "TEAM" && access.derivedLevel("expenses", "view", held("expenses.viewAll")).level === "ALL" && access.derivedLevel("expenses", "edit", held("expenses.viewAll")).level === "OWN");
   ok("contacts have no person of their own — none, as the account, or all", same([...access.accessRecordDefinition("contacts").levels], ["NONE", "FOLLOW", "ALL"]));
 
   await cleanup();
@@ -153,6 +183,56 @@ async function main() {
     const pJunior = await pay(cJunior.id, junior.id, null);
     const pOnRepsCustomer = await pay(cRep.id, peer.id, null);
 
+    // Phase 3. Tickets are the assignee's or the logger's; branch is the assignee's.
+    const ticket = (title: string, companyId: string, createdByUserId: string, assignedToUserId: string | null) =>
+      db.ticket.create({ data: { companyId, title: `${TAG} ${title}`, createdByUserId, assignedToUserId } });
+    const tRepAssigned = await ticket("given to Rep, on Peer's customer", cPeer.id, peer.id, rep.id);
+    const tJuniorLogged = await ticket("logged by Junior, unassigned", cJunior.id, junior.id, null);
+    const tBranchmate = await ticket("given to Branchmate", cBranchmate.id, peer.id, branchmate.id);
+    const tPeer = await ticket("given to Peer", cPeer.id, peer.id, peer.id);
+    const tOnRepsCustomer = await ticket("Peer's, on Rep's customer", cRep.id, peer.id, peer.id);
+
+    // Projects are their manager's, members' and maker's; branch is the manager's.
+    let projectN = 0;
+    const project = (name: string, companyId: string, managerId: string | null, member: string | null = null) =>
+      db.project.create({
+        data: {
+          code: `${TAG}-P${(projectN += 1)}`,
+          companyId,
+          name: `${TAG} ${name}`,
+          managerId,
+          createdById: peer.id,
+          ...(member ? { stakeholders: { create: { userId: member } } } : {}),
+        },
+      });
+    const prRepManages = await project("Rep manages", cPeer.id, rep.id);
+    const prJuniorOn = await project("Junior is on", cJunior.id, null, junior.id);
+    const prBranchmate = await project("Branchmate manages", cBranchmate.id, branchmate.id);
+    const prPeer = await project("Peer manages", cPeer.id, peer.id);
+
+    // Visits, calls and expenses are one person's; tasks the assignee's or the maker's.
+    const visit = (userId: string) => db.visit.create({ data: { companyId: cPeer.id, userId, scheduledFor: new Date() } });
+    const visitRep = await visit(rep.id);
+    const visitJunior = await visit(junior.id);
+    const visitBranchmate = await visit(branchmate.id);
+    const visitPeer = await visit(peer.id);
+    const call = (userId: string) => db.callLog.create({ data: { companyId: cPeer.id, userId, phoneNumber: "+910000000000", outcome: "CONNECTED", startedAt: new Date() } });
+    const callRep = await call(rep.id);
+    const callJunior = await call(junior.id);
+    const callBranchmate = await call(branchmate.id);
+    const callPeer = await call(peer.id);
+    const task = (title: string, createdByUserId: string, assignedToUserId: string | null) =>
+      db.task.create({ data: { title: `${TAG} ${title}`, createdByUserId, assignedToUserId } });
+    const taskRepMade = await task("made by Rep, given to Peer", rep.id, peer.id);
+    const taskJunior = await task("given to Junior", peer.id, junior.id);
+    const taskBranchmate = await task("given to Branchmate", peer.id, branchmate.id);
+    const taskPeer = await task("Peer's", peer.id, peer.id);
+    const expense = (userId: string) => db.expense.create({ data: { userId, amount: 100, spentOn: new Date(), description: `${TAG} claim` } });
+    const exRep = await expense(rep.id);
+    const exJunior = await expense(junior.id);
+    const exBranchmate = await expense(branchmate.id);
+    const exPeer = await expense(peer.id);
+
     const names = new Map<string, string>([
       ...accounts.map((c) => [c.id, c.name.replace(`${TAG} `, "")] as const),
       ...[kRep, kPeer, kVendor].map((k) => [k.id, k.name.replace("Zzprobe ", "")] as const),
@@ -160,6 +240,12 @@ async function main() {
       [oRepOnPeer.id, "order Rep added on Peer's"], [oJunior.id, "order Junior added"], [oBranchmate.id, "order Branchmate added"], [oPeer.id, "order Peer added"], [oPeerOnRep.id, "order Peer added on Rep's"],
       [dRepInBranch.id, "doc Rep sells, branch"], [dPeerAtHead.id, "doc Peer sells, head office"], [dJunior.id, "doc Junior sells"], [dRaisedByRep.id, "doc Rep raised"], [dOnRepsCustomer.id, "doc on Rep's customer"],
       [pRepInBranch.id, "payment Rep recorded, branch"], [pPeerAtHead.id, "payment Peer recorded"], [pJunior.id, "payment Junior recorded"], [pOnRepsCustomer.id, "payment on Rep's customer"],
+      ...[tRepAssigned, tJuniorLogged, tBranchmate, tPeer, tOnRepsCustomer].map((t) => [t.id, `ticket ${t.title.replace(`${TAG} `, "")}`] as const),
+      ...[prRepManages, prJuniorOn, prBranchmate, prPeer].map((p) => [p.id, `project ${p.name.replace(`${TAG} `, "")}`] as const),
+      [visitRep.id, "Rep's visit"], [visitJunior.id, "Junior's visit"], [visitBranchmate.id, "Branchmate's visit"], [visitPeer.id, "Peer's visit"],
+      [callRep.id, "Rep's call"], [callJunior.id, "Junior's call"], [callBranchmate.id, "Branchmate's call"], [callPeer.id, "Peer's call"],
+      ...[taskRepMade, taskJunior, taskBranchmate, taskPeer].map((t) => [t.id, `task ${t.title.replace(`${TAG} `, "")}`] as const),
+      [exRep.id, "Rep's claim"], [exJunior.id, "Junior's claim"], [exBranchmate.id, "Branchmate's claim"], [exPeer.id, "Peer's claim"],
     ]);
     ok("a manager, a rep in a branch with a junior, a branch-mate outside the team, a peer at the head office — and one of each record", true);
 
@@ -172,6 +258,12 @@ async function main() {
       orders: [oRepOnPeer.id, oJunior.id, oBranchmate.id, oPeer.id, oPeerOnRep.id],
       documents: [dRepInBranch.id, dPeerAtHead.id, dJunior.id, dRaisedByRep.id, dOnRepsCustomer.id],
       payments: [pRepInBranch.id, pPeerAtHead.id, pJunior.id, pOnRepsCustomer.id],
+      tickets: [tRepAssigned.id, tJuniorLogged.id, tBranchmate.id, tPeer.id, tOnRepsCustomer.id],
+      projects: [prRepManages.id, prJuniorOn.id, prBranchmate.id, prPeer.id],
+      visits: [visitRep.id, visitJunior.id, visitBranchmate.id, visitPeer.id],
+      activities: [callRep.id, callJunior.id, callBranchmate.id, callPeer.id],
+      tasks: [taskRepMade.id, taskJunior.id, taskBranchmate.id, taskPeer.id],
+      expenses: [exRep.id, exJunior.id, exBranchmate.id, exPeer.id],
     };
     const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
     /** The probe records of a type that this person's list shows for an action. */
@@ -191,6 +283,18 @@ async function main() {
           return ids(await appDb.tradeDocument.findMany({ where: { AND: [only, await access.documentAccess(userId, action)] }, select: { id: true } }));
         case "payments":
           return ids(await appDb.payment.findMany({ where: { AND: [only, await access.paymentAccess(userId, action)] }, select: { id: true } }));
+        case "tickets":
+          return ids(await appDb.ticket.findMany({ where: { AND: [only, await access.ticketAccess(userId, action)] }, select: { id: true } }));
+        case "projects":
+          return ids(await appDb.project.findMany({ where: { AND: [only, await access.projectAccess(userId, action)] }, select: { id: true } }));
+        case "visits":
+          return ids(await appDb.visit.findMany({ where: { AND: [only, await access.visitAccess(userId, action)] }, select: { id: true } }));
+        case "activities":
+          return ids(await appDb.callLog.findMany({ where: { AND: [only, await access.callAccess(userId, action)] }, select: { id: true } }));
+        case "tasks":
+          return ids(await appDb.task.findMany({ where: { AND: [only, await access.taskAccess(userId, action)] }, select: { id: true } }));
+        case "expenses":
+          return ids(await appDb.expense.findMany({ where: { AND: [only, await access.expenseAccess(userId, action)] }, select: { id: true } }));
       }
     };
     /** The same question one record at a time — must agree with the list, record for record. */
@@ -351,6 +455,98 @@ async function main() {
     await roleLevel("contacts", "view", "OWN");
     await expectReach("a level contacts don't offer (OWN) answers nothing — corrupt access data hides", rep.id, "contacts", []);
     await clearLevels();
+
+    // ── Phase 3: the rest of the records ──────────────────────────────────────────────────────────
+    section("Phase 3 records with no level stored — today's answers");
+    await expectReach("tickets without View tickets: none", rep.id, "tickets", []);
+    await expectReach("projects without View projects: none", rep.id, "projects", []);
+    await expectReach("visits without View visits: none", rep.id, "visits", []);
+    await expectReach("calls: the rep's line's, without See all activity", rep.id, "activities", [callRep.id, callJunior.id]);
+    await expectReach("tasks: everybody's", rep.id, "tasks", fixture.tasks);
+    await expectReach("  but deleting one: only the rep's own, without Delete any task", rep.id, "tasks", [taskRepMade.id], "delete");
+    await expectReach("expenses: the rep's line's claims, without See all expenses", rep.id, "expenses", [exRep.id, exJunior.id]);
+    await expectReach("  and changing one: the rep's own", rep.id, "expenses", [exRep.id], "edit");
+    for (const key of ["tickets.view", "projects.view", "visits.view"]) await grant(rep.id, key);
+    await expectReach("with View tickets, the tickets on the accounts the rep reaches", rep.id, "tickets", [tJuniorLogged.id, tOnRepsCustomer.id]);
+    await expectReach("with View projects, the projects the rep is on", rep.id, "projects", [prRepManages.id]);
+    await expectReach("with View visits, the rep's line's", rep.id, "visits", [visitRep.id, visitJunior.id]);
+    await grant(rep.id, "visits.viewAll");
+    await expectReach("  everyone's with See all visits", rep.id, "visits", fixture.visits);
+    await expectReach("  but See all visits never widened a change: still the line's", rep.id, "visits", [visitRep.id, visitJunior.id], "edit");
+    ok("  and whose visits the rep may plan: the line", same((await access.peopleReached(rep.id, "visits", "edit")) ?? [], [rep.id, junior.id]));
+    await ungrant(rep.id, "visits.viewAll");
+    await grant(rep.id, "projects.viewAll");
+    await expectReach("with See every project, every project", rep.id, "projects", fixture.projects);
+    await ungrant(rep.id, "projects.viewAll");
+    for (const key of ["activities.viewAll", "tasks.delete", "expenses.viewAll"]) await grant(rep.id, key);
+    await expectReach("with See all activity, every call", rep.id, "activities", fixture.activities);
+    await expectReach("with Delete any task, any task", rep.id, "tasks", fixture.tasks, "delete");
+    await expectReach("with See all expenses, every claim", rep.id, "expenses", fixture.expenses);
+    await expectReach("  and still only the rep's own to change", rep.id, "expenses", [exRep.id], "edit");
+    for (const key of ["activities.viewAll", "tasks.delete", "expenses.viewAll"]) await ungrant(rep.id, key);
+
+    const byPerson = (record: Record, own: string, ofJunior: string, ofBranchmate: string): [Level, string[]][] => [
+      ["NONE", []],
+      ["OWN", [own]],
+      ["TEAM", [own, ofJunior]],
+      ["BRANCH", [own, ofJunior, ofBranchmate]],
+      ["ALL", fixture[record]],
+    ];
+    const levelByLevel = async (record: Record, expectations: [Level, string[]][]) => {
+      for (const [level, expected] of expectations) {
+        await roleLevel(record, "view", level);
+        await expectReach(`${level}`, rep.id, record, expected);
+      }
+      await clearLevels();
+    };
+
+    section("Tickets, level by level — own means its assignee or whoever logged it; branch is the assignee's");
+    await levelByLevel("tickets", [
+      ["NONE", []],
+      ["OWN", [tRepAssigned.id]],
+      ["TEAM", [tRepAssigned.id, tJuniorLogged.id]],
+      ["BRANCH", [tRepAssigned.id, tBranchmate.id]],
+      ["ALL", fixture.tickets],
+      ["FOLLOW", [tJuniorLogged.id, tOnRepsCustomer.id]],
+    ]);
+
+    section("Projects, level by level — own means its manager, a member or its maker; branch is the manager's");
+    await levelByLevel("projects", [
+      ["NONE", []],
+      ["OWN", [prRepManages.id]],
+      ["TEAM", [prRepManages.id, prJuniorOn.id]],
+      ["BRANCH", [prRepManages.id, prBranchmate.id]],
+      ["ALL", fixture.projects],
+    ]);
+    await roleLevel("projects", "view", "ALL");
+    await db.roleAccessLevel.create({ data: { role: ROLE, record: "projects", action: "delete", level: "ALL" } });
+    await expectReach("a project has no delete: nobody's, whatever is stored", rep.id, "projects", [], "delete");
+    await clearLevels();
+
+    section("Visits, level by level — the person visiting");
+    await levelByLevel("visits", byPerson("visits", visitRep.id, visitJunior.id, visitBranchmate.id));
+
+    section("Calls, notes & meetings, level by level — whoever logged it");
+    await levelByLevel("activities", byPerson("activities", callRep.id, callJunior.id, callBranchmate.id));
+
+    section("Tasks, level by level — own means its assignee or its maker; branch is the assignee's");
+    await levelByLevel("tasks", [
+      ["NONE", []],
+      ["OWN", [taskRepMade.id]],
+      ["TEAM", [taskRepMade.id, taskJunior.id]],
+      ["BRANCH", [taskJunior.id, taskBranchmate.id]],
+      ["ALL", fixture.tasks],
+    ]);
+
+    section("Expenses, level by level — the claimant");
+    await levelByLevel("expenses", byPerson("expenses", exRep.id, exJunior.id, exBranchmate.id));
+    ok("whose claims a level picks, for the screens that pick a person: TEAM is the line", await (async () => {
+      await roleLevel("expenses", "view", "TEAM");
+      const reached = await access.peopleReached(rep.id, "expenses", "view");
+      await clearLevels();
+      return same(reached ?? [], [rep.id, junior.id]);
+    })());
+    for (const key of ["tickets.view", "projects.view", "visits.view"]) await ungrant(rep.id, key);
 
     // ── Actions under actions ─────────────────────────────────────────────────────────────────────
     section("You can only change what you can see");

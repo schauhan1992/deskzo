@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { mayAddTo, orderAccess, ticketAccess, type AccessAction } from "@/lib/authz/access";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -57,7 +57,8 @@ export async function createTicket(input: unknown): Promise<ActionResult<{ id: s
   const data = parsed.data;
 
   const company = await db.company.findUnique({ where: { id: data.companyId } });
-  if (!company) {
+  // A ticket is logged on a company the person reaches — one they couldn't then open is refused as missing.
+  if (!company || !(await mayAddTo(user.id, "tickets", company))) {
     return { ok: false, error: "Company not found." };
   }
   if (data.contactId) {
@@ -109,8 +110,8 @@ export async function listCompanyOrderOptions(companyId: string) {
   return db.companyProduct.findMany({
     // Scoped as well as filtered by id: the company id arrives from the caller and is not a
     // secret, so without this the picker would list what any account has bought to anyone who
-    // passes one in. An order reaches the company directly, same one hop as the ticket.
-    where: { companyId, ...(await viaCompanyScope(user.id)) },
+    // passes one in. Asked of the orders' own rule, so it lists the orders this person may open.
+    where: { AND: [{ companyId }, await orderAccess(user.id, "view")] },
     orderBy: { createdAt: "desc" },
     select: { id: true, orderSeq: true, item: { select: { name: true } } },
   });
@@ -129,13 +130,14 @@ type TicketListParams = {
  * A ticket reaches its company in one hop — `Ticket.companyId` — so the account manager on that
  * company is what decides whose ticket it is, exactly as `companies.viewAll` describes.
  *
- * Support is untouched by this: every support preset holds `companies.viewAll`, so
- * `viaCompanyScope` hands them `{}` and the helpdesk still sees every ticket in the business.
- * `params.companyId` is a scalar and the scope is a relation filter, so the two never collide.
+ * Support is untouched by this: every support preset holds `companies.viewAll`, so the ticket rule
+ * (src/lib/authz/access.ts, "tickets") hands them `{}` and the helpdesk still sees every ticket in the
+ * business — until an admin sets a level of its own for tickets on the role.
  */
 async function ticketListWhere(userId: string, params?: TicketListParams): Promise<Prisma.TicketWhereInput> {
   return {
-    ...(await viaCompanyScope(userId)),
+    // Inside an AND: the level may itself be an OR (its assignee or creator), and so is the search.
+    AND: [await ticketAccess(userId, "view")],
     ...(params?.status ? { status: params.status } : {}),
     ...(params?.priority ? { priority: params.priority } : {}),
     ...(params?.ticketType ? { ticketType: params.ticketType } : {}),
@@ -199,7 +201,7 @@ export async function getTicket(id: string) {
   const user = await requireModuleUser("helpdesk");
   if (!(await viewerHas("tickets.view"))) return null;
   return db.ticket.findFirst({
-    where: { id, ...(await viaCompanyScope(user.id)) },
+    where: { AND: [{ id }, await ticketAccess(user.id, "view")] },
     include: {
       company: { select: { id: true, name: true, companySeq: true, customerCategory: { select: CATEGORY_SELECT } } },
       contact: { select: { id: true, name: true, email: true, phone: true, designation: true } },
@@ -211,6 +213,14 @@ export async function getTicket(id: string) {
   });
 }
 
+/**
+ * The ticket, when this person may act on it this way (src/lib/authz/access.ts) — a ticket they can't
+ * reach is missing rather than refused, as an id that never existed is.
+ */
+async function reachableTicket(userId: string, ticketId: string, action: AccessAction) {
+  return db.ticket.findFirst({ where: { AND: [{ id: ticketId }, await ticketAccess(userId, action)] } });
+}
+
 export async function updateTicketStatus(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("helpdesk");
   const parsed = updateTicketStatusSchema.safeParse(input);
@@ -219,7 +229,7 @@ export async function updateTicketStatus(input: unknown): Promise<ActionResult<{
   }
   const { ticketId, status } = parsed.data;
 
-  const ticket = await db.ticket.findUnique({ where: { id: ticketId } });
+  const ticket = await reachableTicket(user.id, ticketId, "edit");
   if (!ticket) {
     return { ok: false, error: "Ticket not found." };
   }
@@ -261,14 +271,14 @@ export async function updateTicketStatus(input: unknown): Promise<ActionResult<{
 }
 
 export async function updateTicketPriority(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireModuleUser("helpdesk");
+  const user = await requireModuleUser("helpdesk");
   const parsed = updateTicketPrioritySchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { ticketId, priority } = parsed.data;
 
-  const ticket = await db.ticket.findUnique({ where: { id: ticketId } });
+  const ticket = await reachableTicket(user.id, ticketId, "edit");
   if (!ticket) {
     return { ok: false, error: "Ticket not found." };
   }
@@ -288,7 +298,7 @@ export async function assignTicket(input: unknown): Promise<ActionResult<{ id: s
   }
   const { ticketId, userId } = parsed.data;
 
-  const ticket = await db.ticket.findUnique({ where: { id: ticketId } });
+  const ticket = await reachableTicket(actor.id, ticketId, "assign");
   if (!ticket) {
     return { ok: false, error: "Ticket not found." };
   }
@@ -322,7 +332,7 @@ export async function addTicketComment(input: unknown): Promise<ActionResult<{ i
   }
   const { ticketId, body } = parsed.data;
 
-  const ticket = await db.ticket.findUnique({ where: { id: ticketId } });
+  const ticket = await reachableTicket(user.id, ticketId, "edit");
   if (!ticket) {
     return { ok: false, error: "Ticket not found." };
   }
@@ -348,7 +358,7 @@ export async function deleteTicket(id: string): Promise<ActionResult<null>> {
   if (!(await hasEffectivePermission(user.id, "tickets.delete"))) {
     return { ok: false, error: "You don't have permission to delete tickets." };
   }
-  const ticket = await db.ticket.findUnique({ where: { id } });
+  const ticket = await reachableTicket(user.id, id, "delete");
   if (!ticket) {
     return { ok: false, error: "Ticket not found." };
   }
@@ -381,7 +391,7 @@ export async function bulkUpdateTickets(input: unknown): Promise<ActionResult<{ 
     if (assignedToUserId) {
       const result = await assignTicket({
         ticketId,
-        assignedToUserId: assignedToUserId === "unassign" ? "" : assignedToUserId,
+        userId: assignedToUserId === "unassign" ? "" : assignedToUserId,
       });
       if (!result.ok) return { ok: false, error: result.error };
     }
@@ -406,6 +416,6 @@ export async function countOpenTickets(params?: TicketListParams) {
   return db.ticket.count({
     // Scoped through the same `where` as the list it sits above, or the header would count
     // tickets the rows beneath it no longer show.
-    where: { ...(await ticketListWhere(user.id, params)), status: { notIn: ["RESOLVED", "CLOSED"] } },
+    where: { AND: [await ticketListWhere(user.id, params), { status: { notIn: ["RESOLVED", "CLOSED"] } }] },
   });
 }

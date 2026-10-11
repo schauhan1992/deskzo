@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { mayAddTo, ticketAccess } from "@/lib/authz/access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
@@ -142,7 +142,8 @@ export async function createTicketFromEmail(input: { emailId: string; companyId:
   const found = await waitingEmail(input?.emailId);
   if (!found.ok) return { ok: false, error: found.error };
   const { email } = found;
-  const company = await db.company.findFirst({ where: { id: String(input?.companyId ?? ""), ...(await viaCompanyScope(user.id)) }, select: { id: true } });
+  const account = await db.company.findUnique({ where: { id: String(input?.companyId ?? "") }, select: { id: true, ownerUserId: true, relationshipType: true } });
+  const company = account && (await mayAddTo(user.id, "tickets", account)) ? account : null;
   if (!company) return { ok: false, error: "Choose a company you can see." };
 
   const ticket = await db.$transaction(async (tx) => {
@@ -181,7 +182,7 @@ export async function addEmailToTicket(input: { emailId: string; ticket: string 
   const found = await waitingEmail(input?.emailId);
   if (!found.ok) return { ok: false, error: found.error };
   const seq = parseSeqQuery(String(input?.ticket ?? ""));
-  const ticket = seq ? await db.ticket.findFirst({ where: { ticketSeq: seq, ...(await viaCompanyScope(user.id)) }, select: { id: true, ticketSeq: true } }) : null;
+  const ticket = seq ? await db.ticket.findFirst({ where: { AND: [{ ticketSeq: seq }, await ticketAccess(user.id, "edit")] }, select: { id: true, ticketSeq: true } }) : null;
   if (!ticket) return { ok: false, error: "No ticket you can open has that number." };
   await db.supportEmail.update({ where: { id: found.email.id }, data: { state: "REPLY", ticketId: ticket.id, handledById: user.id, handledAt: new Date() } });
   await db.ticket.update({ where: { id: ticket.id }, data: { updatedAt: new Date() } });
@@ -206,7 +207,7 @@ export async function ignoreSupportEmail(emailId: string): Promise<ActionResult<
 async function visibleTicket(userId: string, ticketId: string) {
   if (!(await hasEffectivePermission(userId, "tickets.view"))) return null;
   return db.ticket.findFirst({
-    where: { id: String(ticketId ?? ""), ...(await viaCompanyScope(userId)) },
+    where: { AND: [{ id: String(ticketId ?? "") }, await ticketAccess(userId, "view")] },
     select: { id: true, ticketSeq: true, title: true, contact: { select: { email: true } } },
   });
 }

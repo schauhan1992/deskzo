@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { db, getTenantDb } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { isModuleEnabled } from "@/actions/module";
@@ -25,7 +26,7 @@ import {
   type IncomeExpense,
   type Outstanding,
 } from "@/lib/finance/dashboard";
-import { accountScopeIds, viaCompanyScope } from "@/lib/authz/company-scope";
+import { companyAccess, documentAccess, leadAccess, orderAccess, ticketAccess } from "@/lib/authz/access";
 import { measure } from "@/lib/targets/measure";
 import { progressOf, METRICS } from "@/lib/targets/metrics";
 import { releaseDueOrders } from "@/lib/orders/handoff";
@@ -149,8 +150,21 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const leadIds = await scopeUserIds(user.id, "targets.viewAll");
   // The lead widgets carry "View leads" (src/lib/dashboard-widgets.ts), so being offered one is holding it.
   const canSeeLeads = offers("leads", "recentLeads");
-  const leadScope = !canSeeLeads ? { id: { in: [] } } : leadIds === null ? {} : { ownerUserId: { in: leadIds } };
+  // Whose pipeline (the owner's line, or everybody's with `targets.viewAll`), and never past the leads
+  // this person may open — the lead rule (src/lib/authz/access.ts) — so the card counts no lead the
+  // list it links to would hide.
+  const leadScope: Prisma.LeadWhereInput = !canSeeLeads
+    ? { id: { in: [] } }
+    : { AND: [await leadAccess(user.id, "view"), leadIds === null ? {} : { ownerUserId: { in: leadIds } }] };
   const leadWidgetScope: WidgetScope = leadIds === null ? "company" : leadIds.length > 1 ? "team" : "own";
+
+  /**
+   * Every other card counts what its own list shows, by that record's rule — customers and vendors,
+   * orders and renewals, quotations — so a figure can never be bigger than the page behind it. These
+   * were company-wide while the lists were scoped, which put the size of everybody's book (and, on the
+   * renewals card, five other people's customers by name) on every home screen.
+   */
+  const [accounts, orderScope] = await Promise.all([companyAccess(user.id, "view"), orderAccess(user.id, "view")]);
 
   const [
     companyGroups,
@@ -172,10 +186,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     ordersOffered,
   ] = await Promise.all([
     offers("companies", "customers")
-      ? db.company.groupBy({ by: ["stage"], where: { relationshipType: "CLIENT" }, _count: true })
+      ? db.company.groupBy({ by: ["stage"], where: { AND: [{ relationshipType: "CLIENT" }, accounts] }, _count: true })
       : Promise.resolve(null),
     offers("companies", "customers")
-      ? db.company.count({ where: { relationshipType: "CLIENT", stage: "CUSTOMER", products: { some: {} } } })
+      ? db.company.count({ where: { AND: [{ relationshipType: "CLIENT", stage: "CUSTOMER", products: { some: {} } }, accounts] } })
       : Promise.resolve(0),
     canSeeLeads ? db.lead.groupBy({ by: ["status"], where: leadScope, _count: true }) : Promise.resolve([]),
     canSeeLeads
@@ -234,7 +248,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   if (vendorsOffered) {
     const vendorGroups = await db.company.groupBy({
       by: ["vendorStatus"],
-      where: { relationshipType: { in: vendorRelationshipTypeValues } },
+      where: { AND: [{ relationshipType: { in: vendorRelationshipTypeValues } }, accounts] },
       _count: true,
     });
     vendors = {
@@ -246,9 +260,11 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
   let renewals: DashboardSummary["renewals"] = null;
   if (renewalsOffered) {
-    const next30Where = { item: { type: "SUBSCRIPTION" as const }, endDate: { not: null, gte: now, lte: addDays(now, 30) } };
+    const next30Where: Prisma.CompanyProductWhereInput = {
+      AND: [{ item: { type: "SUBSCRIPTION" }, endDate: { not: null, gte: now, lte: addDays(now, 30) } }, orderScope],
+    };
     const [expiredCount, next30Count, upcomingRows] = await Promise.all([
-      db.companyProduct.count({ where: { item: { type: "SUBSCRIPTION" }, endDate: { not: null, lt: now } } }),
+      db.companyProduct.count({ where: { AND: [{ item: { type: "SUBSCRIPTION" }, endDate: { not: null, lt: now } }, orderScope] } }),
       db.companyProduct.count({ where: next30Where }),
       db.companyProduct.findMany({
         where: next30Where,
@@ -327,10 +343,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       // The same line the tickets list follows. This card is a count of the same rows, and a
       // summary that disagrees with the list it links to is its own kind of wrong: an executive
       // would read "204 open, 31 overdue", click through, and find twenty-nine.
-      where: {
-        ...(await viaCompanyScope(user.id)),
-        status: { notIn: ["RESOLVED", "CLOSED"] },
-      },
+      where: { AND: [await ticketAccess(user.id, "view"), { status: { notIn: ["RESOLVED", "CLOSED"] } }] },
       select: { priority: true, createdAt: true },
     });
     const overdue = openTickets.filter((t) => {
@@ -396,10 +409,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     // A scheduled order whose day has come is purchase's now, whether or not the daily job has run.
     await releaseDueOrders();
     const [awaitingApproval, awaitingSourcing] = await Promise.all([
-      db.companyProduct.count({ where: { orderStatus: "PENDING_APPROVAL" } }),
+      db.companyProduct.count({ where: { AND: [{ orderStatus: "PENDING_APPROVAL" }, orderScope] } }),
       // Approved, released by sales, and waiting on purchasing to place it with a vendor — an in-hand
       // order sales is still holding isn't purchase's to source yet.
-      db.companyProduct.count({ where: { orderStatus: "APPROVED", purchaseRelease: "RELEASED" } }),
+      db.companyProduct.count({ where: { AND: [{ orderStatus: "APPROVED", purchaseRelease: "RELEASED" }, orderScope] } }),
     ]);
     orders = { awaitingApproval, awaitingSourcing };
   }
@@ -414,16 +427,13 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    */
   let quotations: DashboardSummary["quotations"] = null;
   if (salesDocumentsOffered) {
-    const scopeIds = await accountScopeIds(user.id);
-    const where = {
-      direction: "SALES" as const,
-      docType: "PROPOSAL" as const,
-      status: "ISSUED" as const,
-      ...(scopeIds === null ? {} : { company: { ownerUserId: { in: scopeIds } } }),
+    // The documents this person may open (the document rule, src/lib/authz/access.ts).
+    const where: Prisma.TradeDocumentWhereInput = {
+      AND: [{ direction: "SALES", docType: "PROPOSAL", status: "ISSUED" }, await documentAccess(user.id, "view")],
     };
     const [agg, lapsed] = await Promise.all([
       db.tradeDocument.aggregate({ where, _count: { _all: true }, _sum: { total: true } }),
-      db.tradeDocument.count({ where: { ...where, validUntil: { not: null, lt: now } } }),
+      db.tradeDocument.count({ where: { AND: [where, { validUntil: { not: null, lt: now } }] } }),
     ]);
     quotations = { pending: agg._count._all, value: Number(agg._sum.total ?? 0), lapsed };
   }

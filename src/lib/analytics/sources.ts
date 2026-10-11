@@ -1,6 +1,16 @@
 import { db } from "@/lib/db";
-import { accountScopeIds } from "@/lib/authz/company-scope";
-import { scopeUserIds } from "@/lib/authz/scope";
+import {
+  accessLevel,
+  customerReachIds,
+  documentAccess,
+  leadAccess,
+  orderAccess,
+  paymentAccess,
+  throughAccount,
+  ticketAccess,
+  visitAccess,
+  type AccessRecord,
+} from "@/lib/authz/access";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import { buildWhere, countActiveFilters } from "@/lib/workspace/filters";
@@ -16,8 +26,9 @@ import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
  * own: each source names the records its rows reach (`customFields`), and src/lib/analytics/custom.ts
  * adds the fields on them that the person asking may see.
  *
- * Every `load` applies the same account scoping the screens use. That is the whole security surface
- * of this module: a report is a way to read thousands of rows at once, so if scoping were wrong
+ * Every `load` applies the rule its record's own screen uses — orders the order rule, invoices the
+ * document rule, and so on (src/lib/authz/access.ts). That is the whole security surface of this
+ * module: a report is a way to read thousands of rows at once, so if scoping were wrong
  * here it would be wrong in the most consequential possible place, and it would look like a
  * feature rather than a leak.
  */
@@ -34,11 +45,11 @@ import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
 const money = (v: unknown) => Number(v ?? 0);
 
 /**
- * The company predicate for a source: the account scope, and the workspace filters on top.
+ * The rows of a source this person may see — its record's rule — with the workspace filters on top.
  *
- * Both, always, and in that order. The scope decides what this person may see at all and the
- * filters narrow within it — so no combination of filters can ever widen the result, which is the
- * property that makes it safe to hand somebody forty of them.
+ * Both, always, and inside an AND: the rule decides what this person may see at all and the filters
+ * narrow within it — so no combination of filters can ever widen the result, which is the property
+ * that makes it safe to hand somebody forty of them.
  */
 /**
  * The date window, on the column the report was actually placed on.
@@ -53,12 +64,33 @@ const money = (v: unknown) => Number(v ?? 0);
  */
 const dateWindow = (ctx: SourceContext) => ({ [ctx.dateColumn]: { gte: ctx.from, lt: ctx.to } });
 
-async function companyWhere(ctx: SourceContext) {
-  const ids = await accountScopeIds(ctx.userId);
-  const scope = ids === null ? {} : { ownerUserId: { in: ids } };
+async function scoped<W extends object>(ctx: SourceContext, rule: W): Promise<{ AND: W[] }> {
   const filters = ctx.companyFilters ? buildWhere(ctx.companyFilters, await workspaceClock()) : {};
-  const merged = { ...scope, ...filters };
-  return Object.keys(merged).length === 0 ? {} : { company: merged };
+  // Every model here reaches its company through `company` and has the window's column, which is
+  // what the cast says; the rule is the record's own fragment.
+  return { AND: [rule, (Object.keys(filters).length === 0 ? {} : { company: filters }) as W, dateWindow(ctx) as W] };
+}
+
+/**
+ * What a source's rows are narrowed to, in words — from the level its query asks, so a note can't
+ * describe a different rule from the one applied. `all` and `accounts` are the two notes a record that
+ * follows the account has always had; the rest are for a level a role sets.
+ */
+async function reachNote(ctx: SourceContext, record: AccessRecord, noun: string, all: string, accounts: string): Promise<string> {
+  switch (await accessLevel(ctx.userId, record, "view")) {
+    case "ALL":
+      return all;
+    case "FOLLOW":
+      return (await customerReachIds(ctx.userId)) === null ? all : accounts;
+    case "BRANCH":
+      return `Only ${noun} in your branch.`;
+    case "TEAM":
+      return `Only ${noun} that are yours or your team's.`;
+    case "OWN":
+      return `Only your own ${noun}.`;
+    default:
+      return `None — you can't see ${noun}.`;
+  }
 }
 
 /**
@@ -167,13 +199,10 @@ const orderInclude = (want: Wanted) =>
 type OrderRow = Awaited<ReturnType<typeof loadOrders>>[number];
 
 async function loadOrders(ctx: SourceContext) {
-  const scope = await companyWhere(ctx);
+  const where = await scoped(ctx, await orderAccess(ctx.userId, "view"));
   return withOwnFields(ctx, (want) =>
     db.companyProduct.findMany({
-      where: {
-        ...scope,
-        ...dateWindow(ctx),
-      },
+      where,
       include: orderInclude(want),
       omit: ownFields(want, "ORDER"),
       take: ROW_CAP,
@@ -199,12 +228,7 @@ const ordersSource: FactSource<OrderRow> = {
   moduleKey: "orders",
   load: loadOrders,
   scopeNote: async (ctx) =>
-    withAccountFilters(
-      ctx,
-      (await accountScopeIds(ctx.userId)) === null
-        ? "Every account in the company."
-        : "Only the accounts you and your team manage.",
-    ),
+    withAccountFilters(ctx, await reachNote(ctx, "orders", "orders", "Every account in the company.", "Only the accounts you and your team manage.")),
   dateFields: [
     { key: "createdAt", label: "Punched on", get: (r) => r.createdAt },
     { key: "startDate", label: "Starts on", get: (r) => r.startDate },
@@ -278,15 +302,12 @@ async function loadLeads(ctx: SourceContext) {
    * The failure was invisible in the ordinary way: `scopeNote` truthfully said "Every lead in the
    * company", and nobody queries a report for returning too much.
    */
-  // `companyWhere`, the same helper every other source uses — which is the point. Leads had their
-  // own hand-rolled predicate, and that is where the divergence lived.
-  const scope = await companyWhere(ctx);
+  // The lead rule, as the leads screen asks it (src/lib/authz/access.ts) — which is the point. Leads
+  // had their own hand-rolled predicate, and that is where the divergence lived.
+  const where = await scoped(ctx, await leadAccess(ctx.userId, "view"));
   return withOwnFields(ctx, (want) =>
     db.lead.findMany({
-      where: {
-        ...scope,
-        ...dateWindow(ctx),
-      },
+      where,
       include: {
         company: {
           select: {
@@ -321,12 +342,7 @@ const leadsSource: FactSource<LeadRow> = {
    * derived from the same thing the query is.
    */
   scopeNote: async (ctx) =>
-    withAccountFilters(
-      ctx,
-      (await accountScopeIds(ctx.userId)) === null
-        ? "Every lead in the company."
-        : "Only leads on the accounts you and your team manage.",
-    ),
+    withAccountFilters(ctx, await reachNote(ctx, "leads", "leads", "Every lead in the company.", "Only leads on the accounts you and your team manage.")),
   dateFields: [{ key: "createdAt", label: "Created on", get: (r) => r.createdAt }],
   measures: [
     { key: "count", label: "Number of leads", unit: "number", value: () => 1 },
@@ -362,13 +378,10 @@ const leadsSource: FactSource<LeadRow> = {
 type TicketRow = Awaited<ReturnType<typeof loadTickets>>[number];
 
 async function loadTickets(ctx: SourceContext) {
-  const scope = await companyWhere(ctx);
+  const where = await scoped(ctx, await ticketAccess(ctx.userId, "view"));
   return withOwnFields(ctx, (want) =>
     db.ticket.findMany({
-      where: {
-        ...scope,
-        ...dateWindow(ctx),
-      },
+      where,
       include: {
         company: {
           select: { name: true, tags: true, industry: { select: { name: true } }, customFields: want.has("COMPANY") },
@@ -391,12 +404,7 @@ const ticketsSource: FactSource<TicketRow> = {
   moduleKey: "helpdesk",
   load: loadTickets,
   scopeNote: async (ctx) =>
-    withAccountFilters(
-      ctx,
-      (await accountScopeIds(ctx.userId)) === null
-        ? "Every account in the company."
-        : "Only tickets against accounts you and your team manage.",
-    ),
+    withAccountFilters(ctx, await reachNote(ctx, "tickets", "tickets", "Every account in the company.", "Only tickets against accounts you and your team manage.")),
   dateFields: [
     { key: "createdAt", label: "Raised on", get: (r) => r.createdAt },
     { key: "resolvedAt", label: "Resolved on", get: (r) => r.resolvedAt },
@@ -432,15 +440,14 @@ const ticketsSource: FactSource<TicketRow> = {
 type InvoiceRow = Awaited<ReturnType<typeof loadInvoices>>[number];
 
 async function loadInvoices(ctx: SourceContext) {
-  const scope = await companyWhere(ctx);
+  const where = await scoped(ctx, await documentAccess(ctx.userId, "view"));
   return withOwnFields(ctx, (want) =>
     db.tradeDocument.findMany({
       where: {
         direction: "SALES",
         docType: { in: ["INVOICE", "CREDIT_NOTE"] },
         status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] },
-        ...scope,
-        ...dateWindow(ctx),
+        ...where,
       },
       include: {
         company: {
@@ -468,12 +475,7 @@ const invoicesSource: FactSource<InvoiceRow> = {
   moduleKey: "sales_documents",
   load: loadInvoices,
   scopeNote: async (ctx) =>
-    withAccountFilters(
-      ctx,
-      (await accountScopeIds(ctx.userId)) === null
-        ? "Every account in the company."
-        : "Only the accounts you and your team manage.",
-    ),
+    withAccountFilters(ctx, await reachNote(ctx, "documents", "invoices", "Every account in the company.", "Only the accounts you and your team manage.")),
   dateFields: [
     { key: "issueDate", label: "Issued on", get: (r) => r.issueDate },
     { key: "dueDate", label: "Due on", get: (r) => r.dueDate },
@@ -507,13 +509,10 @@ const invoicesSource: FactSource<InvoiceRow> = {
 type PaymentRow = Awaited<ReturnType<typeof loadPayments>>[number];
 
 async function loadPayments(ctx: SourceContext) {
-  const scope = await companyWhere(ctx);
+  const where = await scoped(ctx, await paymentAccess(ctx.userId, "view"));
   return withOwnFields(ctx, (want) =>
     db.payment.findMany({
-      where: {
-        ...scope,
-        ...dateWindow(ctx),
-      },
+      where,
       include: {
         company: {
           select: {
@@ -540,12 +539,7 @@ const paymentsSource: FactSource<PaymentRow> = {
   moduleKey: "payments",
   load: loadPayments,
   scopeNote: async (ctx) =>
-    withAccountFilters(
-      ctx,
-      (await accountScopeIds(ctx.userId)) === null
-        ? "Every account in the company."
-        : "Only the accounts you and your team manage.",
-    ),
+    withAccountFilters(ctx, await reachNote(ctx, "payments", "payments", "Every account in the company.", "Only the accounts you and your team manage.")),
   dateFields: [{ key: "paidOn", label: "Received on", get: (r) => r.paidOn }],
   measures: [
     { key: "amount", label: "Amount collected", unit: "currency", value: (r) => money(r.amount) },
@@ -568,17 +562,13 @@ const paymentsSource: FactSource<PaymentRow> = {
 type VisitRow = Awaited<ReturnType<typeof loadVisits>>[number];
 
 async function loadVisits(ctx: SourceContext) {
-  // Two gates, both applied: the account has to be visible, and so does the person — a visit log is
-  // a record of where somebody spent their day, which the visits screen scopes by user as well.
-  const people = await scopeUserIds(ctx.userId, "visits.viewAll");
-  const scope = await companyWhere(ctx);
+  // Two gates, both applied: the account has to be visible, and so does the visit — the visit rule,
+  // as the visits screen asks it (src/lib/authz/access.ts): a visit log is a record of where somebody
+  // spent their day.
+  const where = await scoped(ctx, { AND: [await throughAccount(ctx.userId, "view"), await visitAccess(ctx.userId, "view")] });
   return withOwnFields(ctx, (want) =>
     db.visit.findMany({
-      where: {
-        ...scope,
-        ...(people === null ? {} : { userId: { in: people } }),
-        ...dateWindow(ctx),
-      },
+      where,
       include: {
         company: {
           select: { name: true, tags: true, industry: { select: { name: true } }, customFields: want.has("COMPANY") },
@@ -608,20 +598,21 @@ const visitsSource: FactSource<VisitRow> = {
    * he can see. The note has to name the same gates the query applies or it is a guess about it.
    */
   scopeNote: async (ctx) => {
-    const [people, accounts] = await Promise.all([
-      scopeUserIds(ctx.userId, "visits.viewAll"),
-      accountScopeIds(ctx.userId),
-    ]);
-    return withAccountFilters(
-      ctx,
-      people === null
-        ? // No person gate; the account gate is named whether or not it is narrowing, which is what
-          // this branch already said and is still true.
-          "Every visit against accounts you can see."
-        : accounts === null
-          ? "Only visits by you and your team."
-          : "Only visits by you and your team, against accounts you can see.",
-    );
+    const [level, accounts] = await Promise.all([accessLevel(ctx.userId, "visits", "view"), customerReachIds(ctx.userId)]);
+    // The account gate is named whether or not it is narrowing when the visits aren't; otherwise only
+    // when it narrows, which is what these notes have always said.
+    const against = accounts === null ? "" : ", against accounts you can see";
+    const note =
+      level === "ALL"
+        ? "Every visit against accounts you can see."
+        : level === "TEAM"
+          ? `Only visits by you and your team${against}.`
+          : level === "BRANCH"
+            ? `Only visits by your branch${against}.`
+            : level === "OWN"
+              ? `Only your own visits${against}.`
+              : "None — you can't see visits.";
+    return withAccountFilters(ctx, note);
   },
   dateFields: [
     { key: "scheduledFor", label: "Scheduled for", get: (r) => r.scheduledFor },

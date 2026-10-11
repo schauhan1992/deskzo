@@ -7,8 +7,8 @@ import { STILL_THERE } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
-import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
-import { scopeUserIds, scopeWhere } from "@/lib/authz/scope";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { callAccess, peopleReached, throughAccount } from "@/lib/authz/access";
 import { callOutcomeValues, isConnected } from "@/lib/calls";
 import type { ActionResult } from "@/actions/company";
 import { viewerHas } from "@/actions/permission";
@@ -62,8 +62,21 @@ export async function logCall(input: {
   const phoneNumber = input.phoneNumber?.trim();
   if (!phoneNumber) return { ok: false, error: "A call needs the number that was dialled." };
 
-  const company = await db.company.findUnique({ where: { id: input.companyId }, select: { id: true, name: true } });
-  if (!company) return { ok: false, error: "That company no longer exists." };
+  const company = await db.company.findUnique({ where: { id: input.companyId }, select: { id: true, name: true, ownerUserId: true, relationshipType: true } });
+  // A call is logged on a company the caller reaches — one they couldn't then see is missing to them.
+  if (!company || !(await canSeeCompany(user.id, company))) return { ok: false, error: "That company no longer exists." };
+  // What it is also about must be this company's: a lead, ticket or order from another account would
+  // put this call on that account's timeline.
+  const belongs = async (found: { companyId: string } | null) => !!found && found.companyId === company.id;
+  if (input.leadId && !(await belongs(await db.lead.findUnique({ where: { id: input.leadId }, select: { companyId: true } })))) {
+    return { ok: false, error: "That lead isn't this company's." };
+  }
+  if (input.ticketId && !(await belongs(await db.ticket.findUnique({ where: { id: input.ticketId }, select: { companyId: true } })))) {
+    return { ok: false, error: "That ticket isn't this company's." };
+  }
+  if (input.companyProductId && !(await belongs(await db.companyProduct.findUnique({ where: { id: input.companyProductId }, select: { companyId: true } })))) {
+    return { ok: false, error: "That order isn't this company's." };
+  }
 
   if (input.contactId) {
     const contact = await db.contact.findUnique({ where: { id: input.contactId }, select: { companyId: true } });
@@ -167,7 +180,11 @@ export async function logCall(input: {
 /** Marks a promised callback as done, without deleting the promise that was made. */
 export async function completeFollowUp(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("calls");
-  const call = await db.callLog.findUnique({ where: { id }, select: { id: true, followUpAt: true, followUpTaskId: true } });
+  // A call this person may see — its company and its caller — and change (src/lib/authz/access.ts, "activities").
+  const call = await db.callLog.findFirst({
+    where: { AND: [{ id }, await throughAccount(user.id, "view"), await callAccess(user.id, "edit")] },
+    select: { id: true, followUpAt: true, followUpTaskId: true },
+  });
   if (!call) return { ok: false, error: "That call no longer exists." };
   if (!call.followUpAt) return { ok: false, error: "There's no callback set on that call." };
 
@@ -256,9 +273,9 @@ export async function listCalls(params: {
      * And then whose calls (owner, 8 Oct 2026): their own and their team's, or everybody's with "See
      * everyone's calls, notes & meetings". The `userId` parameter stays a filter chosen inside that.
      */
-    ...(await viaCompanyScope(user.id)),
-    // Under AND, so the caller filter below narrows it rather than replacing it.
-    AND: [await scopeWhere(user.id, "activities.viewAll", "call")],
+    // Both under AND — the company's rule and whose calls (src/lib/authz/access.ts, "activities") — so
+    // the caller filter below narrows them rather than replacing either.
+    AND: [await throughAccount(user.id, "view"), await callAccess(user.id, "view")],
     ...(params.outcome && callOutcomeValues.includes(params.outcome as CallOutcome)
       ? { outcome: params.outcome as CallOutcome }
       : {}),
@@ -306,7 +323,7 @@ export async function callSummary(params?: { from?: string; to?: string; userId?
   // and counts the whole business unless it is scoped too — a number nobody would think to doubt,
   // and one that tells a sales executive how many customers they cannot see are waiting on a call.
   // Whose calls under AND, so the caller filter narrows it rather than replacing it.
-  const scope = { ...(await viaCompanyScope(user.id)), AND: [await scopeWhere(user.id, "activities.viewAll", "call")] };
+  const scope: Prisma.CallLogWhereInput = { AND: [await throughAccount(user.id, "view"), await callAccess(user.id, "view")] };
 
   const [calls, dueCount] = await Promise.all([
     db.callLog.findMany({
@@ -337,7 +354,7 @@ export async function listCompanyCalls(companyId: string, take = 50) {
       // Scoped as well as filtered by id. Every row here shares one company, so the scope is
       // all-or-nothing and reads as the refusal it is: without it, a company id — which is not a
       // secret — is enough to read the call notes on an account somebody else manages.
-      where: { ...(await viaCompanyScope(user.id)), ...(await scopeWhere(user.id, "activities.viewAll", "call")), companyId },
+      where: { AND: [{ companyId }, await throughAccount(user.id, "view"), await callAccess(user.id, "view")] },
       orderBy: { startedAt: "desc" },
       take,
       select: callSelect,
@@ -353,7 +370,7 @@ export async function listCompanyCalls(companyId: string, take = 50) {
  */
 export async function listCallers() {
   const user = await requireModuleUser("calls");
-  const callers = await scopeUserIds(user.id, "activities.viewAll");
+  const callers = await peopleReached(user.id, "activities", "view");
   return db.user.findMany({
     where: { active: true, callsLogged: { some: {} }, ...(callers ? { id: { in: callers } } : {}) },
     orderBy: { name: "asc" },

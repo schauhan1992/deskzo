@@ -108,7 +108,7 @@ const opensable = (line: Invoice["lines"][number]) =>
 
 /**
  * Issued invoices from the 24 months up to `asAt` with a service or subscription line that has no
- * schedule yet. `scope` narrows it to the customers the caller may see.
+ * schedule yet. `scope` narrows it to the invoices the caller may see.
  */
 export async function openingCandidates(
   client: Client,
@@ -118,7 +118,8 @@ export async function openingCandidates(
   const window = lookback(params.asAt);
   const invoices = await client.tradeDocument.findMany({
     where: {
-      ...(params.scope ?? {}),
+      // Under AND, so a fragment of any shape narrows and none of the conditions below can replace it.
+      AND: [params.scope ?? {}],
       docType: "INVOICE",
       status: { notIn: ["DRAFT", "CANCELLED"] },
       issueDate: { gte: window.from, lt: window.to },

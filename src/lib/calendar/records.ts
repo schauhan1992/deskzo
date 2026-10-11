@@ -110,7 +110,7 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
     case "ticket": {
       if (!(await moduleAvailableForTenant("helpdesk")) || !(await can(userId, "tickets.view"))) return null;
       const ticket = await db.ticket.findUnique({ where: { id: ref.id }, select: { id: true, ticketSeq: true, title: true, contactId: true, company: COMPANY } });
-      if (!ticket || !(await canSeeCompany(userId, ticket.company))) return null;
+      if (!ticket || !(await mayAccess(userId, "tickets", "view", ticket.id))) return null;
       const number = formatTicketId(ticket.ticketSeq);
       return {
         ref,

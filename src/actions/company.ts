@@ -6,8 +6,7 @@ import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationship
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
-import { accessLevel, leadAccess, mayAccess, mayAccessContactsOf, mayAddTo, orderAccess } from "@/lib/authz/access";
-import { scopeUserIds } from "@/lib/authz/scope";
+import { accessLevel, leadAccess, mayAccess, mayAccessContactsOf, mayAddTo, orderAccess, timelineAccess } from "@/lib/authz/access";
 import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
@@ -1569,7 +1568,7 @@ export async function getCompany(id: string) {
    * or everybody's with "See everyone's calls, notes & meetings". Filtered in the query, so what
    * they may not read never leaves the database — the Activity pane and the copilot both read this.
    */
-  const activityBy = await scopeUserIds(user.id, "activities.viewAll");
+  const activityWhere = await timelineAccess(user.id, "view");
   // The leads and orders tabs, each at the viewer's own level for it — the access engine answers both.
   const leadWhere = await leadAccess(user.id, "view");
   const orderWhere = await orderAccess(user.id, "view");
@@ -1589,7 +1588,7 @@ export async function getCompany(id: string) {
           owner: { select: { id: true, name: true } },
           contact: { select: { id: true, name: true } },
           activities: {
-            where: activityBy ? { userId: { in: activityBy } } : undefined,
+            where: activityWhere,
             orderBy: { occurredAt: "desc" },
             include: { user: { select: { id: true, name: true } } },
           },

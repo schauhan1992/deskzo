@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { ownScope, type Exporter } from "./types";
+import { companyAccess, documentAccess, paymentAccess } from "@/lib/authz/access";
+import type { Exporter } from "./types";
 
 /**
  * What each account was invoiced, what they have paid, and what is still outstanding.
@@ -18,13 +19,24 @@ import { ownScope, type Exporter } from "./types";
  * cancelled one is a debt that was withdrawn — including either would overstate what a customer
  * owes, which is the one direction a statement must never be wrong in. Credit notes reduce the
  * invoiced total rather than appearing as a payment, because a credit note is not money received.
+ *
+ * ## Whose
+ *
+ * The accounts this person may open, and on each the documents and receipts they may see — each by
+ * its own record's rule (src/lib/authz/access.ts), as the statement screen asks them. Today all three
+ * follow the account, so an account in reach is counted whole.
  */
 
 const COUNTED = ["ISSUED", "PARTIALLY_PAID", "PAID"] as const;
 
 export const statementsExporter: Exporter = async (scope) => {
+  const [accounts, documentScope, receiptScope] = await Promise.all([
+    companyAccess(scope.userId, "view"),
+    documentAccess(scope.userId, "view"),
+    paymentAccess(scope.userId, "view"),
+  ]);
   const companies = await db.company.findMany({
-    where: ownScope(scope),
+    where: accounts,
     select: { id: true, name: true, normalizedName: true, owner: { select: { name: true } } },
     orderBy: { name: "asc" },
   });
@@ -34,14 +46,14 @@ export const statementsExporter: Exporter = async (scope) => {
 
   const documents = await db.tradeDocument.groupBy({
     by: ["companyId", "docType"],
-    where: { companyId: { in: ids }, direction: "SALES", status: { in: [...COUNTED] }, docType: { in: ["INVOICE", "CREDIT_NOTE"] } },
+    where: { AND: [{ companyId: { in: ids }, direction: "SALES", status: { in: [...COUNTED] }, docType: { in: ["INVOICE", "CREDIT_NOTE"] } }, documentScope] },
     _sum: { total: true },
     _count: { _all: true },
   });
 
   const receipts = await db.payment.groupBy({
     by: ["companyId"],
-    where: { companyId: { in: ids } },
+    where: { AND: [{ companyId: { in: ids } }, receiptScope] },
     _sum: { amount: true },
   });
 
@@ -50,7 +62,7 @@ export const statementsExporter: Exporter = async (scope) => {
   // hundred.
   const oldestOpen = await db.tradeDocument.groupBy({
     by: ["companyId"],
-    where: { companyId: { in: ids }, direction: "SALES", docType: "INVOICE", status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
+    where: { AND: [{ companyId: { in: ids }, direction: "SALES", docType: "INVOICE", status: { in: ["ISSUED", "PARTIALLY_PAID"] } }, documentScope] },
     _min: { issueDate: true },
   });
 

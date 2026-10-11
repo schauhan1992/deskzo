@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { scopeUserIds } from "@/lib/authz/scope";
+import { meetingAccess } from "@/lib/authz/access";
 import type { MeetingRecordRef } from "@/lib/calendar/records";
 
 /**
@@ -36,9 +36,9 @@ const WHERE: Record<MeetingRecordRef["kind"], (id: string) => object> = {
 };
 
 export async function meetingsForRecord(viewerId: string, ref: MeetingRecordRef, take = 20, now = new Date()): Promise<RecordMeeting[]> {
-  const organisers = await scopeUserIds(viewerId, "activities.viewAll");
+  // Whose meetings: the calls, notes & meetings rule (src/lib/authz/access.ts, "activities").
   const rows = await db.calendarEvent.findMany({
-    where: { fromDeskzo: true, ...WHERE[ref.kind](ref.id), ...(organisers ? { userId: { in: organisers } } : {}) },
+    where: { AND: [{ fromDeskzo: true }, WHERE[ref.kind](ref.id), await meetingAccess(viewerId, "view")] },
     orderBy: { startsAt: "desc" },
     take,
     select: { id: true, title: true, startsAt: true, endsAt: true, status: true, joinUrl: true, location: true, attendees: true, isOrganizer: true, user: { select: { id: true, name: true } } },

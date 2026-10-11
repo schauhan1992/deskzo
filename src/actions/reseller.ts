@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type ResellerOnboardingStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { mayAccess, type AccessAction } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { calculateOrderAmount } from "@/lib/gst";
 import {
@@ -15,9 +16,19 @@ import { resellerProfileSchema, resellerItemPriceSchema, bulkUpdateResellersSche
 import { toPlain } from "@/lib/serialize";
 import type { ActionResult } from "@/actions/company";
 
+/**
+ * Whether this person may act this way on a reseller — an account, so the account rule
+ * (src/lib/authz/access.ts), which its page asks before showing anything here. One out of reach
+ * answers as missing, or as not a reseller.
+ */
+async function reaches(userId: string, resellerId: string, action: AccessAction): Promise<boolean> {
+  return mayAccess(userId, "companies", action, resellerId);
+}
+
 /** The profile plus the company/location fields the onboarding checklist reads. */
 export async function getResellerOnboarding(companyId: string) {
-  await requireModuleUser("resellers");
+  const user = await requireModuleUser("resellers");
+  if (!(await reaches(user.id, companyId, "view"))) return null;
   const company = await db.company.findUnique({
     where: { id: companyId },
     select: {
@@ -43,9 +54,14 @@ export async function getResellerOnboarding(companyId: string) {
   return toPlain({ company, profile, inputs });
 }
 
-/** Unpaid balance across the reseller's orders, against the credit limit they were granted. */
+/**
+ * Unpaid balance across the reseller's orders, against the credit limit they were granted. Across all
+ * of them, to anybody who may open the reseller: a limit is the account's, and a part of the balance
+ * would read as headroom that isn't there.
+ */
 export async function getResellerCreditSummary(companyId: string) {
-  await requireModuleUser("resellers");
+  const user = await requireModuleUser("resellers");
+  if (!(await reaches(user.id, companyId, "view"))) return null;
   const [profile, orders] = await Promise.all([
     db.resellerProfile.findUnique({ where: { companyId }, select: { creditLimit: true } }),
     db.companyProduct.findMany({
@@ -88,7 +104,7 @@ export async function updateResellerProfile(companyId: string, input: unknown): 
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const profile = await db.resellerProfile.findUnique({ where: { companyId } });
-  if (!profile) {
+  if (!profile || !(await reaches(user.id, companyId, "edit"))) {
     return { ok: false, error: "That company isn't a reseller." };
   }
 
@@ -119,7 +135,7 @@ export async function updateResellerProfile(companyId: string, input: unknown): 
 export async function setResellerStatus(companyId: string, status: ResellerOnboardingStatus): Promise<ActionResult<null>> {
   const user = await requireModuleUser("resellers");
   const onboarding = await getResellerOnboarding(companyId);
-  if (!onboarding) {
+  if (!onboarding || !(await reaches(user.id, companyId, "edit"))) {
     return { ok: false, error: "That company isn't a reseller." };
   }
 
@@ -146,7 +162,8 @@ export async function setResellerStatus(companyId: string, status: ResellerOnboa
 }
 
 export async function listResellerItemPrices(resellerId: string) {
-  await requireModuleUser("resellers");
+  const user = await requireModuleUser("resellers");
+  if (!(await reaches(user.id, resellerId, "view"))) return [];
   return toPlain(
     await db.resellerItemPrice.findMany({
       where: { resellerId },
@@ -163,7 +180,7 @@ export async function upsertResellerItemPrice(resellerId: string, input: unknown
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const reseller = await db.company.findUnique({ where: { id: resellerId }, select: { relationshipType: true } });
-  if (!reseller || reseller.relationshipType !== "RESELLER") {
+  if (!reseller || reseller.relationshipType !== "RESELLER" || !(await reaches(user.id, resellerId, "edit"))) {
     return { ok: false, error: "That company isn't a reseller." };
   }
 
@@ -187,9 +204,9 @@ export async function upsertResellerItemPrice(resellerId: string, input: unknown
 }
 
 export async function deleteResellerItemPrice(id: string): Promise<ActionResult<null>> {
-  await requireModuleUser("resellers");
+  const user = await requireModuleUser("resellers");
   const existing = await db.resellerItemPrice.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || !(await reaches(user.id, existing.resellerId, "edit"))) {
     return { ok: false, error: "Price not found." };
   }
   await db.resellerItemPrice.delete({ where: { id } });
@@ -220,7 +237,7 @@ export async function getResellerPriceForItem(resellerId: string, itemId: string
  * Resellers that fail the gate are reported by name rather than failing the whole batch.
  */
 export async function bulkUpdateResellers(input: unknown): Promise<ActionResult<{ count: number; blocked: string[] }>> {
-  await requireModuleUser("resellers");
+  const user = await requireModuleUser("resellers");
   const parsed = bulkUpdateResellersSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -232,6 +249,12 @@ export async function bulkUpdateResellers(input: unknown): Promise<ActionResult<
   let changed = 0;
 
   for (const companyId of companyIds) {
+    // Ticked on a list of the resellers this person may open. One posted from outside it is refused,
+    // named by the id it came as — its name is not theirs to read.
+    if (!(await reaches(user.id, companyId, "edit"))) {
+      blocked.push(companyId);
+      continue;
+    }
     if (tier) {
       await db.resellerProfile.updateMany({ where: { companyId }, data: { tier } });
     }

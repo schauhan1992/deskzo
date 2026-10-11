@@ -8,11 +8,8 @@ import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import { isBaseCurrency } from "@/lib/currency";
 import { requireModuleUser } from "@/lib/modules-access";
 import { bookOnFirstPayment } from "@/lib/orders/handoff";
-import {
-  canSeeCompany,
-  viaCompanyScope,
-} from "@/lib/authz/company-scope";
-import { mayAccess, mayAddTo, paymentAccess } from "@/lib/authz/access";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { mayAccess, mayAddTo, orderAccess, paymentAccess } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { pageOf } from "@/lib/pagination";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
@@ -392,9 +389,10 @@ export async function paymentsSnapshot() {
      * A tile is a summary rather than a list, which is exactly why it was missed: nothing here
      * renders a customer's name, so the leak reads as "one big number" — and that one number is
      * the whole business's outstanding receivable shown to an executive who manages a dozen
-     * accounts. An order reaches its account through its own company, one hop.
+     * accounts. The orders this person may open — the order rule (src/lib/authz/access.ts), through
+     * the account until a role sets a level of its own — as on the page below it.
      */
-    where: { ...(await viaCompanyScope(user.id)) },
+    where: await orderAccess(user.id, "view"),
     select: {
       quantity: true,
       unitPrice: true,
@@ -432,7 +430,8 @@ export async function listOrdersWithPayments(params?: {
        * key was written last and silently drop the other, and the one dropped would be the scope.
        */
       AND: [
-        await viaCompanyScope(user.id),
+        // Its rows are orders, so the order rule decides which (src/lib/authz/access.ts).
+        await orderAccess(user.id, "view"),
         ...(params?.search
           ? [
               {

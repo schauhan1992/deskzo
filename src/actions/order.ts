@@ -8,8 +8,8 @@ import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
-import { canSeeCompany, viaCompanyScope } from "@/lib/authz/company-scope";
-import { mayAccess, orderAccess } from "@/lib/authz/access";
+import { canSeeCompany } from "@/lib/authz/company-scope";
+import { leadAccess, mayAccess, orderAccess } from "@/lib/authz/access";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -1566,10 +1566,10 @@ export async function getOrder(id: string) {
 export async function listProposalOptions(companyId: string) {
   const user = await requireModuleUser("orders");
   return db.proposal.findMany({
-    // A proposal reaches the account through its lead, so the scope goes inside the `lead` clause
-    // rather than beside it. Scoped as well as filtered by the caller's `companyId`: a company id
-    // is not a secret, and the picker would otherwise read out what any account has been quoted.
-    where: { lead: { companyId, ...(await viaCompanyScope(user.id)) } },
+    // A proposal is its lead's, so the lead rule goes inside the `lead` clause rather than beside it.
+    // Scoped as well as filtered by the caller's `companyId`: a company id is not a secret, and the
+    // picker would otherwise read out what any account has been quoted.
+    where: { lead: { AND: [{ companyId }, await leadAccess(user.id, "view")] } },
     orderBy: { createdAt: "desc" },
     select: { id: true, status: true, validUntil: true, lead: { select: { title: true } } },
   });
@@ -1587,7 +1587,7 @@ export async function hasExistingOrderForItem(companyId: string, itemId: string)
     // Scoped as well as filtered by id: unscoped, this is a yes/no oracle over the whole order
     // book — pass a company id and an item id and it answers whether that account buys that
     // product. Out of scope it answers "no", which is what the form does for a brand-new sale.
-    where: { companyId, itemId, ...(await viaCompanyScope(user.id)), orderStatus: { notIn: ["REJECTED", "CANCELLED"] } },
+    where: { AND: [{ companyId, itemId, orderStatus: { notIn: ["REJECTED", "CANCELLED"] } }, await orderAccess(user.id, "view")] },
     select: { id: true },
   });
   return !!existing;
@@ -1617,13 +1617,14 @@ export async function purchaseSavingsReport(params: { from?: string; to?: string
 
   const from = params.from ? calendarDay(params.from) : null;
   const to = params.to ? calendarDay(params.to) : null;
-  const scope = await viaCompanyScope(user.id);
+  // The orders this person may open (the order rule, src/lib/authz/access.ts).
+  const scope = await orderAccess(user.id, "view");
 
   const rows = await db.purchaseSaving.findMany({
     where: {
       ...(from || to ? { recordedOn: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
       ...(everyone ? {} : { purchaserId: user.id }),
-      ...(Object.keys(scope).length ? { companyProduct: scope as Prisma.CompanyProductWhereInput } : {}),
+      ...(Object.keys(scope).length ? { companyProduct: scope } : {}),
     },
     orderBy: [{ recordedOn: "desc" }, { recordedAt: "desc" }],
     include: {

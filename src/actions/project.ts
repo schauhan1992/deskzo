@@ -17,6 +17,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { visibleProjectsWhere } from "@/lib/projects/visibility";
+import { projectAccess } from "@/lib/authz/access";
 import { companyAccess, mayAccess } from "@/lib/authz/access";
 import { milestonesFromTemplate, projectStatusLabels } from "@/lib/projects/status";
 import { partyDetails } from "@/lib/proposals/party";
@@ -27,17 +28,16 @@ import type { ActionResult } from "@/actions/company";
 /**
  * Delivered work for a customer — a website build, a mail migration, an implementation.
  *
- * Every read composes `visibleProjectsWhere`. Stakeholders only, and the reasoning for that is in
- * lib/projects/visibility.ts. The rule matters most in the places nobody thinks about: a count on a
- * dashboard and a name in a search result leak just as surely as a detail page.
+ * Every read asks the project rule (src/lib/authz/access.ts, "projects") — its members, or everyone's
+ * with "See every project", until a role sets a level of its own; the reasoning for members only is in
+ * lib/projects/visibility.ts. Every write asks it for editing. The rule matters most in the places
+ * nobody thinks about: a count on a dashboard and a name in a search result leak just as surely as a
+ * detail page.
  */
 
+/** Whether this person may change projects at all — which ones is the project rule's (projectAccess). */
 async function access(userId: string) {
-  const [viewAll, manage] = await Promise.all([
-    hasEffectivePermission(userId, "projects.viewAll"),
-    hasEffectivePermission(userId, "projects.manage"),
-  ]);
-  return { viewAll, manage };
+  return { manage: await hasEffectivePermission(userId, "projects.manage") };
 }
 
 /**
@@ -46,15 +46,15 @@ async function access(userId: string) {
  * whoever the account is assigned to — that is the module's own rule (src/lib/projects/visibility.ts)
  * — but a company id from anywhere else was answered with that company's contacts.
  */
-async function mayWorkWith(userId: string, viewAll: boolean, companyId: string): Promise<boolean> {
+async function mayWorkWith(userId: string, companyId: string): Promise<boolean> {
   if (await mayAccess(userId, "companies", "view", companyId)) return true;
-  return (await db.project.count({ where: { AND: [{ companyId }, visibleProjectsWhere(userId, viewAll)] } })) > 0;
+  return (await db.project.count({ where: { AND: [{ companyId }, await projectAccess(userId, "view")] } })) > 0;
 }
 
-/** A project this person may open, or null — the single gate every detail action goes through. */
-async function readable(projectId: string, userId: string, viewAll: boolean) {
+/** A project this person may change, or null — the single gate every write goes through. */
+async function readable(projectId: string, userId: string) {
   return db.project.findFirst({
-    where: { AND: [{ id: projectId }, visibleProjectsWhere(userId, viewAll)] },
+    where: { AND: [{ id: projectId }, await projectAccess(userId, "edit")] },
     select: { id: true, code: true, name: true, managerId: true, companyId: true },
   });
 }
@@ -97,12 +97,12 @@ export type ProjectFilters = {
 export async function listProjects(filters?: ProjectFilters) {
   const user = await requireModuleUser("projects");
   if (!(await viewerHas("projects.view"))) return [];
-  const { viewAll: mayViewAll } = await access(user.id);
-  const viewAll = filters?.mineOnly ? false : mayViewAll;
 
   const where: Prisma.ProjectWhereInput = {
     AND: [
-      visibleProjectsWhere(user.id, viewAll),
+      await projectAccess(user.id, "view"),
+      // "Mine": the projects this person is on, whatever else they may open.
+      ...(filters?.mineOnly ? [visibleProjectsWhere(user.id, false)] : []),
       ...(filters?.companyId ? [{ companyId: filters.companyId }] : []),
       ...(filters?.status ? [{ status: filters.status }] : []),
       ...(filters?.health ? [{ health: filters.health }] : []),
@@ -147,10 +147,9 @@ export async function listProjects(filters?: ProjectFilters) {
 export async function getProject(id: string) {
   const user = await requireModuleUser("projects");
   if (!(await viewerHas("projects.view"))) return null;
-  const { viewAll } = await access(user.id);
 
   const project = await db.project.findFirst({
-    where: { AND: [{ id }, visibleProjectsWhere(user.id, viewAll)] },
+    where: { AND: [{ id }, await projectAccess(user.id, "view")] },
     include: {
       company: { select: { id: true, companySeq: true, name: true } },
       type: { select: { id: true, name: true } },
@@ -210,7 +209,7 @@ export async function saveProject(input: {
   applyTemplate?: boolean;
 }): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't create or edit projects." };
 
   const name = input.name.trim();
@@ -251,7 +250,7 @@ export async function saveProject(input: {
   };
 
   if (input.id) {
-    const existing = await readable(input.id, user.id, viewAll);
+    const existing = await readable(input.id, user.id);
     if (!existing) return { ok: false, error: "That project doesn't exist, or you're not on it." };
 
     const before = await db.project.findUniqueOrThrow({ where: { id: input.id }, select: { status: true } });
@@ -350,10 +349,10 @@ export async function addStakeholder(input: {
   note?: string;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't change who's on a project." };
 
-  const project = await readable(input.projectId, user.id, viewAll);
+  const project = await readable(input.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.userId && !input.contactId) return { ok: false, error: "Choose a colleague or a customer contact." };
   if (input.userId && input.contactId) return { ok: false, error: "A stakeholder is one person, not two." };
@@ -407,7 +406,7 @@ export async function addStakeholder(input: {
 
 export async function removeStakeholder(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't change who's on a project." };
 
   const row = await db.projectStakeholder.findUnique({
@@ -415,7 +414,7 @@ export async function removeStakeholder(id: string): Promise<ActionResult<null>>
     select: { id: true, projectId: true, userId: true, project: { select: { code: true, managerId: true, createdById: true } } },
   });
   if (!row) return { ok: false, error: "They're not on this project." };
-  const project = await readable(row.projectId, user.id, viewAll);
+  const project = await readable(row.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
 
   // Removing the manager's own row would leave the project readable only through the manager
@@ -447,9 +446,9 @@ export async function saveMilestone(input: {
   sortOrder?: number;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };
-  const project = await readable(input.projectId, user.id, viewAll);
+  const project = await readable(input.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.name.trim()) return { ok: false, error: "Give the milestone a name." };
 
@@ -472,12 +471,12 @@ export async function saveMilestone(input: {
 
 export async function setMilestoneDone(id: string, done: boolean): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };
 
   const row = await db.projectMilestone.findUnique({ where: { id }, select: { projectId: true } });
   if (!row) return { ok: false, error: "That milestone no longer exists." };
-  const project = await readable(row.projectId, user.id, viewAll);
+  const project = await readable(row.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
 
   await db.projectMilestone.update({
@@ -490,11 +489,11 @@ export async function setMilestoneDone(id: string, done: boolean): Promise<Actio
 
 export async function deleteMilestone(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's plan." };
   const row = await db.projectMilestone.findUnique({ where: { id }, select: { projectId: true } });
   if (!row) return { ok: false, error: "That milestone no longer exists." };
-  if (!(await readable(row.projectId, user.id, viewAll))) {
+  if (!(await readable(row.projectId, user.id))) {
     return { ok: false, error: "That project doesn't exist, or you're not on it." };
   }
   // Revenue invoiced on a stage "earned when" this is done waits for it; without it, it never would.
@@ -521,9 +520,9 @@ export async function saveRisk(input: {
   ownerId?: string;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project." };
-  const project = await readable(input.projectId, user.id, viewAll);
+  const project = await readable(input.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.title.trim()) return { ok: false, error: "Say what the risk is." };
 
@@ -562,9 +561,9 @@ export async function postUpdate(input: {
   health: ProjectHealth;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't post updates on this project." };
-  const project = await readable(input.projectId, user.id, viewAll);
+  const project = await readable(input.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.body.trim()) return { ok: false, error: "An empty update tells nobody anything." };
 
@@ -606,9 +605,9 @@ export async function saveBillingMilestone(input: {
   sortOrder?: number;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's billing." };
-  const project = await readable(input.projectId, user.id, viewAll);
+  const project = await readable(input.projectId, user.id);
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!input.label.trim()) return { ok: false, error: "Name the stage — 'Advance', 'On UAT sign-off'." };
 
@@ -677,11 +676,11 @@ const STAGE_HAS_REVENUE =
 
 export async function deleteBillingMilestone(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's billing." };
   const row = await db.projectBillingMilestone.findUnique({ where: { id }, select: { projectId: true } });
   if (!row) return { ok: false, error: "That stage no longer exists." };
-  if (!(await readable(row.projectId, user.id, viewAll))) {
+  if (!(await readable(row.projectId, user.id))) {
     return { ok: false, error: "That project doesn't exist, or you're not on it." };
   }
   // A MILESTONE revenue schedule restricts the delete (it could never be recognised without its
@@ -718,7 +717,7 @@ const DEFAULT_TAX_RATE_PERCENT = 18;
  */
 export async function raiseBillingMilestoneInvoice(id: string): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("projects");
-  const { viewAll, manage } = await access(user.id);
+  const { manage } = await access(user.id);
   if (!manage) return { ok: false, error: "You can't edit this project's billing." };
   if ((await moduleAccessFor(user.id, "sales_documents")) !== "available") {
     return { ok: false, error: "Sales documents aren't available in this workspace, so there's nowhere to raise the invoice." };
@@ -732,7 +731,7 @@ export async function raiseBillingMilestoneInvoice(id: string): Promise<ActionRe
     select: { id: true, projectId: true, label: true, amount: true, status: true, documentId: true, document: { select: { docNumber: true } } },
   });
   if (!stage) return { ok: false, error: "That stage no longer exists." };
-  if (!(await readable(stage.projectId, user.id, viewAll))) {
+  if (!(await readable(stage.projectId, user.id))) {
     return { ok: false, error: "That project doesn't exist, or you're not on it." };
   }
   if (stage.documentId) return { ok: false, error: `This stage is already invoiced on ${stage.document?.docNumber ?? "another document"}.` };
@@ -857,10 +856,9 @@ export async function raiseBillingMilestoneInvoice(id: string): Promise<ActionRe
 
 export async function projectFormOptions(companyId?: string) {
   const user = await requireModuleUser("projects");
-  const { viewAll } = await access(user.id);
   // A company's people only for a company this person works with; the picker only the companies they
   // reach, plus that one — so a project whose customer is outside their accounts still shows it.
-  const listed = companyId && (await mayWorkWith(user.id, viewAll, companyId)) ? companyId : null;
+  const listed = companyId && (await mayWorkWith(user.id, companyId)) ? companyId : null;
   const [types, users, contacts, reached, current] = await Promise.all([
     db.projectType.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),

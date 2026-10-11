@@ -3,7 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
-import { viaCompanyScope } from "@/lib/authz/company-scope";
+import { throughAccount } from "@/lib/authz/access";
 import { requireModuleUser } from "@/lib/modules-access";
 import { logActivity } from "@/lib/activity";
 import { csvRow } from "@/lib/csv";
@@ -32,7 +32,8 @@ async function reader() {
 }
 
 async function scheduleScope(userId: string): Promise<Prisma.RevenueScheduleWhereInput> {
-  return (await viaCompanyScope(userId)) as Prisma.RevenueScheduleWhereInput;
+  // The account's, as revenue's actions are (src/actions/revenue.ts).
+  return (await throughAccount(userId, "view")) as Prisma.RevenueScheduleWhereInput;
 }
 
 /** How far back the month pickers reach: two years of completed months. */

@@ -8,7 +8,7 @@ import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
-import { visibleProjectsWhere } from "@/lib/projects/visibility";
+import { projectAccess, type AccessAction } from "@/lib/authz/access";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -38,9 +38,8 @@ import type { ActionResult } from "@/actions/company";
  * left the building — the mask is HTML, and the value is in the response.
  */
 
-async function credentialAccess(projectId: string, userId: string) {
-  const [viewAll, mayUse, mayManage] = await Promise.all([
-    hasEffectivePermission(userId, "projects.viewAll"),
+async function credentialAccess(projectId: string, userId: string, action: AccessAction = "view") {
+  const [mayUse, mayManage] = await Promise.all([
     hasEffectivePermission(userId, "projects.credentials"),
     hasEffectivePermission(userId, "projects.manage"),
   ]);
@@ -48,7 +47,7 @@ async function credentialAccess(projectId: string, userId: string) {
   // Seeing the project is a precondition, not a substitute: being a stakeholder does not by itself
   // entitle somebody to the customer's passwords.
   const project = await db.project.findFirst({
-    where: { AND: [{ id: projectId }, visibleProjectsWhere(userId, viewAll)] },
+    where: { AND: [{ id: projectId }, await projectAccess(userId, action)] },
     select: { id: true, code: true, name: true, managerId: true },
   });
 
@@ -141,7 +140,7 @@ export async function saveCredential(input: {
   if (input.id && !existing) return { ok: false, error: "That credential no longer exists." };
 
   const owningProjectId = existing?.projectId ?? input.projectId;
-  const { project, mayManage } = await credentialAccess(owningProjectId, user.id);
+  const { project, mayManage } = await credentialAccess(owningProjectId, user.id, "edit");
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!mayManage) return { ok: false, error: "You can't store credentials." };
 
@@ -260,7 +259,7 @@ export async function deleteCredential(id: string): Promise<ActionResult<null>> 
   });
   if (!credential) return { ok: false, error: "That credential no longer exists." };
 
-  const { project, mayManage } = await credentialAccess(credential.projectId, user.id);
+  const { project, mayManage } = await credentialAccess(credential.projectId, user.id, "edit");
   if (!project) return { ok: false, error: "That project doesn't exist, or you're not on it." };
   if (!mayManage) return { ok: false, error: "You can't remove credentials." };
 

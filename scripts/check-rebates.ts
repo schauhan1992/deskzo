@@ -372,10 +372,12 @@ async function run(scratchUrl: string) {
     const base = { "orders.view": true, "orders.approve": false, "orders.process": false, "orders.approveLoss": false, "rebates.view": false, "rebates.manage": false };
     const owner = await user("Owner", {}, { isSuperAdmin: true, role: "ADMIN" });
     const exec = await user("Executive", { ...base, "companies.viewAll": false });
-    const manager = await user("Manager", { ...base, "companies.viewAll": true, "rebates.view": true, "orders.approveLoss": true });
+    // Vendor credits are Payables screens, behind "View payments" (a page without it is the 404 page).
+    const manager = await user("Manager", { ...base, "companies.viewAll": true, "payments.view": true, "rebates.view": true, "orders.approveLoss": true });
     const approver = await user("Approver", { ...base, "companies.viewAll": true, "orders.approve": true, "credit.override": true });
     const buyer = await user("Buyer", { ...base, "companies.viewAll": true, "orders.process": true });
-    const accounts = await user("Accounts", { ...base, "companies.viewAll": true, "rebates.view": true, "rebates.manage": true });
+    // Accounts raise and settle against bills, so they see documents — a credit applied to a bill asks for it.
+    const accounts = await user("Accounts", { ...base, "companies.viewAll": true, "documents.view": true, "payments.view": true, "rebates.view": true, "rebates.manage": true });
     const as = (u: { id: string; name: string; email: string; role: string }) => {
       actor = u;
     };
@@ -724,10 +726,14 @@ async function run(scratchUrl: string) {
       managerReport.includes("ORD-000001") && managerReport.includes("ORD-000002") && managerReport.includes(ingram.name) && managerReport.includes(`${TAG} Adobe`),
     );
 
-    const execCredits = await screen(exec, el(CreditsPage));
+    // The 404 page for the executive, who can't open Payables (owner, 8 Oct 2026).
+    const execCredits = await screen(exec, el(CreditsPage)).then(
+      () => "rendered",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    );
     const managerCredits = await screen(manager, el(CreditsPage));
     const accountsCredits = await screen(accounts, el(CreditsPage));
-    ok("vendor credits: not the executive's", execCredits.includes("for whoever can see backend rebates") && !execCredits.includes(`${TAG}-CN-2`));
+    ok("vendor credits: not the executive's — the 404 page", execCredits === "NOT_FOUND_CALLED", execCredits);
     ok(
       "  the manager sees the credit notes and the payout, and can't record one",
       managerCredits.includes(`${TAG}-CN-2`) && managerCredits.includes(`${TAG}-PAY-1`) && !managerCredits.includes("Record a credit"),

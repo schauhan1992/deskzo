@@ -2,6 +2,16 @@ import ExcelJS from "exceljs";
 import { formatContactId, formatLeadId } from "@/lib/order-id";
 import { db } from "@/lib/db";
 import { accountScopeIds } from "@/lib/authz/company-scope";
+import {
+  companyAccess,
+  contactAccess,
+  documentAccess,
+  leadAccess,
+  orderAccess,
+  paymentAccess,
+  ticketAccess,
+  visitAccess,
+} from "@/lib/authz/access";
 import { seesResellerContactDetails } from "@/lib/authz/contact-access";
 import { sanitizeCsvCell } from "@/lib/csv";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
@@ -131,16 +141,27 @@ export function toCsv(rows: Record<string, unknown>[]): string {
  * target system or a person with a spreadsheet can work with flat; neither can work with nesting.
  */
 export async function accountBundle(userId: string, companyId: string) {
-  const ids = await accountScopeIds(userId);
+  // The account, and on it each kind of record by that record's own rule (src/lib/authz/access.ts) —
+  // the same fragments the account's tabs ask, so the workbook holds what the page shows and no more.
+  const [accounts, contactRule, orderRule, paymentRule, ticketRule, visitRule, documentRule, leadRule] = await Promise.all([
+    companyAccess(userId, "view"),
+    contactAccess(userId, "view"),
+    orderAccess(userId, "view"),
+    paymentAccess(userId, "view"),
+    ticketAccess(userId, "view"),
+    visitAccess(userId, "view"),
+    documentAccess(userId, "view"),
+    leadAccess(userId, "view"),
+  ]);
   const company = await db.company.findFirst({
-    where: { id: companyId, ...(ids === null ? {} : { ownerUserId: { in: ids } }) },
+    where: { AND: [{ id: companyId }, accounts] },
     include: {
       owner: { select: { name: true, email: true } },
       assignedTo: { select: { name: true } },
       industry: { select: { name: true } },
       managedByReseller: { select: { name: true } },
       locations: true,
-      contacts: true,
+      contacts: { where: contactRule },
     },
   });
   // Null covers both "no such company" and "not yours" on purpose: telling somebody a record exists
@@ -154,15 +175,15 @@ export async function accountBundle(userId: string, companyId: string) {
 
   const [orders, payments, tickets, visits, documents, leads] = await Promise.all([
     db.companyProduct.findMany({
-      where: { companyId },
+      where: { AND: [{ companyId }, orderRule] },
       include: { item: { select: { name: true, sku: true } }, vendor: { select: { name: true } }, addedBy: { select: { name: true } } },
       orderBy: { orderSeq: "asc" },
     }),
-    db.payment.findMany({ where: { companyId }, include: { recordedBy: { select: { name: true } } }, orderBy: { paidOn: "asc" } }),
-    db.ticket.findMany({ where: { companyId }, include: { assignedTo: { select: { name: true } } }, orderBy: { ticketSeq: "asc" } }),
-    db.visit.findMany({ where: { companyId }, include: { user: { select: { name: true } } }, orderBy: { createdAt: "asc" } }),
-    db.tradeDocument.findMany({ where: { companyId }, orderBy: { createdAt: "asc" } }),
-    db.lead.findMany({ where: { companyId }, include: { owner: { select: { name: true } } }, orderBy: { leadSeq: "asc" } }),
+    db.payment.findMany({ where: { AND: [{ companyId }, paymentRule] }, include: { recordedBy: { select: { name: true } } }, orderBy: { paidOn: "asc" } }),
+    db.ticket.findMany({ where: { AND: [{ companyId }, ticketRule] }, include: { assignedTo: { select: { name: true } } }, orderBy: { ticketSeq: "asc" } }),
+    db.visit.findMany({ where: { AND: [{ companyId }, visitRule] }, include: { user: { select: { name: true } } }, orderBy: { createdAt: "asc" } }),
+    db.tradeDocument.findMany({ where: { AND: [{ companyId }, documentRule] }, orderBy: { createdAt: "asc" } }),
+    db.lead.findMany({ where: { AND: [{ companyId }, leadRule] }, include: { owner: { select: { name: true } } }, orderBy: { leadSeq: "asc" } }),
   ]);
 
   return {

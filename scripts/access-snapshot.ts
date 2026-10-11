@@ -147,6 +147,40 @@ async function take(): Promise<string> {
     orders: await direct.companyProduct.count(),
     documents: await direct.tradeDocument.count(),
     payments: await direct.payment.count(),
+    tickets: await direct.ticket.count(),
+    projects: await direct.project.count(),
+    visits: await direct.visit.count(),
+    calls: await direct.callLog.count(),
+    activities: await direct.activity.count(),
+    meetings: await direct.calendarEvent.count({ where: { fromDeskzo: true } }),
+    tasks: await direct.task.count(),
+    expenses: await direct.expense.count(),
+  };
+
+  /**
+   * The six record types phase 3 moved onto the engine — tickets, projects, visits, calls, notes and
+   * meetings, tasks, expenses — as the engine answers them (src/lib/authz/access.ts), with the module
+   * gate the screens still ask first where there is one (calls, a lead's timeline). The snapshot taken
+   * before phase 3 ("phase3-before") asked each module's own rule; comparing against it is what proves
+   * the engine kept every answer.
+   */
+  const phaseThreeSets = async (person: { id: string; active: boolean; kind: string }, keys: string[]): Promise<Record<string, SetFingerprint>> => {
+    const has = (k: string) => person.active && person.kind !== "AUTOMATION" && keys.includes(k);
+    const none = fingerprint([]);
+    return {
+      "tickets.view": fingerprint(ids(await db.ticket.findMany({ where: await access.ticketAccess(person.id, "view"), select: { id: true } }))),
+      "projects.view": fingerprint(ids(await db.project.findMany({ where: await access.projectAccess(person.id, "view"), select: { id: true } }))),
+      "visits.view": fingerprint(ids(await db.visit.findMany({ where: await access.visitAccess(person.id, "view"), select: { id: true } }))),
+      "calls.view": has("calls.view")
+        ? fingerprint(ids(await db.callLog.findMany({ where: { AND: [await access.throughAccount(person.id, "view"), await access.callAccess(person.id, "view")] }, select: { id: true } })))
+        : none,
+      "activities.view": has("leads.view")
+        ? fingerprint(ids(await db.activity.findMany({ where: { AND: [{ lead: await access.leadAccess(person.id, "view") }, await access.timelineAccess(person.id, "view")] }, select: { id: true } })))
+        : none,
+      "meetings.view": fingerprint(ids(await db.calendarEvent.findMany({ where: { AND: [{ fromDeskzo: true }, await access.meetingAccess(person.id, "view")] }, select: { id: true } }))),
+      "tasks.view": fingerprint(ids(await db.task.findMany({ where: await access.taskAccess(person.id, "view"), select: { id: true } }))),
+      "expenses.view": fingerprint(ids(await db.expense.findMany({ where: await access.expenseAccess(person.id, "view"), select: { id: true } }))),
+    };
   };
 
   /**
@@ -194,6 +228,7 @@ async function take(): Promise<string> {
       "orders.view": fingerprint(ids(await db.companyProduct.findMany({ where: await access.orderAccess(person.id, "view"), select: { id: true } }))),
       "documents.view": fingerprint(ids(await db.tradeDocument.findMany({ where: await access.documentAccess(person.id, "view"), select: { id: true } }))),
       "payments.view": fingerprint(ids(await db.payment.findMany({ where: await access.paymentAccess(person.id, "view"), select: { id: true } }))),
+      ...(await phaseThreeSets(person, keys)),
     };
 
     // A customer and a vendor of each manager: the two rows a single-company check now tells apart.
