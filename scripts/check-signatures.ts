@@ -11,6 +11,8 @@
  *
  *   npm run check:signatures
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -19,6 +21,7 @@ import {
   SIGNATURE_TEMPLATES,
   escapeHtml,
   imageNote,
+  linkNote,
   renderSignature,
   safeImage,
   safeUrl,
@@ -110,6 +113,60 @@ async function main() {
   const text = signatureText(full, MADE);
   ok("the plain-text twin has every line, in order", text.startsWith("Best regards,\nPriya Sharma\nSales manager, Enterprise\nAcme Traders\nT +91 22 4000 1000  M +91 98765 43210\npriya@acme.test"), text.split("\n").slice(0, 6).join(" | "));
   ok("...and the credit with its address", text.endsWith("Made with Deskzo: https://deskzo.com/email-signature-generator"));
+
+  section("https only");
+  ok("an http:// link is refused — everywhere a signature links to", safeUrl("http://acme.test") === null && safeUrl("HTTP://acme.test/x") === null && safeUrl("https://acme.test") === "https://acme.test/");
+  ok("...and says what to change", /change http:\/\/ to https:\/\//.test(linkNote("http://acme.test") ?? "") && linkNote("https://acme.test") === null && linkNote("") === null && linkNote("not a site") === "That isn't a web address.");
+  ok("an http:// picture is refused too, and says so", safeImage("http://acme.test/logo.png") === null && /https:\/\//.test(imageNote("http://acme.test/logo.png") ?? ""));
+  ok("the only exception: an address on this computer while developing", safeUrl("http://zz.localhost:3000/x") !== null && safeUrl("http://intranet.acme/x") === null);
+  const plainHttp = renderSignature({ ...full, website: "http://acme.test", logo: "http://acme.test/logo.png", ctaUrl: "http://acme.test/book", social: { ...full.social, linkedin: "http://linkedin.com/in/priya" } }, style("stacked"), MADE);
+  ok("so a signature given http:// addresses carries none of them", !/http:\/\/(?!localhost)/.test(plainHttp.replace(/https:\/\//g, "")) && !plainHttp.includes("acme.test/logo.png"));
+
+  section("The logo's link");
+  const logoLinked = renderSignature({ ...full, photo: "" }, style("classic"), MADE);
+  ok("the logo links to the website when it has no link of its own", logoLinked.includes('<a href="https://acme.test/" style="text-decoration:none;"><img src="https://acme.test/logo.png"'));
+  const ownLink = renderSignature({ ...full, logoLink: "acme.test/about" }, style("modern"), MADE);
+  ok("...or to its own link, made https", ownLink.includes('<a href="https://acme.test/about" style="text-decoration:none;"><img src="https://acme.test/logo.png"'));
+  ok("...and never to an http:// one", !renderSignature({ ...full, website: "", logoLink: "http://acme.test" }, style("modern"), MADE).includes('<a href="http://acme.test'));
+
+  section("A banner under the signature");
+  const BANNER = { image: "https://acme.test/fair.png", link: "acme.test/fair", alt: `Meet us at the fair <hall 4>`, width: 520 };
+  const withBanner = renderSignature({ ...full, banner: BANNER }, style("classic"), MADE);
+  const bannerAt = withBanner.indexOf('src="https://acme.test/fair.png"');
+  ok("it is drawn under the signature — after the details, before the disclaimer and the credit", bannerAt > withBanner.indexOf("Priya Sharma") && bannerAt > withBanner.indexOf("Book a meeting") && bannerAt < withBanner.indexOf("This email is confidential.") && bannerAt < withBanner.indexOf("Made with"));
+  ok("...linked to its https address, at its width, its words escaped for where pictures are blocked", withBanner.includes('<a href="https://acme.test/fair" style="text-decoration:none;"><img src="https://acme.test/fair.png" alt="Meet us at the fair &lt;hall 4&gt;" width="520"'));
+  ok("a width outside 120–600 is brought inside it", renderSignature({ ...full, banner: { ...BANNER, width: 2000 } }, style("classic"), MADE).includes('width="600"') && renderSignature({ ...full, banner: { ...BANNER, width: 10 } }, style("classic"), MADE).includes('width="120"'));
+  ok("an http:// picture or a picture inside the signature is no banner at all", !renderSignature({ ...full, banner: { ...BANNER, image: "http://acme.test/fair.png" } }, style("classic"), MADE).includes("fair.png") && !renderSignature({ ...full, banner: { ...BANNER, image: "data:image/png;base64,iVBORw0KGgo=" } }, style("classic"), MADE).includes("data:image"));
+  ok("an http:// link leaves the picture unlinked", !renderSignature({ ...full, banner: { ...BANNER, link: "http://acme.test/fair" } }, style("classic"), MADE).includes('href="http://acme.test/fair"'));
+  ok("the plain-text twin carries its words and link", signatureText({ ...full, banner: BANNER }, null).includes("Meet us at the fair <hall 4>: https://acme.test/fair"));
+  ok("with a banner, a full signature is still well inside Gmail's limit", withBanner.length < GMAIL_LIMIT, withBanner.length);
+
+  section("Premium layouts — the paid product's, not the free generator's");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const premium = require("../src/lib/signatures/premium") as typeof import("../src/lib/signatures/premium");
+  const generatorModule = require("../src/components/site/signature-generator") as typeof import("../src/components/site/signature-generator");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const generatorSource = readFileSync(path.join(__dirname, "../src/components/site/signature-generator.tsx"), "utf8");
+  ok("the free generator offers the four free layouts and never imports the premium ones", SIGNATURE_TEMPLATES.length === 4 && !/(from|import\()\s*["'][^"']*signatures\/premium/.test(generatorSource));
+  ok("...but names them, in step with the paid product's list", JSON.stringify(generatorModule.PREMIUM_LAYOUT_NAMES) === JSON.stringify(premium.PREMIUM_TEMPLATES.map((t) => t.label)));
+  ok("the free renderer draws a premium name as its own Classic — it can't draw them", renderSignature(full, style("executive" as never), MADE) === renderSignature(full, style("classic"), MADE));
+  ok("six premium layouts, ten in all, and the stored names map onto every one", premium.PREMIUM_TEMPLATES.length === 6 && premium.ALL_SIGNATURE_LAYOUTS.length === 10 && Object.values(premium.STORED_LAYOUTS).every((k) => premium.ALL_SIGNATURE_LAYOUTS.some((l) => l.key === k)));
+  const drawn = new Set<string>();
+  for (const t of premium.PREMIUM_TEMPLATES) {
+    const out = premium.renderAnySignature({ ...full, banner: BANNER }, { template: t.key, color: "#0f766e", font: "georgia" }, null);
+    drawn.add(out);
+    ok(
+      `${t.label}: name, company, contacts, linked logo and banner — tables and inline styles only`,
+      out.includes("Priya Sharma") && out.includes("Acme Traders") && out.includes("mailto:priya@acme.test") && out.includes('<a href="https://acme.test/" style="text-decoration:none;"><img src="https://acme.test/logo.png"') && out.includes("fair.png") && !/<style|class=|<script/i.test(out) && out.length < GMAIL_LIMIT,
+      out.length,
+    );
+  }
+  ok("...each one its own design", drawn.size === premium.PREMIUM_TEMPLATES.length);
+  ok("...and none carries the free generator's credit unless asked", ![...drawn].some((h) => h.includes("Made with")));
+  ok("Corporate without a logo shows the company's initials on its panel", premium.renderAnySignature({ ...full, logo: "" }, { template: "corporate", color: "#0f766e", font: "arial" }, null).includes(">AT</div>"));
+  ok("Spotlight keeps the name dark on a light colour, so it reads", premium.renderAnySignature(full, { template: "spotlight", color: "#facc15", font: "arial" }, null).includes("font-size:20px;font-weight:bold;color:#111111;"));
+  ok("a premium layout given hostile text escapes it like every other", !/<script/i.test(premium.renderAnySignature({ ...full, name: "<script>alert(1)</script>" }, { template: "bold", color: "#0f766e", font: "arial" }, null)));
+  ok("tint mixes the colour towards white", premium.tint("#000000", 0.5) === "#808080" && premium.tint("#1d4ed8", 1) === "#ffffff");
 
   section("The page and the block");
   /* eslint-disable @typescript-eslint/no-require-imports */

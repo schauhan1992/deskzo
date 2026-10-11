@@ -5,7 +5,10 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { requireUser } from "@/lib/session";
 import { db } from "@/lib/db";
 import { zohoApp } from "@/lib/workplace/settings";
-import { PERSON_SELECT, personSignature, readTemplate, signatureContext, templateIdFor, type Person } from "@/lib/signatures/person";
+import { PERSON_SELECT, brandLogoUsable, loadPerson, personSignature, readTemplate, signatureContext, templateIdFor, type Person } from "@/lib/signatures/person";
+import { BANNER_SELECT, bannerFor, bannerImageSrc, bannerState, bannerTemplateIds } from "@/lib/signatures/banners";
+import { getBranding } from "@/actions/branding";
+import { workspaceClock } from "@/lib/time/workspace";
 import { readSignatureSettings } from "@/lib/signatures/sync";
 import { OUTLOOK_PATHS } from "@/lib/signatures/outlook";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -13,6 +16,7 @@ import { SignaturePeopleTable, type SignaturePersonRow } from "@/components/sign
 import { SignatureTemplates, type SignatureTemplateDraft } from "@/components/signatures/template-editor";
 import { SignatureRulesEditor, type SignatureRuleRow } from "@/components/signatures/rules-editor";
 import { SignatureConnectionPanel } from "@/components/signatures/connection-panel";
+import { SignatureBanners, type BannerView } from "@/components/signatures/banner-editor";
 
 /**
  * Email signatures, for whoever holds `signatures.manage`: everybody's signature and whether it is in
@@ -23,7 +27,7 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
   const me = await requireUser();
   if (!(await hasEffectivePermission(me.id, "signatures.manage"))) notFound();
   const { tab: rawTab, mailbox } = await searchParams;
-  const tab = rawTab === "templates" || rawTab === "rules" || rawTab === "connection" ? rawTab : "people";
+  const tab = rawTab === "templates" || rawTab === "banners" || rawTab === "rules" || rawTab === "connection" ? rawTab : "people";
 
   const [ctx, settings] = await Promise.all([signatureContext(me.id), readSignatureSettings()]);
   const people = (await db.user.findMany({ where: { active: true, kind: "MEMBER" }, orderBy: { name: "asc" }, select: PERSON_SELECT })) as Person[];
@@ -37,8 +41,40 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
   let body: React.ReactNode;
   if (tab === "templates") {
     const rows = (await db.signatureTemplate.findMany({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] })).map(readTemplate);
-    const drafts: SignatureTemplateDraft[] = rows.map((t) => ({ ...t, shown: t.shown, social: t.social, people: counts.get(t.id) ?? 0 }));
-    body = <SignatureTemplates templates={drafts} company={ctx.company} />;
+    const drafts: SignatureTemplateDraft[] = rows.map((t) => ({ ...t, shown: t.shown, social: t.social, people: counts.get(t.id) ?? 0, banner: bannerFor(t.id, ctx.banners) }));
+    const branding = await getBranding();
+    body = (
+      <SignatureTemplates
+        templates={drafts}
+        company={ctx.company}
+        brand={{ logo: ctx.brandLogo, logoUnusable: !!branding.logoDataUrl && !brandLogoUsable(branding.logoDataUrl) }}
+        everybodyBanner={bannerFor("", ctx.banners)}
+      />
+    );
+  } else if (tab === "banners") {
+    const [rows, mine, today] = await Promise.all([
+      db.signatureBanner.findMany({ orderBy: [{ createdAt: "desc" }], select: BANNER_SELECT }),
+      loadPerson(me.id),
+      workspaceClock().then((c) => c.today()),
+    ]);
+    const banners: BannerView[] = rows.map((b) => ({
+      id: b.id,
+      name: b.name,
+      // In the app, the upload's address on this host.
+      imageSrc: bannerImageSrc(b, ""),
+      imageUrl: b.imageUrl,
+      linkUrl: b.linkUrl ?? "",
+      altText: b.altText,
+      width: b.width,
+      startsOn: b.startsOn?.toISOString().slice(0, 10) ?? null,
+      endsOn: b.endsOn?.toISOString().slice(0, 10) ?? null,
+      paused: b.paused,
+      templateIds: bannerTemplateIds(b),
+      state: bannerState(b, today),
+    }));
+    // The manager's own signature, without a banner, to show one under.
+    const sampleHtml = mine ? (await personSignature(mine, { ...ctx, banners: [] })).html : "";
+    body = <SignatureBanners banners={banners} templates={[...ctx.templates.values()].map((t) => ({ id: t.id, name: t.name }))} sampleHtml={sampleHtml} />;
   } else if (tab === "rules") {
     const [departments, branches, roles] = await Promise.all([
       db.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
@@ -132,6 +168,7 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
         tabs={[
           { key: "people", label: "People" },
           { key: "templates", label: "Templates", count: ctx.templates.size },
+          { key: "banners", label: "Banners", count: ctx.banners.length || undefined },
           { key: "rules", label: "Who gets which" },
           { key: "connection", label: "Connection" },
         ]}

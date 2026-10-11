@@ -9,8 +9,9 @@ import { encryptSecret } from "@/lib/crypto";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
-import { SIGNATURE_FONTS, SOCIAL_NETWORKS, safeImage, safeUrl } from "@/lib/signatures/render";
-import { RECORD_FIELDS } from "@/lib/signatures/person";
+import { BANNER_WIDTH, SIGNATURE_FONTS, SOCIAL_NETWORKS, linkNote, safeImage, safeUrl } from "@/lib/signatures/render";
+import { LAYOUTS, RECORD_FIELDS, type LayoutKey } from "@/lib/signatures/person";
+import { BANNER_IMAGE_MAX_BYTES, BANNER_IMAGE_TYPES } from "@/lib/signatures/banners";
 import { checkGoogle, readServiceAccount } from "@/lib/signatures/google";
 import { recordRun, syncSignatures, type SyncReport } from "@/lib/signatures/sync";
 import type { ActionResult } from "@/actions/company";
@@ -39,26 +40,35 @@ async function everybodyPending() {
 
 // ── Templates ───────────────────────────────────────────────────────────────────────────────────────
 
+/** A web address that may be left empty — https only (render.ts): "isn't a web address", or "change http:// to https://". */
 const optionalUrl = (label: string) =>
   z
     .string()
     .trim()
     .max(500)
-    .refine((v) => !v || safeUrl(v) !== null, `${label} isn't a web address`);
+    .superRefine((v, ctx) => {
+      const note = linkNote(v);
+      if (note) ctx.addIssue({ code: "custom", message: `${label}: ${note}` });
+    });
+
+/** A picture's address a mail program fetches — https only, never a picture inside the signature. */
+const imageAddress = (label: string) =>
+  z
+    .string()
+    .trim()
+    .max(500)
+    .refine((v) => !v || (safeImage(v) !== null && !v.startsWith("data:")), `${label} needs an address starting https:// — mail programs fetch it from there`);
 
 const templateSchema = z.object({
   id: z.string().min(1).nullable(),
   name: z.string().trim().min(1, "Give the template a name").max(60),
-  layout: z.enum(["CLASSIC", "MODERN", "STACKED", "COMPACT"]),
+  layout: z.enum(Object.keys(LAYOUTS) as [LayoutKey, ...LayoutKey[]]),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Pick a colour"),
   font: z.enum(Object.keys(SIGNATURE_FONTS) as [string, ...string[]]),
   shown: z.array(z.enum(RECORD_FIELDS.map((f) => f.key) as [string, ...string[]])).max(RECORD_FIELDS.length),
   website: optionalUrl("The website"),
-  logoUrl: z
-    .string()
-    .trim()
-    .max(500)
-    .refine((v) => !v || (safeImage(v) !== null && !v.startsWith("data:")), "The logo needs an address starting https:// — mail programs fetch it from there"),
+  logoUrl: imageAddress("The logo"),
+  logoLink: optionalUrl("The logo's link").optional(),
   social: z.record(z.string(), z.string().trim().max(300)),
   ctaLabel: z.string().trim().max(60),
   ctaUrl: optionalUrl("The button's link"),
@@ -76,7 +86,7 @@ export async function saveSignatureTemplate(input: unknown): Promise<ActionResul
   const social: Record<string, string> = {};
   for (const n of SOCIAL_NETWORKS) {
     const value = t.social[n.key]?.trim() ?? "";
-    if (value && !safeUrl(value)) return { ok: false, error: `${n.label} isn't a web address.` };
+    if (value && !safeUrl(value)) return { ok: false, error: `${n.label}: ${linkNote(value)}` };
     if (value) social[n.key] = value;
   }
   const data = {
@@ -87,6 +97,7 @@ export async function saveSignatureTemplate(input: unknown): Promise<ActionResul
     recordFields: RECORD_FIELDS.map((f) => ({ key: f.key, show: t.shown.includes(f.key) })) as unknown as Prisma.InputJsonValue,
     website: t.website || null,
     logoUrl: t.logoUrl || null,
+    logoLink: t.logoLink || null,
     social: social as Prisma.InputJsonValue,
     ctaLabel: t.ctaLabel || null,
     ctaUrl: t.ctaUrl || null,
@@ -157,6 +168,122 @@ export async function setSignatureRule(input: unknown): Promise<ActionResult<nul
     await db.signatureRule.upsert({ where: { target_targetId: { target, targetId } }, create: { target, targetId, templateId }, update: { templateId } });
   }
   await everybodyPending();
+  refresh();
+  return { ok: true, data: null };
+}
+
+// ── Banners ─────────────────────────────────────────────────────────────────────────────────────────
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+const bannerSchema = z
+  .object({
+    id: z.string().min(1).nullable(),
+    name: z.string().trim().min(1, "Give the banner a name").max(60),
+    /** A new upload, an https address, or — when changing a banner — the picture it has. */
+    image: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("upload"), dataUrl: z.string().max(1_500_000) }),
+      z.object({ kind: z.literal("url"), url: imageAddress("The banner's picture").refine((v) => v.length > 0, "Give the picture's address, or upload one") }),
+      z.object({ kind: z.literal("keep") }),
+    ]),
+    linkUrl: optionalUrl("The banner's link"),
+    altText: z.string().trim().min(1, "Say what the banner shows — it is shown where pictures are blocked").max(150),
+    width: z.number().int().min(BANNER_WIDTH.min, `At least ${BANNER_WIDTH.min} pixels wide`).max(BANNER_WIDTH.max, `At most ${BANNER_WIDTH.max} pixels wide — wider breaks on phones`),
+    startsOn: z.string().regex(DAY).nullable(),
+    endsOn: z.string().regex(DAY).nullable(),
+    templateIds: z.array(z.string().min(1)).max(100),
+    paused: z.boolean(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.startsOn && b.endsOn && b.endsOn < b.startsOn) ctx.addIssue({ code: "custom", path: ["endsOn"], message: "It can't end before it starts." });
+  });
+
+/** The signatures of an upload: what it says it is must be what it is. */
+const MAGIC: Record<string, (b: Buffer) => boolean> = {
+  "image/png": (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  "image/jpeg": (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  "image/gif": (b) => b.subarray(0, 4).toString("ascii") === "GIF8",
+};
+
+function checkBannerUpload(dataUrl: string): { dataUrl: string } | { error: string } {
+  const match = /^data:([a-z/]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl.trim());
+  if (!match || !(BANNER_IMAGE_TYPES as readonly string[]).includes(match[1]!)) return { error: "A banner is a PNG, JPEG or GIF picture — mail programs don't all show other kinds." };
+  const bytes = Buffer.from(match[2]!, "base64");
+  if (!bytes.length || !MAGIC[match[1]!]!(bytes)) return { error: "That file isn't the picture it says it is." };
+  if (bytes.length > BANNER_IMAGE_MAX_BYTES) return { error: "The picture is over 1 MB. Banners travel in every email — make it smaller (a few hundred KB at most is best)." };
+  return { dataUrl: `data:${match[1]};base64,${match[2]}` };
+}
+
+const asDay = (d: string | null) => (d ? new Date(`${d}T00:00:00.000Z`) : null);
+
+/**
+ * A banner, made or changed — under everybody's signature or the named templates' — and every signature
+ * drawn again: the next sync sends the ones it changed, and Outlook has it on the next message.
+ */
+export async function saveSignatureBanner(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  const parsed = bannerSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const b = parsed.data;
+
+  let picture: { imageData: string | null; imageUrl: string | null } | null = null;
+  if (b.image.kind === "upload") {
+    const upload = checkBannerUpload(b.image.dataUrl);
+    if ("error" in upload) return { ok: false, error: upload.error };
+    picture = { imageData: upload.dataUrl, imageUrl: null };
+  } else if (b.image.kind === "url") {
+    picture = { imageData: null, imageUrl: safeUrl(b.image.url) };
+  } else if (!b.id) {
+    return { ok: false, error: "Upload the banner's picture, or give its https:// address." };
+  }
+
+  const known = new Set((await db.signatureTemplate.findMany({ where: { id: { in: b.templateIds } }, select: { id: true } })).map((t) => t.id));
+  const data = {
+    name: b.name,
+    linkUrl: b.linkUrl ? safeUrl(b.linkUrl) : null,
+    altText: b.altText,
+    width: b.width,
+    startsOn: asDay(b.startsOn),
+    endsOn: asDay(b.endsOn),
+    paused: b.paused,
+    templateIds: b.templateIds.filter((id) => known.has(id)) as Prisma.InputJsonValue,
+    ...(picture ?? {}),
+  };
+  let id: string;
+  if (b.id) {
+    const updated = await db.signatureBanner.updateMany({ where: { id: b.id }, data });
+    if (updated.count === 0) return { ok: false, error: "That banner no longer exists." };
+    id = b.id;
+  } else {
+    id = (await db.signatureBanner.create({ data: { ...data, imageData: picture!.imageData, imageUrl: picture!.imageUrl, createdById: user.id }, select: { id: true } })).id;
+  }
+  await everybodyPending();
+  await recordAudit({ userId: user.id, action: b.id ? "UPDATE" : "CREATE", entityType: "SignatureBanner", entityId: id, entityLabel: b.name });
+  refresh();
+  return { ok: true, data: { id } };
+}
+
+/** Paused, it leaves every signature at once; started again, it comes back on its days. */
+export async function setSignatureBannerPaused(id: string, paused: boolean): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  const updated = await db.signatureBanner.updateMany({ where: { id: String(id) }, data: { paused: !!paused } });
+  if (updated.count === 0) return { ok: false, error: "That banner no longer exists." };
+  await everybodyPending();
+  refresh();
+  return { ok: true, data: null };
+}
+
+/** Gone from every signature; emails already sent lose an uploaded picture with it. */
+export async function deleteSignatureBanner(id: string): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  const banner = await db.signatureBanner.findUnique({ where: { id: String(id) }, select: { name: true } });
+  if (!banner) return { ok: false, error: "That banner no longer exists." };
+  await db.signatureBanner.delete({ where: { id: String(id) } });
+  await everybodyPending();
+  await recordAudit({ userId: user.id, action: "DELETE", entityType: "SignatureBanner", entityId: String(id), entityLabel: banner.name });
   refresh();
   return { ok: true, data: null };
 }

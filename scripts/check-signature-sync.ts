@@ -309,6 +309,8 @@ async function run(scratchUrl: string, base: string) {
   const allowedRoute = require("../src/app/api/signatures/outlook/allowed/route") as typeof import("../src/app/api/signatures/outlook/allowed/route");
   const manifestRoute = require("../src/app/api/signatures/outlook/manifest.xml/route") as typeof import("../src/app/api/signatures/outlook/manifest.xml/route");
   const iconRoute = require("../src/app/api/signatures/outlook/icon/[size]/route") as typeof import("../src/app/api/signatures/outlook/icon/[size]/route");
+  const bannerRoute = require("../src/app/api/signatures/banner/[id]/route") as typeof import("../src/app/api/signatures/banner/[id]/route");
+  const renderLib = require("../src/lib/signatures/render") as typeof import("../src/lib/signatures/render");
   const MyPage = (require("../src/app/(dashboard)/signatures/page") as { default: () => Promise<unknown> }).default;
   const ManagePage = (require("../src/app/(dashboard)/signatures/manage/page") as { default: (p: unknown) => Promise<unknown> }).default;
   /* eslint-enable @typescript-eslint/no-require-imports */
@@ -679,6 +681,76 @@ async function run(scratchUrl: string, base: string) {
       ok("My email signature: that it is in their Outlook", mineNow.includes("In your Outlook"), mineNow.slice(0, 300));
       actor = boss;
       ok("turned off, the add-in gets nothing again", (await actions.setOutlookAddin(false)).ok && (await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-a")).status === 404);
+
+      section("Premium layouts, the logo's link and banners");
+      actor = boss;
+      const salesBase = { ...base0, id: salesId, logoUrl: "https://zzsig.example/logo.png" };
+      const httpLogoLink = await actions.saveSignatureTemplate({ ...salesBase, layout: "EXECUTIVE", logoLink: "http://zzsig.example" });
+      ok("an http:// logo link is refused, saying what to change", !httpLogoLink.ok && /https:\/\//.test(errorOf(httpLogoLink) ?? ""), errorOf(httpLogoLink));
+      const httpWebsite = await actions.saveSignatureTemplate({ ...salesBase, website: "http://zzsig.example" });
+      ok("...and so is an http:// website, button or profile", !httpWebsite.ok && !(await actions.saveSignatureTemplate({ ...salesBase, ctaUrl: "http://zzsig.example/demo" })).ok && !(await actions.saveSignatureTemplate({ ...salesBase, social: { linkedin: "http://linkedin.com/company/zz" } })).ok);
+      ok("...and an http:// logo", !(await actions.saveSignatureTemplate({ ...salesBase, logoUrl: "http://zzsig.example/logo.png" })).ok);
+      const premiumSaved = await actions.saveSignatureTemplate({ ...salesBase, layout: "EXECUTIVE", logoLink: "zzsig.example/about" });
+      const salesRow = await db.signatureTemplate.findUniqueOrThrow({ where: { id: salesId } });
+      ok("a premium layout and an https logo link are kept", premiumSaved.ok && salesRow.layout === "EXECUTIVE" && salesRow.logoLink === "zzsig.example/about", errorOf(premiumSaved));
+      const repExec = await person.personSignature((await person.loadPerson(rep.id))!, await person.signatureContext());
+      ok("the rep's signature is drawn in it, the logo linked where the template says", repExec.html.includes("text-transform:uppercase;letter-spacing:1px") && repExec.html.includes('<a href="https://zzsig.example/about" style="text-decoration:none;"><img src="https://zzsig.example/logo.png"'));
+
+      await db.brandingSettings.upsert({ where: { id: "global" }, create: { id: "global", logoDataUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" }, update: { logoDataUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" } });
+      ok("an SVG logo in Branding isn't used — Outlook and Gmail don't show one", (await person.signatureContext()).brandLogo === null);
+      await db.brandingSettings.update({ where: { id: "global" }, data: { logoDataUrl: "data:image/png;base64,iVBORw0KGgo=" } });
+      ok("...a PNG one is", (await person.signatureContext()).brandLogo?.endsWith("/api/brand/mark") === true);
+
+      const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      const banner0 = { id: null, name: `${TAG} Fair`, image: { kind: "upload", dataUrl: PNG }, linkUrl: "zzsig.example/fair", altText: "Meet us at the fair", width: 520, startsOn: null, endsOn: null, templateIds: [] as string[], paused: false };
+      actor = rep;
+      ok("somebody who doesn't manage signatures can't add a banner", !(await actions.saveSignatureBanner(banner0)).ok);
+      actor = boss;
+      const httpBanner = await actions.saveSignatureBanner({ ...banner0, linkUrl: "http://zzsig.example/fair" });
+      ok("a banner's http:// link is refused", !httpBanner.ok && /https:\/\//.test(errorOf(httpBanner) ?? ""), errorOf(httpBanner));
+      ok("...and an http:// picture", !(await actions.saveSignatureBanner({ ...banner0, image: { kind: "url", url: "http://zzsig.example/fair.png" } })).ok);
+      ok("an SVG upload is refused — mail programs don't all show it", /PNG, JPEG or GIF/.test(errorOf(await actions.saveSignatureBanner({ ...banner0, image: { kind: "upload", dataUrl: "data:image/svg+xml;base64,PHN2Zz4=" } })) ?? ""));
+      ok("a file that isn't the picture it says is refused", /isn't the picture/.test(errorOf(await actions.saveSignatureBanner({ ...banner0, image: { kind: "upload", dataUrl: "data:image/png;base64,aGVsbG8gd29ybGQ=" } })) ?? ""));
+      const big = `data:image/png;base64,${Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1024 * 1024 + 10)]).toString("base64")}`;
+      ok("a picture over 1 MB is refused", /over 1 MB/.test(errorOf(await actions.saveSignatureBanner({ ...banner0, image: { kind: "upload", dataUrl: big } })) ?? ""));
+      ok("one that ends before it starts is refused", !(await actions.saveSignatureBanner({ ...banner0, startsOn: "2030-02-10", endsOn: "2030-02-01" })).ok);
+      const fair = await actions.saveSignatureBanner(banner0);
+      const fairId = fair.ok ? fair.data.id : "";
+      ok("a manager adds a banner for everybody", fair.ok, errorOf(fair));
+      const ctxB = await person.signatureContext();
+      const repFair = await person.personSignature((await person.loadPerson(rep.id))!, ctxB);
+      const bossFair = await person.personSignature((await person.loadPerson(boss.id))!, ctxB);
+      ok(
+        "everybody's signature carries it, under the signature, linked — the picture served from the workspace",
+        [repFair.html, bossFair.html].every((h) => h.includes(`/api/signatures/banner/${fairId}?v=`) && h.includes('<a href="https://zzsig.example/fair" style="text-decoration:none;">')),
+      );
+      ok("...and a new digest, so the next sync sends it", repFair.hash !== repExec.hash);
+      const bannerPic = await bannerRoute.GET(new Request("http://x"), { params: Promise.resolve({ id: fairId }) });
+      ok("the uploaded picture is served as itself", bannerPic.status === 200 && bannerPic.headers.get("content-type") === "image/png" && Buffer.from(await bannerPic.arrayBuffer()).subarray(1, 4).toString("ascii") === "PNG");
+      ok("...and an unknown banner gets nothing", (await bannerRoute.GET(new Request("http://x"), { params: Promise.resolve({ id: "zzzzzzzzzzzzzzzzzzzz" }) })).status === 404);
+      const forSales = await actions.saveSignatureBanner({ ...banner0, name: `${TAG} Sales offer`, image: { kind: "url", url: "zzsig.example/sales.png" }, linkUrl: "zzsig.example/offer", templateIds: [salesId] });
+      const ctxS = await person.signatureContext();
+      const repSales2 = await person.personSignature((await person.loadPerson(rep.id))!, ctxS);
+      const bossSales2 = await person.personSignature((await person.loadPerson(boss.id))!, ctxS);
+      ok("a banner for the Sales template wins there over the one for everybody", forSales.ok && repSales2.html.includes('src="https://zzsig.example/sales.png"') && !repSales2.html.includes("/api/signatures/banner/"));
+      ok("...and everybody else keeps the company's", bossSales2.html.includes(`/api/signatures/banner/${fairId}?v=`) && !bossSales2.html.includes("sales.png"));
+      const salesBannerId = forSales.ok ? forSales.data.id : "";
+      ok("paused, it leaves at once — the Sales people get the company's again", (await actions.setSignatureBannerPaused(salesBannerId, true)).ok && (await person.personSignature((await person.loadPerson(rep.id))!, await person.signatureContext())).html.includes(`/api/signatures/banner/${fairId}?v=`));
+      await actions.setSignatureBannerPaused(salesBannerId, false);
+      await actions.saveSignatureBanner({ ...banner0, name: `${TAG} Later`, image: { kind: "url", url: "zzsig.example/later.png" }, startsOn: "2099-01-01", endsOn: null, templateIds: [salesId] });
+      await actions.saveSignatureBanner({ ...banner0, name: `${TAG} Over`, image: { kind: "url", url: "zzsig.example/over.png" }, startsOn: "2000-01-01", endsOn: "2000-01-31", templateIds: [salesId] });
+      const repDates = await person.personSignature((await person.loadPerson(rep.id))!, await person.signatureContext());
+      ok("one that hasn't started, and one that has ended, are in nobody's signature", !repDates.html.includes("later.png") && !repDates.html.includes("over.png") && repDates.html.includes("sales.png"));
+      ok("the plain-text twin carries the banner's words and link", renderLib.signatureText(repDates.details, null).includes("Meet us at the fair: https://zzsig.example/offer"));
+      const zBefore = stand.zoho.puts;
+      const zBanner = await sync.syncSignatures({ budgetMs: 30_000, userIds: [rep.id] });
+      ok("a banner goes into the mailbox on the next sync, as part of the signature", zBanner.synced === 1 && stand.zoho.puts === zBefore + 1 && (stand.zoho.signatures.get("102")?.[0]?.content ?? "").includes("sales.png"), JSON.stringify(zBanner));
+
+      const bannersTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "banners" }) })));
+      ok("the Banners tab: each banner, whether it is live, scheduled or over, and whose signatures carry it", bannersTab.includes(`${TAG} Fair`) && bannersTab.includes("Live") && bannersTab.includes("Scheduled") && bannersTab.includes("Ended") && bannersTab.includes("Everybody"), bannersTab.slice(0, 300));
+      const templatesTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "templates" }) })));
+      ok("the Templates tab says which are premium", templatesTab.includes("Executive (premium)"), templatesTab.slice(0, 300));
+      ok("deleting a banner takes it out of every signature", (await actions.deleteSignatureBanner(fairId)).ok && !(await person.personSignature((await person.loadPerson(boss.id))!, await person.signatureContext())).html.includes("/api/signatures/banner/"));
 
       section("Letting go");
       actor = boss;

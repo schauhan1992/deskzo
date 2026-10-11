@@ -130,6 +130,8 @@ async function main() {
   ok("a website without https:// gets it", "field" in web && web.field.value === "https://company.com/", JSON.stringify(web));
   ok("...and an empty label takes the kind's name", "field" in web && web.field.label === "Website");
   ok("a javascript: address is refused", "error" in fields.checkField({ kind: "link", value: "javascript:alert(1)" }));
+  const httpLink = fields.checkField({ kind: "website", value: "http://company.com" });
+  ok("an http:// address is refused — https only — and says what to change", "error" in httpLink && /change http:\/\/ to https:\/\//.test(httpLink.error), JSON.stringify(httpLink));
   ok("a host without a dot is refused", "error" in fields.checkField({ kind: "linkedin", value: "localhost" }));
   ok("a phone number with letters is refused", "error" in fields.checkField({ kind: "phone", value: "call me" }));
   ok("an email address is lower-cased", JSON.stringify(fields.checkField({ kind: "email", value: "Priya@Company.COM" })).includes("priya@company.com"));

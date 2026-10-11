@@ -456,3 +456,34 @@ desktop launch event; whether classic Outlook reads the well-known file and lets
 through; whether the signature's inline styles survive (Microsoft's reference says setSignatureAsync
 "doesn't support inline CSS", while its own sample uses inline styles); the photo and logo fetched by
 address; and replies and forwards.
+
+**Premium layouts, banners, the logo's link, https only (11 Oct 2026).** The owner asked for a banner under
+the signature that whoever manages signatures controls for the whole company, a linked company logo,
+https for every external address and picture, and premium templates for paying companies — the paid
+product had only the free generator's four layouts.
+
+- **Premium layouts** (src/lib/signatures/premium.ts): Executive, Corporate, Bold, Centred, Card and
+  Spotlight, beside the four free ones — ten in the template editor, shown as a gallery of live
+  thumbnails in the template's own colour, font and logo, the six badged Premium. The free generator
+  never imports premium.ts, so the public page can't draw them; it names them and links to /signatures.
+  `SignatureTemplate.layout` stores EXECUTIVE, CORPORATE, BOLD, CENTERED, CARD or SPOTLIGHT.
+- **Banners** (`SignatureBanner`, src/lib/signatures/banners.ts, Email signatures → Banners): a picture
+  uploaded (PNG, JPEG or GIF, 1 MB at most, checked by its first bytes; served by the workspace at
+  /api/signatures/banner/<id>?v=<version>) or an https address; an https link; words for where pictures
+  are blocked; a width of 120–600 px; optional first and last days in the workspace's calendar; paused or
+  not; everybody's signatures or the named templates'. Drawn under the signature, above the disclaimer.
+  One per signature: a banner for the template wins over one for everybody, then the latest to start.
+  The database refuses two pictures or none, a width outside 120–600 and an end before the start. Sync
+  and the Outlook add-in draw every signature afresh, so a banner starts and ends on its days by itself.
+- **The logo's link** (`SignatureTemplate.logoLink`): where the logo goes when clicked — the website when
+  empty — in every layout, the free generator's too. Branding's logo is used only when it is a PNG, JPEG
+  or GIF; an SVG or WebP one (which Outlook and Gmail don't show) is skipped and the editor says so.
+- **https only**: the renderer refuses http:// for every link and picture (`safeUrl`, `safeImage`), the
+  forms say "change http:// to https://", and Cards' links follow the same rule. The one exception is an
+  address on the machine itself while developing (localhost, *.localhost). The free generator still lets
+  a person pick a picture from their computer; it travels inside the signature, not as an address.
+- Checks: check:signatures 64 (https, the logo's link, the banner, the premium six and the generator
+  kept apart from them), check:signature-sync 128 (premium layout saved and drawn, every http refusal,
+  Branding's SVG skipped, uploads refused by kind, bytes and size, dates, audience, pause, schedule,
+  the picture's route, a banner reaching Zoho on the next sync, the Banners and Templates tabs),
+  check:cards (http refused).

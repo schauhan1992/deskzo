@@ -5,18 +5,10 @@ import { digestSecret } from "@/lib/crypto";
 import { getOrganisation } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
-import {
-  EMPTY_DETAILS,
-  SIGNATURE_FONTS,
-  SOCIAL_NETWORKS,
-  renderSignature,
-  safeColor,
-  type SignatureDetails,
-  type SignatureFont,
-  type SignatureStyle,
-  type SignatureTemplate as Layout,
-  type SocialNetwork,
-} from "@/lib/signatures/render";
+import { workspaceClock } from "@/lib/time/workspace";
+import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, safeColor, type SignatureDetails, type SignatureFont, type SignatureStyle, type SocialNetwork } from "@/lib/signatures/render";
+import { STORED_LAYOUTS, renderAnySignature, type SignatureLayout, type StoredLayout } from "@/lib/signatures/premium";
+import { bannerFor, liveBanners, type LiveBanner } from "@/lib/signatures/banners";
 
 /**
  * Deskzo Signatures on the server: which template somebody gets, and their signature drawn from it and
@@ -36,7 +28,9 @@ export type SignatureRecordField = (typeof RECORD_FIELDS)[number]["key"];
 /** A new template shows everything but the department. */
 export const DEFAULT_SHOWN: SignatureRecordField[] = ["photo", "title", "phone", "email", "address"];
 
-const LAYOUTS = { CLASSIC: "classic", MODERN: "modern", STACKED: "stacked", COMPACT: "compact" } as const satisfies Record<string, Layout>;
+/** The layouts as the template row stores them — the free four, then the premium six (premium.ts). */
+export const LAYOUTS = STORED_LAYOUTS;
+export type LayoutKey = StoredLayout;
 
 export type TemplateSpec = {
   id: string;
@@ -48,6 +42,7 @@ export type TemplateSpec = {
   shown: SignatureRecordField[];
   website: string;
   logoUrl: string;
+  logoLink: string;
   social: Record<SocialNetwork, string>;
   ctaLabel: string;
   ctaUrl: string;
@@ -75,6 +70,7 @@ export function readTemplate(row: SignatureTemplate): TemplateSpec {
     shown,
     website: row.website ?? "",
     logoUrl: row.logoUrl ?? "",
+    logoLink: row.logoLink ?? "",
     social,
     ctaLabel: row.ctaLabel ?? "",
     ctaUrl: row.ctaUrl ?? "",
@@ -177,7 +173,7 @@ function joinAddress(parts: (string | null | undefined)[]): string {
 export type PersonSignature = {
   templateId: string;
   details: SignatureDetails;
-  style: SignatureStyle;
+  style: SignatureStyle<SignatureLayout>;
   html: string;
   /** What changes when the signature does — compared with what was last put into the mailbox. */
   hash: string;
@@ -192,16 +188,24 @@ export type SignatureContext = {
   templates: Map<string, TemplateSpec>;
   rules: Rule[];
   defaultId: string;
+  /** The banners running today, in the workspace's calendar. */
+  banners: LiveBanner[];
 };
 
+/** Branding's logo, where mail programs show it: a PNG, JPEG or GIF (an SVG or WebP one isn't shown by Outlook or Gmail). */
+export function brandLogoUsable(logoDataUrl: string | null | undefined): boolean {
+  return !!logoDataUrl && /^data:image\/(png|jpeg|gif);base64,/i.test(logoDataUrl);
+}
+
 export async function signatureContext(actorId: string | null = null): Promise<SignatureContext> {
-  const [origin, org, branding, defaultRow, rows, rules] = await Promise.all([
+  const [origin, org, branding, defaultRow, rows, rules, clock] = await Promise.all([
     tenantOrigin(),
     getOrganisation(),
     getBranding(),
     defaultSignatureTemplate(actorId),
     db.signatureTemplate.findMany(),
     db.signatureRule.findMany({ select: { templateId: true, target: true, targetId: true } }),
+    workspaceClock(),
   ]);
   const templates = new Map(rows.map((r) => [r.id, readTemplate(r)]));
   if (!templates.has(defaultRow.id)) templates.set(defaultRow.id, readTemplate(defaultRow));
@@ -209,10 +213,11 @@ export async function signatureContext(actorId: string | null = null): Promise<S
     origin,
     company: org.tradeName?.trim() || org.legalName?.trim() || "",
     orgAddress: joinAddress([org.addressLine1, org.addressLine2, org.city, org.state, org.pincode]),
-    brandLogo: branding.logoDataUrl ? `${origin}/api/brand/mark` : null,
+    brandLogo: brandLogoUsable(branding.logoDataUrl) ? `${origin}/api/brand/mark` : null,
     templates,
     rules,
     defaultId: defaultRow.id,
+    banners: await liveBanners(clock.today(), origin),
   };
 }
 
@@ -234,15 +239,17 @@ export async function personSignature(person: Person, ctx: SignatureContext): Pr
     address: show.has("address") ? address : "",
     photo: show.has("photo") && person.photoUpdatedAt ? `${ctx.origin}/api/signatures/photo/${await photoToken(person.id)}?v=${person.photoUpdatedAt.getTime()}` : "",
     logo: t.logoUrl || ctx.brandLogo || "",
+    logoLink: t.logoLink,
     social: t.social,
     signOff: t.signOff,
     ctaLabel: t.ctaLabel,
     ctaUrl: t.ctaUrl,
     disclaimer: t.disclaimer,
+    banner: bannerFor(t.id, ctx.banners),
   };
-  const style: SignatureStyle = { template: LAYOUTS[t.layout] ?? "classic", color: t.color, font: t.font };
+  const style: SignatureStyle<SignatureLayout> = { template: LAYOUTS[t.layout] ?? "classic", color: t.color, font: t.font };
   // The paid product carries no credit.
-  const html = renderSignature(details, style, null);
+  const html = renderAnySignature(details, style, null);
   return { templateId: t.id, details, style, html, hash: createHash("sha256").update(html).digest("hex") };
 }
 

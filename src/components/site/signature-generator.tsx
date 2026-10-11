@@ -9,11 +9,11 @@ import {
   SIGNATURE_TEMPLATES,
   SOCIAL_NETWORKS,
   imageNote,
+  linkNote,
   renderSignature,
   safeColor,
   safeEmail,
   safePhone,
-  safeUrl,
   signatureText,
   type SignatureDetails,
   type SignatureFont,
@@ -25,6 +25,9 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const COLORS = ["#1d4ed8", "#0f766e", "#7c3aed", "#be123c", "#c2410c", "#111827"];
+
+/** Named only — check:signatures keeps this in step with premium.ts, which this page must not import. */
+export const PREMIUM_LAYOUT_NAMES = ["Executive", "Corporate", "Bold", "Centred", "Card", "Spotlight"];
 
 const noSubscription = () => () => {};
 
@@ -116,7 +119,8 @@ export function SignatureGenerator({
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 
-  const urlProblem = (value: string) => (value.trim() && !safeUrl(value) ? "That isn't a web address." : null);
+  // https only: an http:// address is refused, and says so.
+  const urlProblem = (value: string) => linkNote(value);
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
@@ -139,6 +143,14 @@ export function SignatureGenerator({
               </button>
             ))}
           </div>
+          {/* The premium layouts are drawn only by the paid product (src/lib/signatures/premium.ts), never in this page. */}
+          <p className="text-xs text-muted">
+            Six premium layouts — {PREMIUM_LAYOUT_NAMES.join(", ")} — and a company banner under every signature come with{" "}
+            <a href="/signatures" className="font-medium text-brand hover:underline">
+              {siteName} Signatures
+            </a>
+            .
+          </p>
           <div className="flex flex-wrap items-end gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="sig-color">Colour</Label>

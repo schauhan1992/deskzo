@@ -12888,6 +12888,8 @@ model SignatureTemplate {
   /// One value for everybody: the website, a logo's address, the company's social profiles, a button, the sign-off and a disclaimer.
   website     String?
   logoUrl     String?
+  /// Where the logo goes when clicked (https only); the website when empty.
+  logoLink    String?
   social      Json            @default("{}")
   ctaLabel    String?
   ctaUrl      String?
@@ -12899,6 +12901,36 @@ model SignatureTemplate {
   rules       SignatureRule[]
 
   @@map("signature_templates")
+}
+
+/**
+ * A banner under the signature — everybody's, or only the signatures of the templates it names — while
+ * it runs. Set by whoever manages signatures, for the whole company. The picture is uploaded (and served
+ * by the workspace, /api/signatures/banner/<id>) or an https address; its link is https too.
+ */
+model SignatureBanner {
+  id          String    @id @default(cuid())
+  /// What the managers call it; never shown in an email.
+  name        String
+  /// An uploaded picture as a data: URL — PNG, JPEG or GIF, at most 1 MB. Null when imageUrl is used.
+  imageData   String?
+  imageUrl    String?
+  linkUrl     String?
+  /// Shown where the picture is blocked, and read out by screen readers.
+  altText     String
+  /// The width it is shown at, in pixels (120–600); the height follows the picture.
+  width       Int       @default(500)
+  /// Runs from and to these days, in the workspace's own calendar; either may be left open.
+  startsOn    DateTime? @db.Date
+  endsOn      DateTime? @db.Date
+  paused      Boolean   @default(false)
+  /// The templates whose signatures show it, by id; empty: everybody's.
+  templateIds Json      @default("[]")
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("signature_banners")
 }
 
 enum SignatureRuleTarget {

@@ -70,14 +70,17 @@ export function kindPlaceholder(kind: string): string {
   return KINDS.get(kind)?.placeholder ?? "";
 }
 
-/** A web address as typed — "company.com" — made one a browser opens. Null when it can't be. */
+/**
+ * A web address as typed — "company.com" — made an https one a browser opens. Null when it can't be: an
+ * http:// address included, so nothing on a card sends somebody somewhere unencrypted.
+ */
 export function normaliseUrl(raw: string): string | null {
   const value = raw.trim();
   if (!value) return null;
   const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
   try {
     const url = new URL(withScheme);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.protocol !== "https:") return null;
     if (!url.hostname.includes(".")) return null;
     return url.toString();
   } catch {
@@ -99,7 +102,7 @@ export function checkField(input: { kind?: unknown; label?: unknown; value?: unk
   if (raw.length > 300) return { error: `${label} is too long.` };
   if (URL_KINDS.has(kind)) {
     const url = normaliseUrl(raw);
-    if (!url) return { error: `${label} isn't a web address.` };
+    if (!url) return { error: /^http:\/\//i.test(raw) ? `${label}: only https:// addresses — change http:// to https://.` : `${label} isn't a web address.` };
     return { field: { kind: def.kind, label, value: url } };
   }
   if (NUMBER_KINDS.has(kind)) {

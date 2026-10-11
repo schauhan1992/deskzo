@@ -26,7 +26,7 @@ const generator: SiteBlock = {
   props: {
     upsellHeading: "Signatures for your whole team",
     upsellBody:
-      "{siteName} Signatures keeps one design for everybody, fills each person's details in from their record, and puts every signature into their Gmail, Zoho Mail or Outlook — changed there when their details change.",
+      "{siteName} Signatures adds six premium layouts and a company banner under every signature, keeps one design for everybody, fills each person's details in from their record, and puts every signature into their Gmail, Zoho Mail or Outlook — changed there when their details change.",
     upsellAction: { kind: "link", label: "See Deskzo Signatures", href: "/signatures" },
     privacyNote: "Nothing you type here is sent to us or kept: the signature is made in your browser. Pictures you pick from your computer stay in it too.",
   },
