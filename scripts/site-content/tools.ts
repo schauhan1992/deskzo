@@ -26,7 +26,7 @@ const generator: SiteBlock = {
   props: {
     upsellHeading: "Signatures for your whole team",
     upsellBody:
-      "{siteName} Signatures keeps one design for everybody, fills each person's details in from their record, and puts every signature into their Gmail or Zoho Mail — changed there when their details change.",
+      "{siteName} Signatures keeps one design for everybody, fills each person's details in from their record, and puts every signature into their Gmail, Zoho Mail or Outlook — changed there when their details change.",
     upsellAction: { kind: "link", label: "See Deskzo Signatures", href: "/signatures" },
     privacyNote: "Nothing you type here is sent to us or kept: the signature is made in your browser. Pictures you pick from your computer stay in it too.",
   },
@@ -69,7 +69,7 @@ const faq: SiteBlock = {
       { question: "Is what I type kept anywhere?", answer: ["No. The signature is made in your browser and nothing you type is sent to us. Close the page and it is gone, so copy or download your signature first."] },
       { question: "Which email programs does it work with?", answer: ["Gmail, Outlook (the new one, the web one and classic Outlook for Windows), Apple Mail and most others that take a pasted signature. The steps for each are beside the preview."] },
       { question: "Can I remove the “Made with” line?", answer: ["Not from the free signature. Signatures made by {siteName} Signatures, for a whole team, carry no credit line."] },
-      { question: "Can my whole company use the same design?", answer: ["Each person can make their own here with the same colour and layout. {siteName} Signatures keeps one design for everybody, fills each person's details in from their record, and puts the signatures into their Gmail or Zoho Mail for them."] },
+      { question: "Can my whole company use the same design?", answer: ["Each person can make their own here with the same colour and layout. {siteName} Signatures keeps one design for everybody, fills each person's details in from their record, and puts the signatures into their Gmail, Zoho Mail or Outlook for them."] },
     ],
   },
 };

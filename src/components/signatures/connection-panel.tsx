@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { connectGoogleSignatures, disconnectSignatures, setSignatureAutoSync, setZohoOrganisation } from "@/actions/signature";
+import { connectGoogleSignatures, disconnectSignatures, setOutlookAddin, setOutlookReplaceOwn, setSignatureAutoSync, setZohoOrganisation } from "@/actions/signature";
 import { useClock } from "@/components/time/clock-provider";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,17 @@ export type ConnectionView = {
   lastError: string | null;
   /** Whether the company's Zoho app (Settings → Security) is there to connect through. */
   zohoAppReady: boolean;
+  /** Microsoft 365: the Outlook add-in (src/lib/signatures/outlook.ts). */
+  outlook: {
+    on: boolean;
+    /** Its id is made the first time it is turned on — only then is there a manifest to download. */
+    ready: boolean;
+    replaceOwn: boolean;
+    manifestPath: string;
+    /** People Outlook has fetched a signature for, and when it last did. */
+    people: number;
+    lastAt: string | null;
+  };
 };
 
 const OUTCOMES: Record<string, { ok: boolean; text: string }> = {
@@ -150,7 +161,68 @@ export function SignatureConnectionPanel({ view, outcome }: { view: ConnectionVi
           )}
         </Card>
       </div>
-      <p className="text-xs text-subtle">Microsoft 365 is coming: Microsoft has no way to set signatures from outside, so it will be an Outlook add-in. Until then, Outlook users copy theirs from My email signature.</p>
+      <Card className="space-y-3 p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-semibold text-text">Microsoft 365 (Outlook)</h2>
+          {view.outlook.on ? <Badge tone="green">Add-in on</Badge> : <Badge>Off</Badge>}
+        </div>
+        <p className="text-sm text-muted">
+          Microsoft has no way to set signatures from outside, so Outlook runs an add-in that asks for each person&apos;s signature whenever they start a message — in
+          Outlook for Windows (new and classic), on the web, on a Mac, and on iPhone and Android.
+        </p>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
+          <li>Turn the add-in on here, then download its file.</li>
+          <li>
+            A Microsoft 365 administrator opens the Microsoft 365 admin center (admin.microsoft.com) → Settings → Integrated apps → Upload custom apps, chooses Office
+            Add-in, and uploads the file.
+          </li>
+          <li>They choose who gets it — everybody, or some groups — and deploy it. Outlook picks it up within a few hours (Microsoft allows up to a day); people may need to restart Outlook.</li>
+        </ol>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant={view.outlook.on ? "secondary" : "primary"}
+            disabled={pending}
+            onClick={() =>
+              run(
+                () => setOutlookAddin(!view.outlook.on),
+                view.outlook.on ? "The add-in is off: Outlook gets no signatures until it is on again." : "The add-in is on. Download its file for your Microsoft 365 administrator.",
+              )
+            }
+          >
+            {view.outlook.on ? "Turn the add-in off" : "Turn on the Outlook add-in"}
+          </Button>
+          {view.outlook.ready && (
+            <a href={view.outlook.manifestPath} download className="inline-flex h-9 items-center rounded-base border border-line px-3.5 text-sm font-medium text-text hover:bg-surface-sunken">
+              Download the add-in file
+            </a>
+          )}
+        </div>
+        {view.outlook.on && (
+          <>
+            <label className="flex items-center gap-2 text-sm text-text">
+              <input
+                type="checkbox"
+                checked={view.outlook.replaceOwn}
+                disabled={pending}
+                onChange={(e) =>
+                  run(() => setOutlookReplaceOwn(e.target.checked), e.target.checked ? "People's own Outlook signatures are turned off as the add-in puts the company's in." : "People's own Outlook signatures are left alone.")
+                }
+              />
+              Turn off people&apos;s own Outlook signature, so a message never carries two
+            </label>
+            <p className="text-xs text-subtle">
+              {view.outlook.people > 0 && view.outlook.lastAt
+                ? `Outlook has fetched signatures for ${view.outlook.people} ${view.outlook.people === 1 ? "person" : "people"}, most recently ${clock.dateTimeShort(view.outlook.lastAt)}.`
+                : "Outlook hasn't asked for a signature yet — it will once the add-in is deployed and somebody starts a message."}
+            </p>
+            <p className="text-xs text-subtle">
+              While the add-in is on, anybody who knows a person&apos;s work address can ask for that person&apos;s signature — what every email they send already shows.
+              Somebody guessing addresses is stopped after a few wrong ones.
+            </p>
+          </>
+        )}
+      </Card>
     </div>
   );
 }

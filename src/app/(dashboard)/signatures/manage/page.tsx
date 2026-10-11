@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { zohoApp } from "@/lib/workplace/settings";
 import { PERSON_SELECT, personSignature, readTemplate, signatureContext, templateIdFor, type Person } from "@/lib/signatures/person";
 import { readSignatureSettings } from "@/lib/signatures/sync";
+import { OUTLOOK_PATHS } from "@/lib/signatures/outlook";
 import { TabNav } from "@/components/ui/tab-nav";
 import { SignaturePeopleTable, type SignaturePersonRow } from "@/components/signatures/people-table";
 import { SignatureTemplates, type SignatureTemplateDraft } from "@/components/signatures/template-editor";
@@ -60,6 +61,7 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
     }));
     body = <SignatureRulesEditor rules={rules} templates={[...ctx.templates.values()].map((t) => ({ id: t.id, name: t.name }))} choices={choices} />;
   } else if (tab === "connection") {
+    const outlookSeen = await db.signatureOutlook.aggregate({ _count: { _all: true }, _max: { fetchedAt: true } });
     body = (
       <SignatureConnectionPanel
         outcome={mailbox ?? null}
@@ -73,11 +75,21 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
           lastRunAt: settings?.lastRunAt?.toISOString() ?? null,
           lastError: settings?.lastError ?? null,
           zohoAppReady: !!(await zohoApp()),
+          outlook: {
+            on: settings?.outlookOn ?? false,
+            ready: !!settings?.outlookAddinId,
+            replaceOwn: settings?.outlookReplaceOwn ?? true,
+            manifestPath: OUTLOOK_PATHS.manifest,
+            people: outlookSeen._count._all,
+            lastAt: outlookSeen._max.fetchedAt?.toISOString() ?? null,
+          },
         }}
       />
     );
   } else {
-    const syncs = new Map((await db.signatureSync.findMany({ where: { userId: { in: people.map((p) => p.id) } } })).map((s) => [s.userId, s]));
+    const ids = people.map((p) => p.id);
+    const syncs = new Map((await db.signatureSync.findMany({ where: { userId: { in: ids } } })).map((s) => [s.userId, s]));
+    const outlook = settings?.outlookOn ? new Map((await db.signatureOutlook.findMany({ where: { userId: { in: ids } } })).map((o) => [o.userId, o])) : null;
     const rows: SignaturePersonRow[] = [];
     for (const p of people) {
       const s = syncs.get(p.id);
@@ -93,9 +105,19 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
             : s.status === "SKIPPED"
               ? "skipped"
               : "pending";
-      rows.push({ userId: p.id, name: p.name, email: p.email, template: templateName(sig.templateId), state, syncedAt: s?.syncedAt?.toISOString() ?? null, error: s?.lastError ?? null });
+      const seen = outlook?.get(p.id);
+      rows.push({
+        userId: p.id,
+        name: p.name,
+        email: p.email,
+        template: templateName(sig.templateId),
+        state,
+        syncedAt: s?.syncedAt?.toISOString() ?? null,
+        error: s?.lastError ?? null,
+        outlook: seen ? { at: seen.fetchedAt.toISOString(), current: seen.hash === sig.hash } : null,
+      });
     }
-    body = <SignaturePeopleTable rows={rows} connected={!!settings?.provider} />;
+    body = <SignaturePeopleTable rows={rows} connected={!!settings?.provider} outlookOn={!!settings?.outlookOn} />;
   }
 
   return (
@@ -103,7 +125,7 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
       <div>
         <h1 className="text-xl font-semibold text-text">Email signatures</h1>
         <p className="mt-1 text-sm text-muted">
-          One design, each person&apos;s details from their record, put into their Gmail or Zoho Mail and kept in step.
+          One design, each person&apos;s details from their record, put into their Gmail, Zoho Mail or Outlook and kept in step.
         </p>
       </div>
       <TabNav

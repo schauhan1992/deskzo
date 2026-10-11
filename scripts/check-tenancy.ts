@@ -95,6 +95,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/wins/detect.ts:lastLazyRun": PER_WORKSPACE,
   "src/lib/wins/prize-announce.ts:lastLazyRun": PER_WORKSPACE,
   "src/lib/automation-user.ts:memo": PER_WORKSPACE,
+  "src/lib/signatures/outlook.ts:misses": PER_WORKSPACE,
 
   "src/lib/access/geo.ts:loaded": { reason: "shared: the GeoIP database file, public data, one per install" },
   "src/lib/access/geo.ts:checkedAt": { reason: "shared: when the GeoIP file was last looked at" },
@@ -139,6 +140,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/mail/microsoft.ts:endpoints": { reason: "test override of Microsoft's addresses, set only by check scripts" },
   "src/lib/mail/google.ts:endpoints": { reason: "test override of Google's addresses, set only by check scripts" },
   "src/lib/mail/zoho.ts:regions": { reason: "test override of Zoho's data centres, set only by check scripts" },
+  "src/lib/signatures/google.ts:hosts": { reason: "test override of Google's token and Gmail addresses, set only by check scripts" },
   "src/lib/time/zone.ts:partsFormatters": { reason: "Intl formatters keyed by time zone name — the same for every workspace in that zone; no workspace data" },
   "src/lib/time/zone.ts:clocks": { reason: "a clock per time zone name — pure functions of the zone; no workspace data" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },

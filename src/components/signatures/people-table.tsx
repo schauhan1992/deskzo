@@ -18,6 +18,8 @@ export type SignaturePersonRow = {
   state: "current" | "changed" | "pending" | "failed" | "skipped" | "none";
   syncedAt: string | null;
   error: string | null;
+  /** When the Outlook add-in last fetched their signature, and whether it was the one they have now. */
+  outlook: { at: string; current: boolean } | null;
 };
 
 const BADGE: Record<SignaturePersonRow["state"], { tone: "green" | "amber" | "red" | "default"; label: string }> = {
@@ -29,8 +31,12 @@ const BADGE: Record<SignaturePersonRow["state"], { tone: "green" | "amber" | "re
   none: { tone: "default", label: "Not sent" },
 };
 
-/** Everybody's signature: which template, and whether it is in their mailbox — with Sync now. */
-export function SignaturePeopleTable({ rows, connected }: { rows: SignaturePersonRow[]; connected: boolean }) {
+/**
+ * Everybody's signature: which template, whether it is in their Gmail or Zoho Mail — with Sync now — and,
+ * with the Outlook add-in on, when Outlook last fetched it. Outlook can't be synced: it asks for itself.
+ */
+export function SignaturePeopleTable({ rows, connected, outlookOn }: { rows: SignaturePersonRow[]; connected: boolean; outlookOn: boolean }) {
+  const showMailbox = connected || !outlookOn;
   const router = useRouter();
   const clock = useClock();
   const [q, setQ] = useState("");
@@ -60,12 +66,17 @@ export function SignaturePeopleTable({ rows, connected }: { rows: SignaturePerso
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Input className="max-w-xs" placeholder="Search people" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search people" />
-        <Button type="button" className="ml-auto" disabled={!connected || pending} onClick={() => sync()}>
-          <RefreshCw className={pending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-          {pending ? "Putting them in…" : "Sync everybody now"}
-        </Button>
+        {connected && (
+          <Button type="button" className="ml-auto" disabled={pending} onClick={() => sync()}>
+            <RefreshCw className={pending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {pending ? "Putting them in…" : "Sync everybody now"}
+          </Button>
+        )}
       </div>
-      {!connected && <p className="text-sm text-muted">Connect Google Workspace or Zoho Mail (Connection tab) to put signatures into mailboxes. Until then, people copy theirs from My email signature.</p>}
+      {!connected && !outlookOn && (
+        <p className="text-sm text-muted">Connect Google Workspace, Zoho Mail or the Outlook add-in (Connection tab) to put signatures into mailboxes. Until then, people copy theirs from My email signature.</p>
+      )}
+      {!connected && outlookOn && <p className="text-sm text-muted">Outlook asks for each person&apos;s signature as they write, so there is nothing to sync: a change reaches their next message.</p>}
       {message && <p className={message.ok ? "text-sm text-success" : "text-sm text-danger"}>{message.text}</p>}
       <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="w-full min-w-[40rem] text-sm">
@@ -73,8 +84,9 @@ export function SignaturePeopleTable({ rows, connected }: { rows: SignaturePerso
             <tr>
               <th className="px-3 py-2 font-medium">Person</th>
               <th className="px-3 py-2 font-medium">Template</th>
-              <th className="px-3 py-2 font-medium">In their mailbox</th>
-              <th className="px-3 py-2" />
+              {showMailbox && <th className="px-3 py-2 font-medium">In their mailbox</th>}
+              {outlookOn && <th className="px-3 py-2 font-medium">In Outlook</th>}
+              {connected && <th className="px-3 py-2" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -85,21 +97,37 @@ export function SignaturePeopleTable({ rows, connected }: { rows: SignaturePerso
                   <p className="text-xs text-muted">{r.email}</p>
                 </td>
                 <td className="px-3 py-2 align-top text-muted">{r.template}</td>
-                <td className="px-3 py-2 align-top">
-                  <Badge tone={BADGE[r.state].tone}>{BADGE[r.state].label}</Badge>
-                  {r.syncedAt && r.state === "current" && <p className="mt-1 text-xs text-subtle">{clock.dateTimeShort(r.syncedAt)}</p>}
-                  {r.error && r.state !== "current" && <p className="mt-1 max-w-sm text-xs text-danger">{r.error}</p>}
-                </td>
-                <td className="px-3 py-2 text-right align-top">
-                  <Button type="button" variant="ghost" size="sm" disabled={!connected || pending} onClick={() => sync([r.userId])}>
-                    Sync
-                  </Button>
-                </td>
+                {showMailbox && (
+                  <td className="px-3 py-2 align-top">
+                    <Badge tone={BADGE[r.state].tone}>{BADGE[r.state].label}</Badge>
+                    {r.syncedAt && r.state === "current" && <p className="mt-1 text-xs text-subtle">{clock.dateTimeShort(r.syncedAt)}</p>}
+                    {r.error && r.state !== "current" && <p className="mt-1 max-w-sm text-xs text-danger">{r.error}</p>}
+                  </td>
+                )}
+                {outlookOn && (
+                  <td className="px-3 py-2 align-top">
+                    {r.outlook ? (
+                      <>
+                        <Badge tone={r.outlook.current ? "green" : "amber"}>{r.outlook.current ? "Fetched" : "Older one — next message"}</Badge>
+                        <p className="mt-1 text-xs text-subtle">{clock.dateTimeShort(r.outlook.at)}</p>
+                      </>
+                    ) : (
+                      <Badge>Not yet</Badge>
+                    )}
+                  </td>
+                )}
+                {connected && (
+                  <td className="px-3 py-2 text-right align-top">
+                    <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => sync([r.userId])}>
+                      Sync
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-8 text-center text-muted">
+                <td colSpan={2 + (showMailbox ? 1 : 0) + (outlookOn ? 1 : 0) + (connected ? 1 : 0)} className="px-3 py-8 text-center text-muted">
                   Nobody matches.
                 </td>
               </tr>

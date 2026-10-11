@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -227,6 +228,33 @@ export async function setSignatureAutoSync(on: boolean): Promise<ActionResult<nu
   const user = await manager();
   if (!user) return { ok: false, error: REFUSED };
   await db.signatureSettings.upsert({ where: { id: "global" }, create: { id: "global", autoSync: !!on }, update: { autoSync: !!on } });
+  refresh();
+  return { ok: true, data: null };
+}
+
+// ── Microsoft 365: the Outlook add-in ───────────────────────────────────────────────────────────────
+
+/**
+ * The Outlook add-in answers for this workspace, or stops (src/lib/signatures/outlook.ts). Its id is made
+ * the first time and kept, so the manifest the Microsoft 365 administrator uploaded keeps working through
+ * an off and on. Beside Google or Zoho, not instead of them: a company can have people on both.
+ */
+export async function setOutlookAddin(on: boolean): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  const existing = await db.signatureSettings.findUnique({ where: { id: "global" }, select: { outlookAddinId: true } });
+  const data = { outlookOn: !!on, outlookAddinId: existing?.outlookAddinId ?? randomUUID() };
+  await db.signatureSettings.upsert({ where: { id: "global" }, create: { id: "global", ...data }, update: data });
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "SignatureSettings", entityId: "global", entityLabel: on ? "Outlook add-in for email signatures turned on" : "Outlook add-in for email signatures turned off" });
+  refresh();
+  return { ok: true, data: null };
+}
+
+/** Whether the add-in turns off a person's own Outlook signature, so a message never carries two. */
+export async function setOutlookReplaceOwn(on: boolean): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  await db.signatureSettings.upsert({ where: { id: "global" }, create: { id: "global", outlookReplaceOwn: !!on }, update: { outlookReplaceOwn: !!on } });
   refresh();
   return { ok: true, data: null };
 }

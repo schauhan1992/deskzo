@@ -410,3 +410,49 @@ CMS can place and word like any other.
 **Never tried against the real Google or Zoho.** Before selling it: a Google Workspace test domain with a
 service account and delegation, and a Zoho Mail test organisation with an administrator — run Connect and
 Sync once on each, and watch the Zoho signature's position and any limit on its size.
+
+**Phase 5 — Deskzo Signatures for Microsoft 365: the Outlook add-in (11 Oct 2026).** Built from
+Microsoft's documentation and its own signature sample; no Microsoft 365 tenant was used, so the spike in
+decision 5 is still to be run (below).
+
+- **How it works.** Each workspace serves its own add-in (src/lib/signatures/outlook.ts): a manifest of
+  the add-in-only (XML) kind — the unified one isn't taken by Outlook on a Mac or a phone — with one
+  event, `OnNewMessageCompose` (replies and forwards included), on the desktop and on phones, and an
+  **Insert signature** button in the message's ribbon. When it fires, the add-in asks
+  `/api/signatures/outlook/signature?email=<the mailbox's address>`, gets the HTML and its plain-text twin
+  — drawn by the same template and rules as Gmail's and Zoho's — and calls `body.setSignatureAsync`
+  (plain text for a plain-text message). It asks for read/write item and nothing more.
+- **The files** are all the workspace's own, under /api/signatures/outlook: `manifest.xml` (managers
+  only, as an attachment), `launch.html` (Office.js from Microsoft, then the script), `launch.js` (one
+  file, no imports, every address whole — classic Outlook for Windows runs it without the page),
+  `icon/<16|32|64|80|128>` (an envelope on the brand colour, drawn with next/og), and `signature`. The
+  proxy rewrites `/.well-known/microsoft-officeaddins-allowed.json` to a route listing the script, which
+  classic Outlook for Windows reads before it lets the script reach the workspace.
+- **Settings** (`SignatureSettings`): `outlookOn` (off until a manager turns it on), `outlookAddinId` (the
+  manifest's GUID, made the first time and kept, so off and on needs no new upload), `outlookReplaceOwn`
+  (on: the add-in turns off the person's own Outlook signature with `disableClientSignatureAsync`, so a
+  message never carries two).
+- **Seen** (`SignatureOutlook`): when Outlook last fetched each person's signature and its digest —
+  written at most hourly unless the signature changed. People shows an "In Outlook" column, My email
+  signature says "In your Outlook", the Connection tab counts the people.
+- **Who is asking.** The add-in sends only the mailbox's address; proving it (Microsoft's single sign-on)
+  needs an app registered in the company's Entra ID, which is left for later. So while the add-in is on,
+  anybody who knows a person's work address can ask for that person's signature — what every email they
+  send already shows — and a caller who gets 20 addresses wrong in 10 minutes is refused for the rest of
+  them. The Connection tab says so.
+- **The Microsoft 365 administrator** downloads the file from the Connection tab and uploads it in the
+  Microsoft 365 admin center → Settings → Integrated apps → Upload custom apps → Office Add-in, then picks
+  who gets it. Event-based add-ins only start on their own when deployed that way.
+- Not built: the mail-flow-rule fallback; `OnMessageFromChanged` (a signature for a shared mailbox chosen
+  in From); a shorter signature for replies; signing in with Entra ID.
+- Checks: check:signature-sync (100 — the manifest's shape and order, the script run in a stand-in
+  Outlook through every path, the endpoint, its limits, the files and the pages).
+
+**Never tried in a real Outlook.** Before selling it, on a Microsoft 365 test tenant: upload the manifest
+in Integrated apps (Microsoft's validator is the first real check of it), then start a message in classic
+Outlook for Windows, the new Outlook, Outlook on the web, Outlook for Mac, and Outlook on iPhone and
+Android. Watch for: whether the manifest's Mailbox 1.5 minimum (needed for phones) is accepted with the
+desktop launch event; whether classic Outlook reads the well-known file and lets the script's fetch
+through; whether the signature's inline styles survive (Microsoft's reference says setSignatureAsync
+"doesn't support inline CSS", while its own sample uses inline styles); the photo and logo fetched by
+address; and replies and forwards.

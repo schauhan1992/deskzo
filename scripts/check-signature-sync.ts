@@ -8,11 +8,15 @@
  * domain-wide delegation, so the stand-in checks the signed token itself; Zoho is an administrator's
  * grant, an organisation, its accounts and an admin-added signature per person.
  *
+ * Microsoft 365 is the Outlook add-in (src/lib/signatures/outlook.ts): its manifest is checked for shape,
+ * and its script is run in a stand-in Outlook (node:vm) whose fetch reaches the real signature route.
+ *
  *   npm run check:signature-sync
  */
 import "dotenv/config";
 import Module from "node:module";
 import http from "node:http";
+import vm from "node:vm";
 import type { AddressInfo } from "node:net";
 import { execSync } from "node:child_process";
 import { createVerify, generateKeyPairSync, randomUUID } from "node:crypto";
@@ -285,7 +289,7 @@ async function snapshot(client: PrismaClient): Promise<string> {
 async function run(scratchUrl: string, base: string) {
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { db } = require("../src/lib/db") as typeof import("../src/lib/db");
-  const { runAsTenant } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");
+  const { runAsTenant, tenantOrigin } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");
   const { encryptSecret } = require("../src/lib/crypto") as typeof import("../src/lib/crypto");
   const settingsLib = require("../src/lib/workplace/settings") as typeof import("../src/lib/workplace/settings");
   const zohoMail = require("../src/lib/mail/zoho") as typeof import("../src/lib/mail/zoho");
@@ -298,6 +302,13 @@ async function run(scratchUrl: string, base: string) {
   const connectRoute = require("../src/app/api/mail/[provider]/connect/route") as typeof import("../src/app/api/mail/[provider]/connect/route");
   const callbackRoute = require("../src/app/api/mail/[provider]/callback/route") as typeof import("../src/app/api/mail/[provider]/callback/route");
   const connectState = require("../src/lib/mail/connect-state") as typeof import("../src/lib/mail/connect-state");
+  const outlookLib = require("../src/lib/signatures/outlook") as typeof import("../src/lib/signatures/outlook");
+  const signatureRoute = require("../src/app/api/signatures/outlook/signature/route") as typeof import("../src/app/api/signatures/outlook/signature/route");
+  const scriptRoute = require("../src/app/api/signatures/outlook/launch.js/route") as typeof import("../src/app/api/signatures/outlook/launch.js/route");
+  const pageRoute = require("../src/app/api/signatures/outlook/launch.html/route") as typeof import("../src/app/api/signatures/outlook/launch.html/route");
+  const allowedRoute = require("../src/app/api/signatures/outlook/allowed/route") as typeof import("../src/app/api/signatures/outlook/allowed/route");
+  const manifestRoute = require("../src/app/api/signatures/outlook/manifest.xml/route") as typeof import("../src/app/api/signatures/outlook/manifest.xml/route");
+  const iconRoute = require("../src/app/api/signatures/outlook/icon/[size]/route") as typeof import("../src/app/api/signatures/outlook/icon/[size]/route");
   const MyPage = (require("../src/app/(dashboard)/signatures/page") as { default: () => Promise<unknown> }).default;
   const ManagePage = (require("../src/app/(dashboard)/signatures/manage/page") as { default: (p: unknown) => Promise<unknown> }).default;
   /* eslint-enable @typescript-eslint/no-require-imports */
@@ -483,6 +494,191 @@ async function run(scratchUrl: string, base: string) {
       const z5 = await sync.syncSignatures({ budgetMs: 30_000, userIds: fixture, force: true });
       ok("a withdrawn grant stops the run and says to connect again", z5.stopped !== null && /Connect Zoho Mail again/.test(z5.stopped ?? ""), z5.stopped);
       stand.zoho.revoked = false;
+
+      section("Microsoft 365: the Outlook add-in");
+      const ORIGIN = await tenantOrigin();
+      const ask = (email: string) => signatureRoute.GET(new NextRequest(`${ORIGIN}/api/signatures/outlook/signature?email=${encodeURIComponent(email)}`));
+      outlookLib.resetOutlookMisses();
+      const offAnswer = await ask(`rep@${DOMAIN}`);
+      ok("off until a manager turns it on: not found, and nothing for the add-in to say", offAnswer.status === 404 && (await offAnswer.json()).message === null);
+      actor = rep;
+      ok("somebody who doesn't manage signatures can't turn it on", !(await actions.setOutlookAddin(true)).ok);
+      actor = boss;
+      ok("a manager turns it on", (await actions.setOutlookAddin(true)).ok);
+      const addinId = (await db.signatureSettings.findUniqueOrThrow({ where: { id: "global" } })).outlookAddinId ?? "";
+      ok("...which gives the add-in its id, a GUID as Office wants", /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(addinId), addinId);
+      await actions.setOutlookAddin(false);
+      await actions.setOutlookAddin(true);
+      ok("off and on again keeps the id, so the uploaded manifest keeps working", (await db.signatureSettings.findUniqueOrThrow({ where: { id: "global" } })).outlookAddinId === addinId);
+
+      // The manifest.
+      const manifest = outlookLib.outlookManifest({ origin: ORIGIN, addinId, company: `${TAG} Traders & <Sons>` });
+      const stack: string[] = [];
+      let wellFormed = true;
+      for (const m of manifest.replace(/<\?xml[^>]*\?>/, "").matchAll(/<(\/?)([A-Za-z][\w:.-]*)[^>]*?(\/?)>/g)) {
+        if (m[3]) continue;
+        if (m[1]) wellFormed = wellFormed && stack.pop() === m[2];
+        else stack.push(m[2]!);
+      }
+      ok("the manifest is well-formed XML, with every & and < in the company's name escaped", wellFormed && stack.length === 0 && !/&(?!amp;|lt;|gt;|quot;|apos;)/.test(manifest) && manifest.includes(`${TAG} Traders &amp; &lt;Sons&gt; signatures`));
+      const order = ["<Id>", "<Version>", "<ProviderName>", "<DefaultLocale>", "<DisplayName", "<Description", "<IconUrl", "<HighResolutionIconUrl", "<SupportUrl", "<AppDomains>", "<Hosts>", "<Requirements>", "<FormSettings>", "<Permissions>", "<Rule ", "<VersionOverrides"];
+      ok("...its elements in the order Office's schema reads them", order.every((tag, i) => i === 0 || manifest.indexOf(tag) > manifest.indexOf(order[i - 1]!)));
+      ok("...the add-in's id, and read/write item — the least it can ask for to set a signature", manifest.includes(`<Id>${addinId}</Id>`) && manifest.includes("<Permissions>ReadWriteItem</Permissions>") && !manifest.includes("ReadWriteMailbox"));
+      ok(
+        "...a new message starts it on the desktop and on phones; classic Outlook gets the script itself",
+        (manifest.match(/<LaunchEvent Type="OnNewMessageCompose" FunctionName="deskzoOnNewMessageCompose"\/>/g) ?? []).length === 2 &&
+          /<DesktopFormFactor>[\s\S]*LaunchEvent[\s\S]*<\/DesktopFormFactor>\s*<MobileFormFactor>[\s\S]*LaunchEvent[\s\S]*<\/MobileFormFactor>/.test(manifest) &&
+          manifest.includes(`<Override type="javascript" resid="LaunchScript.Url"/>`),
+      );
+      const urls = [...manifest.matchAll(/DefaultValue="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
+      ok("...every address in it is this workspace's own, whole", urls.length >= 9 && urls.every((u) => u.startsWith(`${ORIGIN}/`)), urls.length);
+
+      // The script, in a stand-in Outlook.
+      const scriptRes = await scriptRoute.GET();
+      const script = await scriptRes.text();
+      ok("the script is served as JavaScript with the workspace's address written in", scriptRes.status === 200 && (scriptRes.headers.get("content-type") ?? "").startsWith("text/javascript") && script.includes(`var DESKZO_ORIGIN = "${ORIGIN}";`));
+      ok("...and is one file with no imports, as classic Outlook for Windows needs", !/^\s*(import|export)\s/m.test(script) && !/require\(/.test(script) && (() => {
+        try {
+          new vm.Script(script);
+          return true;
+        } catch {
+          return false;
+        }
+      })());
+      type Fetched = { status: number; json: () => Promise<unknown> };
+      const outlook = (o: { email: string; bodyType?: "html" | "text"; own?: boolean; failSet?: boolean; page?: boolean; fetchImpl?: (url: string) => Promise<Fetched> }) => {
+        const calls = { set: [] as { data: string; coercion: string }[], disabled: 0, notes: [] as string[], completed: 0, onReady: 0, fetched: [] as string[] };
+        const handlers = new Map<string, (event: unknown) => void>();
+        type Cb = (r: { status: string; value?: unknown; error?: { message: string } }) => void;
+        const item = {
+          body: {
+            getTypeAsync: (cb: Cb) => cb({ status: "succeeded", value: o.bodyType ?? "html" }),
+            setSignatureAsync: (data: string, options: { coercionType: string }, cb: Cb) => {
+              calls.set.push({ data, coercion: options.coercionType });
+              cb(o.failSet ? { status: "failed", error: { message: "The data is too long" } } : { status: "succeeded" });
+            },
+          },
+          isClientSignatureEnabledAsync: (cb: Cb) => cb({ status: "succeeded", value: o.own ?? true }),
+          disableClientSignatureAsync: (cb: Cb) => {
+            calls.disabled += 1;
+            cb({ status: "succeeded" });
+          },
+          notificationMessages: {
+            replaceAsync: (_key: string, m: { message: string }, cb: Cb) => {
+              calls.notes.push(m.message);
+              cb({ status: "succeeded" });
+            },
+          },
+        };
+        const realFetch = async (url: string): Promise<Fetched> => {
+          const res = await signatureRoute.GET(new NextRequest(url));
+          return { status: res.status, json: () => res.json() };
+        };
+        const Office = {
+          context: { mailbox: { item, userProfile: { emailAddress: o.email } } },
+          actions: { associate: (name: string, fn: (event: unknown) => void) => handlers.set(name, fn) },
+          onReady: () => {
+            calls.onReady += 1;
+          },
+        };
+        vm.runInContext(
+          script,
+          vm.createContext({
+            Office,
+            setTimeout,
+            clearTimeout,
+            fetch: (url: string) => {
+              calls.fetched.push(url);
+              return (o.fetchImpl ?? realFetch)(url);
+            },
+            ...(o.page ? { document: {} } : {}),
+          }),
+        );
+        const fire = (name: string) =>
+          new Promise<void>((resolve) =>
+            handlers.get(name)!({
+              completed: () => {
+                calls.completed += 1;
+                resolve();
+              },
+            }),
+          );
+        return { calls, handlers, fire };
+      };
+
+      const classic = outlook({ email: `REP@${DOMAIN.toUpperCase()}` });
+      ok("both handlers are made known to Office by the names in the manifest", classic.handlers.has(outlookLib.OUTLOOK_HANDLERS.compose) && classic.handlers.has(outlookLib.OUTLOOK_HANDLERS.button));
+      await classic.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("a new message: it asks the workspace by the mailbox's address, with the whole address", classic.calls.fetched.length === 1 && classic.calls.fetched[0]!.startsWith(`${ORIGIN}/api/signatures/outlook/signature?email=`));
+      ok("...and puts the rep's own signature in as HTML (the address matched whatever its case)", classic.calls.set.length === 1 && classic.calls.set[0]!.coercion === "html" && classic.calls.set[0]!.data.includes("Head of accounts") && classic.calls.set[0]!.data.includes(`${TAG} Rep`));
+      ok("...turns off their own Outlook signature, so there is never two, and finishes the event once", classic.calls.disabled === 1 && classic.calls.completed === 1 && classic.calls.notes.length === 0);
+      ok("...without a page it doesn't wait for one (classic Outlook for Windows)", classic.calls.onReady === 0);
+      const web = outlook({ email: `rep@${DOMAIN}`, page: true, own: false });
+      await web.fire(outlookLib.OUTLOOK_HANDLERS.button);
+      ok("in a page (the web, the new Outlook, Mac, phones) it tells Office.js it is ready; the button puts it in too", web.calls.onReady === 1 && web.calls.set.length === 1 && web.calls.completed === 1);
+      ok("...and leaves a person's own signature alone when there is none on", web.calls.disabled === 0);
+      const plain = outlook({ email: `rep@${DOMAIN}`, bodyType: "text" });
+      await plain.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("a plain-text message gets the plain-text twin", plain.calls.set[0]?.coercion === "text" && plain.calls.set[0]!.data.includes(`\n${TAG} Rep\n`) && !plain.calls.set[0]!.data.includes("<"), plain.calls.set[0]?.data.slice(0, 80));
+      const nobody = outlook({ email: `nobody@${DOMAIN}` });
+      await nobody.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("an address that is nobody's here: nothing put in, and the person is told whom to ask", nobody.calls.set.length === 0 && nobody.calls.completed === 1 && /Ask whoever manages/.test(nobody.calls.notes[0] ?? ""), nobody.calls.notes[0]);
+      const refusedSet = outlook({ email: `rep@${DOMAIN}`, failSet: true });
+      await refusedSet.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("Outlook refusing it: said, and the event still finished", refusedSet.calls.completed === 1 && /couldn't be put in: The data is too long/.test(refusedSet.calls.notes[0] ?? ""));
+      const offline = outlook({ email: `rep@${DOMAIN}`, fetchImpl: () => Promise.reject(new Error("offline")) });
+      await offline.fire(outlookLib.OUTLOOK_HANDLERS.compose);
+      ok("the workspace out of reach: said, with the button to try again, and the event still finished", offline.calls.completed === 1 && /Insert signature/.test(offline.calls.notes[0] ?? ""));
+
+      // What the signature endpoint answers.
+      outlookLib.resetOutlookMisses();
+      const repNow = await person.personSignature((await person.loadPerson(rep.id))!, await person.signatureContext());
+      const seen = await db.signatureOutlook.findUniqueOrThrow({ where: { userId: rep.id } });
+      ok("each fetch is noted against the person, with the signature's digest", seen.hash === repNow.hash);
+      await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-a", seen.fetchedAt.getTime() + 5 * 60_000);
+      ok("...but not written again within the hour for the same signature", (await db.signatureOutlook.findUniqueOrThrow({ where: { userId: rep.id } })).fetchedAt.getTime() === seen.fetchedAt.getTime());
+      await db.employeeProfile.update({ where: { userId: rep.id }, data: { designation: "Director of accounts" } });
+      const changed = await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-a");
+      ok("a changed title is in the very next message, and noted", changed.status === 200 && (changed.body as { html: string }).html.includes("Director of accounts") && (await db.signatureOutlook.findUniqueOrThrow({ where: { userId: rep.id } })).hash !== seen.hash);
+      ok("an address that isn't one is refused outright", (await outlookLib.outlookSignature("not an address", "caller-a")).status === 400);
+      await db.user.update({ where: { id: other.id }, data: { active: false } });
+      ok("a switched-off account has no signature", (await outlookLib.outlookSignature(`other@${DOMAIN}`, "caller-a")).status === 404);
+      await db.user.update({ where: { id: other.id }, data: { active: true } });
+      for (let i = 0; i < 25; i++) await outlookLib.outlookSignature(`guess${i}@${DOMAIN}`, "caller-guessing");
+      ok("somebody guessing addresses is stopped — even for a real one — after twenty wrong", (await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-guessing")).status === 429);
+      ok("...and only they are: everybody else is answered", (await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-b")).status === 200);
+      ok("...and they are again ten minutes later", (await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-guessing", Date.now() + 11 * 60_000)).status === 200);
+      ok("any origin may read it, and nothing keeps it", (await ask(`rep@${DOMAIN}`)).headers.get("access-control-allow-origin") === "*" && (await ask(`rep@${DOMAIN}`)).headers.get("cache-control") === "no-store");
+      await actions.setOutlookReplaceOwn(false);
+      ok("a manager can leave people's own Outlook signatures alone", ((await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-a")).body as { replaceOwn: boolean }).replaceOwn === false);
+      await actions.setOutlookReplaceOwn(true);
+
+      // The other files Outlook fetches, and the manifest's download.
+      const page = await (await pageRoute.GET()).text();
+      ok("the page loads Office.js from Microsoft, then the script from this workspace", page.indexOf(outlookLib.OFFICE_JS) > 0 && page.indexOf(`${ORIGIN}/api/signatures/outlook/launch.js`) > page.indexOf(outlookLib.OFFICE_JS));
+      ok("the well-known file allows that one script", JSON.stringify(await (await allowedRoute.GET()).json()) === JSON.stringify({ allowed: [`${ORIGIN}/api/signatures/outlook/launch.js`] }));
+      const icon = await iconRoute.GET(new Request(`${ORIGIN}/x`), { params: Promise.resolve({ size: "80" }) });
+      const iconBytes = Buffer.from(await icon.arrayBuffer());
+      ok("the icons are PNGs at the sizes Outlook asks for, and only those", icon.status === 200 && iconBytes.subarray(1, 4).toString("ascii") === "PNG" && iconBytes.readUInt32BE(16) === 80 && (await iconRoute.GET(new Request(`${ORIGIN}/x`), { params: Promise.resolve({ size: "81" }) })).status === 404);
+      actor = null;
+      ok("the manifest isn't given to somebody signed out", (await manifestRoute.GET()).status === 404);
+      actor = rep;
+      ok("...nor to somebody who doesn't manage signatures", (await manifestRoute.GET()).status === 404);
+      actor = boss;
+      const download = await manifestRoute.GET();
+      const downloaded = await download.text();
+      ok("a manager downloads it, as a file, with this workspace's id and address", download.status === 200 && (download.headers.get("content-disposition") ?? "").startsWith("attachment") && downloaded.includes(`<Id>${addinId}</Id>`) && downloaded.includes(`<AppDomain>${ORIGIN}</AppDomain>`));
+
+      // The pages.
+      const connTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "connection" }) })));
+      ok("the Connection tab: the add-in on, its file, and the steps in the Microsoft 365 admin center", connTab.includes("Microsoft 365 (Outlook)") && connTab.includes("Add-in on") && connTab.includes("Download the add-in file") && connTab.includes("Integrated apps") && /fetched signatures for \d+ (person|people)/.test(connTab), connTab.slice(connTab.indexOf("Microsoft 365"), connTab.indexOf("Microsoft 365") + 200));
+      const peopleTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({}) })));
+      ok("the People tab: when Outlook last fetched each person's signature", peopleTab.includes("In Outlook") && peopleTab.includes("Fetched") && peopleTab.includes("Not yet"));
+      actor = rep;
+      const mineNow = textOf(await renderHtml(await MyPage()));
+      ok("My email signature: that it is in their Outlook", mineNow.includes("In your Outlook"), mineNow.slice(0, 300));
+      actor = boss;
+      ok("turned off, the add-in gets nothing again", (await actions.setOutlookAddin(false)).ok && (await outlookLib.outlookSignature(`rep@${DOMAIN}`, "caller-a")).status === 404);
 
       section("Letting go");
       actor = boss;

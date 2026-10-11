@@ -675,6 +675,7 @@ model User {
   cardContacts             CardContact[]              @relation("CardContactOwner")
   cardCampaigns            CardCampaignMember[]       @relation("CardCampaignMember")
   signatureSync            SignatureSync?             @relation("SignatureSyncOf")
+  signatureOutlook         SignatureOutlook?          @relation("SignatureOutlookOf")
   leaveBalances            LeaveBalance[]             @relation("UserLeaveBalances")
   leaveRequests            LeaveRequest[]             @relation("UserLeaveRequests")
   leaveApprovals           LeaveRequest[]             @relation("LeaveApprover")
@@ -12948,6 +12949,12 @@ model SignatureSettings {
   lastError            String?
   connectedById        String?
   connectedAt          DateTime?
+  /// Microsoft 365: the Outlook add-in answers for this workspace. Off until a manager turns it on.
+  outlookOn            Boolean   @default(false)
+  /// The add-in's id in its manifest — made the first time it is turned on and kept, so turning it off and on needs no new upload.
+  outlookAddinId       String?
+  /// The add-in turns off a person's own Outlook signature, so a message never carries two.
+  outlookReplaceOwn    Boolean   @default(true)
   updatedAt            DateTime  @updatedAt
 
   @@map("signature_settings")
@@ -12981,4 +12988,19 @@ model SignatureSync {
 
   @@index([status])
   @@map("signature_syncs")
+}
+
+/**
+ * Microsoft 365 has no way to set a signature from outside, so the Outlook add-in asks for the person's
+ * signature each time they write a message. This is the last time it did, and which signature it got —
+ * written at most hourly unless the signature changed.
+ */
+model SignatureOutlook {
+  userId    String   @id
+  user      User     @relation("SignatureOutlookOf", fields: [userId], references: [id], onDelete: Cascade)
+  /// A digest of the signature Outlook got — the same digest as SignatureSync.syncedHash.
+  hash      String
+  fetchedAt DateTime
+
+  @@map("signature_outlook")
 }

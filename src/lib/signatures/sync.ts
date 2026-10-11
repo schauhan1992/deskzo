@@ -19,6 +19,9 @@ import { PERSON_SELECT, personSignature, signatureContext, type Person } from "@
  * else does. A person who fails is tried again later, waiting longer each time; a fault in the
  * connection itself — a missing delegation, a revoked grant — stops the run and is said once, on the
  * settings, not once per person.
+ *
+ * Outlook isn't here: Microsoft 365 can't be given a signature from outside, so its add-in asks for each
+ * one as a message starts (src/lib/signatures/outlook.ts).
  */
 
 export type SignatureProvider = "GOOGLE" | "ZOHO";

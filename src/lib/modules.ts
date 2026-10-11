@@ -564,7 +564,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     key: "signatures",
     label: "Email Signatures",
     description:
-      "The company's email signatures: designed once, each person's name, title and numbers filled in from their record, and put into everybody's Gmail or Zoho Mail — kept in step when a title or a number changes.",
+      "The company's email signatures: designed once, each person's name, title and numbers filled in from their record, and put into everybody's Gmail, Zoho Mail or Outlook — kept in step when a title or a number changes.",
     navGroup: "My work",
     navItems: [
       // Everybody may see and copy their own signature.

@@ -141,7 +141,7 @@ const clean = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0,
 // ── Building ────────────────────────────────────────────────────────────────────────────────────────
 
 /** Text that reads on the colour: near-black on a light one, white on a dark one. */
-function inkOn(hex: string): string {
+export function inkOn(hex: string): string {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return "#ffffff";
   const ch = (h: string) => {

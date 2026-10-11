@@ -94,6 +94,9 @@ const MAINTENANCE_PAGE = `<!doctype html>
  */
 const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay)|platform\/inbound-email)\/?$/;
 
+/** Where Office looks for the add-in scripts a workspace allows — see the rewrite in the proxy. */
+const OFFICE_ADDINS_ALLOWED = "/.well-known/microsoft-officeaddins-allowed.json";
+
 /** The partner programme's first-touch referral cookie on the public site, and a referral code's shape (6–40 characters). */
 const REFERRAL_COOKIE = "deskzo_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -316,6 +319,16 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
    * maintenance status endpoint authenticate themselves and must keep answering while pages are held.
    */
   if (api) return NextResponse.next();
+  /**
+   * The Outlook add-in's well-known file (src/lib/signatures/outlook.ts): classic Outlook for Windows
+   * reads it, with no session, before it lets the add-in's script reach this workspace. Answered by an
+   * /api route, so — like the rest of /api — nothing below applies to it.
+   */
+  if (pathname === OFFICE_ADDINS_ALLOWED) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/api/signatures/outlook/allowed";
+    return NextResponse.rewrite(url);
+  }
   // A session counts only in the workspace that issued it (its cookie also only decrypts there).
   const sessionTenant = (req.auth as { user?: { tid?: string } } | null)?.user?.tid;
   if (req.auth && sessionTenant !== tenant.id) req.auth = null;
