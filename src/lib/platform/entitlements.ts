@@ -15,6 +15,9 @@ import { forgetRegistry } from "@/lib/tenancy/registry";
  *   · Seats, copilot tokens and custom domains: an edition or internal plan without a limit means
  *     no limit; otherwise each plan's allowance times its quantity, added up (an add-on without one
  *     adds nothing). A staff override replaces the sum.
+ *   · Seats charged per person (a per-person price) are what was bought: the quantity, times the
+ *     plan's seats or one — never "no limit" because the plan names none. A trial or a plan given by
+ *     hand has no price, so the plan's own number holds as before.
  *
  * The working out itself is `entitlementsFrom`, which reads nothing: the console's previews
  * (entitlement-preview.ts) run it on a change that has not been made, so what they show is what the
@@ -37,17 +40,21 @@ export const ENTITLEMENT_PLAN_SELECT = {
   modules: { select: { moduleKey: true } },
 } as const satisfies Prisma.PlanSelect;
 
-/** One plan on a live subscription, with its quantity. */
+/** One plan on a live subscription, with its quantity — and whether it is charged per person. */
 export type EntItem = {
   quantity: number;
+  /** Charged per person: the quantity is the people bought (the item's price, src/lib/billing/prices.ts). */
+  perSeat?: boolean;
   plan: { key: string; kind: PlanKind; allModules: boolean; seats: number | null; copilotTokens: number | null; customDomains: number | null; modules: { moduleKey: string }[] };
 };
 
 type PlanForSum = { kind: PlanKind; seats: number | null; copilotTokens: number | null; customDomains: number | null };
 
-function sumLimit(items: { quantity: number; plan: PlanForSum }[], field: "seats" | "copilotTokens" | "customDomains"): number | null {
-  if (items.some((i) => BASE_KINDS.includes(i.plan.kind) && i.plan[field] === null)) return null;
-  return items.reduce((total, i) => total + (i.plan[field] ?? 0) * i.quantity, 0);
+function sumLimit(items: { quantity: number; perSeat?: boolean; plan: PlanForSum }[], field: "seats" | "copilotTokens" | "customDomains"): number | null {
+  // People charged per person are counted, whatever the plan says (one each, when it says nothing).
+  const counted = (i: { perSeat?: boolean }) => field === "seats" && !!i.perSeat;
+  if (items.some((i) => BASE_KINDS.includes(i.plan.kind) && i.plan[field] === null && !counted(i))) return null;
+  return items.reduce((total, i) => total + (i.plan[field] ?? (counted(i) ? 1 : 0)) * i.quantity, 0);
 }
 
 /**
@@ -88,11 +95,11 @@ export async function computeEntitlements(tenantId: string): Promise<Entitlement
     control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
     control.subscriptionItem.findMany({
       where: { subscription: { tenantId, status: { in: [...LIVE_STATUSES] } } },
-      select: { quantity: true, plan: { select: ENTITLEMENT_PLAN_SELECT } },
+      select: { quantity: true, price: { select: { perSeat: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
   ]);
-  return entitlementsFrom(tenant, items, overrides);
+  return entitlementsFrom(tenant, items.map(({ price, ...item }) => ({ ...item, perSeat: !!price?.perSeat })), overrides);
 }
 
 /** Works it out and writes it, where every request for the workspace reads it within the minute. */

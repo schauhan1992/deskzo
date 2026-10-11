@@ -3,16 +3,24 @@
  *
  *   npm run platform:plans -- products [--dry-run] [--allow-removals]   the products as plans, made or brought up to date
  *   npm run platform:plans -- list                                      every plan: key, kind, product, default, on sale
+ *   npm run platform:plans -- prices [--apply] [--remake]               the launch prices for India (src/lib/platform/price-book.ts)
  *
  * `products` makes Deskzo One, a plan for each product and the add-ons (src/lib/platform/product-plans.ts,
  * which says what it owns and what it leaves to staff). It is safe to run again: a run that finds them
  * as products.ts has them changes nothing. `--dry-run` says what it would do and writes nothing;
- * `--allow-removals` lets it take a module off a plan that workspaces are on. Prices are staff's to
- * add in the console — nothing here calls a gateway.
+ * `--allow-removals` lets it take a module off a plan that workspaces are on. Nothing but `prices --apply`
+ * calls a gateway.
+ *
+ * `prices` says what the launch price book would change — the people each plan's unit includes, and its
+ * monthly and yearly price in rupees — and writes nothing. `prices --apply` makes each price at Razorpay
+ * (its keys must be in the console, Settings › Billing — test keys first) and here, as the console does.
+ * Prices are staff's to change in the console afterwards. `--remake` makes every price again, even one
+ * that matches — once, when Razorpay's live keys replace its test keys.
  */
 import "dotenv/config";
 import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
 import { syncProductPlans } from "../src/lib/platform/product-plans";
+import { INDIA_LAUNCH_PRICES, applyPriceBook } from "../src/lib/platform/price-book";
 
 const args = process.argv.slice(2);
 const ACTOR = "script:platform:plans";
@@ -45,8 +53,26 @@ async function main() {
       }
       return;
     }
+    case "prices": {
+      const apply = args.includes("--apply");
+      const lines = await applyPriceBook(INDIA_LAUNCH_PRICES, { actor: "script:platform:prices", dryRun: !apply, remake: args.includes("--remake") });
+      for (const line of lines) {
+        const outcome = !apply && line.outcome === "priced" ? "would be priced" : line.outcome;
+        console.log(`${line.planKey.padEnd(22)} ${outcome.padEnd(16)}${line.changes.length ? `  ${line.changes.join("; ")}` : ""}${line.note ? `  (${line.note})` : ""}`);
+      }
+      const priced = lines.filter((l) => l.outcome === "priced").length;
+      const failed = lines.filter((l) => l.outcome === "missing" || l.outcome === "refused").length;
+      console.log(apply ? `
+${priced} priced, ${lines.length - priced - failed} as they were.` : `
+Dry run: ${priced} to price, nothing written and no gateway called. Add --apply to make them.`);
+      if (failed) {
+        console.error(`${failed} not priced — see above.`);
+        process.exitCode = 1;
+      }
+      return;
+    }
     default:
-      console.log("Commands: products [--dry-run] [--allow-removals], list — see the top of scripts/platform-plans.ts.");
+      console.log("Commands: products [--dry-run] [--allow-removals], list, prices [--apply] [--remake] — see the top of scripts/platform-plans.ts.");
       process.exitCode = 1;
   }
 }

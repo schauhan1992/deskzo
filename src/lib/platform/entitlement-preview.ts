@@ -116,7 +116,7 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
         cancelAtPeriodEnd: true,
         pastDueSince: true,
         cancelledAt: true,
-        items: { select: { planId: true, quantity: true, plan: { select: ENTITLEMENT_PLAN_SELECT } } },
+        items: { select: { planId: true, quantity: true, price: { select: { perSeat: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } } },
       },
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
@@ -124,7 +124,7 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
   ]);
   if (!tenant) throw new ConsoleRefused("That workspace no longer exists.");
 
-  const itemsOf = (list: typeof subs): EntItem[] => list.filter((s) => LIVE.includes(s.status)).flatMap((s) => s.items.map(({ quantity, plan }) => ({ quantity, plan })));
+  const itemsOf = (list: typeof subs): EntItem[] => list.filter((s) => LIVE.includes(s.status)).flatMap((s) => s.items.map(({ quantity, price, plan }) => ({ quantity, perSeat: !!price?.perSeat, plan })));
   const current = entitlementsFrom(tenant, itemsOf(subs), overrides);
 
   // Every refusal the save's checks would reach, in its order; the save stops at the first.
@@ -260,7 +260,7 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
   const [items, overrides] = await Promise.all([
     control.subscriptionItem.findMany({
       where: { subscription: { tenantId: { in: ids }, status: { in: [...LIVE_STATUSES] } } },
-      select: { quantity: true, subscription: { select: { tenantId: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
+      select: { quantity: true, price: { select: { perSeat: true } }, subscription: { select: { tenantId: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId: { in: ids } }, select: { tenantId: true, moduleKey: true, granted: true } }),
   ]);
@@ -275,10 +275,10 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     modules: data.allModules ? [] : modules.map((moduleKey) => ({ moduleKey })),
   };
   for (const t of tenants) {
-    const own: EntItem[] = items.filter((i) => i.subscription.tenantId === t.id).map(({ quantity, plan }) => ({ quantity, plan }));
+    const own: EntItem[] = items.filter((i) => i.subscription.tenantId === t.id).map(({ quantity, price, plan }) => ({ quantity, perSeat: !!price?.perSeat, plan }));
     const ownOverrides = overrides.filter((o) => o.tenantId === t.id);
     const current = entitlementsFrom(t, own, ownOverrides);
-    const next = entitlementsFrom(t, own.map((i) => (i.plan.key === key ? { quantity: i.quantity, plan: saved } : i)), ownOverrides);
+    const next = entitlementsFrom(t, own.map((i) => (i.plan.key === key ? { quantity: i.quantity, perSeat: i.perSeat, plan: saved } : i)), ownOverrides);
     const { removed } = moduleDiff(current, next, t.country);
     if (removed.length) preview.losingModules.push({ slug: t.slug, modules: removed });
   }

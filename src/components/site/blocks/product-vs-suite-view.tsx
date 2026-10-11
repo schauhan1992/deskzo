@@ -6,6 +6,7 @@ import { anchorId, fill, resolveAction } from "@/components/site/links";
 import { ButtonLink, Container } from "@/components/site/ui";
 import type { OfferPrice } from "@/lib/billing/checkout";
 import { formatMoney } from "@/lib/billing/money";
+import { PLATFORM_GST_PERCENT } from "@/lib/billing/platform-gst";
 import { soldIn, withDependencies } from "@/lib/entitlements";
 import { MODULE_REGISTRY, type ModuleDefinition } from "@/lib/modules";
 import { ADD_ONS, BASE_MODULES, PRODUCTS, productByKey, type Product } from "@/lib/products";
@@ -272,6 +273,7 @@ function Price({ prices, interval, currency }: { prices: OfferPrice[]; interval:
       <span className="text-sm text-muted">
         {price.perSeat ? "per person / " : "/ "}
         {PER[price.interval as Interval] ?? "month"}
+        {currency === "INR" ? ` + ${PLATFORM_GST_PERCENT}% GST` : ""}
       </span>
       {saving && <span className="rounded-full bg-success-bg px-2 py-0.5 text-xs font-medium text-success">Save {saving}%</span>}
     </p>

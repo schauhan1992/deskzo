@@ -6,6 +6,7 @@ import { anchorId, fill, resolveAction } from "@/components/site/links";
 import { ButtonLink, Container } from "@/components/site/ui";
 import { gatewayFor, type OfferPlan, type OfferPrice } from "@/lib/billing/checkout";
 import { formatMoney } from "@/lib/billing/money";
+import { PLATFORM_GST_PERCENT } from "@/lib/billing/platform-gst";
 import { needsOfExtra } from "@/lib/billing/plan-choice";
 import { soldIn, withDependencies } from "@/lib/entitlements";
 import { WORLD_COUNTRIES } from "@/lib/geo/world-countries";
@@ -124,7 +125,7 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
           <CountryPicker label={t(props.countryLabel)} countries={WORLD_COUNTRIES.map(({ code, name }) => ({ code, name }))} value={country.code} interval={sold.length > 1 ? interval : null} />
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
             <span>
-              Prices in <span className="font-semibold text-text">{offer.currency}</span>, paid through {offer.gateway === "RAZORPAY" ? "Razorpay" : "Stripe"}
+              Prices in <span className="font-semibold text-text">{offer.currency}</span>, {offer.gateway === "RAZORPAY" ? `before ${PLATFORM_GST_PERCENT}% GST, paid through Razorpay` : "before tax, paid through Stripe"}
             </span>
             {sold.length > 1 && (
               <nav aria-label="Billing period" className="inline-flex rounded-base border border-line bg-surface-sunken p-0.5">

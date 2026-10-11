@@ -71,6 +71,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const method = (init?.method ?? "GET").toUpperCase();
   calls.push({ method, url, body: typeof init?.body === "string" ? init.body : "" });
   if (url.host === "api.stripe.com" && method === "POST" && url.pathname === "/v1/checkout/sessions") return answer(200, { id: `cs_zzprod${++seq}`, url: `https://checkout.stripe.test/cs_zzprod${seq}` });
+  if (url.host === "api.razorpay.com" && method === "POST" && url.pathname === "/v1/plans") return answer(200, { id: `plan_zzbook${++seq}`, entity: "plan" });
   if (url.host === "api.razorpay.com" && method === "POST" && url.pathname === "/v1/subscriptions") {
     const id = `sub_zzprod${++seq}`;
     return answer(200, { id, entity: "subscription", status: "created", short_url: `https://rzp.test/${id}` });
@@ -747,6 +748,66 @@ async function main() {
     const oddLead = await control.siteLead.findFirst({ where: { email: "odd@zzdemo.example" }, orderBy: { createdAt: "desc" } });
     ok("the request keeps its product for the leads inbox; one nobody knows is kept without", sentDemo.ok && demoLead?.productKey === "books" && demoLead.topic === "demo" && sentOdd.ok && oddLead?.productKey === null, { sentDemo, demoLead: demoLead?.productKey, oddLead: oddLead?.productKey });
     ok("  and the mail to sales says which product", salesMail[0]?.subject === "Contact form: Demo of Deskzo Books — Zz Demo Traders" && salesMail[0]!.text.includes("Product:  Deskzo Books") && salesMail[1]?.text.includes("Product:  —") === true, salesMail.map((m) => m.subject));
+
+    // ─── The launch prices ──────────────────────────────────────────────────────────────────
+    section("The launch prices: per person, monthly and yearly, before GST");
+    const book = require("../src/lib/platform/price-book") as typeof import("../src/lib/platform/price-book");
+    const gst = require("../src/lib/billing/platform-gst") as typeof import("../src/lib/billing/platform-gst");
+    const launch = book.INDIA_LAUNCH_PRICES;
+    const editionKeys = products.PRODUCTS.map((p) => `deskzo-${p.key}`);
+    ok("the book prices Deskzo One and every product, per person", editionKeys.every((k) => launch.some((e) => e.planKey === k && e.perSeat)), launch.map((e) => e.planKey));
+    ok("  a year is ten months — two free — and every figure a whole rupee", launch.every((e) => e.year === e.month * 10 && Number.isInteger(e.month) && e.month >= 1));
+    const monthOf = (key: string) => launch.find((e) => e.planKey === key)!.month;
+    const dearest = editionKeys.filter((k) => k !== "deskzo-one").map(monthOf).sort((a, b) => b - a);
+    ok("  Deskzo One a person costs less than its three dearest products together", monthOf("deskzo-one") < dearest[0]! + dearest[1]! + dearest[2]!, `${monthOf("deskzo-one")} vs ${dearest.slice(0, 3).join("+")}`);
+    ok("  More people is left off sale: every product is charged per person already", !launch.some((e) => e.planKey === "addon-more-people"));
+    const launchDry = await book.applyPriceBook(launch, { actor: ACTOR, dryRun: true });
+    ok("  and every plan in it exists in the catalogue", launchDry.every((l) => l.outcome === "priced" || l.outcome === "unchanged"), launchDry.filter((l) => l.outcome !== "priced" && l.outcome !== "unchanged"));
+
+    const unit = (seats: number | null) => ({ key: "zz", kind: "EDITION" as const, allModules: false, seats, copilotTokens: 0, customDomains: 0, modules: [] });
+    const nobody = { country: "IN", seatOverride: null, copilotTokenOverride: null, customDomainOverride: null };
+    ok(
+      "per person, the people bought are the seats — never no limit; a trial or a plan given by hand, as before",
+      ent.entitlementsFrom(nobody, [{ quantity: 7, perSeat: true, plan: unit(null) }], []).seats === 7 &&
+        ent.entitlementsFrom(nobody, [{ quantity: 7, perSeat: true, plan: unit(null) }, { quantity: 3, perSeat: true, plan: unit(null) }], []).seats === 10 &&
+        ent.entitlementsFrom(nobody, [{ quantity: 1, plan: unit(null) }], []).seats === null &&
+        ent.entitlementsFrom(nobody, [{ quantity: 2, plan: unit(5) }], []).seats === 10,
+    );
+
+    const testBook = [
+      { planKey: "deskzo-signatures", month: 49, year: 490, perSeat: true },
+      { planKey: "zzprod-none", month: 10, year: 100, perSeat: true },
+    ];
+    const plansMade = () => calls.filter((c) => c.url.pathname === "/v1/plans");
+    const madeBefore = plansMade().length;
+    const dryBook = await book.applyPriceBook(testBook, { actor: ACTOR, dryRun: true });
+    ok(
+      "a dry run says what it would price — calling no gateway, writing nothing — and names a plan that isn't there",
+      dryBook[0]?.outcome === "priced" && dryBook[0].changes.join(" | ") === "₹49 a person a month | ₹490 a person a year" && dryBook[1]?.outcome === "missing" && plansMade().length === madeBefore && (await control.planPrice.count({ where: { plan: { key: "deskzo-signatures" } } })) === 0,
+      dryBook,
+    );
+    const appliedBook = await book.applyPriceBook(testBook.slice(0, 1), { actor: "script:platform:prices" });
+    const sigPrices = await control.planPrice.findMany({ where: { plan: { key: "deskzo-signatures" }, active: true } });
+    const rzpAmounts = plansMade().slice(madeBefore).map((c) => (JSON.parse(c.body) as { item: { amount: number } }).item.amount);
+    ok(
+      "applied: a Razorpay plan for each, carrying 18% GST — the price here before GST, per person",
+      appliedBook[0]?.outcome === "priced" &&
+        sigPrices.map((p) => `${p.interval}:${p.amount}:${p.perSeat}`).sort().join() === "MONTH:4900:true,YEAR:49000:true" &&
+        rzpAmounts.join() === `${gst.withPlatformGst(4900)},${gst.withPlatformGst(49000)}` &&
+        (await control.platformAuditLog.count({ where: { action: "plan.price", actorKind: "SCRIPT" } })) === 2,
+      { appliedBook, sigPrices, rzpAmounts },
+    );
+    const bookAgain = await book.applyPriceBook(testBook.slice(0, 1), { actor: "script:platform:prices" });
+    ok("  run again: unchanged, and no gateway called", bookAgain[0]?.outcome === "unchanged" && plansMade().length === madeBefore + 2);
+    const remadeBook = await book.applyPriceBook(testBook.slice(0, 1), { actor: "script:platform:prices", remake: true });
+    ok("  remade — from test keys to live — every price again, the same amounts", remadeBook[0]?.outcome === "priced" && remadeBook[0].changes.every((c) => c.endsWith("made again")) && plansMade().length === madeBefore + 4 && (await control.planPrice.count({ where: { plan: { key: "deskzo-signatures" }, active: true } })) === 2, remadeBook);
+    const raised = await book.applyPriceBook([{ planKey: "deskzo-signatures", month: 59, year: 590, perSeat: true }], { actor: "script:platform:prices" });
+    const sigAll = await control.planPrice.findMany({ where: { plan: { key: "deskzo-signatures" } } });
+    ok(
+      "  a new figure replaces the one on sale; the old stays on whoever pays it",
+      raised[0]?.outcome === "priced" && sigAll.length === 6 && sigAll.filter((p) => p.active).map((p) => p.amount).sort((a, b) => a - b).join() === "5900,59000",
+      raised,
+    );
 
     // ─── The console ────────────────────────────────────────────────────────────────────────
     section("The console: plans know their product");

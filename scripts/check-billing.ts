@@ -280,7 +280,8 @@ async function main() {
     const proInr = await prices.addPlanPrice({ planKey: "zz-pro", gateway: "RAZORPAY", currency: "INR", interval: "MONTH", amount: 149900, perSeat: false }, "script:check");
     await prices.addPlanPrice({ planKey: "zz-seats", gateway: "RAZORPAY", currency: "INR", interval: "MONTH", amount: 49900, perSeat: false }, "script:check");
     const rzpPlan = JSON.parse(callsTo("POST", "/v1/plans")[0]!.body) as { period: string; item: { amount: number; currency: string } };
-    ok("Razorpay: a plan per price, monthly, in rupees", proInr.externalId.startsWith("plan_zz") && rzpPlan.period === "monthly" && rzpPlan.item.amount === 149900 && rzpPlan.item.currency === "INR");
+    ok("Razorpay: a plan per price, monthly, in rupees", proInr.externalId.startsWith("plan_zz") && rzpPlan.period === "monthly" && rzpPlan.item.amount === 176882 && rzpPlan.item.currency === "INR");
+    ok("  carrying 18% GST, since Razorpay adds none — the price on sale stays before GST", (await control.planPrice.findUniqueOrThrow({ where: { id: proInr.id } })).amount === 149900);
     ok("  and only in rupees", /rupees/.test(await refused(() => prices.addPlanPrice({ planKey: "zz-pro", gateway: "RAZORPAY", currency: "USD", interval: "MONTH", amount: 100, perSeat: false }, "script:check"))));
     ok("an internal plan is never priced", /never sold/.test(await refused(() => prices.addPlanPrice({ planKey: plans.INTERNAL_PLAN_KEY, gateway: "STRIPE", currency: "USD", interval: "MONTH", amount: 100, perSeat: false }, "script:check"))));
 
@@ -456,17 +457,18 @@ async function main() {
     ok("  the edition's subscription is live, the trial it replaces ended", inSub.status === "ACTIVE" && inSub.items[0]?.plan.key === "zz-pro" && (await control.subscription.count({ where: { tenantId: IN, gateway: "MANUAL", status: "TRIALING" } })) === 0);
     ok("  the add-on waiting for its own authorisation gives nothing yet", (await control.subscription.findUniqueOrThrow({ where: { externalId: secondRzp! } })).status === "INCOMPLETE" && rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id: IN } })).entitlements).seats === 5);
     ok("  the same delivery again is not processed twice", (await webhooks.receiveRazorpayWebhook(activated.raw, activated.signature, "evt_rzp_1")).body === "already processed");
-    const charged = razorSigned(rzpEvent("subscription.charged", firstRzp!, { payment: { entity: { id: "pay_zz1", entity: "payment", amount: 149900, currency: "INR", status: "captured", invoice_id: "inv_zz1", created_at: Math.floor(Date.now() / 1000) } } }));
+    const charged = razorSigned(rzpEvent("subscription.charged", firstRzp!, { payment: { entity: { id: "pay_zz1", entity: "payment", amount: 176882, currency: "INR", status: "captured", invoice_id: "inv_zz1", created_at: Math.floor(Date.now() / 1000), tax: 590 } } }));
     await webhooks.receiveRazorpayWebhook(charged.raw, charged.signature, "evt_rzp_2");
     const inInvoice = await control.invoice.findFirst({ where: { tenantId: IN } });
-    ok("charged: its invoice, paid, in rupees", inInvoice?.status === "PAID" && inInvoice.total === 149900 && inInvoice.currency === "INR" && inInvoice.externalId === "inv_zz1");
+    ok("charged: its invoice, paid, in rupees", inInvoice?.status === "PAID" && inInvoice.total === 176882 && inInvoice.currency === "INR" && inInvoice.externalId === "inv_zz1");
+    ok("  its tax the GST inside the charge — never the payment's tax, GST on Razorpay's own fee", inInvoice?.tax === 26982 && inInvoice.subtotal === 149900, `${inInvoice?.tax} ${inInvoice?.subtotal}`);
     ok("  with its subscription, and the plan it is for as its one plan line, less tax", inInvoice?.subscriptionId === inSub.id && linesOf(inInvoice.planLines) === "zz-pro:149900", linesOf(inInvoice?.planLines));
     const rzpInvoice = () => control.invoice.findUniqueOrThrow({ where: { gateway_externalId: { gateway: "RAZORPAY", externalId: "inv_zz1" } } });
     const rzpRefund = (event: string, payment: Record<string, unknown>, refund?: Record<string, unknown>) =>
       razorSigned({
         entity: "event",
         event,
-        payload: { payment: { entity: { id: "pay_zz1", entity: "payment", amount: 149900, currency: "INR", status: "refunded", invoice_id: "inv_zz1", created_at: Math.floor(Date.now() / 1000), ...payment } }, ...(refund ? { refund: { entity: refund } } : {}) },
+        payload: { payment: { entity: { id: "pay_zz1", entity: "payment", amount: 176882, currency: "INR", status: "refunded", invoice_id: "inv_zz1", created_at: Math.floor(Date.now() / 1000), ...payment } }, ...(refund ? { refund: { entity: refund } } : {}) },
         created_at: 0,
       });
     const rzpRefunded = rzpRefund("payment.refunded", { amount_refunded: 50000 });

@@ -1,4 +1,5 @@
 import type { BillingInterval } from "@deskzo/control-client";
+import { withPlatformGst } from "@/lib/billing/platform-gst";
 import { createRazorpayPlan } from "@/lib/billing/razorpay";
 import { createStripePrice, createStripeProduct } from "@/lib/billing/stripe";
 import { controlDb } from "@/lib/platform/control-db";
@@ -7,6 +8,9 @@ import { controlDb } from "@/lib/platform/control-db";
  * A plan's price at a gateway — made there first (a Stripe price on the plan's product, a Razorpay
  * plan), then here with the gateway's id. Prices are never changed: a new one replaces the one on
  * offer, which stays on the subscriptions already paying it.
+ *
+ * A price is always before tax. Stripe adds the tax itself; a Razorpay plan carries the GST, since
+ * Razorpay charges exactly its amount (src/lib/billing/platform-gst.ts).
  */
 
 export class PriceRefused extends Error {}
@@ -36,7 +40,7 @@ export async function addPlanPrice(
     }
     externalId = (await createStripePrice({ productId, currency, amount, interval: input.interval, planKey: plan.key, reference })).id;
   } else {
-    externalId = (await createRazorpayPlan({ planKey: plan.key, name: plan.name, amount, currency, interval: input.interval })).id;
+    externalId = (await createRazorpayPlan({ planKey: plan.key, name: plan.name, amount: withPlatformGst(amount), currency, interval: input.interval })).id;
   }
 
   const saved = await control.$transaction(async (tx) => {

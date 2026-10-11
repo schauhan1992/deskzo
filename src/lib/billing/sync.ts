@@ -4,6 +4,7 @@ import { idOf, stripeInvoiceStatus, stripePeriodEnd, stripeStatus, type StripeCh
 import { noteOf, razorpayStatus, type RazorpayPayment, type RazorpaySubscription } from "@/lib/billing/razorpay";
 import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
+import { platformGstIn } from "@/lib/billing/platform-gst";
 
 /**
  * A gateway's word, written into the control plane: its subscriptions and invoices as ours, and then
@@ -211,7 +212,8 @@ export async function applyRazorpayCharge(payment: RazorpayPayment, sub: Razorpa
   if (!tenantId) return null;
   const externalId = payment.invoice_id ?? payment.id;
   const paid = payment.status === "captured";
-  const tax = payment.tax ?? 0;
+  // The GST inside the charge — not `payment.tax`, which is GST on Razorpay's fee to us (platform-gst.ts).
+  const tax = platformGstIn(payment.amount);
   // A Razorpay subscription carries a single plan, so the whole charge, less its tax, is that plan's.
   const planKey = ours?.items[0]?.plan.key ?? null;
   const planLines: PlanLine[] | null = planKey ? [{ planKey, amount: payment.amount - tax }] : null;
