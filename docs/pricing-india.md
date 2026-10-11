@@ -79,7 +79,7 @@ The add-ons are priced for the whole workspace, not per person:
    - Recommended before selling product combinations widely.
 2. **GST registration.** The 18% assumes the selling company is GST-registered and its invoices carry its GSTIN and the SAC (9983). Your CA should confirm the rate and the invoice format.
 3. **A free plan.** Zoho Books is free under ₹25 lakh revenue, Zoho Payroll for up to 10 employees, and HubSpot and Zoho CRM for 2–3 users. Billing can't sell a ₹0 plan yet (Razorpay plans need an amount). The trial stands in for now.
-4. **Razorpay test, then live.** Prices are made at Razorpay, so do it with **test keys** first and check one checkout end to end. Billing has only ever been tested against fake gateways (see the billing memory). When the live keys go in, run `-- prices --apply --remake` once, so every price is made again on the live account.
+4. **Razorpay test, then live.** Prices don't depend on Razorpay (owner, 12 Oct 2026): they show at once, and Razorpay's copy of each is made at the first payment through it. Test and live keys each get their own copies, so switching needs no step. Before taking real money, enter **test keys** and check one checkout end to end. Billing has only ever been tested against fake gateways (see the billing memory).
 5. **Review after the first customers.** These are launch prices. Watch which products people buy first and where trials stall, then change prices in the console. A price changed there is replaced, never edited, so whoever already pays keeps their price.
 
 ## Setting it on live
@@ -90,13 +90,12 @@ npm run platform:plans -- prices
 npm run platform:plans -- prices --apply
 ```
 
-1. Deploy, so both control migrations are applied (`20261028100000_signup_product`, `20261029100000_site_lead_product`).
+1. Deploy, so the control migrations are applied (`20261028100000_signup_product`, `20261029100000_site_lead_product`, `20261030100000_gateway_prices`).
 2. Run `npm run platform:plans -- products`. It makes the Deskzo Cards and Deskzo Signatures plans if they're missing.
-3. Enter Razorpay's **test** keys in the console under Settings › Billing.
-4. Run `npm run platform:plans -- prices` and read the dry run.
-5. Run `npm run platform:plans -- prices --apply`.
-6. Check the pricing page and the Books page. Start a checkout from a test workspace.
-7. Put in the live keys, then run `npm run platform:plans -- prices --apply --remake`.
+3. Run `npm run platform:plans -- prices` and read the dry run.
+4. Run `npm run platform:plans -- prices --apply`. No gateway is needed: the prices show on the pricing page, the product pages and the billing page at once.
+5. When you're ready to take payments online, enter Razorpay's **test** keys in the console under Settings › Billing, and start a checkout from a test workspace. Until a gateway is connected, a workspace that tries to pay online is told it isn't open yet, and staff set its plan up by hand.
+6. Put in the live keys. Nothing else to run: the live copies are made at the first live payment.
 
 ## The research (read 11 Oct 2026)
 

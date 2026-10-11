@@ -1,5 +1,6 @@
 import type { BillingInterval } from "@deskzo/control-client";
-import { GatewayError } from "@/lib/billing/gateway";
+import { GatewayError, GatewayNotConfigured } from "@/lib/billing/gateway";
+import { PriceRefused, gatewayPriceId } from "@/lib/billing/prices";
 import { choiceRefusal } from "@/lib/billing/plan-choice";
 import { cancelRazorpaySubscription, createRazorpaySubscription } from "@/lib/billing/razorpay";
 import { createStripeCheckout, createStripePortal } from "@/lib/billing/stripe";
@@ -10,7 +11,9 @@ import { controlDb } from "@/lib/platform/control-db";
  *
  * The gateway follows the country: a workspace in India pays Razorpay in rupees, every other one
  * Stripe — in its own currency where a price is set in it, in US dollars otherwise. What is offered is
- * what is on sale there: plans offered in its country, with a price at its gateway.
+ * what is on sale there: plans offered in its country, with a price in its currency. Prices are the
+ * plans' own (src/lib/billing/prices.ts): they are offered whether the gateway is connected or not, and
+ * its copy of each is made as somebody pays.
  */
 
 export type Gateway = "STRIPE" | "RAZORPAY";
@@ -33,6 +36,12 @@ export type OfferPlan = {
   prices: OfferPrice[];
 };
 
+/** The currency a country's prices are shown and charged in: rupees in India; elsewhere its own, where prices are set in it, or US dollars. */
+export function currencyFor(country: string, own: string | null | undefined, priced: Set<string>): string {
+  if (country === "IN") return "INR";
+  return own && priced.has(own.toUpperCase()) ? own.toUpperCase() : "USD";
+}
+
 /** What this workspace can buy: its gateway, its currency, and the plans with a price in it. */
 export async function offerFor(tenantId: string): Promise<{ gateway: Gateway; currency: string; plans: OfferPlan[] }> {
   const control = controlDb();
@@ -41,10 +50,9 @@ export async function offerFor(tenantId: string): Promise<{ gateway: Gateway; cu
   const plans = await control.plan.findMany({
     where: { active: true, kind: { in: ["EDITION", "BUNDLE", "ADDON"] }, OR: [{ countries: { isEmpty: true } }, { countries: { has: tenant.country } }] },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: { modules: { select: { moduleKey: true } }, prices: { where: { gateway, active: true } } },
+    include: { modules: { select: { moduleKey: true } }, prices: { where: { active: true } } },
   });
-  const currencies = new Set(plans.flatMap((p) => p.prices.map((x) => x.currency)));
-  const currency = gateway === "RAZORPAY" ? "INR" : currencies.has(tenant.currency) ? tenant.currency : "USD";
+  const currency = currencyFor(tenant.country, tenant.currency, new Set(plans.flatMap((p) => p.prices.map((x) => x.currency))));
   return {
     gateway,
     currency,
@@ -62,6 +70,9 @@ export async function offerFor(tenantId: string): Promise<{ gateway: Gateway; cu
       .filter((p) => p.prices.length > 0),
   };
 }
+
+/** What a customer is told when no gateway takes payments for them yet. */
+export const PAYING_ONLINE_CLOSED = "Paying online isn't open yet. Write to us and we'll set your plan up — and keep your workspace going meanwhile.";
 
 export type Selection = { interval: BillingInterval; items: { planKey: string; quantity: number }[] };
 export type CheckoutStart =
@@ -98,12 +109,17 @@ export async function startCheckout(tenantId: string, selection: Selection, retu
   const live = await control.subscription.findMany({ where: { tenantId, gateway: { not: "MANUAL" }, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } }, select: { gateway: true } });
   if (live.length) throw new CheckoutRefused("This workspace is already paying for a plan — change it from Manage billing.");
 
-  const prices = await control.planPrice.findMany({ where: { id: { in: lines.map((l) => l.price.id) } }, select: { id: true, externalId: true } });
-  const externalOf = (id: string) => {
-    const external = prices.find((p) => p.id === id)?.externalId;
-    if (!external) throw new CheckoutRefused("That price is not set up at the gateway yet. Staff can finish it in the platform console.");
-    return external;
-  };
+  // Each price's copy at the gateway, made now where it has none. Without the gateway connected yet,
+  // paying online simply isn't open: staff set plans up by hand (a bank transfer, a distributor).
+  const external = new Map<string, string>();
+  try {
+    for (const line of lines) if (!external.has(line.price.id)) external.set(line.price.id, await gatewayPriceId(line.price.id, offer.gateway));
+  } catch (err) {
+    if (err instanceof GatewayNotConfigured) throw new CheckoutRefused(PAYING_ONLINE_CLOSED);
+    if (err instanceof PriceRefused) throw new CheckoutRefused(err.message);
+    throw err;
+  }
+  const externalOf = (id: string) => external.get(id)!;
 
   if (offer.gateway === "STRIPE") {
     const session = await createStripeCheckout({

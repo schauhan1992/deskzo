@@ -359,7 +359,9 @@ export async function setWorkspacePlans(tenantId: string, items: { planKey: stri
   const gateway = await liveGatewaySubscription(tenantId);
   if (gateway) throw new PlanRefused(PLAN_REFUSALS.paysAtGateway(gateway));
   const wanted = wantedPlans(items);
-  const plans = await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: PLAN_CHOICE_SELECT });
+  // In the order asked for, so a refusal naming two of them names them the same way every time.
+  const keys = [...wanted.keys()];
+  const plans = (await control.plan.findMany({ where: { key: { in: keys } }, select: PLAN_CHOICE_SELECT })).sort((a, b) => keys.indexOf(a.key) - keys.indexOf(b.key));
   const missing = [...wanted.keys()].filter((k) => !plans.some((p) => p.key === k));
   if (missing.length) throw new PlanRefused(PLAN_REFUSALS.noSuchPlan(missing));
 

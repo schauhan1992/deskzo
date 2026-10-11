@@ -3,7 +3,7 @@
  *
  *   npm run platform:plans -- products [--dry-run] [--allow-removals]   the products as plans, made or brought up to date
  *   npm run platform:plans -- list                                      every plan: key, kind, product, default, on sale
- *   npm run platform:plans -- prices [--apply] [--remake]               the launch prices for India (src/lib/platform/price-book.ts)
+ *   npm run platform:plans -- prices [--apply]                          the launch prices for India (src/lib/platform/price-book.ts)
  *   npm run platform:plans -- refresh                                   every workspace's entitlements worked out again
  *
  * `products` makes Deskzo One, a plan for each product and the add-ons (src/lib/platform/product-plans.ts,
@@ -13,10 +13,10 @@
  * calls a gateway.
  *
  * `prices` says what the launch price book would change — the people each plan's unit includes, and its
- * monthly and yearly price in rupees — and writes nothing. `prices --apply` makes each price at Razorpay
- * (its keys must be in the console, Settings › Billing — test keys first) and here, as the console does.
- * Prices are staff's to change in the console afterwards. `--remake` makes every price again, even one
- * that matches — once, when Razorpay's live keys replace its test keys.
+ * monthly and yearly price in rupees — and writes nothing. `prices --apply` writes them, as the console
+ * does. No gateway is called: prices show on the website at once, and each gateway's copy of a price is
+ * made when somebody first pays through it (test and live keys each get their own). Prices are staff's to
+ * change in the console afterwards.
  */
 import "dotenv/config";
 import { closeControlDb, controlDb } from "../src/lib/platform/control-db";
@@ -57,7 +57,7 @@ async function main() {
     }
     case "prices": {
       const apply = args.includes("--apply");
-      const lines = await applyPriceBook(INDIA_LAUNCH_PRICES, { actor: "script:platform:prices", dryRun: !apply, remake: args.includes("--remake") });
+      const lines = await applyPriceBook(INDIA_LAUNCH_PRICES, { actor: "script:platform:prices", dryRun: !apply });
       for (const line of lines) {
         const outcome = !apply && line.outcome === "priced" ? "would be priced" : line.outcome;
         console.log(`${line.planKey.padEnd(22)} ${outcome.padEnd(16)}${line.changes.length ? `  ${line.changes.join("; ")}` : ""}${line.note ? `  (${line.note})` : ""}`);
@@ -66,7 +66,7 @@ async function main() {
       const failed = lines.filter((l) => l.outcome === "missing" || l.outcome === "refused").length;
       console.log(apply ? `
 ${priced} priced, ${lines.length - priced - failed} as they were.` : `
-Dry run: ${priced} to price, nothing written and no gateway called. Add --apply to make them.`);
+Dry run: ${priced} to price, nothing written. Add --apply to set them.`);
       if (failed) {
         console.error(`${failed} not priced — see above.`);
         process.exitCode = 1;
@@ -79,7 +79,7 @@ Dry run: ${priced} to price, nothing written and no gateway called. Add --apply 
       return;
     }
     default:
-      console.log("Commands: products [--dry-run] [--allow-removals], list, prices [--apply] [--remake], refresh — see the top of scripts/platform-plans.ts.");
+      console.log("Commands: products [--dry-run] [--allow-removals], list, prices [--apply], refresh — see the top of scripts/platform-plans.ts.");
       process.exitCode = 1;
   }
 }

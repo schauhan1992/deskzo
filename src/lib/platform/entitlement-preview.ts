@@ -148,7 +148,10 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     // What it would mean, from the items the save could take.
     const wanted = wantedPlans(items.filter((i) => refusalOf(() => wantedPlans([i])) === null));
     const plans = wanted.size
-      ? await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: { ...PLAN_CHOICE_SELECT, ...ENTITLEMENT_PLAN_SELECT } })
+      ? (await control.plan.findMany({ where: { key: { in: [...wanted.keys()] } }, select: { ...PLAN_CHOICE_SELECT, ...ENTITLEMENT_PLAN_SELECT } })).sort(
+          // In the order asked for, as the save has them.
+          (a, b) => [...wanted.keys()].indexOf(a.key) - [...wanted.keys()].indexOf(b.key),
+        )
       : [];
     const missing = [...wanted.keys()].filter((k) => !plans.some((p) => p.key === k));
     if (missing.length) refuse(PLAN_REFUSALS.noSuchPlan(missing));

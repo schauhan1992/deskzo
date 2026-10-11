@@ -125,7 +125,8 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
           <CountryPicker label={t(props.countryLabel)} countries={WORLD_COUNTRIES.map(({ code, name }) => ({ code, name }))} value={country.code} interval={sold.length > 1 ? interval : null} />
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
             <span>
-              Prices in <span className="font-semibold text-text">{offer.currency}</span>, {offer.gateway === "RAZORPAY" ? `before ${PLATFORM_GST_PERCENT}% GST, paid through Razorpay` : "before tax, paid through Stripe"}
+              {/* Prices are the plans' own, whichever gateway takes the payment — or none yet (owner, 12 Oct 2026). */}
+              Prices in <span className="font-semibold text-text">{offer.currency}</span>, {offer.currency === "INR" ? `before ${PLATFORM_GST_PERCENT}% GST` : "before tax"}
             </span>
             {sold.length > 1 && (
               <nav aria-label="Billing period" className="inline-flex rounded-base border border-line bg-surface-sunken p-0.5">

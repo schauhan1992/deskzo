@@ -3,7 +3,7 @@ import { ArrowRight, Boxes, CopyPlus, Globe, Pencil, Sparkles, Star, Users } fro
 import { StatusPill } from "@/components/console/kit/status";
 import { formatMoney } from "@/lib/billing/money";
 import { compactNumber, plural } from "@/lib/console-shared/format";
-import { gatewayLabel, intervalLabel } from "@/lib/console-shared/labels";
+import { intervalLabel } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { CatalogueModuleView, PlanKindKey } from "@/lib/console-shared/types";
 import type { PlanListRow } from "@/lib/platform/console-data";
@@ -212,7 +212,6 @@ function PlanCard({ plan, labels, order, caps }: { plan: PlanListRow; labels: Ma
               {live.map((price) => (
                 <li key={price.id} className="text-sm text-text tabular-nums">
                   {priceLine(price)}
-                  <span className="text-muted"> · {gatewayLabel(price.gateway)}</span>
                 </li>
               ))}
             </ul>

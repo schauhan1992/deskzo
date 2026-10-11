@@ -276,7 +276,8 @@ async function planRows(where?: Prisma.PlanWhereInput) {
     where,
     orderBy: [{ active: "desc" }, { sortOrder: "asc" }, { name: "asc" }],
     include: {
-      prices: { orderBy: [{ active: "desc" }, { createdAt: "desc" }] },
+      // Each price with its copies at the gateways — made as somebody first pays it there.
+      prices: { orderBy: [{ active: "desc" }, { createdAt: "desc" }], include: { gatewayCopies: { select: { gateway: true, mode: true, externalId: true }, orderBy: { createdAt: "asc" } } } },
       modules: { select: { moduleKey: true } },
       items: { where: { subscription: { status: { in: [...LIVE_STATUSES] } } }, select: { subscription: { select: { tenantId: true } } } },
     },

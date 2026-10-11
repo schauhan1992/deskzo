@@ -417,9 +417,10 @@ async function main() {
     const planId = async (key: string) => (await control.plan.findUniqueOrThrow({ where: { key }, select: { id: true } })).id;
     const PRO = await planId("zzp-pro");
     const ADDON = await planId("zzp-addon");
-    const priceProUsd = await control.planPrice.create({ data: { planId: PRO, gateway: "STRIPE", currency: "USD", interval: "MONTH", amount: 2900, externalId: "price_zzp_pro" }, select: { id: true } });
-    await control.planPrice.create({ data: { planId: ADDON, gateway: "STRIPE", currency: "USD", interval: "MONTH", amount: 900, externalId: "price_zzp_addon" } });
-    const priceProInr = await control.planPrice.create({ data: { planId: PRO, gateway: "RAZORPAY", currency: "INR", interval: "MONTH", amount: 99900, externalId: "plan_zzp_pro_inr" }, select: { id: true } });
+    // Prices are the plans' own; each gateway's copy is what its webhooks name (src/lib/billing/prices.ts).
+    const priceProUsd = await control.planPrice.create({ data: { planId: PRO, currency: "USD", interval: "MONTH", amount: 2900, gatewayCopies: { create: { gateway: "STRIPE", mode: "test", externalId: "price_zzp_pro" } } }, select: { id: true } });
+    await control.planPrice.create({ data: { planId: ADDON, currency: "USD", interval: "MONTH", amount: 900, gatewayCopies: { create: { gateway: "STRIPE", mode: "test", externalId: "price_zzp_addon" } } } });
+    const priceProInr = await control.planPrice.create({ data: { planId: PRO, currency: "INR", interval: "MONTH", amount: 99900, gatewayCopies: { create: { gateway: "RAZORPAY", mode: "test", externalId: "plan_zzp_pro_inr" } } }, select: { id: true } });
 
     // ─── Fixture makers (straight into the control plane) ────────────────────────────────────────
     type PartnerSeed = {

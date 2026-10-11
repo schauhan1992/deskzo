@@ -5,7 +5,8 @@ import { PlanRefused, savePlan } from "@/lib/platform/plans";
 /**
  * The launch prices, as a book — `npm run platform:plans -- prices` says what it would do, and
  * `-- prices --apply` does it: for each plan, the people its unit includes, and a monthly and a yearly
- * price in rupees through Razorpay (src/lib/billing/prices.ts, which makes each at Razorpay first).
+ * price in rupees (src/lib/billing/prices.ts). No gateway is called: a price is the plan's, shown on
+ * the website at once, and each gateway's copy is made when somebody first pays through it.
  *
  * Owner, 11 Oct 2026: research the competitors, set the launch prices for India, and change them
  * later from the console. So the book is only a starting point. Running it again changes nothing that
@@ -86,19 +87,15 @@ const rupees = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
 
 /**
  * Applies a book (or, with `dryRun`, says what it would do). Each plan must exist already — `npm run
- * platform:plans -- products` makes them. Prices go through Razorpay in rupees; without its keys in the
- * console (Settings › Billing), an applying run stops at the first price with the gateway's own refusal.
- *
- * `remake`: every price made again, even one that matches — for moving from Razorpay's test keys to its
- * live keys, whose plans are different objects at Razorpay with the same amounts.
+ * platform:plans -- products` makes them. Prices are in rupees; nothing here needs a gateway.
  */
-export async function applyPriceBook(book: readonly PriceBookEntry[], opts: { actor: string; dryRun?: boolean; remake?: boolean }): Promise<PriceBookLine[]> {
+export async function applyPriceBook(book: readonly PriceBookEntry[], opts: { actor: string; dryRun?: boolean }): Promise<PriceBookLine[]> {
   const control = controlDb();
   const lines: PriceBookLine[] = [];
   for (const entry of book) {
     const plan = await control.plan.findUnique({
       where: { key: entry.planKey },
-      include: { modules: { select: { moduleKey: true } }, prices: { where: { gateway: "RAZORPAY", currency: "INR", active: true } } },
+      include: { modules: { select: { moduleKey: true } }, prices: { where: { currency: "INR", active: true } } },
     });
     if (!plan) {
       lines.push({ planKey: entry.planKey, outcome: "missing", changes: [], note: "no such plan — run `npm run platform:plans -- products` first" });
@@ -114,12 +111,12 @@ export async function applyPriceBook(book: readonly PriceBookEntry[], opts: { ac
     const wanted = (["MONTH", "YEAR"] as const).map((interval) => ({ interval, amount: Math.round((interval === "MONTH" ? entry.month : entry.year) * 100) }));
     const toPrice = wanted.filter((w) => {
       const now = plan.prices.find((p) => p.interval === w.interval);
-      return opts.remake || !now || now.amount !== w.amount || now.perSeat !== entry.perSeat;
+      return !now || now.amount !== w.amount || now.perSeat !== entry.perSeat;
     });
     for (const w of toPrice) {
       const now = plan.prices.find((p) => p.interval === w.interval);
       const per = `${entry.perSeat ? " a person" : ""} a ${w.interval === "MONTH" ? "month" : "year"}`;
-      changes.push(now ? (now.amount === w.amount && now.perSeat === entry.perSeat ? `${rupees(w.amount)}${per}, made again` : `${rupees(now.amount)}${now.perSeat ? " a person" : ""} → ${rupees(w.amount)}${per}`) : `${rupees(w.amount)}${per}`);
+      changes.push(now ? `${rupees(now.amount)}${now.perSeat ? " a person" : ""} → ${rupees(w.amount)}${per}` : `${rupees(w.amount)}${per}`);
     }
     if (!changes.length) {
       lines.push({ planKey: entry.planKey, outcome: "unchanged", changes });
@@ -151,7 +148,7 @@ export async function applyPriceBook(book: readonly PriceBookEntry[], opts: { ac
           opts.actor,
         );
       }
-      for (const w of toPrice) await addPlanPrice({ planKey: plan.key, gateway: "RAZORPAY", currency: "INR", interval: w.interval, amount: w.amount, perSeat: entry.perSeat }, opts.actor);
+      for (const w of toPrice) await addPlanPrice({ planKey: plan.key, currency: "INR", interval: w.interval, amount: w.amount, perSeat: entry.perSeat }, opts.actor);
       lines.push({ planKey: entry.planKey, outcome: "priced", changes });
     } catch (err) {
       if (err instanceof PriceRefused || err instanceof PlanRefused) {

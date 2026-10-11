@@ -365,15 +365,13 @@ export async function consoleSetLimitOverrides(tenantId: string, input: { seats:
 
 // ─── Billing ────────────────────────────────────────────────────────────────────────────────────
 
-/** A price for a plan, made at its gateway first. */
-export async function consoleAddPrice(input: { planKey: string; gateway: "STRIPE" | "RAZORPAY"; currency: string; interval: "MONTH" | "YEAR"; amount: number; perSeat: boolean }) {
+/** A price for a plan — the plan's own, in a currency; no gateway is called (each makes its copy as somebody pays). */
+export async function consoleAddPrice(input: { planKey: string; currency: string; interval: "MONTH" | "YEAR"; amount: number; perSeat: boolean }) {
   return asStaff(SELLERS, async (staff) => {
-    const gateway = input?.gateway;
-    if (gateway !== "STRIPE" && gateway !== "RAZORPAY") throw new ConsoleRefused("Choose Stripe or Razorpay.");
     const interval = input?.interval;
     if (interval !== "MONTH" && interval !== "YEAR") throw new ConsoleRefused("Monthly or yearly.");
     return addPlanPrice(
-      { planKey: cleanText(input.planKey, 64), gateway, currency: cleanText(input.currency, 8), interval, amount: Number(input.amount), perSeat: input.perSeat === true },
+      { planKey: cleanText(input.planKey, 64), currency: cleanText(input.currency, 8), interval, amount: Number(input.amount), perSeat: input.perSeat === true },
       `staff:${staff.id}`,
     );
   });

@@ -72,6 +72,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   calls.push({ method, url, body: typeof init?.body === "string" ? init.body : "" });
   if (url.host === "api.stripe.com" && method === "POST" && url.pathname === "/v1/checkout/sessions") return answer(200, { id: `cs_zzprod${++seq}`, url: `https://checkout.stripe.test/cs_zzprod${seq}` });
   if (url.host === "api.razorpay.com" && method === "POST" && url.pathname === "/v1/plans") return answer(200, { id: `plan_zzbook${++seq}`, entity: "plan" });
+  // Each price's copy at Stripe, made at the first payment through it (src/lib/billing/prices.ts).
+  if (url.host === "api.stripe.com" && method === "POST" && url.pathname === "/v1/products") return answer(200, { id: `prod_zzprod${++seq}`, object: "product" });
+  if (url.host === "api.stripe.com" && method === "POST" && url.pathname === "/v1/prices") return answer(200, { id: `price_zzcopy${++seq}`, object: "price" });
   if (url.host === "api.razorpay.com" && method === "POST" && url.pathname === "/v1/subscriptions") {
     const id = `sub_zzprod${++seq}`;
     return answer(200, { id, entity: "subscription", status: "created", short_url: `https://rzp.test/${id}` });
@@ -807,26 +810,32 @@ async function main() {
       dryBook[0]?.outcome === "priced" && dryBook[0].changes.join(" | ") === "₹49 a person a month | ₹490 a person a year" && dryBook[1]?.outcome === "missing" && plansMade().length === madeBefore && (await control.planPrice.count({ where: { plan: { key: "deskzo-signatures" } } })) === 0,
       dryBook,
     );
+    const gatewayCallsBefore = calls.length;
     const appliedBook = await book.applyPriceBook(testBook.slice(0, 1), { actor: "script:platform:prices" });
     const sigPrices = await control.planPrice.findMany({ where: { plan: { key: "deskzo-signatures" }, active: true } });
-    const rzpAmounts = plansMade().slice(madeBefore).map((c) => (JSON.parse(c.body) as { item: { amount: number } }).item.amount);
     ok(
-      "applied: a Razorpay plan for each, carrying 18% GST — the price here before GST, per person",
+      "applied: the prices written, per person, before GST, in rupees — no gateway called (each makes its copy at the first payment)",
       appliedBook[0]?.outcome === "priced" &&
-        sigPrices.map((p) => `${p.interval}:${p.amount}:${p.perSeat}`).sort().join() === "MONTH:4900:true,YEAR:49000:true" &&
-        rzpAmounts.join() === `${gst.withPlatformGst(4900)},${gst.withPlatformGst(49000)}` &&
+        sigPrices.map((p) => `${p.interval}:${p.amount}:${p.perSeat}:${p.currency}`).sort().join() === "MONTH:4900:true:INR,YEAR:49000:true:INR" &&
+        calls.length === gatewayCallsBefore &&
         (await control.platformAuditLog.count({ where: { action: "plan.price", actorKind: "SCRIPT" } })) === 2,
-      { appliedBook, sigPrices, rzpAmounts },
+      { appliedBook, sigPrices },
+    );
+    const shownAtOnce = await publicOffer.publicOffer("IN");
+    ok("  and on the pricing page at once", shownAtOnce.plans.find((p) => p.key === "deskzo-signatures")?.prices.some((x) => x.amount === 4900 && x.perSeat) === true);
+    const sigMonth = sigPrices.find((p) => p.interval === "MONTH")!;
+    const sigCopy = await (require("../src/lib/billing/prices") as typeof import("../src/lib/billing/prices")).gatewayPriceId(sigMonth.id, "RAZORPAY");
+    ok(
+      "  its Razorpay copy, when first needed, carries 18% GST",
+      sigCopy.startsWith("plan_zzbook") && (JSON.parse(plansMade().at(-1)!.body) as { item: { amount: number } }).item.amount === gst.withPlatformGst(4900),
     );
     const bookAgain = await book.applyPriceBook(testBook.slice(0, 1), { actor: "script:platform:prices" });
-    ok("  run again: unchanged, and no gateway called", bookAgain[0]?.outcome === "unchanged" && plansMade().length === madeBefore + 2);
-    const remadeBook = await book.applyPriceBook(testBook.slice(0, 1), { actor: "script:platform:prices", remake: true });
-    ok("  remade — from test keys to live — every price again, the same amounts", remadeBook[0]?.outcome === "priced" && remadeBook[0].changes.every((c) => c.endsWith("made again")) && plansMade().length === madeBefore + 4 && (await control.planPrice.count({ where: { plan: { key: "deskzo-signatures" }, active: true } })) === 2, remadeBook);
+    ok("  run again: unchanged", bookAgain[0]?.outcome === "unchanged" && plansMade().length === madeBefore + 1);
     const raised = await book.applyPriceBook([{ planKey: "deskzo-signatures", month: 59, year: 590, perSeat: true }], { actor: "script:platform:prices" });
     const sigAll = await control.planPrice.findMany({ where: { plan: { key: "deskzo-signatures" } } });
     ok(
       "  a new figure replaces the one on sale; the old stays on whoever pays it",
-      raised[0]?.outcome === "priced" && sigAll.length === 6 && sigAll.filter((p) => p.active).map((p) => p.amount).sort((a, b) => a - b).join() === "5900,59000",
+      raised[0]?.outcome === "priced" && sigAll.length === 4 && sigAll.filter((p) => p.active).map((p) => p.amount).sort((a, b) => a - b).join() === "5900,59000",
       raised,
     );
 

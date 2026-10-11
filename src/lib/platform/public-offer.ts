@@ -1,4 +1,4 @@
-import { gatewayFor, type Gateway, type OfferPlan } from "@/lib/billing/checkout";
+import { currencyFor, gatewayFor, type Gateway, type OfferPlan } from "@/lib/billing/checkout";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { trialDays } from "@/lib/platform/settings";
 
@@ -7,12 +7,13 @@ import { trialDays } from "@/lib/platform/settings";
  * without a workspace: the country is the visitor's choice rather than a workspace's.
  *
  *   · The gateway follows the country (`gatewayFor`): Razorpay in India, Stripe everywhere else.
- *   · One currency, never mixed or converted: rupees at Razorpay; at Stripe, US dollars — unless every
+ *   · One currency, never mixed or converted: rupees in India; elsewhere US dollars — unless every
  *     price on offer is in one other currency, which is then the one shown.
  *   · Plans offered there (everywhere, or naming the country), still sold (`active`), of a kind that is
- *     sold at all (never INTERNAL), with an active price at the gateway in that currency.
+ *     sold at all (never INTERNAL), with an active price in that currency. Prices are the plans' own,
+ *     shown whether a gateway is connected or not (owner, 12 Oct 2026).
  *
- * Read narrowly: no gateway ids (`externalId`), nothing about any workspace.
+ * Read narrowly: no gateway ids, nothing about any workspace.
  */
 
 export type PublicOffer = { gateway: Gateway; currency: string; plans: OfferPlan[]; trialDays: number };
@@ -35,14 +36,15 @@ export async function publicOffer(country: string): Promise<PublicOffer> {
         seats: true,
         allModules: true,
         modules: { select: { moduleKey: true } },
-        prices: { where: { gateway, active: true }, select: { id: true, currency: true, interval: true, amount: true, perSeat: true }, orderBy: { amount: "asc" } },
+        prices: { where: { active: true }, select: { id: true, currency: true, interval: true, amount: true, perSeat: true }, orderBy: { amount: "asc" } },
       },
     }),
     trialDays(),
   ]);
 
   const currencies = new Set(rows.flatMap((p) => p.prices.map((x) => x.currency.toUpperCase())));
-  const currency = gateway === "RAZORPAY" ? "INR" : currencies.size === 1 ? [...currencies][0]! : "USD";
+  // In India rupees; elsewhere the one currency every price is in, or US dollars.
+  const currency = code === "IN" ? "INR" : currencies.size === 1 ? [...currencies][0]! : currencyFor(code, null, currencies);
   const plans: OfferPlan[] = rows
     .map((p) => ({
       key: p.key,

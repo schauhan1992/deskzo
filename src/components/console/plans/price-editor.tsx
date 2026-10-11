@@ -19,15 +19,16 @@ import { gatewayLabel, intervalLabel } from "@/lib/console-shared/labels";
 import type { PlanDetail } from "@/lib/platform/console-data";
 
 /**
- * A plan's prices (spec §3.10 › Prices). A price is made at its gateway as it is added — a Stripe
- * price, a Razorpay plan — and never changed there: a new one for the same gateway, currency and
- * interval replaces the one on sale, and workspaces already paying the old one keep it. So the only
+ * A plan's prices (spec §3.10 › Prices). A price is the plan's own (owner, 12 Oct 2026), in a currency,
+ * monthly or yearly — on the website and the billing page at once, whether a payment gateway is
+ * connected or not. Each gateway's copy of it (a Stripe price, a Razorpay plan) is made when somebody
+ * first pays it there, and listed beside it. Prices are never changed: a new one for the same currency
+ * and interval replaces the one on sale, and workspaces already paying the old one keep it. So the only
  * two things done here are adding a price (T2, which says what it replaces) and taking one off sale
  * (T1). Internal plans are never sold and have no prices; the page leaves this out for them.
  */
 
 type Price = PlanDetail["prices"][number];
-type Gateway = "RAZORPAY" | "STRIPE";
 type Interval = "MONTH" | "YEAR";
 
 /** The largest amount a price holds — a 32-bit integer of the currency's smallest unit. */
@@ -67,11 +68,10 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
   const id = useId();
   const clock = useClock();
   const retire = useConsoleAction<null>();
-  const add = useConsoleAction<{ id: string; externalId: string }>();
+  const add = useConsoleAction<{ id: string }>();
   const [retiring, setRetiring] = useState<Price | null>(null);
 
   const [adding, setAdding] = useState(false);
-  const [gateway, setGateway] = useState<Gateway>("RAZORPAY");
   const [currency, setCurrency] = useState("INR");
   const [billed, setBilled] = useState<Interval>("MONTH");
   const [amount, setAmount] = useState("");
@@ -79,11 +79,10 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
 
   const onSale = prices.filter((p) => p.active).length;
   const parsed = parseAmount(amount, currency);
-  const replaced = prices.find((p) => p.active && p.gateway === gateway && p.currency === currency && p.interval === billed) ?? null;
+  const replaced = prices.find((p) => p.active && p.currency === currency && p.interval === billed) ?? null;
 
   function openAdd() {
     add.reset();
-    setGateway("RAZORPAY");
     setCurrency("INR");
     setBilled("MONTH");
     setAmount("");
@@ -91,19 +90,11 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
     setAdding(true);
   }
 
-  function chooseGateway(value: string) {
-    const next: Gateway = value === "STRIPE" ? "STRIPE" : "RAZORPAY";
-    setGateway(next);
-    // Razorpay charges in rupees here; Stripe is how anything else is charged.
-    if (next === "RAZORPAY") setCurrency("INR");
-    else if (currency === "INR") setCurrency("USD");
-  }
-
   function createPrice() {
     if (parsed.minor === null) return;
-    const input = { planKey, gateway, currency, interval: billed, amount: parsed.minor, perSeat };
+    const input = { planKey, currency, interval: billed, amount: parsed.minor, perSeat };
     add.run(() => consoleAddPrice(input), {
-      success: `Price created at ${gatewayLabel(gateway)} and put on sale.`,
+      success: "Price put on sale.",
       onDone: () => setAdding(false),
     });
   }
@@ -119,7 +110,6 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
     retire.run(() => consoleRetirePrice(priceId), { success: "Price taken off sale.", onDone: () => setRetiring(null) });
   }
 
-  const gatewayId = `${id}-gateway`;
   const currencyId = `${id}-currency`;
   const currencyHintId = `${id}-currency-hint`;
   const intervalId = `${id}-interval`;
@@ -132,8 +122,8 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
         title="Prices"
         description={
           prices.length === 0
-            ? "Made at the gateway as they are added, and never changed there."
-            : `${onSale} on sale. Made at the gateway as they are added and never changed there — a new one replaces the one on sale, and workspaces paying an older one keep it.`
+            ? "The plan's own, shown on the website at once — each payment gateway makes its copy when somebody first pays there."
+            : `${onSale} on sale. Shown on the website whether a gateway is connected or not; never changed — a new one replaces the one on sale, and workspaces paying an older one keep it.`
         }
         actions={
           editable ? (
@@ -154,7 +144,6 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
         ) : (
           <DataTable caption={`Prices of ${planKey}`} minWidth={820}>
             <THead>
-              <Th>Gateway</Th>
               <Th numeric>Amount</Th>
               <Th>Currency</Th>
               <Th>Billed</Th>
@@ -167,9 +156,6 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
             <TBody>
               {prices.map((price) => (
                 <Tr key={price.id}>
-                  <Td nowrap muted={!price.active}>
-                    {gatewayLabel(price.gateway)}
-                  </Td>
                   <Td numeric muted={!price.active} className="font-medium">
                     {formatMoney(price.amount, price.currency)}
                   </Td>
@@ -182,7 +168,17 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
                   <Td nowrap muted={!price.active}>
                     {price.perSeat ? "Per person" : "Flat"}
                   </Td>
-                  <Td>{price.externalId ? <CopyField value={price.externalId} label={`${gatewayLabel(price.gateway)} id`} /> : <span className="text-subtle">—</span>}</Td>
+                  <Td>
+                    {price.gatewayCopies.length ? (
+                      <span className="flex flex-col gap-1">
+                        {price.gatewayCopies.map((copy) => (
+                          <CopyField key={copy.externalId} value={copy.externalId} label={`${gatewayLabel(copy.gateway)}${copy.mode === "live" ? "" : copy.mode === "test" ? " (test)" : ""} id`} />
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-subtle">Not yet — made at the first payment</span>
+                    )}
+                  </Td>
                   <Td nowrap>
                     <StatusPill tone={price.active ? "success" : "neutral"} dot>
                       {price.active ? "On sale" : "Off sale"}
@@ -218,8 +214,7 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
       >
         {retiring && (
           <p>
-            <span className="font-medium">{priceText(retiring)}</span> at {gatewayLabel(retiring.gateway)} stops being offered. Workspaces already paying
-            it keep it.
+            <span className="font-medium">{priceText(retiring)}</span> stops being offered. Workspaces already paying it keep it.
           </p>
         )}
       </ConfirmDialog>
@@ -236,18 +231,10 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor={gatewayId}>Gateway</Label>
-            <Select id={gatewayId} value={gateway} onChange={(e) => chooseGateway(e.target.value)}>
-              <option value="RAZORPAY">Razorpay</option>
-              <option value="STRIPE">Stripe</option>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
             <Label htmlFor={currencyId}>Currency</Label>
             <Input
               id={currencyId}
               value={currency}
-              disabled={gateway === "RAZORPAY"}
               maxLength={3}
               autoComplete="off"
               spellCheck={false}
@@ -256,7 +243,7 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
               className="font-mono"
             />
             <p id={currencyHintId} className="text-xs text-muted">
-              {gateway === "RAZORPAY" ? "Razorpay charges in rupees here." : "Three letters, like USD, EUR or AED."}
+              Three letters: INR for India, USD or another for elsewhere.
             </p>
           </div>
           <div className="space-y-1.5">
@@ -296,10 +283,10 @@ export function PriceEditor({ planKey, prices, editable }: { planKey: string; pr
           <p className="mt-1 text-lg font-semibold text-text tabular-nums">
             {parsed.minor !== null ? priceText({ amount: parsed.minor, currency, interval: billed, perSeat }) : "—"}
           </p>
-          <p className="text-xs text-muted">at {gatewayLabel(gateway)}</p>
+          <p className="text-xs text-muted">{currency === "INR" ? "plus 18% GST" : "plus tax"}</p>
         </InsetBlock>
         <p>
-          This creates the price at {gatewayLabel(gateway)} now.{" "}
+          It shows on the website and billing page at once; each payment gateway makes its copy when somebody first pays it there.{" "}
           {replaced
             ? `The previous active price for ${currency} / ${intervalLabel(billed)} (${priceText(replaced)}) is taken off sale — workspaces paying it keep it.`
             : `Nothing else is taken off sale.`}

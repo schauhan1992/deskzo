@@ -5,7 +5,7 @@ import { Panel } from "@/components/console/kit/panel";
 import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, DayHeaderRow, TBody, Td, Tr } from "@/components/console/kit/table";
 import { compactNumber } from "@/lib/console-shared/format";
-import { gatewayLabel, planKindLabel } from "@/lib/console-shared/labels";
+import { planKindLabel } from "@/lib/console-shared/labels";
 import type { CatalogueModuleView } from "@/lib/console-shared/types";
 import { withDependencies } from "@/lib/entitlements";
 import { getModuleDefinition, navGroupRank } from "@/lib/modules";
@@ -183,7 +183,6 @@ export function CompareMatrix({ plans, catalogue }: { plans: PlanListRow[]; cata
                   {live.map((x) => (
                     <span key={x.id} className="text-xs whitespace-nowrap text-text tabular-nums">
                       {priceLine(x)}
-                      <span className="text-muted"> · {gatewayLabel(x.gateway)}</span>
                     </span>
                   ))}
                 </span>

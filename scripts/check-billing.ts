@@ -213,6 +213,7 @@ async function main() {
     const plans = require("../src/lib/platform/plans") as typeof import("../src/lib/platform/plans");
     const prices = require("../src/lib/billing/prices") as typeof import("../src/lib/billing/prices");
     const checkout = require("../src/lib/billing/checkout") as typeof import("../src/lib/billing/checkout");
+    const publicOffer = require("../src/lib/platform/public-offer") as typeof import("../src/lib/platform/public-offer");
     const webhooks = require("../src/lib/billing/webhooks") as typeof import("../src/lib/billing/webhooks");
     const lifecycle = require("../src/lib/billing/lifecycle") as typeof import("../src/lib/billing/lifecycle");
     const reconcile = require("../src/lib/billing/reconcile") as typeof import("../src/lib/billing/reconcile");
@@ -258,32 +259,23 @@ async function main() {
     ok("  and the console learns only that they are set", !overviewText.includes("sk_test_zz") && !overviewText.includes(STRIPE_WHSEC) && /"stripe.secretKey":true/.test(overviewText));
     ok("signup is by invitation, and a trial 14 days, until staff say otherwise", !(await settings.signupOpen()) && (await settings.trialDays()) === 14);
 
-    section("Prices, made at the gateway");
+    section("Prices: the plan's own, whatever gateway is connected");
     const base = { countries: [] as string[], seats: null, copilotTokens: null, modules: [] as string[] };
     await plans.savePlan({ ...base, kind: "EDITION", key: "zz-pro", name: "Pro", modules: ["helpdesk"], seats: 5, isDefault: true }, "script:check");
     await plans.savePlan({ ...base, kind: "EDITION", key: "zz-lite", name: "Lite", modules: ["tasks"], seats: 2 }, "script:check");
     await plans.savePlan({ ...base, kind: "ADDON", key: "zz-seats", name: "Five more people", seats: 5 }, "script:check");
-    const proUsd = await prices.addPlanPrice({ planKey: "zz-pro", gateway: "STRIPE", currency: "usd", interval: "MONTH", amount: 2900, perSeat: false }, "script:check");
-    const stripePrice = new URLSearchParams(callsTo("POST", "/v1/prices").at(-1)!.body);
-    ok("Stripe: a product for the plan, then its price", callsTo("POST", "/v1/products").length === 1 && proUsd.externalId.startsWith("price_zz"));
-    ok(
-      "  monthly, in the currency's smallest unit, tax added on top",
-      stripePrice.get("recurring[interval]") === "month" && stripePrice.get("unit_amount") === "2900" && stripePrice.get("currency") === "usd" && stripePrice.get("tax_behavior") === "exclusive",
-      stripePrice.toString(),
-    );
-    ok("  with the API version pinned and a key to make it once", callsTo("POST", "/v1/prices").at(-1)!.headers["stripe-version"] === "2024-06-20" && !!callsTo("POST", "/v1/prices").at(-1)!.headers["idempotency-key"]);
-    await prices.addPlanPrice({ planKey: "zz-seats", gateway: "STRIPE", currency: "USD", interval: "MONTH", amount: 900, perSeat: false }, "script:check");
-    const productsBefore = callsTo("POST", "/v1/products").length;
-    const again = await prices.addPlanPrice({ planKey: "zz-pro", gateway: "STRIPE", currency: "USD", interval: "MONTH", amount: 3900, perSeat: false }, "script:check");
-    const proUsdRows = await control.planPrice.findMany({ where: { plan: { key: "zz-pro" }, gateway: "STRIPE" } });
-    ok("a new price replaces the one on sale, which is kept — on the plan's same product", proUsdRows.length === 2 && proUsdRows.filter((p) => p.active).map((p) => p.id).join() === again.id && callsTo("POST", "/v1/products").length === productsBefore);
-    const proInr = await prices.addPlanPrice({ planKey: "zz-pro", gateway: "RAZORPAY", currency: "INR", interval: "MONTH", amount: 149900, perSeat: false }, "script:check");
-    await prices.addPlanPrice({ planKey: "zz-seats", gateway: "RAZORPAY", currency: "INR", interval: "MONTH", amount: 49900, perSeat: false }, "script:check");
-    const rzpPlan = JSON.parse(callsTo("POST", "/v1/plans")[0]!.body) as { period: string; item: { amount: number; currency: string } };
-    ok("Razorpay: a plan per price, monthly, in rupees", proInr.externalId.startsWith("plan_zz") && rzpPlan.period === "monthly" && rzpPlan.item.amount === 176882 && rzpPlan.item.currency === "INR");
-    ok("  carrying 18% GST, since Razorpay adds none — the price on sale stays before GST", (await control.planPrice.findUniqueOrThrow({ where: { id: proInr.id } })).amount === 149900);
-    ok("  and only in rupees", /rupees/.test(await refused(() => prices.addPlanPrice({ planKey: "zz-pro", gateway: "RAZORPAY", currency: "USD", interval: "MONTH", amount: 100, perSeat: false }, "script:check"))));
-    ok("an internal plan is never priced", /never sold/.test(await refused(() => prices.addPlanPrice({ planKey: plans.INTERNAL_PLAN_KEY, gateway: "STRIPE", currency: "USD", interval: "MONTH", amount: 100, perSeat: false }, "script:check"))));
+    const gatewayCallsBefore = calls.length;
+    const proUsd = await prices.addPlanPrice({ planKey: "zz-pro", currency: "usd", interval: "MONTH", amount: 2900, perSeat: false }, "script:check");
+    ok("a price is the plan's: in a currency, before tax — and no gateway is called to make it", calls.length === gatewayCallsBefore && (await control.planPrice.findUniqueOrThrow({ where: { id: proUsd.id } })).currency === "USD");
+    await prices.addPlanPrice({ planKey: "zz-seats", currency: "USD", interval: "MONTH", amount: 900, perSeat: false }, "script:check");
+    const again = await prices.addPlanPrice({ planKey: "zz-pro", currency: "USD", interval: "MONTH", amount: 3900, perSeat: false }, "script:check");
+    const proUsdRows = await control.planPrice.findMany({ where: { plan: { key: "zz-pro" }, currency: "USD" } });
+    ok("a new price replaces the one on sale, which is kept", proUsdRows.length === 2 && proUsdRows.filter((p) => p.active).map((p) => p.id).join() === again.id);
+    const proInr = await prices.addPlanPrice({ planKey: "zz-pro", currency: "INR", interval: "MONTH", amount: 149900, perSeat: false }, "script:check");
+    await prices.addPlanPrice({ planKey: "zz-seats", currency: "INR", interval: "MONTH", amount: 49900, perSeat: false }, "script:check");
+    ok("  rupees beside dollars, each on sale — still no gateway called", calls.length === gatewayCallsBefore && (await control.planPrice.count({ where: { plan: { key: "zz-pro" }, active: true } })) === 2);
+    ok("an internal plan is never priced", /never sold/.test(await refused(() => prices.addPlanPrice({ planKey: plans.INTERNAL_PLAN_KEY, currency: "USD", interval: "MONTH", amount: 100, perSeat: false }, "script:check"))));
+    ok("  and a dollar price never goes through Razorpay", /rupees/.test(await refused(() => prices.gatewayPriceId(again.id, "RAZORPAY"))));
 
     // ─── Workspaces, straight in the control plane: billing never opens their databases ──────
     const makeTenant = async (slug: string, country: string, currency: string, trialDaysLeft: number) => {
@@ -309,7 +301,16 @@ async function main() {
     );
     const started = await checkout.startCheckout(US, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }, { planKey: "zz-seats", quantity: 2 }] }, "https://zzbill-us.test/settings/billing");
     const session = new URLSearchParams(callsTo("POST", "/v1/checkout/sessions").at(-1)!.body);
-    ok("Stripe Checkout, for a subscription, with its prices and quantities", started.gateway === "STRIPE" && session.get("mode") === "subscription" && session.get("line_items[0][price]") === again.externalId && session.get("line_items[1][quantity]") === "2");
+    const proCopy = await control.gatewayPrice.findFirst({ where: { priceId: again.id, gateway: "STRIPE" } });
+    ok("the first payment through Stripe makes its copies: a product for each plan, then each price", callsTo("POST", "/v1/products").length === 2 && callsTo("POST", "/v1/prices").length === 2 && proCopy?.externalId.startsWith("price_zz") === true && proCopy.mode === "test");
+    const stripePrice = new URLSearchParams(callsTo("POST", "/v1/prices")[0]!.body);
+    ok(
+      "  monthly, in the currency's smallest unit, tax added on top",
+      stripePrice.get("recurring[interval]") === "month" && stripePrice.get("unit_amount") === "3900" && stripePrice.get("currency") === "usd" && stripePrice.get("tax_behavior") === "exclusive",
+      stripePrice.toString(),
+    );
+    ok("  with the API version pinned and a key to make it once", callsTo("POST", "/v1/prices").at(-1)!.headers["stripe-version"] === "2024-06-20" && !!callsTo("POST", "/v1/prices").at(-1)!.headers["idempotency-key"]);
+    ok("Stripe Checkout, for a subscription, with those copies and quantities", started.gateway === "STRIPE" && session.get("mode") === "subscription" && session.get("line_items[0][price]") === proCopy?.externalId && session.get("line_items[1][quantity]") === "2");
     ok(
       "  collecting the tax number and working the tax out",
       session.get("automatic_tax[enabled]") === "true" && session.get("tax_id_collection[enabled]") === "true" && session.get("billing_address_collection") === "required",
@@ -320,11 +321,29 @@ async function main() {
     ok("Razorpay: a subscription per plan, each to be authorised on Razorpay's page", inStart.gateway === "RAZORPAY" && inStart.authorisations.length === 2 && inStart.authorisations.every((a) => a.url.startsWith("https://rzp.test/")));
     ok("  ten years of cycles, naming the workspace", rzpSub.total_count === 120 && rzpSub.notes.tenantId === IN && rzpSub.customer_notify === 1);
     ok("  remembered here, giving nothing until authorised", (await control.subscription.count({ where: { tenantId: IN, gateway: "RAZORPAY", status: "INCOMPLETE" } })) === 2 && (await lifecycle.billingStanding(IN)).kind === "trial");
+    const rzpPlan = JSON.parse(callsTo("POST", "/v1/plans")[0]!.body) as { period: string; item: { amount: number; currency: string } };
+    const proInrCopy = await control.gatewayPrice.findFirst({ where: { priceId: proInr.id, gateway: "RAZORPAY" } });
+    ok("  each price's Razorpay plan made at that first payment: monthly, in rupees, carrying 18% GST", callsTo("POST", "/v1/plans").length === 2 && proInrCopy?.externalId.startsWith("plan_zz") === true && rzpPlan.period === "monthly" && rzpPlan.item.amount === 176882 && rzpPlan.item.currency === "INR");
+    ok("  the price on sale stays before GST", (await control.planPrice.findUniqueOrThrow({ where: { id: proInr.id } })).amount === 149900);
+    const US2 = await makeTenant("zzbill-us2", "US", "USD", 14);
+    await checkout.startCheckout(US2, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }, "https://zzbill-us2.test/settings/billing");
+    ok("the next payment uses the copies already made — none made twice", callsTo("POST", "/v1/prices").length === 2 && (await control.gatewayPrice.count({ where: { gateway: "STRIPE" } })) === 2);
+    const keptRazorpay = await control.platformSetting.findMany({ where: { key: { startsWith: "razorpay." } } });
+    await control.platformSetting.deleteMany({ where: { key: { startsWith: "razorpay." } } });
+    const IN2 = await makeTenant("zzbill-in2", "IN", "INR", 14);
+    const noGateway = await refused(() => checkout.startCheckout(IN2, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }, "https://zzbill-in2.test/settings/billing"));
+    const inOfferNoGateway = await checkout.offerFor(IN2);
+    ok(
+      "without Razorpay connected: prices still offered, and paying online says it isn't open yet",
+      noGateway === checkout.PAYING_ONLINE_CLOSED && inOfferNoGateway.plans.find((p) => p.key === "zz-pro")?.prices[0]?.amount === 149900 && (await publicOffer.publicOffer("IN")).plans.some((p) => p.key === "zz-pro"),
+      noGateway,
+    );
+    for (const row of keptRazorpay) await control.platformSetting.create({ data: row });
 
     section("Stripe's webhooks");
     const cusId = "cus_zz1";
     const periodEnd = Math.floor((Date.now() + 30 * DAY) / 1000);
-    const priceIds = (await control.planPrice.findMany({ where: { gateway: "STRIPE", active: true }, include: { plan: true } })).reduce<Record<string, string>>((m, p) => ({ ...m, [p.plan.key]: p.externalId! }), {});
+    const priceIds = (await control.gatewayPrice.findMany({ where: { gateway: "STRIPE" }, include: { price: { include: { plan: true } } } })).reduce<Record<string, string>>((m, p) => ({ ...m, [p.price.plan.key]: p.externalId }), {});
     const stripeSub = (status: string, extra: Record<string, unknown> = {}) => ({
       id: "sub_stripe_zz1",
       object: "subscription",
@@ -593,7 +612,7 @@ async function main() {
     const adminKeys = await consoleActions.consoleSaveGatewayKeys({ values: { "stripe.secretKey": "sk_test_other" } });
     const adminSettings = await consoleActions.consoleSaveBillingSettings({ signupOpen: false, trialDays: 30, autoDeprovision: true });
     ok("an admin changes neither the gateways' keys nor the billing settings", !adminKeys.ok && !adminSettings.ok && (await settings.getSecret("stripe.secretKey")) === "sk_test_zz_check_billing");
-    const adminPrice = await consoleActions.consoleAddPrice({ planKey: "zz-lite", gateway: "STRIPE", currency: "USD", interval: "YEAR", amount: 19900, perSeat: true });
+    const adminPrice = await consoleActions.consoleAddPrice({ planKey: "zz-lite", currency: "USD", interval: "YEAR", amount: 19900, perSeat: true });
     ok("  but sets prices", adminPrice.ok);
     await actAs(ownerStaff);
     const ownerKeys = await consoleActions.consoleSaveGatewayKeys({ values: { "stripe.secretKey": "sk_test_replaced" }, clear: ["razorpay.webhookSecret"] });

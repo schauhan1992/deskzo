@@ -699,23 +699,45 @@ model PlanPrice {
   id         String          @id @default(cuid())
   planId     String
   plan       Plan            @relation(fields: [planId], references: [id], onDelete: Restrict)
-  gateway    BillingGateway
+  /// Legacy, unused since 12 Oct 2026: the gateway a price was made at. A price is the plan's now —
+  /// shown and sold whether a gateway is connected or not — and each gateway's copy of it is a
+  /// GatewayPrice. Dropped in a later migration.
+  gateway    BillingGateway?
   /// ISO 4217, upper case: INR, USD, EUR.
   currency   String
   interval   BillingInterval
-  /// In the currency's smallest unit (paise, cents), for one unit of quantity.
+  /// In the currency's smallest unit (paise, cents), for one unit of quantity, before tax.
   amount     Int
   /// Charged per person: the quantity is the seats wanted.
   perSeat    Boolean         @default(false)
-  /// The gateway's own id for it.
+  /// Legacy, unused since 12 Oct 2026: the gateway's id, now on GatewayPrice. Dropped in a later migration.
   externalId String?         @unique
   active     Boolean         @default(true)
   createdAt  DateTime        @default(now())
 
-  items SubscriptionItem[]
+  items         SubscriptionItem[]
+  gatewayCopies GatewayPrice[]
 
   @@index([planId])
   @@map("plan_prices")
+}
+
+/// A price's copy at a payment gateway — a Stripe price, a Razorpay plan — made the first time somebody
+/// pays that price through that gateway (src/lib/billing/prices.ts `gatewayPriceId`), for the keys then
+/// in use: test keys and live keys are different accounts at the gateway, with different objects.
+model GatewayPrice {
+  id         String         @id @default(cuid())
+  priceId    String
+  price      PlanPrice      @relation(fields: [priceId], references: [id], onDelete: Cascade)
+  gateway    BillingGateway
+  /// "test" or "live": the keys it was made with. "unknown" for one made before this was kept.
+  mode       String
+  /// The gateway's id for it — what its webhooks name.
+  externalId String         @unique
+  createdAt  DateTime       @default(now())
+
+  @@unique([priceId, gateway, mode])
+  @@map("gateway_prices")
 }
 
 /// Every webhook a gateway sent, once each — its id is the key, so a second delivery is a no-op.

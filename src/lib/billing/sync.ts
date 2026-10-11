@@ -5,6 +5,7 @@ import { noteOf, razorpayStatus, type RazorpayPayment, type RazorpaySubscription
 import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { platformGstIn } from "@/lib/billing/platform-gst";
+import { priceOfGatewayId } from "@/lib/billing/prices";
 
 /**
  * A gateway's word, written into the control plane: its subscriptions and invoices as ours, and then
@@ -62,7 +63,8 @@ export async function applyStripeSubscription(sub: StripeSubscription, now = new
   if (!tenantId) return null;
 
   const status = stripeStatus(sub.status);
-  const prices = await control.planPrice.findMany({ where: { externalId: { in: sub.items.data.map((i) => i.price.id) } }, select: { id: true, planId: true, externalId: true, interval: true } });
+  const copies = await control.gatewayPrice.findMany({ where: { gateway: "STRIPE", externalId: { in: sub.items.data.map((i) => i.price.id) } }, select: { externalId: true, price: { select: { id: true, planId: true, interval: true } } } });
+  const prices = copies.map((c) => ({ ...c.price, externalId: c.externalId }));
   const periodEnd = fromUnix(stripePeriodEnd(sub));
   const fields = {
     status,
@@ -111,9 +113,9 @@ async function stripePlanLines(invoice: StripeInvoice): Promise<PlanLine[] | nul
   if (!lines?.data.length || lines.has_more) return null;
   const priceIds = [...new Set(lines.data.flatMap((l) => (l.price?.id ? [l.price.id] : [])))];
   const prices = priceIds.length
-    ? await controlDb().planPrice.findMany({ where: { gateway: "STRIPE", externalId: { in: priceIds } }, select: { externalId: true, plan: { select: { key: true } } } })
+    ? await controlDb().gatewayPrice.findMany({ where: { gateway: "STRIPE", externalId: { in: priceIds } }, select: { externalId: true, price: { select: { plan: { select: { key: true } } } } } })
     : [];
-  const keyOf = new Map(prices.map((p) => [p.externalId, p.plan.key]));
+  const keyOf = new Map(prices.map((p) => [p.externalId, p.price.plan.key]));
   return lines.data.map((l) => ({ planKey: (l.price?.id ? keyOf.get(l.price.id) : undefined) ?? null, amount: l.amount }));
 }
 
@@ -166,7 +168,7 @@ export async function applyRazorpaySubscription(sub: RazorpaySubscription, now =
   const existing = await control.subscription.findUnique({ where: { externalId: sub.id }, select: { tenantId: true, pastDueSince: true, cancelAtPeriodEnd: true } });
   const tenantId = existing?.tenantId ?? (await tenantExists(noteOf(sub.notes, "tenantId")));
   if (!tenantId) return null;
-  const price = await control.planPrice.findUnique({ where: { externalId: sub.plan_id }, select: { id: true, planId: true, currency: true, interval: true } });
+  const price = await priceOfGatewayId("RAZORPAY", sub.plan_id);
   const status = razorpayStatus(sub.status);
   const fields = {
     status,
