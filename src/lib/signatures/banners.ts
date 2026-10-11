@@ -75,7 +75,7 @@ export type LiveBanner = { id: string; templateIds: string[]; startsOn: string; 
 export async function liveBanners(today: string, origin: string): Promise<LiveBanner[]> {
   let rows: BannerRow[];
   try {
-    rows = await db.signatureBanner.findMany({ where: { paused: false }, select: BANNER_SELECT });
+    rows = await db.signatureBanner.findMany({ where: { paused: false, removedAt: null }, select: BANNER_SELECT });
   } catch (err) {
     if (notMigratedYet(err)) return [];
     throw err;
@@ -92,10 +92,16 @@ export async function liveBanners(today: string, origin: string): Promise<LiveBa
 }
 
 /** The one banner a template's signatures carry: one meant for it before one for everybody, then the latest to start. */
-export function bannerFor(templateId: string, banners: LiveBanner[]): SignatureBannerSpec | null {
+export function pickBanner(templateId: string, banners: LiveBanner[]): LiveBanner | null {
   const rank = (b: LiveBanner) => (b.templateIds.includes(templateId) ? 1 : 0);
-  const best = banners
-    .filter((b) => b.templateIds.length === 0 || b.templateIds.includes(templateId))
-    .sort((a, b) => rank(b) - rank(a) || b.startsOn.localeCompare(a.startsOn) || b.updatedAt - a.updatedAt)[0];
-  return best?.spec ?? null;
+  return (
+    banners
+      .filter((b) => b.templateIds.length === 0 || b.templateIds.includes(templateId))
+      .sort((a, b) => rank(b) - rank(a) || b.startsOn.localeCompare(a.startsOn) || b.updatedAt - a.updatedAt)[0] ?? null
+  );
+}
+
+/** The banner as drawn, without counting its clicks — for previews. */
+export function bannerFor(templateId: string, banners: LiveBanner[]): SignatureBannerSpec | null {
+  return pickBanner(templateId, banners)?.spec ?? null;
 }

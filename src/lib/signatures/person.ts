@@ -6,9 +6,11 @@ import { getOrganisation } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { workspaceClock } from "@/lib/time/workspace";
-import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, safeColor, type SignatureDetails, type SignatureFont, type SignatureStyle, type SocialNetwork } from "@/lib/signatures/render";
+import { EMPTY_DETAILS, SIGNATURE_FONTS, SOCIAL_NETWORKS, safeColor, safeUrl, type SignatureDetails, type SignatureFont, type SignatureStyle, type SocialNetwork } from "@/lib/signatures/render";
 import { STORED_LAYOUTS, renderAnySignature, type SignatureLayout, type StoredLayout } from "@/lib/signatures/premium";
-import { bannerFor, liveBanners, type LiveBanner } from "@/lib/signatures/banners";
+import { liveBanners, pickBanner, type LiveBanner } from "@/lib/signatures/banners";
+import { clickLink } from "@/lib/signatures/clicks";
+import { readSignatureSettings } from "@/lib/signatures/sync";
 
 /**
  * Deskzo Signatures on the server: which template somebody gets, and their signature drawn from it and
@@ -190,6 +192,8 @@ export type SignatureContext = {
   defaultId: string;
   /** The banners running today, in the workspace's calendar. */
   banners: LiveBanner[];
+  /** Banners' and buttons' links go through the workspace's click address (clicks.ts). */
+  trackClicks: boolean;
 };
 
 /** Branding's logo, where mail programs show it: a PNG, JPEG or GIF (an SVG or WebP one isn't shown by Outlook or Gmail). */
@@ -198,7 +202,7 @@ export function brandLogoUsable(logoDataUrl: string | null | undefined): boolean
 }
 
 export async function signatureContext(actorId: string | null = null): Promise<SignatureContext> {
-  const [origin, org, branding, defaultRow, rows, rules, clock] = await Promise.all([
+  const [origin, org, branding, defaultRow, rows, rules, clock, settings] = await Promise.all([
     tenantOrigin(),
     getOrganisation(),
     getBranding(),
@@ -206,6 +210,7 @@ export async function signatureContext(actorId: string | null = null): Promise<S
     db.signatureTemplate.findMany(),
     db.signatureRule.findMany({ select: { templateId: true, target: true, targetId: true } }),
     workspaceClock(),
+    readSignatureSettings(),
   ]);
   const templates = new Map(rows.map((r) => [r.id, readTemplate(r)]));
   if (!templates.has(defaultRow.id)) templates.set(defaultRow.id, readTemplate(defaultRow));
@@ -218,6 +223,7 @@ export async function signatureContext(actorId: string | null = null): Promise<S
     rules,
     defaultId: defaultRow.id,
     banners: await liveBanners(clock.today(), origin),
+    trackClicks: settings?.trackClicks ?? true,
   };
 }
 
@@ -227,6 +233,11 @@ export async function personSignature(person: Person, ctx: SignatureContext): Pr
   const show = new Set(t.shown);
   const branch = person.branch;
   const address = branch ? joinAddress([branch.addressLine1, branch.addressLine2, branch.city, branch.state, branch.pincode]) : ctx.orgAddress;
+  // While clicks are counted, the banner's and the button's links are this person's click addresses —
+  // only where they link somewhere (an unlinked banner stays unlinked; a button needs both its words and link).
+  const banner = pickBanner(t.id, ctx.banners);
+  const bannerLink = banner && ctx.trackClicks && safeUrl(banner.spec.link) ? await clickLink(ctx.origin, "BANNER", banner.id, person.id) : (banner?.spec.link ?? "");
+  const ctaUrl = ctx.trackClicks && t.ctaLabel.trim() && safeUrl(t.ctaUrl) ? await clickLink(ctx.origin, "BUTTON", t.id, person.id) : t.ctaUrl;
   const details: SignatureDetails = {
     ...EMPTY_DETAILS,
     name: person.name,
@@ -243,9 +254,9 @@ export async function personSignature(person: Person, ctx: SignatureContext): Pr
     social: t.social,
     signOff: t.signOff,
     ctaLabel: t.ctaLabel,
-    ctaUrl: t.ctaUrl,
+    ctaUrl,
     disclaimer: t.disclaimer,
-    banner: bannerFor(t.id, ctx.banners),
+    banner: banner ? { ...banner.spec, link: bannerLink } : null,
   };
   const style: SignatureStyle<SignatureLayout> = { template: LAYOUTS[t.layout] ?? "classic", color: t.color, font: t.font };
   // The paid product carries no credit.

@@ -487,3 +487,28 @@ product had only the free generator's four layouts.
   Branding's SVG skipped, uploads refused by kind, bytes and size, dates, audience, pause, schedule,
   the picture's route, a banner reaching Zoho on the next sync, the Banners and Templates tabs),
   check:cards (http refused).
+
+**Counting clicks on banners and buttons (11 Oct 2026).** (src/lib/signatures/clicks.ts; Email signatures
+→ Clicks.)
+
+- **How.** While a company counts clicks (on by default; the switch is on the Clicks tab), a banner's
+  link and the template's button link in each person's signature are the workspace's own short address,
+  `/s/<b|c><banner or template>.<person>.<MAC>`. The proxy rewrites it to an /api route, so link checkers
+  aren't turned away as crawlers. The route counts the click and sends the reader on (302, no referrer) to
+  the link as it is now. The MAC, under the workspace's key, means an address can't be made up to count
+  against somebody else.
+- **What is counted:** clicks per banner or button, per person whose signature carried it, per day in the
+  workspace's calendar (`SignatureClick`). Who clicked is never known or kept. Left out: a known automated
+  agent (no user agent included), a HEAD, a prefetch, and the same address from the same place again
+  within ten minutes. Some mail scanners look like browsers, so the tab says to treat the numbers as a
+  little high.
+- **Not tracked:** the logo, the website and social profiles link straight to where they go — they are
+  what a reader checks before trusting an email, and a signature full of redirects reads like spam.
+- **The Clicks tab:** every banner and button with its clicks in the last 7, 30 or 90 days and ever; one
+  picked shows clicks by day, by team (department) and by whose signature it was. The Banners tab shows
+  each banner's clicks in the last 30 days.
+- **Removing a banner** (`removedAt`, was a delete) takes it out of every signature and off the list,
+  but its picture and link keep answering for emails already sent, and its clicks stay in the report.
+  Counting off: links go straight again; addresses already sent still send their readers on, uncounted.
+- Migration 20261031160000_signature_clicks. check:signature-sync 151 (the address and its MAC, the
+  redirect, every rule for what counts, the button, the report, both tabs, counting off, removal).

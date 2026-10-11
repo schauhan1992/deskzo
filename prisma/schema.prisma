@@ -12926,6 +12926,9 @@ model SignatureBanner {
   paused      Boolean   @default(false)
   /// The templates whose signatures show it, by id; empty: everybody's.
   templateIds Json      @default("[]")
+  /// Removed by a manager: out of every signature and the list, but its link and picture keep answering
+  /// for emails already sent, and its clicks stay counted.
+  removedAt   DateTime?
   createdById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -12987,6 +12990,9 @@ model SignatureSettings {
   outlookAddinId       String?
   /// The add-in turns off a person's own Outlook signature, so a message never carries two.
   outlookReplaceOwn    Boolean   @default(true)
+  /// Banners' and buttons' links go through the workspace's /s/ address, which counts the click and sends
+  /// the reader on. Off: they link straight to where they go.
+  trackClicks          Boolean   @default(true)
   updatedAt            DateTime  @updatedAt
 
   @@map("signature_settings")
@@ -13020,6 +13026,25 @@ model SignatureSync {
 
   @@index([status])
   @@map("signature_syncs")
+}
+
+/**
+ * Clicks on a signature's banner or button, counted per thing clicked, per person whose signature it
+ * was, per day in the workspace's calendar — src/lib/signatures/clicks.ts. Who clicked is never known
+ * or kept: an email's reader is nobody's account.
+ */
+model SignatureClick {
+  /// BANNER (refId: the banner) or BUTTON (refId: the template whose button it was).
+  kind   String
+  refId  String
+  /// Whose signature carried it. Not a relation: the count outlives the account.
+  userId String
+  day    DateTime @db.Date
+  clicks Int      @default(0)
+
+  @@id([kind, refId, userId, day])
+  @@index([day])
+  @@map("signature_clicks")
 }
 
 /**

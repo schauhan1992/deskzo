@@ -311,6 +311,8 @@ async function run(scratchUrl: string, base: string) {
   const iconRoute = require("../src/app/api/signatures/outlook/icon/[size]/route") as typeof import("../src/app/api/signatures/outlook/icon/[size]/route");
   const bannerRoute = require("../src/app/api/signatures/banner/[id]/route") as typeof import("../src/app/api/signatures/banner/[id]/route");
   const renderLib = require("../src/lib/signatures/render") as typeof import("../src/lib/signatures/render");
+  const clicks = require("../src/lib/signatures/clicks") as typeof import("../src/lib/signatures/clicks");
+  const clickRoute = require("../src/app/api/signatures/click/[token]/route") as typeof import("../src/app/api/signatures/click/[token]/route");
   const MyPage = (require("../src/app/(dashboard)/signatures/page") as { default: () => Promise<unknown> }).default;
   const ManagePage = (require("../src/app/(dashboard)/signatures/manage/page") as { default: (p: unknown) => Promise<unknown> }).default;
   /* eslint-enable @typescript-eslint/no-require-imports */
@@ -684,6 +686,8 @@ async function run(scratchUrl: string, base: string) {
 
       section("Premium layouts, the logo's link and banners");
       actor = boss;
+      // Links straight to where they go here; counting clicks has its own section below.
+      await actions.setSignatureClickTracking(false);
       const salesBase = { ...base0, id: salesId, logoUrl: "https://zzsig.example/logo.png" };
       const httpLogoLink = await actions.saveSignatureTemplate({ ...salesBase, layout: "EXECUTIVE", logoLink: "http://zzsig.example" });
       ok("an http:// logo link is refused, saying what to change", !httpLogoLink.ok && /https:\/\//.test(errorOf(httpLogoLink) ?? ""), errorOf(httpLogoLink));
@@ -750,7 +754,74 @@ async function run(scratchUrl: string, base: string) {
       ok("the Banners tab: each banner, whether it is live, scheduled or over, and whose signatures carry it", bannersTab.includes(`${TAG} Fair`) && bannersTab.includes("Live") && bannersTab.includes("Scheduled") && bannersTab.includes("Ended") && bannersTab.includes("Everybody"), bannersTab.slice(0, 300));
       const templatesTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "templates" }) })));
       ok("the Templates tab says which are premium", templatesTab.includes("Executive (premium)"), templatesTab.slice(0, 300));
-      ok("deleting a banner takes it out of every signature", (await actions.deleteSignatureBanner(fairId)).ok && !(await person.personSignature((await person.loadPerson(boss.id))!, await person.signatureContext())).html.includes("/api/signatures/banner/"));
+
+      section("Counting clicks on banners and buttons");
+      ok("a manager turns counting on", (await actions.setSignatureClickTracking(true)).ok);
+      const ctxC = await person.signatureContext();
+      const repC = await person.personSignature((await person.loadPerson(rep.id))!, ctxC);
+      const bossC = await person.personSignature((await person.loadPerson(boss.id))!, ctxC);
+      const repBannerLink = await clicks.clickLink(ORIGIN, "BANNER", salesBannerId, rep.id);
+      const repButtonLink = await clicks.clickLink(ORIGIN, "BUTTON", salesId, rep.id);
+      ok("the banner's link is now the rep's own click address on the workspace", repC.html.includes(`href="${repBannerLink}"`) && repBannerLink.startsWith(`${ORIGIN}/s/b${salesBannerId}.${rep.id}.`), repBannerLink);
+      ok("...and so is the button's, while the logo, website and profiles link straight", repC.html.includes(`href="${repButtonLink}"`) && repC.html.includes('href="https://zzsig.example/about"') && repC.html.includes('href="https://linkedin.com/company/zz"'));
+      ok("each person's address is their own, so a click says whose signature it was", bossC.html.includes(`/s/b${fairId}.${boss.id}.`) && !bossC.html.includes(`.${rep.id}.`));
+      ok("...and the plain-text twin carries it too", renderLib.signatureText(repC.details, null).includes(`Meet us at the fair: ${repBannerLink}`));
+      const tokenOf = (link: string) => link.slice(link.indexOf("/s/") + 3);
+      const repToken = tokenOf(repBannerLink);
+      ok("an address with another person in it, or a wrong MAC, names nothing", (await clicks.readClickToken(repToken.replace(rep.id, other.id))) === null && (await clicks.readClickToken(`${repToken.slice(0, -3)}zzz`)) === null);
+
+      const BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+      const trustProxyBefore = process.env.TRUST_PROXY;
+      process.env.TRUST_PROXY = "1";
+      clicks.resetClickMemory();
+      const click = (token: string, o: { ua?: string; ip?: string; purpose?: string; head?: boolean } = {}) => {
+        const req = new NextRequest(`${ORIGIN}/api/signatures/click/${token}`, {
+          method: o.head ? "HEAD" : "GET",
+          headers: { "user-agent": o.ua ?? BROWSER, "x-forwarded-for": o.ip ?? "203.0.113.10", ...(o.purpose ? { "sec-purpose": o.purpose } : {}) },
+        });
+        return (o.head ? clickRoute.HEAD : clickRoute.GET)(req, { params: Promise.resolve({ token }) });
+      };
+      const today = new Date(`${(await clicks.periodDays(1)).keys[0]}T00:00:00.000Z`);
+      const countOf = async (kind: "BANNER" | "BUTTON", refId: string, userId: string) =>
+        (await db.signatureClick.findUnique({ where: { kind_refId_userId_day: { kind, refId, userId, day: today } } }))?.clicks ?? 0;
+      const firstClick = await click(repToken);
+      ok("a click is sent on to the banner's link, and the click address isn't passed on", firstClick.status === 302 && firstClick.headers.get("location") === "https://zzsig.example/offer" && firstClick.headers.get("referrer-policy") === "no-referrer");
+      ok("...and counted, against the banner, the rep and today", (await countOf("BANNER", salesBannerId, rep.id)) === 1);
+      await click(repToken);
+      ok("the same link from the same place again within ten minutes counts once", (await countOf("BANNER", salesBannerId, rep.id)) === 1);
+      await click(repToken, { ip: "198.51.100.7" });
+      ok("...from somewhere else, it counts again", (await countOf("BANNER", salesBannerId, rep.id)) === 2);
+      const scanner = await click(repToken, { ua: "", ip: "192.0.2.50" });
+      const head = await click(repToken, { ip: "192.0.2.51", head: true });
+      const prefetch = await click(repToken, { ip: "192.0.2.52", purpose: "prefetch" });
+      ok("a link checker with no browser, a HEAD and a prefetch are sent on but never counted", [scanner, head, prefetch].every((r) => r.status === 302) && (await countOf("BANNER", salesBannerId, rep.id)) === 2);
+      const forged = await click(`${repToken.slice(0, -3)}zzz`);
+      ok("a made-up address goes nowhere", forged.status === 410);
+      const button = await click(tokenOf(repButtonLink));
+      ok("a click on the button goes to its link, counted against the template's button", button.headers.get("location") === "https://zzsig.example/demo" && (await countOf("BUTTON", salesId, rep.id)) === 1);
+
+      const items = await clicks.clickItems(30);
+      const salesItem = items.find((i) => i.key === `BANNER:${salesBannerId}`);
+      ok("the report lists each banner and button with its clicks, most first", items[0]?.key === `BANNER:${salesBannerId}` && salesItem?.clicks === 2 && salesItem.allTime === 2 && items.some((i) => i.key === `BUTTON:${salesId}` && i.clicks === 1 && i.label.includes("Book a demo")), JSON.stringify(items));
+      const detail = await clicks.clickDetail("BANNER", salesBannerId, 30);
+      ok("...and one banner's clicks by day, by team and by whose signature", detail.total === 2 && detail.byDay.length === 30 && detail.byDay[29]!.clicks === 2 && detail.byTeam[0]?.team === `${TAG} Sales` && detail.byPerson[0]?.name === `${TAG} Rep`);
+      const clicksTab = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "clicks", item: `BANNER:${salesBannerId}`, days: "30" }) })));
+      ok("the Clicks tab shows them, and says who clicked is never known", clicksTab.includes(`${TAG} Sales offer`) && clicksTab.includes("By team") && clicksTab.includes("Whose signature it was") && clicksTab.includes("never known"), clicksTab.slice(0, 300));
+      const bannersTabC = textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "banners" }) })));
+      ok("the Banners tab shows each banner's clicks in the last 30 days", bannersTabC.includes("2 clicks in 30 days"));
+
+      ok("counting off: links go straight again", (await actions.setSignatureClickTracking(false)).ok && (await person.personSignature((await person.loadPerson(rep.id))!, await person.signatureContext())).html.includes('href="https://zzsig.example/offer"'));
+      const afterOff = await click(repToken, { ip: "198.51.100.99" });
+      ok("...an address in an email already sent still takes its reader there, uncounted", afterOff.headers.get("location") === "https://zzsig.example/offer" && (await countOf("BANNER", salesBannerId, rep.id)) === 2);
+      if (trustProxyBefore === undefined) delete process.env.TRUST_PROXY;
+      else process.env.TRUST_PROXY = trustProxyBefore;
+
+      ok("removing a banner takes it out of every signature and off the list", (await actions.removeSignatureBanner(fairId)).ok && !(await person.personSignature((await person.loadPerson(boss.id))!, await person.signatureContext())).html.includes("/api/signatures/banner/") && !textOf(await renderHtml(await ManagePage({ searchParams: Promise.resolve({ tab: "banners" }) }))).includes(`${TAG} Fair`));
+      ok("...but emails already sent keep its picture", (await bannerRoute.GET(new Request("http://x"), { params: Promise.resolve({ id: fairId }) })).status === 200);
+      ok("...and a removed banner can't be changed or paused", !(await actions.setSignatureBannerPaused(fairId, true)).ok);
+      await actions.removeSignatureBanner(salesBannerId);
+      ok("its clicks stay in the report, marked removed", (await clicks.clickItems(30)).some((i) => i.key === `BANNER:${salesBannerId}` && i.note === "Removed" && i.clicks === 2));
+      ok("...and its link still sends readers of emails already sent where it went", (await click(repToken, { ip: "198.51.100.120" })).headers.get("location") === "https://zzsig.example/offer");
 
       section("Letting go");
       actor = boss;

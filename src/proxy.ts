@@ -97,6 +97,9 @@ const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platf
 /** Where Office looks for the add-in scripts a workspace allows — see the rewrite in the proxy. */
 const OFFICE_ADDINS_ALLOWED = "/.well-known/microsoft-officeaddins-allowed.json";
 
+/** A signature's click address, /s/<token> — see the rewrite in the proxy. */
+const SIGNATURE_CLICK = /^\/s\/[A-Za-z0-9._-]{20,120}$/;
+
 /** The partner programme's first-touch referral cookie on the public site, and a referral code's shape (6–40 characters). */
 const REFERRAL_COOKIE = "deskzo_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -327,6 +330,16 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
   if (pathname === OFFICE_ADDINS_ALLOWED) {
     const url = req.nextUrl.clone();
     url.pathname = "/api/signatures/outlook/allowed";
+    return NextResponse.rewrite(url);
+  }
+  /**
+   * A click on a signature's banner or button (src/lib/signatures/clicks.ts): a short address in every
+   * email, answered by an /api route like the file above — mail programs' link checkers aren't turned
+   * away as crawlers, and nobody needs to be signed in to be sent on.
+   */
+  if (SIGNATURE_CLICK.test(pathname)) {
+    const url = req.nextUrl.clone();
+    url.pathname = `/api/signatures/click/${pathname.slice(3)}`;
     return NextResponse.rewrite(url);
   }
   // A session counts only in the workspace that issued it (its cookie also only decrypts there).

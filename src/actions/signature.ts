@@ -252,7 +252,7 @@ export async function saveSignatureBanner(input: unknown): Promise<ActionResult<
   };
   let id: string;
   if (b.id) {
-    const updated = await db.signatureBanner.updateMany({ where: { id: b.id }, data });
+    const updated = await db.signatureBanner.updateMany({ where: { id: b.id, removedAt: null }, data });
     if (updated.count === 0) return { ok: false, error: "That banner no longer exists." };
     id = b.id;
   } else {
@@ -268,22 +268,39 @@ export async function saveSignatureBanner(input: unknown): Promise<ActionResult<
 export async function setSignatureBannerPaused(id: string, paused: boolean): Promise<ActionResult<null>> {
   const user = await manager();
   if (!user) return { ok: false, error: REFUSED };
-  const updated = await db.signatureBanner.updateMany({ where: { id: String(id) }, data: { paused: !!paused } });
+  const updated = await db.signatureBanner.updateMany({ where: { id: String(id), removedAt: null }, data: { paused: !!paused } });
   if (updated.count === 0) return { ok: false, error: "That banner no longer exists." };
   await everybodyPending();
   refresh();
   return { ok: true, data: null };
 }
 
-/** Gone from every signature; emails already sent lose an uploaded picture with it. */
-export async function deleteSignatureBanner(id: string): Promise<ActionResult<null>> {
+/**
+ * Out of every signature and off the list. Kept underneath: emails already sent still show its picture
+ * and its link still takes their readers where it went, and its clicks stay in the count.
+ */
+export async function removeSignatureBanner(id: string): Promise<ActionResult<null>> {
   const user = await manager();
   if (!user) return { ok: false, error: REFUSED };
-  const banner = await db.signatureBanner.findUnique({ where: { id: String(id) }, select: { name: true } });
+  const banner = await db.signatureBanner.findFirst({ where: { id: String(id), removedAt: null }, select: { name: true } });
   if (!banner) return { ok: false, error: "That banner no longer exists." };
-  await db.signatureBanner.delete({ where: { id: String(id) } });
+  await db.signatureBanner.update({ where: { id: String(id) }, data: { removedAt: new Date() } });
   await everybodyPending();
   await recordAudit({ userId: user.id, action: "DELETE", entityType: "SignatureBanner", entityId: String(id), entityLabel: banner.name });
+  refresh();
+  return { ok: true, data: null };
+}
+
+/**
+ * Counting clicks on banners and buttons (src/lib/signatures/clicks.ts), or not: off, their links go
+ * straight to where they go. Every signature changes, so every one goes out again.
+ */
+export async function setSignatureClickTracking(on: boolean): Promise<ActionResult<null>> {
+  const user = await manager();
+  if (!user) return { ok: false, error: REFUSED };
+  await db.signatureSettings.upsert({ where: { id: "global" }, create: { id: "global", trackClicks: !!on }, update: { trackClicks: !!on } });
+  await everybodyPending();
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "SignatureSettings", entityId: "global", entityLabel: on ? "Clicks on signature banners and buttons counted" : "Clicks on signature banners and buttons no longer counted" });
   refresh();
   return { ok: true, data: null };
 }

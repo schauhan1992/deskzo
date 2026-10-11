@@ -3,7 +3,8 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus, Pause, Play, Plus, Trash2 } from "lucide-react";
-import { deleteSignatureBanner, saveSignatureBanner, setSignatureBannerPaused } from "@/actions/signature";
+import Link from "next/link";
+import { removeSignatureBanner, saveSignatureBanner, setSignatureBannerPaused } from "@/actions/signature";
 import { BANNER_WIDTH, imageNote, linkNote } from "@/lib/signatures/render";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,8 @@ export type BannerView = {
   paused: boolean;
   templateIds: string[];
   state: "live" | "scheduled" | "ended" | "paused";
+  /** Clicks on it in the last 30 days, while clicks are counted. */
+  clicks: number;
 };
 
 const STATE: Record<BannerView["state"], { tone: "green" | "amber" | "default" | "red"; label: string }> = {
@@ -89,7 +92,18 @@ const NEW: Draft = {
  * it links to, when it runs, and whose signatures carry it. Set here by whoever manages signatures;
  * nobody else can change or remove it from their own.
  */
-export function SignatureBanners({ banners, templates, sampleHtml }: { banners: BannerView[]; templates: { id: string; name: string }[]; sampleHtml: string }) {
+export function SignatureBanners({
+  banners,
+  templates,
+  sampleHtml,
+  counting,
+}: {
+  banners: BannerView[];
+  templates: { id: string; name: string }[];
+  sampleHtml: string;
+  /** Whether clicks are counted (Clicks tab). */
+  counting: boolean;
+}) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +146,11 @@ export function SignatureBanners({ banners, templates, sampleHtml }: { banners: 
                   {when(b)} · {b.templateIds.length ? b.templateIds.map(templateName).join(", ") : "Everybody"}
                   {b.linkUrl ? ` · links to ${b.linkUrl.replace(/^https:\/\//, "").replace(/\/$/, "")}` : " · no link"}
                 </p>
+                {counting && b.linkUrl && (
+                  <Link href={`/signatures/manage?tab=clicks&item=BANNER:${b.id}`} className="text-xs text-brand hover:underline">
+                    {b.clicks} {b.clicks === 1 ? "click" : "clicks"} in 30 days
+                  </Link>
+                )}
               </div>
               <div className="flex flex-wrap justify-end gap-1">
                 <Button
@@ -167,10 +186,11 @@ export function SignatureBanners({ banners, templates, sampleHtml }: { banners: 
                   type="button"
                   variant="ghost"
                   size="sm"
-                  aria-label={`Delete ${b.name}`}
+                  aria-label={`Remove ${b.name}`}
+                  title="Remove — emails already sent keep its picture and link"
                   className="text-danger hover:bg-danger-bg hover:text-danger"
                   disabled={pending}
-                  onClick={() => act(() => deleteSignatureBanner(b.id))}
+                  onClick={() => act(() => removeSignatureBanner(b.id))}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
