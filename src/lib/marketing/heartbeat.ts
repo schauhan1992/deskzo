@@ -9,6 +9,7 @@ import { runOrderReleases } from "@/lib/orders/handoff";
 import { runCollectionsDaily } from "@/lib/collections/daily";
 import { runRecurringBilling } from "@/lib/recurring-billing/run";
 import { calendarChores } from "@/lib/calendar/chores";
+import { signatureChores } from "@/lib/signatures/sync";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -108,6 +109,14 @@ export async function runHeartbeat() {
     console.error("calendar sync failed", err);
     return null;
   });
+  /**
+   * Email signatures: everybody's drawn afresh and only what changed put into Gmail or Zoho Mail — where
+   * Signatures is in the plan, a suite is connected, and the company keeps them in step. It asks for itself.
+   */
+  const signatures = await signatureChores({ budgetMs: 45_000 }).catch((err) => {
+    console.error("signature sync failed", err);
+    return null;
+  });
   return {
     ...result,
     leadScoresRefreshed,
@@ -121,5 +130,6 @@ export async function runHeartbeat() {
     recurringDrafts: recurringBilling.drafts,
     calendarsSynced: calendars?.synced ?? 0,
     meetingsHeld: calendars?.held ?? 0,
+    signaturesSynced: signatures?.synced ?? 0,
   };
 }

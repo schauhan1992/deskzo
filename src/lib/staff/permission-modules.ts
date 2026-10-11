@@ -59,6 +59,7 @@ const BY_PREFIX: Record<string, ModuleRef> = {
   payroll: "payroll",
   vault: "vault",
   cards: "cards",
+  signatures: "signatures",
   assets: "it_assets",
   marketing: "marketing",
   forms: "forms",

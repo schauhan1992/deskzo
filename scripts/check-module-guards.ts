@@ -172,6 +172,7 @@ const COMPONENT_FOLDERS: Record<string, string[]> = {
   assets: ["it_assets"],
   calendar: ["calendar"],
   cards: ["cards"],
+  signatures: ["signatures"],
   close: ["revenue_close"],
   credit: ["receivables"],
   documents: ["sales_documents", "purchase_documents"],

@@ -4,6 +4,7 @@ import { recordAudit } from "@/lib/audit";
 import { finishConnect } from "@/lib/mail/connect";
 import { CONNECT_COOKIE, CONNECT_COOKIE_PATH, openState, publicOrigin } from "@/lib/mail/connect-state";
 import { MAIL_NAMES, MAIL_SLUGS, mailCallbackPath, providerOfMailSlug } from "@/lib/workplace/providers";
+import { finishZohoSignatureConnect, mayConnectSignatures } from "@/lib/signatures/connect";
 
 /**
  * Step two: the provider sends the browser back with a code. Every check happens before anything is
@@ -36,6 +37,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   const user = await currentUser();
   if (!user || user.id !== saved.userId) return back("expired");
   if (await refuseWhileViewingAs()) return back("viewing-as");
+
+  // A Zoho Mail administrator's grant for the company's signatures — asked again, never assumed.
+  if (saved.purpose === "signatures") {
+    if (provider !== "ZOHO" || !(await mayConnectSignatures(user.id))) return back("failed");
+    const outcome = await finishZohoSignatureConnect({
+      userId: user.id,
+      code,
+      redirectUri: `${origin}${mailCallbackPath(provider)}`,
+      accountsServer: query.get("accounts-server"),
+    });
+    if (outcome === "connected") {
+      await recordAudit({ userId: user.id, action: "UPDATE", entityType: "SignatureSettings", entityId: "global", entityLabel: "Zoho Mail connected for email signatures" });
+    }
+    return back(outcome);
+  }
 
   const done = await finishConnect(provider, {
     user: { id: user.id, email: user.email ?? "" },

@@ -126,7 +126,7 @@ async function main() {
   const markup = block && block.type === "signatureGenerator" ? renderToStaticMarkup(createElement(SignatureGeneratorBlock, { props: block.props, ctx })) : "";
   ok("rendered: the form, the preview, the copy button and the steps for each mail program", markup.includes("Copy signature") && markup.includes("Your name") && markup.includes("Apple Mail") && markup.includes("Outlook for Windows (classic)"), markup.length);
   ok("...the credit names the site and links to it", markup.includes("Made with <a href=&quot;https://deskzo.com&quot;") || markup.includes('Made with <a href="https://deskzo.com"'));
-  ok("...and the team upsell, with its button to sales", markup.includes("Signatures for your whole team") && markup.includes("/contact?topic=sales"));
+  ok("...and the team upsell, with its button to Deskzo Signatures", markup.includes("Signatures for your whole team") && markup.includes("href=\"/signatures\""));
   ok("...and says nothing typed leaves the browser", markup.includes("Nothing you type here is sent to us"));
 
   console.log(failures ? `\n${failures} failed.\n` : "\nAll passed.\n");

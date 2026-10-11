@@ -298,6 +298,15 @@ export const PERMISSION_REGISTRY = [
     delegable: false,
   },
   {
+    /** Deskzo Signatures: the company's email signatures, and putting them into everybody's mailbox. */
+    key: "signatures.manage",
+    label: "Manage email signatures",
+    description:
+      "Design the company's email signatures, decide who gets which, connect Google Workspace or Zoho Mail, and put the signatures into everybody's mailbox.",
+    defaultRoles: ["MANAGEMENT"],
+    delegable: false,
+  },
+  {
     key: "vault.use",
     label: "Use the credential vault",
     description:
@@ -1182,6 +1191,7 @@ export const PERMISSION_REGISTRY = [
   { key: "section.calendar", label: "My work › Calendar", description: "See Calendar in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.notes", label: "My work › Sticky Notes", description: "See Sticky Notes in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.cards", label: "My work › Digital Cards", description: "See Digital Cards in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.signatures", label: "My work › Email Signatures", description: "See Email Signatures in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.vault", label: "My work › Credential Vault", description: "See Credential Vault in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.targets", label: "Performance › Targets", description: "See Targets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.incentives", label: "Performance › Incentives", description: "See Incentives in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
@@ -1290,6 +1300,7 @@ const GROUP_BY_PREFIX: Record<string, string> = {
   // filed under a heading called "Other" on the permission screen.
   vault: "Administration",
   cards: "People & HR",
+  signatures: "Marketing",
   visitors: "Support",
   engagement: "People & HR",
   projects: "Orders & fulfilment",

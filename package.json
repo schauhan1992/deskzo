@@ -127,6 +127,7 @@
     "check:recurring-billing": "tsx scripts/check-recurring-billing.ts",
     "check:cards": "tsx scripts/check-cards.ts",
     "check:signatures": "tsx scripts/check-signatures.ts",
+    "check:signature-sync": "tsx scripts/check-signature-sync.ts",
     "check:item-import": "tsx scripts/check-item-import.ts",
     "check:credit": "tsx scripts/check-credit.ts",
     "check:support-load": "tsx scripts/check-support-load.ts",

@@ -44,6 +44,11 @@ export function setTestZohoRegions(next: Record<ZohoRegion, Omit<Hosts, "calenda
     : live();
 }
 
+/** Zoho Mail's address in a data centre, for src/lib/signatures/zoho.ts. */
+export function zohoMailBase(region: ZohoRegion): string {
+  return regions[region].mail;
+}
+
 /** Zoho Calendar's address in a data centre, for src/lib/calendar/zoho.ts. */
 export function zohoCalendarBase(region: ZohoRegion): string {
   return regions[region].calendar;

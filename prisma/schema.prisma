@@ -674,6 +674,7 @@ model User {
   digitalCard              DigitalCard?               @relation("DigitalCardHolder")
   cardContacts             CardContact[]              @relation("CardContactOwner")
   cardCampaigns            CardCampaignMember[]       @relation("CardCampaignMember")
+  signatureSync            SignatureSync?             @relation("SignatureSyncOf")
   leaveBalances            LeaveBalance[]             @relation("UserLeaveBalances")
   leaveRequests            LeaveRequest[]             @relation("UserLeaveRequests")
   leaveApprovals           LeaveRequest[]             @relation("LeaveApprover")
@@ -12865,4 +12866,119 @@ model CardCampaignMember {
   @@id([campaignId, userId])
   @@index([userId])
   @@map("card_campaign_members")
+}
+
+/**
+ * Deskzo Signatures: a company's email signature design. Each person's signature is drawn from one —
+ * their name, title, phones, email, photo and office from their record, the rest from here — by the
+ * same renderer as the free generator (src/lib/signatures/render.ts), without its credit.
+ */
+model SignatureTemplate {
+  id          String          @id @default(cuid())
+  name        String
+  /// The one everybody gets unless a rule gives them another. Exactly one per workspace.
+  isDefault   Boolean         @default(false)
+  /// CLASSIC, MODERN, STACKED or COMPACT — the renderer's layouts.
+  layout      String          @default("CLASSIC")
+  color       String          @default("#1d4ed8")
+  font        String          @default("arial")
+  /// Which of the person's record fields it shows: [{ key, show }] — photo, title, department, phone, mobile, email, address.
+  recordFields Json           @default("[]")
+  /// One value for everybody: the website, a logo's address, the company's social profiles, a button, the sign-off and a disclaimer.
+  website     String?
+  logoUrl     String?
+  social      Json            @default("{}")
+  ctaLabel    String?
+  ctaUrl      String?
+  signOff     String?
+  disclaimer  String?
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  rules       SignatureRule[]
+
+  @@map("signature_templates")
+}
+
+enum SignatureRuleTarget {
+  DEPARTMENT
+  BRANCH
+  ROLE
+  PERSON
+}
+
+/**
+ * Who gets a template other than the default. The most particular rule wins: a person's own, then their
+ * department's, their branch's, their role's — and the default for everybody else.
+ */
+model SignatureRule {
+  id         String              @id @default(cuid())
+  templateId String
+  template   SignatureTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  target     SignatureRuleTarget
+  /// The department, branch or user id, or the role's key.
+  targetId   String
+  createdAt  DateTime            @default(now())
+
+  @@unique([target, targetId])
+  @@index([templateId])
+  @@map("signature_rules")
+}
+
+/**
+ * Where the signatures go: one mail suite per workspace, connected by its administrator.
+ *
+ * Google Workspace: a service account the company made, given domain-wide delegation of
+ * gmail.settings.basic in its Admin console — Deskzo signs a token for each person with it. Zoho Mail: a
+ * Zoho administrator's grant of ZohoMail.organization.accounts, kept as its refresh token.
+ */
+model SignatureSettings {
+  id                   String    @id @default("global")
+  /// GOOGLE or ZOHO; null until a suite is connected.
+  provider             String?
+  googleServiceEmail   String?
+  googleKeyCipher      String?
+  zohoRefreshCipher    String?
+  zohoOrgId            String?
+  zohoAdminEmail       String?
+  /// Keep every signature in step on its own — a changed title or phone goes out within minutes.
+  autoSync             Boolean   @default(true)
+  /// The last run, and why it stopped when it did — a missing delegation, a withdrawn grant — shown on the settings.
+  lastRunAt            DateTime?
+  lastError            String?
+  connectedById        String?
+  connectedAt          DateTime?
+  updatedAt            DateTime  @updatedAt
+
+  @@map("signature_settings")
+}
+
+enum SignatureSyncStatus {
+  /// Changed since it was last put into the mailbox, or never put there.
+  PENDING
+  SYNCED
+  FAILED
+  /// Not for this person: no mailbox in the connected suite, or a switched-off account.
+  SKIPPED
+}
+
+/** One person's signature in their mailbox: what was put there, when, and what went wrong. */
+model SignatureSync {
+  userId           String              @id
+  user             User                @relation("SignatureSyncOf", fields: [userId], references: [id], onDelete: Cascade)
+  provider         String
+  status           SignatureSyncStatus @default(PENDING)
+  /// A digest of the signature last put into the mailbox — the same signature is never sent twice.
+  syncedHash       String?
+  syncedAt         DateTime?
+  lastError        String?
+  attempts         Int                 @default(0)
+  /// Zoho's id for the signature it holds for this person, so the next change updates it in place.
+  zohoSignatureId  String?
+  zohoAccountId    String?
+  claimedUntil     DateTime?
+  updatedAt        DateTime            @updatedAt
+
+  @@index([status])
+  @@map("signature_syncs")
 }

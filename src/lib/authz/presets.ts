@@ -443,6 +443,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "fields.seeRestricted",
       "pipeline.manage",
       "cards.manage",
+      "signatures.manage",
     ],
   },
   {

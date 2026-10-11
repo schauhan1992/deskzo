@@ -14,7 +14,11 @@ export const CONNECT_COOKIE_PATH = "/api/mail";
 export const CONNECT_TTL_SECONDS = 600;
 
 /** `provider`: the URL segment it was started for — absent on one started before Gmail and Zoho, which was Outlook. */
-export type ConnectState = { state: string; verifier: string; userId: string; expires: number; next: string; provider?: string };
+/**
+ * `purpose`: "signatures" for a Zoho Mail administrator's grant for the company's signatures
+ * (src/lib/signatures/connect.ts), which comes back through the same callback as a person's mailbox.
+ */
+export type ConnectState = { state: string; verifier: string; userId: string; expires: number; next: string; provider?: string; purpose?: "signatures" };
 
 export function newState(): string {
   return randomBytes(24).toString("base64url");

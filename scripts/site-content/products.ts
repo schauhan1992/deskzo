@@ -27,6 +27,7 @@ const campaigns = product("campaigns");
 const analytics = product("analytics");
 const vault = product("vault");
 const cards = product("cards");
+const signatures = product("signatures");
 
 /** "Deskzo CRM: leads, pipeline, calls…" — the name, then the tagline as the rest of the sentence. */
 function headline(p: Product): string {
@@ -779,7 +780,79 @@ const cardsPage = productLinePage({
   cta: { heading: `Give your team ${cards.name}`, body: `Design the card, issue it to the people who meet customers, and see who saved it. ${trial}` },
 });
 
-export const PRODUCT_LINE_PAGES: SeedPage[] = [onePage, crmPage, booksPage, peoplePage, deskPage, inventoryPage, subscriptionsPage, projectsPage, campaignsPage, analyticsPage, vaultPage, cardsPage];
+// ─── Deskzo Signatures ───────────────────────────────────────────────────────────────────────────
+
+const signaturesPage = productLinePage({
+  slug: signatures.path.slice(1),
+  name: signatures.name,
+  seo: {
+    title: `${signatures.name}: email signature management for teams`,
+    description: `${signatures.name} manages a company's email signatures: one design, each person's details from their record, put into Gmail and Zoho Mail and kept in step.`,
+    keywords: [signatures.name, "email signature management", "Gmail signatures for a company"],
+  },
+  eyebrow: PRODUCT_GROUP_TITLES.sell,
+  h1: headline(signatures),
+  lead: "Every email your people send carries the company's signature: one design, each person's name, title, phone and photo filled in from their record, put into their Gmail or Zoho Mail for them, and changed there when their details change.",
+  answer: {
+    question: `What is ${signatures.name}?`,
+    answer: `${signatures.name} is email signature management for a company. Whoever manages signatures designs a template once and decides who gets which; {siteName} fills in each person's details from their record and puts the signature into their mailbox in Google Workspace or Zoho Mail, keeping it in step from then on.`,
+    more: [
+      "Microsoft 365 is coming, as an Outlook add-in: Microsoft gives no way to set a signature from outside. Until then, anybody can copy their own signature from My email signature and paste it into Outlook.",
+    ],
+  },
+  contents: { heading: `What's in ${signatures.name}`, intro: contentsIntro(signatures), items: moduleCards(signatures) },
+  extra: [
+    {
+      id: "signatures-features",
+      type: "featureGrid",
+      props: {
+        heading: "What the company gets",
+        intro: "Signatures that look the same on everybody's email, and stay right without anybody remembering to change them.",
+        columns: 3,
+        items: [
+          { icon: "layers", title: "Templates", body: "A layout, a colour and a font, the logo and website, the company's social profiles, a button and a disclaimer — designed once." },
+          { icon: "users", title: "Who gets which", body: "A template for everybody, and others for a department, a branch, a role or one person. The most particular one wins." },
+          { icon: "check", title: "From the record", body: "Name, job title, department, work phone, email, photo and office address come from each person's record." },
+          { icon: "mail", title: "Into Gmail and Zoho Mail", body: "Put into each person's mailbox through Google Workspace's domain-wide delegation or a Zoho Mail administrator's grant." },
+          { icon: "history", title: "Kept in step", body: "A changed title or phone goes out within minutes, and only what changed: the same signature is never sent twice." },
+          { icon: "shield", title: "Safe in every mail program", body: "Tables and inline styles only, every value escaped and every link checked, so it looks the same in Gmail, Outlook and Apple Mail." },
+        ],
+      },
+    },
+  ],
+  how: [
+    {
+      heading: "How a company's signatures get into every mailbox",
+      intro: "The setup happens once, in the company's own admin console.",
+      steps: [
+        "Design the company's signature, and any others for a team or a branch.",
+        "Connect Google Workspace (a service account with domain-wide delegation) or Zoho Mail (an administrator's approval).",
+        "Press Sync: every person's signature goes into their mailbox, filled in from their record.",
+        "From then on, a new title, phone or photo goes out by itself.",
+      ],
+    },
+  ],
+  worksWith: {
+    heading: `What ${signatures.name} works with`,
+    intro: "A signature reads the person's record, and goes well with a card.",
+    links: [
+      pair(people, "Job titles, departments and photos from the employee record."),
+      pair(cards, "A digital business card for the same people, in the same design."),
+      pair(one, "Every product in one workspace, signatures included."),
+    ],
+  },
+  faqHeading: `Questions about ${signatures.name}`,
+  faq: [
+    ["Which mail suites does it work with?", "Google Workspace and Zoho Mail today. Microsoft 365 is coming as an Outlook add-in; until then, people copy their own signature from My email signature."],
+    ["Can people change their own signature?", "Their details come from their record, so they change them there. The design is the company's."],
+    ["What do I need to connect Google Workspace?", "A service account in your company's Google Cloud project, given domain-wide delegation of the gmail.settings.basic scope in your Google Admin console. The steps are on the Connection tab."],
+    ["Is there a free version?", "Yes: the free email signature generator makes one signature in your browser, with a small credit line. Signatures for a whole team, kept in step, are this product."],
+  ],
+  related: ["/email-signature-generator", "/cards", "/product/hr", "/pricing"],
+  cta: { heading: `Put ${signatures.name} on every email`, body: `Design the company's signature and connect your mail suite. ${trial}` },
+});
+
+export const PRODUCT_LINE_PAGES: SeedPage[] = [onePage, crmPage, booksPage, peoplePage, deskPage, inventoryPage, subscriptionsPage, projectsPage, campaignsPage, analyticsPage, vaultPage, cardsPage, signaturesPage];
 
 // Every product in products.ts has its page here, at its own path: a product added there and not here fails the seed.
 const missing = PRODUCTS.filter((p) => !PRODUCT_LINE_PAGES.some((page) => `/${page.slug}` === p.path));

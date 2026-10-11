@@ -27,7 +27,8 @@ export type ProductKey =
   | "campaigns"
   | "analytics"
   | "vault"
-  | "cards";
+  | "cards"
+  | "signatures";
 
 export type Product = {
   key: ProductKey;
@@ -171,6 +172,15 @@ export const PRODUCTS: readonly Product[] = [
     path: "/cards",
     tagline: "Branded digital business cards, a QR code each, and leads from every meeting",
     modules: ["cards"],
+    group: "sell",
+  },
+  {
+    // Sold on its own and in One (owner, 10 Oct 2026). The free generator on the website leads here.
+    key: "signatures",
+    name: "Deskzo Signatures",
+    path: "/signatures",
+    tagline: "Company email signatures, kept in step and put into every mailbox",
+    modules: ["signatures"],
     group: "sell",
   },
 ];

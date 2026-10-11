@@ -50,6 +50,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // Deskzo Cards: issuing cards, templates, My card (src/lib/cards); the card page itself is public.
   "card.ts": ["cards"],
   "card-public.ts": "public",
+  // Deskzo Signatures: templates, rules, the connected suite and syncing (src/lib/signatures).
+  "signature.ts": ["signatures"],
   "celebration.ts": ["hr"],
   // Revenue & Close: the month-end checklist, closing a month, flux and the close settings (src/lib/close).
   "close.ts": ["revenue_close"],

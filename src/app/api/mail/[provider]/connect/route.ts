@@ -3,6 +3,7 @@ import { currentUser, refuseWhileViewingAs } from "@/lib/session";
 import { startConnect } from "@/lib/mail/connect";
 import { CONNECT_COOKIE, CONNECT_COOKIE_PATH, CONNECT_TTL_SECONDS, newState, publicOrigin, safeNext, sealState } from "@/lib/mail/connect-state";
 import { MAIL_SLUGS, mailCallbackPath, providerOfMailSlug } from "@/lib/workplace/providers";
+import { mayConnectSignatures, startZohoSignatureConnect } from "@/lib/signatures/connect";
 
 /**
  * Step one of connecting somebody's own mailbox — off to Microsoft, Google or Zoho, to approve sending
@@ -23,13 +24,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   if (await refuseWhileViewingAs()) return back("viewing-as");
 
   const state = newState();
-  const started = await startConnect(provider, { redirectUri: `${origin}${mailCallbackPath(provider)}`, state, email: user.email ?? null });
+  // ?purpose=signatures: a Zoho Mail administrator's grant for the company's signatures, not a mailbox.
+  const forSignatures = req.nextUrl.searchParams.get("purpose") === "signatures";
+  if (forSignatures && (provider !== "ZOHO" || !(await mayConnectSignatures(user.id)))) return back("failed");
+  const started = forSignatures
+    ? await startZohoSignatureConnect({ redirectUri: `${origin}${mailCallbackPath(provider)}`, state }).then((s) => (s.ok ? { ...s, verifier: "" } : s))
+    : await startConnect(provider, { redirectUri: `${origin}${mailCallbackPath(provider)}`, state, email: user.email ?? null });
   if (!started.ok) return back(started.outcome);
 
   const res = NextResponse.redirect(started.url);
   res.cookies.set(
     CONNECT_COOKIE,
-    await sealState({ state, verifier: started.verifier, userId: user.id, expires: Date.now() + CONNECT_TTL_SECONDS * 1000, next, provider: MAIL_SLUGS[provider] }),
+    await sealState({
+      state,
+      verifier: started.verifier,
+      userId: user.id,
+      expires: Date.now() + CONNECT_TTL_SECONDS * 1000,
+      next,
+      provider: MAIL_SLUGS[provider],
+      ...(forSignatures ? { purpose: "signatures" as const } : {}),
+    }),
     {
       httpOnly: true,
       // Lax, not strict: the provider sends the browser back here with a top-level GET, which is

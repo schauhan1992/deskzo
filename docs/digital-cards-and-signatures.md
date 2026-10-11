@@ -376,3 +376,37 @@ CMS can place and word like any other.
 - **"Made with {siteName}"** links back to the page, as the owner decided; the paid product may take it off.
 - **The upsell** under it says Signatures for a team is on its way and links to sales.
 - Linked from Resources (menu, footer, hub), Deskzo Cards and Campaigns. `npm run check:signatures`.
+
+**Phase 4 — Deskzo Signatures for Google Workspace and Zoho Mail (11 Oct 2026).** Module and product
+`signatures` (sold alone and in One), permission `signatures.manage` (Management by default).
+
+- **Templates** (`SignatureTemplate`): layout, colour, font, which record fields show (photo, title,
+  department, work phone, email, office address), and one value for everybody — website, a logo's
+  address (the workspace's brand mark when empty), the company's social profiles, a button, sign-off,
+  disclaimer. Exactly one default. Drawn by the free generator's renderer, without its credit.
+- **Who gets which** (`SignatureRule`): a person's own rule, then their department's, branch's, role's,
+  then the default.
+- **My email signature** (/signatures, everybody): theirs, whether it is in their mailbox, Copy, and
+  steps for pasting it into Outlook — the way in for Microsoft 365 until phase 5.
+- **Email signatures** (/signatures/manage): people (template, in-mailbox state, Sync now — everybody or
+  one), templates with a live preview, who gets which, and the connection.
+- **Google Workspace**: the company's own service account with domain-wide delegation of
+  gmail.settings.basic. The key is pasted once (kept encrypted) and tried on an administrator before it is
+  kept; each person's token is signed with it (RS256, node:crypto) and their send-as signature patched.
+- **Zoho Mail**: a Zoho Mail administrator approves ZohoMail.organization.accounts (+ accounts.READ for
+  the organisation id) through the mailbox callback the company already registered — the connect state
+  says it is for signatures. One admin-added signature per person, "Company signature (Deskzo)", updated
+  in place; re-added when deleted in Zoho; found by name when its id is lost. The organisation id can be
+  typed in when Zoho doesn't give it.
+- **Sync** (`SignatureSync`, src/lib/signatures/sync.ts): every run draws each signature afresh and sends
+  only what changed (a digest of the HTML); a failure waits 10 minutes, doubling, at most a day; a fault in
+  the connection itself stops the run and is shown once on the settings. The 5-minute heartbeat does it
+  when the company keeps signatures in step on its own (on by default).
+- **Photos** are served at /api/signatures/photo/<user>.<MAC> — a mail program has to fetch them, and the
+  MAC under the workspace's key means an address can't be made up.
+- Website: /signatures product page; the generator's upsell now points there.
+- Checks: check:signature-sync (57, a scratch database and a stand-in Google and Zoho), check:signatures.
+
+**Never tried against the real Google or Zoho.** Before selling it: a Google Workspace test domain with a
+service account and delegation, and a Zoho Mail test organisation with an administrator — run Connect and
+Sync once on each, and watch the Zoho signature's position and any limit on its size.
