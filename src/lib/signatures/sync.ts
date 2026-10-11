@@ -9,6 +9,7 @@ import type { ZohoRegion } from "@/lib/workplace/providers";
 import { readServiceAccount, setGmailSignature, type ServiceAccount } from "@/lib/signatures/google";
 import { putZohoSignature, zohoOrgAccounts, zohoOrgId } from "@/lib/signatures/zoho";
 import { PERSON_SELECT, personSignature, signatureContext, type Person } from "@/lib/signatures/person";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Putting the company's signatures into everybody's mailbox — Gmail or Zoho Mail, whichever suite the
@@ -91,7 +92,7 @@ export async function syncSignatures(opts: { budgetMs: number; userIds?: string[
   const started = Date.now();
 
   const people = (await db.user.findMany({
-    where: { active: true, kind: "MEMBER", ...(opts.userIds ? { id: { in: opts.userIds } } : {}) },
+    where: { active: true, ...PEOPLE_ONLY, ...(opts.userIds ? { id: { in: opts.userIds } } : {}) },
     orderBy: { name: "asc" },
     select: PERSON_SELECT,
   })) as Person[];

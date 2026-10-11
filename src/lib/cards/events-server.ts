@@ -7,6 +7,7 @@ import { classifyHost, normaliseHost, protocolFor } from "@/lib/tenancy/host";
 import { readQuestions, type CardQuestion } from "@/lib/cards/fields";
 import { dayOf, eventDays, eventState, parseVCard, type EventState, type ScannedContact } from "@/lib/cards/events";
 import { publicCard } from "@/lib/cards/server";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Deskzo Cards' events on the server: which event somebody is working today, the booth form, an
@@ -131,7 +132,7 @@ export async function boothEvent(code: string | null | undefined, userId: string
 /** Everybody who could work an event, and whether they have a card switched on (a booth form needs one). */
 export async function teamChoices(): Promise<{ id: string; name: string; department: string | null; hasCard: boolean }[]> {
   const people = await db.user.findMany({
-    where: { active: true, kind: "MEMBER" },
+    where: { active: true, ...PEOPLE_ONLY },
     orderBy: { name: "asc" },
     select: { id: true, name: true, department: { select: { name: true } }, digitalCard: { select: { status: true } } },
   });

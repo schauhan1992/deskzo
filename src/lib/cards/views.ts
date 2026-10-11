@@ -5,6 +5,7 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { leadPath } from "@/lib/record-links";
 import { MAX_OWN_FIELDS, readFields, type CardField, type DrawnCard } from "@/lib/cards/fields";
 import { cardNumbers, drawnCardFor, isLive, loadCard, readTemplate, type CardNumbers, type TemplateSpec } from "@/lib/cards/server";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * What the signed-in pages of Deskzo Cards show. Plain functions, not actions: the pages check who
@@ -165,7 +166,7 @@ export type ManagedPerson = {
 export async function managedPeople(): Promise<ManagedPerson[]> {
   const today = (await workspaceClock()).today();
   const people = await db.user.findMany({
-    where: { kind: "MEMBER", OR: [{ active: true }, { digitalCard: { isNot: null } }] },
+    where: { ...PEOPLE_ONLY, OR: [{ active: true }, { digitalCard: { isNot: null } }] },
     orderBy: { name: "asc" },
     select: {
       id: true,

@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { workspaceClock } from "@/lib/time/workspace";
 import { notMigratedYet } from "@/lib/not-migrated";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Whether a card is live — the one rule the menu, My card and the public page all use.
@@ -18,7 +19,7 @@ export function liveCardWhere(today: string): Prisma.DigitalCardWhereInput {
     status: "ACTIVE",
     user: {
       active: true,
-      kind: "MEMBER",
+      ...PEOPLE_ONLY,
       // Three cases rather than a NOT, which would drop everybody whose exit date is null.
       OR: [{ employeeProfile: { is: null } }, { employeeProfile: { is: { exitedOn: null } } }, { employeeProfile: { is: { exitedOn: { gte: new Date(`${today}T00:00:00.000Z`) } } } }],
     },

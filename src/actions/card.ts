@@ -27,6 +27,7 @@ import { csvRow } from "@/lib/csv";
 import { cardChanges, tellCardholders } from "@/lib/cards/notices";
 import { formatLeadId } from "@/lib/order-id";
 import type { ActionResult } from "@/actions/company";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Deskzo Cards, for the people signed in: the holder's own card, and — for whoever holds
@@ -140,7 +141,7 @@ export async function issueDigitalCards(input: unknown): Promise<ActionResult<Is
         await db.user.findMany({
           where: {
             active: true,
-            kind: "MEMBER",
+            ...PEOPLE_ONLY,
             ...(departmentId ? { departmentId } : {}),
             ...(branchId ? { branchId } : {}),
             ...(role ? { role } : {}),
@@ -335,7 +336,7 @@ export async function saveCardEvent(input: unknown): Promise<ActionResult<{ id: 
   const parsed = eventSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const e = parsed.data;
-  const members = await db.user.findMany({ where: { id: { in: [...new Set(e.memberIds)] }, active: true, kind: "MEMBER" }, select: { id: true } });
+  const members = await db.user.findMany({ where: { id: { in: [...new Set(e.memberIds)] }, active: true, ...PEOPLE_ONLY }, select: { id: true } });
   const data = {
     name: e.name,
     venue: e.venue || null,

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getOrganisation } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { workspaceClock } from "@/lib/time/workspace";
+import { PEOPLE_ONLY } from "@/lib/people";
 import {
   DEFAULT_RECORD_FIELDS,
   MAX_OWN_FIELDS,
@@ -325,7 +326,7 @@ export async function issueCards(input: { userIds: string[]; templateId: string 
   if (!template) throw new Error("That template no longer exists.");
 
   const people = await db.user.findMany({
-    where: { id: { in: [...new Set(input.userIds)] }, active: true, kind: "MEMBER" },
+    where: { id: { in: [...new Set(input.userIds)] }, active: true, ...PEOPLE_ONLY },
     select: { id: true, name: true, digitalCard: { select: { id: true, status: true, templateId: true } } },
   });
   const outcome: IssueOutcome = { issued: 0, switchedOn: 0, moved: 0, skipped: new Set(input.userIds).size - people.length };

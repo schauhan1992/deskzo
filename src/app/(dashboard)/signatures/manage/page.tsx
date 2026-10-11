@@ -20,6 +20,7 @@ import { SignatureBanners, type BannerView } from "@/components/signatures/banne
 import { SignatureMailboxes, type MailboxView } from "@/components/signatures/mailboxes-editor";
 import { ClicksReport } from "@/components/signatures/clicks-report";
 import { CLICK_PERIODS, bannerClicks, clickDetail, clickItems } from "@/lib/signatures/clicks";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Email signatures, for whoever holds `signatures.manage`: everybody's signature and whether it is in
@@ -33,7 +34,7 @@ export default async function ManageSignaturesPage({ searchParams }: { searchPar
   const tab = rawTab === "templates" || rawTab === "banners" || rawTab === "clicks" || rawTab === "rules" || rawTab === "connection" ? rawTab : "people";
 
   const [ctx, settings] = await Promise.all([signatureContext(me.id), readSignatureSettings()]);
-  const people = (await db.user.findMany({ where: { active: true, kind: "MEMBER" }, orderBy: { name: "asc" }, select: PERSON_SELECT })) as Person[];
+  const people = (await db.user.findMany({ where: { active: true, ...PEOPLE_ONLY }, orderBy: { name: "asc" }, select: PERSON_SELECT })) as Person[];
   const counts = new Map<string, number>();
   for (const p of people) {
     const id = templateIdFor(p, ctx.rules, ctx.defaultId);

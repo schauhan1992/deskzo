@@ -6,6 +6,7 @@ import { getOrganisation } from "@/lib/organisation";
 import { signatureText } from "@/lib/signatures/render";
 import { PERSON_SELECT, mailboxSignature, personSignature, signatureContext, type Person } from "@/lib/signatures/person";
 import { readSignatureSettings } from "@/lib/signatures/sync";
+import { PEOPLE_ONLY } from "@/lib/people";
 
 /**
  * Deskzo Signatures for Microsoft 365. Microsoft gives no way to set somebody's Outlook signature from
@@ -435,7 +436,7 @@ export async function outlookSignature(rawEmail: string | null, caller: string |
   const key = `${await tenantKey()}|${caller ?? "unknown"}`;
   if (missesOf(key, now) >= MAX_MISSES) return { status: 429, body: { message: null } };
 
-  const person = (await db.user.findFirst({ where: { email: { equals: email, mode: "insensitive" }, active: true, kind: "MEMBER" }, select: PERSON_SELECT })) as Person | null;
+  const person = (await db.user.findFirst({ where: { email: { equals: email, mode: "insensitive" }, active: true, ...PEOPLE_ONLY }, select: PERSON_SELECT })) as Person | null;
   // Nobody's own address: perhaps a shared mailbox's (sales@, support@), when a From was changed to it.
   const mailbox = person ? null : await db.signatureMailbox.findUnique({ where: { address: email }, select: { id: true, address: true, name: true, phone: true, templateId: true } });
   if (!person && !mailbox) {
