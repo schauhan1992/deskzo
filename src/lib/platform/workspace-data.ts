@@ -5,7 +5,8 @@ import { plural } from "@/lib/console-shared/format";
 import { INVOICE_STATUS, SUBSCRIPTION_STATUS, actorLabel, gatewayLabel, jobLabel, noticeLabel, schemaLabel, subscriptionKind } from "@/lib/console-shared/labels";
 import type { TerminalState } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
-import type { CatalogueModuleView, GatewayKey, GatewayModes, InvoiceStatusKey, PlanKindKey, SubscriptionStatusKey, Tone } from "@/lib/console-shared/types";
+import type { CatalogueModuleView, GatewayKey, GatewayModes, InvoiceStatusKey, OfflineMethodKey, PlanKindKey, SubscriptionStatusKey, Tone } from "@/lib/console-shared/types";
+import { documentUrl } from "@/lib/billing/tax-invoice";
 import { usageDay } from "@/lib/copilot/settings";
 import { moduleEntitled, parseEntitlements, type Entitlements } from "@/lib/entitlements";
 import { getModuleDefinition } from "@/lib/modules";
@@ -363,7 +364,41 @@ export type InvoiceView = {
   paidAt: Date | null;
   hostedUrl: string | null;
   pdfUrl: string | null;
+  /** Its GST tax invoice, once issued, and the private link to it; its credit notes, the same. */
+  taxNumber: string | null;
+  taxUrl: string | null;
+  creditNotes: { number: string; url: string }[];
 };
+
+/** A payment recorded offline (src/lib/billing/offline.ts), as the billing tab lists it. */
+export type OfflinePaymentView = {
+  id: string;
+  method: OfflineMethodKey;
+  reference: string | null;
+  receivedOn: Date;
+  amount: number;
+  currency: string;
+  periodStart: Date;
+  periodEnd: Date;
+  paidBy: string | null;
+  recordedBy: string;
+  note: string | null;
+  voidedAt: Date | null;
+  voidReason: string | null;
+  taxNumber: string | null;
+  taxUrl: string | null;
+};
+
+/** What the "Record a payment" form offers: plans with a rupee price, and the partners that may pay for a customer. */
+export type OfflineFormOptions = {
+  plans: { key: string; name: string; kind: string; productKey: string | null; monthly: number | null; yearly: number | null; perSeat: boolean }[];
+  partners: { id: string; name: string; kind: string }[];
+  /** The plans and people it has now — what the form starts from. */
+  current: { planKey: string; quantity: number }[];
+  /** Its offline subscription's paid-until date, when it has one. */
+  paidUntil: Date | null;
+};
+
 export type BillingPanel = {
   subscriptions: SubView[];
   /** One page of its invoices, newest first (`INVOICES_PER_PAGE` a page), and how many it has. */
@@ -377,6 +412,9 @@ export type BillingPanel = {
   trial: { subscriptionId: string; status: SubscriptionStatusKey; endsAt: Date | null } | null;
   /** Test or live keys at each gateway, for the dashboard links. Never a key. */
   modes: GatewayModes;
+  /** Payments recorded offline, newest first. */
+  offlinePayments: OfflinePaymentView[];
+  offlineForm: OfflineFormOptions;
   asOf: Date;
 };
 
@@ -385,7 +423,7 @@ export const INVOICES_PER_PAGE = 25;
 export async function workspaceBilling(tenantId: string, opts: { invoicePage?: number } = {}, now = new Date()): Promise<BillingPanel> {
   const control = controlDb();
   const page = clampInt(opts?.invoicePage, 1, 10_000, 1);
-  const [subscriptions, invoices, invoiceCount, paid, notices, events, modes] = await Promise.all([
+  const [subscriptions, invoices, invoiceCount, paid, notices, events, modes, offline, offlineForm] = await Promise.all([
     control.subscription.findMany({
       where: { tenantId },
       orderBy: { createdAt: "desc" },
@@ -438,6 +476,8 @@ export async function workspaceBilling(tenantId: string, opts: { invoicePage?: n
         paidAt: true,
         hostedUrl: true,
         pdfUrl: true,
+        taxNumber: true,
+        creditNotes: { orderBy: { issuedAt: "asc" }, select: { id: true, number: true } },
       },
     }),
     control.invoice.count({ where: { tenantId } }),
@@ -450,21 +490,90 @@ export async function workspaceBilling(tenantId: string, opts: { invoicePage?: n
       select: { id: true, gateway: true, type: true, receivedAt: true, processedAt: true, error: true },
     }),
     gatewayModes(),
+    control.offlinePayment.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        method: true,
+        reference: true,
+        receivedOn: true,
+        amount: true,
+        currency: true,
+        periodStart: true,
+        periodEnd: true,
+        recordedBy: true,
+        note: true,
+        voidedAt: true,
+        voidReason: true,
+        partner: { select: { displayName: true } },
+        invoice: { select: { id: true, taxNumber: true } },
+      },
+    }),
+    offlineFormOptions(tenantId),
   ]);
+  const recorders = await staffNameMap(offline.map((p) => p.recordedBy));
 
   // The subscription "extend the trial" changes — the same one `setTrialEnd` picks: the newest by hand with a trial end.
   const trialSub = subscriptions.find((s) => s.gateway === "MANUAL" && (s.status === "TRIALING" || s.status === "CANCELLED") && s.trialEndsAt !== null);
 
   return {
     subscriptions: subscriptions.map((s) => ({ ...s, kind: subscriptionKind(s.gateway, s.status) })),
-    invoices,
+    invoices: invoices.map(({ creditNotes, ...i }) => ({
+      ...i,
+      taxUrl: i.taxNumber ? documentUrl("i", i.id) : null,
+      creditNotes: creditNotes.map((c) => ({ number: c.number, url: documentUrl("c", c.id) })),
+    })),
     invoiceCount,
     lifetimePaid: paid.flatMap((p) => (p._sum.amountPaid ? [{ currency: p.currency, minor: p._sum.amountPaid }] : [])),
     notices: notices.map((n) => ({ key: n.key, sentAt: n.sentAt, label: noticeLabel(n.key) })),
     events: events.map((e) => ({ ...e, error: e.error ? cut(redactSecrets(e.error) ?? "", 1000) : null })),
     trial: trialSub ? { subscriptionId: trialSub.id, status: trialSub.status, endsAt: trialSub.trialEndsAt } : null,
     modes,
+    offlinePayments: offline.map(({ partner, invoice, recordedBy, ...p }) => ({
+      ...p,
+      paidBy: partner?.displayName ?? null,
+      recordedBy: recorders.get(recordedBy) ?? "A staff member",
+      taxNumber: invoice.taxNumber,
+      taxUrl: invoice.taxNumber ? documentUrl("i", invoice.id) : null,
+    })),
+    offlineForm,
     asOf: now,
+  };
+}
+
+/** What the "Record a payment" form needs for this workspace: plans on sale with rupee prices, the partners, and what it has now. */
+async function offlineFormOptions(tenantId: string): Promise<OfflineFormOptions> {
+  const control = controlDb();
+  const [plans, partners, live] = await Promise.all([
+    control.plan.findMany({
+      where: { active: true, kind: { in: ["EDITION", "BUNDLE", "ADDON"] }, prices: { some: { active: true, currency: "INR" } } },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { key: true, name: true, kind: true, productKey: true, prices: { where: { active: true, currency: "INR" }, select: { interval: true, amount: true, perSeat: true } } },
+    }),
+    control.partner.findMany({ where: { status: { in: ["ACTIVE", "ONBOARDING"] } }, orderBy: { displayName: "asc" }, take: 500, select: { id: true, displayName: true, kind: true } }),
+    control.subscription.findMany({
+      where: { tenantId, status: { in: [...LIVE_STATUSES] } },
+      orderBy: { createdAt: "desc" },
+      select: { gateway: true, currentPeriodEnd: true, items: { select: { quantity: true, plan: { select: { key: true } } } } },
+    }),
+  ]);
+  const offline = live.find((s) => s.gateway === "OFFLINE");
+  const from = offline ?? live[0];
+  return {
+    plans: plans.map((p) => ({
+      key: p.key,
+      name: p.name,
+      kind: p.kind,
+      productKey: p.productKey,
+      monthly: p.prices.find((x) => x.interval === "MONTH")?.amount ?? null,
+      yearly: p.prices.find((x) => x.interval === "YEAR")?.amount ?? null,
+      perSeat: p.prices.some((x) => x.perSeat),
+    })),
+    partners: partners.map((p) => ({ id: p.id, name: p.displayName, kind: p.kind })),
+    current: (from?.items ?? []).map((i) => ({ planKey: i.plan.key, quantity: i.quantity })),
+    paidUntil: offline?.currentPeriodEnd ?? null,
   };
 }
 

@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
+import { InvoicingSettingsForm } from "@/components/console/settings/invoicing-settings";
+import { readSeller, sellerProblem } from "@/lib/billing/tax-invoice";
+import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { Banner } from "@/components/console/kit/banner";
 import { EnvBadge } from "@/components/console/kit/env-badge";
 import { PageHeader } from "@/components/console/kit/page-header";
@@ -38,6 +41,7 @@ export const metadata: Metadata = { title: "Settings" };
 const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "signup", label: "Signup & trials", icon: UserPlus },
   { id: "gateways", label: "Payment gateways", icon: CreditCard },
+  { id: "invoicing", label: "Invoicing", icon: ReceiptText },
   { id: "security", label: "Staff security", icon: ShieldCheck },
   { id: "linked-sign-in", label: "Linked sign-in", icon: Link2 },
   { id: "custom-domains", label: "Custom domains", icon: Globe },
@@ -64,6 +68,8 @@ export default async function ConsoleSettingsPage() {
   // First: signed out, the page ends here with a redirect to /login; support and read-only staff get "not found".
   const staff = await consoleStaff(PAGE_ROLES.settings);
   const caps = capsFor(staff.role);
+  const [seller, waitingInvoices] = await Promise.all([readSeller(), controlDb().invoice.count({ where: { taxNumber: null, currency: "INR", status: "PAID" } })]);
+  const sellerIssue = sellerProblem(seller);
   const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
@@ -174,6 +180,28 @@ export default async function ConsoleSettingsPage() {
             }
           >
             <GatewayKeysEditor rows={rows.filter((r) => r.kind === "secret")} modes={modes} readOnly={!caps.owner} production={production} />
+          </Panel>
+
+          <Panel
+            id="invoicing"
+            title="Invoicing"
+            description="Deskzo's own details on its GST tax invoices and credit notes — every paid rupee invoice gets one, numbered in the financial year's series and mailed to whoever it is made out to."
+          >
+            {caps.owner ? (
+              <InvoicingSettingsForm
+                initial={{ name: seller.name ?? "", address: seller.address ?? "", state: seller.state ?? "", gstin: seller.gstin ?? "", pan: seller.pan ?? "", sac: seller.sac ?? "9983", prefix: seller.prefix ?? "DZ" }}
+                waiting={waitingInvoices}
+              />
+            ) : (
+              <DefinitionList
+                columns={1}
+                items={[
+                  { term: "Registered name", value: seller.name ?? <span className="text-muted">Not set</span> },
+                  { term: "State · GSTIN", value: seller.state && seller.gstin ? `${GST_STATE_CODES[seller.state] ?? seller.state} · ${seller.gstin}` : <span className="text-muted">Not set</span> },
+                  { term: "Ready to issue", value: sellerIssue ? <span className="text-warning">{sellerIssue}</span> : "Yes" },
+                ]}
+              />
+            )}
           </Panel>
 
           <Panel id="security" title="Staff security" description="How staff sign in to this console.">

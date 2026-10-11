@@ -9,6 +9,7 @@ import { previewEntitlements, type EntitlementChange, type EntitlementPreview } 
 import { endManualPlan } from "@/lib/platform/plans";
 import { ROLE_LIMITS, applyRoleLimits, roleLimits, workspaceDatabaseExists } from "@/lib/platform/provisioner";
 import { ConsoleRefused } from "@/lib/platform/refused";
+import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
 import { requestSupportAccess } from "@/lib/platform/support-request";
 import { sendWorkspaceAdminReset } from "@/lib/platform/admin-reset";
@@ -234,10 +235,18 @@ export async function consoleSendAdminReset(tenantId: string): Promise<ConsoleRe
  * The billing email and tax ID, normalised as the workspace's own billing page does it. It changes
  * where reminders go and what new checkouts use — not the customer record already at a gateway.
  */
-export async function consoleSetBillingDetails(tenantId: string, input: { billingEmail: string; taxId: string; reason: string }): Promise<ConsoleResult<null>> {
+export async function consoleSetBillingDetails(
+  tenantId: string,
+  input: { billingEmail: string; taxId: string; reason: string; billingName?: string; billingAddress?: string; billingState?: string },
+): Promise<ConsoleResult<null>> {
   return asStaff(SELLERS, async (staff) => {
     const id = idOf(tenantId, GONE);
     const given = input && typeof input === "object" ? input : { billingEmail: "", taxId: "", reason: "" };
+    // Who its tax invoices are made out to (src/lib/billing/tax-invoice.ts); left out by an older form, kept.
+    const billingName = given.billingName === undefined ? undefined : cleanText(given.billingName, 200) || null;
+    const billingAddress = given.billingAddress === undefined ? undefined : String(given.billingAddress ?? "").replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, "").trim().slice(0, 500) || null;
+    const billingState = given.billingState === undefined ? undefined : cleanText(given.billingState, 2) || null;
+    if (billingState && !GST_STATE_CODES[billingState]) throw new ConsoleRefused("Choose the state from the list.");
     // As the workspace's own billing page saves them (src/actions/billing.ts), control characters dropped first.
     const billingEmail = cleanText(given.billingEmail, 400).toLowerCase() || null;
     if (billingEmail && (billingEmail.length > 254 || !EMAIL.test(billingEmail))) throw new ConsoleRefused("That doesn't look like an email address.");
@@ -246,12 +255,20 @@ export async function consoleSetBillingDetails(tenantId: string, input: { billin
     if (reason.length < 5) throw new ConsoleRefused("Say why — at least 5 characters. It is kept with the change.");
 
     const control = controlDb();
-    const tenant = await control.tenant.findUnique({ where: { id }, select: { status: true, billingEmail: true, taxId: true } });
+    const tenant = await control.tenant.findUnique({ where: { id }, select: { status: true, billingEmail: true, taxId: true, billingName: true, billingAddress: true, billingState: true } });
     if (!tenant) throw new ConsoleRefused(GONE);
     if (tenant.status === "DEPROVISIONED") throw new ConsoleRefused("This workspace is closed.");
-    if (tenant.billingEmail === billingEmail && tenant.taxId === taxId) throw new ConsoleRefused("Nothing has changed.");
-    await control.tenant.update({ where: { id }, data: { billingEmail, taxId }, select: { id: true } });
-    await consoleAudit(staff, "tenant.billing-details", { from: { billingEmail: tenant.billingEmail, taxId: tenant.taxId }, to: { billingEmail, taxId }, reason }, id);
+    const next = {
+      billingEmail,
+      taxId,
+      billingName: billingName === undefined ? tenant.billingName : billingName,
+      billingAddress: billingAddress === undefined ? tenant.billingAddress : billingAddress,
+      billingState: billingState === undefined ? tenant.billingState : billingState,
+    };
+    const before = { billingEmail: tenant.billingEmail, taxId: tenant.taxId, billingName: tenant.billingName, billingAddress: tenant.billingAddress, billingState: tenant.billingState };
+    if (JSON.stringify(before) === JSON.stringify(next)) throw new ConsoleRefused("Nothing has changed.");
+    await control.tenant.update({ where: { id }, data: next, select: { id: true } });
+    await consoleAudit(staff, "tenant.billing-details", { from: before, to: next, reason }, id);
     revalidateConsole();
     return null;
   });

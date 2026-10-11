@@ -6,6 +6,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { platformGstIn } from "@/lib/billing/platform-gst";
 import { priceOfGatewayId } from "@/lib/billing/prices";
+import { creditRefunds, issueTaxInvoice } from "@/lib/billing/tax-invoice";
 
 /**
  * A gateway's word, written into the control plane: its subscriptions and invoices as ours, and then
@@ -232,15 +233,22 @@ export async function applyRazorpayCharge(payment: RazorpayPayment, sub: Razorpa
     paidAt: paid ? fromUnix(payment.created_at) : null,
     planLines: planLines ?? Prisma.DbNull,
   };
-  await control.invoice.upsert({
+  const saved = await control.invoice.upsert({
     where: { gateway_externalId: { gateway: "RAZORPAY", externalId } },
     create: { tenantId, gateway: "RAZORPAY", externalId, subscriptionId: ours?.id ?? null, ...data },
     update: { ...data, ...(ours ? { subscriptionId: ours.id } : {}) },
+    select: { id: true },
   });
+  // Paid: its GST tax invoice, numbered and mailed (once — a second delivery finds it issued).
+  if (paid) await issueTaxInvoice(saved.id);
   return tenantId;
 }
 
 /** A payment refunded, in whole or in part: the invoice it paid keeps how much went back. */
 export async function applyRazorpayRefund(payment: RazorpayPayment, now = new Date()): Promise<string | null> {
-  return raiseRefunded("RAZORPAY", payment.invoice_id ?? payment.id, payment.amount_refunded, now);
+  const tenantId = await raiseRefunded("RAZORPAY", payment.invoice_id ?? payment.id, payment.amount_refunded, now);
+  // What was refunded, credited against its tax invoice — each refund once.
+  const invoice = tenantId ? await controlDb().invoice.findUnique({ where: { gateway_externalId: { gateway: "RAZORPAY", externalId: payment.invoice_id ?? payment.id } }, select: { id: true } }) : null;
+  if (invoice) await creditRefunds(invoice.id);
+  return tenantId;
 }

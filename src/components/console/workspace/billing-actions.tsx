@@ -14,12 +14,13 @@ import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { dayKeyLabel, plural } from "@/lib/console-shared/format";
 import { SUBSCRIPTION_STATUS } from "@/lib/console-shared/labels";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { BillingPanel } from "@/lib/platform/workspace-data";
 import type { Clock } from "@/lib/time/zone";
+import { GST_STATE_CODES, GST_STATE_OPTIONS } from "@/lib/gst-engine";
 
 /**
  * The Billing tab's own controls: the trial (extend, set a date, keep its plan free), the billing
@@ -196,13 +197,33 @@ export function TrialCard({ tenantId, trial, caps, asOf }: { tenantId: string; t
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** The billing email and tax ID, as the workspace's own billing page would save them — with a reason, recorded. */
-export function BillingProfileButton({ tenantId, billingEmail, taxId }: { tenantId: string; billingEmail: string | null; taxId: string | null }) {
+export function BillingProfileButton({
+  tenantId,
+  billingEmail,
+  taxId,
+  billingName = null,
+  billingAddress = null,
+  billingState = null,
+}: {
+  tenantId: string;
+  billingEmail: string | null;
+  taxId: string | null;
+  billingName?: string | null;
+  billingAddress?: string | null;
+  billingState?: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [tax, setTax] = useState("");
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [state, setState] = useState("");
   const { pending, error, run, reset } = useConsoleAction<null>();
   const emailId = useId();
   const taxIdField = useId();
+  const nameId = useId();
+  const addressId = useId();
+  const stateId = useId();
 
   const nextEmail = email.trim().toLowerCase() || null;
   const nextTax = tax.trim().toUpperCase().slice(0, 40) || null;
@@ -210,12 +231,18 @@ export function BillingProfileButton({ tenantId, billingEmail, taxId }: { tenant
   const changes = [
     ...(nextEmail !== (billingEmail ?? null) ? [{ label: "Billing email", value: `${billingEmail ?? "none"} → ${nextEmail ?? "none"}` }] : []),
     ...(nextTax !== (taxId ?? null) ? [{ label: "Tax ID", value: `${taxId ?? "none"} → ${nextTax ?? "none"}` }] : []),
+    ...((name.trim() || null) !== billingName ? [{ label: "Registered name", value: `${billingName ?? "none"} → ${name.trim() || "none"}` }] : []),
+    ...((address.trim() || null) !== billingAddress ? [{ label: "Address", value: "changed" }] : []),
+    ...((state || null) !== billingState ? [{ label: "State", value: `${billingState ? (GST_STATE_CODES[billingState] ?? billingState) : "none"} → ${state ? (GST_STATE_CODES[state] ?? state) : "none"}` }] : []),
   ];
 
   function start() {
     reset();
     setEmail(billingEmail ?? "");
     setTax(taxId ?? "");
+    setName(billingName ?? "");
+    setAddress(billingAddress ?? "");
+    setState(billingState ?? "");
     setOpen(true);
   }
 
@@ -239,7 +266,7 @@ export function BillingProfileButton({ tenantId, billingEmail, taxId }: { tenant
         pending={pending}
         error={error}
         confirmDisabled={!emailOk || changes.length === 0}
-        onConfirm={({ reason }) => run(() => consoleSetBillingDetails(tenantId, { billingEmail: email, taxId: tax, reason }), { success: "Billing details saved.", onDone: () => setOpen(false) })}
+        onConfirm={({ reason }) => run(() => consoleSetBillingDetails(tenantId, { billingEmail: email, taxId: tax, reason, billingName: name, billingAddress: address, billingState: state }), { success: "Billing details saved.", onDone: () => setOpen(false) })}
       >
         <p className="text-muted">
           Where reminders go and what new checkouts use. This does not change the customer record at Stripe or Razorpay.
@@ -253,6 +280,25 @@ export function BillingProfileButton({ tenantId, billingEmail, taxId }: { tenant
           <div className="space-y-1.5">
             <Label htmlFor={taxIdField}>Tax ID</Label>
             <Input id={taxIdField} autoComplete="off" value={tax} onChange={(e) => setTax(e.target.value)} placeholder="GSTIN, VAT number…" maxLength={40} className="uppercase" />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={nameId}>Registered name, for its tax invoices</Label>
+            <Input id={nameId} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} placeholder="The workspace's name if empty" maxLength={200} />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={addressId}>Address</Label>
+            <Textarea id={addressId} rows={2} value={address} onChange={(e) => setAddress(e.target.value)} maxLength={500} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={stateId}>State</Label>
+            <Select id={stateId} value={state} onChange={(e) => setState(e.target.value)}>
+              <option value="">Not given — read from the GSTIN</option>
+              {GST_STATE_OPTIONS.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name} ({s.code})
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
         {changes.length > 0 ? <ImpactList items={changes} /> : <p className="text-xs text-muted">Nothing changed yet.</p>}

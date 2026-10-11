@@ -18,7 +18,8 @@ function standingText(view: BillingView, clock: Clock): { tone: "green" | "amber
     case "exempt":
       return { tone: "default", text: `Your plan is looked after by ${COMPANY_NAME} — there is nothing to pay here.` };
     case "paid":
-      return { tone: "green", text: "Paid up." };
+      // Paid offline (a bank transfer, a distributor): until a date, renewed by paying the next period.
+      return { tone: "green", text: s.renewBy ? `Paid up until ${clock.date(s.renewBy)}.` : "Paid up." };
     case "trial":
       return { tone: "blue", text: `On a free trial until ${clock.date(s.endsAt)}.` };
     case "trial-over":
@@ -74,9 +75,15 @@ export default async function BillingPage() {
               <span>
                 <span className="font-medium text-text">{s.plans.map((p) => (p.quantity > 1 ? `${p.name} ×${p.quantity}` : p.name)).join(", ") || "—"}</span>
                 <span className="block text-xs text-muted">
-                  {s.gateway === "MANUAL" ? (s.status === "TRIALING" ? "Free trial" : `Given by ${COMPANY_NAME}`) : `${s.gateway === "STRIPE" ? "Stripe" : "Razorpay"}, ${s.interval === "YEAR" ? "yearly" : "monthly"}`}
+                  {s.gateway === "MANUAL"
+                    ? s.status === "TRIALING"
+                      ? "Free trial"
+                      : `Given by ${COMPANY_NAME}`
+                    : s.gateway === "OFFLINE"
+                      ? "Paid by bank transfer"
+                      : `${s.gateway === "STRIPE" ? "Stripe" : "Razorpay"}, ${s.interval === "YEAR" ? "yearly" : "monthly"}`}
                   {s.status === "PAST_DUE" && " — payment overdue"}
-                  {s.currentPeriodEnd && ` — ${s.cancelAtPeriodEnd ? "ends" : "renews"} ${clock.date(s.currentPeriodEnd)}`}
+                  {s.currentPeriodEnd && (s.gateway === "OFFLINE" ? ` — paid until ${clock.date(s.currentPeriodEnd)}` : ` — ${s.cancelAtPeriodEnd ? "ends" : "renews"} ${clock.date(s.currentPeriodEnd)}`)}
                 </span>
               </span>
               {s.gateway === "RAZORPAY" && !s.cancelAtPeriodEnd && <CancelRazorpay subscriptionId={s.id} plan={s.plans[0]?.name ?? "this plan"} />}
@@ -140,11 +147,23 @@ export default async function BillingPage() {
                     <td className="py-1.5">{formatMoney(i.total, i.currency)}</td>
                     <td className="py-1.5">{i.status.toLowerCase()}</td>
                     <td className="py-1.5 text-right">
-                      {(i.pdfUrl ?? i.hostedUrl) && (
-                        <OutboundLink href={(i.pdfUrl ?? i.hostedUrl)!} className="text-brand hover:underline">
-                          View
-                        </OutboundLink>
-                      )}
+                      <span className="inline-flex flex-wrap justify-end gap-x-3">
+                        {i.taxUrl && (
+                          <OutboundLink href={i.taxUrl} className="text-brand hover:underline">
+                            {`Tax invoice ${i.taxNumber}`}
+                          </OutboundLink>
+                        )}
+                        {i.creditNotes.map((c) => (
+                          <OutboundLink key={c.number} href={c.url} className="text-brand hover:underline">
+                            {`Credit note ${c.number}`}
+                          </OutboundLink>
+                        ))}
+                        {!i.taxUrl && (i.pdfUrl ?? i.hostedUrl) && (
+                          <OutboundLink href={(i.pdfUrl ?? i.hostedUrl)!} className="text-brand hover:underline">
+                            View
+                          </OutboundLink>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -157,7 +176,15 @@ export default async function BillingPage() {
       <Card>
         <CardHeader className="text-sm font-medium text-text">Billing details</CardHeader>
         <CardContent>
-          <BillingDetailsForm billingEmail={view.billingEmail} taxId={view.taxId} taxLabel={country === "IN" ? "GSTIN" : "VAT or tax number"} />
+          <BillingDetailsForm
+            billingEmail={view.billingEmail}
+            taxId={view.taxId}
+            taxLabel={country === "IN" ? "GSTIN" : "VAT or tax number"}
+            india={country === "IN"}
+            billingName={view.billingName}
+            billingAddress={view.billingAddress}
+            billingState={view.billingState}
+          />
         </CardContent>
       </Card>
     </SettingsPage>

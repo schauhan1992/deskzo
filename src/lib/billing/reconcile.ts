@@ -55,6 +55,7 @@ export async function resyncSubscription(
   if (!sub) throw new ConsoleRefused("That subscription no longer exists.");
   const { tenantId, gateway, externalId, status: before } = sub;
   if (gateway === "MANUAL") throw new ConsoleRefused("A plan given by hand is not at a gateway, so there is nothing to read back.");
+  if (gateway === "OFFLINE") throw new ConsoleRefused("It is paid offline — there is no gateway to read it back from.");
   if (!externalId) throw new ConsoleRefused("It was never made at the gateway, so there is nothing to read back.");
 
   if (gateway === "STRIPE") await applyStripeSubscription(await getStripeSubscription(externalId), now);

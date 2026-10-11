@@ -65,8 +65,9 @@ export function openForTenant(tenantId: string, purpose: SealPurpose, sealed: st
 /**
  * "link-*": linked sign-in's tokens and credential stamps (src/lib/platform/linked/keys.ts), keyed per
  * verifying workspace. "email-index": find-my-workspace's address index, keyed to "platform".
+ * "platform-invoice": the private links to Deskzo's own tax invoices and credit notes, keyed to "platform".
  */
-export type SignPurpose = "backup-archive" | "cms-preview" | "link-intent" | "link-completion" | "link-switch" | "link-stamp" | "email-index";
+export type SignPurpose = "backup-archive" | "cms-preview" | "link-intent" | "link-completion" | "link-switch" | "link-stamp" | "email-index" | "platform-invoice";
 
 /**
  * A signature only the platform can make, for one workspace and one purpose — derived from the

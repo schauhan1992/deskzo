@@ -593,7 +593,7 @@ async function exemptAlerts(): Promise<Alert[]> {
       status: { not: "DEPROVISIONED" },
       AND: [
         { subscriptions: { some: { gateway: "MANUAL", status: "ACTIVE" } } },
-        { subscriptions: { some: { gateway: { in: ["STRIPE", "RAZORPAY"] }, status: { in: [...LIVE_STATUSES] } } } },
+        { subscriptions: { some: { gateway: { in: ["STRIPE", "RAZORPAY", "OFFLINE"] }, status: { in: [...LIVE_STATUSES] } } } },
       ],
     },
     orderBy: { slug: "asc" },

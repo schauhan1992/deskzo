@@ -10,6 +10,8 @@ import { CheckoutRefused, billingPortal, cancelAtPeriodEnd, offerFor, pendingAut
 import { getRazorpaySubscription } from "@/lib/billing/razorpay";
 import { usedThisMonth } from "@/lib/copilot/settings";
 import { controlDb } from "@/lib/platform/control-db";
+import { documentUrl } from "@/lib/billing/tax-invoice";
+import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { seatsInUse } from "@/lib/seats";
 import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 import type { ActionResult } from "@/actions/company";
@@ -50,12 +52,29 @@ export type BillingView = {
     interval: string | null;
   }[];
   authorisations: { id: string; plan: string; url: string | null }[];
-  invoices: { id: string; number: string | null; status: string; currency: string; total: number; issuedAt: string; hostedUrl: string | null; pdfUrl: string | null }[];
+  invoices: {
+    id: string;
+    number: string | null;
+    status: string;
+    currency: string;
+    total: number;
+    issuedAt: string;
+    hostedUrl: string | null;
+    pdfUrl: string | null;
+    /** Its GST tax invoice and credit notes, by their private links (src/lib/billing/tax-invoice.ts). */
+    taxNumber: string | null;
+    taxUrl: string | null;
+    creditNotes: { number: string; url: string }[];
+  }[];
   usage: { seatsUsed: number; seatsLimit: number | null; copilotUsed: number; copilotLimit: number | null };
   offer: OfferPlan[];
   canManageAtStripe: boolean;
   billingEmail: string | null;
   taxId: string | null;
+  /** Who its tax invoices are made out to: the registered name, address and GST state code. */
+  billingName: string | null;
+  billingAddress: string | null;
+  billingState: string | null;
 };
 
 export async function getBilling(): Promise<BillingView | null> {
@@ -64,14 +83,14 @@ export async function getBilling(): Promise<BillingView | null> {
   const tenant = await currentTenant();
   const control = controlDb();
   const [row, standing, subs, invoices, offer, pending, seatsUsed, copilotUsed] = await Promise.all([
-    control.tenant.findUniqueOrThrow({ where: { id: tenant.id }, select: { status: true, suspendedFor: true, billingEmail: true, taxId: true, stripeCustomerId: true } }),
+    control.tenant.findUniqueOrThrow({ where: { id: tenant.id }, select: { status: true, suspendedFor: true, billingEmail: true, taxId: true, billingName: true, billingAddress: true, billingState: true, stripeCustomerId: true } }),
     billingStanding(tenant.id),
     control.subscription.findMany({
       where: { tenantId: tenant.id, status: { not: "CANCELLED" } },
       orderBy: { createdAt: "asc" },
       include: { items: { include: { plan: { select: { name: true } } } } },
     }),
-    control.invoice.findMany({ where: { tenantId: tenant.id }, orderBy: { issuedAt: "desc" }, take: 24 }),
+    control.invoice.findMany({ where: { tenantId: tenant.id }, orderBy: { issuedAt: "desc" }, take: 24, include: { creditNotes: { orderBy: { issuedAt: "asc" }, select: { id: true, number: true } } } }),
     offerFor(tenant.id),
     pendingAuthorisations(tenant.id),
     seatsInUse(),
@@ -99,12 +118,27 @@ export async function getBilling(): Promise<BillingView | null> {
         interval: s.interval,
       })),
     authorisations,
-    invoices: invoices.map((i) => ({ id: i.id, number: i.number, status: i.status, currency: i.currency, total: i.total, issuedAt: i.issuedAt.toISOString(), hostedUrl: i.hostedUrl, pdfUrl: i.pdfUrl })),
+    invoices: invoices.map((i) => ({
+      id: i.id,
+      number: i.number,
+      status: i.status,
+      currency: i.currency,
+      total: i.total,
+      issuedAt: i.issuedAt.toISOString(),
+      hostedUrl: i.hostedUrl,
+      pdfUrl: i.pdfUrl,
+      taxNumber: i.taxNumber,
+      taxUrl: i.taxNumber ? documentUrl("i", i.id) : null,
+      creditNotes: i.creditNotes.map((c) => ({ number: c.number, url: documentUrl("c", c.id) })),
+    })),
     usage: { seatsUsed, seatsLimit: tenant.entitlements.seats, copilotUsed, copilotLimit: tenant.entitlements.copilotTokens },
     offer: offer.plans,
     canManageAtStripe: !!row.stripeCustomerId,
     billingEmail: row.billingEmail,
     taxId: row.taxId,
+    billingName: row.billingName,
+    billingAddress: row.billingAddress,
+    billingState: row.billingState,
   };
 }
 
@@ -123,6 +157,9 @@ export async function billingNotice(): Promise<{ tone: "info" | "warning"; text:
       return { tone: "warning", text: `A payment has failed. The workspace will be held in ${days(standing.holdAt)} day(s) unless it is paid.` };
     case "ending":
       return days(standing.holdAt) <= 14 ? { tone: "info", text: `Your subscription ends in ${days(standing.holdAt)} day(s) and will not renew.` } : null;
+    case "paid":
+      // Paid offline: it doesn't renew by itself — the next period is paid the same way.
+      return standing.renewBy && days(standing.renewBy) <= 14 ? { tone: "info", text: `Your plan is paid until ${new Date(standing.renewBy).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. Pay the next period by bank transfer as before to carry on.` } : null;
     default:
       return null;
   }
@@ -172,13 +209,19 @@ export async function cancelSubscription(subscriptionId: string): Promise<Action
   return { ok: true, data: null };
 }
 
-export async function saveBillingDetails(input: { billingEmail: string; taxId: string }): Promise<ActionResult<null>> {
+export async function saveBillingDetails(input: { billingEmail: string; taxId: string; billingName?: string; billingAddress?: string; billingState?: string }): Promise<ActionResult<null>> {
   const a = await owner();
   if (!a.ok) return a;
   const email = String(input?.billingEmail ?? "").trim().toLowerCase();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That doesn't look like an email address." };
   const taxId = String(input?.taxId ?? "").trim().toUpperCase().slice(0, 40);
-  await controlDb().tenant.update({ where: { id: (await currentTenant()).id }, data: { billingEmail: email || null, taxId: taxId || null } });
+  // Who its tax invoices are made out to; a form without them leaves them as they are.
+  const named = input?.billingName === undefined ? {} : { billingName: String(input.billingName ?? "").trim().slice(0, 200) || null };
+  const addressed = input?.billingAddress === undefined ? {} : { billingAddress: String(input.billingAddress ?? "").replace(/\r\n?/g, "\n").trim().slice(0, 500) || null };
+  const state = input?.billingState === undefined ? undefined : String(input.billingState ?? "").trim();
+  if (state && !GST_STATE_CODES[state]) return { ok: false, error: "Choose the state from the list." };
+  const stated = state === undefined ? {} : { billingState: state || null };
+  await controlDb().tenant.update({ where: { id: (await currentTenant()).id }, data: { billingEmail: email || null, taxId: taxId || null, ...named, ...addressed, ...stated } });
   await recordAudit({ userId: a.me.id, action: "UPDATE", entityType: "BillingDetails", entityId: (await currentTenant()).id, entityLabel: "Billing email and tax number" });
   revalidatePath("/settings/billing");
   return { ok: true, data: null };

@@ -80,7 +80,7 @@ export async function trialsBoard(now = new Date()): Promise<TrialsBoard> {
         OR: [{ status: "TRIALING" }, { status: "CANCELLED", cancelledAt: { gte: new Date(now.getTime() - ENDED_WITHIN_DAYS * DAY) } }],
         tenant: {
           status: { in: ["ACTIVE", "SUSPENDED"] },
-          subscriptions: { none: { gateway: { in: ["STRIPE", "RAZORPAY"] }, status: { in: LIVE } } },
+          subscriptions: { none: { gateway: { in: ["STRIPE", "RAZORPAY", "OFFLINE"] }, status: { in: LIVE } } },
         },
       },
       orderBy: { trialEndsAt: "asc" },

@@ -16,6 +16,8 @@ import { clockFor, type Clock } from "@/lib/time/zone";
  *   · A subscription cancelled runs to the end of its period; then the workspace is held — and, if
  *     staff have turned it on, closed ninety days later.
  *   · Paying again lifts a billing hold at once. A staff hold is never lifted by billing.
+ *   · Paid offline (a bank transfer, a distributor — src/lib/billing/offline.ts): paid until its period
+ *     ends, with reminders to renew before; then due, like a failed payment — fourteen days' grace, held.
  *   · Reminders go to its billing address seven, three and one days before any of those ends.
  *
  * The installation's own workspace, and any workspace staff put on a plan by hand, are never touched.
@@ -35,8 +37,8 @@ const CHUNK = 1_000;
 export type Standing =
   /** The installation's own, or on a plan staff gave by hand: nothing to collect. */
   | { kind: "exempt" }
-  /** A live subscription at a gateway, paid up. */
-  | { kind: "paid" }
+  /** A live subscription at a gateway, paid up — or paid offline until `renewBy`. */
+  | { kind: "paid"; renewBy?: Date }
   | { kind: "trial"; endsAt: Date }
   /** The trial is over; held at `holdAt` unless a plan is bought. */
   | { kind: "trial-over"; holdAt: Date }
@@ -77,16 +79,25 @@ export function standingOf(isDefault: boolean, subs: StandingSub[], now: Date): 
   if (subs.some((s) => s.gateway === "MANUAL" && s.status === "ACTIVE")) return { kind: "exempt" };
 
   const paid = subs.filter((s) => s.gateway !== "MANUAL");
-  const live = paid.filter((s) => s.status === "ACTIVE" || s.status === "TRIALING");
+  // Paid offline and past its period: due from the day it ended — nothing renews it on its own.
+  const offlineEnded = (s: StandingSub) => s.gateway === "OFFLINE" && s.status === "ACTIVE" && !!s.currentPeriodEnd && s.currentPeriodEnd <= now;
+  const live = paid.filter((s) => (s.status === "ACTIVE" || s.status === "TRIALING") && !offlineEnded(s));
   const renewing = live.filter((s) => !s.cancelAtPeriodEnd);
-  if (renewing.length) return { kind: "paid" };
+  if (renewing.length) {
+    // A gateway renews by itself; paid offline only, it is paid until the latest period ends.
+    if (renewing.every((s) => s.gateway === "OFFLINE")) {
+      const until = renewing.map((s) => s.currentPeriodEnd?.getTime() ?? now.getTime()).reduce((a, b) => Math.max(a, b));
+      return { kind: "paid", renewBy: new Date(until) };
+    }
+    return { kind: "paid" };
+  }
   if (live.length) {
     const end = live.map((s) => s.currentPeriodEnd?.getTime() ?? now.getTime()).reduce((a, b) => Math.max(a, b));
     return { kind: "ending", holdAt: new Date(end) };
   }
-  const pastDue = paid.filter((s) => s.status === "PAST_DUE");
+  const pastDue = paid.filter((s) => s.status === "PAST_DUE" || offlineEnded(s));
   if (pastDue.length) {
-    const since = pastDue.map((s) => s.pastDueSince?.getTime() ?? now.getTime()).reduce((a, b) => Math.min(a, b));
+    const since = pastDue.map((s) => (offlineEnded(s) ? s.currentPeriodEnd!.getTime() : (s.pastDueSince?.getTime() ?? now.getTime()))).reduce((a, b) => Math.min(a, b));
     return { kind: "past-due", holdAt: new Date(since + PAST_DUE_GRACE_DAYS * DAY) };
   }
   const trial = subs.find((s) => s.gateway === "MANUAL" && s.status === "TRIALING");
@@ -153,9 +164,15 @@ function reminderStep(at: Date, now: Date): { daysLeft: number; step: number } |
 }
 
 /** Each reminder is sent once: its key names what it is about, the date, and the step. */
-const noticeKey = (what: "trial" | "hold", at: Date, step: number) => `${what}:${at.toISOString().slice(0, 10)}:${step}`;
+const noticeKey = (what: Reminder, at: Date, step: number) => `${what}:${at.toISOString().slice(0, 10)}:${step}`;
 
-export type PlannedAction = { action: "none" | "held" | "lifted" | "closed"; remind: "trial" | "hold" | null };
+/** A trial ending, a hold coming, or a period paid offline running out. */
+type Reminder = "trial" | "hold" | "renew";
+
+/** The date a reminder counts to: the standing's own, or — paid offline — the end of what is paid. */
+const reminderDate = (s: Standing): Date | null => standingDate(s) ?? (s.kind === "paid" ? (s.renewBy ?? null) : null);
+
+export type PlannedAction = { action: "none" | "held" | "lifted" | "closed"; remind: Reminder | null };
 
 /**
  * What a standing calls for, decided without doing any of it — `applyStanding` acts on exactly this,
@@ -172,10 +189,10 @@ export function plannedAction(t: { status: TenantStatus; suspendedFor: Suspended
   const fine = standing.kind === "exempt" || standing.kind === "paid" || standing.kind === "trial" || ("holdAt" in standing && !due);
 
   if (fine) {
-    const at = standingDate(standing);
+    const at = reminderDate(standing);
     return {
       action: t.status === "SUSPENDED" && t.suspendedFor === "BILLING" ? "lifted" : "none",
-      remind: at && reminderStep(at, now) ? (standing.kind === "trial" ? "trial" : "hold") : null,
+      remind: at && reminderStep(at, now) ? (standing.kind === "trial" ? "trial" : standing.kind === "paid" ? "renew" : "hold") : null,
     };
   }
   if (standing.kind === "none") return none;
@@ -195,7 +212,7 @@ function billingUrl(slug: string): string {
 const dateText = (d: Date, clock: Clock) => d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: clock.zone });
 
 /** The reminder due now, if one is: the tightest of 7/3/1 days the date has come within, once. */
-async function remind(tenant: { id: string; slug: string; name: string; to: string | null; timezone: string | null }, what: "trial" | "hold", at: Date, now: Date): Promise<boolean> {
+async function remind(tenant: { id: string; slug: string; name: string; to: string | null; timezone: string | null }, what: Reminder, at: Date, now: Date): Promise<boolean> {
   if (!tenant.to) return false;
   const due = reminderStep(at, now);
   if (!due) return false;
@@ -208,11 +225,19 @@ async function remind(tenant: { id: string; slug: string; name: string; to: stri
   const when = due.daysLeft === 1 ? "tomorrow" : `in ${due.daysLeft} days`;
   // The workspace's zone, from its control-plane row (src/lib/time/workspace.ts says the same of a Tenant).
   const clock = clockFor(tenant.timezone);
-  const subject = what === "trial" ? `Your trial of ${tenant.name} ends ${when}` : `${tenant.name} will be held ${when}`;
+  const subject =
+    what === "trial" ? `Your trial of ${tenant.name} ends ${when}` : what === "renew" ? `${tenant.name} is paid until ${dateText(at, clock)}` : `${tenant.name} will be held ${when}`;
   const body =
     what === "trial"
       ? [`Your free trial ends on ${dateText(at, clock)}.`, "", "Choose a plan to keep everything as it is:", billingUrl(tenant.slug)]
-      : [`${tenant.name} will be held on ${dateText(at, clock)} unless the subscription is paid — nothing is deleted, but nobody can work in it until it is.`, "", "Settle it here:", billingUrl(tenant.slug)];
+      : what === "renew"
+        ? [
+            `${tenant.name} is paid until ${dateText(at, clock)}. To carry on after that, pay the next period by bank transfer as before — or write to us to pay another way.`,
+            "",
+            "Your plan and invoices:",
+            billingUrl(tenant.slug),
+          ]
+        : [`${tenant.name} will be held on ${dateText(at, clock)} unless the subscription is paid — nothing is deleted, but nobody can work in it until it is.`, "", "Settle it here:", billingUrl(tenant.slug)];
   await sendPlatformMail({ type: "BILLING", to: tenant.to, subject, text: body.join("\n") });
   return true;
 }
@@ -251,7 +276,7 @@ export async function applyStanding(tenantId: string, now = new Date()): Promise
       out.action = "closed";
       break;
   }
-  const at = standingDate(standing);
+  const at = reminderDate(standing);
   if (plan.remind && at) out.reminded = await remind(who, plan.remind, at, now);
   return out;
 }
@@ -290,7 +315,7 @@ export async function previewLifecycle(now = new Date()): Promise<{ held: string
     if (!standing) continue;
     const plan = plannedAction(t, standing, now, autoClose);
     if (plan.action !== "none") out[plan.action].push(t.slug);
-    const at = standingDate(standing);
+    const at = reminderDate(standing);
     const due = at && reminderStep(at, now);
     if (plan.remind && at && due && (t.billingEmail ?? t.ownerEmail)) reminders.push({ tenantId: t.id, slug: t.slug, key: noticeKey(plan.remind, at, due.step) });
   }

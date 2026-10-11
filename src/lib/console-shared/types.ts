@@ -18,7 +18,10 @@ export type TenantStatusKey = "PROVISIONING" | "ACTIVE" | "SUSPENDED" | "MIGRATI
 /** `Standing["kind"]` of src/lib/billing/lifecycle.ts. */
 export type StandingKind = "exempt" | "paid" | "trial" | "trial-over" | "past-due" | "ending" | "lapsed" | "none";
 
-export type GatewayKey = "MANUAL" | "STRIPE" | "RAZORPAY";
+export type GatewayKey = "MANUAL" | "STRIPE" | "RAZORPAY" | "OFFLINE";
+
+/** How a payment recorded offline came in (src/lib/billing/offline.ts). */
+export type OfflineMethodKey = "NEFT" | "RTGS" | "IMPS" | "UPI" | "CHEQUE" | "CASH" | "OTHER";
 
 /** Which kind of key a gateway holds — worked out from its prefix on the server; null when none is set. */
 export type GatewayMode = "test" | "live" | "unknown" | null;

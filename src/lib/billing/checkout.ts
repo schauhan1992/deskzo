@@ -107,6 +107,7 @@ export async function startCheckout(tenantId: string, selection: Selection, retu
   if (refusal) throw new CheckoutRefused(refusal);
 
   const live = await control.subscription.findMany({ where: { tenantId, gateway: { not: "MANUAL" }, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } }, select: { gateway: true } });
+  if (live.some((s) => s.gateway === "OFFLINE")) throw new CheckoutRefused("This workspace is paid by bank transfer — write to us to change its plan or how it pays.");
   if (live.length) throw new CheckoutRefused("This workspace is already paying for a plan — change it from Manage billing.");
 
   // Each price's copy at the gateway, made now where it has none. Without the gateway connected yet,

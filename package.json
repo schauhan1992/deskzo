@@ -167,6 +167,7 @@
     "check:module-guards": "tsx scripts/check-module-guards.ts",
     "check:entitlements": "tsx scripts/check-entitlements.ts",
     "check:billing": "tsx scripts/check-billing.ts",
+    "check:offline-billing": "tsx scripts/check-offline-billing.ts",
     "check:products": "tsx scripts/check-products.ts",
     "check:hardening": "tsx scripts/check-hardening.ts",
     "check:site": "tsx scripts/check-site.ts",

@@ -77,10 +77,45 @@ The add-ons are priced for the whole workspace, not per person:
    - This doesn't matter for a single-product workspace or for Deskzo One.
    - For mixed workspaces the fix is per-product licences: assign each person the products they use, like Zoho's per-app users, and have module access check it.
    - Recommended before selling product combinations widely.
-2. **GST registration.** The 18% assumes the selling company is GST-registered and its invoices carry its GSTIN and the SAC (9983). Your CA should confirm the rate and the invoice format.
+2. **GST registration.** The 18% assumes the selling company is GST-registered. Its tax invoices now carry its GSTIN and the SAC (9983) — see below. Your CA should confirm the rate, the SAC, the numbering format, and how a buyer with no GSTIN and no state is taxed.
 3. **A free plan.** Zoho Books is free under ₹25 lakh revenue, Zoho Payroll for up to 10 employees, and HubSpot and Zoho CRM for 2–3 users. Billing can't sell a ₹0 plan yet (Razorpay plans need an amount). The trial stands in for now.
 4. **Razorpay test, then live.** Prices don't depend on Razorpay (owner, 12 Oct 2026): they show at once, and Razorpay's copy of each is made at the first payment through it. Test and live keys each get their own copies, so switching needs no step. Before taking real money, enter **test keys** and check one checkout end to end. Billing has only ever been tested against fake gateways (see the billing memory).
 5. **Review after the first customers.** These are launch prices. Watch which products people buy first and where trials stall, then change prices in the console. A price changed there is replaced, never edited, so whoever already pays keeps their price.
+
+## Paying outside a gateway, and tax invoices
+
+Built 12 Oct 2026. The code is in `src/lib/billing/offline.ts` and `src/lib/billing/tax-invoice.ts`; `npm run check:offline-billing` covers it.
+
+**Bank transfer and distributors.**
+- Staff record the payment from the workspace's page in the console: Billing › Offline payments › Record a payment. Billing staff, admins and the owner can record; only admins and the owner can void.
+- Each payment records:
+  - the plans and quantities, monthly or yearly, and for how many periods;
+  - the amount received, which the form fills from the price list plus GST;
+  - how it was paid (NEFT, RTGS, IMPS, UPI, cheque, cash or other), its UTR or cheque number, and the day it came in;
+  - whether the workspace paid, or a distributor or reseller from the partner directory.
+- What a payment does:
+  - It pays the workspace until the period ends, ends its trial, and sets its plans and people.
+  - It makes a paid invoice, and a tax invoice for it.
+  - A held workspace is let back in at once.
+- **Paying ahead** carries on from the paid-until date. Paying after a lapse starts from the day the money came.
+- **When the paid period runs out:**
+  - The billing contact is reminded seven, three and one days before it ends.
+  - After it ends, the workspace has fourteen days' grace, then it is held, like a failed card payment.
+  - The workspace's billing page shows "Paid up until …".
+- **A wrong entry is voided with a reason, never deleted.** Its time comes off the paid-until date, and its tax invoice is credited in full. Voiding the last payment ends the subscription.
+- Only rupees, for workspaces in India. A workspace paying through Razorpay can't also be paid offline; cancel that first.
+
+**GST tax invoices for Deskzo's own subscriptions.**
+- Every paid rupee invoice gets a tax invoice, whether it came through Razorpay or was recorded offline.
+- **Numbering:** one series per financial year, `DZ/2026-27/0001`. Credit notes have their own series, `DZ/CN/2026-27/0001`. Numbers are taken under a lock, so none is shared or skipped.
+- **Who it is made out to:**
+  - the workspace, using the billing details on its page (registered name, address, state, GSTIN);
+  - or the distributor that paid, using its GSTIN and address from the partner directory, with the workspace named as the end user.
+- **Tax:** CGST and SGST when the buyer is in the seller's state, IGST otherwise. The state comes from the buyer's GSTIN, then from the state given. A buyer with neither is taxed in the seller's own state.
+- **Issued once, then frozen.** Changing either side's details later never rewrites an invoice that has gone out.
+- **Delivery:** mailed as billing mail, with a private link to a printable A4 page (`/invoice/…` on the main site) that a browser saves as a PDF. The link opens that one document only, and the page is kept out of search engines.
+- **Refunds:** a Razorpay refund gets a credit note for what went back, once per refund.
+- **Seller's details:** the owner enters them in console › Settings › Invoicing (registered name and address, state, GSTIN, PAN, SAC, number prefix). Until then, paid invoices wait without a number. Saving the details issues all of them, oldest first, and mails them.
 
 ## Setting it on live
 
@@ -90,12 +125,13 @@ npm run platform:plans -- prices
 npm run platform:plans -- prices --apply
 ```
 
-1. Deploy, so the control migrations are applied (`20261028100000_signup_product`, `20261029100000_site_lead_product`, `20261030100000_gateway_prices`).
+1. Deploy, so the control migrations are applied (`20261028100000_signup_product`, `20261029100000_site_lead_product`, `20261030100000_gateway_prices`, `20261031100000_offline_payments_tax_invoices`).
 2. Run `npm run platform:plans -- products`. It makes the Deskzo Cards and Deskzo Signatures plans if they're missing.
 3. Run `npm run platform:plans -- prices` and read the dry run.
 4. Run `npm run platform:plans -- prices --apply`. No gateway is needed: the prices show on the pricing page, the product pages and the billing page at once.
 5. When you're ready to take payments online, enter Razorpay's **test** keys in the console under Settings › Billing, and start a checkout from a test workspace. Until a gateway is connected, a workspace that tries to pay online is told it isn't open yet, and staff set its plan up by hand.
 6. Put in the live keys. Nothing else to run: the live copies are made at the first live payment.
+7. Before the first payment, enter the seller's details in console › Settings › Invoicing, so tax invoices go out from the start.
 
 ## The research (read 11 Oct 2026)
 

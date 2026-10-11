@@ -22,6 +22,9 @@ import type { BillingPanel, SubView, WorkspaceHeader } from "@/lib/platform/work
 import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 import { BillingProfileButton, EndManualPlanButton, ResyncButton, TrialCard } from "./billing-actions";
+import { RecordPaymentButton, VoidPaymentButton } from "./offline-payments";
+
+const OFFLINE_METHOD: Record<string, string> = { NEFT: "NEFT", RTGS: "RTGS", IMPS: "IMPS", UPI: "UPI", CHEQUE: "Cheque", CASH: "Cash", OTHER: "Other" };
 
 /**
  * Workspace 360 › Billing: where it stands and why, its trial, its subscriptions with their ids at
@@ -106,6 +109,7 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
   }
   if (liveGatewaySub?.pastDueSince) facts.push({ term: "Past due since", value: <DateValue clock={clock} at={liveGatewaySub.pastDueSince} asOf={asOf} tone="danger" /> });
   if (heldForBilling && tenant.suspendedAt) facts.push({ term: "Held for billing since", value: <DateValue clock={clock} at={tenant.suspendedAt} asOf={asOf} tone="danger" /> });
+  if (billing.offlineForm.paidUntil) facts.push({ term: "Paid offline until", value: <DateValue clock={clock} at={billing.offlineForm.paidUntil} asOf={asOf} /> });
   facts.push({ term: "Paid, all time", value: <MoneyList amounts={billing.lifetimePaid} size="sm" empty="Nothing yet" /> });
 
   return (
@@ -186,6 +190,63 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
       </Panel>
 
       <Panel
+        title="Offline payments"
+        description="Bank transfers, cheques and distributors paying for it — recorded here, each paying it for a period. Voided ones stay, struck through."
+        actions={caps.sell && !closed && tenant.country === "IN" ? <RecordPaymentButton tenantId={tenant.id} options={billing.offlineForm} /> : undefined}
+        padded={false}
+      >
+        {billing.offlinePayments.length === 0 ? (
+          <EmptyState
+            icon={<Receipt className="h-5 w-5" />}
+            title="No offline payments"
+            body={tenant.country === "IN" ? "When it pays by bank transfer, or a distributor pays for it, record the payment here." : "Offline payments are recorded in rupees, for workspaces in India."}
+          />
+        ) : (
+          <DataTable caption="Offline payments" minWidth={980}>
+            <THead>
+              <Th>Received</Th>
+              <Th>Pays for</Th>
+              <Th>How</Th>
+              <Th>Paid by</Th>
+              <Th numeric>Amount</Th>
+              <Th>Tax invoice</Th>
+              <Th>Recorded by</Th>
+              {caps.manage && !closed && <Th srOnly>Void</Th>}
+            </THead>
+            <TBody>
+              {billing.offlinePayments.map((p) => (
+                <Tr key={p.id}>
+                  <Td nowrap muted={!!p.voidedAt}>
+                    {clock.date(p.receivedOn)}
+                  </Td>
+                  <Td nowrap muted={!!p.voidedAt}>
+                    <span className={cn("block", p.voidedAt && "line-through")}>{`${clock.dayMonth(p.periodStart)} – ${clock.date(p.periodEnd)}`}</span>
+                    {p.voidedAt && <span className="block text-[11px] text-danger">{`Voided: ${p.voidReason ?? ""}`}</span>}
+                  </Td>
+                  <Td muted={!!p.voidedAt}>
+                    <span className="block">{OFFLINE_METHOD[p.method] ?? p.method}</span>
+                    {p.reference && <span className="block font-mono text-[11px] text-subtle">{p.reference}</span>}
+                  </Td>
+                  <Td muted>{p.paidBy ?? "The workspace"}</Td>
+                  <Td numeric className={cn("font-medium", p.voidedAt && "line-through text-muted")}>
+                    {formatMoney(p.amount, p.currency)}
+                  </Td>
+                  <Td nowrap>{p.taxUrl ? <ExternalLink href={p.taxUrl}>{p.taxNumber}</ExternalLink> : <span className="text-muted">Waiting for Settings › Invoicing</span>}</Td>
+                  <Td muted>
+                    <span className="block">{p.recordedBy}</span>
+                    {p.note && <span className="block max-w-xs truncate text-[11px] text-subtle" title={p.note}>{p.note}</span>}
+                  </Td>
+                  {caps.manage && !closed && (
+                    <RowActionsCell>{!p.voidedAt && <VoidPaymentButton paymentId={p.id} summary={`${formatMoney(p.amount, p.currency)} by ${OFFLINE_METHOD[p.method] ?? p.method}${p.reference ? ` (${p.reference})` : ""}`} />}</RowActionsCell>
+                  )}
+                </Tr>
+              ))}
+            </TBody>
+          </DataTable>
+        )}
+      </Panel>
+
+      <Panel
         title="Invoices"
         description={
           billing.invoiceCount === 0
@@ -205,7 +266,7 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
         padded={false}
       >
         {billing.invoices.length === 0 ? (
-          <EmptyState icon={<Receipt className="h-5 w-5" />} title="No invoices yet" body="Invoices appear here when its gateway issues them." />
+          <EmptyState icon={<Receipt className="h-5 w-5" />} title="No invoices yet" body="Invoices appear here when it pays — through a gateway, or offline." />
         ) : (
           <DataTable caption="Invoices" minWidth={900}>
             <THead>
@@ -242,10 +303,14 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
                     </Td>
                     <Td nowrap className="text-right">
                       <span className="inline-flex items-center gap-3">
+                        {i.taxUrl && <ExternalLink href={i.taxUrl}>{`Tax invoice ${i.taxNumber}`}</ExternalLink>}
+                        {i.creditNotes.map((c) => (
+                          <ExternalLink key={c.number} href={c.url}>{`Credit note ${c.number}`}</ExternalLink>
+                        ))}
                         {i.hostedUrl && <ExternalLink href={i.hostedUrl}>Invoice</ExternalLink>}
                         {i.pdfUrl && <ExternalLink href={i.pdfUrl}>PDF</ExternalLink>}
                         {dashboard && <ExternalLink href={dashboard}>Dashboard</ExternalLink>}
-                        {!i.hostedUrl && !i.pdfUrl && !dashboard && <span className="text-muted">—</span>}
+                        {!i.taxUrl && !i.hostedUrl && !i.pdfUrl && !dashboard && <span className="text-muted">—</span>}
                       </span>
                     </Td>
                   </Tr>
@@ -329,7 +394,18 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
         <div className="min-w-0 space-y-6">
           <Panel
             title="Billing profile"
-            actions={caps.sell && !closed ? <BillingProfileButton tenantId={tenant.id} billingEmail={tenant.billingEmail} taxId={tenant.taxId} /> : undefined}
+            actions={
+              caps.sell && !closed ? (
+                <BillingProfileButton
+                  tenantId={tenant.id}
+                  billingEmail={tenant.billingEmail}
+                  taxId={tenant.taxId}
+                  billingName={tenant.billingName}
+                  billingAddress={tenant.billingAddress}
+                  billingState={tenant.billingState}
+                />
+              ) : undefined
+            }
             footer={caps.sell ? "Editing these does not change the customer record at Stripe or Razorpay." : undefined}
           >
             <DefinitionList
@@ -337,6 +413,14 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
               items={[
                 { term: "Billing email", value: tenant.billingEmail ?? <span className="text-muted">Not set — reminders go to the owner</span> },
                 { term: "Tax ID", value: tenant.taxId ? <span className="font-mono text-xs">{tenant.taxId}</span> : <span className="text-muted">Not set</span> },
+                {
+                  term: "Invoices made out to",
+                  value: (
+                    <span className="block whitespace-pre-line">
+                      {[tenant.billingName ?? tenant.name, tenant.billingAddress, tenant.billingState ? `State ${tenant.billingState}` : null].filter(Boolean).join("\n")}
+                    </span>
+                  ),
+                },
                 { term: "Stripe customer", value: <CustomerId gateway="STRIPE" id={tenant.stripeCustomerId} billing={billing} caps={caps} /> },
                 { term: "Razorpay customer", value: <CustomerId gateway="RAZORPAY" id={tenant.razorpayCustomerId} billing={billing} caps={caps} /> },
               ]}

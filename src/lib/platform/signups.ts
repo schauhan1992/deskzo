@@ -140,7 +140,7 @@ async function payingTenants(tenantIds: string[]): Promise<Set<string>> {
   const out = new Set<string>();
   for (const part of chunks(tenantIds)) {
     const rows = await controlDb().subscription.findMany({
-      where: { tenantId: { in: part }, gateway: { in: ["STRIPE", "RAZORPAY"] }, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } },
+      where: { tenantId: { in: part }, gateway: { in: ["STRIPE", "RAZORPAY", "OFFLINE"] }, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } },
       distinct: ["tenantId"],
       select: { tenantId: true },
     });

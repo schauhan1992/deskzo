@@ -212,6 +212,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "platform/console-alerts.ts": "platform",
   "platform/console-announcements.ts": "platform",
   "platform/console-billing.ts": "platform",
+  "platform/console-offline.ts": "platform",
   "platform/console-time-zone.ts": "platform",
   "platform/console-commissions.ts": "platform",
   "platform/console-directory.ts": "platform",

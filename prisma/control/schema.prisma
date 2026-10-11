@@ -105,6 +105,12 @@ model Tenant {
   /// its invoices — a GSTIN in India, a VAT number elsewhere.
   billingEmail       String?
   taxId              String?
+  /// Who its tax invoices are made out to (owner, 12 Oct 2026): the registered name, the address, and
+  /// the GST state code ("29" Karnataka) that decides CGST and SGST or IGST when there is no GSTIN to
+  /// read it from. Null until the owner gives them on the billing page.
+  billingName        String?
+  billingAddress     String?
+  billingState       String?
   /// Its customer at each gateway, once it has been one.
   stripeCustomerId   String?       @unique
   razorpayCustomerId String?       @unique
@@ -130,6 +136,7 @@ model Tenant {
   subscriptions    Subscription[]
   moduleOverrides  TenantModuleOverride[]
   invoices         Invoice[]
+  offlinePayments  OfflinePayment[]
   usage            TenantUsage[]
   billingNotices   BillingNotice[]
   notes            TenantNote[]
@@ -612,6 +619,20 @@ enum BillingGateway {
   MANUAL
   STRIPE
   RAZORPAY
+  /// Paid outside any gateway — a bank transfer, a cheque, a distributor paying for its customer — and
+  /// recorded by staff (OfflinePayment). Paid until its period ends, then due like any other.
+  OFFLINE
+}
+
+/// How an offline payment came in.
+enum OfflinePaymentMethod {
+  NEFT
+  RTGS
+  IMPS
+  UPI
+  CHEQUE
+  CASH
+  OTHER
 }
 
 /// A workspace's plans, and how they are paid for. Every live subscription (trialing, active or past
@@ -641,6 +662,8 @@ model Subscription {
 
   items    SubscriptionItem[]
   invoices Invoice[]
+  /// The payments staff recorded for it, when it is paid offline — each extends it.
+  offlinePayments OfflinePayment[]
 
   @@index([tenantId, status])
   @@map("subscriptions")
@@ -802,6 +825,18 @@ model Invoice {
 
   commissionEntries CommissionEntry[]
   commissionState   CommissionInvoiceState?
+
+  /// The GST tax invoice for it (src/lib/billing/tax-invoice.ts), once issued: its number in the year's
+  /// series ("DZ/2026-27/0001"), when, and what it says — seller, buyer, lines and the tax split, frozen
+  /// as issued, so later changes to either side's details never rewrite it. Rupee invoices only.
+  taxNumber   String?   @unique
+  taxIssuedAt DateTime?
+  taxDetails  Json?
+  /// Made out to a partner — a distributor paying for its customer — rather than the workspace.
+  billToPartnerId String?
+  billToPartner   Partner? @relation(fields: [billToPartnerId], references: [id], onDelete: Restrict)
+  offlinePayment  OfflinePayment?
+  creditNotes     PlatformCreditNote[]
 
   @@unique([gateway, externalId])
   @@index([tenantId, issuedAt])
@@ -1727,6 +1762,9 @@ model Partner {
   deals        DealRegistration[]
   entries      CommissionEntry[]
   statements   PartnerStatement[]
+  /// Payments it made for its customers, and the tax invoices made out to it for them.
+  offlinePayments OfflinePayment[]
+  billedInvoices  Invoice[]
   requests     PartnerRequest[]
   applications PartnerApplication[]
   auditLog     PartnerAuditLog[]
@@ -2353,4 +2391,72 @@ model MailDelivery {
   @@index([stream, at])
   @@index([status, at])
   @@map("mail_deliveries")
+}
+
+/// A payment staff recorded that no gateway took (owner, 12 Oct 2026 — staff only): a bank transfer, a
+/// cheque, a distributor paying for its customer. A workspace has one OFFLINE subscription; each payment
+/// pays it for a period (`periodStart`–`periodEnd`), moves its paid-until date on, and has its own paid
+/// invoice. Never deleted: a mistake is voided, with a reason, which takes its period back off and credits
+/// its invoice.
+model OfflinePayment {
+  id             String               @id @default(cuid())
+  tenantId       String
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  subscription   Subscription         @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  /// The period it pays for.
+  periodStart    DateTime
+  periodEnd      DateTime
+  invoiceId      String               @unique
+  invoice        Invoice              @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  method         OfflinePaymentMethod
+  /// The UTR, cheque number or other reference.
+  reference      String?
+  /// The day it came in, on the console's calendar.
+  receivedOn     DateTime             @db.Date
+  /// What came in, in the smallest unit, GST included.
+  amount         Int
+  currency       String
+  /// Who paid it: a partner (a distributor or reseller) paying for its customer; null, the workspace.
+  partnerId      String?
+  partner        Partner?             @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  note           String?
+  /// The staff member who recorded it.
+  recordedBy     String
+  createdAt      DateTime             @default(now())
+  voidedAt       DateTime?
+  voidedBy       String?
+  voidReason     String?
+
+  @@index([tenantId, createdAt])
+  @@index([subscriptionId])
+  @@map("offline_payments")
+}
+
+/// A credit note against one of the platform's tax invoices — a refund, or a payment voided — numbered
+/// in its own series ("DZ/CN/2026-27/0001") and frozen as issued.
+model PlatformCreditNote {
+  id        String   @id @default(cuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  number    String   @unique
+  issuedAt  DateTime
+  /// Smallest units, GST included, and the GST in it.
+  amount    Int
+  tax       Int
+  reason    String
+  details   Json
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("platform_credit_notes")
+}
+
+/// The next number in each of the platform's document series — "INV|2026-27", "CN|2026-27" — taken
+/// under a row lock, so two invoices issued at once never share one and none is skipped.
+model DocumentSeries {
+  key  String @id
+  next Int    @default(1)
+
+  @@map("document_series")
 }

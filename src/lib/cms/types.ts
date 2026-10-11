@@ -146,7 +146,7 @@ export const REQUIRED_BLOCKS: Partial<Record<BuiltinPageSlug, BlockType>> = {
  * the partner programme's "Become a partner" and "Find a partner", src/app/platform-site/partners),
  * the platform's folders, and addresses that are files. A built-in page's own slug is not free either.
  */
-export const RESERVED_PAGE_SEGMENTS = ["blog", "media", "preview", "partners", "api", "sitemap", "robots", "favicon", "platform-site", "platform-console", "platform-cms", "_next"] as const;
+export const RESERVED_PAGE_SEGMENTS = ["blog", "media", "preview", "partners", "invoice", "api", "sitemap", "robots", "favicon", "platform-site", "platform-console", "platform-cms", "_next"] as const;
 
 /**
  * "DEFAULT": a built-in page nobody has saved — the site shows its default content. `id` is then

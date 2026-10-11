@@ -66,7 +66,7 @@ function DateCell({ at, tone }: { at: Date | null; tone?: "danger" }) {
 
 function ExternalId({ row, modes }: { row: SubscriptionListRow; modes: SubscriptionsPage["modes"] }) {
   if (!row.externalId) return <span className="text-subtle">—</span>;
-  if (row.gateway === "MANUAL") return <span className="font-mono text-xs text-muted">{row.externalId}</span>;
+  if (row.gateway === "MANUAL" || row.gateway === "OFFLINE") return <span className="font-mono text-xs text-muted">{row.externalId}</span>;
   const mode = row.gateway === "STRIPE" ? modes.stripe : modes.razorpay;
   return (
     <CopyField

@@ -138,7 +138,7 @@ function idsParam(raw: RawParams): string[] | undefined {
 
 const TENANT_STATUSES: readonly TenantStatusKey[] = ["PROVISIONING", "ACTIVE", "SUSPENDED", "MIGRATING", "DEPROVISIONED"];
 const STANDING_KINDS: readonly StandingKind[] = ["exempt", "paid", "trial", "trial-over", "past-due", "ending", "lapsed", "none"];
-const GATEWAYS: readonly GatewayKey[] = ["MANUAL", "STRIPE", "RAZORPAY"];
+const GATEWAYS: readonly GatewayKey[] = ["MANUAL", "STRIPE", "RAZORPAY", "OFFLINE"];
 const SUBSCRIPTION_STATUSES: readonly SubscriptionStatusKey[] = ["INCOMPLETE", "TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED"];
 const INVOICE_STATUSES: readonly InvoiceStatusKey[] = ["DRAFT", "OPEN", "PAID", "VOID", "UNCOLLECTIBLE"];
 const PLAN_KINDS: readonly PlanKindKey[] = ["EDITION", "BUNDLE", "ADDON", "INTERNAL"];

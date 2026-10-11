@@ -258,7 +258,7 @@ export function subscriptionKind(gateway: GatewayKey, status: SubscriptionStatus
 }
 
 export function gatewayLabel(g: GatewayKey): string {
-  return g === "STRIPE" ? "Stripe" : g === "RAZORPAY" ? "Razorpay" : "Manual";
+  return g === "STRIPE" ? "Stripe" : g === "RAZORPAY" ? "Razorpay" : g === "OFFLINE" ? "Paid offline" : "Manual";
 }
 
 export function intervalLabel(i: "MONTH" | "YEAR" | null): string {
@@ -273,10 +273,11 @@ export const BILLING_TAB_LABELS: Record<BillingTab, string> = { overview: "Overv
 
 /** "trial:2026-10-01:7" → "7-day trial reminder for 1 Oct" — a BillingNotice key (src/lib/billing/lifecycle.ts). */
 export function noticeLabel(key: string): string {
-  const match = /^(trial|hold):(\d{4}-\d{2}-\d{2}):(\d{1,3})$/.exec(key);
+  const match = /^(trial|hold|renew):(\d{4}-\d{2}-\d{2}):(\d{1,3})$/.exec(key);
   if (!match) return key;
   const day = dayKeyLabel(match[2], false);
-  return `${Number(match[3])}-day ${match[1]} reminder for ${day}`;
+  // "renew": a period paid offline running out (src/lib/billing/lifecycle.ts).
+  return `${Number(match[3])}-day ${match[1] === "renew" ? "renewal" : match[1]} reminder for ${day}`;
 }
 
 // ─── Platform ────────────────────────────────────────────────────────────────────────────────────
@@ -1157,7 +1158,7 @@ function counted(value: unknown, what: string): string | null {
 const workspaces = (value: unknown) => (typeof value === "number" ? plural(value, "workspace") : null);
 const failed = (value: unknown) => (typeof value === "number" && value > 0 ? `${value} failed` : null);
 const limitText = (value: unknown) => (typeof value === "number" ? value.toLocaleString("en-IN") : "from plans");
-const gatewayText = (value: unknown) => (value === "STRIPE" || value === "RAZORPAY" || value === "MANUAL" ? gatewayLabel(value) : null);
+const gatewayText = (value: unknown) => (value === "STRIPE" || value === "RAZORPAY" || value === "MANUAL" || value === "OFFLINE" ? gatewayLabel(value) : null);
 const roleText = (value: unknown) => (typeof value === "string" && has(ROLE_LABEL, value) ? ROLE_LABEL[value].label : null);
 const levelText = (value: unknown) => (value === "ADMIN" ? "Administrator" : value === "READONLY" ? "Read-only" : null);
 const standingText = (value: unknown) => (typeof value === "string" && has(STANDING_KIND_LABEL, value) ? STANDING_KIND_LABEL[value] : null);

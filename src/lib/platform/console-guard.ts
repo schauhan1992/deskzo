@@ -3,6 +3,8 @@ import { Prisma } from "@deskzo/control-client";
 import { CheckoutRefused } from "@/lib/billing/checkout";
 import { GatewayError } from "@/lib/billing/gateway";
 import { PriceRefused } from "@/lib/billing/prices";
+import { OfflineRefused } from "@/lib/billing/offline";
+import { TaxInvoiceRefused } from "@/lib/billing/tax-invoice";
 import { actorLabel, auditHref, auditLabel, auditSummary } from "@/lib/console-shared/labels";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { ActivityItem } from "@/lib/console-shared/types";
@@ -32,7 +34,7 @@ export const BULK_CAPS = { applyStanding: 50, extendTrial: 50, tag: 100 } as con
 /** How many rows one CSV export may hold; more is refused with "narrow it down". */
 export const EXPORT_CAPS = { workspaces: 5000, invoices: 10000, audit: 10000 } as const;
 
-const REFUSALS = [StaffRefused, StaffChangeRefused, LifecycleRefused, PlanRefused, PriceRefused, GatewayError, CheckoutRefused, ProvisioningRefused, DomainRefused, ConsoleRefused];
+const REFUSALS = [StaffRefused, StaffChangeRefused, LifecycleRefused, PlanRefused, PriceRefused, GatewayError, CheckoutRefused, ProvisioningRefused, DomainRefused, OfflineRefused, TaxInvoiceRefused, ConsoleRefused];
 
 /**
  * The message to give whoever asked, when `err` is a refusal — something they can act on — or null
@@ -97,6 +99,9 @@ export const TENANT_SAFE_SELECT = {
   suspendedFor: true,
   billingEmail: true,
   taxId: true,
+  billingName: true,
+  billingAddress: true,
+  billingState: true,
   stripeCustomerId: true,
   razorpayCustomerId: true,
   createdAt: true,

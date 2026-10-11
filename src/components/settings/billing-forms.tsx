@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { GST_STATE_OPTIONS } from "@/lib/gst-engine";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { cancelSubscription, checkoutPlan, openBillingPortal, saveBillingDetails } from "@/actions/billing";
 import type { OfferPlan } from "@/lib/billing/checkout";
@@ -248,10 +249,30 @@ export function CancelRazorpay({ subscriptionId, plan }: { subscriptionId: strin
   );
 }
 
-export function BillingDetailsForm({ billingEmail, taxId, taxLabel }: { billingEmail: string | null; taxId: string | null; taxLabel: string }) {
+export function BillingDetailsForm({
+  billingEmail,
+  taxId,
+  taxLabel,
+  billingName = null,
+  billingAddress = null,
+  billingState = null,
+  india = false,
+}: {
+  billingEmail: string | null;
+  taxId: string | null;
+  taxLabel: string;
+  billingName?: string | null;
+  billingAddress?: string | null;
+  billingState?: string | null;
+  /** In India: the registered name, address and state its GST tax invoices are made out to. */
+  india?: boolean;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState(billingEmail ?? "");
   const [tax, setTax] = useState(taxId ?? "");
+  const [name, setName] = useState(billingName ?? "");
+  const [address, setAddress] = useState(billingAddress ?? "");
+  const [state, setState] = useState(billingState ?? "");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
   return (
@@ -261,7 +282,7 @@ export function BillingDetailsForm({ billingEmail, taxId, taxLabel }: { billingE
         e.preventDefault();
         setMessage(null);
         startTransition(async () => {
-          const r = await saveBillingDetails({ billingEmail: email, taxId: tax });
+          const r = await saveBillingDetails(india ? { billingEmail: email, taxId: tax, billingName: name, billingAddress: address, billingState: state } : { billingEmail: email, taxId: tax });
           setMessage(r.ok ? { ok: true, text: "Saved." } : { ok: false, text: r.error });
           if (r.ok) router.refresh();
         });
@@ -276,6 +297,29 @@ export function BillingDetailsForm({ billingEmail, taxId, taxLabel }: { billingE
           <Label htmlFor="billing-tax">{taxLabel}</Label>
           <Input id="billing-tax" value={tax} onChange={(e) => setTax(e.target.value)} />
         </div>
+        {india && (
+          <>
+            <div className="sm:col-span-2">
+              <Label htmlFor="billing-name">Registered name, for your tax invoices</Label>
+              <Input id="billing-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="The workspace's name, when empty" />
+            </div>
+            <div className="sm:col-span-2">
+              <Label htmlFor="billing-address">Registered address</Label>
+              <Textarea id="billing-address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} maxLength={500} />
+            </div>
+            <div>
+              <Label htmlFor="billing-state">State</Label>
+              <Select id="billing-state" value={state} onChange={(e) => setState(e.target.value)}>
+                <option value="">Read from the GSTIN</option>
+                {GST_STATE_OPTIONS.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <Button type="submit" size="sm" variant="secondary" disabled={pending}>
