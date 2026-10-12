@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Menu, X, ChevronRight, LayoutDashboard, Search, PanelLeftClose, PanelLeftOpen, Headset } from "lucide-react";
+import { Menu, X, ChevronDown, LayoutDashboard, Search, PanelLeftClose, PanelLeftOpen, Headset } from "lucide-react";
 import { MODULE_REGISTRY } from "@/lib/modules";
-import { DASHBOARD_HREF, hasModuleNavigation, navIcon, type VisibleNavSection } from "@/lib/navigation";
+import { DASHBOARD_HREF, hasModuleNavigation, headedNavigation, navGroupIcon, navIcon, type VisibleNavSection } from "@/lib/navigation";
 import { RailFlyout } from "@/components/ui/rail-flyout";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,6 @@ import { openSupport } from "@/components/support/open-support";
 const NAV_HREFS = MODULE_REGISTRY.flatMap((m) => m.navItems.map((i) => i.href));
 
 const COLLAPSED_STORAGE_KEY = "deskzo-sidebar-collapsed";
-const OPEN_GROUPS_STORAGE_KEY = "deskzo-sidebar-open-groups";
 
 /**
  * localStorage, read the way React wants a browser-only value read.
@@ -77,28 +76,70 @@ function makeStore<T>(key: string, parse: (raw: string | null) => T, serverValue
 
 const collapsedStore = makeStore(COLLAPSED_STORAGE_KEY, (raw) => raw === "true", false);
 
-/**
- * Which sections were left open, or `null` when this browser has never said.
- *
- * `null` is distinct from "none open" on purpose: somebody who has collapsed every section should
- * get every section collapsed back, while somebody arriving for the first time should not be shown
- * a sidebar that is nothing but headings.
- */
-const openGroupsStore = makeStore<string[] | null>(
-  OPEN_GROUPS_STORAGE_KEY,
-  (raw) => {
-    if (raw === null) return null;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : null;
-    } catch {
-      // A corrupt value is the same as never having said — better a sensible default than a crash
-      // in the one component every page renders.
-      return null;
-    }
-  },
-  null,
-);
+/** How long the pointer rests on a section before it opens — passing over one on the way to another opens nothing. */
+const HOVER_OPEN_MS = 120;
+/** How long a section the pointer opened stays open once the pointer has left it. */
+const HOVER_CLOSE_MS = 250;
+
+type NavIcon = typeof LayoutDashboard;
+
+/** A top-level link: the dashboard, and in the icon rail a page standing on its own. */
+function NavLink({
+  href,
+  label,
+  Icon,
+  active,
+  isCollapsed,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  Icon: NavIcon;
+  active: boolean;
+  isCollapsed: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      title={isCollapsed ? label : undefined}
+      aria-label={isCollapsed ? label : undefined}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "group relative flex h-9 items-center gap-2.5 rounded-base px-2.5 text-[13px] font-medium",
+        "transition-colors duration-150",
+        isCollapsed && "mx-auto w-9 justify-center px-0",
+        active ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text",
+      )}
+    >
+      {/* A brand-coloured rail reads as "you are here" without shouting. */}
+      {active && <span aria-hidden="true" className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand" />}
+      <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
+      {!isCollapsed && <span className="truncate">{label}</span>}
+    </Link>
+  );
+}
+
+/** A page inside a section, indented under it on the section's guide line. */
+function SubLink({ href, label, active, onNavigate }: { href: string; label: string; active: boolean; onNavigate?: () => void }) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex h-8 items-center rounded-base px-2.5 text-[13px] transition-colors duration-150",
+        active ? "bg-brand-subtle font-medium text-brand" : "text-muted hover:bg-surface-sunken hover:text-text",
+      )}
+    >
+      {/* Drawn over the guide line, level with the page you are on. */}
+      {active && <span aria-hidden="true" className="absolute -left-[9px] top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />}
+      <span className="truncate">{label}</span>
+    </Link>
+  );
+}
+
 function BrandMark({ branding, collapsed }: { branding: Branding; collapsed: boolean }) {
   if (branding.logoDataUrl) {
     return (
@@ -146,13 +187,39 @@ export function Sidebar({
   const wording = useWording();
   const [mobileOpen, setMobileOpen] = useState(false);
   /**
-   * Deliberately not persisted, unlike the collapse state and the open sections.
+   * Deliberately not persisted, unlike the collapse state.
    *
    * A filter is about the next thirty seconds. Coming back tomorrow to a menu still showing three
    * of its forty pages, with no memory of having typed anything, reads as a broken app.
    */
   const [search, setSearch] = useState("");
   const collapsed = useSyncExternalStore(collapsedStore.subscribe, collapsedStore.get, collapsedStore.server);
+
+  /**
+   * The section the pointer opened, and the one opened from the keyboard or by a tap — see `aim`.
+   * Neither is remembered: which section is open follows the pointer and the page, not last week.
+   */
+  const [hoverGroup, setHoverGroup] = useState<string | null>(null);
+  const [pickedGroup, setPickedGroup] = useState<string | null>(null);
+  /** Where the pointer is heading and the timer that takes it there, until it arrives. */
+  const intent = useRef<{ target: string | null; timer: number } | null>(null);
+  /** The pointer behind the click about to arrive on a section's row — none for a keyboard's Enter. */
+  const pressedWith = useRef<string | null>(null);
+
+  // A new page closes what the pointer or the keyboard opened; the section holding it is open anyway.
+  const [seenPath, setSeenPath] = useState(pathname);
+  if (seenPath !== pathname) {
+    setSeenPath(pathname);
+    setHoverGroup(null);
+    setPickedGroup(null);
+  }
+
+  useEffect(
+    () => () => {
+      if (intent.current) window.clearTimeout(intent.current.timer);
+    },
+    [],
+  );
 
   function toggleCollapsed() {
     collapsedStore.write(String(!collapsed));
@@ -166,58 +233,47 @@ export function Sidebar({
   const isActive = (href: string) =>
     !!matches(href) && !NAV_HREFS.some((other) => other.length > href.length && other.startsWith(`${href}/`) && matches(other));
 
-  const openGroups = useSyncExternalStore(openGroupsStore.subscribe, openGroupsStore.get, openGroupsStore.server);
-
-  function toggleGroup(group: string) {
-    // `null` means nothing stored yet, and what is on screen in that case is the active section
-    // alone — so the first click has to start from that, not from an empty set, or collapsing the
-    // section you are in would silently reopen it.
-    const base = openGroups ?? (activeGroup ? [activeGroup] : []);
-    const next = base.includes(group) ? base.filter((g) => g !== group) : [...base, group];
-    openGroupsStore.write(JSON.stringify(next));
+  /**
+   * Point the open section at `target` (null: none) once the pointer has stayed there a moment.
+   *
+   * Driven by the pointer *moving* over a section, never by it merely being over one. Opening a
+   * section closes the one before it, and when that one was above, everything below moves up under a
+   * pointer that hasn't moved — enter and leave events fire for whatever slid beneath it, and a menu
+   * that obeyed them would open the next section, shift again, and run down the list on its own.
+   * Movement is the person; a layout shift is not, so nothing changes until they move again.
+   */
+  function aim(target: string | null) {
+    if (intent.current?.target === target) return;
+    if (intent.current) window.clearTimeout(intent.current.timer);
+    intent.current = null;
+    if (target === hoverGroup) return;
+    const timer = window.setTimeout(
+      () => {
+        intent.current = null;
+        setHoverGroup(target);
+        // One section open at a time, besides the one you are in: the pointer moving on to another
+        // closes what a click or a key opened.
+        if (target !== null) setPickedGroup(null);
+      },
+      target === null ? HOVER_CLOSE_MS : HOVER_OPEN_MS,
+    );
+    intent.current = { target, timer };
   }
 
-  function NavLink({
-    href,
-    label,
-    Icon,
-    active,
-    isCollapsed,
-    onNavigate,
-  }: {
-    href: string;
-    label: string;
-    Icon: typeof LayoutDashboard;
-    active: boolean;
-    isCollapsed: boolean;
-    onNavigate?: () => void;
-  }) {
-    return (
-      <Link
-        href={href}
-        onClick={onNavigate}
-        title={isCollapsed ? label : undefined}
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "group relative flex items-center gap-2.5 rounded-base px-2.5 py-2 text-[13px] font-medium",
-          "transition-colors duration-150",
-          isCollapsed && "justify-center",
-          active ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text",
-        )}
-      >
-        {/* A brand-coloured rail reads as "you are here" without shouting. */}
-        {active && <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand" />}
-        <Icon className="h-4 w-4 shrink-0" />
-        {!isCollapsed && <span className="truncate">{label}</span>}
-      </Link>
-    );
+  /** Close a section opened by hand, keyboard or pointer (the one you are in stays open regardless). */
+  function closeGroup(group: string) {
+    if (intent.current) window.clearTimeout(intent.current.timer);
+    intent.current = null;
+    if (hoverGroup === group) setHoverGroup(null);
+    if (pickedGroup === group) setPickedGroup(null);
   }
 
   // `canonical` is the app's own label: a renamed page is still found by its old name. A group with
   // nothing in it was dropped by `buildNavigation` — a bare heading over nothing reads as broken.
-  const visibleSections: { group: string; items: { href: string; label: string; canonical?: string; exact?: boolean; Icon: typeof LayoutDashboard }[] }[] =
+  const visibleSections: { group: string; Icon: NavIcon; items: { href: string; label: string; canonical?: string; exact?: boolean; Icon: NavIcon }[] }[] =
     navigation.map(({ group, items }) => ({
       group,
+      Icon: navGroupIcon(group, items[0]?.href),
       items: items.map((i) => ({
         href: i.href,
         label: i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label,
@@ -243,15 +299,13 @@ export function Sidebar({
     )?.group ?? null;
 
   /**
-   * Whether a section is expanded.
+   * Whether a section's pages are showing.
    *
-   * Two rules, and the second is the one worth stating. Sections remember how you left them. But the
-   * section containing the current page is always open, so the sidebar can never be in a state where
-   * nothing on it tells you where you are — which is the failure mode of every accordion nav that
-   * lets you close everything and then lands you on a page by redirect.
+   * The section holding the current page is always open, so nothing on the sidebar can ever leave you
+   * without a mark of where you are. Besides it, one section at a time: the one the pointer rests on
+   * (`aim`), or else the one opened from the keyboard or by a tap, which have no hover.
    */
-  const isGroupOpen = (group: string) =>
-    group === activeGroup || (openGroups === null ? false : openGroups.includes(group));
+  const isGroupOpen = (group: string) => group === activeGroup || group === hoverGroup || group === pickedGroup;
 
   /**
    * "Contact Support", at the foot of the menu: the platform's help desk, not a page of this workspace.
@@ -269,9 +323,9 @@ export function Sidebar({
           openSupport();
         }}
         className={cn(
-          "flex w-full items-center gap-2.5 rounded-base px-2.5 py-2 text-[13px] font-medium text-brand",
+          "flex h-9 w-full items-center gap-2.5 rounded-base px-2.5 text-[13px] font-medium text-brand",
           "transition-colors hover:bg-brand/10",
-          isCollapsed && "justify-center",
+          isCollapsed && "justify-center px-0",
           className,
         )}
       >
@@ -281,14 +335,14 @@ export function Sidebar({
     );
   }
 
-  function renderNav(isCollapsed: boolean, onNavigate?: () => void) {
+  function renderNav(isCollapsed: boolean, where: "side" | "drawer", onNavigate?: () => void) {
     /**
      * Typing filters; an empty box changes nothing.
      *
-     * Forty-odd destinations behind eleven collapsible headings is a lot of opening and closing to
-     * reach a page whose name you already know — and worse for anybody who arrived from a link and
-     * does not know which heading it lives under. Matching on the section name as well as the item
-     * means "hr" finds the whole People group, which is how people actually search a menu.
+     * Forty-odd destinations behind a dozen sections is a lot of opening and closing to reach a page
+     * whose name you already know — and worse for anybody who arrived from a link and does not know
+     * which section it lives under. Matching on the section name as well as the item means "hr"
+     * finds the whole People group, which is how people actually search a menu.
      *
      * Not offered in the icon rail: there is nowhere to put a box, and nothing to read if there
      * were. The rail is for people who already know where things are.
@@ -296,20 +350,36 @@ export function Sidebar({
     const query = search.trim().toLowerCase();
     const matching = query
       ? visibleSections
-          .map(({ group, items }) => ({
-            group,
-            items: items.filter(
-              (i) => i.label.toLowerCase().includes(query) || (i.canonical ?? "").toLowerCase().includes(query) || group.toLowerCase().includes(query),
+          .map((section) => ({
+            ...section,
+            items: section.items.filter(
+              (i) => i.label.toLowerCase().includes(query) || (i.canonical ?? "").toLowerCase().includes(query) || section.group.toLowerCase().includes(query),
             ),
           }))
           .filter((section) => section.items.length > 0)
       : visibleSections;
 
     return (
-      <nav className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2.5 py-4">
+      <nav
+        aria-label="Main"
+        // The rail scrolls without a scrollbar: one drawn over a column of icons sits on top of them.
+        className={cn("flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden py-3", isCollapsed ? "px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "px-2.5")}
+        // Hover opens sections in the full sidebar only — the rail's groups open beside it on their own
+        // (src/components/ui/rail-flyout.tsx). A finger has no hover: a tap on a section's row opens it.
+        onPointerMove={
+          isCollapsed
+            ? undefined
+            : (e) => {
+                if (e.pointerType === "touch") return;
+                const over = (e.target as Element).closest("[data-nav-group]");
+                aim(over?.getAttribute("data-nav-group") ?? null);
+              }
+        }
+        onPointerLeave={isCollapsed ? undefined : (e) => e.pointerType !== "touch" && aim(null)}
+      >
         {!isCollapsed && (
           <div className="relative mb-2">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle" />
+            <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle" />
             <input
               type="search"
               value={search}
@@ -358,96 +428,127 @@ export function Sidebar({
           </p>
         )}
 
-        {matching.map(({ group, items }) => {
-          // In the icon rail a group of several pages is one button that opens them, named, beside the
-          // rail (src/components/ui/rail-flyout.tsx) — a column of forty unlabelled icons, several
-          // alike, was the rail's whole problem. A group of one is just its link.
-          if (isCollapsed) {
-            if (items.length === 1) {
-              const only = items[0]!;
-              return (
-                <NavLink
-                  key={group}
-                  href={only.href}
-                  label={only.label}
-                  Icon={only.Icon}
-                  active={only.exact ? pathname === only.href : isActive(only.href)}
-                  isCollapsed
-                  onNavigate={onNavigate}
-                />
-              );
-            }
-            const FirstIcon = items[0]!.Icon;
-            return (
-              <RailFlyout
-                key={group}
-                label={group}
-                icon={<FirstIcon className="h-4 w-4 shrink-0" />}
-                className="py-2"
-                onNavigate={onNavigate}
-                items={items.map((item) => ({
-                  key: item.href,
-                  href: item.href,
-                  label: item.label,
-                  icon: <item.Icon className="h-4 w-4 shrink-0" />,
-                  active: item.exact ? pathname === item.href : isActive(item.href),
-                }))}
-              />
-            );
-          }
-
-          // Open while filtering, whatever the stored state: a section that hid its own matches
-          // would make the search look broken.
-          const open = query ? true : isGroupOpen(group);
-          const panelId = `nav-${group.replace(/\W+/g, "-").toLowerCase()}`;
-          // The one section you cannot close is the one you are in — see isGroupOpen.
-          const locked = group === activeGroup;
-
-          return (
-            <div key={group}>
-              <button
-                type="button"
-                onClick={() => toggleGroup(group)}
-                disabled={locked}
-                aria-expanded={open}
-                aria-controls={panelId}
-                title={locked ? `${group} — the section you're in` : undefined}
-                className={cn(
-                  "flex w-full items-center gap-1 rounded-base px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors",
-                  locked ? "cursor-default text-muted" : "text-subtle hover:bg-surface-sunken hover:text-muted",
-                )}
-              >
-                <span className="truncate">{group}</span>
-                {/* Not rendered for the locked section: a chevron that does nothing is worse than
-                    no chevron, and the count of closed sections is what the eye is scanning. */}
-                {!locked && (
-                  <ChevronRight
-                    className={cn("ml-auto h-3 w-3 shrink-0 transition-transform duration-150", open && "rotate-90")}
+        {headedNavigation(matching).map(({ heading, sections }, at) => (
+          <div
+            key={heading ?? "top"}
+            role={heading ? "group" : undefined}
+            aria-label={heading ?? undefined}
+            className={cn("space-y-0.5", isCollapsed ? at > 0 && "mt-2 border-t border-line pt-2" : heading && "pt-3")}
+          >
+            {/* The heading over its sections — in the rail, the rule above them says the same. */}
+            {heading && !isCollapsed && (
+              <p aria-hidden="true" className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-subtle">
+                {heading}
+              </p>
+            )}
+            {sections.map(({ group, Icon, items }) => {
+              // In the icon rail each section is its icon, and its pages open, named, beside the rail on
+              // hover (src/components/ui/rail-flyout.tsx) — a column of forty unlabelled icons, several
+              // alike, was the rail's whole problem.
+              if (isCollapsed) {
+                return (
+                  <RailFlyout
+                    key={group}
+                    label={group}
+                    icon={<Icon aria-hidden="true" className="h-4 w-4 shrink-0" />}
+                    className="mx-auto h-9 w-9"
+                    // From the icon's edge past the rail's own, so the panel opens just clear of the rail.
+                    offset={24}
+                    onNavigate={onNavigate}
+                    // Names alone beside the rail, as under a section in the full sidebar.
+                    items={items.map((item) => ({
+                      key: item.href,
+                      href: item.href,
+                      label: item.label,
+                      active: item.exact ? pathname === item.href : isActive(item.href),
+                    }))}
                   />
-                )}
-              </button>
+                );
+              }
 
-              {/* Unmounted rather than hidden. A closed section that is still in the DOM leaves
-                  forty invisible links in the tab order, which turns one keyboard traversal of this
-                  nav into a tour of every page in the app. */}
-              {open && (
-                <div id={panelId} className="mb-1 mt-0.5 space-y-0.5">
-                  {items.map((item) => (
-                    <NavLink
-                      key={item.href}
-                      href={item.href}
-                      label={item.label}
-                      Icon={item.Icon}
-                      active={item.exact ? pathname === item.href : isActive(item.href)}
-                      isCollapsed={false}
-                      onNavigate={onNavigate}
+              // Open while filtering, whatever else: a section that hid its own matches would make the
+              // search look broken.
+              const open = query ? true : isGroupOpen(group);
+              const current = group === activeGroup;
+              const panelId = `nav-${where}-${group.replace(/\W+/g, "-").toLowerCase()}`;
+
+              return (
+                <div
+                  key={group}
+                  data-nav-group={group}
+                  onKeyDown={(e) => {
+                    // Escape folds a section opened by hand back up, and leaves focus on its row.
+                    if (e.key === "Escape" && open && !current && !query) {
+                      e.preventDefault();
+                      closeGroup(group);
+                      e.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    aria-expanded={open}
+                    aria-controls={open ? panelId : undefined}
+                    onPointerDown={(e) => {
+                      pressedWith.current = e.pointerType;
+                    }}
+                    onClick={() => {
+                      const pointer = pressedWith.current;
+                      pressedWith.current = null;
+                      if (query) return;
+                      if (pointer === "mouse" || pointer === "pen") {
+                        // The pointer is on it: open now rather than after the hover's moment. Hover owns
+                        // closing, so a click that lands just as a section opened can't shut it again.
+                        if (intent.current) window.clearTimeout(intent.current.timer);
+                        intent.current = null;
+                        setHoverGroup(group);
+                        setPickedGroup(null);
+                        return;
+                      }
+                      // The keyboard, or a finger: no hover to open it, so the press opens and closes.
+                      if (current) return;
+                      if (open) closeGroup(group);
+                      else {
+                        setPickedGroup(group);
+                        setHoverGroup(null);
+                      }
+                    }}
+                    className={cn(
+                      "flex h-9 w-full items-center gap-2.5 rounded-base px-2.5 text-left text-[13px] transition-colors duration-150",
+                      // The section you are in reads as chosen: heavier, in full colour.
+                      current ? "font-semibold text-text" : "font-medium text-muted hover:bg-surface-sunken hover:text-text",
+                      open && !current && "bg-surface-sunken text-text",
+                    )}
+                  >
+                    <Icon aria-hidden="true" className={cn("h-4 w-4 shrink-0", current && "text-brand")} />
+                    <span className="min-w-0 flex-1 truncate">{group}</span>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={cn("h-3.5 w-3.5 shrink-0 text-subtle transition-transform duration-150", open && "rotate-180")}
                     />
-                  ))}
+                  </button>
+
+                  {/* Unmounted rather than hidden. A closed section that is still in the DOM leaves
+                      forty invisible links in the tab order, which turns one keyboard traversal of this
+                      nav into a tour of every page in the app. */}
+                  {open && (
+                    <div id={panelId} role="group" aria-label={group} className="mb-1 ml-[17px] mt-0.5 space-y-0.5 border-l border-line pl-2">
+                      {items.map((item) => (
+                        <SubLink
+                          key={item.href}
+                          href={item.href}
+                          label={item.label}
+                          active={item.exact ? pathname === item.href : isActive(item.href)}
+                          onNavigate={onNavigate}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        ))}
       </nav>
     );
   }
@@ -467,33 +568,32 @@ export function Sidebar({
         suppressHydrationWarning
         className={cn(
           "hidden md:sticky md:top-0 md:flex md:h-screen md:shrink-0 md:flex-col md:border-r md:border-line md:bg-surface",
-          "md:transition-[width] md:duration-200 md:ease-out",
-          collapsed ? "md:w-[68px]" : "md:w-[228px]",
+          // Nothing inside spills while the width eases: the rail's panels are portalled to the body, not clipped here.
+          "md:overflow-hidden md:whitespace-nowrap md:transition-[width] md:duration-200 md:ease-out",
+          collapsed ? "md:w-[68px]" : "md:w-[240px]",
         )}
       >
-        <div className={cn("flex h-14 items-center gap-2.5 border-b border-line px-4", collapsed && "justify-center px-2")}>
+        {/* The brand, and beside it — beneath it in the rail — the control that folds the sidebar to
+            icons and back. Kept apart from the menu, so it is never mistaken for a page; the page you
+            are on and the section holding it stay marked whichever way it goes. */}
+        <div className={cn("flex shrink-0 border-b border-line", collapsed ? "flex-col items-center gap-2 px-2 py-3" : "h-14 items-center gap-2.5 pl-4 pr-2")}>
           <BrandMark branding={branding} collapsed={collapsed} />
           {!collapsed && !branding.logoDataUrl && (
-            <span className="truncate text-sm font-semibold text-text">{branding.appName}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">{branding.appName}</span>
           )}
-        </div>
-        {renderNav(collapsed)}
-        <div className="space-y-0.5 border-t border-line p-2">
-          {support && supportButton(collapsed, undefined, "xl:hidden")}
+          {!collapsed && branding.logoDataUrl && <span className="flex-1" />}
           <button
             type="button"
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             onClick={toggleCollapsed}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-base px-2.5 py-2 text-[13px] font-medium text-subtle",
-              "transition-colors hover:bg-surface-sunken hover:text-text",
-              collapsed && "justify-center",
-            )}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-base border border-line text-subtle transition-colors hover:bg-surface-sunken hover:text-text"
           >
-            {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            {!collapsed && "Collapse"}
+            {collapsed ? <PanelLeftOpen aria-hidden="true" className="h-4 w-4" /> : <PanelLeftClose aria-hidden="true" className="h-4 w-4" />}
           </button>
         </div>
+        {renderNav(collapsed, "side")}
+        {support && <div className="border-t border-line p-2 xl:hidden">{supportButton(collapsed)}</div>}
       </aside>
 
       {mobileOpen && (
@@ -516,7 +616,7 @@ export function Sidebar({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {renderNav(false, () => setMobileOpen(false))}
+            {renderNav(false, "drawer", () => setMobileOpen(false))}
             {/* The drawer closes first, so the dialog opens over the page rather than over the menu. */}
             {support && <div className="border-t border-line p-2">{supportButton(false, () => setMobileOpen(false))}</div>}
             {drawerExtras && <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2 text-xs text-muted sm:hidden">Theme {drawerExtras}</div>}

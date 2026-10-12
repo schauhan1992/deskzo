@@ -63,6 +63,12 @@ export function AnchoredPopover({
   side = "bottom",
   /** How far from the anchor's right edge a "right" panel opens — past the padding of what holds it. */
   offset = 6,
+  /**
+   * The pointer coming onto and leaving the panel — its own box, scrollbar and border included, which
+   * the caller's content inside it is not. A menu that opens on hover keeps itself open with these.
+   */
+  onPointerEnter,
+  onPointerLeave,
 }: {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
@@ -72,7 +78,11 @@ export function AnchoredPopover({
   align?: "start" | "end";
   side?: "bottom" | "right";
   offset?: number;
+  onPointerEnter?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerLeave?: (e: React.PointerEvent<HTMLDivElement>) => void;
 }) {
+  /** The panel once drawn, so a "right" panel can be placed by the height it really has. */
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null);
   const [position, setPosition] = useState<{
     top: number;
     left: number;
@@ -97,10 +107,16 @@ export function AnchoredPopover({
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect();
       if (side === "right") {
-        const want = Math.min(maxHeight, window.innerHeight - 16);
+        const room = Math.min(maxHeight, window.innerHeight - 16);
+        // Moved up only by as much as the panel actually needs. Reserving the whole `maxHeight` lifted
+        // a short group's panel far above the icon that opened it, near the foot of a sidebar.
+        const want = panel ? Math.min(panel.scrollHeight + 2, room) : 0;
         const top = Math.max(8, Math.min(rect.top, window.innerHeight - want - 8));
         // `top - 4` because the panel is drawn 4px below `top` (the gap a dropdown keeps from its field).
-        setPosition({ top: top - 4, left: rect.right + offset, width: width ?? rect.width, flipped: false, available: window.innerHeight - top - 8 });
+        const next = { top: top - 4, left: rect.right + offset, width: width ?? rect.width, flipped: false, available: window.innerHeight - top - 8 };
+        setPosition((prev) =>
+          prev && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.available === next.available && !prev.flipped ? prev : next,
+        );
         return;
       }
       const spaceBelow = window.innerHeight - rect.bottom;
@@ -129,18 +145,25 @@ export function AnchoredPopover({
     // And once something animates into place — a sidebar easing to its collapsed width moves the
     // anchor without a scroll or a resize.
     window.addEventListener("transitionend", place, true);
+    // A "right" panel is placed again once drawn, and whenever its content changes height.
+    const resized = side === "right" && panel ? new ResizeObserver(place) : null;
+    if (resized && panel) resized.observe(panel.firstElementChild ?? panel);
     return () => {
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
       window.removeEventListener("transitionend", place, true);
+      resized?.disconnect();
     };
-  }, [open, anchorRef, width, maxHeight, align, side, offset]);
+  }, [open, anchorRef, width, maxHeight, align, side, offset, panel]);
 
   if (!isClient || !open || !position) return null;
 
   return createPortal(
     <div
+      ref={setPanel}
       data-anchored-popover=""
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
       onMouseDown={(e) => {
         if (keepsFocusOnAnchor(e.target)) e.preventDefault();
       }}

@@ -1,6 +1,31 @@
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, FileSpreadsheet, LayoutDashboard, ScrollText, Settings as SettingsIcon, ShieldCheck, UserCog } from "lucide-react";
-import { MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavFact, type NavItem } from "@/lib/modules";
+import {
+  BarChart3,
+  BookOpen,
+  BookUser,
+  Briefcase,
+  FileSpreadsheet,
+  FolderKanban,
+  Handshake,
+  Laptop,
+  LayoutDashboard,
+  LifeBuoy,
+  MapPin,
+  Megaphone,
+  Package,
+  Receipt,
+  ScrollText,
+  Settings as SettingsIcon,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingCart,
+  Telescope,
+  TrendingUp,
+  UserCog,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavFact, type NavItem, type NAV_GROUP_ORDER } from "@/lib/modules";
 import { PERMISSION_KEYS, isPermissionKey, sectionPermission } from "@/lib/permissions";
 
 /**
@@ -180,4 +205,76 @@ const ICONS = new Map<string, LucideIcon>([
 /** A link's icon. Looked up in the browser, since a component can't travel from the server as data. */
 export function navIcon(href: string): LucideIcon {
   return ICONS.get(href) ?? LayoutDashboard;
+}
+
+/**
+ * Each sidebar section's own icon — the main module's, on its row in the full sidebar and on its
+ * button in the icon rail, so a section looks the same whichever width the sidebar is. Keyed by
+ * every name in NAV_GROUP_ORDER, so a new section can't be added without one.
+ */
+const GROUP_ICONS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Administration", LucideIcon> = {
+  Sales: Handshake,
+  Prospecting: Telescope,
+  "Quotes & Invoices": Receipt,
+  "Catalog & Stock": Package,
+  "Orders & Renewals": ShoppingCart,
+  Purchase: ShoppingBag,
+  Payments: Wallet,
+  Accounting: BookOpen,
+  Support: LifeBuoy,
+  Delivery: FolderKanban,
+  "Field & Expenses": MapPin,
+  "IT Assets": Laptop,
+  Directory: BookUser,
+  Marketing: Megaphone,
+  People: Users,
+  "My work": Briefcase,
+  Performance: TrendingUp,
+  Reports: BarChart3,
+  Administration: SettingsIcon,
+};
+
+/** A section's icon, or its first link's when the section has none of its own. */
+export function navGroupIcon(group: string, firstHref?: string): LucideIcon {
+  return (GROUP_ICONS as Record<string, LucideIcon>)[group] ?? (firstHref ? navIcon(firstHref) : LayoutDashboard);
+}
+
+/**
+ * The headings the sidebar sorts its sections under, in the order it draws them. A null label is the
+ * top of the menu, under the dashboard, with no heading over it.
+ */
+export const NAV_HEADINGS = [null, "Customers", "Sales & Catalogue", "Finance", "Operations", "Team", "Growth", "Admin"] as const;
+export type NavHeading = (typeof NAV_HEADINGS)[number];
+
+/** Which heading each section sits under — every name in NAV_GROUP_ORDER has one, so none goes missing. */
+const GROUP_HEADINGS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Administration", NavHeading> = {
+  "My work": null,
+  Sales: "Customers",
+  Prospecting: "Customers",
+  Support: "Customers",
+  "Quotes & Invoices": "Sales & Catalogue",
+  "Catalog & Stock": "Sales & Catalogue",
+  "Orders & Renewals": "Sales & Catalogue",
+  Purchase: "Sales & Catalogue",
+  Payments: "Finance",
+  Accounting: "Finance",
+  Delivery: "Operations",
+  "Field & Expenses": "Operations",
+  "IT Assets": "Operations",
+  Directory: "Operations",
+  People: "Team",
+  Marketing: "Growth",
+  Performance: "Growth",
+  Reports: "Growth",
+  Administration: "Admin",
+};
+
+/**
+ * The menu's sections under their headings, in drawing order — a heading with nothing of this
+ * person's under it is left out. Within a heading, sections keep the order `buildNavigation` gave them.
+ * Only how the menu is laid out: what is in it is still `buildNavigation`'s alone.
+ */
+export function headedNavigation<S extends { group: string }>(sections: readonly S[]): { heading: NavHeading; sections: S[] }[] {
+  const headingOf = (group: string): NavHeading => (group in GROUP_HEADINGS ? (GROUP_HEADINGS as Record<string, NavHeading>)[group]! : "Operations");
+  return NAV_HEADINGS.map((heading) => ({ heading, sections: sections.filter((s) => headingOf(s.group) === heading) })).filter((h) => h.sections.length > 0);
 }
