@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -75,11 +75,6 @@ function makeStore<T>(key: string, parse: (raw: string | null) => T, serverValue
 }
 
 const collapsedStore = makeStore(COLLAPSED_STORAGE_KEY, (raw) => raw === "true", false);
-
-/** How long the pointer rests on a section before it opens — passing over one on the way to another opens nothing. */
-const HOVER_OPEN_MS = 120;
-/** How long a section the pointer opened stays open once the pointer has left it. */
-const HOVER_CLOSE_MS = 250;
 
 type NavIcon = typeof LayoutDashboard;
 
@@ -196,30 +191,16 @@ export function Sidebar({
   const collapsed = useSyncExternalStore(collapsedStore.subscribe, collapsedStore.get, collapsedStore.server);
 
   /**
-   * The section the pointer opened, and the one opened from the keyboard or by a tap — see `aim`.
-   * Neither is remembered: which section is open follows the pointer and the page, not last week.
+   * The section opened by a click on its row — one at a time, so opening another closes it. Before
+   * any click on this page (`undefined`) it is the section holding the page you are on, so that one
+   * starts open; a click can still fold it away. Not remembered: a new page starts from its own section.
    */
-  const [hoverGroup, setHoverGroup] = useState<string | null>(null);
-  const [pickedGroup, setPickedGroup] = useState<string | null>(null);
-  /** Where the pointer is heading and the timer that takes it there, until it arrives. */
-  const intent = useRef<{ target: string | null; timer: number } | null>(null);
-  /** The pointer behind the click about to arrive on a section's row — none for a keyboard's Enter. */
-  const pressedWith = useRef<string | null>(null);
-
-  // A new page closes what the pointer or the keyboard opened; the section holding it is open anyway.
+  const [openGroup, setOpenGroup] = useState<string | null | undefined>(undefined);
   const [seenPath, setSeenPath] = useState(pathname);
   if (seenPath !== pathname) {
     setSeenPath(pathname);
-    setHoverGroup(null);
-    setPickedGroup(null);
+    setOpenGroup(undefined);
   }
-
-  useEffect(
-    () => () => {
-      if (intent.current) window.clearTimeout(intent.current.timer);
-    },
-    [],
-  );
 
   function toggleCollapsed() {
     collapsedStore.write(String(!collapsed));
@@ -232,41 +213,6 @@ export function Sidebar({
    */
   const isActive = (href: string) =>
     !!matches(href) && !NAV_HREFS.some((other) => other.length > href.length && other.startsWith(`${href}/`) && matches(other));
-
-  /**
-   * Point the open section at `target` (null: none) once the pointer has stayed there a moment.
-   *
-   * Driven by the pointer *moving* over a section, never by it merely being over one. Opening a
-   * section closes the one before it, and when that one was above, everything below moves up under a
-   * pointer that hasn't moved — enter and leave events fire for whatever slid beneath it, and a menu
-   * that obeyed them would open the next section, shift again, and run down the list on its own.
-   * Movement is the person; a layout shift is not, so nothing changes until they move again.
-   */
-  function aim(target: string | null) {
-    if (intent.current?.target === target) return;
-    if (intent.current) window.clearTimeout(intent.current.timer);
-    intent.current = null;
-    if (target === hoverGroup) return;
-    const timer = window.setTimeout(
-      () => {
-        intent.current = null;
-        setHoverGroup(target);
-        // One section open at a time, besides the one you are in: the pointer moving on to another
-        // closes what a click or a key opened.
-        if (target !== null) setPickedGroup(null);
-      },
-      target === null ? HOVER_CLOSE_MS : HOVER_OPEN_MS,
-    );
-    intent.current = { target, timer };
-  }
-
-  /** Close a section opened by hand, keyboard or pointer (the one you are in stays open regardless). */
-  function closeGroup(group: string) {
-    if (intent.current) window.clearTimeout(intent.current.timer);
-    intent.current = null;
-    if (hoverGroup === group) setHoverGroup(null);
-    if (pickedGroup === group) setPickedGroup(null);
-  }
 
   // `canonical` is the app's own label: a renamed page is still found by its old name. A group with
   // nothing in it was dropped by `buildNavigation` — a bare heading over nothing reads as broken.
@@ -299,13 +245,12 @@ export function Sidebar({
     )?.group ?? null;
 
   /**
-   * Whether a section's pages are showing.
-   *
-   * The section holding the current page is always open, so nothing on the sidebar can ever leave you
-   * without a mark of where you are. Besides it, one section at a time: the one the pointer rests on
-   * (`aim`), or else the one opened from the keyboard or by a tap, which have no hover.
+   * Whether a section's pages are showing. In the full sidebar a section opens and closes by a click
+   * on its row (Enter or Space from the keyboard, a tap on a phone) — never on hover, which opened
+   * sections the pointer merely passed over (owner, 13 Oct 2026). The icon rail's groups still open
+   * beside it on hover (src/components/ui/rail-flyout.tsx).
    */
-  const isGroupOpen = (group: string) => group === activeGroup || group === hoverGroup || group === pickedGroup;
+  const isGroupOpen = (group: string) => (openGroup === undefined ? group === activeGroup : group === openGroup);
 
   /**
    * "Contact Support", at the foot of the menu: the platform's help desk, not a page of this workspace.
@@ -364,18 +309,6 @@ export function Sidebar({
         aria-label="Main"
         // The rail scrolls without a scrollbar: one drawn over a column of icons sits on top of them.
         className={cn("flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden py-3", isCollapsed ? "px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "px-2.5")}
-        // Hover opens sections in the full sidebar only — the rail's groups open beside it on their own
-        // (src/components/ui/rail-flyout.tsx). A finger has no hover: a tap on a section's row opens it.
-        onPointerMove={
-          isCollapsed
-            ? undefined
-            : (e) => {
-                if (e.pointerType === "touch") return;
-                const over = (e.target as Element).closest("[data-nav-group]");
-                aim(over?.getAttribute("data-nav-group") ?? null);
-              }
-        }
-        onPointerLeave={isCollapsed ? undefined : (e) => e.pointerType !== "touch" && aim(null)}
       >
         {!isCollapsed && (
           <div className="relative mb-2">
@@ -475,12 +408,11 @@ export function Sidebar({
               return (
                 <div
                   key={group}
-                  data-nav-group={group}
                   onKeyDown={(e) => {
-                    // Escape folds a section opened by hand back up, and leaves focus on its row.
-                    if (e.key === "Escape" && open && !current && !query) {
+                    // Escape folds an open section back up, and leaves focus on its row.
+                    if (e.key === "Escape" && open && !query) {
                       e.preventDefault();
-                      closeGroup(group);
+                      setOpenGroup(null);
                       e.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
                     }
                   }}
@@ -489,30 +421,8 @@ export function Sidebar({
                     type="button"
                     aria-expanded={open}
                     aria-controls={open ? panelId : undefined}
-                    onPointerDown={(e) => {
-                      pressedWith.current = e.pointerType;
-                    }}
-                    onClick={() => {
-                      const pointer = pressedWith.current;
-                      pressedWith.current = null;
-                      if (query) return;
-                      if (pointer === "mouse" || pointer === "pen") {
-                        // The pointer is on it: open now rather than after the hover's moment. Hover owns
-                        // closing, so a click that lands just as a section opened can't shut it again.
-                        if (intent.current) window.clearTimeout(intent.current.timer);
-                        intent.current = null;
-                        setHoverGroup(group);
-                        setPickedGroup(null);
-                        return;
-                      }
-                      // The keyboard, or a finger: no hover to open it, so the press opens and closes.
-                      if (current) return;
-                      if (open) closeGroup(group);
-                      else {
-                        setPickedGroup(group);
-                        setHoverGroup(null);
-                      }
-                    }}
+                    // Opens this section and closes whichever was open; a second click folds it away.
+                    onClick={() => !query && setOpenGroup(open ? null : group)}
                     className={cn(
                       "flex h-9 w-full items-center gap-2.5 rounded-base px-2.5 text-left text-[13px] transition-colors duration-150",
                       // The section you are in reads as chosen: heavier, in full colour.
