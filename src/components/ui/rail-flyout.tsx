@@ -62,6 +62,7 @@ export function RailFlyout({
   onNavigate,
   className,
   offset = 16,
+  itemClassName,
 }: {
   label: string;
   icon: ReactNode;
@@ -71,6 +72,8 @@ export function RailFlyout({
   className?: string;
   /** From the trigger's right edge to the panel: far enough to clear the rail's edge. */
   offset?: number;
+  /** Added to each page's link in the panel — a sidebar's own text size for its pages. */
+  itemClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -263,6 +266,7 @@ export function RailFlyout({
                   "flex h-8 items-center gap-2.5 rounded-base px-2 text-[13px] font-medium outline-none transition-colors",
                   "focus-visible:ring-2 focus-visible:ring-brand/40",
                   item.active ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text focus:bg-surface-sunken focus:text-text",
+                  itemClassName,
                 )}
               >
                 {item.icon}

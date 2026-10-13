@@ -78,6 +78,13 @@ const collapsedStore = makeStore(COLLAPSED_STORAGE_KEY, (raw) => raw === "true",
 
 type NavIcon = typeof LayoutDashboard;
 
+/**
+ * The menu's two text sizes, set here once: a main module's row (and the dashboard beside them) at
+ * 16px, a page inside a module at 14px — in the full sidebar and in the rail's panels alike.
+ */
+const MODULE_TEXT = "text-base";
+const PAGE_TEXT = "text-sm";
+
 /** A top-level link: the dashboard, and in the icon rail a page standing on its own. */
 function NavLink({
   href,
@@ -102,7 +109,8 @@ function NavLink({
       aria-label={isCollapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex h-9 items-center gap-2.5 rounded-base px-2.5 text-[13px] font-medium",
+        "group relative flex h-9 items-center gap-2.5 rounded-base px-2.5 font-medium",
+        MODULE_TEXT,
         "transition-colors duration-150",
         isCollapsed && "mx-auto w-9 justify-center px-0",
         active ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text",
@@ -124,7 +132,8 @@ function SubLink({ href, label, active, onNavigate }: { href: string; label: str
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex h-8 items-center rounded-base px-2.5 text-[13px] transition-colors duration-150",
+        "relative flex h-8 items-center rounded-base px-2.5 transition-colors duration-150",
+        PAGE_TEXT,
         active ? "bg-brand-subtle font-medium text-brand" : "text-muted hover:bg-surface-sunken hover:text-text",
       )}
     >
@@ -387,6 +396,7 @@ export function Sidebar({
                     className="mx-auto h-9 w-9"
                     // From the icon's edge past the rail's own, so the panel opens just clear of the rail.
                     offset={24}
+                    itemClassName={PAGE_TEXT}
                     onNavigate={onNavigate}
                     // Names alone beside the rail, as under a section in the full sidebar.
                     items={items.map((item) => ({
@@ -424,7 +434,8 @@ export function Sidebar({
                     // Opens this section and closes whichever was open; a second click folds it away.
                     onClick={() => !query && setOpenGroup(open ? null : group)}
                     className={cn(
-                      "flex h-9 w-full items-center gap-2.5 rounded-base px-2.5 text-left text-[13px] transition-colors duration-150",
+                      "flex h-9 w-full items-center gap-2.5 rounded-base px-2.5 text-left transition-colors duration-150",
+                      MODULE_TEXT,
                       // The section you are in reads as chosen: heavier, in full colour.
                       current ? "font-semibold text-text" : "font-medium text-muted hover:bg-surface-sunken hover:text-text",
                       open && !current && "bg-surface-sunken text-text",
