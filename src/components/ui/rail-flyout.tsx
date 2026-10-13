@@ -63,6 +63,8 @@ export function RailFlyout({
   className,
   offset = 16,
   itemClassName,
+  headingClassName,
+  panelClassName,
 }: {
   label: string;
   icon: ReactNode;
@@ -74,6 +76,10 @@ export function RailFlyout({
   offset?: number;
   /** Added to each page's link in the panel — a sidebar's own text size for its pages. */
   itemClassName?: string;
+  /** Added to the group's name at the top of the panel — a sidebar's own size for its headings. */
+  headingClassName?: string;
+  /** Added to the panel itself — a sidebar's own colours, which a portalled panel doesn't inherit. */
+  panelClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -245,9 +251,12 @@ export function RailFlyout({
         onPointerEnter={(e) => hovers(e.pointerType) && clearTimer()}
         onPointerLeave={(e) => hovers(e.pointerType) && hoverOut()}
       >
-        <div ref={placePanel} id={menuId} role="menu" aria-label={label} onKeyDown={onKeyDown}>
+        <div ref={placePanel} id={menuId} role="menu" aria-label={label} onKeyDown={onKeyDown} className={panelClassName}>
           {/* The group's name, kept in view while a long group scrolls under it. */}
-          <p aria-hidden="true" className="sticky top-0 z-[1] bg-surface px-3.5 pt-3 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-subtle uppercase">
+          <p
+            aria-hidden="true"
+            className={cn("sticky top-0 z-[1] bg-surface px-3.5 pt-3 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-subtle uppercase", headingClassName)}
+          >
             {label}
           </p>
           <div className="space-y-0.5 px-1.5 pb-1.5">

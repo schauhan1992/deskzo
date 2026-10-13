@@ -84,8 +84,18 @@ type NavIcon = typeof LayoutDashboard;
  */
 const MODULE_TEXT = "text-base";
 const PAGE_TEXT = "text-sm";
-/** The headings over the modules (CUSTOMERS, FINANCE…), at 12px. */
+/** The headings over the modules (CUSTOMERS, FINANCE…) and atop the rail's panels, at 12px. */
 const HEADING_TEXT = "text-xs";
+
+/**
+ * In dark mode the menu's text is white — modules, pages, the app's name and the headings — rather
+ * than the greys the rest of the app uses. Scoped to the sidebar by re-pointing the text colours
+ * inside it (the app's dark mode is the `.dark` class on <html>, not the OS setting, hence
+ * `[.dark_&]`); the search box's placeholder keeps its grey, so it never reads as typed text.
+ */
+const DARK_TEXT = "[.dark_&]:[--text:#ffffff] [.dark_&]:[--text-muted:#ffffff]";
+/** For what is drawn in the faintest grey in light mode — the headings, the chevrons, the collapse control. */
+const DARK_WHITE = "[.dark_&]:text-white";
 
 /** A top-level link: the dashboard, and in the icon rail a page standing on its own. */
 function NavLink({
@@ -381,7 +391,7 @@ export function Sidebar({
           >
             {/* The heading over its sections — in the rail, the rule above them says the same. */}
             {heading && !isCollapsed && (
-              <p aria-hidden="true" className={cn("px-2.5 pb-1 font-semibold uppercase tracking-[0.08em] text-subtle", HEADING_TEXT)}>
+              <p aria-hidden="true" className={cn("px-2.5 pb-1 font-semibold uppercase tracking-[0.08em] text-subtle", HEADING_TEXT, DARK_WHITE)}>
                 {heading}
               </p>
             )}
@@ -399,6 +409,8 @@ export function Sidebar({
                     // From the icon's edge past the rail's own, so the panel opens just clear of the rail.
                     offset={24}
                     itemClassName={PAGE_TEXT}
+                    headingClassName={cn(HEADING_TEXT, DARK_WHITE)}
+                    panelClassName={DARK_TEXT}
                     onNavigate={onNavigate}
                     // Names alone beside the rail, as under a section in the full sidebar.
                     items={items.map((item) => ({
@@ -447,7 +459,7 @@ export function Sidebar({
                     <span className="min-w-0 flex-1 truncate">{group}</span>
                     <ChevronDown
                       aria-hidden="true"
-                      className={cn("h-3.5 w-3.5 shrink-0 text-subtle transition-transform duration-150", open && "rotate-180")}
+                      className={cn("h-3.5 w-3.5 shrink-0 text-subtle transition-transform duration-150", DARK_WHITE, open && "rotate-180")}
                     />
                   </button>
 
@@ -491,6 +503,7 @@ export function Sidebar({
         suppressHydrationWarning
         className={cn(
           "hidden md:sticky md:top-0 md:flex md:h-screen md:shrink-0 md:flex-col md:border-r md:border-line md:bg-surface",
+          DARK_TEXT,
           // Nothing inside spills while the width eases: the rail's panels are portalled to the body, not clipped here.
           "md:overflow-hidden md:whitespace-nowrap md:transition-[width] md:duration-200 md:ease-out",
           collapsed ? "md:w-[68px]" : "md:w-[240px]",
@@ -510,7 +523,7 @@ export function Sidebar({
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             onClick={toggleCollapsed}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-base border border-line text-subtle transition-colors hover:bg-surface-sunken hover:text-text"
+            className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-base border border-line text-subtle transition-colors hover:bg-surface-sunken hover:text-text", DARK_WHITE)}
           >
             {collapsed ? <PanelLeftOpen aria-hidden="true" className="h-4 w-4" /> : <PanelLeftClose aria-hidden="true" className="h-4 w-4" />}
           </button>
@@ -522,7 +535,7 @@ export function Sidebar({
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 animate-fade-in bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 top-0 flex h-full w-[264px] animate-slide-in-left flex-col border-r border-line bg-surface shadow-lg">
+          <aside className={cn("absolute left-0 top-0 flex h-full w-[264px] animate-slide-in-left flex-col border-r border-line bg-surface shadow-lg", DARK_TEXT)}>
             <div className="flex h-14 items-center justify-between gap-2 border-b border-line px-4">
               <div className="flex min-w-0 items-center gap-2.5">
                 <BrandMark branding={branding} collapsed={false} />
@@ -534,7 +547,7 @@ export function Sidebar({
                 type="button"
                 aria-label="Close menu"
                 onClick={() => setMobileOpen(false)}
-                className="rounded-base p-1.5 text-subtle transition-colors hover:bg-surface-sunken hover:text-text"
+                className={cn("rounded-base p-1.5 text-subtle transition-colors hover:bg-surface-sunken hover:text-text", DARK_WHITE)}
               >
                 <X className="h-4 w-4" />
               </button>
