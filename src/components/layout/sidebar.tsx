@@ -124,13 +124,13 @@ function NavLink({
         "group relative flex h-9 items-center gap-2.5 rounded-base px-2.5 font-medium",
         MODULE_TEXT,
         "transition-colors duration-150",
-        isCollapsed && "mx-auto w-9 justify-center px-0",
+        isCollapsed && "mx-auto h-10 w-10 justify-center px-0",
         active ? "bg-brand-subtle text-brand" : "text-muted hover:bg-surface-sunken hover:text-text",
       )}
     >
       {/* A brand-coloured rail reads as "you are here" without shouting. */}
       {active && <span aria-hidden="true" className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand" />}
-      <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
+      <Icon aria-hidden="true" className={cn("shrink-0", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
       {!isCollapsed && <span className="truncate">{label}</span>}
     </Link>
   );
@@ -291,11 +291,11 @@ export function Sidebar({
         className={cn(
           "flex h-9 w-full items-center gap-2.5 rounded-base px-2.5 text-[13px] font-medium text-brand",
           "transition-colors hover:bg-brand/10",
-          isCollapsed && "justify-center px-0",
+          isCollapsed && "mx-auto h-10 w-10 justify-center px-0",
           className,
         )}
       >
-        <Headset aria-hidden="true" className="h-4 w-4 shrink-0" />
+        <Headset aria-hidden="true" className={cn("shrink-0", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
         {!isCollapsed && "Contact Support"}
       </button>
     );
@@ -404,10 +404,11 @@ export function Sidebar({
                   <RailFlyout
                     key={group}
                     label={group}
-                    icon={<Icon aria-hidden="true" className="h-4 w-4 shrink-0" />}
-                    className="mx-auto h-9 w-9"
+                    // A size up from the full sidebar's: with no name beside it, the icon is all there is to read.
+                    icon={<Icon aria-hidden="true" className="h-5 w-5 shrink-0" />}
+                    className="mx-auto h-10 w-10"
                     // From the icon's edge past the rail's own, so the panel opens just clear of the rail.
-                    offset={24}
+                    offset={22}
                     itemClassName={PAGE_TEXT}
                     headingClassName={cn(HEADING_TEXT, DARK_WHITE)}
                     panelClassName={DARK_TEXT}
