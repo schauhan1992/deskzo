@@ -84,6 +84,8 @@ type NavIcon = typeof LayoutDashboard;
  */
 const MODULE_TEXT = "text-base";
 const PAGE_TEXT = "text-sm";
+/** The headings over the modules (CUSTOMERS, FINANCE…), at 12px. */
+const HEADING_TEXT = "text-xs";
 
 /** A top-level link: the dashboard, and in the icon rail a page standing on its own. */
 function NavLink({
@@ -379,7 +381,7 @@ export function Sidebar({
           >
             {/* The heading over its sections — in the rail, the rule above them says the same. */}
             {heading && !isCollapsed && (
-              <p aria-hidden="true" className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-subtle">
+              <p aria-hidden="true" className={cn("px-2.5 pb-1 font-semibold uppercase tracking-[0.08em] text-subtle", HEADING_TEXT)}>
                 {heading}
               </p>
             )}
