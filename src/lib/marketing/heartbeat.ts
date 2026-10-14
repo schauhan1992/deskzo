@@ -10,6 +10,7 @@ import { runCollectionsDaily } from "@/lib/collections/daily";
 import { runRecurringBilling } from "@/lib/recurring-billing/run";
 import { calendarChores } from "@/lib/calendar/chores";
 import { signatureChores } from "@/lib/signatures/sync";
+import { purgeExpiredChat } from "@/lib/chat/retention";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -119,6 +120,14 @@ export async function runHeartbeat() {
     console.error("signature sync failed", err);
     return null;
   });
+  /**
+   * Chat: messages older than the workspace keeps them (Settings → Chat), deleted once a workspace day.
+   * Kept for good unless an admin chose otherwise.
+   */
+  const chatPurge = await purgeExpiredChat().catch((err) => {
+    console.error("chat retention failed", err);
+    return null;
+  });
   return {
     ...result,
     leadScoresRefreshed,
@@ -133,5 +142,6 @@ export async function runHeartbeat() {
     calendarsSynced: calendars?.synced ?? 0,
     meetingsHeld: calendars?.held ?? 0,
     signaturesSynced: signatures?.synced ?? 0,
+    chatMessagesPurged: chatPurge?.deleted ?? 0,
   };
 }

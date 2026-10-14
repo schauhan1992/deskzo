@@ -12,6 +12,7 @@
 export const CUSTOMER_DATA_PATHS = [
   "/accounting",
   "/calls",
+  "/chat",
   "/collections",
   "/companies",
   "/contacts",

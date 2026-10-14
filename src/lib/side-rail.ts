@@ -11,9 +11,11 @@
  * recognise them by shape.
  */
 
-export type SideRailTool = "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos" | "support-access";
+export type SideRailTool = "chat" | "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos" | "support-access";
 
 export const SIDE_RAIL_TOOLS: SideRailTool[] = [
+  // Chat beside whatever you are working on: a colleague's question answered without leaving the page.
+  "chat",
   "tasks",
   "notes",
   "calculator",

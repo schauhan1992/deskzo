@@ -58,7 +58,21 @@ import { linkedSignInEnabled } from "@/lib/platform/linked/groups";
 import { PLATFORM_DOMAIN } from "@/lib/tenancy/host";
 import { WorkspaceSwitcher } from "@/components/linked/workspace-switcher";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
+import { ChatLiveProvider } from "@/components/chat/chat-live";
+import { ChatButton } from "@/components/chat/chat-button";
+import { unreadTotal } from "@/lib/chat/server";
 import { wizardAutoOpens, wizardMounted } from "@/lib/help/onboarding";
+
+/** Chat's live connection around the app, or nothing at all where chat isn't open to this person. */
+function ChatGate({ on, meId, unread, children }: { on: boolean; meId: string; unread: number; children: React.ReactNode }) {
+  return on ? (
+    <ChatLiveProvider meId={meId} initialUnread={unread}>
+      {children}
+    </ChatLiveProvider>
+  ) : (
+    <>{children}</>
+  );
+}
 
 /** Nothing unread on either side — for nobody signed in, or a count that could not be read. */
 const NO_UNREAD = { deskzo: 0, company: 0 };
@@ -175,6 +189,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const dlpOn = dlpApplies(shownUser?.role, securityPolicy) && hasAnyDeterrent(securityPolicy);
 
+  // Team chat (src/lib/chat): one live connection for the whole app, and its unread count — for the
+  // person as themselves only. Chats are private, so never while viewing as somebody.
+  const chatOn = !!session?.user && !viewAs && openModules.includes("chat");
+  const chatUnread = chatOn ? await unreadTotal(session!.user.id).catch(() => 0) : 0;
+
   // The Getting Started wizard (src/lib/help/onboarding.ts): for a person still being onboarded, signed in as
   // themselves; never while viewing as somebody (then `viewer` is them). It opens by itself once per sign-in — the
   // key names the sign-in without carrying its id to the page — except over a forced password or two-factor form.
@@ -202,6 +221,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <TableColumnsProvider initial={tablePreferences}>
     <WordingProvider initial={wording}>
     <ClockProvider zone={zone}>
+    <ChatGate on={chatOn} meId={session?.user?.id ?? ""} unread={chatUnread}>
     <div className="flex min-h-screen bg-bg">
       {/* Not while impersonating: the heartbeat accrues "time spent on the CRM" against whoever the
           request resolves as, and an admin reading somebody's screen is not that person working. */}
@@ -290,6 +310,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="hidden sm:block">
               <ThemeToggle defaultTheme={branding.defaultTheme} />
             </div>
+            {chatOn && <ChatButton />}
             <NotificationBell />
             <Link
               href="/profile"
@@ -375,12 +396,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
           country={(await currentTenant()).country}
           support={!!supportLauncher}
           supportAccess={supportAccess ? { inside: !!supportAccess.grant } : null}
+          chat={chatOn}
         />
       </div>
 
       {/* The Contact Support dialog; its button is on the tool rail from xl, and at the foot of the sidebar below it. */}
       {supportLauncher && <SupportLauncher state={supportLauncher} />}
     </div>
+    </ChatGate>
     </ClockProvider>
     </WordingProvider>
     </TableColumnsProvider>

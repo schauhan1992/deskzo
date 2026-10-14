@@ -460,6 +460,11 @@ enum NotificationType {
    * each live cardholder, at most once in half an hour per template.
    */
   CARD_CHANGED
+  /**
+   * Somebody @mentioned you in a team chat. Says who and in which chat, never what — the message stays
+   * in the chat (src/lib/chat).
+   */
+  CHAT_MENTION
 }
 
 model User {
@@ -857,6 +862,10 @@ model User {
   calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
   bookingsHosted                Booking[]                @relation("BookingHost")
   recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
+  chatsCreated         Chat[]             @relation("ChatCreatedBy")
+  chatMemberships      ChatMember[]       @relation("ChatMemberships")
+  chatMessagesSent     ChatMessage[]      @relation("ChatMessagesSent")
+  chatPresence         ChatPresence?      @relation("ChatPresence")
 
   @@index([departmentId])
   @@index([managerId])
@@ -13283,4 +13292,135 @@ model SignatureOutlook {
   fetchedAt DateTime
 
   @@map("signature_outlook")
+}
+
+// ─── Team chat ────────────────────────────────────────────────────────────────
+
+/**
+ * WhatsApp-style chat between the people of the workspace, kept entirely inside it: messages and
+ * files live in this database and nothing is sent anywhere else (src/lib/chat). Only a chat's members
+ * read it — no admin browses chats; the super admin may export one, which is audited.
+ */
+enum ChatKind {
+  /** Two people. One per pair — see `directKey`. */
+  DIRECT
+  GROUP
+}
+
+enum ChatMessageKind {
+  TEXT
+  /** Written by the app, not by a person: "Asha added Ravi", "Group renamed to Sales". */
+  SYSTEM
+}
+
+model Chat {
+  id            String    @id @default(cuid())
+  kind          ChatKind
+  /** A group's name. Null for a direct chat, which is shown as the other person. */
+  name          String?
+  /** A direct chat's two members' ids, sorted and joined by "|": the database keeps it to one chat per pair. */
+  directKey     String?   @unique
+  createdById   String?
+  createdBy     User?     @relation("ChatCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  /** The newest message's time, so a person's list sorts without reading every chat's messages. */
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  members  ChatMember[]
+  messages ChatMessage[]
+
+  @@index([lastMessageAt])
+  @@map("chats")
+}
+
+/**
+ * A person in a chat, and how far they have got through it. The ticks are worked out from these two
+ * times rather than stored per message: a message is delivered to a member once their
+ * `lastDeliveredAt` reaches it, and read once their `lastReadAt` does.
+ */
+model ChatMember {
+  id              String    @id @default(cuid())
+  chatId          String
+  chat            Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation("ChatMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  /** A group admin may rename it and add or remove people. Its creator is one. */
+  isAdmin         Boolean   @default(false)
+  joinedAt        DateTime  @default(now())
+  /** Left, or removed: they keep what was said up to then and see nothing after. */
+  leftAt          DateTime?
+  lastDeliveredAt DateTime?
+  lastReadAt      DateTime?
+  /** No sound or unread badge until then; an @mention still counts. */
+  mutedUntil      DateTime?
+
+  @@unique([chatId, userId])
+  @@index([userId])
+  @@map("chat_members")
+}
+
+model ChatMessage {
+  id         String          @id @default(cuid())
+  chatId     String
+  chat       Chat            @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  /** Null for a SYSTEM line, and for a sender whose account was later removed. */
+  senderId   String?
+  sender     User?           @relation("ChatMessagesSent", fields: [senderId], references: [id], onDelete: SetNull)
+  kind       ChatMessageKind @default(TEXT)
+  body       String          @default("")
+  replyToId  String?
+  replyTo    ChatMessage?    @relation("ChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies    ChatMessage[]   @relation("ChatReplies")
+  /** The people @mentioned, by id: they are told even when the chat is muted. */
+  mentionIds String[]        @default([])
+  editedAt   DateTime?
+  /** Deleted for everyone: the body and files are gone, the row stays so the conversation keeps its shape. */
+  deletedAt  DateTime?
+  createdAt  DateTime        @default(now())
+
+  attachments ChatAttachment[]
+
+  @@index([chatId, createdAt])
+  @@map("chat_messages")
+}
+
+/** A file sent in a chat, kept in the database like every other file here. */
+model ChatAttachment {
+  id        String      @id @default(cuid())
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileName  String
+  mimeType  String
+  size      Int
+  data      Bytes
+  createdAt DateTime    @default(now())
+
+  @@index([messageId])
+  @@map("chat_attachments")
+}
+
+/** When a person was last in the app with chat open, for "last seen" — kept apart from User so no sign-in query reads it. */
+model ChatPresence {
+  userId     String   @id
+  user       User     @relation("ChatPresence", fields: [userId], references: [id], onDelete: Cascade)
+  lastSeenAt DateTime
+
+  @@map("chat_presence")
+}
+
+/**
+ * The workspace's rules for chat, one row (id "global"); no row is the defaults. Changed under
+ * Settings → Chat by somebody who may change the workspace's settings.
+ */
+model ChatSettings {
+  id                  String   @id @default("global")
+  /** Files open in the browser and can't be saved from the chat — a deterrent, like the DLP policy. */
+  attachmentsViewOnly Boolean  @default(false)
+  /** Messages older than this many days are deleted each night; null keeps them for good. */
+  retentionDays       Int?
+  updatedById         String?
+  updatedAt           DateTime @updatedAt
+
+  @@map("chat_settings")
 }

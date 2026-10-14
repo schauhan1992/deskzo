@@ -145,6 +145,7 @@
     "check:customer-categories": "tsx scripts/check-customer-categories.ts",
     "check:custom-fields": "tsx scripts/check-custom-fields.ts",
     "check:wishes": "tsx scripts/check-wishes.ts",
+    "check:chat": "tsx scripts/check-chat.ts",
     "check:vendor-banking": "tsx scripts/check-vendor-banking.ts",
     "check:documents-sections": "tsx scripts/check-documents-sections.ts",
     "check:custom-field-filters": "tsx scripts/check-custom-field-filters.ts",

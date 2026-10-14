@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -478,6 +478,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       "Quick notes that do not warrant a task — kept to yourself, shared with your reporting line, or stuck to a company, lead or ticket so the context lives with the record rather than in somebody's head.",
     navGroup: "My work",
     navItems: [{ href: "/notes", label: "Sticky Notes", icon: StickyNote }],
+  },
+  {
+    key: "chat",
+    inEveryPlan: true,
+    label: "Chat",
+    description:
+      "WhatsApp-style chat between colleagues — one to one and in groups, with files, replies and read ticks — that never leaves the workspace: messages live in its own database, and only the people in a chat can read it.",
+    navGroup: "My work",
+    navItems: [{ href: "/chat", label: "Chat", icon: MessageCircle }],
   },
   {
     key: "marketing",

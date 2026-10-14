@@ -35,6 +35,7 @@ import {
   Tags,
   Trophy,
   MapPin,
+  MessageCircle,
   Shuffle,
   Truck,
   UserCog,
@@ -256,6 +257,15 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/locks",
             icon: Lock,
             permission: "users.lock",
+          },
+          {
+            key: "chat",
+            label: "Chat",
+            description: "Whether files sent in chat can be saved, and how long messages are kept. The super admin can export one chat.",
+            href: "/settings/chat",
+            icon: MessageCircle,
+            permission: "settings.manage",
+            module: "chat",
           },
           {
             key: "access-control",

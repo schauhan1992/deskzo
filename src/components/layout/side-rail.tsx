@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
+import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MessageCircle, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
 import { COPILOT_OPEN_EVENT, SIDE_RAIL_STORAGE_KEY, UPDATES_SEEN_EVENT, parseTool, type SideRailTool } from "@/lib/side-rail";
 import { RailTasks } from "@/components/layout/rail-tasks";
 import { RailNotes } from "@/components/layout/rail-notes";
@@ -12,8 +12,11 @@ import { RailProRata } from "@/components/layout/rail-prorata";
 import { RailHelp, RailUpdates, RailVideos } from "@/components/layout/rail-help";
 import { openSupport } from "@/components/support/open-support";
 import { RailSupportAccess } from "@/components/layout/rail-support-access";
+import { ChatApp } from "@/components/chat/chat-app";
+import { useChatLive } from "@/components/chat/chat-live";
 
 const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group: "work" | "help" }[] = [
+  { key: "chat", label: "Chat", icon: MessageCircle, group: "work" },
   { key: "tasks", label: "My tasks", icon: CheckSquare, group: "work" },
   { key: "notes", label: "Sticky notes", icon: StickyNote, group: "work" },
   { key: "calculator", label: "GST & margin", icon: Calculator, group: "work" },
@@ -51,7 +54,10 @@ export function SideRail({
   country = "IN",
   support = false,
   supportAccess = null,
+  chat = false,
 }: {
+  /** Chat is open to this person, as themselves — its panel and its unread count (src/components/chat). */
+  chat?: boolean;
   /** Renewals are in the workspace's plan — the pro-rata tool quotes seats onto a subscription. */
   proRata?: boolean;
   /** This person may raise a proposal — the pro-rata panel then offers to draft one from its figures. */
@@ -79,6 +85,7 @@ export function SideRail({
   supportAccess?: { inside: boolean } | null;
 }) {
   const open = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const chatUnread = useChatLive()?.unread ?? 0;
 
   // The server's counts, until What's new is opened — then each cleared at once by its own feed,
   // rather than on the next page load. New counts from the server (a new post, another page) replace them.
@@ -123,7 +130,7 @@ export function SideRail({
 
   // Only the tools this workspace has: nothing here asks for a module outside its plan.
   const tools = TOOLS.filter(
-    (t) => (t.key !== "prorata" || proRata) && (t.key !== "tasks" || tasks) && (t.key !== "notes" || notes) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess),
+    (t) => (t.key !== "prorata" || proRata) && (t.key !== "tasks" || tasks) && (t.key !== "notes" || notes) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess) && (t.key !== "chat" || chat),
   );
   const active = tools.find((t) => t.key === open);
 
@@ -140,7 +147,7 @@ export function SideRail({
       {active && (
         <aside
           aria-label={active.label}
-          className="flex w-72 flex-col overflow-hidden border-r border-line lg:w-80"
+          className={`flex flex-col overflow-hidden border-r border-line ${active.key === "chat" ? "w-80 2xl:w-96" : "w-72 lg:w-80"}`}
         >
           {/* Its title bar lines up with the app header rather than starting below it. */}
           <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line px-3">
@@ -155,7 +162,8 @@ export function SideRail({
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className={active.key === "chat" ? "min-h-0 flex-1" : "min-h-0 flex-1 overflow-y-auto p-3"}>
+            {active.key === "chat" && <ChatApp compact />}
             {active.key === "tasks" && <RailTasks />}
             {active.key === "notes" && <RailNotes />}
             {active.key === "calculator" && <RailCalculator />}
@@ -181,7 +189,7 @@ export function SideRail({
           const news = tool.key === "updates" ? unread : null;
           // Support access says so while support is inside: the one thing on this rail that is about who else can see.
           const supportIn = tool.key === "support-access" && !!supportAccess?.inside;
-          const label = news ? withNews(tool.label, news) : supportIn ? `${tool.label} — support can see your workspace now` : tool.label;
+          const label = news ? withNews(tool.label, news) : supportIn ? `${tool.label} — support can see your workspace now` : tool.key === "chat" && chatUnread > 0 ? `Chat — ${chatUnread} unread` : tool.label;
           const startsGroup = index > 0 && tools[index - 1].group !== tool.group;
           return (
             <div key={tool.key} className="flex flex-col items-center">
@@ -200,6 +208,11 @@ export function SideRail({
                 {news && news.company > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" aria-hidden="true" />}
                 {news && news.deskzo > 0 && <span className="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-brand ring-2 ring-surface" aria-hidden="true" />}
                 {supportIn && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-warning ring-2 ring-surface" aria-hidden="true" />}
+                {tool.key === "chat" && chatUnread > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-medium text-white" aria-hidden="true">
+                    {chatUnread > 99 ? "99+" : chatUnread}
+                  </span>
+                )}
               </button>
             </div>
           );

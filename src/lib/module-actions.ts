@@ -141,6 +141,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "messaging-provider.ts": ["marketing"],
   "module.ts": "core",
   "note.ts": ["notes"],
+  "chat.ts": ["chat"],
+  "chat-admin.ts": ["chat"],
   "notification.ts": ["notifications"],
   "order-notice.ts": ["orders", "renewals"],
   "order-progress.ts": ["orders"],
