@@ -196,10 +196,10 @@ export function RenewalsTable({
                       <td className="px-4 py-2.5 text-muted">{r.poNumber ?? "—"}</td>
                     )}
                     {cols.show("startDate") && (
-                      <td className="px-4 py-2.5 text-muted">{formatCalendarDay(r.startDate)}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-muted">{formatCalendarDay(r.startDate)}</td>
                     )}
                     {cols.show("expiryDate") && (
-                      <td className="px-4 py-2.5 text-muted">{formatCalendarDay(r.endDate)}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-muted">{formatCalendarDay(r.endDate)}</td>
                     )}
                     {cols.show("accountManager") && (
                       <td className="px-4 py-2.5 text-muted">

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Pin, RotateCcw } from "lucide-react";
+import { ChevronDown, Info, MessageSquareText, Pin, RotateCcw } from "lucide-react";
 import { setRenewalStage } from "@/actions/renewal-stage";
 import { SETTABLE_RENEWAL_STAGES, type RenewalStageKey, type RenewalStageTone } from "@/lib/renewals";
 import { Badge } from "@/components/ui/card";
@@ -31,9 +31,11 @@ export type RenewalStageCellData = {
  * picker exists for the three stages nothing can infer — Negotiating, On hold, Lost — and for
  * taking a pin back off again.
  *
- * The distinction is on the face of it rather than buried in a tooltip: a pinned stage carries a pin
- * and says who set it. Somebody looking down this column needs to know which entries are the system
- * reporting and which are a colleague asserting, because only one of those is evidence.
+ * The distinction is on the face of it: a pinned stage carries a pin. Somebody looking down this column
+ * needs to know which entries are the system reporting and which are a colleague asserting, because
+ * only one of those is evidence. Who pinned it, when and why sit behind the note beside it
+ * (`StageNote`) — written out under the badge, a long reason took the column's width from the dates
+ * and names beside it (owner, 14 Oct 2026).
  */
 export function RenewalStageCell({
   companyProductId,
@@ -100,7 +102,9 @@ export function RenewalStageCell({
   );
 
   return (
-    <div className="min-w-0">
+    // Capped, so nothing under the badge — a quotation's number, an old pin — can widen the column.
+    <div className="min-w-0 max-w-[15rem]">
+      <div className="flex items-center gap-1">
       {canEdit ? (
         <button
           ref={anchorRef}
@@ -117,6 +121,8 @@ export function RenewalStageCell({
       ) : (
         <Badge tone={stage.tone}>{badge}</Badge>
       )}
+      {stage.source === "manual" && stage.setBy && <StageNote setBy={stage.setBy.name} setAt={stage.setAt ? clock.date(stage.setAt) : null} note={stage.note} />}
+      </div>
 
       {/* The evidence behind the stage, where there is a document to point at. Turning "Quoted" into
           a link is most of this column's value — the next question after "has it been quoted?" is
@@ -128,14 +134,6 @@ export function RenewalStageCell({
         >
           {stage.quote.docNumber}
         </Link>
-      )}
-
-      {stage.source === "manual" && stage.setBy && (
-        <span className="mt-0.5 block truncate text-[11px] text-subtle" title={stage.note ?? undefined}>
-          {stage.setBy.name}
-          {stage.setAt ? `, ${clock.date(stage.setAt)}` : ""}
-          {stage.note ? ` — ${stage.note}` : ""}
-        </span>
       )}
 
       {/**
@@ -203,5 +201,55 @@ export function RenewalStageCell({
         </div>
       </AnchoredPopover>
     </div>
+  );
+}
+
+/**
+ * Who pinned the stage, when, and why — a small note beside the badge that opens on hover, on keyboard
+ * focus and on a tap (a phone has no hover). A speech bubble when a reason was given, an "i" when only
+ * who and when are known.
+ */
+function StageNote({ setBy, setAt, note }: { setBy: string; setAt: string | null; note: string | null }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const Icon = note ? MessageSquareText : Info;
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        aria-label={note ? `Why: ${note}` : `Set by ${setBy}`}
+        aria-describedby={open ? id : undefined}
+        aria-expanded={open}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-subtle hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      >
+        <Icon aria-hidden className="h-3.5 w-3.5" />
+      </button>
+      <AnchoredPopover anchorRef={ref} open={open} width={280} align="start">
+        <div id={id} role="tooltip" className="space-y-1 p-2.5">
+          <p className="text-[11px] text-subtle">
+            {setBy}
+            {setAt ? `, ${setAt}` : ""}
+          </p>
+          <p className="whitespace-pre-line text-sm text-text">{note ?? "No reason was given."}</p>
+        </div>
+      </AnchoredPopover>
+    </>
   );
 }
