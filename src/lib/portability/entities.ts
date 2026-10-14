@@ -778,6 +778,25 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "Configuration rather than records: the stages the workspace's leads move through (Settings → Pipeline), their names, order and colours, and what each counts as. Described in the workflow specification to be rebuilt in the target; each lead exports with its status, which is what its stage means.",
   },
+  LeadPipeline: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: the workspace's team pipelines (Settings → Pipeline) — their names, whether each counts as sales, and which carries its won leads on into which. Described in the workflow specification to be rebuilt in the target; each lead exports with its status.",
+  },
+  PipelineAutomation: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: a pipeline's automations — when a lead arrives or enters a stage, the tasks, emails, assignments and notifications that follow. Described in the workflow specification to be rebuilt in the target; what they did (tasks, emails sent) travels as itself.",
+  },
+  BookingPage: {
+    disposition: "specification",
+    reason: "Configuration rather than records: the public pages customers book meetings on — their address, hours, length and hosts. Rebuilt in the target rather than loaded.",
+  },
+  Booking: {
+    disposition: "archive",
+    reason:
+      "Who booked which time on which page, and with whom. The meeting is in the host's own calendar and the lead it opened exports as itself; this is the record of the booking, which no target CRM has a place for.",
+  },
   OrderStep: {
     disposition: "specification",
     reason:
@@ -804,4 +823,71 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   },
   RebateAllocation: { disposition: "archive", reason: "Immutable history. Which orders' rebates a vendor credit paid, and how much of each — archived with the credit." },
   VendorCreditApplication: { disposition: "archive", reason: "Immutable history. Which bills a vendor credit note was set against, and how much of each — archived with the credit and the bill." },
+  // ─── Recurring billing ─────────────────────────────────────────────────────────────────────────
+  RecurringBilling: {
+    disposition: "specification",
+    reason:
+      "Configuration on an order rather than a record: whether it renews itself at the end of its term or is invoiced in monthly or quarterly parts. Described in the workflow specification to be set up again in the target; the order and every invoice it raised travel as themselves.",
+  },
+  RecurringBillingPeriod: {
+    disposition: "archive",
+    reason: "Immutable history — each period recurring billing raised, and the draft invoice it made or the one skipped. The invoices export on their own; this is the schedule behind them, which no target system has a place for.",
+  },
+  // ─── Deskzo Cards ──────────────────────────────────────────────────────────────────────────────
+  CardTemplate: {
+    disposition: "specification",
+    reason: "Configuration rather than records: the company's card designs — colours, layout, the shared fields and which details a holder may add. Rebuilt in the target rather than loaded.",
+  },
+  DigitalCard: {
+    disposition: "specification",
+    reason:
+      "Configuration rather than records: who holds a card, at which address, with which of their own additions. What a card shows comes from its holder's record, which travels as itself; a card is issued again in the target.",
+  },
+  CardEvent: {
+    disposition: "archive",
+    reason: "Immutable history — counts of a card's page being opened, its contact saved, its links tapped and its details shared back, with when. Nothing about who; kept for the record, with no place in a target CRM.",
+  },
+  CardContact: {
+    disposition: "archive",
+    reason:
+      "The people met through a card — shared back, filled in at an event's stand, or scanned — with what they answered. With the CRM each is also a lead, which exports as itself; the archive keeps every one, so a workspace without the CRM keeps them too.",
+  },
+  CardCampaign: {
+    disposition: "archive",
+    reason: "Immutable history — the trade shows and conferences the team worked, their days and booth questions, and so which people were met at each. No target CRM has a place for it.",
+  },
+  CardCampaignMember: { disposition: "archive", reason: "Immutable history. Who worked each event — archived with the event." },
+  // ─── Deskzo Signatures ─────────────────────────────────────────────────────────────────────────
+  SignatureTemplate: {
+    disposition: "specification",
+    reason: "Configuration rather than records: the company's email signature designs. Rebuilt in the target rather than loaded; each person's details come from their own record.",
+  },
+  SignatureBanner: {
+    disposition: "specification",
+    reason: "Configuration rather than records: the banners shown under signatures, which signatures carry them, and from when to when. Set up again in the target.",
+  },
+  SignatureMailbox: {
+    disposition: "specification",
+    reason: "Configuration rather than records: the shared mailboxes (sales@, support@) and the signature each carries in Outlook. Set up again in the target.",
+  },
+  SignatureRule: {
+    disposition: "specification",
+    reason: "Configuration rather than records: which people, departments, branches or roles get a design other than the default. Described in the workflow specification to be rebuilt.",
+  },
+  SignatureSettings: {
+    disposition: "excluded",
+    reason: "The connection to the company's mail suite — a Google service account or a Zoho grant, encrypted under this installation's secret. Useless anywhere else; the administrator connects again.",
+  },
+  SignatureSync: {
+    disposition: "excluded",
+    reason: "Where each person's signature got to in their mailbox and what went wrong — sync state of this installation, meaningless elsewhere. It starts again when signatures are set up in the target.",
+  },
+  SignatureClick: {
+    disposition: "archive",
+    reason: "Immutable history — clicks on signatures' banners and buttons, per thing, per person, per day. Who clicked is never known; kept for the record, with no place in a target CRM.",
+  },
+  SignatureOutlook: {
+    disposition: "excluded",
+    reason: "When the Outlook add-in last asked for each person's signature, and which it got. Working state of this installation's add-in; nothing to carry.",
+  },
 };
