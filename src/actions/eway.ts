@@ -26,6 +26,7 @@ import {
 import { EWAY_DOC_TYPES, deliveryStateCode } from "@/lib/eway/documents";
 import { apportionLineValues, documentGoodsValue } from "@/lib/eway/value";
 import { subSupplyFor } from "@/lib/eway/sub-supply";
+import { uqcOfUnit } from "@/lib/uqc";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -620,7 +621,8 @@ function toEwayPayload(
       productName: l.name,
       hsnCode: l.hsnCode ?? "",
       quantity: Number(l.quantity),
-      unit: l.unit ?? "NOS",
+      // The portal's unit code, as GSTR-1 reports it: a blank unit counts numbers, one naming no code is OTH.
+      unit: l.unit?.trim() ? (uqcOfUnit(l.unit) ?? "OTH") : "NOS",
       taxableValue: lineValues[i]!,
     })),
     totalValue: value,

@@ -7,6 +7,7 @@
  */
 import { gstNumberProblem } from "@/lib/document-numbering";
 import { indiaClock } from "@/lib/time/zone";
+import { uqcOfUnit } from "@/lib/uqc";
 
 export type EInvoiceParty = {
   gstin: string | null;
@@ -134,7 +135,8 @@ export function buildEInvoicePayload(doc: EInvoiceDocument) {
       IsServc: line.isService ? "Y" : "N",
       HsnCd: line.hsnCode ?? "",
       Qty: line.quantity,
-      Unit: (line.unit ?? "OTH").slice(0, 3).toUpperCase(),
+      // A portal unit code: "Piece" is PCS, not its first three letters; a unit naming none is OTH.
+      Unit: uqcOfUnit(line.unit) ?? "OTH",
       UnitPrice: line.unitPrice,
       TotAmt: line.grossAmount,
       Discount: line.discountAmount,

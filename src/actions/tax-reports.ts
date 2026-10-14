@@ -12,6 +12,8 @@ import { buildGstr1, buildGstr3b, buildTdsSummary, type ReturnDocument } from "@
 import { profitAndLoss } from "@/actions/ledger-reports";
 import { indiaClock } from "@/lib/time/zone";
 import { listRegistrationChoices } from "@/lib/branches/identity";
+import { knownHsnCodes } from "@/lib/platform/hsn-directory";
+import { normaliseHsn } from "@/lib/items/catalogue-import";
 import type { RegistrationChoice } from "@/lib/branches/format";
 
 /**
@@ -189,13 +191,24 @@ export async function gstr1(params: { month: number; year: number; gstRegistrati
     select: documentSelect,
   });
 
+  // The directory names each HSN row and catches a code the portal won't take; without one, neither.
+  const codes = docs.flatMap((d) => d.lines.map((l) => normaliseHsn(l.hsnCode))).filter(Boolean);
+  const directory = await knownHsnCodes(codes);
+  // Many eight-digit leaves are just "OTHER"; their heading is what says what they are.
+  const named = new Map(
+    [...directory.found].map(([code, o]) => [code, { description: /^others?\W*$/i.test(o.description) && o.heading ? `Other — ${o.heading}` : o.description }]),
+  );
+
   return toPlain({
     month: params.month,
     year: params.year,
     from,
     to,
     registration,
-    ...buildGstr1(docs.map((d) => toReturnDocument(d as unknown as RawDoc))),
+    ...buildGstr1(
+      docs.map((d) => toReturnDocument(d as unknown as RawDoc)),
+      directory.checked ? { directory: named } : {},
+    ),
   });
 }
 

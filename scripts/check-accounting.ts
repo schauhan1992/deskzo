@@ -42,6 +42,7 @@ import { indiaClock } from "../src/lib/time/zone";
 import { EXPENSE_CATEGORY_ACCOUNT, SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { bookValue, depreciableAmount, monthlyCharge, schedule } from "../src/lib/ledger/depreciation";
 import { buildGstr1, buildGstr3b, buildTdsSummary, countsForReturn, type ReturnDocument } from "../src/lib/ledger/gst-returns";
+import { uqcForLine, uqcOfUnit } from "../src/lib/uqc";
 import { buildCashFlow, sectionFor, type AccountMovement } from "../src/lib/ledger/cashflow";
 import {
   parseStatementCsv,
@@ -61,6 +62,9 @@ function eq(label: string, actual: number, expected: number, why = "") {
   const pass = Math.abs(actual - expected) < 0.005;
   console.log(`${pass ? "  ok  " : " FAIL "} ${label} — ${actual.toFixed(2)}${pass ? "" : ` (expected ${expected.toFixed(2)})`}${why ? ` · ${why}` : ""}`);
   if (!pass) failures += 1;
+}
+function is(label: string, actual: unknown, expected: unknown) {
+  ok(label, actual === expected, actual === expected ? String(actual) : `${String(actual)} (expected ${String(expected)})`);
 }
 function balanced(label: string, lines: DraftLine[]) {
   const { debit, credit } = entryTotals(lines);
@@ -453,8 +457,10 @@ ok("Nor is a cancelled invoice", !returns.b2b.some((b) => b.docNumber === "INV/2
 eq("Taxable value covers both", returns.totals.taxableValue, 200000, "B2B + B2C");
 eq("  B2B half", returns.totals.b2bTaxable, 100000);
 eq("  B2C half", returns.totals.b2cTaxable, 100000);
-eq("HSN summary groups by code", returns.hsn.length, 1, "8471");
-eq("  and totals the quantity", returns.hsn[0].quantity, 2);
+eq("The HSN summary has a B2B tab", returns.hsn.b2b.length, 1, "8471 to the registered customer");
+eq("  and a B2C tab", returns.hsn.b2c.length, 1, "8471 to the walk-in");
+eq("  each with its own quantity", returns.hsn.b2b[0].quantity + returns.hsn.b2c[0].quantity, 2);
+is("  reported in the portal's unit code", returns.hsn.b2b[0].uqc, "NOS");
 
 // A credit note reduces what was supplied.
 const withCredit = buildGstr1([
@@ -464,6 +470,77 @@ const withCredit = buildGstr1([
 eq("A credit note reduces the taxable value", withCredit.totals.taxableValue, 80000, "1,00,000 less 20,000");
 eq("  and the tax with it", withCredit.totals.cgst, 7200, "9,000 less 1,800");
 eq("  it is counted separately", withCredit.totals.creditNoteCount, 1);
+eq("  and netted into the HSN summary's B2B tab", withCredit.hsn.b2b[0]?.taxableValue ?? NaN, 80000, "one row, 1,00,000 less 20,000");
+eq("    with its quantity", withCredit.hsn.b2b[0]?.quantity ?? NaN, 0, "one laptop sold, one returned");
+
+// ─── GSTR-1 Table 12: one row per code, rate and unit, in two tabs ───────────────
+console.log("\n— HSN summary (Table 12) —\n");
+
+is("A typed unit is read as its portal code", uqcOfUnit("Piece"), "PCS");
+is("  plurals and short forms too", [uqcOfUnit("boxes"), uqcOfUnit("Kgs."), uqcOfUnit("ltr"), uqcOfUnit("sq ft")].join(" "), "BOX KGS LTR SQF");
+is("  a code typed as a code stays itself", uqcOfUnit("nos"), "NOS");
+is("  a billing period after a slash is not the unit", uqcOfUnit("Pack / year"), "PAC");
+is("  a unit naming no code is null", uqcOfUnit("Box of 10"), null);
+is("A service goes as NA, whatever its unit", uqcForLine({ hsnCode: "997331", unit: "Seat / year" }), "NA");
+is("Goods with an unknown unit go as OTH", uqcForLine({ hsnCode: "8471", unit: "Box of 10" }), "OTH");
+
+const sez = "27AABCS1234A1Z5";
+const table12 = buildGstr1([
+  // A registered buyer: laptops at 18% in pieces and in boxes, and a licence at 18%.
+  doc({
+    docNumber: "INV/2026/0101",
+    taxableValue: 250000,
+    lines: [
+      line({ unit: "Piece", quantity: 2, taxableValue: 100000 }),
+      line({ unit: "Box", quantity: 1, taxableValue: 50000, cgstAmount: 4500, sgstAmount: 4500 }),
+      line({ hsnCode: "997331", name: "Microsoft 365", unit: "Seat / year", quantity: 10, taxableValue: 100000 }),
+    ],
+  }),
+  // The same laptop at 12% is a separate row, even at the same code and unit.
+  doc({ docNumber: "INV/2026/0102", lines: [line({ unit: "Piece", taxRatePercent: 12, cgstAmount: 6000, sgstAmount: 6000 })] }),
+  // An SEZ unit carries a GSTIN, so it is B2B (6B), on IGST.
+  doc({ docNumber: "INV/2026/0103", partyGstin: sez, placeOfSupplyCode: "96", cgstAmount: 0, sgstAmount: 0, igstAmount: 0, lines: [line({ unit: "Piece", taxRatePercent: 0, cgstAmount: 0, sgstAmount: 0 })] }),
+  // An export has no GSTIN, so it is B2C.
+  doc({ docNumber: "INV/2026/0104", partyGstin: null, partyName: "Contoso GmbH", placeOfSupplyCode: "96", cgstAmount: 0, sgstAmount: 0, lines: [line({ unit: "Piece", taxRatePercent: 0, cgstAmount: 0, sgstAmount: 0 })] }),
+  // A walk-in, and a credit note to them netted in.
+  doc({ docNumber: "INV/2026/0105", partyGstin: null, partyName: "Walk-in", lines: [line({ unit: "Piece", quantity: 3, taxableValue: 150000, cgstAmount: 13500, sgstAmount: 13500 })], taxableValue: 150000 }),
+  doc({ docNumber: "CN/2026/0101", docType: "CREDIT_NOTE", partyGstin: null, partyName: "Walk-in", taxableValue: 50000, lines: [line({ unit: "Piece", quantity: 1, taxableValue: 50000, cgstAmount: 4500, sgstAmount: 4500 })] }),
+]);
+const rowOf = (rows: typeof table12.hsn.b2b, code: string, uqc: string, rate: number) =>
+  rows.find((r) => r.hsnCode === code && r.uqc === uqc && r.taxRatePercent === rate);
+eq("B2B: 8471 in pieces at 18%", rowOf(table12.hsn.b2b, "8471", "PCS", 18)?.taxableValue ?? NaN, 100000);
+eq("  8471 in boxes at 18% is its own row", rowOf(table12.hsn.b2b, "8471", "BOX", 18)?.taxableValue ?? NaN, 50000);
+eq("  8471 at 12% its own row too", rowOf(table12.hsn.b2b, "8471", "PCS", 12)?.cgstAmount ?? NaN, 6000);
+eq("  the SEZ supply is in B2B", rowOf(table12.hsn.b2b, "8471", "PCS", 0)?.quantity ?? NaN, 1);
+const licence = rowOf(table12.hsn.b2b, "997331", "NA", 18);
+ok("  the licence is a service: NA, no quantity", licence?.quantity === 0 && licence.taxableValue === 100000, JSON.stringify(licence));
+eq("  five rows in all", table12.hsn.b2b.length, 5);
+eq("B2C: the export at 0%", rowOf(table12.hsn.b2c, "8471", "PCS", 0)?.taxableValue ?? NaN, 100000);
+const walkIn = rowOf(table12.hsn.b2c, "8471", "PCS", 18);
+ok("  the walk-in's sale less the credit note", walkIn?.taxableValue === 100000 && walkIn.quantity === 2 && walkIn.cgstAmount === 9000, JSON.stringify(walkIn));
+eq("  two rows in all", table12.hsn.b2c.length, 2);
+const tabTaxable = (rows: typeof table12.hsn.b2b) => rows.reduce((t, r) => t + r.taxableValue, 0);
+eq("The B2B tab adds up to the B2B invoices", tabTaxable(table12.hsn.b2b), table12.totals.b2bTaxable);
+eq("  and the B2C tab to the B2C ones", tabTaxable(table12.hsn.b2c), table12.totals.b2cTaxable);
+ok("  with nothing flagged", table12.problems.length === 0, JSON.stringify(table12.problems));
+
+const cancelled = buildGstr1([
+  doc({ docNumber: "INV/2026/0106", partyGstin: null, partyName: "Walk-in" }),
+  doc({ docNumber: "CN/2026/0102", docType: "CREDIT_NOTE", partyGstin: null, partyName: "Walk-in" }),
+]);
+eq("A sale wholly credited leaves no row behind", cancelled.hsn.b2c.length, 0);
+
+const unlisted = buildGstr1([doc({ lines: [line({ hsnCode: "8471" }), line({ hsnCode: "1234", name: "Widget" })], taxableValue: 200000 })], {
+  directory: new Map([["8471", { description: "Automatic data processing machines" }]]),
+});
+is("The directory names the row", unlisted.hsn.b2b.find((r) => r.hsnCode === "8471")?.description, "Automatic data processing machines");
+ok("  and a code it doesn't list is flagged", unlisted.problems.some((p) => p.issue.startsWith("1234")), JSON.stringify(unlisted.problems));
+ok("  once, however many lines carry it", buildGstr1([doc({ lines: [line({ hsnCode: "1234" }), line({ hsnCode: "1234" })], taxableValue: 200000 })], { directory: new Map() }).problems.length === 1);
+ok("Without a directory nothing is flagged", buildGstr1([doc({ lines: [line({ hsnCode: "1234" })] })]).problems.length === 0);
+ok(
+  "A document whose lines don't add up to it is flagged",
+  buildGstr1([doc({ taxableValue: 90000 })]).problems.some((p) => p.issue.includes("lines add up")),
+);
 
 const problems = buildGstr1([
   doc({ docNumber: "INV/2026/0005", partyGstin: "NOTAGSTIN" }),

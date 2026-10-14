@@ -15,6 +15,9 @@
  * checking, because a return that is quietly wrong is discovered by a notice rather than by a test.
  */
 
+import { normaliseHsn } from "@/lib/items/catalogue-import";
+import { uqcForLine, type LineUqc } from "@/lib/uqc";
+
 export type ReturnDocument = {
   docNumber: string;
   docType: "INVOICE" | "CREDIT_NOTE" | "BILL";
@@ -72,10 +75,20 @@ export type B2CSummary = {
   igstAmount: number;
 };
 
+/**
+ * One row of the HSN summary (GSTR-1 Table 12): one code, at one rate, in one unit. A code sold at two
+ * rates, or in pieces and in boxes, is two rows — the portal checks each row's tax against its rate.
+ */
 export type HsnRow = {
+  /** "(none)" for lines with no code, which the portal will refuse. */
   hsnCode: string;
+  /** The GST directory's wording where it has the code, else the first line's name. */
   description: string;
-  unit: string | null;
+  /** NA for a service, whose quantity is not reported. */
+  uqc: LineUqc;
+  /** The units as typed on the lines folded into this row, so an OTH row shows what it was read from. */
+  units: string[];
+  taxRatePercent: number;
   quantity: number;
   taxableValue: number;
   cgstAmount: number;
@@ -84,10 +97,18 @@ export type HsnRow = {
   total: number;
 };
 
+/**
+ * Table 12 in its two tabs, as the portal has split it since Phase III: supplies to registered
+ * recipients (B2B — including SEZ and deemed exports, which carry a GSTIN) and to everyone else (B2C —
+ * unregistered buyers and exports). A credit note is netted into the tab of the invoice it reverses,
+ * which is its own party's.
+ */
+export type HsnSummary = { b2b: HsnRow[]; b2c: HsnRow[] };
+
 export type Gstr1 = {
   b2b: B2BInvoice[];
   b2c: B2CSummary[];
-  hsn: HsnRow[];
+  hsn: HsnSummary;
   totals: {
     b2bTaxable: number;
     b2cTaxable: number;
@@ -108,18 +129,32 @@ export type Gstr1 = {
  *
  * The B2B / B2C split is on whether the customer gave a GSTIN, because that is exactly what decides
  * it: a registered buyer needs the invoice listed to claim credit, an unregistered one does not and
- * only the totals are reported.
+ * only the totals are reported. The same split decides which tab of the HSN summary a line goes in.
+ *
+ * `directory` is the GST directory's entries for the codes on these lines, when there is a directory
+ * to ask: it names each row, and a code it doesn't list is flagged, because Table 12 takes codes only
+ * from the portal's own list. Without it, rows are named after their first line and nothing is flagged.
  */
-export function buildGstr1(docs: ReturnDocument[]): Gstr1 {
+export function buildGstr1(docs: ReturnDocument[], options: { directory?: ReadonlyMap<string, { description: string }> } = {}): Gstr1 {
   const sales = docs.filter((d) => (d.docType === "INVOICE" || d.docType === "CREDIT_NOTE") && countsForReturn(d));
 
   const b2b: B2BInvoice[] = [];
   const b2cMap = new Map<string, B2CSummary>();
-  const hsnMap = new Map<string, HsnRow>();
+  const hsnMaps = { b2b: new Map<string, HsnRow>(), b2c: new Map<string, HsnRow>() };
   const problems: { docNumber: string; issue: string }[] = [];
+  const unlisted = new Set<string>();
 
   for (const doc of sales) {
     const isCreditNote = doc.docType === "CREDIT_NOTE";
+
+    // Table 12 is built from lines and the invoice tables from documents; the portal compares the two.
+    const linesTaxable = doc.lines.reduce((t, l) => t + l.taxableValue, 0);
+    if (Math.abs(linesTaxable - doc.taxableValue) >= 1) {
+      problems.push({
+        docNumber: doc.docNumber,
+        issue: `Its lines add up to ${round2(linesTaxable)} taxable but the document says ${round2(doc.taxableValue)}, so the HSN summary won't agree with the invoice tables.`,
+      });
+    }
 
     if (doc.partyGstin) {
       if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]{3}$/.test(doc.partyGstin)) {
@@ -163,18 +198,26 @@ export function buildGstr1(docs: ReturnDocument[]): Gstr1 {
       }
     }
 
-    // The HSN summary covers everything, B2B and B2C alike.
+    // The HSN summary covers everything, in the tab the document's party puts it in.
+    const hsnMap = doc.partyGstin ? hsnMaps.b2b : hsnMaps.b2c;
     for (const line of doc.lines) {
-      const code = line.hsnCode?.trim() || "";
+      const code = normaliseHsn(line.hsnCode);
       if (!code) {
         problems.push({ docNumber: doc.docNumber, issue: `"${line.name}" has no HSN or SAC code, and the summary requires one.` });
+      } else if (options.directory && !options.directory.has(code) && !unlisted.has(code)) {
+        unlisted.add(code);
+        problems.push({ docNumber: doc.docNumber, issue: `${code} on "${line.name}" isn't in the GST portal's HSN/SAC list, so the summary can't report it.` });
       }
-      const key = code || "(none)";
+      const hsnCode = code || "(none)";
+      const uqc = uqcForLine(line);
+      const key = `${hsnCode}|${uqc}|${line.taxRatePercent}`;
       const sign = isCreditNote ? -1 : 1;
       const row = hsnMap.get(key) ?? {
-        hsnCode: key,
-        description: line.name,
-        unit: line.unit,
+        hsnCode,
+        description: (code && options.directory?.get(code)?.description) || line.name,
+        uqc,
+        units: [],
+        taxRatePercent: line.taxRatePercent,
         quantity: 0,
         taxableValue: 0,
         cgstAmount: 0,
@@ -182,7 +225,10 @@ export function buildGstr1(docs: ReturnDocument[]): Gstr1 {
         igstAmount: 0,
         total: 0,
       };
-      row.quantity = round2(row.quantity + sign * line.quantity);
+      const unit = line.unit?.trim();
+      if (unit && !row.units.includes(unit)) row.units.push(unit);
+      // A service's quantity isn't reported: its UQC is NA and the portal takes 0.
+      if (uqc !== "NA") row.quantity = round2(row.quantity + sign * line.quantity);
       row.taxableValue = round2(row.taxableValue + sign * line.taxableValue);
       row.cgstAmount = round2(row.cgstAmount + sign * line.cgstAmount);
       row.sgstAmount = round2(row.sgstAmount + sign * line.sgstAmount);
@@ -208,10 +254,16 @@ export function buildGstr1(docs: ReturnDocument[]): Gstr1 {
     { b2bTaxable: 0, b2cTaxable: 0, taxableValue: 0, cgst: 0, sgst: 0, igst: 0, total: 0, invoiceCount: 0, creditNoteCount: 0 },
   );
 
+  // A row a credit note cancelled out entirely says nothing; leave it off rather than file zeros.
+  const hsnRows = (map: Map<string, HsnRow>) =>
+    [...map.values()]
+      .filter((r) => r.quantity !== 0 || r.taxableValue !== 0 || r.cgstAmount !== 0 || r.sgstAmount !== 0 || r.igstAmount !== 0)
+      .sort((a, b) => a.hsnCode.localeCompare(b.hsnCode) || a.taxRatePercent - b.taxRatePercent || a.uqc.localeCompare(b.uqc));
+
   return {
     b2b: b2b.sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime()),
     b2c: [...b2cMap.values()].sort((a, b) => a.taxRatePercent - b.taxRatePercent),
-    hsn: [...hsnMap.values()].sort((a, b) => b.taxableValue - a.taxableValue),
+    hsn: { b2b: hsnRows(hsnMaps.b2b), b2c: hsnRows(hsnMaps.b2c) },
     totals,
     problems,
   };

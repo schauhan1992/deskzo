@@ -7,6 +7,7 @@ import { GST_STATE_CODES } from "@/lib/gst-engine";
 import type { RegistrationChoice } from "@/lib/branches/format";
 import { Badge, Card } from "@/components/ui/card";
 import { Amount, ReportHeader } from "@/components/accounting/report-chrome";
+import type { HsnRow } from "@/lib/ledger/gst-returns";
 import { MonthPicker } from "@/components/accounting/month-picker";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { monthName } from "@/lib/ledger/period";
@@ -381,47 +382,105 @@ export default async function GstPage({
         </Card>
       )}
 
-      <Card className="mt-3 overflow-hidden p-0">
-        <div className="border-b border-line px-4 py-2.5 text-sm font-medium text-text">HSN summary</div>
+      <h3 className="mt-5 text-sm font-medium text-text">HSN summary — Table 12</h3>
+      <p className="mt-0.5 text-xs text-muted">
+        One row per code, rate and unit, in the portal&apos;s two tabs: registered customers (B2B, with SEZ and deemed
+        exports) and everyone else (B2C, with exports). Credit notes are netted in. Services go as NA with no quantity.
+      </p>
+      <HsnTable title="B2B — supplies to registered persons" rows={one.hsn.b2b} />
+      <HsnTable title="B2C — supplies to unregistered persons" rows={one.hsn.b2c} />
+    </div>
+  );
+}
+
+
+/** One tab of Table 12, laid out in the portal's column order so it can be keyed in row by row. */
+function HsnTable({ title, rows }: { title: string; rows: HsnRow[] }) {
+  const sum = (pick: (r: HsnRow) => number) => round2(rows.reduce((t, r) => t + pick(r), 0));
+  return (
+    <Card className="mt-3 overflow-hidden p-0">
+      <div className="border-b border-line px-4 py-2.5 text-sm font-medium text-text">{title}</div>
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
               <th className="px-4 py-2.5">HSN / SAC</th>
               <th className="px-4 py-2.5">Description</th>
+              <th className="px-4 py-2.5">UQC</th>
               <th className="px-4 py-2.5 text-right">Qty</th>
               <th className="px-4 py-2.5 text-right">Taxable</th>
-              <th className="px-4 py-2.5 text-right">Total</th>
+              <th className="px-4 py-2.5 text-right">Rate</th>
+              <th className="px-4 py-2.5 text-right">IGST</th>
+              <th className="px-4 py-2.5 text-right">CGST</th>
+              <th className="px-4 py-2.5 text-right">SGST</th>
             </tr>
           </thead>
           <tbody>
-            {one.hsn.map((row) => (
-              <tr key={row.hsnCode} className="border-b border-line last:border-0">
+            {rows.map((row) => (
+              <tr key={`${row.hsnCode}-${row.uqc}-${row.taxRatePercent}`} className="border-b border-line last:border-0">
                 <td className="px-4 py-2 font-mono text-xs text-muted">
                   {row.hsnCode === "(none)" ? <span className="text-danger">missing</span> : row.hsnCode}
                 </td>
-                <td className="px-4 py-2 text-text">{row.description}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-muted">
-                  {row.quantity} {row.unit ?? ""}
+                <td className="max-w-xs truncate px-4 py-2 text-text" title={row.description}>
+                  {row.description}
                 </td>
+                <td className="px-4 py-2 font-mono text-xs text-muted">
+                  {row.uqc}
+                  {row.uqc === "OTH" && row.units.length > 0 && (
+                    <span className="ml-1.5 font-sans text-subtle" title="The item's unit names no portal code — set one on the item to report it properly.">
+                      ({row.units.join(", ")})
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted">{row.quantity}</td>
                 <td className="px-4 py-2 text-right">
                   <Amount value={row.taxableValue} />
                 </td>
+                <td className="px-4 py-2 text-right text-muted">{row.taxRatePercent}%</td>
                 <td className="px-4 py-2 text-right">
-                  <Amount value={row.total} bold />
+                  <Amount value={row.igstAmount} muted />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <Amount value={row.cgstAmount} muted />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <Amount value={row.sgstAmount} muted />
                 </td>
               </tr>
             ))}
-            {one.hsn.length === 0 && (
+            {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-subtle">
+                <td colSpan={9} className="px-4 py-8 text-center text-subtle">
                   Nothing supplied this month.
                 </td>
               </tr>
             )}
           </tbody>
+          {rows.length > 1 && (
+            <tfoot className="border-t border-line bg-surface-sunken text-xs font-medium text-muted">
+              <tr>
+                <td colSpan={4} className="px-4 py-2">
+                  {rows.length} rows
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <Amount value={sum((r) => r.taxableValue)} bold />
+                </td>
+                <td />
+                <td className="px-4 py-2 text-right">
+                  <Amount value={sum((r) => r.igstAmount)} />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <Amount value={sum((r) => r.cgstAmount)} />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <Amount value={sum((r) => r.sgstAmount)} />
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
-      </Card>
-    </div>
+      </div>
+    </Card>
   );
 }
 
