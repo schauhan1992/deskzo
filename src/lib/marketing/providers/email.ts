@@ -149,8 +149,12 @@ type SmtpSettings = { host: string; port: number; user: string };
 function smtpSettings(config: ProviderConfig, fallbackHost: string, fallbackPort: number): SmtpSettings | null {
   const raw = config.config ?? {};
   // A field cleared in the settings screen is saved as "", which means "the usual", not port 0.
-  const host = String(raw.host ?? "").trim() || fallbackHost;
-  const port = String(raw.port ?? "").trim() ? Number(raw.port) : fallbackPort;
+  // A host pasted as "smtps://mail.example.com:465" is taken apart rather than looked up whole.
+  const typed = String(raw.host ?? "").trim().replace(/^smtps?:\/\//i, "").replace(/\/.*$/, "");
+  const [typedHost, typedPort] = typed.split(":");
+  const host = typedHost || fallbackHost;
+  const portField = String(raw.port ?? "").trim() || typedPort || "";
+  const port = portField ? Number(portField) : fallbackPort;
   const user = String(raw.user ?? "").trim();
   if (!host || !user || !Number.isInteger(port) || port <= 0) return null;
   return { host, port, user };
@@ -168,6 +172,45 @@ function smtpRetryable(err: unknown): boolean {
   return true;
 }
 
+function smtpTransport(settings: SmtpSettings, password: string) {
+  return nodemailer.createTransport({
+    host: settings.host,
+    port: settings.port,
+    // 587 is STARTTLS, 465 is implicit TLS. Getting this backwards fails with a timeout that
+    // looks like a firewall problem and is not.
+    secure: settings.port === 465,
+    auth: { user: settings.user, pass: password },
+    // Nodemailer's own default is two minutes of silence before it says anything.
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
+  });
+}
+
+/**
+ * Why it failed, with the likely way out. "Connection timeout" alone sends people to check the
+ * password, when nothing ever got as far as asking for one.
+ */
+function smtpFailure(err: unknown, settings: SmtpSettings): string {
+  const said = asError(err);
+  const code = (err as { code?: string })?.code ?? "";
+  const where = `${settings.host}:${settings.port}`;
+  if (/greeting never received/i.test(said)) {
+    return settings.port === 465
+      ? `${where} answered, but not with TLS — try port 587.`
+      : `${where} answered, but said nothing — if it wants TLS from the start, use port 465.`;
+  }
+  if (code === "ETIMEDOUT" || /timeout|timed out/i.test(said)) {
+    return `Couldn't reach ${where} — the connection timed out. Check the host and port${
+      settings.port === 25 ? "; port 25 is blocked by most cloud hosts, so use 587 or 465" : " (587 or 465)"
+    }, and that the mail server doesn't only accept connections from certain IP addresses.`;
+  }
+  if (code === "EDNS" || /ENOTFOUND|EAI_AGAIN/.test(said)) return `There is no server called ${settings.host} — check the host.`;
+  if (/ECONNREFUSED/.test(said) || code === "ECONNECTION") return `${where} refused the connection — check the port. (${said})`;
+  if (code === "EAUTH") return `${settings.host} turned down the username or password. (${said})`;
+  return said;
+}
+
 async function smtpSend(
   message: OutboundMessage,
   config: ProviderConfig,
@@ -177,15 +220,7 @@ async function smtpSend(
   if (!password) return { ok: false, retryable: false, error: "No SMTP password saved." };
 
   try {
-    const transport = nodemailer.createTransport({
-      host: settings.host,
-      port: settings.port,
-      // 587 is STARTTLS, 465 is implicit TLS. Getting this backwards fails with a timeout that
-      // looks like a firewall problem and is not.
-      secure: settings.port === 465,
-      auth: { user: settings.user, pass: password },
-    });
-    const info = await transport.sendMail({
+    const info = await smtpTransport(settings, password).sendMail({
       from: fromHeader(config),
       to: message.toName ? `${message.toName} <${message.to}>` : message.to,
       replyTo: config.replyTo ?? undefined,
@@ -196,7 +231,7 @@ async function smtpSend(
     });
     return { ok: true, providerMessageId: info.messageId ?? null };
   } catch (err) {
-    return { ok: false, retryable: smtpRetryable(err), error: asError(err) };
+    return { ok: false, retryable: smtpRetryable(err), error: smtpFailure(err, settings) };
   }
 }
 
@@ -205,16 +240,10 @@ async function smtpVerify(config: ProviderConfig, settings: SmtpSettings | null)
   const password = requireSecret(config);
   if (!password) return { ok: false, detail: "No password saved." };
   try {
-    const transport = nodemailer.createTransport({
-      host: settings.host,
-      port: settings.port,
-      secure: settings.port === 465,
-      auth: { user: settings.user, pass: password },
-    });
-    await transport.verify();
+    await smtpTransport(settings, password).verify();
     return { ok: true, detail: `${settings.host} accepted the credentials.` };
   } catch (err) {
-    return { ok: false, detail: asError(err) };
+    return { ok: false, detail: smtpFailure(err, settings) };
   }
 }
 
