@@ -10922,6 +10922,8 @@ model CreditDecision {
 enum CustomerNoticeKind {
   RENEWAL
   FULFILMENT
+  /// The renewal confirmed — sent from a renewed subscription, about its renewal order.
+  RENEWED
 }
 
 // ---------------------------------------------------------------------------------------------

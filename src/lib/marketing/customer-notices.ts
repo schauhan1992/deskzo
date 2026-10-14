@@ -3,7 +3,7 @@ import type { MarketingTopic } from "@prisma/client";
 /**
  * The notices somebody sends a customer by hand, about an order they already have.
  *
- * Two so far — a renewal coming up, and an order fulfilled — and they are the same shape: raised
+ * Three — a renewal coming up, a renewal confirmed, and an order fulfilled — all the same shape: raised
  * from a list, aimed at chosen contacts, about something the customer already bought. So they share
  * everything except the words: the recipient resolution, the suppression rules, the merge, the
  * send. See src/lib/marketing/order-notice.ts.
@@ -16,7 +16,7 @@ import type { MarketingTopic } from "@prisma/client";
  * price was never filled in is worse than one that reads slightly more generally.
  */
 
-export type NoticeKind = "RENEWAL" | "FULFILMENT";
+export type NoticeKind = "RENEWAL" | "RENEWED" | "FULFILMENT";
 
 export type NoticeDefinition = {
   kind: NoticeKind;
@@ -59,6 +59,33 @@ A quick note that {{companyName}}'s {{productName|subscription}} is due for rene
     "Sent as a service notice about their own subscription, so it reaches people who have opted out of marketing — but never a bounced address, a spam complaint, or a reseller's customer.",
 };
 
+/**
+ * The renewal confirmed (owner, 14 Oct 2026): what the mail icon on a renewed subscription sends in place
+ * of the reminder, which would be wrong by then. Written about the renewal order — its number, the new
+ * term, the quantity and PO it was renewed for.
+ */
+export const RENEWED_NOTICE: NoticeDefinition = {
+  kind: "RENEWED",
+  title: "Confirm the renewal",
+  buttonLabel: "Send the confirmation",
+  // Something that happened to their account, as an order done is — not a reminder of one to come.
+  topic: "SERVICE",
+  subject: "{{productName|Your subscription}} is renewed — {{orderId|your renewal}}",
+  body: `Hi {{firstName|there}},
+
+Thank you — {{companyName}}'s {{productName|subscription}} is renewed.
+
+  Order     {{orderId|—}}
+  Product   {{productName|—}}
+  Quantity  {{quantity|—}}
+  Your PO   {{poNumber|—}}
+  Term      {{startDate|—}} to {{expiryDate|—}}
+
+{{ownerName|Your account manager}} is on hand if anything isn't as you expected — just reply to this.${SIGN_OFF}`,
+  footnote:
+    "Sent as a service notice about their own subscription, so it reaches people who have opted out of marketing — but never a bounced address, a spam complaint, or a reseller's customer.",
+};
+
 export const FULFILMENT_NOTICE: NoticeDefinition = {
   kind: "FULFILMENT",
   title: "Tell them the order is done",
@@ -83,6 +110,7 @@ Good news — {{companyName}}'s order is complete.
 
 export const NOTICES: Record<NoticeKind, NoticeDefinition> = {
   RENEWAL: RENEWAL_NOTICE,
+  RENEWED: RENEWED_NOTICE,
   FULFILMENT: FULFILMENT_NOTICE,
 };
 
@@ -119,4 +147,20 @@ export function daysLeftPhrase(daysLeft: number | null): string | null {
  */
 export function canAnnounceFulfilment(orderStatus: string): boolean {
   return orderStatus === "FULFILLED";
+}
+
+/**
+ * Whether a renewal order is far enough along to tell the customer it is renewed: approved, or past
+ * that. "Your renewal is confirmed" sent while the order still waits for approval, and then rejected,
+ * cannot be taken back — the same reasoning as a fulfilment announced too early.
+ */
+export function canConfirmRenewal(orderStatus: string): boolean {
+  return orderStatus === "APPROVED" || orderStatus === "PROCESSING" || orderStatus === "FULFILLED";
+}
+
+/** Whether a notice of this kind may go out about an order in this status — and why not, in words. */
+export function noticeHeldBack(kind: NoticeKind, orderStatus: string): string | null {
+  if (kind === "FULFILMENT" && !canAnnounceFulfilment(orderStatus)) return "That order isn't fulfilled yet, so there is nothing to announce.";
+  if (kind === "RENEWED" && !canConfirmRenewal(orderStatus)) return "The renewal order is still waiting for approval — the confirmation can go once it's approved.";
+  return null;
 }

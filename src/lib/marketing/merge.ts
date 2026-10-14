@@ -30,6 +30,7 @@ export const MERGE_FIELDS: MergeField[] = [
   { key: "productName", label: "Product", example: "Microsoft 365 Business Basic", source: "The subscription that triggered this" },
   { key: "quantity", label: "Quantity", example: "20", source: "Seats or units on that subscription" },
   { key: "expiryDate", label: "Expiry", example: "9 Aug 2027", source: "When the subscription or cover ends" },
+  { key: "startDate", label: "Start", example: "10 Aug 2026", source: "When the subscription's term starts — a renewal's new term" },
   { key: "daysLeft", label: "Days left", example: "58", source: "Days until that expiry" },
   {
     key: "daysLeftPhrase",

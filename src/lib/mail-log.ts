@@ -50,7 +50,7 @@ export type MailStatusGroup = keyof typeof MAIL_STATUS_GROUPS;
 export const MAIL_STATUS_GROUP_KEYS = Object.keys(MAIL_STATUS_GROUPS) as MailStatusGroup[];
 
 type Sourced = {
-  noticeKind: "RENEWAL" | "FULFILMENT" | null;
+  noticeKind: "RENEWAL" | "RENEWED" | "FULFILMENT" | null;
   messageClass: "MARKETING" | "TRANSACTIONAL";
   campaign: { reference: string; name: string; createdBy?: { name: string } | null } | null;
   enrolment: { journey: { name: string } } | null;
@@ -78,7 +78,7 @@ export function mailSource(m: Sourced, formatOrder: (seq: number) => string): st
   if (m.tradeDocument) return `${DOCUMENT_LABELS[m.tradeDocument.docType] ?? "Document"} ${m.tradeDocument.docNumber ?? ""}`.trim();
   if (m.formInvite) return `${m.formInvite.form.category === "EVENT" ? "Event invitation" : "Form invitation"} — ${m.formInvite.form.name}`;
   if (m.noticeKind) {
-    const kind = m.noticeKind === "RENEWAL" ? "Renewal reminder" : "Fulfilment notice";
+    const kind = m.noticeKind === "RENEWAL" ? "Renewal reminder" : m.noticeKind === "RENEWED" ? "Renewal confirmation" : "Fulfilment notice";
     return m.companyProduct ? `${kind} for ${formatOrder(m.companyProduct.orderSeq)}` : kind;
   }
   return m.messageClass === "TRANSACTIONAL" ? "Customer notice" : "Marketing message";

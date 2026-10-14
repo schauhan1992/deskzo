@@ -58,10 +58,7 @@ export async function sendCustomerNotice(input: {
     action: "CREATE",
     entityType: "CompanyProduct",
     entityId: product.id,
-    entityLabel:
-      input.kind === "FULFILMENT"
-        ? `Fulfilment notice for ${product.itemName} sent to ${outcome.sent} contact(s) at ${product.companyName}`
-        : `Renewal reminder for ${product.itemName} sent to ${outcome.sent} contact(s) at ${product.companyName}`,
+    entityLabel: `${input.kind === "FULFILMENT" ? "Fulfilment notice" : input.kind === "RENEWED" ? "Renewal confirmation" : "Renewal reminder"} for ${product.itemName} sent to ${outcome.sent} contact(s) at ${product.companyName}`,
   });
   revalidatePath("/renewals");
   revalidatePath("/orders");

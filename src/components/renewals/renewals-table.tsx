@@ -240,9 +240,12 @@ export function RenewalsTable({
                             size="icon"
                             variant="ghost"
                           />
+                          {/* Renewed: the reminder would be wrong by now — the icon confirms the renewal instead,
+                              written about the renewal order. */}
                           <CustomerNoticeButton
-                            companyProductId={r.id}
+                            companyProductId={r.renewedBy?.id ?? r.id}
                             companyName={(r.endCustomer ?? r.company).name}
+                            kind={r.renewedBy ? "RENEWED" : "RENEWAL"}
                           />
                           <RenewalProposalButton
                             companyProductId={r.id}

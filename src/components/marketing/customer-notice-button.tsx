@@ -17,10 +17,11 @@ type Loaded = NonNullable<Awaited<ReturnType<typeof noticeRecipients>>>;
 
 /** Used only for the split second before the dialog's own copy arrives. */
 const label = (kind: NoticeKind) =>
-  kind === "FULFILMENT" ? "Tell them the order is done" : "Send a renewal reminder";
+  kind === "FULFILMENT" ? "Tell them the order is done" : kind === "RENEWED" ? "Confirm the renewal" : "Send a renewal reminder";
 
 /**
- * Writing to a customer about one order, by hand — a renewal coming up, or one just fulfilled.
+ * Writing to a customer about one order, by hand — a renewal coming up, a renewal confirmed, or an
+ * order just fulfilled.
  *
  * Everybody at the company is listed with whether they can actually be written to, worked out
  * *before* anything is sent — so a bounced address or a spam complaint is visible at the moment of
@@ -204,7 +205,7 @@ export function CustomerNoticeButton({
               <div className="space-y-1.5">
                 <Label htmlFor="rtpl">Wording</Label>
                 <Select id="rtpl" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-                  <option value="">Standard renewal reminder</option>
+                  <option value="">The standard wording</option>
                   {data.templates.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
@@ -226,12 +227,13 @@ export function CustomerNoticeButton({
             </div>
 
             {error && <p className="text-sm text-danger">{error}</p>}
+            {data.heldBack && <p className="rounded-lg bg-warning-bg px-3 py-2 text-sm text-warning">{data.heldBack}</p>}
 
             <p className="text-xs text-subtle">{data.footnote}</p>
 
             <div className="flex gap-2">
               <Button
-                disabled={pending || chosen.size === 0}
+                disabled={pending || chosen.size === 0 || !data.canAnnounce}
                 onClick={() => {
                   setError(null);
                   startTransition(async () => {

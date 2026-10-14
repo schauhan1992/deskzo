@@ -105,8 +105,9 @@ export default async function RenewalsPage({
                       variant="ghost"
                     />
                     <CustomerNoticeButton
-                      companyProductId={selectedRenewal.id}
+                      companyProductId={selectedRenewal.renewedBy?.id ?? selectedRenewal.id}
                       companyName={(selectedRenewal.endCustomer ?? selectedRenewal.company).name}
+                      kind={selectedRenewal.renewedBy ? "RENEWED" : "RENEWAL"}
                     />
                     <RenewalProposalButton
                       companyProductId={selectedRenewal.id}

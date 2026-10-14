@@ -97,6 +97,7 @@ async function main() {
     "a notice says which, and about which order",
     mailSource({ ...base, messageClass: "TRANSACTIONAL", noticeKind: "RENEWAL", companyProduct: { orderSeq: 42 } }, order) === "Renewal reminder for ORD-000042",
   );
+  ok("  a renewal confirmed says so, about the renewal order", mailSource({ ...base, messageClass: "TRANSACTIONAL", noticeKind: "RENEWED", companyProduct: { orderSeq: 43 } }, order) === "Renewal confirmation for ORD-000043");
   ok("the sender is the person, or the campaign's author, or automatic", mailSender({ ...base, sentBy: { name: "Asha" } }) === "Asha" && mailSender({ ...base, campaign: { reference: "C", name: "n", createdBy: { name: "Ravi" } } }) === "Ravi (campaign)" && mailSender({ ...base, enrolment: { journey: { name: "j" } } }) === "Automatic");
   ok("  and an older message says it wasn't recorded rather than guessing", mailSender(base) === "Not recorded");
   ok("delivered includes opened and clicked; problems are bounces, spam and failures", MAIL_STATUS_GROUPS.delivered.statuses.includes("OPENED") && [...MAIL_STATUS_GROUPS.problem.statuses].sort().join() === "BOUNCED,COMPLAINED,FAILED");
@@ -218,6 +219,40 @@ async function main() {
     const page = await renderHtml(MessagePage({ params: Promise.resolve({ id: opened.id }) }));
     ok("a message page shows it in a frame that allows nothing", page.includes('sandbox=""') && page.includes("default-src") && page.includes("Opened"));
     ok("the Mail log is in the sidebar, behind the emails view", MODULE_REGISTRY.flatMap((m) => m.navItems).find((n) => n.href === "/mail-log")?.permission === "emails.view");
+
+    // ── A renewed subscription's mail icon confirms the renewal (owner, 14 Oct 2026) ─────────────
+    section("A renewal confirmed");
+    const { formatCalendarDay } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
+    const renewal = await db.companyProduct.create({
+      data: {
+        companyId: customer.id,
+        locationId: location.id,
+        itemId: item.id,
+        addedByUserId: agent.id,
+        orderStatus: "PENDING_APPROVAL",
+        quantity: 25,
+        poNumber: `${TAG}-PO-9`,
+        startDate: new Date(Date.UTC(2026, 10, 1)),
+        endDate: new Date(Date.UTC(2027, 9, 31)),
+        renewedFromId: subscription.id,
+      },
+      select: { id: true, orderSeq: true },
+    });
+    const confirm = () => queueCustomerNotice({ companyProductId: renewal.id, contactIds: [contact.id], kind: "RENEWED", origin: "https://erp.example", sentByUserId: agent.id });
+    const early = await confirm();
+    ok("not while the renewal order waits for approval — it can't be taken back", !early.ok && /waiting for approval/.test(early.error), early.ok ? "sent" : early.error);
+    await db.companyProduct.update({ where: { id: renewal.id }, data: { orderStatus: "APPROVED" } });
+    const confirmed = await confirm();
+    const confirmation = await db.marketingMessage.findFirst({ where: { companyProductId: renewal.id, noticeKind: "RENEWED" } });
+    const orderId = `ORD-${String(renewal.orderSeq).padStart(6, "0")}`;
+    ok("once approved it goes, about the renewal order", confirmed.ok && confirmation?.subject === `${TAG} 365 is renewed — ${orderId}`, confirmation?.subject ?? (confirmed.ok ? "" : confirmed.error));
+    ok(
+      "  naming its PO, quantity and the new term",
+      !!confirmation?.body.includes(`Your PO   ${TAG}-PO-9`) && confirmation.body.includes("Quantity  25") && confirmation.body.includes(`Term      ${formatCalendarDay(new Date(Date.UTC(2026, 10, 1)))} to ${formatCalendarDay(new Date(Date.UTC(2027, 9, 31)))}`),
+      confirmation?.body.split("\n").slice(2, 9).join(" | "),
+    );
+    const logged = (await mailActions.listMailLog({ companyId: customer.id, page: 1, pageSize: 50 })).rows.find((r) => r.noticeKind === "RENEWED");
+    ok("  and the mail log calls it a renewal confirmation", !!logged?.source.startsWith(`Renewal confirmation for ${orderId}`), logged?.source);
   } finally {
     await cleanup();
     await db.$disconnect();

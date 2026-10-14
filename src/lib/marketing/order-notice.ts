@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { toPlain } from "@/lib/serialize";
@@ -13,13 +14,7 @@ import {
   sendQueued,
   subscriptionMergeValues,
 } from "@/lib/marketing/pipeline";
-import {
-  NOTICES,
-  NOTICE_MESSAGE_CLASS,
-  canAnnounceFulfilment,
-  daysLeftPhrase,
-  type NoticeKind,
-} from "@/lib/marketing/customer-notices";
+import { NOTICES, NOTICE_MESSAGE_CLASS, daysLeftPhrase, noticeHeldBack, type NoticeKind } from "@/lib/marketing/customer-notices";
 import { formatCurrency } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
@@ -215,8 +210,9 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
     buttonLabel: notice.buttonLabel,
     footnote: notice.footnote,
     orderStatus: product.orderStatus,
-    /** A "your order is ready" that goes out before it is is unrecoverable. */
-    canAnnounce: kind === "FULFILMENT" ? canAnnounceFulfilment(product.orderStatus) : true,
+    /** A "your order is ready", or "your renewal is confirmed", that goes out too early is unrecoverable. */
+    canAnnounce: noticeHeldBack(kind, product.orderStatus) === null,
+    heldBack: noticeHeldBack(kind, product.orderStatus),
     subscription: {
       id: product.id,
       orderSeq: product.orderSeq,
@@ -257,11 +253,10 @@ export async function queueCustomerNotice(input: {
 
   const kind = input.kind ?? "RENEWAL";
   const notice = NOTICES[kind];
-  // Announcing a fulfilment before it has happened cannot be taken back, so it is refused here
-  // rather than trusted to the button being hidden.
-  if (kind === "FULFILMENT" && !canAnnounceFulfilment(product.orderStatus)) {
-    return { ok: false, error: "That order isn't fulfilled yet, so there is nothing to announce." };
-  }
+  // Announcing a fulfilment before it has happened, or a renewal before it is approved, cannot be taken
+  // back, so it is refused here rather than trusted to the button.
+  const heldBack = noticeHeldBack(kind, product.orderStatus);
+  if (heldBack) return { ok: false, error: heldBack };
   const available = await resolveNoticeRecipients(input.companyProductId, kind);
   if (!available) return { ok: false, error: "That subscription no longer exists." };
 
@@ -319,6 +314,8 @@ export async function queueCustomerNotice(input: {
         renewalValue: group.renewalValue > 0 ? formatCurrency(group.renewalValue) : null,
         // The end date is a typed day kept as its midnight UTC; the fulfilment, a moment on the workspace's clock.
         expiryDate: product.endDate ? formatCalendarDay(product.endDate) : null,
+        // The term a renewal confirmation names: typed days, kept as their midnight UTC.
+        startDate: product.startDate ? formatCalendarDay(product.startDate) : null,
         daysLeft: days,
         daysLeftPhrase: daysLeftPhrase(days),
         orderId: formatOrderId(product.orderSeq),
@@ -331,34 +328,43 @@ export async function queueCustomerNotice(input: {
     const renderedSubject = render(subject, values);
     const renderedBody = render(body, values);
     if (!renderedSubject.ok || !renderedBody.ok) {
-      const missing = [
-        ...(renderedSubject.ok ? [] : renderedSubject.missing),
-        ...(renderedBody.ok ? [] : renderedBody.missing),
-      ];
-      skipped.push({ name: contact.name, reason: `The template needs ${[...new Set(missing)].join(", ")}.` });
+      const missing = [...new Set([...(renderedSubject.ok ? [] : renderedSubject.missing), ...(renderedBody.ok ? [] : renderedBody.missing)])];
+      const unknown = [...new Set([...(renderedSubject.ok ? [] : renderedSubject.unknown), ...(renderedBody.ok ? [] : renderedBody.unknown)])];
+      skipped.push({
+        name: contact.name,
+        reason: [missing.length ? `The template needs ${missing.join(", ")}.` : null, unknown.length ? `It uses ${unknown.map((u) => `{{${u}}}`).join(", ")}, which isn't a field it can fill.` : null]
+          .filter(Boolean)
+          .join(" "),
+      });
       continue;
     }
 
-    await db.marketingMessage.create({
-      data: {
-        token,
-        companyId: product.company.id,
-        contactId: contact.id,
-        channel: "EMAIL",
-        messageClass: NOTICE_MESSAGE_CLASS,
-        subject: renderedSubject.text,
-        body: renderedBody.text,
-        toEmail: contact.email,
-        // For the mail log: who sent it, about which order, and which notice it was.
-        sentByUserId: input.sentByUserId ?? null,
-        companyProductId: product.id,
-        noticeKind: kind,
-        // Manual and transactional, so it goes now rather than waiting for the next send window.
-        // Quiet hours exist to stop a *campaign* landing at 2am, not to delay somebody's own notice.
-        scheduledFor: new Date(),
-        status: "QUEUED",
-      },
-    });
+    const message: Prisma.MarketingMessageUncheckedCreateInput = {
+      token,
+      companyId: product.company.id,
+      contactId: contact.id,
+      channel: "EMAIL",
+      messageClass: NOTICE_MESSAGE_CLASS,
+      subject: renderedSubject.text,
+      body: renderedBody.text,
+      toEmail: contact.email,
+      // For the mail log: who sent it, about which order, and which notice it was.
+      sentByUserId: input.sentByUserId ?? null,
+      companyProductId: product.id,
+      noticeKind: kind,
+      // Manual and transactional, so it goes now rather than waiting for the next send window.
+      // Quiet hours exist to stop a *campaign* landing at 2am, not to delay somebody's own notice.
+      scheduledFor: new Date(),
+      status: "QUEUED",
+    };
+    try {
+      await db.marketingMessage.create({ data: message });
+    } catch (err) {
+      // A workspace still waiting for 20261103100000_renewal_confirmation can't name a confirmation
+      // yet: it goes all the same, and the mail log calls it a customer notice until then.
+      if (kind !== "RENEWED") throw err;
+      await db.marketingMessage.create({ data: { ...message, noticeKind: null } });
+    }
     queued += 1;
   }
 
