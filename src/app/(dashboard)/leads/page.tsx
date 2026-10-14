@@ -39,6 +39,8 @@ export default async function LeadsPage({
     sel?: string;
     status?: string;
     stage?: string;
+    /** The team pipeline shown, by its key; the first in use when not given (src/lib/pipeline). */
+    pipeline?: string;
     q?: string;
     owner?: string;
     closeFrom?: string;
@@ -59,9 +61,15 @@ export default async function LeadsPage({
 
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  // One team pipeline at a time (owner, 14 Oct 2026): the board's columns are its stages. The first in
+  // use — the main one, unless reordered — when none is asked for, or one no longer in use is.
+  const pipelineData = await leadStages();
+  const inUse = pipelineData.pipelines.filter((p) => !p.archived);
+  const shown = inUse.find((p) => p.key === params.pipeline) ?? inUse[0] ?? pipelineData.pipelines[0]!;
   const filters = {
     status: params.status as LeadStatus | undefined,
     stage: params.stage || undefined,
+    pipeline: shown.key,
     search: params.q,
     ownerUserId: params.owner,
     closeFrom: params.closeFrom,
@@ -84,8 +92,8 @@ export default async function LeadsPage({
   // Server → Client Component boundary as a prop, so serialize it to a string here.
   // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): the board's columns, the filter's
   // choices, and the one each lead shows.
-  const [{ stages }, stageOf] = await Promise.all([leadStages(), stagesOfLeads(result.rows)]);
-  const activeStages = stages.filter((s) => !s.archived);
+  const stageOf = await stagesOfLeads(result.rows);
+  const activeStages = pipelineData.stages.filter((s) => !s.archived && s.pipelineId === shown.id);
   const leads = result.rows.map((lead) => ({
     ...lead,
     estimatedValue: lead.estimatedValue?.toString() ?? null,
@@ -107,7 +115,7 @@ export default async function LeadsPage({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Lead pipeline", "lead", "{one} pipeline")}</h1>
-          <p className="mt-1 text-sm text-muted">{result.total} total leads</p>
+          <p className="mt-1 text-sm text-muted">{inUse.length > 1 ? `${result.total} in ${shown.name}` : `${result.total} total leads`}</p>
         </div>
         <div className="flex items-center gap-2">
           <ViewToggle
@@ -117,6 +125,7 @@ export default async function LeadsPage({
               ...customFilterParams(params),
               status: params.status,
               stage: params.stage,
+              pipeline: params.pipeline,
               q: params.q,
               owner: params.owner,
               closeFrom: params.closeFrom,
@@ -127,11 +136,26 @@ export default async function LeadsPage({
             }}
           />
           <ExportLeadsButton />
-          <Link href="/leads/new">
+          <Link href={inUse.length > 1 ? `/leads/new?pipeline=${encodeURIComponent(shown.key)}` : "/leads/new"}>
             <Button>{slot(await getWording(), "New lead", "lead", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>
+
+      {inUse.length > 1 && (
+        <nav aria-label="Pipelines" className="mt-4 flex flex-wrap items-center gap-2">
+          {inUse.map((p) => (
+            <Link
+              key={p.id}
+              href={`/leads?pipeline=${encodeURIComponent(p.key)}${view === "list" ? "&view=list" : ""}`}
+              aria-current={p.id === shown.id ? "page" : undefined}
+              className={`rounded-full border px-3 py-1 text-sm ${p.id === shown.id ? "border-brand bg-brand-subtle font-medium text-brand" : "border-line text-muted hover:text-text"}`}
+            >
+              {p.name}
+            </Link>
+          ))}
+        </nav>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <SearchParamInput paramName="q" placeholder="Search title or company…" />

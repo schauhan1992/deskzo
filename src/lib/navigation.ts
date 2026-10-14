@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavFact, type NavItem, type NAV_GROUP_ORDER } from "@/lib/modules";
 import { PERMISSION_KEYS, isPermissionKey, sectionPermission } from "@/lib/permissions";
+import { BASE_MODULES, productByKey, productPlanKey } from "@/lib/products";
 
 /**
  * What somebody may open, and the menu built from it — one rule for every surface.
@@ -82,7 +83,30 @@ export type NavAccess = {
   country: string;
   /** What is true of this person for `NavItem.onlyFor` — they hold a live digital card. */
   facts?: readonly NavFact[];
+  /**
+   * The workspace has only what Deskzo Pipeline sells (`simpleMenuFor`): its menu is one short list,
+   * the pipeline first, rather than the full suite's sections.
+   */
+  simple?: boolean;
 };
+
+/**
+ * Whether a workspace gets the simple menu (owner, 14 Oct 2026 — Deskzo Pipeline, Bigin-like): it is on
+ * Deskzo Pipeline's plan, and every module it holds is one that product sells or every workspace has.
+ * The plan only decides how the menu looks — what is open is the modules' business, as everywhere.
+ */
+export function simpleMenuFor(entitledModules: readonly string[], plans: readonly string[]): boolean {
+  const pipeline = productByKey("pipeline");
+  if (!pipeline || !plans.includes(productPlanKey("pipeline"))) return false;
+  const allowed = new Set<string>([...pipeline.modules, ...BASE_MODULES]);
+  return entitledModules.every((key) => {
+    const def = MODULE_REGISTRY.find((m) => m.key === key);
+    return !def || def.core || def.inEveryPlan || allowed.has(key);
+  });
+}
+
+/** The simple menu's order: the pipeline and the people in it first, then whatever else is open. */
+const SIMPLE_ORDER = ["/leads", "/contacts", "/companies", "/customers", "/calls", "/booking-pages", "/marketing/forms"];
 
 /** Every export permission: any one of them opens Import & export. */
 const DATA_PERMISSIONS = PERMISSION_KEYS.filter((k) => k.startsWith("data."));
@@ -175,10 +199,19 @@ export function buildNavigation(access: NavAccess): VisibleNavSection[] {
     groups.set(mod.navGroup, [...(groups.get(mod.navGroup) ?? []), ...items]);
   }
 
-  const modules: VisibleNavSection[] = Array.from(groups.entries())
+  const sorted: VisibleNavSection[] = Array.from(groups.entries())
     // Explicit order rather than the order the registry happens to declare them in.
     .sort(([a], [b]) => navGroupRank(a) - navGroupRank(b))
     .map(([group, items]) => ({ group, items }));
+  // A Pipeline-only workspace: one section, the pipeline first (`simpleMenuFor`).
+  const rank = (href: string) => {
+    const i = SIMPLE_ORDER.indexOf(href);
+    return i === -1 ? SIMPLE_ORDER.length : i;
+  };
+  const modules: VisibleNavSection[] =
+    access.simple && sorted.length > 0
+      ? [{ group: "Sales", items: sorted.flatMap((s) => s.items).sort((a, b) => rank(a.href) - rank(b.href)) }]
+      : sorted;
 
   const system: VisibleNavSection[] = SYSTEM_NAV.map(({ group, items }) => ({
     group,

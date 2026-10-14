@@ -20,7 +20,7 @@ import {
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { currentKeys } from "@/lib/tenancy/keys";
-import { byStageDate } from "@/lib/pipeline/server";
+import { byStageDate, salesLeads } from "@/lib/pipeline/server";
 
 /**
  * Finding who should be in a journey, and moving them along it.
@@ -248,10 +248,12 @@ export async function candidatesFor(
 
     case "LEAD_STALLED": {
       // No movement: not moved stage in that long (src/lib/pipeline `byStageDate`). `updatedAt` moves on
-      // every view and every tick, so a lead never went quiet by it.
+      // every view and every tick, so a lead never went quiet by it. Sales leads only — the lead triggers
+      // are about deals, and a pipeline that isn't sales (partner onboarding) has none.
+      const sales = await salesLeads();
       const rows = await byStageDate((moved) =>
         db.lead.findMany({
-          where: { company, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] }, ...moved({ lt: daysAgo(days) }) },
+          where: { company, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] }, ...moved({ lt: daysAgo(days) }), AND: [sales] },
           select: { id: true, companyId: true, title: true, contactId: true },
           take: 1000,
         }),
@@ -260,9 +262,10 @@ export async function candidatesFor(
     }
 
     case "PROPOSAL_NO_RESPONSE": {
+      const sales = await salesLeads();
       const rows = await byStageDate((moved) =>
         db.lead.findMany({
-          where: { company, status: "PROPOSAL_SENT", ...moved({ lt: daysAgo(days) }) },
+          where: { company, status: "PROPOSAL_SENT", ...moved({ lt: daysAgo(days) }), AND: [sales] },
           select: { id: true, companyId: true, title: true, contactId: true },
           take: 1000,
         }),
@@ -271,10 +274,11 @@ export async function candidatesFor(
     }
 
     case "LEAD_LOST_REVISIT": {
+      const sales = await salesLeads();
       const rows = await byStageDate((moved) =>
         db.lead.findMany({
           // Lost, not disqualified: lost means somebody else won it and their contract will end.
-          where: { company, status: "LOST", ...moved({ lt: daysAgo(days) }) },
+          where: { company, status: "LOST", ...moved({ lt: daysAgo(days) }), AND: [sales] },
           select: { id: true, companyId: true, title: true, contactId: true },
           take: 1000,
         }),

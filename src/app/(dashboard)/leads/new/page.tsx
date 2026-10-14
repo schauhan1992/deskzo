@@ -8,11 +8,12 @@ import { isModuleEnabled } from "@/actions/module";
 import { NewLeadForm } from "@/components/leads/new-lead-form";
 import { formSetup } from "@/lib/custom-fields/server";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { activePipelines } from "@/lib/pipeline/server";
 
 export default async function NewLeadPage({
   searchParams,
 }: {
-  searchParams: Promise<{ companyId?: string }>;
+  searchParams: Promise<{ companyId?: string; pipeline?: string }>;
 }) {
   if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const [itemsEnabled, user] = await Promise.all([isModuleEnabled("items"), requireUser()]);
@@ -21,7 +22,7 @@ export default async function NewLeadPage({
     hasEffectivePermission(user.id, "contacts.view"),
   ]);
   if (!canViewLeads) notFound();
-  const [{ companyId }, companies, items, industries, canAssign, people, customFields] = await Promise.all([
+  const [{ companyId, pipeline }, companies, items, industries, canAssign, people, customFields, pipelines] = await Promise.all([
     searchParams,
     listCompanyOptions(),
     itemsEnabled ? listItemOptions() : Promise.resolve([]),
@@ -33,7 +34,10 @@ export default async function NewLeadPage({
     listAssignableUsers(),
     // The workspace's own lead fields (src/lib/custom-fields).
     formSetup("LEAD", user.id),
+    // The team pipelines a lead may start in (src/lib/pipeline) — the board's, when it came from one.
+    activePipelines(),
   ]);
+  const startIn = pipelines.find((p) => p.key === pipeline) ?? pipelines[0];
 
   return (
     <div>
@@ -53,6 +57,8 @@ export default async function NewLeadPage({
           canAddContact={canAddContact}
           people={people.map((p) => ({ id: p.id, name: p.name, email: p.email, hint: p.role }))}
           customFields={customFields}
+          pipelines={pipelines.map((p) => ({ id: p.id, name: p.name }))}
+          initialPipelineId={startIn?.id}
         />
       </div>
     </div>

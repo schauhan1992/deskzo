@@ -13,6 +13,8 @@ import { BASE_MODULES, PRODUCTS, productByKey, productsOfModule } from "@/lib/pr
  *     editions, as every edition did.
  *   · Deskzo One already holds every product: no other edition with it.
  *   · One plan for each product.
+ *   · No product with another that already holds all of it: Deskzo CRM has everything in Deskzo
+ *     Pipeline (owner, 14 Oct 2026), so the two are never bought together.
  *   · What an add-on or a bundle brings has what it needs from the editions chosen — or from Deskzo
  *     One — never through the add-on alone: entitlements add a module's `requires` by themselves
  *     (src/lib/entitlements.ts `withDependencies`), so Revenue & Close bought without Books would
@@ -45,6 +47,7 @@ export const CHOICE_REFUSALS = {
   needs: (name: string, needed: string) => `${name} needs ${needed}.`,
   included: (name: string, by: string) => `${name} is already included in ${by} — there's nothing to add.`,
   addOnTo: (name: string, products: string) => `${name} is an add-on to ${products}, and included in ${SUITE_NAME}.`,
+  contains: (big: string, small: string) => `${big} already includes everything in ${small} — choose one of them.`,
 } as const;
 
 const isEdition = (p: ChoicePlan) => p.kind === "EDITION";
@@ -67,6 +70,12 @@ export function productRefusal(plans: readonly ChoicePlan[]): string | null {
   for (const product of PRODUCTS) {
     const same = editions.filter((p) => p.productKey === product.key);
     if (same.length > 1) return CHOICE_REFUSALS.onePerProduct(product.name, same.map((p) => p.name));
+  }
+  // A product whose modules another chosen product already has, all of them, adds nothing but a price.
+  const chosen = [...new Set(editions.map((p) => p.productKey!))].map((k) => productByKey(k)).filter((p): p is NonNullable<typeof p> => !!p && p.modules.length > 0);
+  for (const small of chosen) {
+    const big = chosen.find((b) => b.key !== small.key && small.modules.every((m) => b.modules.includes(m)));
+    if (big) return CHOICE_REFUSALS.contains(big.name, small.name);
   }
   return null;
 }

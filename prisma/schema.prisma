@@ -855,6 +855,7 @@ model User {
   orderStepChanges              OrderStepChange[]
   calendarAccount               CalendarAccount?         @relation("UserCalendarAccount")
   calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
+  bookingsHosted                Booking[]                @relation("BookingHost")
   recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
 
   @@index([departmentId])
@@ -1073,6 +1074,7 @@ model Company {
   accountingSchedules AccountingSchedule[] @relation("AccountingScheduleVendor")
   paymentFollowUps    PaymentFollowUp[]
   calendarEvents          CalendarEvent[]
+  bookings                Booking[]
 
   @@index([stage])
   @@index([assignedToUserId])
@@ -1385,6 +1387,7 @@ model Contact {
   projectStakes    ProjectStakeholder[]  @relation("ProjectStakeholderContact")
   portalLogins     PortalLogin[]         @relation("PortalLoginContact")
   calendarEvents   CalendarEvent[]
+  bookings         Booking[]
 
   @@index([companyId])
   @@index([emailStatus])
@@ -1462,6 +1465,21 @@ model Lead {
    * the periodic tick, which moves it. Backfilled from the stage-change history.
    */
   stageChangedAt DateTime?
+  /**
+   * The team pipeline the lead is in (src/lib/pipeline) — written with its stage, whose pipeline it is.
+   * Null for a lead written before the workspace had several pipelines, or by a path that knows only the
+   * main one: it is in the main pipeline (`MAIN_PIPELINE_ID`). Left out of select-less reads until every
+   * workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
+   */
+  pipelineId     String?
+  pipeline       LeadPipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  /**
+   * Connected pipelines: the lead this one carried on from — won in one pipeline, it started here at the
+   * next one's first stage. Same NOT_YET_EVERYWHERE note.
+   */
+  fromLeadId     String?
+  fromLead       Lead?         @relation("LeadCarriedOn", fields: [fromLeadId], references: [id], onDelete: SetNull)
+  carriedOnAs    Lead[]        @relation("LeadCarriedOn")
 
   /// Where the enquiry came from. Distinct from Company.source, which is how the *account* was found.
   source         LeadSource      @default(OTHER)
@@ -1498,11 +1516,14 @@ model Lead {
   cardContacts    CardContact[]    @relation("CardContactLead")
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
   calendarEvents     CalendarEvent[]
+  bookings           Booking[]
 
   @@unique([captureKeyId, externalId])
   @@index([companyId])
   @@index([status])
   @@index([stageId])
+  @@index([pipelineId, status])
+  @@index([fromLeadId])
   // Same reason as Company.ownerUserId above.
   @@index([ownerUserId])
   /// Every Leads report windows on this. See the note on Ticket.
@@ -11313,10 +11334,44 @@ model CustomFieldDefinition {
  * app acts on — won leads count towards targets, the forecast weighs open ones — so two stages may share
  * one. Seeded with the stages every workspace started with, under ids `lstg_<key>`.
  */
+/**
+ * A team's pipeline (Settings → Pipeline, src/lib/pipeline): sales, partner onboarding, renewals — each
+ * with its own stages. The main one (`lpip_sales`, made by the migration) is always there and always
+ * counts as sales; a lead with no pipeline is in it.
+ */
+model LeadPipeline {
+  id             String         @id @default(cuid())
+  /// Fixed once made: what a link names (`/leads?pipeline=onboarding`). The name is free to change.
+  key            String         @unique
+  name           String
+  /// Its won leads are sales: they count towards targets, wins and the forecast, and make the company a customer.
+  sales          Boolean        @default(true)
+  sortOrder      Int            @default(0)
+  /// Connected pipelines: a lead won here carries on as a new lead at the first stage of this one.
+  nextPipelineId String?
+  nextPipeline   LeadPipeline?  @relation("PipelineNext", fields: [nextPipelineId], references: [id], onDelete: SetNull)
+  previous       LeadPipeline[] @relation("PipelineNext")
+  /// Retired: no longer offered. Only a pipeline with no open leads can be.
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  stages       LeadStage[]
+  leads        Lead[]
+  automations  PipelineAutomation[]
+  bookingPages BookingPage[]
+
+  @@index([archivedAt, sortOrder])
+  @@map("lead_pipelines")
+}
+
 model LeadStage {
   id         String     @id @default(cuid())
-  /// Fixed once made: what a link or a saved filter names. The label is free to change.
-  key        String     @unique
+  /// The pipeline it is a stage of — the main one for every stage made before there were several.
+  pipelineId String     @default("lpip_sales")
+  pipeline   LeadPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  /// Fixed once made: what a link or a saved filter names, unique within its pipeline. The label is free to change.
+  key        String
   label      String
   status     LeadStatus
   /// A badge tone from STAGE_COLORS (src/lib/pipeline/rules.ts).
@@ -11324,13 +11379,58 @@ model LeadStage {
   sortOrder  Int        @default(0)
   /// Retired: no longer offered or shown as a column. Its leads were moved on when it was retired.
   archivedAt DateTime?
+  /**
+   * The stage's rule: what a lead must have before it moves here — "estimatedValue", "expectedCloseDate",
+   * "contactId", "ownerUserId", "description", or a custom field as "cf:<key>" (src/lib/pipeline/rules.ts).
+   */
+  requiredFields String[] @default([])
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
-  leads Lead[]
+  leads       Lead[]
+  automations PipelineAutomation[]
 
+  @@unique([pipelineId, key])
   @@index([archivedAt, sortOrder])
   @@map("lead_stages")
+}
+
+/// What starts a pipeline's automation.
+enum PipelineTrigger {
+  /// A lead arrives in the pipeline — made by hand, from a form or the website, or carried on from another.
+  LEAD_CREATED
+  /// A lead moves into the automation's stage.
+  STAGE_ENTERED
+}
+
+/**
+ * A pipeline's simple automation (Settings → Pipeline → Automations, src/lib/pipeline/automations.ts):
+ * when a lead arrives or enters a stage, do these — make a task, email the contact from the owner's
+ * mailbox, give it to someone, tell someone. Run after the change is saved, as the Automation account;
+ * one that fails never undoes the change.
+ */
+model PipelineAutomation {
+  id          String          @id @default(cuid())
+  pipelineId  String
+  pipeline    LeadPipeline    @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name        String
+  trigger     PipelineTrigger
+  /// The stage, for STAGE_ENTERED.
+  stageId     String?
+  stage       LeadStage?      @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  /// What it does, in order: [{ type: "TASK" | "EMAIL" | "ASSIGN" | "NOTIFY", … }] — checked by `parseActions`.
+  actions     Json
+  active      Boolean         @default(true)
+  runs        Int             @default(0)
+  lastRunAt   DateTime?
+  /// What went wrong the last time an action could not be done, in words; cleared by a clean run.
+  lastError   String?
+  createdById String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([pipelineId, trigger, active])
+  @@map("pipeline_automations")
 }
 
 /**
@@ -11845,6 +11945,80 @@ model CalendarAccount {
 
   @@index([nextSyncAt])
   @@map("calendar_accounts")
+}
+
+/**
+ * A public page where a customer books a meeting (src/lib/booking): `/book/<slug>` on the workspace's
+ * address. It offers the hosts' free times — their working hours here, less what their connected
+ * calendars and earlier bookings show busy — and a booking is made as a meeting in the host's own
+ * calendar, whose invitation the customer receives.
+ */
+model BookingPage {
+  id              String        @id @default(cuid())
+  /// The address: lower case, digits and hyphens.
+  slug            String        @unique
+  title           String
+  description     String?
+  durationMinutes Int           @default(30)
+  /// Who the customer can meet: people with a connected calendar. A booking goes to whoever is free, the least booked first.
+  hostUserIds     String[]
+  /// Weekly hours in the workspace's zone, Monday "1" to Sunday "7": { "1": [["09:00", "17:00"]], … }.
+  hours           Json
+  /// How far ahead it can be booked, and how soon.
+  daysAhead       Int           @default(14)
+  minNoticeHours  Int           @default(4)
+  /// Kept free between meetings.
+  bufferMinutes   Int           @default(0)
+  /// With a Teams, Meet or Zoho Meeting link, as the host's calendar makes one.
+  online          Boolean       @default(true)
+  /// A lead is opened in this pipeline for whoever books; none: only their company and contact are kept.
+  pipelineId      String?
+  pipeline        LeadPipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  active          Boolean       @default(true)
+  createdById     String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  bookings Booking[]
+
+  @@map("booking_pages")
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+/// A meeting booked from a booking page.
+model Booking {
+  id              String        @id @default(cuid())
+  pageId          String
+  page            BookingPage   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  hostUserId      String
+  host            User          @relation("BookingHost", fields: [hostUserId], references: [id], onDelete: Cascade)
+  startsAt        DateTime
+  endsAt          DateTime
+  name            String
+  email           String
+  phone           String?
+  companyName     String?
+  notes           String?
+  companyId       String?
+  company         Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId       String?
+  contact         Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  leadId          String?
+  lead            Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  /// The host's calendar event it became.
+  calendarEventId String?
+  status          BookingStatus @default(CONFIRMED)
+  /// A one-way hash of the address it came from — how many one place may make is counted by it.
+  sourceHash      String?
+  createdAt       DateTime      @default(now())
+
+  @@index([hostUserId, startsAt])
+  @@index([pageId, createdAt])
+  @@map("bookings")
 }
 
 enum CalendarEventStatus {

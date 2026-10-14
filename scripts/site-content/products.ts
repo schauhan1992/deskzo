@@ -24,6 +24,7 @@ const inventory = product("inventory");
 const subscriptions = product("subscriptions");
 const projects = product("projects");
 const campaigns = product("campaigns");
+const pipeline = product("pipeline");
 const analytics = product("analytics");
 const vault = product("vault");
 const cards = product("cards");
@@ -573,6 +574,61 @@ const campaignsPage = productLinePage({
   cta: { heading: `Build your first journey in ${campaigns.name}`, body: `Import your contacts with their consent and start a renewal journey. ${trial}` },
 });
 
+// ─── Deskzo Pipeline ─────────────────────────────────────────────────────────────────────────────
+
+const pipelinePage = productLinePage({
+  slug: pipeline.path.slice(1),
+  name: pipeline.name,
+  seo: {
+    title: `${pipeline.name}: a pipeline CRM for small teams`,
+    description: `${pipeline.name} is a pipeline CRM for small teams: deals on a board, a pipeline for each team, contacts, calls and follow-ups, web forms and booking pages.`,
+    keywords: [pipeline.name, "pipeline CRM", "small business CRM"],
+  },
+  eyebrow: PRODUCT_GROUP_TITLES.sell,
+  h1: headline(pipeline),
+  lead: "Deals on a board you drag across, a pipeline for each team that works with customers, and the contacts, calls and follow-ups behind every one. Web forms and booking pages bring new people in, and simple automations take care of the next step.",
+  heroPreview: "pipeline",
+  answer: {
+    question: `What is ${pipeline.name}?`,
+    answer: `${pipeline.name} is the {siteName} product for small teams who sell: companies and contacts, and deals moving across a board from new to won. Each team can have a pipeline of its own, such as sales, partner onboarding or renewals, with its own stages.`,
+    more: [
+      "A pipeline can hand a won deal straight to the next team's pipeline, a stage can ask for details such as a value or a close date before a deal moves into it, and an automation can create a task, email the contact from the owner's mailbox or assign the deal when it arrives or moves. Booking pages let customers pick a time in your team's calendars.",
+    ],
+  },
+  contents: { heading: `What's in ${pipeline.name}`, intro: contentsIntro(pipeline), items: moduleCards(pipeline) },
+  how: [
+    {
+      heading: "How a deal moves through the pipeline",
+      intro: "One board for each team, and every move leaves a record.",
+      steps: [
+        "An enquiry arrives from a web form or a booking page, or is added by hand, and lands on the first stage of its pipeline.",
+        "An automation creates a follow-up task for the owner and emails the contact from the owner's own mailbox.",
+        "The deal is dragged across the board; a stage that needs a value or a close date asks for it first.",
+        "Once won, it carries on as a new record in the next team's pipeline, such as onboarding.",
+      ],
+    },
+  ],
+  worksWith: {
+    heading: `What ${pipeline.name} works with`,
+    intro: "Other products that read the same companies and contacts, in the same workspace.",
+    links: [
+      pair(crm, "Everything in this product, with field visits, targets, incentives and a wins wall, for a larger sales team."),
+      pair(books, "Quotes, GST invoices and payments for the companies and deals on your board."),
+      pair(campaigns, "Email journeys to your contacts, with every send checked against consent."),
+      pair(cards, "Digital business cards whose share-backs arrive as deals in the card holder's name."),
+    ],
+  },
+  faqHeading: `Questions about ${pipeline.name}`,
+  faq: [
+    [`How is ${pipeline.name} different from ${crm.name}?`, `${crm.name} has everything in ${pipeline.name}, plus field visits, targets, incentives, a wins wall and resellers. ${pipeline.name} is for a team that wants the pipeline and its follow-ups and nothing more; moving up to ${crm.name} keeps every record.`],
+    ["Can we have more than one pipeline?", "Yes. Each team can have its own pipeline with its own stages, and choose whether its won deals count as sales. A pipeline can pass its won deals on to another, such as from sales to onboarding."],
+    ["Do automations send email from our own address?", "Yes. An automation's email to a contact goes from the deal owner's own mailbox, connected from their profile, so replies come back to them."],
+    ["What do customers see on a booking page?", "The times your chosen people are free in their connected calendars, within the hours you set. A booking puts the meeting in the host's calendar, sends the invitation and opens a deal."],
+  ],
+  related: ["/product/crm", "/product/marketing", "/solutions/sales-teams", "/pricing"],
+  cta: { heading: `Start your pipeline in ${pipeline.name}`, body: `Import your companies and contacts from a spreadsheet and set up your first pipeline. ${trial}` },
+});
+
 // ─── Deskzo Analytics ────────────────────────────────────────────────────────────────────────────
 
 const analyticsPage = productLinePage({
@@ -853,7 +909,7 @@ const signaturesPage = productLinePage({
   cta: { heading: `Put ${signatures.name} on every email`, body: `Design the company's signature and connect your mail suite. ${trial}` },
 });
 
-export const PRODUCT_LINE_PAGES: SeedPage[] = [onePage, crmPage, booksPage, peoplePage, deskPage, inventoryPage, subscriptionsPage, projectsPage, campaignsPage, analyticsPage, vaultPage, cardsPage, signaturesPage];
+export const PRODUCT_LINE_PAGES: SeedPage[] = [onePage, crmPage, booksPage, peoplePage, deskPage, inventoryPage, subscriptionsPage, projectsPage, campaignsPage, pipelinePage, analyticsPage, vaultPage, cardsPage, signaturesPage];
 
 // Every product in products.ts has its page here, at its own path: a product added there and not here fails the seed.
 const missing = PRODUCTS.filter((p) => !PRODUCT_LINE_PAGES.some((page) => `/${page.slug}` === p.path));

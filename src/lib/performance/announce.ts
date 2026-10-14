@@ -10,6 +10,7 @@ import { awardSettings } from "@/lib/performance/award-settings";
 import { prizeNames, prizesForPeriod, recordWinners, winsModuleOn } from "@/lib/wins/prize-store";
 import type { Slot } from "@/lib/wins/prizes";
 import { tenantKey } from "@/lib/tenancy/cache";
+import { salesLeadRelation } from "@/lib/pipeline/server";
 import {
   NO_ACTIVITY,
   announcementCopy,
@@ -45,6 +46,8 @@ const COUNTED_ELSEWHERE = ["CallLog", "Visit"];
 export async function activityCounts(f: Pick<Fortnight, "from" | "to" | "firstDay" | "lastDay">): Promise<Map<string, ActivityCounts>> {
   const within = { gte: f.from, lt: f.to };
   const clock = await workspaceClock();
+  // Deals won count in pipelines that count as sales only (src/lib/pipeline).
+  const salesOnly = await salesLeadRelation();
   const [audits, calls, visits, tickets, won, active] = await Promise.all([
     db.auditLog.findMany({
       where: {
@@ -66,7 +69,7 @@ export async function activityCounts(f: Pick<Fortnight, "from" | "to" | "firstDa
       select: { assignedToUserId: true, priority: true, createdAt: true, resolvedAt: true },
     }),
     db.activity.findMany({
-      where: { type: "STAGE_CHANGE", notes: { contains: " to WON" }, occurredAt: within },
+      where: { type: "STAGE_CHANGE", notes: { contains: " to WON" }, occurredAt: within, ...salesOnly },
       select: { leadId: true, userId: true, lead: { select: { status: true, ownerUserId: true } } },
     }),
     db.userDailyActivity.groupBy({

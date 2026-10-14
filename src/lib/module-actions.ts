@@ -39,6 +39,9 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "auth.ts": "core",
   "backup.ts": "core",
   "billing.ts": "core",
+  // Booking pages (src/lib/booking): made by staff, booked by the public.
+  "booking.ts": ["booking"],
+  "booking-public.ts": "public",
   "bank.ts": ["accounting"],
   "biometric.ts": ["hr"],
   "books.ts": ["accounting"],
@@ -71,6 +74,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // The workspace's own fields on its records (src/lib/custom-fields) — settings, in every plan.
   "custom-fields.ts": "core",
   "pipeline.ts": "core",
+  // A pipeline's automations (src/lib/pipeline/automations.ts) — leads are core.
+  "pipeline-automations.ts": "core",
   "wording.ts": "core",
   "workplace.ts": "core",
   "sign-in-rules.ts": "core",

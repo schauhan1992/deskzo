@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -500,6 +500,16 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navGroup: "Sales",
     // No permission gate: everybody sees the forecast for the accounts they can see.
     navItems: [{ href: "/forecast", label: "Forecast", icon: TrendingUp }],
+  },
+  {
+    // Owner, 14 Oct 2026 (Deskzo Pipeline, src/lib/booking): pages where customers book a meeting with
+    // the team in their free time, made in the host's own calendar.
+    key: "booking",
+    label: "Booking pages",
+    description:
+      "Pages where customers book a meeting with your team, in the time they have free. Each page has its own address, hours, meeting length and people to meet; a booking lands in the host's calendar with a meeting link and invitation, and opens a lead in the pipeline you choose.",
+    navGroup: "Sales",
+    navItems: [{ href: "/booking-pages", label: "Booking pages", icon: CalendarCheck, permission: "booking.manage" }],
   },
   {
     key: "forms",

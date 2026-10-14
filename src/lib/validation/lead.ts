@@ -65,6 +65,8 @@ export const createLeadSchema = z.object({
   requirements: z.array(leadRequirementInputSchema).default([]),
   /** The workspace's own fields (src/lib/custom-fields) — checked by the action against its definitions. */
   customFields: z.record(z.string(), z.unknown()).optional(),
+  /** The team pipeline it starts in (src/lib/pipeline); the main one when not given. */
+  pipelineId: z.string().max(40).optional().or(z.literal("")),
 });
 
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
@@ -105,6 +107,31 @@ export const updateLeadStatusSchema = z
   .refine((v) => v.stageId || v.status, { message: "Choose a stage." });
 
 export type UpdateLeadStatusInput = z.infer<typeof updateLeadStatusSchema>;
+
+/**
+ * A lead's own details, edited on its page — what a stage's rule may ask for before a lead moves on
+ * (src/lib/pipeline/rules.ts). The owner is changed by assigning; the stage by moving.
+ */
+export const updateLeadDetailsSchema = z.object({
+  leadId: z.string().min(1),
+  title: z.string().trim().min(2, "Title is required").max(200, "Keep the title under 200 characters"),
+  description: z.string().trim().max(5000, "Keep the description under 5,000 characters").optional().or(z.literal("")),
+  estimatedValue: z.preprocess(
+    (v) => (v === "" || v === undefined || v === null ? undefined : Number(v)),
+    z.number().nonnegative("A value can't be negative").max(9_999_999_999, "That value is too large").optional(),
+  ),
+  expectedCloseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date").optional().or(z.literal("")),
+  contactId: z.string().optional().or(z.literal("")),
+});
+
+export type UpdateLeadDetailsInput = z.infer<typeof updateLeadDetailsSchema>;
+
+/** A lead moved to another team pipeline — to its first stage, or one of its open stages. */
+export const moveLeadToPipelineSchema = z.object({
+  leadId: z.string().min(1),
+  pipelineId: z.string().min(1),
+  stageId: z.string().optional().or(z.literal("")),
+});
 
 export const logActivitySchema = z.object({
   leadId: z.string().min(1),

@@ -253,7 +253,10 @@ const NOT_YET_EVERYWHERE = {
   // src/lib/contacts/left.ts, designations.ts and moves.ts. user.reminderSounds: src/actions/reminder-sounds.ts.
   contact: { customFields: true, leftAt: true, designationId: true, previousContactId: true },
   // 20261015100000_lead_pipeline. Read by name through src/lib/pipeline/server.ts and the lead actions.
-  lead: { customFields: true, stageId: true, stageChangedAt: true },
+  // and 20261102100000_team_pipelines: the pipeline and the lead carried on from, read by name through
+  // src/lib/pipeline/server.ts; a stage's pipeline and rule, read by name there and in src/actions/pipeline.ts.
+  lead: { customFields: true, stageId: true, stageChangedAt: true, pipelineId: true, fromLeadId: true },
+  leadStage: { pipelineId: true, requiredFields: true },
   item: { customFields: true },
   // 20261016100000_order_steps. Read by name through src/lib/pipeline/order-steps-server.ts.
   companyProduct: { customFields: true, stepId: true, stepChangedAt: true },

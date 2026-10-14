@@ -27,7 +27,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import type { MetricKey } from "@/lib/targets/metrics";
-import { byStageDate } from "@/lib/pipeline/server";
+import { byStageDate, salesLeads } from "@/lib/pipeline/server";
 
 export type MeasureWindow = { from: Date; to: Date; userIds: string[] };
 
@@ -230,11 +230,14 @@ async function splitByUser(
       // in the set. So this is *not* a per-person count that can simply be added up: a lead sourced
       // by one member of a team and qualified by another would be counted twice. Grouped by the
       // pair instead, and each pair counted once against any set that touches either end.
+      // Only sales: a record in a pipeline that isn't (partner onboarding) is nobody's lead sourced.
+      const sales = await salesLeads();
       const pairs = await db.lead.groupBy({
         by: ["sourcedByUserId", "qualifiedByUserId"],
         where: {
           createdAt: range,
           OR: [{ sourcedByUserId: { in: userIds } }, { qualifiedByUserId: { in: userIds } }],
+          AND: [sales],
         },
         _count: { _all: true },
       });
@@ -254,10 +257,12 @@ async function splitByUser(
       // Dated by when it was won, not when it was created — a lead opened in March and won in
       // September belongs to September. When it moved to won (`byStageDate`), not when it last changed:
       // opening a lead rewrites its score, which used to move an old win to today.
+      // Won in a pipeline that counts as sales; finishing a partner's onboarding is not a deal won.
+      const sales = await salesLeads();
       const rows = await byStageDate((moved) =>
         db.lead.groupBy({
           by: ["ownerUserId"],
-          where: { status: "WON", ownerUserId: { in: userIds }, ...moved(range) },
+          where: { status: "WON", ownerUserId: { in: userIds }, ...moved(range), AND: [sales] },
           _count: { _all: true },
         }),
       );
@@ -267,10 +272,11 @@ async function splitByUser(
     }
 
     case "LEAD_VALUE_WON": {
+      const sales = await salesLeads();
       const rows = await byStageDate((moved) =>
         db.lead.groupBy({
           by: ["ownerUserId"],
-          where: { status: "WON", ownerUserId: { in: userIds }, ...moved(range) },
+          where: { status: "WON", ownerUserId: { in: userIds }, ...moved(range), AND: [sales] },
           _sum: { estimatedValue: true },
         }),
       );

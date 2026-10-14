@@ -1,7 +1,7 @@
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { controlDb } from "@/lib/platform/control-db";
 import { PlanRefused, checkPlanInput, savePlan, type PlanInput } from "@/lib/platform/plans";
-import { ADD_ONS, BASE_MODULES, PRODUCTS, type AddOnKey, type ProductKey } from "@/lib/products";
+import { ADD_ONS, BASE_MODULES, PRODUCTS, productPlanKey, type AddOnKey, type ProductKey } from "@/lib/products";
 
 /**
  * The products (src/lib/products.ts) as plans in the control plane — `npm run platform:plans --
@@ -30,10 +30,8 @@ import { ADD_ONS, BASE_MODULES, PRODUCTS, type AddOnKey, type ProductKey } from 
  * them, so that waits for `allowRemovals`; an internal plan with one of these keys is left alone.
  */
 
-/** Plan keys are identifiers — invitations and scripts name them — so they never follow a rename of the brand. */
-const KEY_PREFIX = "deskzo-";
-
-export const productPlanKey = (product: ProductKey) => `${KEY_PREFIX}${product}`;
+/** Plan keys are identifiers — invitations and scripts name them — so they never follow a rename of the brand (src/lib/products.ts). */
+export { productPlanKey };
 
 export const ADD_ON_PLAN_KEYS: Record<AddOnKey, string> = {
   revenue_close: "addon-revenue-close",

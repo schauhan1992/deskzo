@@ -1429,8 +1429,8 @@ async function main() {
         [...unplaced.map((p) => `no place: ${p}`), ...strayPlaces.map((p) => `not a module page: ${p}`), ...lineProblems].slice(0, 4).join(" | "),
       );
       ok(
-        "  the line's products are productsOfModule's: the CRM page names the CRM product alone, the item catalogue's page every product with items",
-        placing.productsOfPage("/product/crm").map((p) => p.key).join(",") === "crm" && placing.productsOfPage("/product/inventory").map((p) => p.key).join(",") === "books,inventory,subscriptions",
+        "  the line's products are productsOfModule's: the CRM page names the products with its modules (CRM, and Pipeline since 14 Oct 2026), the item catalogue's page every product with items",
+        placing.productsOfPage("/product/crm").map((p) => p.key).join(",") === "crm,pipeline" && placing.productsOfPage("/product/inventory").map((p) => p.key).join(",") === "books,inventory,subscriptions",
         `${placing.productsOfPage("/product/crm").map((p) => p.key).join(",")} / ${placing.productsOfPage("/product/inventory").map((p) => p.key).join(",")}`,
       );
     }

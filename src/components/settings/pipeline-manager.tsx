@@ -10,32 +10,58 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
 import {
-  MEANINGS,
+  MAIN_PIPELINE_ID,
   PIPELINE_LIMITS,
+  RULE_FIELDS,
+  RULE_LIMIT,
   STAGE_COLORS,
   STAGE_COLOR_LABELS,
   kindOf,
-  meaningOf,
+  meaningLabel,
+  meaningsFor,
   mustKeep,
   rehomeTargets,
+  ruleFieldLabel,
   type LeadStageDef,
   type StageColor,
   type StageKind,
 } from "@/lib/pipeline/rules";
 
 type Stage = LeadStageDef & { leads: number };
-type Draft = { id: string; label: string; status: LeadStatus; color: StageColor };
+type Draft = { id: string; label: string; status: LeadStatus; color: StageColor; requiredFields: string[] };
 
 const KIND_LABELS: Record<StageKind, string> = { OPEN: "Open — still being worked", WON: "Won", LOST: "Lost" };
+const PROCESS_KIND_LABELS: Record<StageKind, string> = { OPEN: "Open — still being worked", WON: "Done", LOST: "Dropped" };
 
 const leadsText = (n: number) => (n === 0 ? "No leads" : `${n} lead${n === 1 ? "" : "s"}`);
 
 /**
- * Settings → Pipeline (src/actions/pipeline.ts): the stages in the order a lead moves through them, each
- * as the board shows it, with what it counts as; a dialog to add or change one, and one to retire one
- * with its leads moved on.
+ * Settings → Pipeline (src/actions/pipeline.ts): one pipeline's stages in the order a lead moves through
+ * them, each as the board shows it, with what it counts as and what it asks for first (its rule); a
+ * dialog to add or change one, and one to retire one with its leads moved on. A pipeline that isn't
+ * sales offers a process's meanings — start, under way, done, dropped.
  */
-export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: boolean }) {
+export function PipelineManager({
+  stages: all,
+  stored,
+  pipelineId = MAIN_PIPELINE_ID,
+  sales = true,
+  fields = [],
+  rules = false,
+}: {
+  stages: Stage[];
+  stored: boolean;
+  pipelineId?: string;
+  sales?: boolean;
+  /** The workspace's own lead fields, which a stage's rule may ask for. */
+  fields?: { key: string; label: string }[];
+  /** Whether stages can have rules yet (the workspace has the team pipelines). */
+  rules?: boolean;
+}) {
+  const stages = all.filter((s) => s.pipelineId === pipelineId);
+  const kinds = sales ? KIND_LABELS : PROCESS_KIND_LABELS;
+  const customLabels = new Map(fields.map((f) => [f.key, f.label]));
+  const ruleOptions = [...RULE_FIELDS.map((f) => ({ key: f.key as string, label: f.label as string })), ...fields.map((f) => ({ key: `cf:${f.key}`, label: f.label }))];
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +111,7 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
           disabled={active.length >= PIPELINE_LIMITS.stages}
           onClick={() => {
             setError(null);
-            setDraft({ id: "", label: "", status: "QUALIFYING", color: "blue" });
+            setDraft({ id: "", label: "", status: sales ? "QUALIFYING" : "CONTACTED", color: "blue", requiredFields: [] });
           }}
         >
           Add a stage
@@ -94,16 +120,19 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
 
       <div className="space-y-2">
         {active.map((s, index) => {
-          const keep = mustKeep(s, stages);
+          const keep = mustKeep(s, stages, sales);
           return (
             <Card key={s.id}>
               <CardContent className="flex flex-wrap items-start justify-between gap-3 py-3 text-sm">
                 <div className="min-w-0 space-y-1">
                   <p className="flex flex-wrap items-center gap-2">
                     <Badge tone={s.color}>{s.label}</Badge>
-                    <span className="text-muted">counts as {meaningOf(s.status).label.toLowerCase()}</span>
+                    <span className="text-muted">counts as {meaningLabel(s.status, sales).toLowerCase()}</span>
                   </p>
-                  <p className="text-xs text-subtle">{meaningOf(s.status).hint}</p>
+                  <p className="text-xs text-subtle">{meaningsFor(sales).find((m) => m.status === s.status)?.hint}</p>
+                  {s.requiredFields.length > 0 && (
+                    <p className="text-xs text-subtle">Asks for {s.requiredFields.map((k) => ruleFieldLabel(k, customLabels).toLowerCase()).join(", ")} first</p>
+                  )}
                   <p className="text-xs text-subtle">{leadsText(s.leads)}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
@@ -134,7 +163,7 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
                     disabled={isPending}
                     onClick={() => {
                       setError(null);
-                      setDraft({ id: s.id, label: s.label, status: s.status, color: s.color });
+                      setDraft({ id: s.id, label: s.label, status: s.status, color: s.color, requiredFields: s.requiredFields });
                     }}
                   >
                     Change
@@ -176,7 +205,7 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
                 <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
                   <p className="flex flex-wrap items-center gap-2 text-muted">
                     <Badge tone={s.color}>{s.label}</Badge>
-                    counts as {meaningOf(s.status).label.toLowerCase()} · retired
+                    counts as {meaningLabel(s.status, sales).toLowerCase()} · retired
                   </p>
                   <div className="flex items-center gap-1">
                     <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={() => run(() => restoreLeadStage(s.id))}>
@@ -220,8 +249,8 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
               </Label>
               <Select id="pipeline-stage-meaning" value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as LeadStatus })}>
                 {(["OPEN", "WON", "LOST"] as const).map((kind) => (
-                  <optgroup key={kind} label={KIND_LABELS[kind]}>
-                    {MEANINGS.filter((m) => m.kind === kind).map((m) => (
+                  <optgroup key={kind} label={kinds[kind]}>
+                    {meaningsFor(sales).filter((m) => m.kind === kind).map((m) => (
                       <option
                         key={m.status}
                         value={m.status}
@@ -234,13 +263,35 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
                   </optgroup>
                 ))}
               </Select>
-              <p className="text-xs text-subtle">{meaningOf(draft.status).hint}</p>
+              <p className="text-xs text-subtle">{meaningsFor(sales).find((m) => m.status === draft.status)?.hint}</p>
               {editing && editing.leads > 0 && editing.status !== draft.status && (
                 <p className="text-xs text-warning">
-                  {leadsText(editing.leads)} in this stage will count as {meaningOf(draft.status).label.toLowerCase()} from now on, with a note on each.
+                  {leadsText(editing.leads)} in this stage will count as {meaningLabel(draft.status, sales).toLowerCase()} from now on, with a note on each.
                 </p>
               )}
             </div>
+            {rules && (
+              <fieldset className="space-y-1">
+                <legend className="text-xs font-medium text-text">Before a lead moves here, it must have</legend>
+                <div className="grid gap-1 sm:grid-cols-2">
+                  {ruleOptions.map((o) => {
+                    const checked = draft.requiredFields.includes(o.key);
+                    return (
+                      <label key={o.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!checked && draft.requiredFields.length >= RULE_LIMIT}
+                          onChange={() => setDraft({ ...draft, requiredFields: checked ? draft.requiredFields.filter((k) => k !== o.key) : [...draft.requiredFields, o.key] })}
+                        />
+                        {o.label}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-subtle">Nothing ticked: a lead can move here as it is. A lead missing one is stopped, and told what to fill in.</p>
+              </fieldset>
+            )}
             <fieldset className="space-y-1">
               <legend className="text-xs font-medium text-text">Colour</legend>
               <div className="flex flex-wrap gap-2">
@@ -257,7 +308,19 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
             <Button type="button" variant="ghost" size="sm" onClick={() => setDraft(null)} disabled={isPending}>
               Cancel
             </Button>
-            <Button type="button" size="sm" disabled={isPending || !draft.label.trim()} onClick={() => run(() => saveLeadStage(draft.id ? draft : { ...draft, id: undefined }), () => setDraft(null))}>
+            <Button type="button" size="sm" disabled={isPending || !draft.label.trim()} onClick={() =>
+                run(
+                  () =>
+                    saveLeadStage({
+                      ...(draft.id ? { id: draft.id } : { pipelineId }),
+                      label: draft.label,
+                      status: draft.status,
+                      color: draft.color,
+                      ...(rules ? { requiredFields: draft.requiredFields } : {}),
+                    }),
+                  () => setDraft(null),
+                )
+              }>
               {isPending ? "Saving…" : draft.id ? "Save" : "Add the stage"}
             </Button>
           </div>
@@ -288,7 +351,7 @@ export function PipelineManager({ stages, stored }: { stages: Stage[]; stored: b
                 <p className="text-xs text-subtle">
                   {kindOf(retiring.stage.status) === "OPEN"
                     ? "Any open stage. Moving to one that counts as something else leaves a note on each lead."
-                    : `Another ${KIND_LABELS[kindOf(retiring.stage.status)].toLowerCase()} stage — when each lead was closed stays as it was.`}
+                    : `Another ${kinds[kindOf(retiring.stage.status)].toLowerCase()} stage — when each lead was closed stays as it was.`}
                 </p>
               </div>
             )}

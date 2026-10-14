@@ -105,7 +105,7 @@ const REFERRAL_COOKIE = "deskzo_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /** Reached with nobody signed in. Matched by whole segment: "/c" is a digital card (/c/<name>), never "/cards". */
-const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal", "/c"];
+const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal", "/c", "/book"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

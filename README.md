@@ -14,6 +14,7 @@ are written down. A workspace can hold several products at once, and they share 
 |---|---|
 | **Deskzo One** | Every Deskzo product in one workspace, on one set of records |
 | **Deskzo CRM** | Leads, pipeline, calls, field visits, targets and incentives |
+| **Deskzo Pipeline** | A simple pipeline CRM for small teams: deals, contacts, follow-ups, bookings |
 | **Deskzo Books** | GST invoicing, accounting, payables, receivables and expenses *(India)* |
 | **Deskzo People** | HR, payroll, attendance, leave, recruitment and visitors *(India)* |
 | **Deskzo Desk** | Helpdesk tickets with SLAs, a customer portal and feedback |

@@ -21,6 +21,7 @@ This page covers:
 |---|---|---|---|
 | **Deskzo One** — every product | **₹1,499** | ₹14,990 (₹1,249) | Zoho One All-Employee ₹1,250 / ₹2,500 (every employee must be licensed); Flexible User ₹3,500 / ₹4,000 |
 | Deskzo CRM | ₹799 | ₹7,990 (₹666) | Zoho CRM Standard ₹800 / ₹1,300; Freshsales Growth ₹749 / ₹899; TeleCRM ₹799 |
+| Deskzo Pipeline | ₹299 | ₹2,990 (₹249) | Bigin Express ₹400 a user a month billed yearly, Premier ₹720 (Bigin's India page) |
 | Deskzo Books | ₹349 | ₹3,490 (₹291) | Zoho Books Standard ₹749 an organisation for 3 users (₹250 each), Professional ₹1,499 for 5; myBillBook ₹291–333 |
 | Deskzo People | ₹99 | ₹990 (₹83) | greytHR Growth ₹85 an employee on a ₹4,495 base for 50; Zoho People ₹48–144 plus Zoho Payroll ₹40–80; Keka ₹90–150 |
 | Deskzo Desk | ₹599 | ₹5,990 (₹499) | Zoho Desk Express ₹420 / ₹540, Standard ₹800 / ₹1,300; Freshdesk Growth ₹1,499 / ₹1,799 |
@@ -57,6 +58,35 @@ The add-ons are priced for the whole workspace, not per person:
   - Indian accounting and inventory tools mostly price per organisation with users included. CRM, helpdesk and project tools price per user. HR tools price per employee.
   - One unit across every product is easy to explain ("₹X a person a month") and is what billing already does.
   - For a 1–3 person business it lands at or below Zoho's per-organisation price.
+
+## Deskzo Pipeline: a simple CRM for small teams
+
+Added 14 Oct 2026, at the owner's request for "a module like Zoho Bigin". It is CRM for a small team that wants the pipeline and its follow-ups and nothing more:
+- companies, contacts and leads on a board;
+- calls, tasks and notes;
+- web forms and booking pages.
+
+It sits below Bigin Express (₹400) and well below Deskzo CRM (₹799). CRM includes everything in it, so the two are never sold together; checkout and the console refuse the pair. A workspace that only has Pipeline sees a short, one-section menu with the pipeline first.
+
+What it brings, which CRM and Deskzo One have too (`check:team-pipelines`):
+- **Team pipelines.**
+  - A workspace can have up to 15 pipelines, such as sales, partner onboarding or renewals, each with its own stages.
+  - A pipeline either counts as sales or is a process. A process's stages mean start, under way, done or dropped, and nothing that counts sales — targets, wins, the forecast, a company becoming a customer — counts it.
+  - The main pipeline is always sales.
+- **Connected pipelines.** A pipeline can carry its won leads on into another. The won lead starts again at the first stage there, once, with the same company, contact, owner and value.
+- **A stage's rule.** A stage can ask for fields before a lead moves into it: value, close date, contact, owner, description, or the workspace's own fields. Leads now have an Edit on their page so these can be filled in.
+- **Automations.**
+  - They run when a lead arrives in a pipeline or enters a stage, and can create a task, email the contact from the owner's own mailbox, give the lead to someone, or notify someone.
+  - They run as the Automation account. One that can't do a step notes why on itself and never undoes the change that started it.
+- **Booking pages.**
+  - Each is a public page at `/book/<address>` on the workspace's address, offering the hosts' free times. A host must have a calendar connected.
+  - A booking opens a lead in the page's pipeline, owned by the host, and puts the meeting in the host's calendar, which sends the invitation.
+  - It is the "booking" module, managed by `booking.manage`.
+
+Live steps:
+1. Deploy, then run `npm run tenants:migrate` to apply workspace migration `20261102100000_team_pipelines`.
+2. Run `npm run platform:plans -- products` (makes the Deskzo Pipeline plan, and adds forms and booking pages to Deskzo CRM's), then `npm run platform:plans -- prices --apply`.
+3. Run `npm run site:seed-pages` for its product page.
 
 ## What it costs us to sell, and whether it holds up
 

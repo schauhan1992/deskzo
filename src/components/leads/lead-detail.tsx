@@ -7,7 +7,7 @@ import { RecordMeetings } from "@/components/calendar/record-meetings";
 import { DomainPanel } from "@/components/domains/domain-panel";
 import { getDomainBriefing } from "@/actions/domain";
 import { isModuleEnabled } from "@/actions/module";
-import { getLead, updateLeadCustomFields } from "@/actions/lead";
+import { getLead, leadConnections, updateLeadCustomFields } from "@/actions/lead";
 import { listLeadDocuments } from "@/actions/trade-document";
 import { listLeadVisits } from "@/actions/visit";
 import { listItemOptions } from "@/actions/item";
@@ -27,7 +27,10 @@ import { LeadVisits } from "@/components/leads/lead-visits";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { LeadStatusControl } from "@/components/leads/lead-status-control";
 import { leadStages, stagesOfLeads } from "@/lib/pipeline/server";
-import { readStageNote } from "@/lib/pipeline/rules";
+import { kindOf, readStageNote } from "@/lib/pipeline/rules";
+import { LeadPipelineControls } from "@/components/leads/lead-pipeline-controls";
+import { db } from "@/lib/db";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { ActivityForm } from "@/components/leads/activity-form";
 import { RequirementsList } from "@/components/leads/requirements-list";
 import { TaskList } from "@/components/tasks/task-list";
@@ -38,7 +41,7 @@ import { CategoryChip } from "@/components/customers/category-chip";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
-import { companyPath } from "@/lib/record-links";
+import { companyPath, leadPath } from "@/lib/record-links";
 
 /**
  * A lead's full detail — the requirement, its timeline, and the controls that move it along.
@@ -90,9 +93,24 @@ export async function LeadDetail({ id }: { id: string }) {
   const domainBriefing = domainsEnabled ? await getDomainBriefing(lead.company.id) : null;
 
   // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): where this lead is, where it can go.
-  const [{ stages }, stageOf] = await Promise.all([leadStages(), stagesOfLeads([{ id: lead.id, status: lead.status }])]);
+  // Its own pipeline's stages only — another team's is a move between pipelines (src/lib/pipeline).
+  const [{ stages, pipelines }, stageOf, connections, companyContacts] = await Promise.all([
+    leadStages(),
+    stagesOfLeads([{ id: lead.id, status: lead.status }]),
+    leadConnections(lead.id),
+    db.contact.findMany({ where: { companyId: lead.company.id, ...STILL_THERE }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+  ]);
   const stage = stageOf.get(lead.id)!;
-  const stageChoices = stages.filter((s) => !s.archived).map((s) => ({ id: s.id, label: s.label, status: s.status }));
+  const stageChoices = stages.filter((s) => !s.archived && s.pipelineId === stage.pipelineId).map((s) => ({ id: s.id, label: s.label, status: s.status }));
+  // Where an open lead may move: another pipeline in use, to one of its open stages.
+  const moveTargets =
+    connections?.multi && kindOf(lead.status) === "OPEN"
+      ? pipelines
+          .filter((p) => !p.archived && p.id !== stage.pipelineId)
+          .map((p) => ({ id: p.id, name: p.name, stages: stages.filter((s) => s.pipelineId === p.id && !s.archived && kindOf(s.status) === "OPEN").map((s) => ({ id: s.id, label: s.label })) }))
+          .filter((p) => p.stages.length > 0)
+      : [];
+  const closeDay = lead.expectedCloseDate ? new Date(lead.expectedCloseDate).toISOString().slice(0, 10) : "";
 
   // The workspace's own fields (src/lib/custom-fields) — whoever may open the lead may edit them, as
   // `updateLeadCustomFields` decides it.
@@ -133,6 +151,29 @@ export async function LeadDetail({ id }: { id: string }) {
 
           <CompanyLinks website={company.website} linkedinUrl={company.linkedinUrl} />
 
+          {connections && (connections.multi || connections.from || connections.into.length > 0) && (
+            <p className="mt-1.5 text-xs text-subtle">
+              Pipeline: <span className="text-muted">{connections.pipeline.name}</span>
+              {connections.from && (
+                <>
+                  {" "}
+                  · Carried on from{" "}
+                  <Link href={leadPath(connections.from.leadSeq)} className="text-muted underline">
+                    {connections.from.pipeline} #{connections.from.leadSeq}
+                  </Link>
+                </>
+              )}
+              {connections.into.map((l) => (
+                <span key={l.id}>
+                  {" "}
+                  · Carried on into{" "}
+                  <Link href={leadPath(l.leadSeq)} className="text-muted underline">
+                    {l.pipeline} #{l.leadSeq}
+                  </Link>
+                </span>
+              ))}
+            </p>
+          )}
           <p className="mt-1.5 text-xs text-subtle">
             Deal owner: <span className="text-muted">{lead.owner?.name ?? "Unassigned"}</span>
             {accountManager && accountManager.id !== lead.owner?.id && (
@@ -165,6 +206,18 @@ export async function LeadDetail({ id }: { id: string }) {
               </Button>
             </Link>
           )}
+          <LeadPipelineControls
+            leadId={lead.id}
+            details={{
+              title: lead.title,
+              description: lead.description ?? "",
+              estimatedValue: lead.estimatedValue === null || lead.estimatedValue === undefined ? "" : String(lead.estimatedValue),
+              expectedCloseDate: closeDay,
+              contactId: lead.contactId ?? "",
+            }}
+            contacts={companyContacts}
+            moveTargets={moveTargets}
+          />
           <LeadStatusControl leadId={lead.id} current={{ id: stage.id, label: stage.label, status: stage.status }} stages={stageChoices} />
         </div>
       </div>

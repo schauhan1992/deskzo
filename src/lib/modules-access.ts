@@ -1,10 +1,10 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
 import { permissionsFor } from "@/lib/authz/resolve";
-import { featureAvailable, moduleEntitled } from "@/lib/entitlements";
+import { entitledModuleKeys, featureAvailable, moduleEntitled } from "@/lib/entitlements";
 import { getModuleDefinition, type CountryFeature, type NavFact } from "@/lib/modules";
 import { holdsLiveCard, onEventTeam } from "@/lib/cards/holder";
-import { decideModuleAccess, openModuleKeys, type ModuleAccess, type NavAccess } from "@/lib/navigation";
+import { decideModuleAccess, openModuleKeys, simpleMenuFor, type ModuleAccess, type NavAccess } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { currentTenant } from "@/lib/tenancy/resolve";
@@ -90,7 +90,9 @@ export const accessContextFor = cache(async (userId: string): Promise<AccessCont
     if (await holdsLiveCard(userId)) facts.push("cardholder");
     if (permissions.includes("cards.manage") || (await onEventTeam(userId))) facts.push("eventTeam");
   }
-  return { userId, country: tenant.country, permissions, openModules, facts };
+  // Only what Deskzo Pipeline sells: the simple menu (src/lib/navigation.ts `simpleMenuFor`).
+  const simple = !tenant.entitlements.all && simpleMenuFor(entitledModuleKeys(tenant.entitlements, tenant.country), tenant.entitlements.plans);
+  return { userId, country: tenant.country, permissions, openModules, facts, simple };
 });
 
 /**

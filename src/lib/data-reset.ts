@@ -66,6 +66,13 @@ export const INSTALL_ROWS = [
     to: 'ON CONFLICT ("id") DO NOTHING;',
   },
   {
+    // The main pipeline (src/lib/pipeline) — before its stages, which belong to it.
+    table: "lead_pipelines",
+    migration: "20261102100000_team_pipelines",
+    from: 'INSERT INTO "lead_pipelines"',
+    to: 'ON CONFLICT ("id") DO NOTHING;',
+  },
+  {
     // The stages every pipeline starts with (src/lib/pipeline) — a workspace with none could take no leads.
     table: "lead_stages",
     migration: "20261015100000_lead_pipeline",

@@ -123,7 +123,7 @@ function pure() {
   section("Every template is one the settings screens would accept");
   ok("five of them, each with its own key", INDUSTRY_TEMPLATES.length === 5 && new Set(INDUSTRY_TEMPLATES.map((t) => t.key)).size === 5);
   for (const t of INDUSTRY_TEMPLATES) {
-    const stageProblems = t.stages.map((s, i) => checkStage({ label: s.label, status: s.status, color: "default" }, t.stages.slice(0, i).map((o, j) => ({ id: String(j), key: `k${j}`, label: o.label, status: o.status, color: "default", archived: false }))));
+    const stageProblems = t.stages.map((s, i) => checkStage({ label: s.label, status: s.status, color: "default" }, t.stages.slice(0, i).map((o, j) => ({ id: String(j), pipelineId: "lpip_sales", key: `k${j}`, label: o.label, status: o.status, color: "default", archived: false, requiredFields: [] }))));
     const stepProblems = t.steps.map((s, i) => checkStep({ label: s.label, status: s.status, color: "default" }, t.steps.slice(0, i).map((o, j) => ({ id: String(j), key: `k${j}`, label: o.label, status: o.status, color: "default", archived: false }))));
     const perStatus = Math.max(...["APPROVED", "PROCESSING", "FULFILLED"].map((st) => t.steps.filter((s) => s.status === st).length));
     const wordProblems = Object.entries(t.terms).flatMap(([key, term]) => [(TERM_KEYS as readonly string[]).includes(key) ? null : `no word ${key}`, checkWord(key, term!.one), checkWord(key, term!.many)]);

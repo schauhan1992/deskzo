@@ -1,6 +1,7 @@
 import { listOrderStepsForManage, listPipelineForManage } from "@/actions/pipeline";
+import { listAutomationsForManage } from "@/actions/pipeline-automations";
 import { SettingsPage } from "@/components/settings/settings-page";
-import { PipelineManager } from "@/components/settings/pipeline-manager";
+import { TeamPipelines } from "@/components/settings/team-pipelines";
 import { OrderStepsManager } from "@/components/settings/order-steps-manager";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 
@@ -10,19 +11,28 @@ import { moduleAvailableForTenant } from "@/lib/modules-access";
  * statuses. `pipeline.manage` (the catalogue's gate) opens it.
  */
 export default async function Page() {
-  const [leads, ordersHere] = await Promise.all([listPipelineForManage(), moduleAvailableForTenant("orders")]);
+  const [leads, automations, ordersHere] = await Promise.all([listPipelineForManage(), listAutomationsForManage(), moduleAvailableForTenant("orders")]);
   const orders = ordersHere ? await listOrderStepsForManage() : null;
   return (
     <SettingsPage
       settingsKey="pipeline"
-      description="The stages your leads move through, in your own words — Enquiry, Site visit, Quotation, Booked. Each counts as one of a fixed set of meanings, and that is what the rest of the app acts on: won leads count towards targets, the forecast weighs open ones by how far along they are. Retiring a stage moves its leads on first; nothing about a lead's history is lost."
+      description="Your team pipelines and the stages leads move through, in your own words — Enquiry, Site visit, Quotation, Booked. Each stage counts as one of a fixed set of meanings, and that is what the rest of the app acts on: won leads in a sales pipeline count towards targets, the forecast weighs open ones by how far along they are. A stage can ask for details before a lead moves into it, and a pipeline can hand its won leads to the next team and run simple automations. Retiring a stage moves its leads on first; nothing about a lead's history is lost."
     >
       <div className="space-y-8">
         <section className="space-y-3" aria-labelledby="pipeline-leads">
           <h2 id="pipeline-leads" className="text-base font-semibold text-text">
             Leads
           </h2>
-          <PipelineManager stages={leads?.stages ?? []} stored={leads?.stored ?? false} />
+          <TeamPipelines
+            pipelines={leads?.pipelines ?? []}
+            stages={leads?.stages ?? []}
+            stored={leads?.stored ?? false}
+            multi={leads?.multi ?? false}
+            fields={leads?.fields ?? []}
+            automations={automations?.automations ?? []}
+            people={automations?.people ?? []}
+            automationsReady={automations?.ready ?? false}
+          />
         </section>
         {orders && (
           <section className="space-y-3" aria-labelledby="pipeline-orders">

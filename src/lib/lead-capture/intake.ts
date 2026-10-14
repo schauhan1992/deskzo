@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { newLeadStage } from "@/lib/pipeline/server";
+import { runLeadAutomations } from "@/lib/pipeline/automations";
+import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import { Prisma, type ContactDesignation, type LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizeCompanyName } from "@/lib/company-name";
@@ -207,6 +209,8 @@ export type IntakeOptions = {
   notifyTitle?: string;
   /** False when the owner made it themselves — a card they scanned — and needs no telling. */
   notify?: boolean;
+  /** The team pipeline it starts in (src/lib/pipeline) — a booking page's; the main one when not given. */
+  pipelineId?: string | null;
 };
 
 export async function intakeLead(key: IntakeSource, p: LeadPayload, options: IntakeOptions = {}): Promise<IntakeResult> {
@@ -303,10 +307,10 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
       .filter(Boolean)
       .join("\n\n");
 
+  // Where the lead starts (src/lib/pipeline) — read before the transaction, which holds a connection.
+  const entry = await newLeadStage(undefined, options.pipelineId);
   let created: { id: string; leadSeq: number };
   try {
-    // Where the lead starts (src/lib/pipeline) — read before the transaction, which holds a connection.
-    const entry = await newLeadStage();
     created = await db.$transaction(async (tx) => {
       const company =
         existingCompany ??
@@ -407,6 +411,8 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
     entityId: created.id,
     entityLabel: key.id ? `Website lead via “${key.name}”` : `Lead from ${key.name}`,
   });
+  // The pipeline's automations for a lead arriving (src/lib/pipeline/automations.ts).
+  await runLeadAutomations({ leadId: created.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
 
   return {
     status: "created",

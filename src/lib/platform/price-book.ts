@@ -61,6 +61,8 @@ export const INDIA_LAUNCH_PRICES: readonly PriceBookEntry[] = [
   { planKey: "deskzo-projects", month: 299, year: 2990, perSeat: true },
   // Zoho Marketing Automation ₹855–2,880 for 1k–10k contacts — per person here, with no contact tiers.
   { planKey: "deskzo-campaigns", month: 499, year: 4990, perSeat: true },
+  // Deskzo Pipeline (owner, 14 Oct 2026): below Bigin Express (₹400 billed yearly) and well below CRM.
+  { planKey: "deskzo-pipeline", month: 299, year: 2990, perSeat: true },
   // Zoho Analytics ₹960 an organisation for 2 users (about ₹480 each), extra users ₹200.
   { planKey: "deskzo-analytics", month: 249, year: 2490, perSeat: true },
   // Zoho Vault Standard ₹54, Professional ₹248 (sharing); Bitwarden Teams US$4.

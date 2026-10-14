@@ -19,7 +19,7 @@ import type { DemoContext } from "../context";
 import { COMPANY_AGE_DAYS, DEMO_TAG, chance, int, log, normalise, personName, phone, pick, rnd, slugOf, some } from "../shared";
 import { indiaClock } from "../../../src/lib/time/zone";
 import { gstinCheckCharacter } from "../../../src/lib/gst-engine";
-import { isStageColor, stageChangeNote, stageForStatus, type LeadStageDef } from "../../../src/lib/pipeline/rules";
+import { MAIN_PIPELINE_ID, isStageColor, stageChangeNote, stageForStatus, type LeadStageDef } from "../../../src/lib/pipeline/rules";
 import { coerceValue, keyFromLabel, readValues, type CustomFieldDef, type CustomFieldOption, type CustomFieldValues } from "../../../src/lib/custom-fields/rules";
 import { allocate, trackedGap } from "../../../src/lib/workspace/allocation";
 import { buildWhere, type WorkbookFilters } from "../../../src/lib/workspace/filters";
@@ -959,7 +959,8 @@ async function coverDuplicates(db: Db, cast: Cast, app: App) {
 async function pipeline(db: Db): Promise<LeadStageDef[] | null> {
   const rows = await db.leadStage.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
   if (!rows.length) return null;
-  return rows.map((r) => ({ id: r.id, key: r.key, label: r.label, status: r.status, color: isStageColor(r.color) ? r.color : "default", archived: r.archivedAt !== null }));
+  // The main pipeline: the demo seeds only that one.
+  return rows.map((r) => ({ id: r.id, pipelineId: MAIN_PIPELINE_ID, key: r.key, label: r.label, status: r.status, color: isStageColor(r.color) ? r.color : "default", archived: r.archivedAt !== null, requiredFields: [] }));
 }
 
 const OPEN: LeadStatus[] = ["NEW", "CONTACTED", "QUALIFYING", "QUALIFIED", "PROPOSAL_SENT", "NEGOTIATION"];

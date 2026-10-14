@@ -18,6 +18,7 @@
 export type ProductKey =
   | "one"
   | "crm"
+  | "pipeline"
   | "books"
   | "people"
   | "desk"
@@ -87,7 +88,8 @@ export const PRODUCTS: readonly Product[] = [
     name: "Deskzo CRM",
     path: "/crm",
     tagline: "Leads, pipeline, calls, field visits, targets and incentives",
-    modules: ["companies", "contacts_library", "calls", "visits", "domains", "targets", "incentives", "wins", "tasks", "notes", "resellers", "commission_parties"],
+    // Everything in Deskzo Pipeline too — its web forms and booking pages (owner, 14 Oct 2026).
+    modules: ["companies", "contacts_library", "calls", "visits", "domains", "targets", "incentives", "wins", "tasks", "notes", "resellers", "commission_parties", "forms", "booking"],
     group: "sell",
   },
   {
@@ -149,6 +151,16 @@ export const PRODUCTS: readonly Product[] = [
     group: "sell",
   },
   {
+    // A Bigin-like CRM for small teams (owner, 14 Oct 2026): team pipelines on a board, contacts, calls
+    // and follow-ups, web forms and booking pages — less than Deskzo CRM, which holds all of it.
+    key: "pipeline",
+    name: "Deskzo Pipeline",
+    path: "/pipeline",
+    tagline: "A simple pipeline CRM for small teams: deals, contacts, follow-ups, bookings",
+    modules: ["companies", "contacts_library", "calls", "forms", "booking"],
+    group: "sell",
+  },
+  {
     key: "analytics",
     name: "Deskzo Analytics",
     path: "/analytics",
@@ -190,6 +202,9 @@ export const ADD_ONS: readonly AddOn[] = [
   { key: "copilot", name: "AI Copilot", tagline: "Questions about your data, answered by the AI provider you choose", modules: [], onProduct: null, includedIn: [] },
   { key: "seats", name: "More people", tagline: "Seats beyond what a plan includes", modules: [], onProduct: null, includedIn: [] },
 ];
+
+/** A product's plan key in the catalogue — an identifier invitations and scripts name, so it never follows a rename of the brand. */
+export const productPlanKey = (product: ProductKey) => `deskzo-${product}`;
 
 export const PRODUCT_KEYS = PRODUCTS.map((p) => p.key);
 

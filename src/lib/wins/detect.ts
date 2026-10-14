@@ -8,6 +8,7 @@ import { notifyUser } from "@/lib/notify";
 import { prizesForPeriod, recordWinners, winsModuleOn } from "@/lib/wins/prize-store";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { topSellerNote, type Slot } from "@/lib/wins/prizes";
+import { salesLeads } from "@/lib/pipeline/server";
 
 /**
  * Finding the sales moments worth celebrating, and celebrating each exactly once.
@@ -121,8 +122,9 @@ async function dealsWon(s: WinsSettings, now: Date): Promise<NewWin[]> {
   });
   const ids = [...new Set(changes.map((c) => c.leadId))];
   if (ids.length === 0) return [];
+  // A deal: won in a pipeline that counts as sales (src/lib/pipeline), never a partner's onboarding done.
   const leads = await db.lead.findMany({
-    where: { id: { in: ids }, status: "WON" },
+    where: { id: { in: ids }, status: "WON", AND: [await salesLeads()] },
     select: {
       id: true,
       title: true,

@@ -39,6 +39,7 @@ export const MODULES: Record<string, ModuleInfo> = {
   renewals: { label: "Renewals", icon: "calendar", blurb: "Every subscription's expiry, what is due in the next 30 days, 60 days or 90 days, and a stage for each renewal.", page: "/product/subscriptions-renewals" },
   marketing: { label: "Marketing automation", icon: "megaphone", blurb: "Campaigns and triggered journeys built from your records, with every send checked against consent first.", page: "/product/marketing" },
   forms: { label: "Forms & events", icon: "calendar", blurb: "Enquiry forms, assessments and events with RSVPs, seat limits and an attendance register.", page: "/product/marketing" },
+  booking: { label: "Booking pages", icon: "calendar", blurb: "Pages where customers pick a time your team is free; the meeting goes into the host's calendar with the invitation, and a deal is opened.", page: null },
   projects: { label: "Projects", icon: "layers", blurb: "Client projects with milestones, billing stages, agreements, encrypted credentials, risks and weekly updates.", page: "/product/projects" },
   // ── Run the business ──
   items: { label: "Items & inventory", icon: "package", blurb: "One catalogue of goods, services, subscriptions and licences, with HSN or SAC codes, GST rates and stock for goods.", page: "/product/inventory" },

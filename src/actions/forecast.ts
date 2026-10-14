@@ -28,7 +28,7 @@ import {
   type RenewalItem,
 } from "@/lib/forecast/compute";
 import type { ActionResult } from "@/actions/company";
-import { byStageDate } from "@/lib/pipeline/server";
+import { byStageDate, salesLeads } from "@/lib/pipeline/server";
 
 /**
  * The forecast: sales, renewals, collections and AMC opportunities, period by period.
@@ -73,11 +73,13 @@ function ownerFilter(scope: string[] | null, ownerId: string | undefined): { ids
 
 async function stageWeights() {
   const since = new Date(Date.now() - 365 * DAY);
+  // Only sales: a pipeline that isn't one (partner onboarding) says nothing about how deals close.
+  const sales = await salesLeads();
   const [closed, overrides] = await Promise.all([
     // Closed in the last year — when they were closed (src/lib/pipeline `byStageDate`), not last opened.
     byStageDate((moved) =>
       db.lead.findMany({
-        where: { status: { in: CLOSED_STAGES }, ...moved({ gte: since }) },
+        where: { status: { in: CLOSED_STAGES }, ...moved({ gte: since }), AND: [sales] },
         select: {
           status: true,
           activities: { where: { type: "STAGE_CHANGE" }, orderBy: { occurredAt: "asc" }, select: { notes: true } },
@@ -128,12 +130,15 @@ export async function getForecast(params: ForecastParams = {}) {
   // order value target does.
   const accountWhere = who.ownerId ? { ownerUserId: who.ownerId } : who.ids ? { ownerUserId: { in: who.ids } } : {};
 
+  // The deals: open leads in pipelines that count as sales.
+  const sales = await salesLeads();
   const [weights, rates, leads, renewals, assets, owners] = await Promise.all([
     stageWeights(),
     renewalRates(),
     db.lead.findMany({
       where: {
         status: { in: [...OPEN_STAGES] as LeadStatus[] },
+        AND: [sales],
         // A deal is theirs if they own it or it sits on an account they own.
         ...(who.ownerId ? { ownerUserId: who.ownerId } : who.ids ? { OR: [{ ownerUserId: { in: who.ids } }, { company: { ownerUserId: { in: who.ids } } }] } : {}),
       },
@@ -452,12 +457,13 @@ export async function getCommits() {
     : await db.user.findMany({ where: { id: { in: v.scope }, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } });
   const ids = [...new Set([v.user.id, ...people.map((p) => p.id)])];
 
+  const sales = await salesLeads();
   const [weights, commits, leads] = await Promise.all([
     stageWeights(),
     db.forecastCommit.findMany({ where: { userId: { in: ids }, month: { in: months.map((m) => m.key) } } }),
     db.lead.findMany({
       // A close date is a calendar day held as midnight UTC, so it is bounded by the months' days.
-      where: { status: { in: [...OPEN_STAGES] as LeadStatus[] }, ownerUserId: { in: ids }, expectedCloseDate: { gte: clock.calendarDate(months[0]!.from), lt: clock.calendarDate(months[months.length - 1]!.to) } },
+      where: { status: { in: [...OPEN_STAGES] as LeadStatus[] }, AND: [sales], ownerUserId: { in: ids }, expectedCloseDate: { gte: clock.calendarDate(months[0]!.from), lt: clock.calendarDate(months[months.length - 1]!.to) } },
       select: {
         ownerUserId: true,
         status: true,

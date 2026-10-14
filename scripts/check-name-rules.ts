@@ -148,8 +148,8 @@ const BRIEF_HOSTS = (
   "privacy legal terms abuse postmaster hostmaster webmaster noreply no-reply null undefined default example"
 ).split(" ");
 const ADDED_HOSTS = ["autodiscover", "autoconfig", "mta-sts"];
-/** Product words reserved since the split: Deskzo Cards, and the signatures product to come (10 Oct 2026). */
-const ADDED_WORDS = ["cards", "card", "businesscard", "signatures", "signature"];
+/** Product words reserved since the split: Deskzo Cards, the signatures product (10 Oct 2026), Deskzo Pipeline (14 Oct 2026). */
+const ADDED_WORDS = ["cards", "card", "businesscard", "signatures", "signature", "pipeline"];
 
 async function main() {
   /* eslint-disable @typescript-eslint/no-require-imports */

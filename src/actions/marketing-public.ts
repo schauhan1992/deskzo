@@ -2,6 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { newLeadStage } from "@/lib/pipeline/server";
+import { runLeadAutomations } from "@/lib/pipeline/automations";
+import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import type { FormCategory, MarketingTopic, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -631,7 +633,11 @@ export async function submitForm(input: {
     return { ok: true, data: { thankYou } };
   }
 
-  if (result.lead) await refreshLeadScore(result.lead.id);
+  if (result.lead) {
+    await refreshLeadScore(result.lead.id);
+    // The pipeline's automations for a lead arriving (src/lib/pipeline/automations.ts).
+    await runLeadAutomations({ leadId: result.lead.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
+  }
 
   // A lead goes to whoever owns it. Without one the link is to the form's answers, so it goes to
   // somebody chosen to see them — the person the form routes to, else its owner — rather than to
@@ -780,7 +786,10 @@ async function submitInvited(input: {
   if (outcome.kind === "full") {
     return { ok: false, error: "Sorry — every seat has been taken. Your account manager can let you know if one frees up." };
   }
-  if (outcome.lead) await refreshLeadScore(outcome.lead.id);
+  if (outcome.lead) {
+    await refreshLeadScore(outcome.lead.id);
+    await runLeadAutomations({ leadId: outcome.lead.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
+  }
 
   // Whoever sent the invitation hears about it, then whoever the form routes to, then its owner.
   const tell = invite.invitedById ?? form.assignToUserId ?? form.ownerUserId;

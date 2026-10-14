@@ -1016,7 +1016,18 @@ export const PERMISSION_REGISTRY = [
     key: "pipeline.manage",
     label: "Manage the sales pipeline",
     description:
-      "Name the stages a lead moves through, set their order and colours, choose what each counts as — new, qualified, won, lost and so on — and retire the ones no longer used.",
+      "Add team pipelines and connect them; name the stages a lead moves through, set their order and colours, choose what each counts as — new, qualified, won, lost and so on — and what a lead needs before it moves there; set up the pipelines' automations; retire what is no longer used.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Sales & customers",
+  },
+  {
+    /**
+     * Booking pages (src/lib/booking): their address, hours, who customers meet. A page is public and
+     * puts meetings in people's calendars, so making one is a manager's call.
+     */
+    key: "booking.manage",
+    label: "Manage booking pages",
+    description: "Make the public pages customers book meetings on — their address, hours, meeting length and who they meet — and see what has been booked.",
     defaultRoles: ["MANAGEMENT"],
     group: "Sales & customers",
   },

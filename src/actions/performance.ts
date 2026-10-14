@@ -7,7 +7,7 @@ import { SLA_HOURS } from "@/lib/tickets";
 import { workspaceClock } from "@/lib/time/workspace";
 import { calendarDayRange } from "@/lib/time/zone";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
-import { byStageDate } from "@/lib/pipeline/server";
+import { byStageDate, salesLeads } from "@/lib/pipeline/server";
 
 export async function canViewPerformance(): Promise<boolean> {
   const user = await requireUser();
@@ -68,6 +68,8 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
   const clock = await workspaceClock();
   const within = clock.dayRange(params?.from, params?.to);
   const days = calendarDayRange(params?.from, params?.to);
+  // Deals won: in pipelines that count as sales (src/lib/pipeline).
+  const sales = await salesLeads();
 
   const [users, activityRows, auditRows, assignedTickets, wonLeads, savings] = await Promise.all([
     db.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, role: true, active: true } }),
@@ -92,7 +94,7 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
     // Won within the window: when they moved to won, not when they last changed (src/lib/pipeline).
     byStageDate((moved) =>
       db.lead.findMany({
-        where: { status: "WON", ownerUserId: { not: null }, ...(within ? moved(within) : {}) },
+        where: { status: "WON", ownerUserId: { not: null }, ...(within ? moved(within) : {}), AND: [sales] },
         select: { ownerUserId: true },
       }),
     ),

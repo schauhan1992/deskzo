@@ -401,6 +401,14 @@ const PUBLIC_ACTIONS = new Set([
    * merely undrawn.
    */
   "src/actions/portal-public.ts",
+  /**
+   * A booking page (src/lib/booking): a customer with no account picks a time a host is free. Open
+   * only while the plan has booking pages and they are on (`moduleAvailableForTenant`); it reads one
+   * page in use by its address, offers only the times its hosts are free, holds a time under a lock so
+   * it is never taken twice, and counts how many bookings one address and one page make in an hour.
+   * `check:team-pipelines` holds it.
+   */
+  "src/actions/booking-public.ts",
 ]);
 
 /**

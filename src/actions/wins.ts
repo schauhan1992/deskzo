@@ -12,6 +12,7 @@ import { periodContaining } from "@/lib/forecast/periods";
 import { workspaceClock } from "@/lib/time/workspace";
 import { bookingsByPerson, detectSalesWins, winsSettings, withoutOrphanedWins } from "@/lib/wins/detect";
 import type { ActionResult } from "@/actions/company";
+import { salesLeadRelation } from "@/lib/pipeline/server";
 
 /**
  * The wins wall and the office TV: this month's leaderboard, the wins as they happened, and the
@@ -44,6 +45,8 @@ export async function getWinsWall() {
   const month = periodContaining(now, "month", clock);
   const settings = await winsSettings();
 
+  // Deals won: stage changes to won in pipelines that count as sales.
+  const salesOnly = await salesLeadRelation();
   const [bookings, targets, allWins, wonThisMonth, canManage] = await Promise.all([
     bookingsByPerson(month.from, month.to),
     db.target.findMany({
@@ -67,7 +70,7 @@ export async function getWinsWall() {
       select: { id: true, source: true, title: true, message: true, amount: true, createdAt: true, details: true, subject: { select: { id: true, name: true } } },
     }),
     db.activity.findMany({
-      where: { type: "STAGE_CHANGE", notes: { contains: " to WON" }, occurredAt: { gte: month.from, lt: month.to } },
+      where: { type: "STAGE_CHANGE", notes: { contains: " to WON" }, occurredAt: { gte: month.from, lt: month.to }, ...salesOnly },
       distinct: ["leadId"],
       select: { leadId: true },
     }),

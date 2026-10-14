@@ -31,6 +31,7 @@ import { measure } from "@/lib/targets/measure";
 import { progressOf, METRICS } from "@/lib/targets/metrics";
 import { releaseDueOrders } from "@/lib/orders/handoff";
 import { scopeUserIds } from "@/lib/authz/scope";
+import { salesLeads } from "@/lib/pipeline/server";
 import { vendorRelationshipTypeValues } from "@/lib/validation/company";
 import type { ActionResult } from "@/actions/company";
 
@@ -157,6 +158,9 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     ? { id: { in: [] } }
     : { AND: [await leadAccess(user.id, "view"), leadIds === null ? {} : { ownerUserId: { in: leadIds } }] };
   const leadWidgetScope: WidgetScope = leadIds === null ? "company" : leadIds.length > 1 ? "team" : "own";
+  // The pipeline's counts are sales: leads in pipelines that count as sales (src/lib/pipeline), not a
+  // partner's onboarding. The recent leads are any.
+  const salesScope: Prisma.LeadWhereInput = { AND: [leadScope, await salesLeads()] };
 
   /**
    * Every other card counts what its own list shows, by that record's rule — customers and vendors,
@@ -191,10 +195,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     offers("companies", "customers")
       ? db.company.count({ where: { AND: [{ relationshipType: "CLIENT", stage: "CUSTOMER", products: { some: {} } }, accounts] } })
       : Promise.resolve(0),
-    canSeeLeads ? db.lead.groupBy({ by: ["status"], where: leadScope, _count: true }) : Promise.resolve([]),
+    canSeeLeads ? db.lead.groupBy({ by: ["status"], where: salesScope, _count: true }) : Promise.resolve([]),
     canSeeLeads
       ? db.lead.aggregate({
-          where: { ...leadScope, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } },
+          where: { AND: [salesScope, { status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } }] },
           _sum: { estimatedValue: true },
         })
       : Promise.resolve(null),

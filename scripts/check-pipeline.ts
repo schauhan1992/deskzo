@@ -33,6 +33,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import {
+  MAIN_PIPELINE_ID,
   checkStage,
   defaultStages,
   mustKeep,
@@ -128,7 +129,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
 
 // ── The pure part ───────────────────────────────────────────────────────────────────────────────
 
-const stage = (id: string, label: string, status: LeadStageDef["status"], archived = false): LeadStageDef => ({ id, key: id, label, status, color: "default", archived });
+const stage = (id: string, label: string, status: LeadStageDef["status"], archived = false): LeadStageDef => ({ id, pipelineId: MAIN_PIPELINE_ID, key: id, label, status, color: "default", archived, requiredFields: [] });
 
 function pure() {
   section("The stages every workspace starts with");
@@ -469,9 +470,13 @@ async function run(scratchUrl: string) {
 
     // ── Before the migration ───────────────────────────────────────────────────────────────────
     section("A workspace still waiting for the migration");
+    // …and for the team pipelines that came after it (20261102100000_team_pipelines), which build on its tables.
+    await db.$executeRawUnsafe(`DROP TABLE "pipeline_automations", "bookings", "booking_pages"`);
+    await db.$executeRawUnsafe(`ALTER TABLE "leads" DROP COLUMN "pipelineId", DROP COLUMN "fromLeadId"`);
     await db.$executeRawUnsafe(`ALTER TABLE "leads" DROP CONSTRAINT "leads_stageId_fkey"`);
     await db.$executeRawUnsafe(`ALTER TABLE "leads" DROP COLUMN "stageId", DROP COLUMN "stageChangedAt"`);
     await db.$executeRawUnsafe(`DROP TABLE "lead_stages"`);
+    await db.$executeRawUnsafe(`DROP TABLE "lead_pipelines"`);
     const waiting = await server.leadStages();
     ok("it is shown the stages it always had", !waiting.stored && waiting.stages.length === 9);
     const oldCreate = await leads.createLead({ companyId: company.id, title: `${TAG} During the deploy` });

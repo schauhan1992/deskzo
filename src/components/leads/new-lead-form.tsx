@@ -49,6 +49,8 @@ export function NewLeadForm({
   canAddContact = true,
   people,
   customFields = { fields: [], values: {}, people: [] },
+  pipelines = [],
+  initialPipelineId,
 }: {
   companies: CompanyComboOption[];
   initialCompanyId?: string;
@@ -63,6 +65,9 @@ export function NewLeadForm({
   people: PersonOption[];
   /** The workspace's own lead fields (src/lib/custom-fields/server.ts `formSetup`). */
   customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
+  /** The team pipelines in use (src/lib/pipeline) — offered only when there is more than one. */
+  pipelines?: { id: string; name: string }[];
+  initialPipelineId?: string;
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -86,7 +91,7 @@ export function NewLeadForm({
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, CreateLeadInput>({
     resolver: zodResolver(createLeadSchema),
-    defaultValues: { companyId: initialCompanyId ?? "", requirements: [], source: "OTHER", sourceDetail: "", ownerUserId: "" },
+    defaultValues: { companyId: initialCompanyId ?? "", requirements: [], source: "OTHER", sourceDetail: "", ownerUserId: "", pipelineId: initialPipelineId ?? "" },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "requirements" });
 
@@ -132,6 +137,20 @@ export function NewLeadForm({
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {serverError && (
             <div className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{serverError}</div>
+          )}
+
+          {pipelines.length > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="pipelineId">Pipeline</Label>
+              <Select id="pipelineId" {...register("pipelineId")}>
+                {pipelines.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-muted">It starts at the pipeline&apos;s first stage.</p>
+            </div>
           )}
 
           <div className="space-y-1.5">
