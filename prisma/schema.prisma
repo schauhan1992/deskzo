@@ -6986,7 +6986,7 @@ enum MarketingTopic {
 model MessagingProvider {
   id       String         @id @default(cuid())
   /**
-   * "resend" | "ses" | "elastic" | "m365" | "mock" | a WhatsApp BSP.
+   * "resend" | "ses" | "elastic" | "m365" | "smtp" | "mock" | a WhatsApp BSP.
    */
   key      String         @unique
   kind     ProviderKind   @default(EMAIL)

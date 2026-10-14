@@ -14,11 +14,11 @@ import {
 } from "@/lib/marketing/providers/types";
 
 /**
- * The four email backends.
+ * The email backends.
  *
- * Resend and Elastic Email speak HTTP, so they need no dependency at all. Amazon SES and Microsoft
- * 365 go over SMTP — SES has an HTTP API too, but it wants SigV4 request signing, and its SMTP
- * interface reaches the same servers with none of that.
+ * Resend and Elastic Email speak HTTP, so they need no dependency at all. Amazon SES, Microsoft 365
+ * and any other mail server go over SMTP — SES has an HTTP API too, but it wants SigV4 request
+ * signing, and its SMTP interface reaches the same servers with none of that.
  *
  * Which one carries what is not decided here; see `routeFor` in ./index.ts. The short version is
  * that bulk should not leave the domain your invoices leave from.
@@ -142,16 +142,17 @@ export const elasticProvider: MessageProvider = {
   },
 };
 
-// ─── SMTP, shared by Amazon SES and Microsoft 365 ─────────────────────────────
+// ─── SMTP, shared by Amazon SES, Microsoft 365 and any other server ───────────
 
 type SmtpSettings = { host: string; port: number; user: string };
 
 function smtpSettings(config: ProviderConfig, fallbackHost: string, fallbackPort: number): SmtpSettings | null {
   const raw = config.config ?? {};
-  const host = String(raw.host ?? fallbackHost).trim();
-  const port = Number(raw.port ?? fallbackPort);
+  // A field cleared in the settings screen is saved as "", which means "the usual", not port 0.
+  const host = String(raw.host ?? "").trim() || fallbackHost;
+  const port = String(raw.port ?? "").trim() ? Number(raw.port) : fallbackPort;
   const user = String(raw.user ?? "").trim();
-  if (!host || !user || !Number.isFinite(port)) return null;
+  if (!host || !user || !Number.isInteger(port) || port <= 0) return null;
   return { host, port, user };
 }
 
@@ -253,6 +254,28 @@ export const microsoft365Provider: MessageProvider = {
   verify: (config) => smtpVerify(config, smtpSettings(config, "smtp.office365.com", 587)),
 };
 
+/**
+ * Any server that takes an SMTP login — Google Workspace, Zoho Mail, a hosting company's, your own.
+ * Nothing to fall back on for the host: it is whatever the provider's SMTP settings say.
+ */
+export const smtpProvider: MessageProvider = {
+  key: "smtp",
+  label: "Other SMTP server",
+  kind: "EMAIL",
+  needs: [
+    { key: "host", label: "SMTP host", hint: "e.g. smtp.gmail.com or smtp.zoho.in" },
+    { key: "port", label: "Port", hint: "587 for STARTTLS, 465 for TLS from the start" },
+    { key: "user", label: "Username", hint: "Usually the full address of the mailbox" },
+    { key: "password", label: "Password", hint: "An app password where the provider has them", secret: true },
+  ],
+  async send(message, config) {
+    const settings = smtpSettings(config, "", 587);
+    if (!settings) return { ok: false, retryable: false, error: "SMTP settings are incomplete — a host and a username are needed." };
+    return smtpSend(message, config, settings);
+  },
+  verify: (config) => smtpVerify(config, smtpSettings(config, "", 587)),
+};
+
 // ─── Mock ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -281,5 +304,6 @@ export const EMAIL_PROVIDERS: MessageProvider[] = [
   sesProvider,
   elasticProvider,
   microsoft365Provider,
+  smtpProvider,
   mockProvider,
 ];
