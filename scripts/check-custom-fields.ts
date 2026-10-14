@@ -479,7 +479,7 @@ async function run(scratchUrl: string) {
     // ── Products, end to end ───────────────────────────────────────────────────────────────────
     section("Products: the create form and the stored values");
     const product = (sku: string, extra: Record<string, unknown> = {}) =>
-      items.createItem({ name: `${TAG} ${sku}`, sku: `${TAG}-${sku}`, type: "SERVICE", sellingPrice: 1000, ...extra });
+      items.createItem({ name: `${TAG} ${sku}`, sku: `${TAG}-${sku}`, type: "SERVICE", hsnCode: "998313", sellingPrice: 1000, ...extra });
     as(admin);
     const noBatch = await product("A1", { customFields: { grade: "gold" } });
     ok("a product without its required batch number is refused, by name", !noBatch.ok && noBatch.error.includes("Batch no."), errorOf(noBatch));

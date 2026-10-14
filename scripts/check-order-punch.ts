@@ -542,9 +542,9 @@ async function run(scratchUrl: string) {
     ok("  “acro-0” finds only the active one of the two SKUs it matches", bare(bySku).join(", ") === "Acrobat Pro", bare(bySku).join(", "));
     const found = byName[0];
     ok(
-      "  with what the picker shows and the brand, the prices as plain numbers",
+      "  with what the picker shows, the brand and the HSN/SAC, the prices as plain numbers",
       !!found &&
-        keysOf(found) === "brandId,id,name,sellingPrice,sku,taxRatePercent,type,unit" &&
+        keysOf(found) === "brandId,hsnCode,id,name,sellingPrice,sku,taxRatePercent,type,unit" &&
         found.sellingPrice === 1000 &&
         found.taxRatePercent === 18 &&
         found.brandId === f.adobe.id,
