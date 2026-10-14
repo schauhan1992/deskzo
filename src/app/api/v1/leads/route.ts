@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { parseBasicAuth, secretMatches } from "@/lib/lead-capture/credentials";
 import { intakeLead, leadPayloadSchema, readFormBody } from "@/lib/lead-capture/intake";
 import { MAX_BODY_BYTES, RATE_LIMIT_PER_MINUTE } from "@/lib/lead-capture/spec";
@@ -58,9 +59,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: `The body is over ${MAX_BODY_BYTES / 1024} KB.` }, { status: 413 });
   }
 
-  const recent = await db.lead.count({
-    where: { captureKeyId: key.id, createdAt: { gt: new Date(Date.now() - 60_000) } },
-  });
+  const since = new Date(Date.now() - 60_000);
+  /**
+   * Without leads in the plan (owner, 14 Oct 2026) an enquiry makes only a company and contact, which
+   * don't record the key — so the contacts its issuer was credited with stand in. A key with no issuer
+   * is counted against every contact made in the minute, which only ever stops it sooner.
+   */
+  const recent = (await moduleAvailableForTenant("leads"))
+    ? await db.lead.count({ where: { captureKeyId: key.id, createdAt: { gt: since } } })
+    : await db.contact.count({ where: { createdAt: { gt: since }, ...(key.createdById ? { createdByUserId: key.createdById } : {}) } });
   if (recent >= RATE_LIMIT_PER_MINUTE) {
     return NextResponse.json(
       { ok: false, error: `More than ${RATE_LIMIT_PER_MINUTE} leads a minute from this key. Try again shortly.` },
@@ -107,6 +114,12 @@ export async function POST(request: Request) {
     if (result.status === "reseller") {
       return NextResponse.json(
         { ok: true, routed: "reseller", message: "Received. This company is looked after by one of our partners; the enquiry has been passed to them." },
+        { status: 202 },
+      );
+    }
+    if (result.status === "contact") {
+      return NextResponse.json(
+        { ok: true, routed: "contact", message: "Received. The company and contact were saved; no lead was created.", not_saved: result.notSaved },
         { status: 202 },
       );
     }

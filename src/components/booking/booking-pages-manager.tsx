@@ -307,18 +307,21 @@ export function BookingPagesManager({
               })}
             </fieldset>
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor="booking-pipeline" className="text-xs">
-                  Open a lead in
-                </Label>
-                <Select id="booking-pipeline" value={draft.pipelineId ?? ""} onChange={(e) => setDraft({ ...draft, pipelineId: e.target.value || null })}>
-                  {pipelines.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              {/* No pipelines where the plan has no leads: a booking then adds only the company and contact. */}
+              {pipelines.length > 0 && (
+                <div className="space-y-1">
+                  <Label htmlFor="booking-pipeline" className="text-xs">
+                    Open a lead in
+                  </Label>
+                  <Select id="booking-pipeline" value={draft.pipelineId ?? ""} onChange={(e) => setDraft({ ...draft, pipelineId: e.target.value || null })}>
+                    {pipelines.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2 pt-5">
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={draft.online} onChange={(e) => setDraft({ ...draft, online: e.target.checked })} />

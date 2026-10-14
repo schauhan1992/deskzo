@@ -6,7 +6,8 @@ import Papa from "papaparse";
 import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
-import { requireUser } from "@/lib/session";
+// Leads are a module of their own (owner, 14 Oct 2026): sold with Deskzo Pipeline, CRM and One.
+import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { leadAccess, mayAccess, timelineAccess, type AccessAction } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
@@ -122,10 +123,10 @@ async function resolveOwner(
 }
 
 export async function createLead(input: unknown): Promise<ActionResult<{ id: string; leadSeq: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   // Only somebody who may open Leads: the Create menu and the form are hidden otherwise, and this
   // is the same rule for a caller who posts anyway (decideModuleAccess, src/lib/navigation.ts).
-  if (!(await isModuleEnabled("companies"))) return { ok: false, error: "You don't have access to Leads." };
+  if (!(await isModuleEnabled("leads"))) return { ok: false, error: "You don't have access to Leads." };
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = createLeadSchema.safeParse(input);
   if (!parsed.success) {
@@ -225,7 +226,7 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
 }
 
 export async function addLeadRequirement(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const itemsEnabled = await isModuleEnabled("items");
   if (!itemsEnabled) {
@@ -251,7 +252,7 @@ export async function addLeadRequirement(input: unknown): Promise<ActionResult<{
 }
 
 export async function updateLeadRequirement(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   if (!(await hasEffectivePermission(user.id, "products.edit"))) {
     return { ok: false, error: "You don't have permission to edit products." };
@@ -278,7 +279,7 @@ export async function updateLeadRequirement(input: unknown): Promise<ActionResul
 }
 
 export async function removeLeadRequirement(id: string): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   if (!(await hasEffectivePermission(user.id, "products.delete"))) {
     return { ok: false, error: "You don't have permission to delete products." };
@@ -402,7 +403,7 @@ const leadListInclude = {
 } as const;
 
 export async function listLeads(params?: LeadListParams) {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   return db.lead.findMany({
     where: await leadListWhere(user.id, params),
     orderBy: leadListOrder(params),
@@ -415,7 +416,7 @@ export async function listLeads(params?: LeadListParams) {
  * page 2 would misrepresent the pipeline, which is the one thing it exists to show.
  */
 export async function listLeadsPaged(params: LeadListParams & { page: number; pageSize: number }) {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   // One `where` for both queries: the count has to be the count of the rows this viewer can see,
   // or the pager offers a page 9 that comes back empty.
   const where = await leadListWhere(user.id, params);
@@ -432,7 +433,7 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
 }
 
 export async function getLead(id: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return null;
   // The timeline shows their own and their team's activity, or everybody's with "See everyone's calls,
   // notes & meetings" (owner, 8 Oct 2026) — as on the customer's Activity pane (`getCompany`). The
@@ -492,7 +493,7 @@ export async function getLead(id: string) {
  * numbers once created, and a later price rise must not silently rewrite a quotation already sent.
  */
 export async function leadDocumentDraft(leadId: string) {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return null;
   // Scoped in the `where` rather than checked after the fetch, so the `select` stays exactly the
   // shape the document form expects — a lead out of scope is simply not found, as in `getLead`.
@@ -550,7 +551,7 @@ async function ruleStops(
 }
 
 export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = updateLeadStatusSchema.safeParse(input);
   if (!parsed.success) {
@@ -661,7 +662,7 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
  * lead (`leadInScope`); the contact must work at the lead's company, as when the lead was made.
  */
 export async function updateLeadDetails(input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = updateLeadDetailsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the details." };
@@ -707,7 +708,7 @@ export async function updateLeadDetails(input: unknown): Promise<ActionResult<nu
  * lost; it is reopened first. The rule and automations of the stage it lands in apply as they would.
  */
 export async function moveLeadToPipeline(input: unknown): Promise<ActionResult<{ stageId: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = moveLeadToPipelineSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Choose a pipeline." };
@@ -755,7 +756,7 @@ export async function leadConnections(leadId: string): Promise<{
   from: { id: string; leadSeq: number; title: string; pipeline: string } | null;
   into: { id: string; leadSeq: number; title: string; pipeline: string }[];
 } | null> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id)) || !(await mayAccess(user.id, "leads", "view", leadId))) return null;
   const pipeline = await leadStages();
   const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, status: true } });
@@ -791,7 +792,7 @@ export async function leadConnections(leadId: string): Promise<{
  * page; an edit level an admin sets may be narrower.
  */
 export async function updateLeadCustomFields(leadId: string, input: unknown): Promise<ActionResult<null>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   if (typeof leadId !== "string" || !leadId) return { ok: false, error: "Lead not found." };
 
@@ -812,7 +813,7 @@ export async function updateLeadCustomFields(leadId: string, input: unknown): Pr
 }
 
 export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; filename: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
 
   const leads = await db.lead.findMany({
@@ -860,7 +861,7 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
 }
 
 export async function logActivity(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = logActivitySchema.safeParse(input);
   if (!parsed.success) {
@@ -900,7 +901,7 @@ export async function logActivity(input: unknown): Promise<ActionResult<{ id: st
  * same trail as doing it one by one, or the pipeline history quietly develops holes.
  */
 export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ count: number }>> {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
   const parsed = bulkUpdateLeadsSchema.safeParse(input);
   if (!parsed.success) {

@@ -34,10 +34,12 @@ export async function runHeartbeat() {
    * Lead scores. Part of a score is time — a lead nobody has touched gets colder by the day with
    * nothing about it changing — so scores not refreshed in 12 hours are recomputed, 500 at a time.
    */
-  const leadScoresRefreshed = await refreshStaleLeadScores({ limit: 500 }).catch((err) => {
-    console.error("lead score refresh failed", err);
-    return 0;
-  });
+  const leadScoresRefreshed = !(await moduleAvailableForTenant("leads"))
+    ? 0
+    : await refreshStaleLeadScores({ limit: 500 }).catch((err) => {
+        console.error("lead score refresh failed", err);
+        return 0;
+      });
   /**
    * Credit ratings, for the same reason: an invoice passing its due date changes a rating with
    * nothing being written. Only the stored copy the Customer credit list sorts by — decisions always

@@ -233,9 +233,9 @@ export const DASHBOARD_WIDGET_REGISTRY: DashboardWidgetDefinition[] = [
     key: "leads",
     label: "Open leads",
     description: "Open lead count and open pipeline value.",
-    // Leads are the Companies module's, and behind "View leads" — a section unticked or the
-    // permission taken away takes the widget too, before any figure is read.
-    moduleKey: "companies",
+    // Leads are a module of their own (owner, 14 Oct 2026), and behind "View leads" — out of the plan,
+    // a section unticked or the permission taken away takes the widget too, before any figure is read.
+    moduleKey: "leads",
     permission: "leads.view",
     scope: "team",
     // Without this the pipeline total was on every screen in the building.
@@ -247,9 +247,9 @@ export const DASHBOARD_WIDGET_REGISTRY: DashboardWidgetDefinition[] = [
     key: "recentLeads",
     label: "Recently updated leads",
     description: "The five leads that moved most recently.",
-    // Leads are the Companies module's, and behind "View leads" — a section unticked or the
-    // permission taken away takes the widget too, before any figure is read.
-    moduleKey: "companies",
+    // Leads are a module of their own (owner, 14 Oct 2026), and behind "View leads" — out of the plan,
+    // a section unticked or the permission taken away takes the widget too, before any figure is read.
+    moduleKey: "leads",
     permission: "leads.view",
     scope: "team",
     viewAllPermission: "targets.viewAll",

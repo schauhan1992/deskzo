@@ -74,6 +74,7 @@ export function CompaniesTable({
   reassign,
   customColumns = { columns: [], texts: {} },
   canSeeOrders = true,
+  canSeeLeads = true,
 }: {
   companies: CompanyRow[];
   assignableUsers: AssignableUser[];
@@ -87,6 +88,8 @@ export function CompaniesTable({
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
   /** Holds "View orders": Customers counts each one's orders, which is order data (owner, 8 Oct 2026). */
   canSeeOrders?: boolean;
+  /** Leads in the plan and theirs to see (owner, 14 Oct 2026) — otherwise no Leads column to count them. */
+  canSeeLeads?: boolean;
 }) {
   const router = useRouter();
   const selection = useRowSelection(companies);
@@ -116,7 +119,7 @@ export function CompaniesTable({
    */
   const hasPortalData = companies.some((c) => c.portal !== undefined);
   // The empty-state colspan has to match what is actually drawn, not what the registry allows.
-  const columnCount = cols.count - (cols.show("portal") && !hasPortalData ? 1 : 0);
+  const columnCount = cols.count - (cols.show("portal") && !hasPortalData ? 1 : 0) - (cols.show("leads") && !canSeeLeads ? 1 : 0);
   // The fields this person shows, worked out once: the header and every row draw this one list.
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   const emptyText =
@@ -238,7 +241,7 @@ export function CompaniesTable({
                 {cols.show("relationship") && <th className="px-4 py-2.5">Relationship</th>}
                 {cols.show("source") && <th className="px-4 py-2.5">Source</th>}
                 {cols.show("contacts") && <th className="px-4 py-2.5">Contacts</th>}
-                {cols.show("leads") && <th className="px-4 py-2.5">Leads</th>}
+                {cols.show("leads") && canSeeLeads && <th className="px-4 py-2.5">Leads</th>}
                 {cols.show("assigned") && <th className="px-4 py-2.5">{assignedColumnLabel}</th>}
                 {cols.show("portal") && hasPortalData && <th className="px-4 py-2.5">Portal</th>}
                 {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
@@ -294,7 +297,7 @@ export function CompaniesTable({
                   )}
                   {cols.show("source") && <td className="px-4 py-2.5 text-muted">{c.source}</td>}
                   {cols.show("contacts") && <td className="px-4 py-2.5 text-muted">{c._count.contacts}</td>}
-                  {cols.show("leads") && (
+                  {cols.show("leads") && canSeeLeads && (
                     <td className="px-4 py-2.5 text-muted">{c._count.leads}</td>
                   )}
                   {cols.show("assigned") && (

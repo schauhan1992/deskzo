@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { workspaceClock } from "@/lib/time/workspace";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { leadPath } from "@/lib/record-links";
+import { leadsInPlan } from "@/lib/leads/shown";
 import { MAX_OWN_FIELDS, readFields, type CardField, type DrawnCard } from "@/lib/cards/fields";
 import { cardNumbers, drawnCardFor, isLive, loadCard, readTemplate, type CardNumbers, type TemplateSpec } from "@/lib/cards/server";
 import { PEOPLE_ONLY } from "@/lib/people";
@@ -78,6 +79,8 @@ export type CardContactRow = {
   holder: string;
   owner: string;
   leadLink: string | null;
+  /** Whether the plan has leads — without them nobody met becomes one, so the list doesn't say "No lead". */
+  leadsHere: boolean;
   via: "SHARE_BACK" | "BOOTH" | "SCAN";
   event: string | null;
 };
@@ -96,6 +99,7 @@ export async function cardContacts(
       : "campaignId" in scope
         ? { campaignId: scope.campaignId, ...(scope.ownerUserId ? { ownerUserId: scope.ownerUserId } : {}) }
         : { ownerUserId: scope.ownerUserId };
+  const leadsHere = await leadsInPlan();
   const rows = await db.cardContact.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -136,7 +140,8 @@ export async function cardContacts(
     createdAt: r.createdAt.toISOString(),
     holder: r.card?.user.name ?? r.owner.name,
     owner: r.owner.name,
-    leadLink: r.lead ? leadPath(r.lead.leadSeq) : null,
+    leadLink: leadsHere && r.lead ? leadPath(r.lead.leadSeq) : null,
+    leadsHere,
     via: r.via,
     event: r.campaign?.name ?? null,
   }));

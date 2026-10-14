@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
 import { requireModuleUser } from "@/lib/modules-access";
 import { taskAccess, type AccessAction } from "@/lib/authz/access";
 import { pageSlice } from "@/lib/pagination";
@@ -254,11 +255,12 @@ export async function myOpenTasks(): Promise<RailTask[]> {
 
 export async function listTasks(params?: TaskListParams) {
   const user = await requireModuleUser("tasks");
-  return db.task.findMany({
+  const rows = await db.task.findMany({
     where: await taskListWhere(user.id, params),
     orderBy: [{ done: "asc" }, { dueDate: "asc" }],
     include: taskListInclude,
   });
+  return withoutHiddenLeads(rows, await leadsInPlan());
 }
 
 export async function listTasksPaged(params: TaskListParams & { page: number; pageSize: number }) {
@@ -273,7 +275,7 @@ export async function listTasksPaged(params: TaskListParams & { page: number; pa
     }),
     db.task.count({ where }),
   ]);
-  return { rows, total };
+  return { rows: withoutHiddenLeads(rows, await leadsInPlan()), total };
 }
 
 /** Open and overdue counts across the whole filtered set, so the header holds steady while paging. */

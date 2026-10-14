@@ -5,7 +5,7 @@ import { notifyUser } from "@/lib/notify";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { scheduleMeeting } from "@/lib/calendar/meetings";
 import { intakeLead, leadPayloadSchema } from "@/lib/lead-capture/intake";
-import { leadPath } from "@/lib/record-links";
+import { companyPath, leadPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
 import { getOrganisation } from "@/lib/organisation";
 import type { Clock } from "@/lib/time/zone";
@@ -16,7 +16,7 @@ import { BOOKING_LIMITS, openSlots, pageSlots, parseHours, pickHost, type Busy, 
  * with a connected calendar — the meeting is made in it, the provider sends the invitation, and their
  * busy times come from it (as synced, so up to a few minutes old) and from bookings already taken. A
  * booking opens a lead, its company and contact as a website enquiry would (`intakeLead`), in the page's
- * pipeline, owned by the host it went to.
+ * pipeline, owned by the host it went to — or, where the plan has no leads, only the company and contact.
  */
 
 const DAY = 86_400_000;
@@ -194,6 +194,7 @@ export async function bookSlot(
   // The lead, its company and contact — as a website enquiry would be — owned by the host.
   let links = { companyId: null as string | null, contactId: null as string | null, leadId: null as string | null };
   let leadSeq: number | null = null;
+  let companySeq: number | null = null;
   const payload = leadPayloadSchema.safeParse({ name, email, phone: phone || undefined, company: company || undefined, message: notes || undefined, source: "WEBSITE" });
   if (payload.success) {
     try {
@@ -202,7 +203,10 @@ export async function bookSlot(
         payload.data,
         { ownerUserId: hostId, leadTitle: `${page.title} — ${company || name}`, notifyTitle: `${name} booked ${page.title}`, notify: false, pipelineId: page.pipelineId },
       );
-      if (made.status !== "reseller") {
+      if (made.status === "contact") {
+        links = { companyId: made.companyId, contactId: made.contactId, leadId: null };
+        companySeq = made.companySeq;
+      } else if (made.status !== "reseller") {
         const lead = await db.lead.findUnique({ where: { id: made.leadId }, select: { id: true, leadSeq: true, companyId: true, contactId: true } });
         if (lead) {
           links = { companyId: lead.companyId, contactId: lead.contactId, leadId: lead.id };
@@ -235,7 +239,7 @@ export async function bookSlot(
     type: links.leadId ? "LEAD_ASSIGNED" : "FORM_RESPONSE",
     title: `${name} booked ${page.title}`,
     message: `${clock.dateTime(start)}${meeting.ok ? "" : ` — the meeting couldn't be added to your calendar (${meeting.error}); send them an invitation yourself.`}`,
-    link: leadSeq ? leadPath(leadSeq) : "/calendar",
+    link: leadSeq ? leadPath(leadSeq) : companySeq ? companyPath(companySeq) : "/calendar",
   });
   await recordAudit({ userId: page.createdById, action: "CREATE", entityType: "Booking", entityId: booking.id, entityLabel: `${page.title}: ${name} with ${host.name}, ${clock.dateTime(start)}` });
   return { ok: true, when: clock.dateTime(start), host: host.name, invited: meeting.ok };

@@ -11,6 +11,8 @@
  *   · **The secret is not kept.** Only its digest is.
  *   · **The documentation is the validator.** Every field documented is accepted, and every field
  *     accepted is documented.
+ *   · **No leads, no lead.** Where the plan has no leads (owner, 14 Oct 2026) an enquiry is a 202 that
+ *     makes the company and contact, and says which of its lead fields it couldn't keep.
  *
  * Against the development database, with ZZPROBE_CAPTURE fixtures removed in a finally.
  *
@@ -21,7 +23,6 @@ import Module from "node:module";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { formatLeadId } from "../src/lib/order-id";
 import { LEAD_FIELDS, RATE_LIMIT_PER_MINUTE, renderMarkdown } from "../src/lib/lead-capture/spec";
-import { ACCEPTED_FIELDS, companyNameFor, designationFromTitle } from "../src/lib/lead-capture/intake";
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -33,6 +34,11 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   }
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
+
+// Loaded after the stub: intake asks the plan whether leads are in it (src/lib/modules-access), which
+// reads the session — imported at the top, the real one would be loaded before the stub was in place.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { ACCEPTED_FIELDS, companyNameFor, designationFromTitle } = require("../src/lib/lead-capture/intake") as typeof import("../src/lib/lead-capture/intake");
 
 const db = directClient();
 const TAG = "ZZPROBE_CAPTURE";
@@ -55,6 +61,7 @@ async function cleanup() {
       OR: [
         { entityType: "Lead", entityId: { in: leads.map((l) => l.id) } },
         { entityType: "LeadCaptureKey", entityId: { in: keyIds } },
+        { entityType: "Contact", entityLabel: { contains: TAG } },
       ],
     },
   });
@@ -215,6 +222,27 @@ async function main() {
       routed.status === 202 && (await db.lead.count()) === leadsBefore && (await db.contact.count({ where: { company: { name: `${TAG} EndCustomer` } } })) === 0,
       "no direct contact with a company we reach through a reseller",
     );
+
+    // ── a plan without leads: the module switched off, which is how the plan's answer reaches intake ──
+    const switched = await db.systemModule.findUnique({ where: { key: "leads" } });
+    await db.systemModule.upsert({ where: { key: "leads" }, create: { key: "leads", enabled: false }, update: { enabled: false } });
+    try {
+      const noLeads = await post(
+        auth,
+        JSON.stringify({ ...payload, name: "Zzprobe Noleads", email: "noleads@zzprobe-noleads.example", company: `${TAG} NoLeads`, external_id: "zz-noleads", custom_fields: { zz_tower: "B" } }),
+      );
+      const body = (await noLeads.json()) as { routed?: string; not_saved?: { field: string }[] };
+      const made = await db.company.findFirst({ where: { name: `${TAG} NoLeads` }, select: { contacts: { select: { email: true } }, _count: { select: { leads: true } } } });
+      ok(
+        "without leads in the plan, an enquiry is a 202 that makes the company and contact — and no lead",
+        noLeads.status === 202 && body.routed === "contact" && !!made?.contacts.some((c) => c.email === "noleads@zzprobe-noleads.example") && made._count.leads === 0,
+        JSON.stringify(body),
+      );
+      ok("  naming the lead field it had nowhere to keep", !!body.not_saved?.some((n) => n.field === "custom_fields.zz_tower"));
+    } finally {
+      if (switched) await db.systemModule.update({ where: { key: "leads" }, data: { enabled: switched.enabled } });
+      else await db.systemModule.delete({ where: { key: "leads" } });
+    }
 
     // ── rate limit ──
     const company = await db.company.findFirst({ where: { name: `${TAG} Acme` }, select: { id: true } });

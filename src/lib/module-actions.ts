@@ -73,9 +73,10 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "customer-category.ts": "core",
   // The workspace's own fields on its records (src/lib/custom-fields) — settings, in every plan.
   "custom-fields.ts": "core",
-  "pipeline.ts": "core",
-  // A pipeline's automations (src/lib/pipeline/automations.ts) — leads are core.
-  "pipeline-automations.ts": "core",
+  // Lead stages and pipelines (leads), and order steps (orders) — each half checks its own.
+  "pipeline.ts": ["leads", "orders"],
+  // A pipeline's automations (src/lib/pipeline/automations.ts).
+  "pipeline-automations.ts": ["leads"],
   "wording.ts": "core",
   "workplace.ts": "core",
   "sign-in-rules.ts": "core",
@@ -123,9 +124,10 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "it-asset.ts": ["it_assets"],
   "item-category.ts": ["items"],
   "item.ts": ["items"],
-  "lead-assignment.ts": "core",
-  "lead-capture.ts": "core",
-  "lead.ts": "core",
+  // The lead pipeline is a module of its own since 14 Oct 2026 — sold with Pipeline, CRM and One.
+  "lead-assignment.ts": ["leads"],
+  "lead-capture.ts": ["leads"],
+  "lead.ts": ["leads"],
   "leave.ts": ["hr"],
   "ledger-reports.ts": ["accounting"],
   "ledger.ts": ["accounting"],

@@ -1164,7 +1164,8 @@ export const PERMISSION_REGISTRY = [
   // One per module, in the menu's order and named by its menu group: whether a role sees it in the menu
   // and may open its pages. Every role holds them (`everyone`) until one is unticked for it — so nobody
   // loses a section on the day these arrive. A menu group goes when every module in it is unticked.
-  { key: "section.companies", label: "Sales › Companies & Leads", description: "See Companies & Leads in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.leads", label: "Sales › Leads", description: "See Leads in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.companies", label: "Sales › Companies & Contacts", description: "See Companies & Contacts in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.wins", label: "Sales › Sales Wins", description: "See Sales Wins in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.forecast", label: "Sales › Forecasting", description: "See Forecasting in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.workspace", label: "Prospecting › Workspace", description: "See Workspace in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },

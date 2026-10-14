@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { PipelineTrigger } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { notMigratedYet } from "@/lib/custom-fields/server";
@@ -21,7 +21,7 @@ import type { ActionResult } from "@/actions/company";
  */
 
 async function manager() {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
   return (await can(user.id, "pipeline.manage")) ? user : null;
 }
 

@@ -22,7 +22,8 @@ export type ModuleInfo = { label: string; icon: IconName; blurb: string; page: s
 
 export const MODULES: Record<string, ModuleInfo> = {
   // ── Sell & serve ──
-  companies: { label: "Companies & leads", icon: "building", blurb: "Companies and their contacts, and a lead pipeline from new to won, with scores that explain themselves.", page: "/product/crm" },
+  companies: { label: "Companies & contacts", icon: "building", blurb: "Every company you deal with, its people and its locations, as the one record every product reads.", page: "/product/crm" },
+  leads: { label: "Lead pipeline", icon: "gauge", blurb: "Leads on a board from new to won, with scores that explain themselves, team pipelines, stage rules and simple automations.", page: "/product/crm" },
   contacts_library: { label: "Contacts library", icon: "users", blurb: "Every contact across every company, clients, vendors and OEMs, in one list to search and filter.", page: "/product/crm" },
   calls: { label: "Calls", icon: "headset", blurb: "A phone icon on each record dials from your device and times the call; the outcome and any callback are logged.", page: "/product/crm" },
   visits: { label: "Field visits", icon: "map-pin", blurb: "Visits planned with a purpose, checked in on the day, written up, and the travel claimed against them.", page: "/product/crm" },

@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
+import { leadsInPlan } from "@/lib/leads/shown";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { SLA_HOURS } from "@/lib/tickets";
@@ -91,12 +92,17 @@ export async function getUserPerformance(params?: { from?: string; to?: string }
         resolvedAt: true,
       },
     }),
-    // Won within the window: when they moved to won, not when they last changed (src/lib/pipeline).
-    byStageDate((moved) =>
-      db.lead.findMany({
-        where: { status: "WON", ownerUserId: { not: null }, ...(within ? moved(within) : {}), AND: [sales] },
-        select: { ownerUserId: true },
-      }),
+    // Won within the window: when they moved to won, not when they last changed (src/lib/pipeline). None
+    // where the plan has no leads (owner, 14 Oct 2026) — the ones a workspace had stay out of sight.
+    leadsInPlan().then((leads) =>
+      leads
+        ? byStageDate((moved) =>
+            db.lead.findMany({
+              where: { status: "WON", ownerUserId: { not: null }, ...(within ? moved(within) : {}), AND: [sales] },
+              select: { ownerUserId: true },
+            }),
+          )
+        : [],
     ),
     purchaseSavingsByUser(params?.from, params?.to),
   ]);

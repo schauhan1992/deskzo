@@ -34,7 +34,7 @@ export function CardContactsList({ rows, showHolder, empty }: { rows: CardContac
                   Open the lead
                 </Link>
               ) : (
-                <Badge>No lead</Badge>
+                row.leadsHere && <Badge>No lead</Badge>
               )}
               <span>{clock.dateTimeShort(row.createdAt)}</span>
             </div>

@@ -30,6 +30,8 @@ export type TriggerDefinition = {
   daysLabel?: string;
   /** What this usually wants to do: reach the customer, or hand one of ours a job. */
   suits: "EMAIL" | "TASK";
+  /** About leads, so offered and run only where the plan has them (owner, 14 Oct 2026). */
+  needsLeads?: true;
 };
 
 export const TRIGGERS: TriggerDefinition[] = [
@@ -134,6 +136,7 @@ export const TRIGGERS: TriggerDefinition[] = [
     label: "Lead gone quiet",
     team: "Sales",
     subject: "LEAD",
+    needsLeads: true,
     enrols: "Open leads whose status has not moved in the window.",
     excludes: "Won, lost and disqualified leads.",
     defaultDays: 21,
@@ -145,6 +148,7 @@ export const TRIGGERS: TriggerDefinition[] = [
     label: "Proposal sent, nothing back",
     team: "Sales",
     subject: "LEAD",
+    needsLeads: true,
     enrols: "Leads sitting at proposal-sent for longer than the window.",
     defaultDays: 5,
     daysLabel: "Days since the proposal",
@@ -155,6 +159,7 @@ export const TRIGGERS: TriggerDefinition[] = [
     label: "Worth another run at",
     team: "Sales",
     subject: "LEAD",
+    needsLeads: true,
     enrols: "Lost leads, the configured number of days after they were lost.",
     excludes:
       "Disqualified leads. Lost means somebody else won it and their contract will end; disqualified means they were never a customer for us.",
@@ -230,6 +235,11 @@ export const TRIGGERS: TriggerDefinition[] = [
     suits: "EMAIL",
   },
 ];
+
+/** The triggers a journey may start on: without leads in the plan (owner, 14 Oct 2026), none about leads. */
+export function triggersOffered(leads: boolean): TriggerDefinition[] {
+  return leads ? TRIGGERS : TRIGGERS.filter((t) => !t.needsLeads);
+}
 
 export const triggerByKey: Record<string, TriggerDefinition> = Object.fromEntries(
   TRIGGERS.map((t) => [t.key, t]),

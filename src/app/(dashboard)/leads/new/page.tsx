@@ -15,7 +15,7 @@ export default async function NewLeadPage({
 }: {
   searchParams: Promise<{ companyId?: string; pipeline?: string }>;
 }) {
-  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
+  if (!(await isModuleEnabled("leads"))) return <ModuleDisabledNotice moduleKey="leads" />;
   const [itemsEnabled, user] = await Promise.all([isModuleEnabled("items"), requireUser()]);
   const [canViewLeads, canAddContact] = await Promise.all([
     hasEffectivePermission(user.id, "leads.view"),

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { LeadStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireModuleUser } from "@/lib/modules-access";
+import { moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { accountScopeIds } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
@@ -59,6 +59,9 @@ const money = (v: Prisma.Decimal | number | null | undefined) => (v === null || 
 async function viewer() {
   const user = await requireModuleUser("forecast");
   if (!(await isModuleEnabled("forecast"))) return null;
+  // Built on the lead pipeline (owner, 14 Oct 2026): without leads in the plan there are no deals to
+  // weigh, and leads a workspace once had stay out of sight here too.
+  if (!(await moduleAvailableForTenant("leads"))) return null;
   const [scope, manage] = await Promise.all([accountScopeIds(user.id), can(user.id, "forecast.manage")]);
   return { user, scope, manage };
 }

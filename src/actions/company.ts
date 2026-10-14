@@ -1689,11 +1689,12 @@ export async function getCompany(id: string) {
   /**
    * The same rule for the view permissions: a part of the account this person may not see is left
    * out here, not hidden by the page. `getCompany` is an endpoint in its own right, and the customer
-   * page is only one of the things that can call it.
+   * page is only one of the things that can call it. Leads also need to be in the plan (owner, 14 Oct
+   * 2026): a workspace that had them keeps them, out of sight, until it has them again.
    */
   const [seesContacts, seesLeads, seesOrders] = await Promise.all([
     canViewContacts(user.id),
-    hasEffectivePermission(user.id, "leads.view"),
+    isModuleEnabled("leads"),
     hasEffectivePermission(user.id, "orders.view"),
   ]);
   return toPlain({

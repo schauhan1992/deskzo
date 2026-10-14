@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { TRIGGERS, triggerByKey } from "@/lib/marketing/triggers";
+import { TRIGGERS, triggerByKey, triggersOffered } from "@/lib/marketing/triggers";
 import { exitLabels, parseExitConditions, type ExitCondition } from "@/lib/marketing/journey";
 
 type Audience = Awaited<ReturnType<typeof listAudiences>>[number];
@@ -51,11 +51,15 @@ export function JourneyEditor({
   journey,
   audiences,
   templates,
+  leadTriggers = true,
 }: {
   journey?: Journey;
   audiences: Audience[];
   templates: Template[];
+  /** Leads in the plan: their triggers are offered. A journey already on one keeps it in the list. */
+  leadTriggers?: boolean;
 }) {
+  const triggers = triggersOffered(leadTriggers || !!(journey && triggerByKey[journey.trigger]?.needsLeads));
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -112,7 +116,7 @@ export function JourneyEditor({
                 setCount(null);
               }}
             >
-              {TRIGGERS.map((t) => (
+              {triggers.map((t) => (
                 <option key={t.key} value={t.key}>
                   {t.team} — {t.label}
                 </option>

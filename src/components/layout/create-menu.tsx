@@ -54,7 +54,7 @@ const SECTIONS: { group: string; entries: CreateEntry[] }[] = [
   {
     group: "Sales",
     entries: [
-      { label: "New lead", term: { key: "lead", template: "New {one:lower}" }, icon: Target, module: "companies", permission: "leads.view", href: "/leads/new" },
+      { label: "New lead", term: { key: "lead", template: "New {one:lower}" }, icon: Target, module: "leads", permission: "leads.view", href: "/leads/new" },
       // One entry, not two. There is no separate "customer" record to create: /customers lists
       // CLIENT companies that have bought something (`customerListWhere` in src/actions/company.ts
       // filters on `products: { some: {} }`), and a company becomes one by ordering, not by being

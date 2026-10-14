@@ -68,12 +68,21 @@ export function soldIn(def: Pick<ModuleDefinition, "countries">, country: string
   return !def.countries || def.countries.includes(country);
 }
 
+/**
+ * Leads were part of the core until 14 Oct 2026, when they became a module sold with Deskzo Pipeline, CRM
+ * and One. A plan saved before then doesn't list them. Until `platform:plans -- products` saves it again,
+ * a plan holding the contact library — which only CRM and Pipeline sell — has leads too, so nobody paying
+ * for a CRM loses their pipeline between the deploy and that run. Harmless after it: those plans list leads.
+ */
+const LEADS_CARRIED_BY = "contacts_library";
+
 /** Whether this workspace's plan includes the module. Unknown keys are never included. */
 export function moduleEntitled(entitlements: Entitlements, country: string, key: string): boolean {
   const def = getModuleDefinition(key);
   if (!def) return false;
   if (def.core) return true;
   if (!soldIn(def, country)) return false;
+  if (key === "leads" && entitlements.modules.includes(LEADS_CARRIED_BY)) return true;
   return entitlements.all || !!def.inEveryPlan || entitlements.modules.includes(key);
 }
 

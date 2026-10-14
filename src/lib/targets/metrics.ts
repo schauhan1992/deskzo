@@ -35,6 +35,8 @@ export type MetricDefinition = {
   counts: string;
   /** What is deliberately left out, where that is the contentious part. */
   excludes?: string;
+  /** Measured from leads, so offered only where the plan has them (owner, 14 Oct 2026). */
+  needsLeads?: true;
 };
 
 export const METRICS: MetricDefinition[] = [
@@ -89,6 +91,7 @@ export const METRICS: MetricDefinition[] = [
     unit: "COUNT",
     team: "Sales",
     counts: "Leads you own that reached Won during the period.",
+    needsLeads: true,
   },
   {
     key: "LEAD_VALUE_WON",
@@ -97,6 +100,7 @@ export const METRICS: MetricDefinition[] = [
     team: "Sales",
     counts: "The estimated value of the leads you own that were won in the period.",
     excludes: "Leads won with no value recorded — they count towards the number, not the value.",
+    needsLeads: true,
   },
   {
     key: "LEADS_CREATED",
@@ -104,6 +108,7 @@ export const METRICS: MetricDefinition[] = [
     unit: "COUNT",
     team: "Calling",
     counts: "Leads you sourced or qualified in the period — a requirement you turned into an opportunity.",
+    needsLeads: true,
   },
   {
     key: "CALLS_CONNECTED",
@@ -169,6 +174,11 @@ export const METRICS: MetricDefinition[] = [
     counts: "Tickets assigned to you that were resolved in the period.",
   },
 ];
+
+/** The metrics a new target or scheme may be set on: without leads in the plan, none measured from them. */
+export function metricsOffered(leads: boolean): MetricDefinition[] {
+  return leads ? METRICS : METRICS.filter((m) => !m.needsLeads);
+}
 
 export const metricByKey = Object.fromEntries(METRICS.map((m) => [m.key, m])) as Record<
   MetricKey,

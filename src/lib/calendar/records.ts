@@ -65,7 +65,7 @@ function around(company: CompanyBits) {
 export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): Promise<MeetingRecord | null> {
   switch (ref.kind) {
     case "lead": {
-      if (!(await can(userId, "leads.view"))) return null;
+      if (!(await moduleAvailableForTenant("leads")) || !(await can(userId, "leads.view"))) return null;
       const lead = await db.lead.findUnique({ where: { id: ref.id }, select: { id: true, leadSeq: true, title: true, contactId: true, company: COMPANY } });
       if (!lead || !(await mayAccess(userId, "leads", "view", lead.id))) return null;
       return {

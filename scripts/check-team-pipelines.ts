@@ -246,7 +246,7 @@ function pure() {
     "a workspace on its plan, with only what it sells, gets the simple menu",
     simpleMenuFor([...pipelineModules, "tasks", "notes"], ["deskzo-pipeline"]) && !simpleMenuFor([...pipelineModules, "visits"], ["deskzo-pipeline", "deskzo-crm"]) && !simpleMenuFor(["workspace"], ["zz-crm"]),
   );
-  const simpleNav = buildNavigation({ openModules: ["companies", "contacts_library", "calls", "forms", "booking", "workspace"], permissions: ["leads.view", "contacts.view", "calls.view", "booking.manage"], country: "IN", simple: true });
+  const simpleNav = buildNavigation({ openModules: [...pipelineModules, "workspace"], permissions: ["leads.view", "contacts.view", "calls.view", "booking.manage"], country: "IN", simple: true });
   ok("  one short list, the pipeline first", simpleNav.filter((s) => !s.system).length === 1 && simpleNav[0]!.items[0]!.href === "/leads", simpleNav[0]?.items.map((i) => i.href).join(" "));
   const fullNav = buildNavigation({ openModules: ["companies", "contacts_library", "calls", "forms", "booking", "workspace"], permissions: ["leads.view", "contacts.view", "calls.view", "booking.manage"], country: "IN" });
   ok("  while everybody else's is as it was", fullNav.filter((s) => !s.system).length > 1);

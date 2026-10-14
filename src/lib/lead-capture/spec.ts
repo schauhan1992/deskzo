@@ -120,7 +120,7 @@ export const RESPONSES: { status: string; meaning: string }[] = [
       "The lead was created. The body has its id and reference (LEAD-000123), whether it was assigned, and not_saved — any of your own fields' values that couldn't be used, each with the reason (empty when every one was).",
   },
   { status: "200 OK", meaning: "A request with the same external_id was already received — the body names the existing lead, and nothing new was created." },
-  { status: "202 Accepted", meaning: "Received, but the company is managed by one of our resellers, so no lead was created here; our team is notified to route it." },
+  { status: "202 Accepted", meaning: "Received, but no lead was created: either the company is managed by one of our resellers (`routed` is \"reseller\") and our team is notified to route it, or leads aren't in our plan (`routed` is \"contact\") and the company and contact were saved, with not_saved as for a 201." },
   { status: "400 Bad Request", meaning: "Something is missing or malformed. `error` says what, and `fields` says which." },
   { status: "401 Unauthorized", meaning: "The key ID or secret is wrong, or the key has been revoked. The same answer for each, deliberately." },
   { status: "413 Payload Too Large", meaning: `The body is over ${MAX_BODY_BYTES / 1024} KB.` },

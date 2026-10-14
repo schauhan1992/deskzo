@@ -10,7 +10,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
+  if (!(await isModuleEnabled("leads"))) return <ModuleDisabledNotice moduleKey="leads" />;
   const [{ id }, query, user] = await Promise.all([params, searchParams, requireUser()]);
   if (!(await hasEffectivePermission(user.id, "leads.view"))) notFound();
   const ref = parseRecordRef(id);

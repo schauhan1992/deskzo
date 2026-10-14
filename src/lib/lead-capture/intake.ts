@@ -4,6 +4,7 @@ import { runLeadAutomations } from "@/lib/pipeline/automations";
 import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import { Prisma, type ContactDesignation, type LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { normalizeCompanyName } from "@/lib/company-name";
 import { isResellerManaged } from "@/lib/reseller";
 import { notifyUser } from "@/lib/notify";
@@ -41,6 +42,10 @@ import { MAX_OWN_FIELDS, type OwnFieldGroupName } from "@/lib/lead-capture/spec"
  *     website never changes a customer already on file (src/lib/custom-fields/outside.ts). A value
  *     that can't be used is set aside, listed in the answer and noted on the lead; it never costs the
  *     lead itself. Required fields are not required here: the lead says what is still to fill in.
+ *   · **A lead only where the plan has leads** (owner, 14 Oct 2026). A workspace without them — a
+ *     Cards or Campaigns one, or one that has stopped paying for its CRM — still gets the company and
+ *     contact, made or found by the same rules, and no lead, score or automation. The lead's own
+ *     fields are set aside, and whoever is told about the enquiry is told what it said.
  */
 
 const text = (max: number) => z.string().trim().max(max).optional().or(z.literal(""));
@@ -167,7 +172,12 @@ export type NotSaved = { field: string; reason: string };
 export type IntakeResult =
   | { status: "created"; leadId: string; reference: string; assigned: boolean; notSaved: NotSaved[] }
   | { status: "duplicate"; leadId: string; reference: string }
-  | { status: "reseller" };
+  | { status: "reseller" }
+  /** No leads in the workspace's plan: the company and contact, made or found, and nothing more. */
+  | { status: "contact"; companyId: string; companySeq: number; contactId: string; notSaved: NotSaved[] };
+
+/** Why a lead's own field is set aside where there is no lead to put it on. */
+export const NO_LEADS = "Leads aren't in this workspace's plan, so there is no lead to save it on.";
 
 type SetAside = { group: OwnFieldGroupName; skipped: SkippedValue };
 
@@ -214,8 +224,9 @@ export type IntakeOptions = {
 };
 
 export async function intakeLead(key: IntakeSource, p: LeadPayload, options: IntakeOptions = {}): Promise<IntakeResult> {
-  // A retry of something already received. Only a key makes a retry recognisable.
-  if (p.external_id && key.id) {
+  const leadsHere = await moduleAvailableForTenant("leads");
+  // A retry of something already received. Only a key makes a retry recognisable, and only a lead records it.
+  if (p.external_id && key.id && leadsHere) {
     const existing = await db.lead.findUnique({
       where: { captureKeyId_externalId: { captureKeyId: key.id, externalId: p.external_id } },
       select: { id: true, leadSeq: true },
@@ -251,12 +262,13 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
   // The workspace's own fields, each value checked on its own. Read now; written only into the
   // records the transaction below creates.
   const [leadOwn, companyOwn, contactOwn] = await Promise.all([
-    customFieldsFromOutside("LEAD", p.custom_fields),
+    customFieldsFromOutside("LEAD", leadsHere ? p.custom_fields : undefined),
     customFieldsFromOutside("COMPANY", p.company_fields),
     customFieldsFromOutside("CONTACT", p.contact_fields),
   ]);
+  const leadSkipped: SkippedValue[] = leadsHere ? leadOwn.skipped : Object.keys(p.custom_fields ?? {}).map((key) => ({ key, reason: NO_LEADS }));
   const setAside: SetAside[] = [
-    ...leadOwn.skipped.map((skipped) => ({ group: "custom_fields" as const, skipped })),
+    ...leadSkipped.map((skipped) => ({ group: "custom_fields" as const, skipped })),
     ...companyOwn.skipped.map((skipped) => ({ group: "company_fields" as const, skipped })),
     ...contactOwn.skipped.map((skipped) => ({ group: "contact_fields" as const, skipped })),
   ];
@@ -268,16 +280,19 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
   const unknownSkus = (p.products ?? []).filter((sku) => !items.some((i) => i.sku.toLowerCase() === sku.toLowerCase()));
   const designation = designationFromTitle(p.designation);
   const source: LeadSource = p.source ?? "WEBSITE";
+  // The assignment rules are part of leads; without them a new company is owned only by somebody named.
   const owner = options.ownerUserId
     ? { userId: options.ownerUserId, note: `Shared back from ${key.name}.` }
-    : await chooseOwner({
-        brandIds: [...new Set(items.map((i) => i.brandId).filter((b): b is string => !!b))],
-        itemTypes: [...new Set(items.map((i) => i.type))],
-        designation,
-        source,
-        state: p.state || null,
-        companyOwnerId: existingCompany?.ownerUserId ?? null,
-      });
+    : !leadsHere
+      ? null
+      : await chooseOwner({
+          brandIds: [...new Set(items.map((i) => i.brandId).filter((b): b is string => !!b))],
+          itemTypes: [...new Set(items.map((i) => i.type))],
+          designation,
+          source,
+          state: p.state || null,
+          companyOwnerId: existingCompany?.ownerUserId ?? null,
+        });
 
   const sourceDetail = [
     key.sourceLabel || key.name,
@@ -308,10 +323,10 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
       .join("\n\n");
 
   // Where the lead starts (src/lib/pipeline) — read before the transaction, which holds a connection.
-  const entry = await newLeadStage(undefined, options.pipelineId);
-  let created: { id: string; leadSeq: number };
+  const entry = leadsHere ? await newLeadStage(undefined, options.pipelineId) : null;
+  let made: { lead: { id: string; leadSeq: number } | null; company: { id: string; companySeq: number }; contactId: string };
   try {
-    created = await db.$transaction(async (tx) => {
+    made = await db.$transaction(async (tx) => {
       const company =
         existingCompany ??
         (await tx.company.create({
@@ -337,7 +352,7 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
             },
             ...companyOwn.data,
           },
-          select: { id: true },
+          select: { id: true, companySeq: true },
         }));
 
       const matched =
@@ -358,8 +373,9 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
           select: { id: true },
         }));
 
+      if (!entry) return { lead: null, company, contactId: contact.id };
       const description = describe({ company: !existingCompany, contact: !matched });
-      return tx.lead.create({
+      const lead = await tx.lead.create({
         data: {
           companyId: company.id,
           contactId: contact.id,
@@ -380,6 +396,7 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
         },
         select: { id: true, leadSeq: true },
       });
+      return { lead, company, contactId: contact.id };
     });
   } catch (error) {
     // Two copies of one request racing: the unique index let exactly one through. Answer the other
@@ -392,6 +409,29 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
       if (winner) return { status: "duplicate", leadId: winner.id, reference: formatLeadId(winner.leadSeq) };
     }
     throw error;
+  }
+
+  const notSaved = setAside.map(({ group, skipped }) => ({ field: `${group}.${skipped.key}`, reason: skipped.reason }));
+  const created = made.lead;
+  if (!created) {
+    // No lead to hold what they said, so whoever hears of it is told — the company's owner, else whoever issued the key.
+    if (options.notify !== false) {
+      await notifyUser({
+        userId: owner?.userId ?? existingCompany?.ownerUserId ?? actorId,
+        type: "FORM_RESPONSE",
+        title: options.notifyTitle ?? `A website enquiry from ${p.name}${companyName === p.name ? "" : `, ${companyName}`}`,
+        message: [[p.email, p.phone].filter(Boolean).join(" · "), p.product_interest, p.message].filter(Boolean).join("\n").slice(0, 500),
+        link: companyPath(made.company.companySeq),
+      });
+    }
+    await recordAudit({
+      userId: actorId,
+      action: "CREATE",
+      entityType: "Contact",
+      entityId: made.contactId,
+      entityLabel: key.id ? `Website enquiry via “${key.name}” (no leads in the plan)` : `Contact from ${key.name}`,
+    });
+    return { status: "contact", companyId: made.company.id, companySeq: made.company.companySeq, contactId: made.contactId, notSaved };
   }
 
   await refreshLeadScore(created.id);
@@ -412,13 +452,7 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
     entityLabel: key.id ? `Website lead via “${key.name}”` : `Lead from ${key.name}`,
   });
   // The pipeline's automations for a lead arriving (src/lib/pipeline/automations.ts).
-  await runLeadAutomations({ leadId: created.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
+  await runLeadAutomations({ leadId: created.id, trigger: "LEAD_CREATED", pipelineId: entry?.pipelineId ?? MAIN_PIPELINE_ID });
 
-  return {
-    status: "created",
-    leadId: created.id,
-    reference: formatLeadId(created.leadSeq),
-    assigned: Boolean(owner),
-    notSaved: setAside.map(({ group, skipped }) => ({ field: `${group}.${skipped.key}`, reason: skipped.reason })),
-  };
+  return { status: "created", leadId: created.id, reference: formatLeadId(created.leadSeq), assigned: Boolean(owner), notSaved };
 }

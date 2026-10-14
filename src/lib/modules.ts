@@ -93,14 +93,27 @@ export type CountryFeature = keyof typeof COUNTRY_FEATURES;
 
 export const MODULE_REGISTRY: ModuleDefinition[] = [
   {
+    /**
+     * The lead pipeline (owner, 14 Oct 2026): sold with Deskzo Pipeline, Deskzo CRM and Deskzo One, no
+     * longer in every workspace — a People- or Signatures-only workspace has its companies and contacts
+     * but no deals to chase. Its team pipelines, stage rules, automations and lead capture go with it.
+     * Listed before Companies so the menu's Sales section opens on the pipeline.
+     */
+    key: "leads",
+    label: "Leads",
+    description: "The lead pipeline: deals on a board from new to won, team pipelines, stage rules, automations, lead capture and scores.",
+    navGroup: "Sales",
+    viewPermission: "leads.view",
+    navItems: [{ href: "/leads", label: "Leads", term: { key: "lead" }, icon: Target, permission: "leads.view" }],
+  },
+  {
     key: "companies",
-    label: "Companies & Leads",
-    description: "Company profiling, contacts, and the lead pipeline.",
+    label: "Companies & Contacts",
+    description: "Company profiling, contacts and customers — in every workspace.",
     core: true,
     navGroup: "Sales",
     navItems: [
       { href: "/companies", label: "Companies", term: { key: "company" }, icon: Building2 },
-      { href: "/leads", label: "Leads", term: { key: "lead" }, icon: Target, permission: "leads.view" },
       { href: "/customers", label: "Customer", term: { key: "customer" }, icon: Handshake },
       // One company entered twice, and the merge that folds it into the real one — src/lib/companies/merge.ts.
       { href: "/companies/duplicates", label: "Duplicate companies", term: { key: "company", template: "Duplicate {many:lower}" }, icon: Combine, permission: "companies.merge" },

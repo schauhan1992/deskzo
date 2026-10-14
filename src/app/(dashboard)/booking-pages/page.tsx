@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { workspaceClock } from "@/lib/time/workspace";
 import { leadPath } from "@/lib/record-links";
 import { db } from "@/lib/db";
+import { leadsInPlan } from "@/lib/leads/shown";
 
 /**
  * Booking pages (owner, 14 Oct 2026 — src/lib/booking): the pages customers book meetings on, and what
@@ -17,14 +18,16 @@ export default async function Page() {
   const data = await listBookingPages();
   if (!data) notFound();
   const clock = await workspaceClock();
-  const leadIds = data.bookings.map((b) => b.leadId).filter((id): id is string => !!id);
+  const leads = await leadsInPlan();
+  const leadIds = leads ? data.bookings.map((b) => b.leadId).filter((id): id is string => !!id) : [];
   const seqs = leadIds.length ? new Map((await db.lead.findMany({ where: { id: { in: leadIds } }, select: { id: true, leadSeq: true } })).map((l) => [l.id, l.leadSeq])) : new Map<string, number>();
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-text">Booking pages</h1>
         <p className="mt-1 text-sm text-muted">
-          Pages where customers book a meeting in the time your team has free. A booking goes into the host&apos;s calendar with the invitation and a meeting link, and opens a lead.
+          Pages where customers book a meeting in the time your team has free. A booking goes into the host&apos;s calendar with the invitation and a meeting link, and{" "}
+          {leads ? "opens a lead" : "adds the company and contact"}.
         </p>
       </div>
       {!data.ready ? (

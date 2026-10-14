@@ -88,6 +88,33 @@ Live steps:
 2. Run `npm run platform:plans -- products` (makes the Deskzo Pipeline plan, and adds forms and booking pages to Deskzo CRM's), then `npm run platform:plans -- prices --apply`.
 3. Run `npm run site:seed-pages` for its product page.
 
+## Leads: only in Pipeline, CRM and Deskzo One
+
+Decided 14 Oct 2026. Leads were part of the core, in every workspace whatever it bought. Now they are a module of their own, `leads`, sold with Deskzo Pipeline, Deskzo CRM and Deskzo One. Companies, contacts, customers, duplicates and the mail log stay core, in every plan.
+
+What goes with leads:
+- **Their own pages and settings.** /leads, Settings → Pipeline (its leads half), Lead assignment and the Lead capture API. Every lead action checks the plan (`check:module-guards`).
+- **What reads them elsewhere.** On a plan without leads, these leave them out:
+  - the dashboard's lead widgets, reports' Leads source, search and the Create menu;
+  - the copilot's lead tool, and the company page's Leads tab, stats and New lead button;
+  - lead links on tasks, calls, visits, notes, expenses, documents and card contacts;
+  - the lead target and incentive metrics, deal wins, performance's deals won, and journeys' lead triggers;
+  - proposals offered when an order is punched, and a document raised from a lead;
+  - the industry templates' pipeline and lead fields.
+- **The forecast.** It weighs open deals, so Deskzo Analytics on its own shows a note: it needs Pipeline or CRM.
+
+What still works without leads:
+- A web form, a card share-back or scan, the lead capture API and a booking page each make or find the company and contact. The submission is kept as before. A booking still books the meeting.
+- The API answers `202` with `routed: "contact"`, and the key's issuer, or the company's owner, is told what the enquiry said.
+
+A workspace that loses Pipeline or CRM keeps its leads, out of sight, and gets them back when it has leads again. Nothing is deleted and no data migration is needed.
+
+Until the plans are saved again, a plan holding the contact library has leads too. Only Pipeline and CRM sell the contact library, so nobody paying for a CRM loses their pipeline between the deploy and that run (`src/lib/entitlements.ts`).
+
+Live steps, after the deploy:
+1. `npm run platform:plans -- products` writes `leads` into the Pipeline and CRM plans.
+2. `npm run platform:plans -- refresh` recomputes every workspace's entitlements, so Cards, People, Signatures, Campaigns and the other workspaces stop showing leads.
+
 ## What it costs us to sell, and whether it holds up
 
 - **Payment:** Razorpay takes about 2% plus GST on it, **≈2.36% of each charge** (cards, UPI, netbanking). International cards are about 3.5%. New merchants get 0% for 90 days or ₹5 lakh, whichever comes first.

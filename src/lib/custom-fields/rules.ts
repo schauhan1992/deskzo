@@ -28,14 +28,15 @@ export const CUSTOM_FIELD_ENTITY_LABELS: Record<CustomFieldEntityKey, string> = 
 };
 
 /**
- * The module a record type belongs to — its fields are offered only where the module is. Companies,
- * contacts and leads are the core of every plan (src/lib/module-actions.ts "core"): null.
+ * The module a record type belongs to — its fields are offered only where the module is. Companies and
+ * contacts are the core of every plan (src/lib/module-actions.ts "core"): null. Leads are sold with
+ * Pipeline, CRM and One (owner, 14 Oct 2026).
  */
-export const CUSTOM_FIELD_ENTITY_MODULES: Record<CustomFieldEntityKey, "orders" | "items" | "vendors" | null> = {
+export const CUSTOM_FIELD_ENTITY_MODULES: Record<CustomFieldEntityKey, "orders" | "items" | "vendors" | "leads" | null> = {
   COMPANY: null,
   VENDOR: "vendors",
   CONTACT: null,
-  LEAD: null,
+  LEAD: "leads",
   ORDER: "orders",
   ITEM: "items",
 };

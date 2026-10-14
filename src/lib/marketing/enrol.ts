@@ -21,6 +21,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { currentKeys } from "@/lib/tenancy/keys";
 import { byStageDate, salesLeads } from "@/lib/pipeline/server";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 /**
  * Finding who should be in a journey, and moving them along it.
@@ -68,6 +69,8 @@ export async function candidatesFor(
   // with a moment, which leaves out a day that is still running.
   const clock = await workspaceClock();
   const today = clock.calendarDate(new Date());
+  // A lead trigger enrols nobody where the plan has no leads — the leads a workspace once had stay out of sight.
+  if (triggerByKey[trigger]?.needsLeads && !(await moduleAvailableForTenant("leads"))) return [];
 
   switch (trigger) {
     case "SUBSCRIPTION_RENEWAL": {

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import {
-  METRICS,
+  metricsOffered,
   formatMetric,
   metricByKey,
   scopeLabels,
@@ -37,7 +37,8 @@ const SCOPES: TargetScope[] = ["USER", "DEPARTMENT", "COMPANY"];
  * the air is how targets lose credibility — "they did ₹18L last month" is the only sensible place
  * to start from.
  */
-export function SetTargetsDialog({ options }: { options: Options }) {
+export function SetTargetsDialog({ options, leadMetrics = true }: { options: Options; leadMetrics?: boolean }) {
+  const metrics = metricsOffered(leadMetrics);
   const router = useRouter();
   const clock = useClock();
   const [open, setOpen] = useState(false);
@@ -155,9 +156,9 @@ export function SetTargetsDialog({ options }: { options: Options }) {
             <div className="space-y-1.5">
               <Label htmlFor="metric">What&apos;s being measured</Label>
               <Select id="metric" value={metric} onChange={(e) => setMetric(e.target.value as TargetMetric)}>
-                {[...new Set(METRICS.map((m) => m.team))].map((team) => (
+                {[...new Set(metrics.map((m) => m.team))].map((team) => (
                   <optgroup key={team} label={team}>
-                    {METRICS.filter((m) => m.team === team).map((m) => (
+                    {metrics.filter((m) => m.team === team).map((m) => (
                       <option key={m.key} value={m.key}>
                         {m.label}
                       </option>

@@ -370,6 +370,8 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/pipeline",
             icon: SquareKanban,
             permission: "pipeline.manage",
+            // Lead stages and pipelines, and an order's own steps — each half where its module is.
+            module: ["leads", "orders"],
           },
           {
             key: "lead-assignment",
@@ -378,6 +380,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/lead-assignment",
             icon: Shuffle,
             permission: "settings.manage",
+            module: "leads",
           },
           {
             key: "lead-capture",
@@ -386,6 +389,7 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/lead-capture",
             icon: KeyRound,
             permission: "settings.manage",
+            module: "leads",
           },
         ],
       },

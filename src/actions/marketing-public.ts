@@ -428,6 +428,11 @@ export async function submitForm(input: {
   const admin = await db.user.findFirst({ where: { role: "ADMIN", active: true }, select: { id: true } });
   const companyName = answers.companyName || email.split("@")[1]!;
   /**
+   * A form makes a lead only where the plan has leads (owner, 14 Oct 2026): without them its answer
+   * still makes or finds the company and contact, and the submission is kept as always.
+   */
+  const makesLead = form.createsLead && (await moduleAvailableForTenant("leads"));
+  /**
    * A person named on the form wins; otherwise the lead assignment rules decide, as they do for
    * the website API; an admin only when no rule fits — so a form lead never lands on nobody.
    */
@@ -435,7 +440,7 @@ export async function submitForm(input: {
     where: { normalizedName: normalizeCompanyName(companyName) },
     select: { ownerUserId: true },
   });
-  const ruled = form.assignToUserId
+  const ruled = form.assignToUserId || !makesLead
     ? null
     : await chooseOwner({
         brandIds: [],
@@ -454,7 +459,7 @@ export async function submitForm(input: {
   const submissionHash = createHash("sha256").update(`${email}:${form.id}`).digest("hex").slice(0, 32);
 
   // Where a lead from the form starts (src/lib/pipeline) — read before the transaction, which holds a connection.
-  const entry = await newLeadStage();
+  const entry = makesLead ? await newLeadStage() : null;
   const result = await db.$transaction(async (tx) => {
     if (event) {
       await lockSeats(tx, form.id);
@@ -533,7 +538,7 @@ export async function submitForm(input: {
 
     // Nobody saying "can't make it" to an event is a sales opportunity.
     const lead =
-      form.createsLead && attending !== false
+      entry && attending !== false
         ? await tx.lead.create({
             data: {
               companyId: company.id,
@@ -636,7 +641,7 @@ export async function submitForm(input: {
   if (result.lead) {
     await refreshLeadScore(result.lead.id);
     // The pipeline's automations for a lead arriving (src/lib/pipeline/automations.ts).
-    await runLeadAutomations({ leadId: result.lead.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
+    await runLeadAutomations({ leadId: result.lead.id, trigger: "LEAD_CREATED", pipelineId: entry?.pipelineId ?? MAIN_PIPELINE_ID });
   }
 
   // A lead goes to whoever owns it. Without one the link is to the form's answers, so it goes to
@@ -723,7 +728,8 @@ async function submitInvited(input: {
   const first = invite.submission === null;
   const reseller = isResellerManaged(invite.company);
 
-  const entry = await newLeadStage();
+  // A lead only where the plan has leads, as on the public link.
+  const entry = first && form.createsLead && !reseller && (await moduleAvailableForTenant("leads")) ? await newLeadStage() : null;
   const outcome = await db.$transaction(async (tx) => {
     if (event) {
       await lockSeats(tx, form.id);
@@ -736,7 +742,7 @@ async function submitInvited(input: {
     }
 
     const lead =
-      first && form.createsLead && attending !== false && !reseller
+      entry && attending !== false
         ? await tx.lead.create({
             data: {
               companyId: invite.company.id,
@@ -788,7 +794,7 @@ async function submitInvited(input: {
   }
   if (outcome.lead) {
     await refreshLeadScore(outcome.lead.id);
-    await runLeadAutomations({ leadId: outcome.lead.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
+    await runLeadAutomations({ leadId: outcome.lead.id, trigger: "LEAD_CREATED", pipelineId: entry?.pipelineId ?? MAIN_PIPELINE_ID });
   }
 
   // Whoever sent the invitation hears about it, then whoever the form routes to, then its owner.

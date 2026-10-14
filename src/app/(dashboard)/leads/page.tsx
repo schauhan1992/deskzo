@@ -52,7 +52,7 @@ export default async function LeadsPage({
     pageSize?: string;
   } & CustomFilterParams>;
 }) {
-  if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
+  if (!(await isModuleEnabled("leads"))) return <ModuleDisabledNotice moduleKey="leads" />;
   const user = await requireUser();
   if (!(await hasEffectivePermission(user.id, "leads.view"))) notFound();
 

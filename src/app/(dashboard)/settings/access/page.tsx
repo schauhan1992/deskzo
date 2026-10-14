@@ -150,8 +150,8 @@ async function StaffTab({
       listRoles(),
       can(viewerId, "users.manage"),
       can(viewerId, "users.assignRole"),
-      // The leads column is lead data: only for somebody who may see leads at all.
-      can(viewerId, "leads.view"),
+      // The leads column is lead data: only for somebody who may see leads at all, where the plan has them.
+      moduleAvailableForTenant("leads").then((on) => on && can(viewerId, "leads.view")),
       // When somebody last signed in is in the activity log and the sign-in log; whoever may read
       // either sees it here, and nobody else does.
       can(viewerId, "activity.viewAll"),

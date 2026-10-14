@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ContactDesignation, ItemType, LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { chooseOwner } from "@/lib/leads/assign";
@@ -24,7 +24,8 @@ const ITEM_TYPES = ["SUBSCRIPTION", "GOOD", "SERVICE"] as const satisfies readon
 const STRATEGIES = ["ROUND_ROBIN", "LEAST_LOADED", "SPECIFIC_USER", "ACCOUNT_MANAGER"] as const;
 
 async function requireAdmin() {
-  const user = await requireUser();
+  // Part of the leads module (owner, 14 Oct 2026) — only where the plan has leads.
+  const user = await requireModuleUser("leads");
   return (await hasEffectivePermission(user.id, "settings.manage")) ? user : null;
 }
 

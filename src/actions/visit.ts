@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type VisitStatus, type VisitPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
+import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
 import { toPlain } from "@/lib/serialize";
@@ -102,7 +103,7 @@ export async function listVisitsPaged(params: VisitListParams & { page: number; 
     db.visit.count({ where }),
     db.visit.count({ where: { ...where, status: { in: ["PLANNED", "CHECKED_IN"] } } }),
   ]);
-  return { rows: toPlain(rows), total, openCount };
+  return { rows: toPlain(withoutHiddenLeads(rows, await leadsInPlan())), total, openCount };
 }
 
 /** A company's visits, for its 360 view — scoped the same way as the list. */
@@ -111,7 +112,7 @@ export async function listCompanyVisits(companyId: string) {
   if (!(await viewerHas("visits.view"))) return [];
   const where = await visitListWhere(user.id, { companyId });
   const rows = await db.visit.findMany({ where, orderBy: { scheduledFor: "desc" }, include: visitListInclude });
-  return toPlain(rows);
+  return toPlain(withoutHiddenLeads(rows, await leadsInPlan()));
 }
 
 /**
@@ -152,7 +153,7 @@ export async function getVisit(id: string) {
     },
   });
   if (!visit) return null;
-  return toPlain(visit);
+  return toPlain((await leadsInPlan()) ? visit : { ...visit, lead: null });
 }
 
 export async function createVisit(input: unknown): Promise<ActionResult<{ id: string; visitSeq: number }>> {
@@ -415,6 +416,8 @@ export async function visitFormOptions(companyId: string) {
     return { contacts: [], locations: [], leads: [] };
   }
 
+  // A visit is made against an open deal only where the plan has leads.
+  const leadsHere = await leadsInPlan();
   const [contacts, locations, leads] = await Promise.all([
     db.contact.findMany({
       where: { companyId },
@@ -426,11 +429,13 @@ export async function visitFormOptions(companyId: string) {
       orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       select: { id: true, label: true, address: true, city: true, state: true, pincode: true },
     }),
-    db.lead.findMany({
-      where: { companyId, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } },
-      orderBy: { updatedAt: "desc" },
-      select: { id: true, title: true },
-    }),
+    leadsHere
+      ? db.lead.findMany({
+          where: { companyId, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, title: true },
+        })
+      : [],
   ]);
   return { contacts, locations, leads };
 }

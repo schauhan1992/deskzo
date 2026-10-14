@@ -13,6 +13,8 @@
  *     borrow from it (the company page, the dashboard, the layout) still render;
  *   · seats: every way an account becomes active is refused once they are taken, and support
  *     accounts take none;
+ *   · leads, sold with Pipeline, CRM and One: elsewhere they refuse and their page says so, a card makes
+ *     only a company and contact, and leads a workspace had are kept out of sight until it has them again;
  *   · the copilot's monthly allowance; e-way bills outside India;
  *   · the console: who may change plans, its previews agreeing with the changes they preview, and
  *     its pages.
@@ -143,6 +145,16 @@ async function main() {
   const nothing = rules.CORE_ONLY;
   ok("the core and the basics are in every plan, nothing else", rules.moduleEntitled(nothing, "AE", "companies") && rules.moduleEntitled(nothing, "AE", "tasks") && !rules.moduleEntitled(nothing, "IN", "helpdesk"));
   ok("an unknown module is never in a plan", !rules.moduleEntitled(everything, "IN", "no-such-module"));
+  {
+    const products = require("../src/lib/products") as typeof import("../src/lib/products");
+    const planOf = (key: string) => ({ ...nothing, modules: [...rules.withDependencies([...products.BASE_MODULES, ...products.productByKey(key)!.modules])] });
+    const withLeads = products.PRODUCT_KEYS.filter((key) => rules.moduleEntitled(planOf(key), "IN", "leads"));
+    ok("leads are sold with Pipeline, CRM and One — not in the core", !rules.moduleEntitled(nothing, "IN", "leads") && withLeads.join() === "crm,pipeline" && rules.moduleEntitled(everything, "IN", "leads"), withLeads.join());
+    ok(
+      "  and a plan saved before they were a module keeps them while it lists the contact library",
+      rules.moduleEntitled({ ...nothing, modules: ["contacts_library", "calls"] }, "IN", "leads") && !rules.moduleEntitled({ ...nothing, modules: ["calls", "forms"] }, "IN", "leads"),
+    );
+  }
 
   section("A scratch control plane");
   ok("the database server is a local one", local);
@@ -362,6 +374,62 @@ async function main() {
     }
     await ent.refreshEntitlements(TID);
     ok(`with each of ${sweep.length} modules alone, the company page, the dashboard and the layout render`, sweepBroken.length === 0, sweepBroken.length ? `\n    ${sweepBroken.join("\n    ")}` : "");
+
+    section("Leads go with the plan (owner, 14 Oct 2026)");
+    {
+      const products = require("../src/lib/products") as typeof import("../src/lib/products");
+      const leadActions = require("../src/actions/lead") as typeof import("../src/actions/lead");
+      const cards = require("../src/lib/cards/capture") as typeof import("../src/lib/cards/capture");
+      const Leads = (require(`${D}/leads/page`) as { default: Page }).default;
+      /** The workspace on one product's plan, as `platform:plans -- products` writes it. */
+      const onProduct = (key: string) =>
+        control.tenant.update({
+          where: { id: TID },
+          data: {
+            entitlements: { v: 1, all: false, modules: [...rules.withDependencies([...products.BASE_MODULES, ...products.productByKey(key)!.modules])], seats: null, copilotTokens: null, plans: [products.productPlanKey(key as never)] },
+          },
+        });
+      const kept = await inWs(() => db.lead.create({ data: { companyId: company.id, title: "Zz kept lead", createdByUserId: owner.id }, select: { id: true } }));
+      const sees = async () => (await inWs(() => leadActions.listLeadsPaged({ page: 1, pageSize: 100 }))).rows.some((r) => r.id === kept.id);
+      const notInPlan = (html: string) => /isn't part of this workspace's plan/.test(text(html));
+      for (const key of ["pipeline", "crm"]) {
+        await onProduct(key);
+        const page = await inWs(() => attempt(Leads));
+        ok(`${key}: leads as before — listed, and their page opens`, (await sees()) && !page.startsWith("FAILED") && !notInPlan(page), page.slice(0, 120));
+      }
+      await onProduct("signatures");
+      ok("Signatures alone: the lead actions refuse", /^ModuleNotInPlan: Leads/.test(await thrown(() => inWs(() => leadActions.listLeadsPaged({ page: 1, pageSize: 10 })))));
+      const write = await thrown(() => inWs(() => leadActions.createLead({ companyId: company.id, title: "Zz refused lead" })));
+      ok("  and so does making one", /^ModuleNotInPlan: Leads/.test(write), write);
+      ok("  /leads says they aren't in the plan", notInPlan(await inWs(() => attempt(Leads))));
+      ok("  the lead it had is kept, out of sight", (await inWs(() => db.lead.count({ where: { id: kept.id } }))) === 1);
+
+      await onProduct("cards");
+      const met = await inWs(() =>
+        cards.recordCardContact({
+          cardId: null,
+          owner: { id: owner.id, name: owner.name },
+          via: "SCAN",
+          event: null,
+          person: { name: "Zz Met Person", email: "met@zzent-met.example", phone: "", company: "Zz Met Co", jobTitle: "IT head", message: "Call me", answers: [] },
+        }),
+      );
+      const metCompany = await inWs(() => db.company.findUnique({ where: { normalizedName: "zz met co" }, select: { id: true, contacts: { select: { email: true } }, _count: { select: { leads: true } } } }));
+      ok(
+        "Cards alone: a card scanned is a card contact, a company and a contact — and no lead",
+        !met.leadLink && !!metCompany && metCompany.contacts.some((c) => c.email === "met@zzent-met.example") && metCompany._count.leads === 0,
+        JSON.stringify(metCompany),
+      );
+
+      await onProduct("analytics");
+      const Forecast = (require(`${D}/forecast/page`) as { default: Page }).default;
+      const forecast = text(await inWs(() => attempt(Forecast)));
+      ok("Analytics alone: the forecast says it needs leads, from Pipeline or CRM", /needs leads — part of Deskzo CRM and Deskzo Pipeline/.test(forecast), forecast.slice(0, 160));
+
+      await onProduct("crm");
+      ok("on CRM again, the kept lead is back", await sees());
+      await ent.refreshEntitlements(TID);
+    }
 
     section("Seats");
     await plans.setLimitOverrides(TID, { seats: 2, copilotTokens: null }, "script:check");

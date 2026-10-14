@@ -3,6 +3,7 @@
 import type { CompanyRelationshipType, PaymentTerms } from "@prisma/client";
 import { db } from "@/lib/db";
 import { isModuleEntitled, requireModuleUser } from "@/lib/modules-access";
+import { leadsInPlan } from "@/lib/leads/shown";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
 import type { getCreditSnapshot } from "@/actions/credit";
@@ -97,12 +98,17 @@ export async function punchCustomerContext(companyId: string) {
       select: { id: true, label: true, isPrimary: true },
     }),
     // The rows `listProposalOptions` gives. It adds the account scope inside the lead clause; every
-    // lead here is on this one company, already in scope, so that would narrow nothing.
-    db.proposal.findMany({
-      where: { lead: { companyId: company.id } },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, status: true, validUntil: true, lead: { select: { title: true } } },
-    }),
+    // lead here is on this one company, already in scope, so that would narrow nothing. A proposal is a
+    // lead's, so none where the plan has no leads.
+    leadsInPlan().then((leads) =>
+      leads
+        ? db.proposal.findMany({
+            where: { lead: { companyId: company.id } },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, status: true, validUntil: true, lead: { select: { title: true } } },
+          })
+        : [],
+    ),
     // Only the ids: the form already has every commission party, and flags and sorts these first.
     db.commissionPartyLink.findMany({ where: { companyId: company.id }, select: { commissionPartyId: true } }),
     // An end customer is only ever reached through the reseller who manages it.

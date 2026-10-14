@@ -29,12 +29,15 @@ export function JourneyList({
   canManage,
   audiences,
   templates,
+  leadTriggers = true,
 }: {
   journeys: Journey[];
   canSend: boolean;
   canManage: boolean;
   audiences: Audience[];
   templates: Template[];
+  /** Leads in the plan, so their triggers are offered (src/lib/marketing/triggers.ts). */
+  leadTriggers?: boolean;
 }) {
   if (journeys.length === 0) {
     return (
@@ -51,7 +54,7 @@ export function JourneyList({
   return (
     <div className="space-y-3">
       {journeys.map((j) => (
-        <JourneyRow key={j.id} journey={j} canSend={canSend} canManage={canManage} audiences={audiences} templates={templates} />
+        <JourneyRow key={j.id} journey={j} canSend={canSend} canManage={canManage} audiences={audiences} templates={templates} leadTriggers={leadTriggers} />
       ))}
     </div>
   );
@@ -63,12 +66,14 @@ function JourneyRow({
   canManage,
   audiences,
   templates,
+  leadTriggers,
 }: {
   journey: Journey;
   canSend: boolean;
   canManage: boolean;
   audiences: Audience[];
   templates: Template[];
+  leadTriggers: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -155,7 +160,7 @@ function JourneyRow({
             <Search className="mr-1.5 h-3 w-3" />
             {pending ? "Counting…" : "Who'd it catch?"}
           </Button>
-          {canManage && <JourneyEditor journey={journey} audiences={audiences} templates={templates} />}
+          {canManage && <JourneyEditor journey={journey} audiences={audiences} templates={templates} leadTriggers={leadTriggers} />}
           {canSend && (
             <Button
               size="sm"

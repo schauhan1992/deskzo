@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
-import { requireModuleUser } from "@/lib/modules-access";
+import { moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { leadStages } from "@/lib/pipeline/server";
@@ -60,8 +60,9 @@ export async function listBookingPages(): Promise<{
   ready: boolean;
 } | null> {
   if (!(await manager())) return null;
-  const [hosts, pipeline, origin] = await Promise.all([possibleHosts(), leadStages(), tenantOrigin()]);
-  const pipelines = pipeline.pipelines.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name }));
+  const [hosts, pipeline, origin, leads] = await Promise.all([possibleHosts(), leadStages(), tenantOrigin(), moduleAvailableForTenant("leads")]);
+  // A booking opens a lead only where the plan has leads (owner, 14 Oct 2026); with none, no pipeline to choose.
+  const pipelines = leads ? pipeline.pipelines.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name })) : [];
   try {
     const now = new Date();
     const [rows, upcoming, bookings] = await Promise.all([

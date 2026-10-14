@@ -6,7 +6,8 @@ import { currentUser } from "@/lib/session";
 import { Card } from "@/components/ui/card";
 import { JourneyList } from "@/components/marketing/journey-list";
 import { JourneyEditor } from "@/components/marketing/journey-editor";
-import { TRIGGERS } from "@/lib/marketing/triggers";
+import { triggersOffered } from "@/lib/marketing/triggers";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 export default async function JourneysPage() {
   const enabled = await isModuleEnabled("marketing");
@@ -21,8 +22,10 @@ export default async function JourneysPage() {
     listTemplates(),
   ]);
 
-  const byTeam = new Map<string, typeof TRIGGERS>();
-  for (const trigger of TRIGGERS) {
+  // Lead triggers only where the plan has leads (owner, 14 Oct 2026).
+  const leadTriggers = await moduleAvailableForTenant("leads");
+  const byTeam = new Map<string, ReturnType<typeof triggersOffered>>();
+  for (const trigger of triggersOffered(leadTriggers)) {
     byTeam.set(trigger.team, [...(byTeam.get(trigger.team) ?? []), trigger]);
   }
 
@@ -36,11 +39,11 @@ export default async function JourneysPage() {
             ours a task, which needs no mail provider at all and is often worth more.
           </p>
         </div>
-        {canManage && <JourneyEditor audiences={audiences} templates={templates} />}
+        {canManage && <JourneyEditor audiences={audiences} templates={templates} leadTriggers={leadTriggers} />}
       </div>
 
       <div className="mt-5">
-        <JourneyList journeys={journeys} canSend={canSend} canManage={canManage} audiences={audiences} templates={templates} />
+        <JourneyList journeys={journeys} canSend={canSend} canManage={canManage} audiences={audiences} templates={templates} leadTriggers={leadTriggers} />
       </div>
 
       <Card className="mt-6 px-4 py-4">

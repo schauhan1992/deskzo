@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CallOutcome, CallDirection, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
@@ -306,7 +307,7 @@ export async function listCalls(params: {
     db.callLog.count({ where }),
   ]);
 
-  return toPlain({ rows, total });
+  return toPlain({ rows: withoutHiddenLeads(rows, await leadsInPlan()), total });
 }
 
 /** Headline figures for the calling team: dials, how many reached a person, and time on the phone. */
@@ -349,17 +350,16 @@ export async function callSummary(params?: { from?: string; to?: string; userId?
 export async function listCompanyCalls(companyId: string, take = 50) {
   const user = await requireModuleUser("calls");
   if (!(await viewerHas("calls.view"))) return [];
-  return toPlain(
-    await db.callLog.findMany({
-      // Scoped as well as filtered by id. Every row here shares one company, so the scope is
-      // all-or-nothing and reads as the refusal it is: without it, a company id — which is not a
-      // secret — is enough to read the call notes on an account somebody else manages.
-      where: { AND: [{ companyId }, await throughAccount(user.id, "view"), await callAccess(user.id, "view")] },
-      orderBy: { startedAt: "desc" },
-      take,
-      select: callSelect,
-    }),
-  );
+  const rows = await db.callLog.findMany({
+    // Scoped as well as filtered by id. Every row here shares one company, so the scope is
+    // all-or-nothing and reads as the refusal it is: without it, a company id — which is not a
+    // secret — is enough to read the call notes on an account somebody else manages.
+    where: { AND: [{ companyId }, await throughAccount(user.id, "view"), await callAccess(user.id, "view")] },
+    orderBy: { startedAt: "desc" },
+    take,
+    select: callSelect,
+  });
+  return toPlain(withoutHiddenLeads(rows, await leadsInPlan()));
 }
 
 /**

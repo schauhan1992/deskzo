@@ -333,7 +333,8 @@ const leadsSource: FactSource<LeadRow> = {
   companyAnchored: true,
   label: "Leads",
   description: "The pipeline — how many, worth how much, from where, and what became of them.",
-  moduleKey: null,
+  // Only where the plan has leads (owner, 14 Oct 2026); a workspace that had them keeps them, unreported.
+  moduleKey: "leads",
   load: loadLeads,
   /**
    * The note said "Only leads owned by you and your team", which described the old owner-based

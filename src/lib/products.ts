@@ -9,7 +9,8 @@
  *
  * A product is a set of module keys (src/lib/modules.ts). Products may share a module (orders is in
  * Inventory and in Subscriptions): a workspace gets the union, and a module's own `requires` are added
- * by entitlements as they always are. "Companies & Leads" is core, in every workspace whatever it buys.
+ * by entitlements as they always are. Companies & contacts are core, in every workspace whatever it buys;
+ * the lead pipeline is sold with Deskzo Pipeline, CRM and One (owner, 14 Oct 2026).
  *
  * Product names are also reserved as workspace addresses (src/lib/workspace-names.ts), so each can
  * have an address of its own one day (books.<domain>).
@@ -89,7 +90,7 @@ export const PRODUCTS: readonly Product[] = [
     path: "/crm",
     tagline: "Leads, pipeline, calls, field visits, targets and incentives",
     // Everything in Deskzo Pipeline too — its web forms and booking pages (owner, 14 Oct 2026).
-    modules: ["companies", "contacts_library", "calls", "visits", "domains", "targets", "incentives", "wins", "tasks", "notes", "resellers", "commission_parties", "forms", "booking"],
+    modules: ["companies", "leads", "contacts_library", "calls", "visits", "domains", "targets", "incentives", "wins", "tasks", "notes", "resellers", "commission_parties", "forms", "booking"],
     group: "sell",
   },
   {
@@ -157,7 +158,7 @@ export const PRODUCTS: readonly Product[] = [
     name: "Deskzo Pipeline",
     path: "/pipeline",
     tagline: "A simple pipeline CRM for small teams: deals, contacts, follow-ups, bookings",
-    modules: ["companies", "contacts_library", "calls", "forms", "booking"],
+    modules: ["companies", "leads", "contacts_library", "calls", "forms", "booking"],
     group: "sell",
   },
   {

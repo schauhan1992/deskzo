@@ -146,6 +146,7 @@ const TOOLS: CopilotTool[] = [
   tool({
     name: "list_leads",
     description: "Leads in the pipeline, newest or hottest first. Filter by status, by the person's own, by hot/warm/cold, or by words in the title or company.",
+    module: "leads",
     schema: z.object({
       status: z.enum(["NEW", "CONTACTED", "QUALIFYING", "QUALIFIED", "PROPOSAL_SENT", "NEGOTIATION", "WON", "LOST", "DISQUALIFIED"]).optional(),
       mine: z.boolean().optional().describe("Only leads owned by the person asking"),
@@ -502,7 +503,8 @@ async function attachments(
 ): Promise<{ companyId: string | null; leadId: string | null; ticketId: string | null; label: string | null } | { error: string }> {
   const companyId = input.companyRef ? await companyIdFor(userId, input.companyRef) : null;
   if (input.companyRef && !companyId) return { error: `No company ${input.companyRef} that this person can see.` };
-  const leadId = input.leadRef ? await leadIdFor(input.leadRef) : null;
+  // A lead only where the plan has leads — a workspace that had them keeps them, out of sight.
+  const leadId = input.leadRef && (await isModuleEnabled("leads")) ? await leadIdFor(input.leadRef) : null;
   const ticketId = input.ticketRef ? await ticketIdFor(input.ticketRef) : null;
   if ((input.leadRef && !leadId) || (input.ticketRef && !ticketId) || !(await mayAttachTo(userId, { companyId, leadId, ticketId }))) {
     return { error: "One of those records isn't there, or isn't one this person can see." };

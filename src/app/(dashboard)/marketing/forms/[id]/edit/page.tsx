@@ -25,6 +25,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
           formId={form.id}
           hasResponses={form.hasResponses}
           users={options?.users ?? []}
+          leadsInPlan={options?.leads ?? false}
           initialFields={form.fields}
           initial={{
             name: form.name,

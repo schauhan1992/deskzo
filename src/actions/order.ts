@@ -6,6 +6,7 @@ import { Prisma, type OrderStatus, type OrderBusinessType } from "@prisma/client
 import { db } from "@/lib/db";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
+import { leadsInPlan } from "@/lib/leads/shown";
 import { isModuleEnabled } from "@/actions/module";
 import { assertNotOwnRecord, AuthzError } from "@/lib/authz/guards";
 import { canSeeCompany } from "@/lib/authz/company-scope";
@@ -1565,6 +1566,8 @@ export async function getOrder(id: string) {
 /** Proposals belonging to leads of this company, for the order-punch "link to proposal" picker. */
 export async function listProposalOptions(companyId: string) {
   const user = await requireModuleUser("orders");
+  // A proposal is its lead's: none where the plan has no leads (owner, 14 Oct 2026).
+  if (!(await leadsInPlan())) return [];
   return db.proposal.findMany({
     // A proposal is its lead's, so the lead rule goes inside the `lead` clause rather than beside it.
     // Scoped as well as filtered by the caller's `companyId`: a company id is not a secret, and the

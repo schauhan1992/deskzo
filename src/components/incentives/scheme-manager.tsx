@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/bulk-select";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { basisHints, basisLabels, computeIncentive, validateScheme } from "@/lib/incentives/compute";
-import { METRICS, formatMetric, metricByKey } from "@/lib/targets/metrics";
+import { formatMetric, metricByKey, metricsOffered } from "@/lib/targets/metrics";
 
 type Scheme = Awaited<ReturnType<typeof listSchemes>>[number];
 
@@ -35,7 +35,7 @@ type SlabRow = { fromPercent: string; toPercent: string; ratePercent: string; fi
  * few thousand rupees at one level of achievement and tens of thousands at another. So the form
  * works out what the scheme would pay at several levels as you type it, before anybody is on it.
  */
-export function SchemeManager({ schemes }: { schemes: Scheme[] }) {
+export function SchemeManager({ schemes, leadMetrics = true }: { schemes: Scheme[]; leadMetrics?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +129,7 @@ export function SchemeManager({ schemes }: { schemes: Scheme[] }) {
 
       {(creating || editing) && (
         <SchemeDialog
+          leadMetrics={leadMetrics}
           scheme={editing}
           onClose={() => {
             setCreating(false);
@@ -140,7 +141,9 @@ export function SchemeManager({ schemes }: { schemes: Scheme[] }) {
   );
 }
 
-function SchemeDialog({ scheme, onClose }: { scheme: Scheme | null; onClose: () => void }) {
+function SchemeDialog({ scheme, onClose, leadMetrics }: { scheme: Scheme | null; onClose: () => void; leadMetrics: boolean }) {
+  // A scheme already on a lead metric keeps it in the list, so editing it doesn't quietly change what it pays on.
+  const metrics = metricsOffered(leadMetrics || (!!scheme && !!metricByKey[scheme.metric].needsLeads));
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -222,9 +225,9 @@ function SchemeDialog({ scheme, onClose }: { scheme: Scheme | null; onClose: () 
           <div className="space-y-1.5">
             <Label htmlFor="smetric">Pays on</Label>
             <Select id="smetric" value={form.metric} onChange={set("metric")}>
-              {[...new Set(METRICS.map((m) => m.team))].map((team) => (
+              {[...new Set(metrics.map((m) => m.team))].map((team) => (
                 <optgroup key={team} label={team}>
-                  {METRICS.filter((m) => m.team === team).map((m) => (
+                  {metrics.filter((m) => m.team === team).map((m) => (
                     <option key={m.key} value={m.key}>
                       {m.label}
                     </option>

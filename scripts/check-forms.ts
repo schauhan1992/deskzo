@@ -605,6 +605,23 @@ async function main() {
     const answered = await publicForms.submitForm({ slug: `${SLUG}-assess`, values: full, elapsedMs: 5000 });
     const lead = await db.lead.findFirst({ where: { company: { name: `${TAG} buyer Co` } } });
     ok("a public assessment makes a company, a contact and a lead with the answers in it", answered.ok && !!lead?.description?.includes("Move to M365 E3") && !!lead.description.includes("Security and backup"), answered.ok ? lead?.description : answered.error);
+    // Leads are sold with Pipeline, CRM and One (owner, 14 Oct 2026). Switched off — which is how a plan
+    // without them reaches the form — the same answer makes the company and contact, and keeps the answer.
+    const leadsSwitch = await db.systemModule.findUnique({ where: { key: "leads" } });
+    await db.systemModule.upsert({ where: { key: "leads" }, create: { key: "leads", enabled: false }, update: { enabled: false } });
+    try {
+      const noLeads = await publicForms.submitForm({ slug: `${SLUG}-assess`, values: { ...full, ...stranger("noleads") }, elapsedMs: 5000 });
+      const plain = await db.company.findFirst({ where: { name: `${TAG} noleads Co` }, select: { id: true, contacts: { select: { email: true } }, _count: { select: { leads: true } } } });
+      const kept = plain ? await db.formSubmission.count({ where: { companyId: plain.id } }) : 0;
+      ok(
+        "without leads in the plan, the same form makes the company and contact — no lead — and keeps the answer",
+        noLeads.ok && !!plain && plain.contacts.length === 1 && plain._count.leads === 0 && kept === 1,
+        noLeads.ok ? JSON.stringify({ contacts: plain?.contacts.length, leads: plain?._count.leads, kept }) : noLeads.error,
+      );
+    } finally {
+      if (leadsSwitch) await db.systemModule.update({ where: { key: "leads" }, data: { enabled: leadsSwitch.enabled } });
+      else await db.systemModule.delete({ where: { key: "leads" } });
+    }
 
     const trimmed = categoryOf("ASSESSMENT").starter.filter((f) => f.key !== "licences");
     const edited = await forms.saveForm({ id: assessmentId, name: `${TAG} Assessment`, slug: `${SLUG}-assess`, category: "ASSESSMENT", fillMode: "LINK", createsLead: true, topic: "OFFERS", fields: trimmed });

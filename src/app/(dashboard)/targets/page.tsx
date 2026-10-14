@@ -6,9 +6,9 @@ import { Card } from "@/components/ui/card";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { TargetCard } from "@/components/targets/target-card";
 import { SetTargetsDialog } from "@/components/targets/set-targets-dialog";
-import { METRICS, scopeLabels } from "@/lib/targets/metrics";
+import { metricsOffered, scopeLabels } from "@/lib/targets/metrics";
 import type { TargetScope } from "@prisma/client";
-import { isModuleEntitled } from "@/lib/modules-access";
+import { isModuleEntitled, moduleAvailableForTenant } from "@/lib/modules-access";
 
 export default async function TargetsPage({
   searchParams,
@@ -19,6 +19,8 @@ export default async function TargetsPage({
   if (!enabled) return <ModuleDisabledNotice moduleKey="targets" />;
 
   const params = await searchParams;
+  // Leads, won or made, are measured only where the plan has leads (owner, 14 Oct 2026).
+  const leadMetrics = await moduleAvailableForTenant("leads");
   const [targets, caps, options, schemes] = await Promise.all([
     listTargets(params),
     targetCapabilities(),
@@ -45,7 +47,7 @@ export default async function TargetsPage({
             reduces it the moment it&apos;s cancelled.
           </p>
         </div>
-        {caps.manage && <SetTargetsDialog options={options} />}
+        {caps.manage && <SetTargetsDialog options={options} leadMetrics={leadMetrics} />}
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -59,7 +61,7 @@ export default async function TargetsPage({
         <SelectParamFilter
           paramName="metric"
           label="Measure"
-          options={METRICS.map((m) => ({ value: m.key, label: m.label }))}
+          options={metricsOffered(leadMetrics).map((m) => ({ value: m.key, label: m.label }))}
         />
         <SelectParamFilter
           paramName="scope"

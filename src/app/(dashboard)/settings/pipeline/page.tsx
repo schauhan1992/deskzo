@@ -3,37 +3,47 @@ import { listAutomationsForManage } from "@/actions/pipeline-automations";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { TeamPipelines } from "@/components/settings/team-pipelines";
 import { OrderStepsManager } from "@/components/settings/order-steps-manager";
+import { planGate } from "@/components/settings/module-disabled-notice";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 /**
  * Settings → Pipeline (owner, 2 Oct 2026) — src/actions/pipeline.ts, src/lib/pipeline. The stages the
  * workspace's leads move through, and — where Orders is in the plan — its own steps within an order's
- * statuses. `pipeline.manage` (the catalogue's gate) opens it.
+ * statuses. `pipeline.manage` (the catalogue's gate) opens it. Each half shows only where its module is
+ * in the plan (owner, 14 Oct 2026) — leads are no longer in every workspace.
  */
 export default async function Page() {
-  const [leads, automations, ordersHere] = await Promise.all([listPipelineForManage(), listAutomationsForManage(), moduleAvailableForTenant("orders")]);
-  const orders = ordersHere ? await listOrderStepsForManage() : null;
+  const gate = await planGate(["leads", "orders"], "Pipeline");
+  if (gate) return gate;
+  const [leadsHere, ordersHere] = await Promise.all([moduleAvailableForTenant("leads"), moduleAvailableForTenant("orders")]);
+  const [leads, automations, orders] = await Promise.all([
+    leadsHere ? listPipelineForManage() : null,
+    leadsHere ? listAutomationsForManage() : null,
+    ordersHere ? listOrderStepsForManage() : null,
+  ]);
   return (
     <SettingsPage
       settingsKey="pipeline"
       description="Your team pipelines and the stages leads move through, in your own words — Enquiry, Site visit, Quotation, Booked. Each stage counts as one of a fixed set of meanings, and that is what the rest of the app acts on: won leads in a sales pipeline count towards targets, the forecast weighs open ones by how far along they are. A stage can ask for details before a lead moves into it, and a pipeline can hand its won leads to the next team and run simple automations. Retiring a stage moves its leads on first; nothing about a lead's history is lost."
     >
       <div className="space-y-8">
-        <section className="space-y-3" aria-labelledby="pipeline-leads">
-          <h2 id="pipeline-leads" className="text-base font-semibold text-text">
-            Leads
-          </h2>
-          <TeamPipelines
-            pipelines={leads?.pipelines ?? []}
-            stages={leads?.stages ?? []}
-            stored={leads?.stored ?? false}
-            multi={leads?.multi ?? false}
-            fields={leads?.fields ?? []}
-            automations={automations?.automations ?? []}
-            people={automations?.people ?? []}
-            automationsReady={automations?.ready ?? false}
-          />
-        </section>
+        {leadsHere && (
+          <section className="space-y-3" aria-labelledby="pipeline-leads">
+            <h2 id="pipeline-leads" className="text-base font-semibold text-text">
+              Leads
+            </h2>
+            <TeamPipelines
+              pipelines={leads?.pipelines ?? []}
+              stages={leads?.stages ?? []}
+              stored={leads?.stored ?? false}
+              multi={leads?.multi ?? false}
+              fields={leads?.fields ?? []}
+              automations={automations?.automations ?? []}
+              people={automations?.people ?? []}
+              automationsReady={automations?.ready ?? false}
+            />
+          </section>
+        )}
         {orders && (
           <section className="space-y-3" aria-labelledby="pipeline-orders">
             <div>

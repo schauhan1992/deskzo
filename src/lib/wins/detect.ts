@@ -7,6 +7,7 @@ import { dealWonCopy, firstOrderCopy, inrSpoken, targetHitCopy, topPerformerCopy
 import { notifyUser } from "@/lib/notify";
 import { prizesForPeriod, recordWinners, winsModuleOn } from "@/lib/wins/prize-store";
 import { tenantKey } from "@/lib/tenancy/cache";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { topSellerNote, type Slot } from "@/lib/wins/prizes";
 import { salesLeads } from "@/lib/pipeline/server";
 
@@ -114,6 +115,8 @@ const money = (v: Prisma.Decimal | number | null | undefined) => (v === null || 
 // ─── Deals won ───────────────────────────────────────────────────────────────
 
 async function dealsWon(s: WinsSettings, now: Date): Promise<NewWin[]> {
+  // Deals are leads: none won where the plan has no leads (owner, 14 Oct 2026).
+  if (!(await moduleAvailableForTenant("leads"))) return [];
   // Won in the last two days, by the stage change that says so — not by `updatedAt`, which moves
   // whenever anybody edits an old won deal.
   const changes = await db.activity.findMany({

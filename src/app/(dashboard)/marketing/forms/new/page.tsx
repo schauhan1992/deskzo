@@ -69,6 +69,7 @@ export default async function NewFormPage({ searchParams }: { searchParams: Prom
       <div className="mt-4">
         <FormBuilder
           users={options?.users ?? []}
+          leadsInPlan={options?.leads ?? false}
           initialFields={def.starter}
           initial={{
             name: def.defaults.headline,

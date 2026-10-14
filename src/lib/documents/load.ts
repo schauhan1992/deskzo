@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { documentAccess } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
+import { leadsInPlan } from "@/lib/leads/shown";
 
 /**
  * One trade document as the detail and print views need it, for a given person — scoped to the
@@ -48,5 +49,7 @@ export async function findTradeDocumentFor(userId: string, id: string) {
     gstRegistration: { select: { id: true, gstin: true, stateCode: true, code: true } },
   },
   });
-  return document ? toPlain(document) : null;
+  if (!document) return null;
+  // Raised from a lead: shown only where the plan has leads (owner, 14 Oct 2026).
+  return toPlain((await leadsInPlan()) ? document : { ...document, lead: null });
 }

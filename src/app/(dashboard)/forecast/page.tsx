@@ -2,6 +2,8 @@ import Link, { type LinkProps } from "next/link";
 import { isModuleEnabled } from "@/actions/module";
 import { getCommits, getForecast } from "@/actions/forecast";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { productsOfModule } from "@/lib/products";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { TabNav } from "@/components/ui/tab-nav";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -24,11 +26,29 @@ const inr =(n: number | null | undefined) => (n === null || n === undefined ? "�
 const COLORS = { forecast: "#6366f1", booked: "#10b981", target: "#f59e0b", lastYear: "#94a3b8", due: "#cbd5e1" };
 
 /**
+ * Deskzo Analytics on its own (owner, 14 Oct 2026): the forecast weighs open deals, and deals are leads —
+ * sold with Pipeline and CRM. Said in place, as a module outside the plan is.
+ */
+function NeedsLeads() {
+  const products = productsOfModule("leads").map((p) => p.name);
+  return (
+    <div className="max-w-md">
+      <h1 className="text-xl font-semibold text-text">Forecast</h1>
+      <p className="mt-2 text-sm text-muted">
+        The forecast is worked out from your open deals, so it needs leads — part of {products.join(" and ")}. To add them, ask the workspace owner to
+        upgrade the plan.
+      </p>
+    </div>
+  );
+}
+
+/**
  * The forecast, period by period. One page, five views, the same periods and the same salesperson
  * filter across all of them — so "October" means the same thing on every tab.
  */
 export default async function ForecastPage({ searchParams }: { searchParams: Promise<Params> }) {
   if (!(await isModuleEnabled("forecast"))) return <ModuleDisabledNotice moduleKey="forecast" />;
+  if (!(await moduleAvailableForTenant("leads"))) return <NeedsLeads />;
   const params = await searchParams;
   const data = await getForecast({ grain: params.grain, count: params.count, ownerId: params.owner });
   if (!data) return <ModuleDisabledNotice moduleKey="forecast" />;

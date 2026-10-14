@@ -105,12 +105,15 @@ export function FormBuilder({
   initialFields,
   users,
   hasResponses = false,
+  leadsInPlan = true,
 }: {
   formId?: string;
   initial: BuilderSettings;
   initialFields: FormField[];
   users: PersonOption[];
   hasResponses?: boolean;
+  /** Whether the plan has leads — without them an answer makes only a company and contact. */
+  leadsInPlan?: boolean;
 }) {
   const router = useRouter();
   const clock = useClock();
@@ -444,15 +447,17 @@ export function FormBuilder({
                   Somebody who opted out of this in the preference centre is not sent an invitation to it.
                 </p>
               </div>
-              <div className="flex items-start gap-2 sm:col-span-2">
-                <Checkbox id="fb-lead" checked={settings.createsLead} onChange={(e) => set("createsLead", e.target.checked)} />
-                <Label htmlFor="fb-lead" className="cursor-pointer">
-                  Make a lead from each new answer
-                  <span className="block text-xs font-normal text-subtle">
-                    With the answers in its description. Not for somebody declining an event.
-                  </span>
-                </Label>
-              </div>
+              {leadsInPlan && (
+                <div className="flex items-start gap-2 sm:col-span-2">
+                  <Checkbox id="fb-lead" checked={settings.createsLead} onChange={(e) => set("createsLead", e.target.checked)} />
+                  <Label htmlFor="fb-lead" className="cursor-pointer">
+                    Make a lead from each new answer
+                    <span className="block text-xs font-normal text-subtle">
+                      With the answers in its description. Not for somebody declining an event.
+                    </span>
+                  </Label>
+                </div>
+              )}
             </div>
           </Section>
 
@@ -472,7 +477,7 @@ export function FormBuilder({
                   last={index === drafts.length - 1}
                   targets={targets}
                   taken={taken}
-                  makesLeads={settings.createsLead}
+                  makesLeads={settings.createsLead && leadsInPlan}
                   onChange={(patch) => update(draft.uid, patch)}
                   onMove={(by) => move(index, by)}
                   // A copy saves nowhere: one question per field.

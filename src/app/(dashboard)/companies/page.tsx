@@ -186,6 +186,7 @@ export default async function CompaniesPage({
             assignableUsers={assignableUsers}
             reassign={await viewerReassignControls()}
             customColumns={customColumns}
+            canSeeLeads={await isModuleEnabled("leads")}
           />
           <Pagination
             page={page}

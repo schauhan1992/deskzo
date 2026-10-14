@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { definitionsFor } from "@/lib/custom-fields/server";
@@ -51,8 +51,15 @@ import type { ActionResult } from "@/actions/company";
  * into another, and is retired only once it holds no open leads. The main one is always there.
  */
 
+/** Shaping the lead pipelines — part of the leads module, so only where the plan has leads. */
 async function manager() {
-  const user = await requireUser();
+  const user = await requireModuleUser("leads");
+  return (await can(user.id, "pipeline.manage")) ? user : null;
+}
+
+/** Shaping an order's steps — the same permission, in a workspace whose plan has orders. */
+async function stepsManager() {
+  const user = await requireModuleUser("orders");
   return (await can(user.id, "pipeline.manage")) ? user : null;
 }
 
@@ -573,7 +580,7 @@ export type ManagedStep = OrderStepDef & { orders: number; placed: number };
 
 /** The steps by status, retired ones too, with how many orders each shows and how many were moved to it. */
 export async function listOrderStepsForManage(): Promise<{ steps: ManagedStep[]; stored: boolean } | null> {
-  if (!(await manager())) return null;
+  if (!(await stepsManager())) return null;
   const data = await orderSteps();
   const counts = await Promise.all(
     data.steps.map((s) => Promise.all([db.companyProduct.count({ where: inStepWhere(data, s) }), db.companyProduct.count({ where: { stepId: s.id, orderStatus: s.status } })])),
@@ -597,7 +604,7 @@ async function renumberSteps(ids: string[]) {
 
 /** Adds a step at the end of its status, or renames and recolours one. A step's status is fixed once made. */
 export async function saveOrderStep(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await manager();
+  const user = await stepsManager();
   if (!user) return { ok: false, error: NOT_ALLOWED };
   const parsed = stepSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the step." };
@@ -634,7 +641,7 @@ export async function saveOrderStep(input: unknown): Promise<ActionResult<{ id: 
 
 /** One place earlier or later among its status's steps. */
 export async function moveOrderStep(id: string, direction: "up" | "down"): Promise<ActionResult<null>> {
-  const user = await manager();
+  const user = await stepsManager();
   if (!user) return { ok: false, error: NOT_ALLOWED };
   const current = await orderSteps();
   if (!current.stored) return { ok: false, error: NOT_READY };
@@ -659,7 +666,7 @@ export async function moveOrderStep(id: string, direction: "up" | "down"): Promi
  * status — first; ones only shown at it (it was the first) fall to whichever step is first now.
  */
 export async function retireOrderStep(id: string, moveToId?: string | null): Promise<ActionResult<{ moved: number }>> {
-  const user = await manager();
+  const user = await stepsManager();
   if (!user) return { ok: false, error: NOT_ALLOWED };
   const current = await orderSteps();
   if (!current.stored) return { ok: false, error: NOT_READY };
@@ -694,7 +701,7 @@ export async function retireOrderStep(id: string, moveToId?: string | null): Pro
 
 /** Puts a retired step back, last among its status's steps. */
 export async function restoreOrderStep(id: string): Promise<ActionResult<null>> {
-  const user = await manager();
+  const user = await stepsManager();
   if (!user) return { ok: false, error: NOT_ALLOWED };
   const current = await orderSteps();
   if (!current.stored) return { ok: false, error: NOT_READY };
@@ -715,7 +722,7 @@ export async function restoreOrderStep(id: string): Promise<ActionResult<null>> 
 
 /** Deletes a step no order is at — a mistake made a minute ago. The history keeps its name. */
 export async function deleteOrderStep(id: string): Promise<ActionResult<null>> {
-  const user = await manager();
+  const user = await stepsManager();
   if (!user) return { ok: false, error: NOT_ALLOWED };
   const current = await orderSteps();
   if (!current.stored) return { ok: false, error: NOT_READY };

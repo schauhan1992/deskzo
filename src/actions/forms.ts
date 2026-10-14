@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import type { FormAttendance, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { STILL_THERE } from "@/lib/contacts/left";
-import { requireModuleUser } from "@/lib/modules-access";
+import { moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
+import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -237,7 +238,8 @@ export async function formEditorOptions() {
     orderBy: { name: "asc" },
     select: { id: true, name: true, email: true },
   });
-  return { users };
+  // A form makes leads only where the plan has them (owner, 14 Oct 2026), so the builder offers it only there.
+  return { users, leads: await moduleAvailableForTenant("leads") };
 }
 
 /**
@@ -617,7 +619,8 @@ export async function listFormResponses(
     fields,
     category: found.form.category,
     total,
-    rows: rows.map(({ payload, ...row }) => {
+    // A lead the answer made is linked only where the plan has leads (owner, 14 Oct 2026).
+    rows: withoutHiddenLeads(rows, await leadsInPlan()).map(({ payload, ...row }) => {
       const answers = answersOf(payload);
       return {
         ...row,

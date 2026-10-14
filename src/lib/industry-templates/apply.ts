@@ -52,7 +52,7 @@ export async function readCurrent(client: PrismaClient, template: IndustryTempla
     overrides: wording?.overrides ?? {},
     fields: fields.map((f) => ({ id: f.id, entity: f.entity, key: f.key, label: f.label, archived: !!f.archivedAt })),
     modules: Object.fromEntries(template.modules.map((key) => [key, !entitled(key) ? "not-in-plan" : on(key) ? "on" : "off"])),
-    has: { orders: available(CUSTOM_FIELD_ENTITY_MODULES.ORDER!), items: available(CUSTOM_FIELD_ENTITY_MODULES.ITEM!) },
+    has: { orders: available(CUSTOM_FIELD_ENTITY_MODULES.ORDER!), items: available(CUSTOM_FIELD_ENTITY_MODULES.ITEM!), leads: available("leads") },
   };
 }
 

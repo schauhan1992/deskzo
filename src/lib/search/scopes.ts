@@ -48,7 +48,7 @@ export type SearchScope = {
 export const SEARCH_SCOPES: SearchScope[] = [
   { key: "customers", label: "Customers", term: "customer", listPath: "/customers", module: "companies", ref: { prefix: "COM", path: "/companies" } },
   { key: "companies", label: "Companies", term: "company", listPath: "/companies", module: "companies", ref: { prefix: "COM", path: "/companies" } },
-  { key: "leads", label: "Leads", term: "lead", listPath: "/leads", module: "companies", permission: "leads.view", ref: { prefix: "LEAD", path: "/leads" } },
+  { key: "leads", label: "Leads", term: "lead", listPath: "/leads", module: "leads", permission: "leads.view", ref: { prefix: "LEAD", path: "/leads" } },
   { key: "contacts", label: "Contacts", term: "contact", listPath: "/contacts", module: "contacts_library" },
   { key: "vendors", label: "Vendors", term: "vendor", listPath: "/vendors", module: "vendors", ref: { prefix: "COM", path: "/companies" } },
   { key: "orders", label: "Orders", term: "order", listPath: "/orders", module: "orders", ref: { prefix: "ORD", path: "/orders" } },

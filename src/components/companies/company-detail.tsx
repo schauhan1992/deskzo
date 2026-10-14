@@ -204,10 +204,11 @@ export async function CompanyDetail({
     canBroadcastNotes(),
     hasEffectivePermission(userId, "portal.manage"),
     // The `*.view` permissions. The module-shaped ones (documents, payments, visits, calls,
-    // tickets, renewals, projects) are already inside `isModuleEnabled` above; these three have no
-    // module of their own to ride on, so they are asked for directly.
+    // tickets, renewals, projects) are already inside `isModuleEnabled` above; contacts and orders
+    // have no module of their own to ride on, so they are asked for directly. Leads have had one since
+    // 14 Oct 2026, so the plan decides too.
     hasEffectivePermission(userId, "contacts.view"),
-    hasEffectivePermission(userId, "leads.view"),
+    isModuleEnabled("leads"),
     hasEffectivePermission(userId, "orders.view"),
     isModuleEnabled("projects"),
     hasEffectivePermission(userId, "projects.manage"),

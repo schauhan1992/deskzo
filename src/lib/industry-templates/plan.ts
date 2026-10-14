@@ -30,8 +30,12 @@ export type CurrentState = {
   fields: CurrentField[];
   /** For each module the template switches on: whether it already is, or isn't in the plan. */
   modules: Record<string, "on" | "off" | "not-in-plan">;
-  /** Whether Orders and Products are part of this workspace — their fields and steps need them. */
-  has: { orders: boolean; items: boolean };
+  /**
+   * Whether Orders and Products are part of this workspace — their fields and steps need them. And
+   * leads (owner, 14 Oct 2026): false where the plan has none, so the pipeline and the lead's fields
+   * are skipped; left out, they are there.
+   */
+  has: { orders: boolean; items: boolean; leads?: boolean };
 };
 
 export type StageOp =
@@ -143,7 +147,7 @@ export function planFields(template: TemplateField[], current: CurrentField[], h
   for (const f of current) if (!f.archived) counts.set(f.entity, (counts.get(f.entity) ?? 0) + 1);
   return template.map((field): FieldOp => {
     const needs = CUSTOM_FIELD_ENTITY_MODULES[field.entity];
-    if ((needs === "orders" && !has.orders) || (needs === "items" && !has.items)) {
+    if ((needs === "orders" && !has.orders) || (needs === "items" && !has.items) || (needs === "leads" && has.leads === false)) {
       return { kind: "skip", field, why: `${CUSTOM_FIELD_ENTITY_LABELS[field.entity]} isn't part of this workspace.` };
     }
     const onEntity = current.filter((f) => f.entity === field.entity);
@@ -157,7 +161,10 @@ export function planFields(template: TemplateField[], current: CurrentField[], h
 }
 
 export function planTemplate(template: IndustryTemplate, current: CurrentState): TemplatePlan {
-  const { stages, pipeline } = planPipeline(template.stages, current.stages);
+  const { stages, pipeline } =
+    current.has.leads === false
+      ? { stages: template.stages.map((t): StageOp => ({ kind: "skip", label: t.label, status: t.status, why: "Leads aren't part of this workspace." })), pipeline: [] }
+      : planPipeline(template.stages, current.stages);
   const steps = planSteps(template.steps, current.steps, current.has.orders);
   const { words, overrides } = planWords(template.terms, current.overrides);
   const fields = planFields(template.fields, current.fields, current.has);

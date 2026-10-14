@@ -3,6 +3,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { incentiveCapabilities, listSchemes } from "@/actions/incentive";
 import { Card } from "@/components/ui/card";
 import { SchemeManager } from "@/components/incentives/scheme-manager";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 
 export default async function SchemesPage() {
   const enabled = await isModuleEnabled("incentives");
@@ -30,7 +31,7 @@ export default async function SchemesPage() {
         </p>
       </div>
       <div className="mt-5">
-        <SchemeManager schemes={schemes} />
+        <SchemeManager schemes={schemes} leadMetrics={await moduleAvailableForTenant("leads")} />
       </div>
     </div>
   );

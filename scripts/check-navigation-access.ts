@@ -315,11 +315,11 @@ async function main() {
       const def = PERMISSIONS.find((p) => p.key === key);
       return !!def && (!!def.everyone || (def.defaultRoles as readonly string[]).includes("CALLING"));
     };
-    const callingKeys = ["calls.view", "section.calls", "section.companies", "leads.view"];
+    const callingKeys = ["calls.view", "section.calls", "section.companies", "section.leads", "leads.view"];
     ok("  but the role starts with the calls, the companies and the leads they work", callingKeys.every(startsWith), callingKeys.filter((k) => !startsWith(k)).join(", "));
     const changedHere = new Map((await db.rolePermission.findMany({ where: { role: "CALLING", permission: { in: callingKeys } }, select: { permission: true, allowed: true } })).map((r) => [r.permission, r.allowed]));
     const heldHere = (key: string) => changedHere.get(key) ?? startsWith(key);
-    const expected = { calls: heldHere("calls.view") && heldHere("section.calls"), companies: heldHere("section.companies"), leads: heldHere("section.companies") && heldHere("leads.view") };
+    const expected = { calls: heldHere("calls.view") && heldHere("section.calls"), companies: heldHere("section.companies"), leads: heldHere("section.leads") && heldHere("leads.view") };
     const actual = { calls: calling.openModules.includes("calls"), companies: calling.openModules.includes("companies"), leads: hrefs(buildNavigation(calling)).includes("/leads") };
     ok(
       `  and the menu has them as this workspace's role has them${changedHere.size ? ` (changed here: ${[...changedHere].map(([k, v]) => `${k} ${v ? "on" : "off"}`).join(", ")})` : ""}`,
@@ -344,9 +344,9 @@ async function main() {
 
     section("8–9. A section unticked: the address and the action");
     await grant(clerk.id, sectionPermission("companies"), false);
-    ok("2. Companies & Leads is no-permission for the clerk", (await moduleAccessFor(clerk.id, "companies")) === "no-permission");
+    ok("2. Companies & Contacts is no-permission for the clerk", (await moduleAccessFor(clerk.id, "companies")) === "no-permission");
     ok("   not in their menu", !(await accessContextFor(clerk.id)).openModules.includes("companies"));
-    for (const p of ["companies", "customers", "leads", "companies/new", "mail-log"]) {
+    for (const p of ["companies", "customers", "companies/new", "mail-log"]) {
       ok(`8. /${p} by its address is a 404`, (await outcome(page(p)(props))) === "notFound");
     }
     const companiesBefore = await db.company.count();
@@ -354,9 +354,16 @@ async function main() {
     ok("9. createCompany called directly is refused", !created.ok, created.ok ? "created" : created.error);
     ok("   and nothing was written", (await db.company.count()) === companiesBefore);
     const scopes = (await searchScopesForMe()).map((s) => s.key);
-    ok("   the header search offers none of its lists", !scopes.some((k) => ["customers", "companies", "leads"].includes(k)), scopes.join(", "));
+    ok("   the header search offers none of its lists", !scopes.some((k) => ["customers", "companies"].includes(k)), scopes.join(", "));
     const noCompanies = await dashboardActions.getDashboardSummary();
-    ok("   the dashboard reads none of its figures", noCompanies.companies === null && noCompanies.customers === null && noCompanies.leads === null);
+    ok("   the dashboard reads none of its figures", noCompanies.companies === null && noCompanies.customers === null);
+    // Leads have had a section of their own since 14 Oct 2026, when they became a module.
+    await grant(clerk.id, sectionPermission("leads"), false);
+    ok("8. with Leads unticked too, /leads by its address is a 404", (await outcome(page("leads")(props))) === "notFound");
+    const leadScopes = (await searchScopesForMe()).map((s) => s.key);
+    ok("   the header search doesn't offer leads", !leadScopes.includes("leads"), leadScopes.join(", "));
+    ok("   and the dashboard reads no lead figures", (await dashboardActions.getDashboardSummary()).leads === null);
+    await grant(clerk.id, sectionPermission("leads"), true);
     await grant(clerk.id, sectionPermission("companies"), true);
     ok("given back, the next request has it again — nothing is held over from before", (await accessContextFor(clerk.id)).openModules.includes("companies") && !/^(notFound|error)/.test(await outcome(page("customers")(props))));
 

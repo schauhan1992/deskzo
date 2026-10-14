@@ -5,6 +5,7 @@ import type { TradeDocumentType } from "@prisma/client";
 import { listDocumentParties } from "@/actions/trade-document";
 import { listAssignableUsers } from "@/actions/company";
 import { leadDocumentDraft } from "@/actions/lead";
+import { isModuleEnabled } from "@/actions/module";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
 import { getOrganisation } from "@/lib/organisation";
 import { defaultBranchIdFor, listBranchChoices } from "@/lib/branches/identity";
@@ -48,7 +49,8 @@ export default async function NewDocumentPage({
     defaultBranch,
     defaultBranch.then((branchId) => getNumberSetting(docType, branchId)),
     defaultBranch.then((branchId) => previewNextNumber(docType, branchId)),
-    params.leadId ? leadDocumentDraft(params.leadId) : Promise.resolve(null),
+    // Raised from a lead only where the plan has leads; otherwise it is a blank document.
+    params.leadId ? isModuleEnabled("leads").then((on) => (on && params.leadId ? leadDocumentDraft(params.leadId) : null)) : Promise.resolve(null),
     signedIn,
     documentDirection[docType] === "SALES" ? documentBankChoices() : undefined,
   ]);

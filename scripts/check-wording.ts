@@ -406,7 +406,10 @@ async function run(scratchUrl: string) {
       "the menu says Enquiries and Buyers",
       slot(wording, leadsNav.label, leadsNav.term!.key, leadsNav.term!.template) === "Enquiries" && slot(wording, customersNav.label, customersNav.term!.key, customersNav.term!.template) === "Buyers",
     );
-    ok("  while the module's own name — which plans and billing share — stays the app's", MODULE_REGISTRY.find((m) => m.key === "companies")!.label === "Companies & Leads");
+    ok(
+      "  while the modules' own names — which plans and billing share — stay the app's",
+      MODULE_REGISTRY.find((m) => m.key === "companies")!.label === "Companies & Contacts" && MODULE_REGISTRY.find((m) => m.key === "leads")!.label === "Leads",
+    );
 
     as(admin);
     const back = await settings.saveWording(all({ terms: {}, orderStatus: {} }));

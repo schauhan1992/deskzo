@@ -1,4 +1,5 @@
 import { captureFieldGuide, listCaptureKeys } from "@/actions/lead-capture";
+import { planGate } from "@/components/settings/module-disabled-notice";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { LeadCaptureManager } from "@/components/settings/lead-capture-manager";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
@@ -11,6 +12,9 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
  * forwarded host — because that is the address a developer outside can reach.
  */
 export default async function Page() {
+  // Configures leads rather than showing them, so the plan decides — not the viewer's leads.view.
+  const gate = await planGate("leads", "Lead capture API");
+  if (gate) return gate;
   const [keys, origin, ownFields] = await Promise.all([listCaptureKeys(), tenantOrigin(), captureFieldGuide()]);
 
   return (
