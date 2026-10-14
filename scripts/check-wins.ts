@@ -31,7 +31,8 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   if (request === "next/cache") return { revalidatePath() {}, revalidateTag() {}, unstable_cache: (fn: unknown) => fn };
   if (request === "@/lib/session" || request.endsWith("lib/session")) {
     const user = () => ({ id: actor.id, role: "SALES", name: actor.name, email: `x${MAIL}` });
-    return { requireUser: async () => user(), currentUser: async () => user() };
+    // Nobody is viewing as somebody else here — today's moments ask before offering wishes (src/lib/hr/today.ts).
+    return { requireUser: async () => user(), currentUser: async () => user(), viewAsContext: async () => null, refuseWhileViewingAs: async () => null };
   }
   if (request === "next/navigation") {
     return {

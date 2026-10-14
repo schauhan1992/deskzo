@@ -308,7 +308,24 @@ async function main() {
     const calling = await accessContextFor(caller.id);
     const money = ["payments", "receivables", "payables", "sales_documents", "purchase_documents"];
     ok("their menu has no payments, receivables, payables, quotes or invoices", !money.some((k) => calling.openModules.includes(k)), money.filter((k) => calling.openModules.includes(k)).join(", "));
-    ok("  but keeps the calls, the companies and the leads they work", ["calls", "companies"].every((k) => calling.openModules.includes(k)) && hrefs(buildNavigation(calling)).includes("/leads"));
+    // The role as the code starts it keeps the calls, the companies and the leads they work. This suite
+    // runs on the real workspace, whose admin may have changed the role since (Settings → Staff & roles):
+    // the menu must then follow the role as it is here, not as it started.
+    const startsWith = (key: string) => {
+      const def = PERMISSIONS.find((p) => p.key === key);
+      return !!def && (!!def.everyone || (def.defaultRoles as readonly string[]).includes("CALLING"));
+    };
+    const callingKeys = ["calls.view", "section.calls", "section.companies", "leads.view"];
+    ok("  but the role starts with the calls, the companies and the leads they work", callingKeys.every(startsWith), callingKeys.filter((k) => !startsWith(k)).join(", "));
+    const changedHere = new Map((await db.rolePermission.findMany({ where: { role: "CALLING", permission: { in: callingKeys } }, select: { permission: true, allowed: true } })).map((r) => [r.permission, r.allowed]));
+    const heldHere = (key: string) => changedHere.get(key) ?? startsWith(key);
+    const expected = { calls: heldHere("calls.view") && heldHere("section.calls"), companies: heldHere("section.companies"), leads: heldHere("section.companies") && heldHere("leads.view") };
+    const actual = { calls: calling.openModules.includes("calls"), companies: calling.openModules.includes("companies"), leads: hrefs(buildNavigation(calling)).includes("/leads") };
+    ok(
+      `  and the menu has them as this workspace's role has them${changedHere.size ? ` (changed here: ${[...changedHere].map(([k, v]) => `${k} ${v ? "on" : "off"}`).join(", ")})` : ""}`,
+      JSON.stringify(actual) === JSON.stringify(expected),
+      `expected ${JSON.stringify(expected)}, menu ${JSON.stringify(actual)}`,
+    );
     actorId = caller.id;
     ok("  and /payments by its address is a 404 for them", (await outcome(page("payments")(props))) === "notFound");
 

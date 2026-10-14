@@ -91,7 +91,9 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
       seen: seen.map((s) => s.occasionKey),
     });
     return { greeting: greeting(now, firstName, clock), moments: await withWishes(moments, user.id) };
-  } catch {
+  } catch (err) {
+    // The greeting still shows; what went wrong is said, never swallowed.
+    console.error("[today] the day's moments could not be read", err);
     return empty;
   }
 });
