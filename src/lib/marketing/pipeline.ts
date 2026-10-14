@@ -526,9 +526,15 @@ async function providerCredentials(id: string) {
  * Straight through the provider chain, now — for a test send, which has no row to queue. The same
  * routing and failover as the queue, so a test that arrives proves the real thing can.
  */
-export async function deliverNow(message: OutboundMessage, messageClass: MessageClass): Promise<{ ok: true; provider: string } | { ok: false; error: string }> {
-  const chain = routeFor(await loadProviders(), { kind: "EMAIL", messageClass });
-  if (chain.length === 0) return { ok: false, error: "No email provider is set up for marketing mail — add one in the marketing settings." };
+export async function deliverNow(
+  message: OutboundMessage,
+  messageClass: MessageClass,
+  options: { delivering?: boolean } = {},
+): Promise<{ ok: true; provider: string } | { ok: false; error: string }> {
+  // `delivering`: only a provider that puts mail on the wire. Mock "sends" by recording, which is
+  // right for a test send and wrong for mail somebody has to receive.
+  const chain = routeFor(await loadProviders(), { kind: "EMAIL", messageClass }).filter((p) => !options.delivering || p.key !== "mock");
+  if (chain.length === 0) return { ok: false, error: `No email provider is set up for ${messageClass.toLowerCase()} mail — add one in Settings › Mail & messaging.` };
   let last = "No provider accepted it.";
   for (const candidate of chain) {
     const implementation = providerByKey[candidate.key];
