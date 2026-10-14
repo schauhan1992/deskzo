@@ -85,3 +85,31 @@ If the loader reports state names that did not resolve to a GST code, add each o
 
 Country, state and city lists are not here: they live in code (`src/lib/geo/`), which no data
 operation can touch.
+
+## The GST HSN/SAC directory
+
+Every HSN (goods) and SAC (services) code with its official description, from the GST portal's own
+Excel: **Services › User Services › Search HSN Code › "Download HSN Directory in Excel Format"**,
+served from https://tutorial.gst.gov.in/downloads/HSN_SAC.xlsx. Two sheets, HSN_MSTR and SAC_MSTR; codes
+and descriptions only, no rates. The committed copy is `hsn-sac.xlsx` in this folder, loaded into
+`hsn_codes`.
+
+It drives the item form in an Indian workspace: the HSN/SAC field searches it by code or description,
+an item can't be saved without a code, and a code it doesn't list is refused — as is a SAC (99…) on a
+good or an HSN on a service. Document lines are checked against it too, and the items list flags every
+item whose code needs fixing. Outside India the field is optional and nothing is checked
+(`COUNTRY_FEATURES.hsn`, src/lib/modules.ts). Rules: src/lib/hsn.ts; reads: src/lib/platform/hsn-directory.ts;
+the loader, the only code that writes the table: `hsn.ts` here.
+
+| How | What it does |
+|---|---|
+| `npm run db:seed` | Loads the committed copy if it is missing or changed; otherwise a no-op |
+| `npm run db:hsn` | The same, on its own |
+| `npm run db:hsn -- <path to HSN_SAC.xlsx>` | Loads a newer download, and on success keeps it as the committed copy — commit it |
+| Console › Reference data › GST HSN/SAC directory | A platform manager uploads a newer copy of the portal's file; it is loaded for every workspace at once |
+
+A file that isn't the portal's workbook, or that would replace the directory with less than half as
+many codes, is refused and the loaded one stays (`--force` on the command line, for the day a halving
+is real). The portal prints a few codes without their leading zero or with a space ("30559",
+"2307 00"); the loader puts them right, and a code it then finds listed twice keeps its first
+description. `npm run check:hsn` covers the rules, the file, the searches and the item and line checks.

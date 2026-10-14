@@ -10,6 +10,7 @@ import { can } from "@/lib/authz/resolve";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { documentAccess, mayAccess, mayAddTo } from "@/lib/authz/access";
 import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
+import { lineHsnRefusal } from "@/lib/platform/hsn-directory";
 import { recordAudit } from "@/lib/audit";
 import { postDocumentToLedger, reverseDocumentPosting } from "@/lib/ledger/journal";
 import { toPlain } from "@/lib/serialize";
@@ -135,6 +136,9 @@ export async function createTradeDocument(
     select: { id: true, name: true, ownerUserId: true },
   });
   if (!company || !(await mayRaiseFor(user.id, company.id))) return { ok: false, error: "That party no longer exists." };
+  // In India, a code typed on a line is checked as an item's is: the right shape, and in the GST directory.
+  const hsnError = (await countryFeatureAvailable("hsn")) ? await lineHsnRefusal(data.lines) : null;
+  if (hsnError) return { ok: false, error: hsnError };
 
   const result = await createDraftDocument({ id: user.id }, data, origin);
   if (result.ok) revalidateDocument(data.docType, result.data.id);
@@ -189,6 +193,8 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
   if (bankError) return { ok: false, error: bankError };
   const links = await checkLineLinks(data.lines, data.companyId, id);
   if ("error" in links) return { ok: false, error: links.error };
+  const hsnError = (await countryFeatureAvailable("hsn")) ? await lineHsnRefusal(data.lines) : null;
+  if (hsnError) return { ok: false, error: hsnError };
 
   // Typed in this save: the form sends the number back every time, so only a changed one counts.
   const typedNumber = data.docNumber?.trim() && data.docNumber.trim() !== existing.docNumber ? data.docNumber.trim() : null;

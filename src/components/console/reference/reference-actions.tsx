@@ -2,8 +2,8 @@
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { KeyRound, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
-import { consoleRemovePinKey, consoleSavePinKey, consoleStartSync } from "@/actions/platform/console";
+import { FileUp, KeyRound, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
+import { consoleLoadHsnDirectory, consoleRemovePinKey, consoleSavePinKey, consoleStartSync } from "@/actions/platform/console";
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
@@ -302,5 +302,93 @@ function PinKeyForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * "Load a newer copy…" for the HSN/SAC directory: the portal's own Excel, chosen from this computer.
+ * Loaded straight away — a replacement in one transaction, so no workspace's search sees it half done.
+ */
+export function HsnUploadButton({ loaded }: { loaded: boolean }) {
+  const action = useConsoleAction<string>();
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const id = useId();
+
+  function close() {
+    if (action.pending) return;
+    action.reset();
+    setFile(null);
+    setOpen(false);
+  }
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!file || action.pending) return;
+    const form = new FormData();
+    form.set("file", file);
+    action.run(() => consoleLoadHsnDirectory(form), {
+      success: (message) => message,
+      onDone: () => {
+        setFile(null);
+        setOpen(false);
+      },
+    });
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant={loaded ? "secondary" : "primary"}
+        size="sm"
+        onClick={() => {
+          action.reset();
+          setOpen(true);
+        }}
+      >
+        <FileUp aria-hidden="true" className="h-4 w-4" />
+        {loaded ? "Load a newer copy…" : "Load the directory…"}
+      </Button>
+      <Dialog open={open} onClose={close} title="Load the GST HSN/SAC directory">
+        <form onSubmit={submit} className="space-y-4 p-0.5">
+          <p className="text-sm text-text">
+            On the GST portal: Services › User Services › Search HSN Code, then &ldquo;Download HSN Directory in Excel
+            Format&rdquo;. Choose that file here as it is — HSN_SAC.xlsx. Every workspace&apos;s item form searches it, and
+            checks codes against it.
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-file`}>The directory file</Label>
+            <Input
+              id={`${id}-file`}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              disabled={action.pending}
+              aria-describedby={`${id}-hint`}
+            />
+            <p id={`${id}-hint`} className="text-xs text-muted">
+              A file with less than half the codes loaded now is refused, and the one in use stays.
+            </p>
+          </div>
+          <ActionNoticeRegion notice={action.error ? { tone: "error", message: action.error } : null} />
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="secondary" onClick={close} disabled={action.pending}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!file}
+              aria-disabled={action.pending || undefined}
+              aria-busy={action.pending || undefined}
+              className={cn(action.pending && "cursor-wait opacity-70")}
+            >
+              {action.pending && <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />}
+              Load it
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </>
   );
 }

@@ -84,6 +84,9 @@ export type ModuleDefinition = {
 export const COUNTRY_FEATURES = {
   einvoice: ["IN"],
   eway: ["IN"],
+  // HSN and SAC are India's GST classification: required on an item there, checked against the GST
+  // portal's directory (src/lib/platform/hsn-directory.ts), and optional everywhere else.
+  hsn: ["IN"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type CountryFeature = keyof typeof COUNTRY_FEATURES;

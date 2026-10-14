@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NewUserCreated, NewUserForm, type CreatedUser } from "@/components/settings/new-user-dialog";
 import { PhotoManager } from "@/components/profile/photo-manager";
+import { HsnCombobox } from "@/components/items/hsn-combobox";
 import { TwoFactorSetup } from "@/components/profile/two-factor-setup";
 import { COUNTRIES, DEFAULT_COUNTRY, isIndia } from "@/lib/geo/countries";
 import { INDIAN_STATES } from "@/lib/geo/india";
@@ -432,6 +433,25 @@ export function ItemStep({
             <option value="GOOD">A product (goods)</option>
           </Select>
         </div>
+        {india && (
+          // GST classifies every line by it, so an item can't be saved without one (src/lib/hsn.ts).
+          <div className="sm:col-span-2">
+            <Label htmlFor="onb-item-hsn">{draft.type === "GOOD" ? "HSN code" : "SAC code"}</Label>
+            <HsnCombobox
+              id="onb-item-hsn"
+              value={draft.hsn}
+              onChange={(hsn) => onChange({ hsn })}
+              itemType={draft.type}
+              aria-invalid={invalid(issues.hsn)}
+              aria-describedby={describedBy("onb-item-hsn", true, issues.hsn)}
+            />
+            <Note
+              id="onb-item-hsn"
+              hint={draft.type === "GOOD" ? "Search the GST directory by code or by what it is." : "Services start with 99 — search by code or by what it is."}
+              error={issues.hsn}
+            />
+          </div>
+        )}
         <div>
           <Label htmlFor="onb-item-price">{india ? "Selling price (₹)" : "Selling price"}</Label>
           <Input
@@ -474,7 +494,7 @@ export function ItemStep({
         </div>
       </div>
       <p className="text-xs text-subtle">
-        HSN codes, stock and the rest are on the full form under{" "}
+        Stock, brand and the rest are on the full form under{" "}
         <Link href="/items/new" className="text-brand hover:underline">
           Items
         </Link>

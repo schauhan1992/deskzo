@@ -45,8 +45,10 @@ const optionalNonNegativeInt = z.preprocess(
 
 /**
  * HSN for goods, SAC for services — the code every invoice line carries and the GST return groups by.
- * Optional here, since a new catalogue is rarely complete, but a code that is present has to be one;
- * the GST summary already flags lines with none. Stored without the spaces people copy it with.
+ * Stored without the spaces people copy it with. A code that is present has to be well formed; in an
+ * Indian workspace the actions also require one, of the right kind for the item and listed in the GST
+ * portal's directory (`hsnIssue`, src/lib/platform/hsn-directory.ts) — elsewhere it means nothing to
+ * the tax, so it stays optional.
  */
 const hsnField = z.preprocess(
   (v) => normaliseHsn(v),
@@ -104,6 +106,8 @@ export const bulkUpdateItemsSchema = z.object({
   type: z.enum(itemTypeValues).optional().or(z.literal("")),
   category: z.string().trim().optional().or(z.literal("")),
   active: z.enum(["true", "false"]).optional().or(z.literal("")),
+  /** One HSN/SAC for every item picked — blank leaves each item's own. */
+  hsnCode: hsnField.optional(),
 });
 
 export type BulkUpdateItemsInput = z.infer<typeof bulkUpdateItemsSchema>;

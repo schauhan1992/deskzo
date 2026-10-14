@@ -20,6 +20,7 @@ import {
   itemDraftEmpty,
   itemIssues,
   itemProblem,
+  ITEM_FIELDS,
   type HelpDraft,
   type HelpField,
   type ItemDraft,
@@ -215,9 +216,9 @@ export function OnboardingWizard({
       return true;
     }
     if (step.key === "items" && !itemDraftEmpty(item)) {
-      const issues = itemIssues(item);
+      const issues = itemIssues(item, fresh.india);
       setItemErrors(issues);
-      const first = (["name", "sku", "price", "tax"] as const).find((f) => issues[f]);
+      const first = ITEM_FIELDS.find((f) => issues[f]);
       if (first) {
         document.getElementById(`onb-item-${first}`)?.focus();
         return false;
@@ -228,7 +229,7 @@ export function OnboardingWizard({
         type: item.type,
         sellingPrice: item.price.trim(),
         taxRatePercent: item.tax.trim(),
-        hsnCode: "",
+        hsnCode: item.hsn,
         active: true,
         trackInventory: false,
       });
@@ -236,6 +237,10 @@ export function OnboardingWizard({
         if (/SKU/i.test(made.error)) {
           setItemErrors({ sku: `${made.error} Change the SKU to add this one too.` });
           document.getElementById("onb-item-sku")?.focus();
+        } else if (fresh.india && /\b(HSN|SAC)\b/.test(made.error)) {
+          // The GST directory's word on the code, under the code.
+          setItemErrors({ hsn: made.error });
+          document.getElementById("onb-item-hsn")?.focus();
         } else setMessage({ tone: "error", text: made.error });
         return false;
       }
@@ -340,7 +345,7 @@ export function OnboardingWizard({
     setItem(draft);
     setItemErrors((all) => {
       const next = { ...all };
-      for (const field of ["name", "sku", "price", "tax"] as const) if (next[field]) next[field] = itemProblem(field, draft) ?? undefined;
+      for (const field of ITEM_FIELDS) if (next[field]) next[field] = itemProblem(field, draft, state?.india) ?? undefined;
       return next;
     });
   };
@@ -460,7 +465,7 @@ export function OnboardingWizard({
                       india={state.india}
                       added={itemsAdded}
                       onChange={changeItem}
-                      onLeave={(f) => setItemErrors((all) => ({ ...all, [f]: itemProblem(f, item) ?? undefined }))}
+                      onLeave={(f) => setItemErrors((all) => ({ ...all, [f]: itemProblem(f, item, state.india) ?? undefined }))}
                     />
                   )}
                   {s.key === "helpline" && (

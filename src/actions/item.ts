@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import Papa from "papaparse";
 import { Prisma, type ItemType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireModuleUser } from "@/lib/modules-access";
+import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { desanitizeCsvCell, sanitizeCsvCell, csvFilename } from "@/lib/csv";
@@ -22,7 +22,9 @@ import { changedLabel, customFieldsForCreate, customSearchWhere, fieldsFor, save
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { customSheetFor, exportCells } from "@/lib/custom-fields/sheets";
 import { hasEffectivePermission } from "@/actions/permission";
-import { canonicalColumn, cleanName, nameKey } from "@/lib/items/catalogue-import";
+import { canonicalColumn, cleanName, nameKey, normaliseHsn } from "@/lib/items/catalogue-import";
+import { HSN_REQUIRED_MESSAGE, hsnShapeIssue } from "@/lib/hsn";
+import { hsnIssue, hsnProblemsFor, knownHsnCodes, notInDirectory } from "@/lib/platform/hsn-directory";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
@@ -60,6 +62,9 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { openingStock, billingCycle, ...rest } = parsed.data;
+  // In India, a real code of the kind this item takes — the GST portal's directory (src/lib/platform/hsn-directory.ts).
+  const hsnError = (await countryFeatureAvailable("hsn")) ? await hsnIssue(rest.hsnCode, rest.type) : null;
+  if (hsnError) return { ok: false, error: hsnError };
   // Only goods can track inventory — the "track inventory" field is hidden (not cleared) in the
   // form for other types, so the server is the authoritative place this gets enforced.
   const trackInventory = rest.type === "GOOD" && rest.trackInventory;
@@ -134,6 +139,8 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { id, billingCycle, ...rest } = parsed.data;
+  const hsnError = (await countryFeatureAvailable("hsn")) ? await hsnIssue(rest.hsnCode, rest.type) : null;
+  if (hsnError) return { ok: false, error: hsnError };
   // Only goods can track inventory — see the matching note in createItem.
   const trackInventory = rest.type === "GOOD" && rest.trackInventory;
   const familyError = await validateBrandFamily(rest.brandId, rest.productFamilyId);
@@ -246,8 +253,21 @@ export async function listItems(params?: {
   pageSize?: number;
   /** The workspace's own product fields filtered on, as the page read them (src/lib/custom-fields/filters.ts). */
   customFilters?: CustomFilterInputs;
+  /**
+   * Check every item's HSN/SAC against the GST directory (an Indian workspace's; ignored elsewhere) —
+   * the items list asks, global search doesn't. With `hsnToFix`, only the items that need fixing.
+   */
+  checkHsn?: boolean;
+  hsnToFix?: boolean;
 }) {
   const user = await requireModuleUser("items");
+  /**
+   * In India, every item's HSN/SAC against the GST directory: how many need fixing (the list's banner),
+   * and, when asked, only those. The whole catalogue is read for it — its id, type and code — because a
+   * code the directory doesn't list can't be found with a query on the workspace's own database.
+   */
+  const india = params?.checkHsn ? await countryFeatureAvailable("hsn") : false;
+  const toFix = india ? await hsnProblemsFor(await db.item.findMany({ select: { id: true, type: true, hsnCode: true } })) : new Map<string, string>();
 
   const seq = params?.search ? parseSeqQuery(params.search) : null;
   // The workspace's own fields this person may see, searched too (src/lib/custom-fields/server.ts).
@@ -270,6 +290,7 @@ export async function listItems(params?: {
         }
       : {}),
     ...(fieldFilters.length > 0 ? { AND: fieldFilters } : {}),
+    ...(india && params?.hsnToFix ? { id: { in: [...toFix.keys()] } } : {}),
   };
 
   const pageSize = params?.pageSize ?? DEFAULT_PAGE_SIZE;
@@ -290,7 +311,17 @@ export async function listItems(params?: {
     },
   });
 
-  return { items: toPlain(items), total, page, pageSize, totalPages };
+  return {
+    items: toPlain(items),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    /** Why each item on this page needs its HSN/SAC fixed — none outside India. */
+    hsnProblems: Object.fromEntries(items.filter((i) => toFix.has(i.id)).map((i) => [i.id, toFix.get(i.id)!])),
+    /** How many in the whole catalogue do. */
+    hsnToFix: toFix.size,
+  };
 }
 
 /**
@@ -307,6 +338,23 @@ export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ co
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { itemIds, brandId, productFamilyId, type, category, active } = parsed.data;
+  const hsnCode = normaliseHsn(parsed.data.hsnCode ?? "") || undefined;
+
+  // In India, a code given to every item picked, or a type given to them, must still fit each one: a
+  // good with a SAC is filed under services. Asked of the types the picked items will have after this.
+  if ((hsnCode || type) && (await countryFeatureAvailable("hsn"))) {
+    const picked = await db.item.findMany({ where: { id: { in: itemIds } }, select: { type: true, hsnCode: true } });
+    for (const item of picked) {
+      const code = hsnCode ?? item.hsnCode;
+      if (!code) continue;
+      const issue = hsnShapeIssue(code, type || item.type);
+      if (issue) return { ok: false, error: hsnCode ? issue : `Some of these items have a code that doesn't fit the new type — ${issue}` };
+    }
+    if (hsnCode) {
+      const known = await knownHsnCodes([hsnCode]);
+      if (known.checked && !known.found.has(hsnCode)) return { ok: false, error: notInDirectory(hsnCode) };
+    }
+  }
 
   // "clear" is how the form asks for null, since an empty select value means "leave alone".
   const nextBrandId = brandId === "clear" ? null : brandId || undefined;
@@ -327,6 +375,7 @@ export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ co
     ...(type ? { type } : {}),
     ...(category ? { category: category === "clear" ? null : category } : {}),
     ...(active ? { active: active === "true" } : {}),
+    ...(hsnCode ? { hsnCode } : {}),
   };
 
   if (Object.keys(data).length === 0) {
@@ -355,6 +404,7 @@ const ITEM_OPTION_SELECT = {
   unit: true,
   sellingPrice: true,
   taxRatePercent: true,
+  hsnCode: true,
 } as const;
 
 /**
@@ -607,6 +657,9 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
   const hasHsn = columns.has("hsnCode");
 
   const result: ImportItemsResult = { created: 0, updated: 0, errors: [], brandsCreated: [], familiesCreated: [] };
+  // In India: every code the file gives, asked of the GST directory once rather than once a row.
+  const india = await countryFeatureAvailable("hsn");
+  const directory = india && hasHsn ? await knownHsnCodes(parsed.data.map((r) => normaliseHsn(r.hsnCode))) : null;
   const catalogue = await catalogueResolver(await hasEffectivePermission(user.id, "catalog.manage"), result);
   // The workspace's own fields, read from their columns by label. A blank cell leaves a value alone —
   // unlike the built-in columns here — so a file made before a field existed never clears it.
@@ -670,6 +723,24 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
         productFamilyId = family.id;
       } else {
         productFamilyId = null;
+      }
+    }
+    // In India, required on a new item and on any row that has the column — a file without the column
+    // leaves an existing item's code as it is — and what is given must be a real code of the kind the
+    // item takes.
+    if (india && !existing && !hasHsn) {
+      result.errors.push({ row: rowNumber, message: `${HSN_REQUIRED_MESSAGE} Add an HSN/SAC column for new items.` });
+      continue;
+    }
+    if (india && hasHsn) {
+      const issue = hsnShapeIssue(data.hsnCode, data.type);
+      if (issue) {
+        result.errors.push({ row: rowNumber, message: issue });
+        continue;
+      }
+      if (directory?.checked && !directory.found.has(data.hsnCode)) {
+        result.errors.push({ row: rowNumber, message: notInDirectory(data.hsnCode) });
+        continue;
       }
     }
     const hsnCode = hasHsn ? data.hsnCode || null : undefined;

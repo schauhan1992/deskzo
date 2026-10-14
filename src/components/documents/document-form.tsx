@@ -36,6 +36,7 @@ import { GST_NUMBERED_TYPES, expandPrefix } from "@/lib/document-numbering";
 import { indiaClock } from "@/lib/time/zone";
 import { useClock } from "@/components/time/clock-provider";
 import { formatOrderId } from "@/lib/order-id";
+import { HSN_PATTERN, normaliseHsn } from "@/lib/items/catalogue-import";
 import {
   defaultServicePeriod,
   formatServicePeriod,
@@ -1057,6 +1058,9 @@ export function DocumentForm({
                         aria-label={`HSN code, line ${index + 1}`}
                         value={line.hsnCode}
                         onChange={(e) => updateLine(line.key, { hsnCode: e.target.value })}
+                        // 4, 6 or 8 digits; whether the GST directory lists it is the save's to say.
+                        aria-invalid={line.hsnCode.trim() !== "" && !HSN_PATTERN.test(normaliseHsn(line.hsnCode))}
+                        className="aria-[invalid=true]:border-danger"
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -1534,7 +1538,10 @@ function ItemPicker({
               >
                 <span className="min-w-0">
                   <span className="block truncate text-text">{item.name}</span>
-                  <span className="block truncate text-xs text-subtle">{item.sku}</span>
+                  {/* Its HSN/SAC comes onto the line with it — said here, so a product without one shows before it is picked. */}
+                  <span className="block truncate text-xs text-subtle">
+                    {item.sku} · {item.hsnCode ? `HSN/SAC ${item.hsnCode}` : "no HSN/SAC"}
+                  </span>
                 </span>
                 {/* The catalogue's own rupee price. On a foreign-currency document the line is
                     added at the converted figure, so this is shown for what it is. */}

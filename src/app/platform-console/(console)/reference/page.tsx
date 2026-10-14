@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/console/kit/page-header";
 import { Panel } from "@/components/console/kit/panel";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
-import { PinDirectoryCard, WorldPlacesCard, isSyncing } from "@/components/console/reference/dataset-card";
+import { HsnDirectoryCard, PinDirectoryCard, WorldPlacesCard, isSyncing } from "@/components/console/reference/dataset-card";
 import { plural } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor } from "@/lib/console-shared/roles";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { readPinDirectory, readWorldPlaces } from "@/lib/platform/reference-sync";
+import { readHsnDirectory } from "@/lib/platform/hsn-directory";
 
 export const metadata: Metadata = { title: "Reference data" };
 
@@ -17,7 +18,8 @@ const REFRESH_SECONDS = 5;
 
 /**
  * Reference data (spec §3.15): the shared reference database — one copy for every workspace — with
- * India's PIN directory and the world's states, cities and postal codes. A sync changes every
+ * India's PIN directory, the world's states, cities and postal codes, and the GST portal's HSN/SAC
+ * directory. A sync changes every
  * workspace's address lookups, which is why it is started from here (managers only) and never from a
  * customer's workspace. Nothing on this page deletes reference data, and a workspace's reset never
  * touches it.
@@ -28,7 +30,7 @@ const REFRESH_SECONDS = 5;
 export default async function ConsoleReferencePage() {
   const staff = await consoleStaff(PAGE_ROLES.reference);
   const caps = capsFor(staff.role);
-  const [pin, world, clock] = await Promise.all([readPinDirectory(), readWorldPlaces(), consoleClock()]);
+  const [pin, world, hsn, clock] = await Promise.all([readPinDirectory(), readWorldPlaces(), readHsnDirectory(), consoleClock()]);
 
   // One poll for the page, however many syncs run: each card would otherwise start its own.
   const running = isSyncing(pin.sync) || isSyncing(world.sync);
@@ -49,6 +51,7 @@ export default async function ConsoleReferencePage() {
         <div className="min-w-0 space-y-6">
           <PinDirectoryCard pin={pin} caps={caps} clock={clock} />
           {unresolved.length > 0 && <UnresolvedStates rows={unresolved} />}
+          <HsnDirectoryCard hsn={hsn} caps={caps} />
         </div>
         <WorldPlacesCard world={world} caps={caps} clock={clock} />
       </div>

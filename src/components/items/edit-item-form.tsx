@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ItemDetailFields, type BrandOption } from "@/components/items/item-fields";
 import type { Item } from "@prisma/client";
 import { itemPath } from "@/lib/record-links";
+import { HSN_REQUIRED_MESSAGE } from "@/lib/hsn";
 
 type FormValues = z.input<typeof updateItemSchema>;
 
@@ -25,11 +26,14 @@ export function EditItemForm({
   item,
   brands,
   showRevenuePattern = false,
+  hsnRequired = false,
 }: {
   item: ItemWithPlainPrices;
   brands: BrandOption[];
   /** Revenue & Close is available, so the form asks how this item's revenue is recognised. */
   showRevenuePattern?: boolean;
+  /** An Indian workspace: HSN/SAC is required, and checked against the GST portal's directory. */
+  hsnRequired?: boolean;
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -38,6 +42,7 @@ export function EditItemForm({
     handleSubmit,
     watch,
     setValue,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, UpdateItemInput>({
     resolver: zodResolver(updateItemSchema),
@@ -66,6 +71,7 @@ export function EditItemForm({
 
   const itemType = watch("type");
   const brandId = watch("brandId");
+  const hsnCode = watch("hsnCode");
   const trackInventory = watch("trackInventory");
 
   useEffect(() => {
@@ -83,9 +89,15 @@ export function EditItemForm({
 
   async function onSubmit(values: UpdateItemInput) {
     setServerError(null);
+    if (hsnRequired && !values.hsnCode) {
+      setError("hsnCode", { message: HSN_REQUIRED_MESSAGE }, { shouldFocus: true });
+      return;
+    }
     const result = await updateItem(values);
     if (!result.ok) {
-      setServerError(result.error);
+      // What the GST directory said about the code belongs under the code.
+      if (/\b(HSN|SAC)\b/.test(result.error)) setError("hsnCode", { message: result.error }, { shouldFocus: true });
+      else setServerError(result.error);
       return;
     }
     router.push(itemPath(item.itemSeq));
@@ -102,8 +114,11 @@ export function EditItemForm({
         brands={brands}
         brandId={brandId}
         onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
+        hsnCode={typeof hsnCode === "string" ? hsnCode : ""}
+        onHsnChange={(code) => setValue("hsnCode", code, { shouldDirty: true, shouldValidate: !!errors.hsnCode })}
         trackInventory={!!trackInventory}
         showRevenuePattern={showRevenuePattern}
+        hsnRequired={hsnRequired}
       />
 
       <div className="flex justify-end gap-3">

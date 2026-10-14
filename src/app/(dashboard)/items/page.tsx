@@ -22,7 +22,7 @@ import type { ItemType } from "@prisma/client";
 export default async function ItemsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; brandId?: string; q?: string; page?: string; pageSize?: string } & CustomFilterParams>;
+  searchParams: Promise<{ type?: string; brandId?: string; q?: string; page?: string; pageSize?: string; hsn?: string } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("items");
   if (!enabled) {
@@ -42,6 +42,9 @@ export default async function ItemsPage({
       page: resolvePage(params.page),
       pageSize: resolvePageSize(params.pageSize),
       customFilters,
+      // In India, every code against the GST directory: the banner's count, and "?hsn=fix" for the list.
+      checkHsn: true,
+      hsnToFix: params.hsn === "fix",
     }),
     listBrands(),
   ]);
@@ -70,6 +73,7 @@ export default async function ItemsPage({
       q: params.q,
       brandId: params.brandId,
       pageSize: params.pageSize,
+      hsn: params.hsn,
       ...overrides,
     };
     return Object.fromEntries(Object.entries(next).filter(([, v]) => v)) as Record<string, string>;
@@ -111,6 +115,7 @@ export default async function ItemsPage({
         {params.type && <input type="hidden" name="type" value={params.type} />}
         {params.brandId && <input type="hidden" name="brandId" value={params.brandId} />}
         {params.pageSize && <input type="hidden" name="pageSize" value={params.pageSize} />}
+        {params.hsn && <input type="hidden" name="hsn" value={params.hsn} />}
         {Object.entries(fieldParams).map(([name, value]) => (
           <input key={name} type="hidden" name={name} value={value} />
         ))}
@@ -143,8 +148,26 @@ export default async function ItemsPage({
         ))}
       </div>
 
+      {/* Items whose HSN/SAC is missing, the wrong kind, or not a code the GST portal lists — every
+          invoice line for them carries it, and the GST return groups by it. */}
+      {(result.hsnToFix > 0 || params.hsn === "fix") && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-text" role="status">
+          <span>
+            {params.hsn === "fix"
+              ? `Showing the ${result.hsnToFix} item${result.hsnToFix === 1 ? "" : "s"} whose HSN/SAC needs fixing — missing, the wrong kind, or not in the GST portal's directory.`
+              : `${result.hsnToFix} item${result.hsnToFix === 1 ? " needs its" : "s need their"} HSN/SAC fixed — missing, the wrong kind, or not in the GST portal's directory.`}
+          </span>
+          <Link
+            href={{ pathname: "/items", query: filterQuery({ hsn: params.hsn === "fix" ? undefined : "fix", page: undefined }) }}
+            className="font-medium text-brand hover:underline"
+          >
+            {params.hsn === "fix" ? "Show every item" : "Show them"}
+          </Link>
+        </div>
+      )}
+
       <div className="mt-6">
-        <ItemsTable items={result.items} brands={brands} customColumns={customColumns} />
+        <ItemsTable items={result.items} brands={brands} customColumns={customColumns} hsnProblems={result.hsnProblems} />
         <Pagination
           page={result.page}
           pageSize={result.pageSize}

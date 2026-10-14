@@ -1,4 +1,6 @@
 import { checkLink } from "@/lib/help/links";
+import { hsnShapeIssue } from "@/lib/hsn";
+import { HSN_MESSAGE, HSN_PATTERN, normaliseHsn } from "@/lib/items/catalogue-import";
 
 /**
  * The onboarding wizard's two small forms — one item, one help link — and what is wrong with each, in
@@ -6,9 +8,10 @@ import { checkLink } from "@/lib/help/links";
  * actions behind them (`createItem`, `saveHelpLink`) check again, as they always have.
  */
 
-export type ItemDraft = { name: string; sku: string; skuTyped: boolean; type: "GOOD" | "SERVICE"; price: string; tax: string };
-export type ItemField = "name" | "sku" | "price" | "tax";
-export const EMPTY_ITEM: ItemDraft = { name: "", sku: "", skuTyped: false, type: "SERVICE", price: "", tax: "18" };
+export type ItemDraft = { name: string; sku: string; skuTyped: boolean; type: "GOOD" | "SERVICE"; hsn: string; price: string; tax: string };
+export type ItemField = "name" | "sku" | "hsn" | "price" | "tax";
+export const ITEM_FIELDS = ["name", "sku", "hsn", "price", "tax"] as const satisfies readonly ItemField[];
+export const EMPTY_ITEM: ItemDraft = { name: "", sku: "", skuTyped: false, type: "SERVICE", hsn: "", price: "", tax: "18" };
 
 export type HelpDraft = { kind: "ARTICLE" | "VIDEO"; title: string; url: string };
 export type HelpField = "title" | "url";
@@ -24,8 +27,17 @@ export function skuFrom(name: string): string {
   return words.join("-").slice(0, 24).replace(/-+$/, "");
 }
 
-export function itemProblem(field: ItemField, d: ItemDraft): string | null {
+/**
+ * What is wrong with one field. `india`: the workspace files GST, so the HSN/SAC is required and must
+ * fit the kind of item — the action then asks the GST directory whether the code is real.
+ */
+export function itemProblem(field: ItemField, d: ItemDraft, india = false): string | null {
   switch (field) {
+    case "hsn": {
+      if (india) return hsnShapeIssue(d.hsn, d.type);
+      const code = normaliseHsn(d.hsn);
+      return code === "" || HSN_PATTERN.test(code) ? null : HSN_MESSAGE;
+    }
     case "name": {
       const name = d.name.trim();
       if (!name) return "Give it a name — the one your customers know it by.";
@@ -49,10 +61,10 @@ export function itemProblem(field: ItemField, d: ItemDraft): string | null {
   }
 }
 
-export function itemIssues(d: ItemDraft): Partial<Record<ItemField, string>> {
+export function itemIssues(d: ItemDraft, india = false): Partial<Record<ItemField, string>> {
   const issues: Partial<Record<ItemField, string>> = {};
-  for (const field of ["name", "sku", "price", "tax"] as const) {
-    const problem = itemProblem(field, d);
+  for (const field of ITEM_FIELDS) {
+    const problem = itemProblem(field, d, india);
     if (problem) issues[field] = problem;
   }
   return issues;

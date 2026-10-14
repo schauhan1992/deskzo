@@ -18,6 +18,7 @@ import {
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { itemPath } from "@/lib/record-links";
+import { HSN_REQUIRED_MESSAGE } from "@/lib/hsn";
 
 type FormValues = z.input<typeof createItemSchema>;
 
@@ -25,11 +26,14 @@ export function NewItemForm({
   brands,
   showRevenuePattern = false,
   customFields = { fields: [], values: {}, people: [] },
+  hsnRequired = false,
 }: {
   brands: BrandOption[];
   showRevenuePattern?: boolean;
   /** The workspace's own product fields (src/lib/custom-fields/server.ts `formSetup`). */
   customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
+  /** An Indian workspace: HSN/SAC is required, and checked against the GST portal's directory. */
+  hsnRequired?: boolean;
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -40,6 +44,7 @@ export function NewItemForm({
     handleSubmit,
     watch,
     setValue,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FormValues, unknown, CreateItemInput>({
     resolver: zodResolver(createItemSchema),
@@ -48,6 +53,7 @@ export function NewItemForm({
 
   const itemType = watch("type");
   const brandId = watch("brandId");
+  const hsnCode = watch("hsnCode");
   const trackInventory = watch("trackInventory");
 
   useEffect(() => {
@@ -61,12 +67,18 @@ export function NewItemForm({
 
   async function onSubmit(values: CreateItemInput) {
     setServerError(null);
+    if (hsnRequired && !values.hsnCode) {
+      setError("hsnCode", { message: HSN_REQUIRED_MESSAGE }, { shouldFocus: true });
+      return;
+    }
     const missing = missingRequired(customFields.fields, custom);
     setCustomErrors(missing);
     if (Object.keys(missing).length > 0) return;
     const result = await createItem({ ...values, customFields: custom });
     if (!result.ok) {
-      setServerError(result.error);
+      // What the GST directory said about the code belongs under the code.
+      if (/\b(HSN|SAC)\b/.test(result.error)) setError("hsnCode", { message: result.error }, { shouldFocus: true });
+      else setServerError(result.error);
       return;
     }
     router.push(itemPath(result.data.itemSeq));
@@ -83,9 +95,12 @@ export function NewItemForm({
         brands={brands}
         brandId={brandId}
         onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
+        hsnCode={typeof hsnCode === "string" ? hsnCode : ""}
+        onHsnChange={(code) => setValue("hsnCode", code, { shouldDirty: true, shouldValidate: !!errors.hsnCode })}
         trackInventory={!!trackInventory}
         showOpeningStock
         showRevenuePattern={showRevenuePattern}
+        hsnRequired={hsnRequired}
       />
 
       {customFields.fields.length > 0 && (

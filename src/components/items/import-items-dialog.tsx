@@ -77,6 +77,11 @@ export function ImportItemsDialog() {
               column but leave a cell blank and that item&rsquo;s value is cleared. An export can be edited and
               imported straight back.
             </li>
+            <li>
+              In India every item needs its HSN/SAC: a new item without one, a blank HSN cell, a SAC on a good
+              or an HSN on a service, and a code the GST portal&rsquo;s directory doesn&rsquo;t list are each
+              refused and named below.
+            </li>
           </ul>
 
           <a

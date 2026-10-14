@@ -981,7 +981,9 @@ async function main() {
     };
     const refused = await attempt(true);
     ok("the migration retiring these tables refuses while one still holds a row", /reference:move/.test(refused), refused.split("\n").find((l) => /reference/.test(l))?.trim().slice(0, 120));
-    ok("  and goes through once they are empty", (await attempt(false)) === "ran" && drops.length === REFERENCE_TABLES.length);
+    // Every table that moved out — the ones made in the reference database never had a copy to drop.
+    const moved = REFERENCE_TABLES.filter((t) => !("sharedFromTheStart" in t));
+    ok("  and goes through once they are empty", (await attempt(false)) === "ran" && drops.length === moved.length);
   }
 
   section("What is in the database now");

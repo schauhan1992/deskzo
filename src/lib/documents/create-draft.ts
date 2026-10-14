@@ -13,6 +13,7 @@ import type { TradeDocumentInput } from "@/lib/validation/trade-document";
 import type { ActionResult } from "@/actions/company";
 import { isIndia } from "@/lib/geo/countries";
 import { periodDay } from "@/lib/documents/service-period";
+import { normaliseHsn } from "@/lib/items/catalogue-import";
 
 /**
  * Building and raising trade documents — the parts of src/actions/trade-document.ts that decide what a
@@ -151,6 +152,10 @@ export async function resolveDocumentBranch(input: {
  *   · `billingMilestoneId` is "Raise invoice"'s to set (src/actions/project.ts). A new document never
  *     carries one; an edited draft keeps a line's only while the stage still points at this document,
  *     so the form can round-trip it and nothing else can attach a stage to a document.
+ *
+ * And a line that names a product but arrives with no HSN/SAC gets the product's — its item's, or the
+ * item of the order it bills. The form fills it when the product is picked; this is what makes that
+ * hold for every other way a line is written.
  */
 export async function checkLineLinks(
   lines: TradeDocumentInput["lines"],
@@ -159,8 +164,12 @@ export async function checkLineLinks(
 ): Promise<{ error: string } | { lines: TradeDocumentInput["lines"] }> {
   const orderIds = [...new Set(lines.map((l) => l.companyProductId).filter((v): v is string => !!v))];
   const orders = orderIds.length
-    ? await db.companyProduct.findMany({ where: { id: { in: orderIds } }, select: { id: true, companyId: true, vendorId: true } })
+    ? await db.companyProduct.findMany({ where: { id: { in: orderIds } }, select: { id: true, companyId: true, vendorId: true, item: { select: { hsnCode: true } } } })
     : [];
+  const blankItemIds = [...new Set(lines.filter((l) => !normaliseHsn(l.hsnCode ?? "") && l.itemId).map((l) => l.itemId!))];
+  const itemCodes = new Map(
+    (blankItemIds.length ? await db.item.findMany({ where: { id: { in: blankItemIds } }, select: { id: true, hsnCode: true } }) : []).map((i) => [i.id, i.hsnCode]),
+  );
   for (const [index, line] of lines.entries()) {
     if (!line.companyProductId) continue;
     const order = orders.find((o) => o.id === line.companyProductId);
@@ -181,7 +190,13 @@ export async function checkLineLinks(
     lines: lines.map((l) => {
       const stage = l.billingMilestoneId && keep.has(l.billingMilestoneId) && !taken.has(l.billingMilestoneId) ? l.billingMilestoneId : "";
       if (stage) taken.add(stage);
-      return { ...l, billingMilestoneId: stage };
+      const typed = normaliseHsn(l.hsnCode ?? "");
+      const hsnCode =
+        typed ||
+        (l.itemId ? itemCodes.get(l.itemId) : null) ||
+        (l.companyProductId ? orders.find((o) => o.id === l.companyProductId)?.item.hsnCode : null) ||
+        "";
+      return { ...l, billingMilestoneId: stage, hsnCode };
     }),
   };
 }
@@ -196,7 +211,8 @@ export function lineData(input: TradeDocumentInput["lines"][number], computed: R
     billingMilestoneId: input.billingMilestoneId || null,
     name: input.name.trim(),
     description: input.description?.trim() || null,
-    hsnCode: input.hsnCode || null,
+    // Without the spaces people copy it with ("8471 30 10"), as an item stores it.
+    hsnCode: normaliseHsn(input.hsnCode ?? "") || null,
     unit: input.unit || null,
     quantity: new Prisma.Decimal(input.quantity),
     unitPrice: new Prisma.Decimal(input.unitPrice),

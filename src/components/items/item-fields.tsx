@@ -4,6 +4,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
 import { OptionCombobox } from "@/components/ui/option-combobox";
+import { HsnCombobox } from "@/components/items/hsn-combobox";
 
 export type BrandOption = { id: string; name: string; families: { id: string; name: string }[] };
 
@@ -17,6 +18,9 @@ export function ItemDetailFields({
   trackInventory,
   showOpeningStock,
   showRevenuePattern = false,
+  hsnCode,
+  onHsnChange,
+  hsnRequired = false,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
@@ -32,6 +36,11 @@ export function ItemDetailFields({
    * decides (`isModuleEnabled("revenue_close")`). The actions ignore the field otherwise.
    */
   showRevenuePattern?: boolean;
+  /** The HSN/SAC field searches the GST directory, so it sets the value itself rather than through `register`. */
+  hsnCode: string;
+  onHsnChange: (code: string) => void;
+  /** An Indian workspace, where the code is the tax's classification and an item must carry one. */
+  hsnRequired?: boolean;
 }) {
   const selectedBrand = brands.find((b) => b.id === brandId);
   return (
@@ -110,13 +119,26 @@ export function ItemDetailFields({
             <Input id="category" placeholder="e.g. Laptop, Productivity Suite" {...register("category")} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="hsnCode">HSN / SAC code</Label>
-            <Input id="hsnCode" inputMode="numeric" placeholder="e.g. 8471 or 997331" {...register("hsnCode")} />
+            <Label htmlFor="hsnCode">HSN / SAC code{hsnRequired ? " *" : ""}</Label>
+            <HsnCombobox
+              id="hsnCode"
+              value={hsnCode}
+              onChange={onHsnChange}
+              itemType={itemType}
+              aria-invalid={!!errors.hsnCode}
+              aria-describedby="hsnCode-help"
+            />
             {errors.hsnCode ? (
-              <p className="text-xs text-danger">{String(errors.hsnCode.message)}</p>
+              <p id="hsnCode-help" className="text-xs text-danger">{String(errors.hsnCode.message)}</p>
             ) : (
               // What every invoice line for this item will carry, and what the GST return groups by.
-              <p className="text-xs text-subtle">HSN for goods, SAC for services — 4, 6 or 8 digits. Copied onto every document line.</p>
+              <p id="hsnCode-help" className="text-xs text-subtle">
+                {itemType === "GOOD"
+                  ? "HSN, from the GST portal's directory. Copied onto every document line."
+                  : itemType === "SERVICE"
+                    ? "SAC — services start with 99. Copied onto every document line."
+                    : "HSN or SAC, from the GST portal's directory. Copied onto every document line."}
+              </p>
             )}
           </div>
           <div className="space-y-1.5">

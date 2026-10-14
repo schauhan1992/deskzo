@@ -20,6 +20,9 @@ import { refreshTrialWorkspaces } from "@/lib/platform/entitlements";
 import { forgetRegistry } from "@/lib/tenancy/registry";
 import { holdProblem, openInviteWhere } from "@/lib/platform/name-rules";
 import { removePinApiKey, savePinApiKey, startPinSync, startWorldSync } from "@/lib/platform/reference-sync";
+// The loader lives with the reference schema, where it may replace the rows (src/lib/reference-data.ts).
+import { HsnFileRefused, loadHsnDirectory } from "../../../prisma/reference/hsn";
+import { refDb } from "@/lib/platform/reference-db";
 import { enterAsSupport } from "@/lib/platform/support";
 import { StaffChangeRefused, createStaff, deactivateStaff, endStaffSessions, issuePasswordSetup, resetStaffTwoFactor, setStaffRole } from "@/lib/platform/staff";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
@@ -295,6 +298,31 @@ export async function consoleRemovePinKey() {
     await removePinApiKey();
     await consoleAudit(staff, "reference.pin-key.remove", {});
     return null;
+  });
+}
+
+/**
+ * A newer copy of the GST portal's HSN/SAC directory — the Excel it publishes — loaded for every
+ * workspace's item form. Managers only, like a sync. A file that isn't the directory, or that would
+ * replace it with less than half as many codes, is refused and the loaded one stays in use.
+ */
+export async function consoleLoadHsnDirectory(formData: FormData) {
+  return asStaff(MANAGERS, async (staff) => {
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) throw new ConsoleRefused("Choose the HSN_SAC.xlsx file the GST portal gives you.");
+    // The portal's file is under a megabyte; five is room for it to grow, not for something else.
+    if (file.size > 5 * 1024 * 1024) throw new ConsoleRefused("That file is far larger than the GST portal's directory — check it's the right one.");
+    let result: Awaited<ReturnType<typeof loadHsnDirectory>>;
+    try {
+      result = await loadHsnDirectory(refDb(), { bytes: new Uint8Array(await file.arrayBuffer()), sourceLabel: cleanText(file.name, 120) || "HSN_SAC.xlsx" });
+    } catch (err) {
+      if (err instanceof HsnFileRefused) throw new StaffChangeRefused(err.message);
+      throw err;
+    }
+    await consoleAudit(staff, "reference.hsn.load", { status: result.status, codes: result.rows });
+    return result.status === "unchanged"
+      ? `That file is the one already loaded — ${result.rows.toLocaleString("en-IN")} codes, unchanged.`
+      : `Loaded ${result.goods.toLocaleString("en-IN")} HSN and ${result.services.toLocaleString("en-IN")} SAC codes.`;
   });
 }
 

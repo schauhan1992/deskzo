@@ -153,3 +153,27 @@ model GeoPostalCode {
   @@index([countryCode, postalKey])
   @@map("geo_postal_codes")
 }
+
+/// Goods (HSN) or services (SAC) — which of the GST portal's two sheets a code came from.
+enum HsnKind {
+  GOODS
+  SERVICES
+}
+
+/**
+ * The GST portal's HSN/SAC directory — every code with its official description, from the Excel the
+ * portal publishes (Services › User Services › Search HSN Code › "Download HSN Directory in Excel
+ * Format"). Goods and services in one table: an item's HSN/SAC field takes either, and every SAC
+ * starts with 99, which no HSN does. Loaded by prisma/reference/hsn.ts; searched from the item form.
+ */
+model HsnCode {
+  /// Digits only, as the portal lists it: 2, 4, 6 or 8 for goods, 2, 4 or 6 for services.
+  code        String  @id
+  description String
+  kind        HsnKind
+  /// The 4-digit heading's description, for a longer code — "Other" says little on its own.
+  heading     String?
+
+  @@index([kind])
+  @@map("hsn_codes")
+}

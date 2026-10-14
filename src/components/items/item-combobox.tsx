@@ -14,6 +14,8 @@ export type ItemComboOption = {
   unit: string | null;
   sellingPrice: unknown;
   taxRatePercent?: unknown;
+  /** What the product's lines will be filed under — shown beside it, so a missing one shows before it's picked. */
+  hsnCode?: string | null;
 };
 
 /** Rows shown at once — and the most a `search` lookup returns, so a full page means "keep typing". */
@@ -178,6 +180,9 @@ export function ItemCombobox({
                 <span className="font-medium text-text">{item.name}</span>{" "}
                 <span className="text-subtle">{item.sku}</span>
                 <Badge className="ml-2">{item.type}</Badge>
+                {item.hsnCode !== undefined && (
+                  <span className="ml-2 text-xs text-subtle">{item.hsnCode ? `HSN/SAC ${item.hsnCode}` : "no HSN/SAC"}</span>
+                )}
               </span>
               {showPrice && (
                 <span className="shrink-0 text-muted">{formatCurrency(String(item.sellingPrice))}</span>

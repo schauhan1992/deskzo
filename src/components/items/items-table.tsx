@@ -16,6 +16,7 @@ import { Input, Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import type { BrandOption } from "@/components/items/item-fields";
 import { OptionCombobox } from "@/components/ui/option-combobox";
+import { HsnCombobox } from "@/components/items/hsn-combobox";
 
 const TYPE_TONE: Record<ItemType, "default" | "blue" | "green" | "amber"> = {
   GOOD: "default",
@@ -38,15 +39,19 @@ export type ItemRow = {
   active: boolean;
   brand: { id: string; name: string } | null;
   productFamily: { id: string; name: string } | null;
+  hsnCode: string | null;
 };
 
 export function ItemsTable({
   items,
   brands,
   customColumns = { columns: [], texts: {} },
+  hsnProblems = {},
 }: {
   items: ItemRow[];
   brands: BrandOption[];
+  /** Why an item's HSN/SAC needs fixing, by id — an Indian workspace's (src/lib/platform/hsn-directory.ts). */
+  hsnProblems?: Record<string, string>;
   /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`, `listedOnly`): no column picker here. */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
@@ -61,6 +66,7 @@ export function ItemsTable({
   const [type, setType] = useState("");
   const [category, setCategory] = useState("");
   const [active, setActive] = useState("");
+  const [hsnCode, setHsnCode] = useState("");
 
   const selectedBrand = brands.find((b) => b.id === brandId);
 
@@ -70,6 +76,7 @@ export function ItemsTable({
     setType("");
     setCategory("");
     setActive("");
+    setHsnCode("");
   }
 
   function apply() {
@@ -83,6 +90,7 @@ export function ItemsTable({
         type,
         category,
         active,
+        hsnCode,
       });
       if (!result.ok) {
         setError(result.error);
@@ -144,6 +152,10 @@ export function ItemsTable({
               className="h-9 w-48"
               aria-label="Category"
             />
+            {/* One code for every item picked — the quick way to fix a run of them the list flagged. */}
+            <div className="w-64">
+              <HsnCombobox value={hsnCode} onChange={setHsnCode} placeholder="HSN/SAC — no change" aria-label="HSN/SAC code" />
+            </div>
             <Select value={active} onChange={(e) => setActive(e.target.value)} className="h-9 w-44" aria-label="Status">
               <option value="">Status — no change</option>
               <option value="true">Mark active</option>
@@ -174,6 +186,7 @@ export function ItemsTable({
                 <th className="px-4 py-2.5">Item</th>
                 <th className="px-4 py-2.5">Type</th>
                 <th className="px-4 py-2.5">SKU</th>
+                <th className="px-4 py-2.5">HSN/SAC</th>
                 <th className="px-4 py-2.5">Brand / family</th>
                 <th className="px-4 py-2.5">Category</th>
                 <th className="px-4 py-2.5">Selling price</th>
@@ -205,6 +218,17 @@ export function ItemsTable({
                       <Badge tone={TYPE_TONE[item.type]}>{itemTypeLabels[item.type]}</Badge>
                     </td>
                     <td className="px-4 py-2.5 text-muted">{item.sku}</td>
+                    <td className="px-4 py-2.5">
+                      {hsnProblems[item.id] ? (
+                        // What is wrong, in words, for whoever hovers or reads it out.
+                        <span className="font-mono text-xs text-danger" title={hsnProblems[item.id]}>
+                          {item.hsnCode ?? "Missing"}
+                          <span className="sr-only"> — {hsnProblems[item.id]}</span>
+                        </span>
+                      ) : (
+                        <span className="font-mono text-xs text-muted">{item.hsnCode ?? "—"}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-muted">
                       {item.brand ? (
                         <>
@@ -236,7 +260,7 @@ export function ItemsTable({
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={10 + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={11 + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
                     No items found.
                   </td>
                 </tr>

@@ -10,8 +10,9 @@ import { SYNC_STATUS } from "@/lib/console-shared/labels";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PinDirectory, SyncStatus, WorldPlaces } from "@/lib/platform/reference-sync";
+import type { HsnDirectoryState } from "@/lib/platform/hsn-directory";
 import type { Clock } from "@/lib/time/zone";
-import { PinKeyButtons, SyncButton } from "./reference-actions";
+import { HsnUploadButton, PinKeyButtons, SyncButton } from "./reference-actions";
 
 /**
  * The two dataset cards of the Reference data page (spec §3.15): India's PIN directory and the
@@ -302,6 +303,53 @@ export function WorldPlacesCard({ world, caps, clock }: { world: WorldPlaces; ca
         </div>
       )}
 
+      <div className="border-t border-line px-5 py-4">
+        <DefinitionList items={details} />
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * The GST portal's HSN/SAC directory: what is loaded, from which file, and — for managers — loading a
+ * newer copy of the portal's Excel. No sync: the portal publishes a file, not an API.
+ */
+export function HsnDirectoryCard({ hsn, caps }: { hsn: HsnDirectoryState; caps: Caps }) {
+  const { loaded } = hsn;
+  const details: { term: string; value: ReactNode; wide?: boolean }[] = [
+    { term: "Source", value: loaded ? loaded.source : <span className="text-muted">—</span> },
+    { term: "Loaded", value: loaded ? <RelativeTime at={loaded.loadedAt} /> : <span className="text-muted">Not yet</span> },
+  ];
+  if (loaded && loaded.skipped > 0) details.push({ term: "Set aside", value: `${num(loaded.skipped)} rows the loader couldn't use`, wide: true });
+
+  return (
+    <Panel
+      title="GST HSN/SAC directory"
+      description="Goods (HSN) and services (SAC) codes, from the GST portal's Excel"
+      padded={false}
+      footer={
+        caps.manage ? (
+          <Footer>
+            <HsnUploadButton loaded={!!loaded} />
+          </Footer>
+        ) : undefined
+      }
+    >
+      <div className="space-y-4 px-5 py-4">
+        {loaded ? (
+          <Stats
+            items={[
+              { label: "HSN codes", value: num(loaded.goods), note: "goods" },
+              { label: "SAC codes", value: num(loaded.services), note: "services" },
+            ]}
+          />
+        ) : (
+          <NotLoaded title="Not loaded yet">
+            Item forms search nothing and check codes for shape only, in every workspace, until the directory is loaded.
+            {caps.manage && " Load the portal's Excel to fill it."}
+          </NotLoaded>
+        )}
+      </div>
       <div className="border-t border-line px-5 py-4">
         <DefinitionList items={details} />
       </div>

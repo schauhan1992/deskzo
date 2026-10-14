@@ -108,6 +108,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "handover.ts": "core",
   "help.ts": "core",
   "hr.ts": ["hr"],
+  // The GST portal's HSN/SAC directory — a reference lookup, like geo.ts, for items and document lines.
+  "hsn.ts": "core",
   "impersonation.ts": "core",
   "incentive.ts": ["incentives"],
   "industry.ts": "core",

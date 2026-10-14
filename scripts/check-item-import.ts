@@ -171,7 +171,7 @@ async function main() {
       "Name,SKU,Type,Brand,Product Family,HSN/SAC,Selling Price,GST Rate",
       `ZZ Laptop,${TAG}-1,GOOD,${TAG.toLowerCase()}   dell,LATITUDE,8471 30 10,1000,18`,
       `ZZ Laptop 2,${TAG}-2,GOOD,${TAG} Newco,Alpha Line,847130,2000,18`,
-      `ZZ Laptop 3,${TAG}-3,GOOD,${TAG.toLowerCase()} newco,alpha line,,3000,18`,
+      `ZZ Laptop 3,${TAG}-3,GOOD,${TAG.toLowerCase()} newco,alpha line,8471 30,3000,18`,
       `ZZ Orphan,${TAG}-4,GOOD,,Beta Line,,10,18`,
       `ZZ Bad HSN,${TAG}-5,GOOD,${TAG} Newco,,12345,10,18`,
     ]);
@@ -195,9 +195,16 @@ async function main() {
       "a price-only sheet updates the price and keeps brand, family and HSN",
       pricesOnly.updated === 1 && Number(afterPrices?.sellingPrice) === 1500 && afterPrices?.brandId === dell.id && afterPrices.productFamilyId === latitude.id && afterPrices.hsnCode === "84713010",
     );
-    await importCsv(["name,sku,type,brand,productFamily,hsnCode,sellingPrice", `ZZ Laptop,${TAG}-1,GOOD,,,,1500`]);
+    await importCsv(["name,sku,type,brand,productFamily,hsnCode,sellingPrice", `ZZ Laptop,${TAG}-1,GOOD,,,84713010,1500`]);
     const cleared = await item(`${TAG}-1`);
-    ok("blank cells in present columns clear them", cleared?.brandId === null && cleared.productFamilyId === null && cleared.hsnCode === null);
+    ok("blank cells in present columns clear them", cleared?.brandId === null && cleared.productFamilyId === null && cleared.hsnCode === "84713010");
+    // HSN/SAC is the exception in India, where a line can't be filed without one (src/lib/hsn.ts).
+    const blankHsn = await importCsv(["name,sku,type,hsnCode,sellingPrice", `ZZ Laptop,${TAG}-1,GOOD,,1500`]);
+    ok(
+      "  except HSN/SAC, which a row with the column must give",
+      blankHsn.updated === 0 && blankHsn.errors.some((e) => e.message.includes("HSN/SAC is required")) && (await item(`${TAG}-1`))?.hsnCode === "84713010",
+      JSON.stringify(blankHsn.errors),
+    );
     await importCsv(["name,sku,type,brand,sellingPrice", `ZZ Laptop 2,${TAG}-2,GOOD,${TAG} Dell,2000`]);
     const moved = await item(`${TAG}-2`);
     ok("moving an item to another brand drops the old brand's family", moved?.brandId === dell.id && moved.productFamilyId === null);
@@ -213,10 +220,10 @@ async function main() {
 
     actorId = reader.id;
     const limited = await importCsv([
-      "name,sku,type,brand,productFamily,sellingPrice",
-      `ZZ Unknown,${TAG}-6,GOOD,${TAG} Unknownco,,10`,
-      `ZZ Known,${TAG}-7,GOOD,${TAG} DELL,latitude,10`,
-      `ZZ New family,${TAG}-8,GOOD,${TAG} Dell,Vostro,10`,
+      "name,sku,type,brand,productFamily,hsnCode,sellingPrice",
+      `ZZ Unknown,${TAG}-6,GOOD,${TAG} Unknownco,,8471,10`,
+      `ZZ Known,${TAG}-7,GOOD,${TAG} DELL,latitude,8471,10`,
+      `ZZ New family,${TAG}-8,GOOD,${TAG} Dell,Vostro,8471,10`,
     ]);
     ok("a row naming a brand that isn't there is refused, by name", limited.errors.some((e) => e.row === 2 && e.message.includes("Unknownco")) && (await brandsNamed(`${TAG} Unknownco`)) === 0);
     ok("  as is one naming a family that isn't there", limited.errors.some((e) => e.row === 4 && e.message.includes("Vostro")) && (await db.productFamily.count({ where: { name: "Vostro", brandId: dell.id } })) === 0);

@@ -4,6 +4,7 @@ import type { Role } from "@/lib/roles";
 import bcrypt from "bcryptjs";
 import { ensurePincodes } from "./reference/pincodes";
 import { ensureGeonames } from "./reference/geonames";
+import { ensureHsnDirectory } from "./reference/hsn";
 
 const db = directClient();
 
@@ -69,6 +70,7 @@ async function main() {
   try {
     await ensurePincodes(reference);
     await ensureGeonames(reference);
+    await ensureHsnDirectory(reference);
   } finally {
     await reference.$disconnect();
   }

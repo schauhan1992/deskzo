@@ -32,6 +32,9 @@ export const REFERENCE_TABLES = [
   { model: "geoState", table: "geo_states", what: "GeoNames' states and provinces outside India" },
   { model: "geoCity", table: "geo_cities", what: "GeoNames' towns and cities outside India" },
   { model: "geoPostalCode", table: "geo_postal_codes", what: "GeoNames' postal codes outside India" },
+  // Made in the reference database: unlike the rows above, it never had a copy in a workspace's, so
+  // the migration that took those out has nothing of it to drop.
+  { model: "hsnCode", table: "hsn_codes", what: "the GST portal's HSN/SAC directory", sharedFromTheStart: true },
   { model: "referenceDataset", table: "reference_datasets", what: "which file each reference table was loaded from" },
   // Configuration rather than facts, but it belongs to the directory: a reset that kept the post
   // offices and threw away the key that refreshes them would leave the next sync failing for no
