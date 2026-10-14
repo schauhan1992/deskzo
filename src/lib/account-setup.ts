@@ -4,6 +4,8 @@ import { assertGrantWithinOwnAuthority } from "@/lib/authz/guards";
 import { permissionsFor } from "@/lib/authz/resolve";
 import { AWAITING_SETUP } from "@/lib/no-password";
 import { isAutomationKind, isSystemAddress, PEOPLE_ONLY } from "@/lib/people";
+import { textToHtml } from "@/lib/marketing/html";
+import { deliverNow } from "@/lib/marketing/pipeline";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 
@@ -29,9 +31,11 @@ import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
  * admin says already uses another workspace on this platform, whose page also offers to link the two. Both
  * flags only change what the page shows; neither proves or opens anything.
  *
- * The email is the platform's own (src/lib/platform/mailer.ts), as the password reset's is — never the
- * workspace's customer mail. When it can't be sent, the link comes back instead, once, for whoever asked to
- * pass on; it is never stored or logged.
+ * The email goes out through the workspace's own mail first — the providers in Settings › Mail & messaging
+ * that carry transactional mail (src/lib/marketing/providers), so an invitation comes from the company's
+ * own server and address. A workspace with none, or whose providers all fail, sends it as the platform's
+ * own (src/lib/platform/mailer.ts), as the password reset's is. When neither can send it, the link comes
+ * back instead, once, for whoever asked to pass on; it is never stored or logged.
  *
  * ## Who may be handed the link
  *
@@ -127,8 +131,17 @@ export async function sendSetupInvitation(user: { id: string; name: string; emai
     console.error(`[setup] a setup link could not be issued: ${codeOf(err)}`);
     return { emailed: false };
   }
+  const mail = setupInvitationMail({ name: user.name, workspace, url, linking });
   try {
-    await sendPlatformMail({ type: "ACCOUNT", to: user.email, ...setupInvitationMail({ name: user.name, workspace, url, linking }) });
+    const sent = await deliverNow({ to: user.email, toName: user.name, subject: mail.subject, text: mail.text, html: textToHtml(mail.text) }, "TRANSACTIONAL", { delivering: true });
+    if (sent.ok) return { emailed: true };
+    // Its reason can quote the address; the platform's mail is tried next either way.
+    console.error("[setup] the workspace's own mail could not send a setup email; trying the platform's");
+  } catch (err) {
+    console.error(`[setup] the workspace's own mail could not be tried: ${codeOf(err)}`);
+  }
+  try {
+    await sendPlatformMail({ type: "ACCOUNT", to: user.email, ...mail });
     return { emailed: true };
   } catch (err) {
     console.error(`[setup] a setup email could not be sent: ${codeOf(err)}`);
