@@ -192,6 +192,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Team chat (src/lib/chat): one live connection for the whole app, and its unread count — for the
   // person as themselves only. Chats are private, so never while viewing as somebody.
   const chatOn = !!session?.user && !viewAs && openModules.includes("chat");
+  // While viewing as somebody, their chat button and rail tool still show — the screen should be theirs —
+  // but lead only to a note that chats are private; nothing of theirs is read.
+  const chatShown = !!shownUser && openModules.includes("chat");
   const chatUnread = chatOn ? await unreadTotal(session!.user.id).catch(() => 0) : 0;
 
   // The Getting Started wizard (src/lib/help/onboarding.ts): for a person still being onboarded, signed in as
@@ -310,7 +313,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="hidden sm:block">
               <ThemeToggle defaultTheme={branding.defaultTheme} />
             </div>
-            {chatOn && <ChatButton />}
+            {chatShown && <ChatButton />}
             <NotificationBell />
             <Link
               href="/profile"
@@ -396,7 +399,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           country={(await currentTenant()).country}
           support={!!supportLauncher}
           supportAccess={supportAccess ? { inside: !!supportAccess.grant } : null}
-          chat={chatOn}
+          chat={chatShown}
         />
       </div>
 

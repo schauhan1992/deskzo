@@ -33,14 +33,17 @@ export function ChatApp({ initialChatId = null, initialMessageId = null, compact
     threadsRef.current = threads;
   });
 
+  // Without the live connection (viewing as somebody) there is nothing to ask the server for: it would refuse.
+  const hasLive = !!live;
   useEffect(() => {
+    if (!hasLive) return;
     chatBootstrap()
       .then((b) => {
         setBoot(b);
         setChats(b.chats);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Chat couldn't be opened."));
-  }, []);
+  }, [hasLive]);
 
   const loadThread = useCallback(async (chatId: string, around?: string | null) => {
     const opened = await openChat(chatId, around ?? undefined);
@@ -198,7 +201,8 @@ export function ChatApp({ initialChatId = null, initialMessageId = null, compact
   );
 
   if (!live) {
-    return <p className="p-4 text-sm text-muted">Chat isn&apos;t available here.</p>;
+    // No live connection: an admin viewing as somebody, whose chats are theirs alone.
+    return <p className="p-4 text-sm text-muted">Chat is private to each person, so it isn&apos;t shown while you&apos;re viewing as somebody else.</p>;
   }
   if (error) return <p className="p-4 text-sm text-danger">{error}</p>;
   if (!boot) {

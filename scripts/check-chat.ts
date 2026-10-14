@@ -385,6 +385,9 @@ async function main() {
       ok("  with read ticks on Alice's", threadHtml.includes('aria-label="Read"'));
       ok("  the deleted one as deleted", threadHtml.includes("You deleted this message"));
       ok("  and the record link as a link", threadHtml.includes('href="/companies/C-999999"'));
+      const { ChatButton } = require("../src/components/chat/chat-button") as typeof import("../src/components/chat/chat-button");
+      const viewAsButton = renderToStaticMarkup(createElement(ChatButton));
+      ok("viewing as somebody, their chat button still shows — without a count, and saying chats are private", viewAsButton.includes('href="/chat"') && viewAsButton.includes("private") && !viewAsButton.includes("bg-red-600"));
     }
 
     section("Settings and the export");

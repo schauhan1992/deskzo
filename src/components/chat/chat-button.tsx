@@ -4,12 +4,15 @@ import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import { useChatLive } from "@/components/chat/chat-live";
 
-/** The header's way into chat, with the number of unread messages — beside the bell, on every page. */
+/**
+ * The header's way into chat, with the number of unread messages — beside the bell, on every page.
+ * Without the live connection (an admin viewing as somebody) it is the button alone, with no count: the
+ * chat page then says chats are private.
+ */
 export function ChatButton() {
   const live = useChatLive();
-  if (!live) return null;
-  const { unread } = live;
-  const label = unread > 0 ? `Chat — ${unread} unread` : "Chat";
+  const unread = live?.unread ?? 0;
+  const label = !live ? "Chat — private to each person, not shown while viewing as somebody" : unread > 0 ? `Chat — ${unread} unread` : "Chat";
   return (
     <Link
       href="/chat"
