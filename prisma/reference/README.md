@@ -95,8 +95,9 @@ and descriptions only, no rates. The committed copy is `hsn-sac.xlsx` in this fo
 `hsn_codes`.
 
 It drives the item form in an Indian workspace: the HSN/SAC field searches it by code or description,
-an item can't be saved without a code, and a code it doesn't list is refused — as is a SAC (99…) on a
-good or an HSN on a service. Document lines are checked against it too, and the items list flags every
+an item can't be saved without a code, and a code it doesn't list is refused — as is a SAC (99…) on
+goods or an HSN on a service. A subscription or perpetual licence is a service (the item form asks
+"Goods or service", then a service's optional sub type), so it takes a SAC. Document lines are checked against it too, and the items list flags every
 item whose code needs fixing. Outside India the field is optional and nothing is checked
 (`COUNTRY_FEATURES.hsn`, src/lib/modules.ts). Rules: src/lib/hsn.ts; reads: src/lib/platform/hsn-directory.ts;
 the loader, the only code that writes the table: `hsn.ts` here.

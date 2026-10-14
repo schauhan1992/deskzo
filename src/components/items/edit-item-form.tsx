@@ -116,6 +116,7 @@ export function EditItemForm({
         onBrandChange={(id) => setValue("brandId", id, { shouldDirty: true })}
         hsnCode={typeof hsnCode === "string" ? hsnCode : ""}
         onHsnChange={(code) => setValue("hsnCode", code, { shouldDirty: true, shouldValidate: !!errors.hsnCode })}
+        onTypeChange={(type) => setValue("type", type, { shouldDirty: true })}
         trackInventory={!!trackInventory}
         showRevenuePattern={showRevenuePattern}
         hsnRequired={hsnRequired}

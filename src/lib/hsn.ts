@@ -11,8 +11,11 @@ import { HSN_PATTERN, normaliseHsn } from "@/lib/items/catalogue-import";
  *
  * HSN codes classify goods, SAC codes services, and every SAC starts with 99 — chapter 99 is not a
  * chapter of goods. A good with a 99 code, or a service without one, is an invoice line filed under
- * the wrong schedule. Subscriptions and perpetual licences may take either: software is sold as goods
- * on a medium (8523) or as a service (99733x, 99831x), and which one is the seller's contract to say.
+ * the wrong schedule.
+ *
+ * An item is goods or a service; a service may be sold as a subscription or as a perpetual licence (the
+ * item form's "Sub type"), so those two are services too and take a SAC — software licensed or
+ * provided electronically is 99733x/99831x. Software sold on a physical medium is goods, sold one-time.
  */
 
 export type HsnKind = "GOODS" | "SERVICES";
@@ -25,10 +28,10 @@ export function kindOfCode(code: string): HsnKind {
   return code.startsWith("99") ? "SERVICES" : "GOODS";
 }
 
-/** The kinds of code an item type may carry. */
+/** The kind of code an item type carries: goods an HSN, every kind of service a SAC. */
 export function kindsForItemType(type: string | null | undefined): HsnKind[] {
   if (type === "GOOD") return ["GOODS"];
-  if (type === "SERVICE") return ["SERVICES"];
+  if (type === "SERVICE" || type === "SUBSCRIPTION" || type === "PERPETUAL") return ["SERVICES"];
   return ["GOODS", "SERVICES"];
 }
 
@@ -43,9 +46,9 @@ export function hsnShapeIssue(value: unknown, type: ItemTypeKey | string | null 
   const allowed = kindsForItemType(type);
   const kind = kindOfCode(code);
   if (!allowed.includes(kind)) {
-    return kind === "SERVICES"
-      ? `${code} is a SAC (services) code — a good takes an HSN code.`
-      : `${code} is an HSN (goods) code — a service takes a SAC code, which starts with 99.`;
+    if (kind === "SERVICES") return `${code} is a SAC (services) code — goods take an HSN code.`;
+    const what = type === "SUBSCRIPTION" ? "a subscription is a service, and" : type === "PERPETUAL" ? "a perpetual licence is a service, and" : "a service";
+    return `${code} is an HSN (goods) code — ${what} takes a SAC code, which starts with 99.`;
   }
   return null;
 }

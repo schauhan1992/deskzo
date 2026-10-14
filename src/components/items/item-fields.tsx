@@ -1,5 +1,5 @@
 import type { FieldErrors, FieldValues, UseFormRegister } from "react-hook-form";
-import { itemTypeValues, itemTypeLabels, billingCycleValues, revenuePatternLabels, revenuePatternValues } from "@/lib/validation/item";
+import { billingCycleValues, revenuePatternLabels, revenuePatternValues, type itemTypeValues } from "@/lib/validation/item";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
@@ -21,6 +21,7 @@ export function ItemDetailFields({
   hsnCode,
   onHsnChange,
   hsnRequired = false,
+  onTypeChange,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
@@ -41,6 +42,11 @@ export function ItemDetailFields({
   onHsnChange: (code: string) => void;
   /** An Indian workspace, where the code is the tax's classification and an item must carry one. */
   hsnRequired?: boolean;
+  /**
+   * The type is asked as two questions — goods or service, then for a service how it's sold — and set
+   * here as the one value it is stored as (GOOD, SERVICE, SUBSCRIPTION, PERPETUAL).
+   */
+  onTypeChange: (type: (typeof itemTypeValues)[number]) => void;
 }) {
   const selectedBrand = brands.find((b) => b.id === brandId);
   return (
@@ -58,19 +64,36 @@ export function ItemDetailFields({
             <Input id="sku" placeholder="e.g. MS365-BSTD" {...register("sku")} />
             {errors.sku && <p className="text-xs text-danger">{String(errors.sku.message)}</p>}
           </div>
+          {/* Goods or a service decides the GST side — HSN or SAC, and whether stock is tracked. How a
+              service is sold is a second question, and optional: most services are one-time. */}
           <div className="space-y-1.5">
-            <Label htmlFor="type">Type *</Label>
-            <Select id="type" {...register("type")}>
-              {itemTypeValues.map((t) => (
-                <option key={t} value={t}>
-                  {itemTypeLabels[t]}
-                </option>
-              ))}
+            <Label htmlFor="type">Goods or service *</Label>
+            <Select id="type" value={itemType === "GOOD" ? "GOOD" : "SERVICE"} onChange={(e) => onTypeChange(e.target.value === "GOOD" ? "GOOD" : "SERVICE")}>
+              <option value="GOOD">Goods</option>
+              <option value="SERVICE">Service</option>
             </Select>
-            {itemType === "PERPETUAL" && (
-              <p className="text-xs text-muted">Owned outright — never expires, so it stays out of Renewals.</p>
-            )}
           </div>
+          {itemType !== "GOOD" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="subType">Sub type</Label>
+              <Select
+                id="subType"
+                value={itemType === "SUBSCRIPTION" || itemType === "PERPETUAL" ? itemType : ""}
+                onChange={(e) => onTypeChange(e.target.value === "SUBSCRIPTION" || e.target.value === "PERPETUAL" ? e.target.value : "SERVICE")}
+              >
+                <option value="">None — a one-time service</option>
+                <option value="SUBSCRIPTION">Subscription</option>
+                <option value="PERPETUAL">Perpetual licence</option>
+              </Select>
+              <p className="text-xs text-muted">
+                {itemType === "SUBSCRIPTION"
+                  ? "Renews — it comes up in Renewals before its term ends."
+                  : itemType === "PERPETUAL"
+                    ? "Owned outright — never expires, so it stays out of Renewals."
+                    : "Optional."}
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="brandId">Brand</Label>
             {/* Searched rather than scrolled: a reseller's catalogue runs to a thousand brands. */}
@@ -135,9 +158,7 @@ export function ItemDetailFields({
               <p id="hsnCode-help" className="text-xs text-subtle">
                 {itemType === "GOOD"
                   ? "HSN, from the GST portal's directory. Copied onto every document line."
-                  : itemType === "SERVICE"
-                    ? "SAC — services start with 99. Copied onto every document line."
-                    : "HSN or SAC, from the GST portal's directory. Copied onto every document line."}
+                  : "SAC — services start with 99. Copied onto every document line."}
               </p>
             )}
           </div>

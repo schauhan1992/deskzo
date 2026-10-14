@@ -2,7 +2,7 @@
  * HSN/SAC: the GST portal's directory, and what an item and a document line may carry.
  *
  *   · the rules without a database — required, 4/6/8 digits, goods take HSN and services SAC (99…),
- *     subscriptions and perpetual licences either; the portal's sheet cleaned ("30559" is 030559);
+ *     a subscription or perpetual licence being a service; the portal's sheet cleaned ("30559" is 030559);
  *   · the committed workbook (prisma/reference/hsn-sac.xlsx) parses into both sheets, with headings;
  *     a file that isn't the directory, or would halve it, is refused before anything is replaced;
  *   · the loaded directory answers: search by code and by words, narrowed to goods or services;
@@ -72,10 +72,11 @@ async function main() {
   ok("a blank code is refused as required", hsnShapeIssue("", "GOOD") === HSN_REQUIRED_MESSAGE);
   ok("  and one not 4, 6 or 8 digits as malformed", ["84", "84713", "847130101"].every((c) => hsnShapeIssue(c, "GOOD")?.includes("4, 6 or 8")));
   ok("SAC codes are the 99s, everything else HSN", kindOfCode("998313") === "SERVICES" && kindOfCode("8471") === "GOODS");
-  ok("a good takes HSN, a service SAC, a subscription or licence either", JSON.stringify([kindsForItemType("GOOD"), kindsForItemType("SERVICE"), kindsForItemType("SUBSCRIPTION"), kindsForItemType("PERPETUAL")]) === JSON.stringify([["GOODS"], ["SERVICES"], ["GOODS", "SERVICES"], ["GOODS", "SERVICES"]]));
+  ok("goods take HSN; a service — one-time, subscription or perpetual licence — SAC", JSON.stringify([kindsForItemType("GOOD"), kindsForItemType("SERVICE"), kindsForItemType("SUBSCRIPTION"), kindsForItemType("PERPETUAL")]) === JSON.stringify([["GOODS"], ["SERVICES"], ["SERVICES"], ["SERVICES"]]));
   ok("  so a good with a SAC is refused, saying why", hsnShapeIssue("997331", "GOOD")?.includes("SAC (services)") === true, hsnShapeIssue("997331", "GOOD"));
   ok("  and a service with an HSN", hsnShapeIssue("8471", "SERVICE")?.includes("starts with 99") === true);
-  ok("  while software sold either way is fine", hsnShapeIssue("85238020", "PERPETUAL") === null && hsnShapeIssue("997331", "SUBSCRIPTION") === null);
+  ok("  a subscription or licence with a SAC is fine", hsnShapeIssue("997331", "SUBSCRIPTION") === null && hsnShapeIssue("997331", "PERPETUAL") === null);
+  ok("  and one with an HSN is refused, saying it is a service", hsnShapeIssue("85238020", "PERPETUAL")?.includes("a perpetual licence is a service") === true, hsnShapeIssue("85238020", "PERPETUAL"));
   ok("  and the spaces people copy codes with don't matter", hsnShapeIssue("8471 30 10", "GOOD") === null);
   ok("the portal's codes are cleaned: a dropped zero put back, a space taken out", directoryCode("30559") === "030559" && directoryCode("2307 00") === "230700" && directoryCode(9983) === "9983");
   ok("  and something that isn't a code is nothing", directoryCode("") === null && directoryCode("123456789") === null);

@@ -11,6 +11,8 @@ import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { documentAccess, mayAccess, mayAddTo } from "@/lib/authz/access";
 import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
 import { lineHsnRefusal } from "@/lib/platform/hsn-directory";
+import { kindOfCode } from "@/lib/hsn";
+import { normaliseHsn } from "@/lib/items/catalogue-import";
 import { recordAudit } from "@/lib/audit";
 import { postDocumentToLedger, reverseDocumentPosting } from "@/lib/ledger/journal";
 import { toPlain } from "@/lib/serialize";
@@ -524,9 +526,10 @@ async function loadEInvoiceDocument(
       },
       lines: document.lines.map((line) => ({
         description: line.description ? `${line.name} — ${line.description}` : line.name,
-        // The portal wants goods and services distinguished; a line with no HSN and no unit is
-        // treated as a service, which is what our subscription lines are.
-        isService: !line.unit,
+        // The portal wants goods and services distinguished. The line's code says which — every SAC
+        // starts with 99 — so a subscription billed per seat is still a service. A line with no code
+        // falls back to the old guess: no unit, a service.
+        isService: line.hsnCode ? kindOfCode(normaliseHsn(line.hsnCode)) === "SERVICES" : !line.unit,
         hsnCode: line.hsnCode,
         quantity: Number(line.quantity),
         unit: line.unit,
