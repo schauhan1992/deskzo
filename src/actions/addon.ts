@@ -225,7 +225,7 @@ export async function subscriptionWithAddons(id: string) {
     include: {
       company: { select: { id: true, name: true, ownerUserId: true } },
       endCustomer: { select: { id: true, name: true } },
-      item: { select: { id: true, name: true, sku: true, unit: true, type: true, billingCycle: true } },
+      item: { select: { id: true, name: true, sku: true, unit: true, type: true } },
       addedBy: { select: { id: true, name: true } },
       addons: {
         orderBy: { startDate: "asc" },

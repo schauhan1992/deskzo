@@ -23,8 +23,6 @@ export type LineDraft = {
   companyProductId: string;
   /** The catalogue item's type, when the line came from one — decides whether the period is offered. */
   itemType: string;
-  /** Its billing cycle: a subscription's default period is one cycle from the document's date. */
-  itemCycle: string;
   /** The period the line pays for, `yyyy-mm-dd` at both ends, or both blank. */
   servicePeriodFrom: string;
   servicePeriodTo: string;
@@ -128,7 +126,6 @@ export function blankLine(): LineDraft {
     taxRatePercent: "18",
     companyProductId: "",
     itemType: "",
-    itemCycle: "",
     servicePeriodFrom: "",
     servicePeriodTo: "",
     periodSource: "",

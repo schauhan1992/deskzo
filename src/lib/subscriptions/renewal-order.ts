@@ -40,8 +40,7 @@ export const cycleMonths: Record<BillingCycle, number> = {
   MONTHLY: 1,
   QUARTERLY: 3,
   ANNUAL: 12,
-  // Nothing recurs, so there is no next term to compute. Treated as a year so the form still opens
-  // with something sensible for whoever is renewing a perpetual licence's support.
+  // Nothing recurs. Kept as a year for the instalment arithmetic's sake; nothing renews by it.
   ONE_TIME: 12,
 };
 
@@ -49,15 +48,53 @@ export type Term = { startDate: string; endDate: string; days: number };
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
+/** The term a subscription is given when nothing says otherwise: a year. */
+export const DEFAULT_TERM_MONTHS = 12;
+
 /**
- * The term that follows this one.
+ * How many months a term ran, from its own dates: the whole months from its first day to the day after
+ * its last (1 April to 31 March is 12, to 31 March three years on is 36). A term that isn't whole
+ * months — a co-termed one, or dates typed by hand — is its nearest number of months, never under one.
+ * Null without both dates.
+ */
+export function termMonthsOf(start: Date | string | null | undefined, end: Date | string | null | undefined): number | null {
+  if (!start || !end) return null;
+  const from = toUtcDate(start);
+  const after = new Date(toUtcDate(end).getTime() + DAY);
+  if (after <= from) return null;
+  for (let months = 1; months <= 120; months++) {
+    const step = addMonths(from, months).getTime();
+    if (step === after.getTime()) return months;
+    if (step > after.getTime()) break;
+  }
+  return Math.max(1, Math.round((after.getTime() - from.getTime()) / DAY / 30.4375));
+}
+
+/** The terms the order form offers as a quick pick, in months; anything else is typed as a date. */
+export const TERM_CHOICES: readonly { months: number; label: string }[] = [
+  { months: 1, label: "1 month" },
+  { months: 3, label: "3 months" },
+  { months: 12, label: "1 year" },
+  { months: 24, label: "2 years" },
+  { months: 36, label: "3 years" },
+];
+
+/** The last day of a term this many months long from `start` (yyyy-mm-dd): the day before the next would begin. */
+export function termEndFor(start: string, months: number): string {
+  return iso(new Date(addMonths(toUtcDate(start), months).getTime() - DAY));
+}
+
+/**
+ * The term that follows this one: as long as this one was (a three-year deal renews for three years, a
+ * monthly one for a month — the term is the order's, not the product's), a year when its length can't
+ * be told.
  *
  * Starts the day after the previous expiry — not on it. A term running 10/08/2026 to 09/08/2027
  * renews as 10/08/2027 to 09/08/2028: no gap in cover, and no day billed on both orders.
  */
-export function nextTerm(params: { previousEnd: Date | string; billingCycle?: BillingCycle | null }): Term {
+export function nextTerm(params: { previousStart?: Date | string | null; previousEnd: Date | string; termMonths?: number | null }): Term {
   const start = new Date(toUtcDate(params.previousEnd).getTime() + DAY);
-  const months = cycleMonths[params.billingCycle ?? "ANNUAL"] ?? 12;
+  const months = params.termMonths ?? termMonthsOf(params.previousStart, params.previousEnd) ?? DEFAULT_TERM_MONTHS;
   // One cycle forward, then back a day, so the term ends the day before the next would begin.
   const end = new Date(addMonths(start, months).getTime() - DAY);
   return {
@@ -71,8 +108,9 @@ export type RenewalSource = {
   quantity: number;
   unitPrice: number | null;
   fullTermUnitPrice: number | null;
+  /** The term being renewed: the next one is as long. */
+  startDate?: Date | string | null;
   endDate: Date | string | null;
-  billingCycle?: BillingCycle | null;
   /** The parent plus its addons, already totalled — see `renewalGroup`. */
   group?: { totalQuantity: number; renewalValue: number; incomplete: boolean; note: string } | null;
 };
@@ -110,7 +148,7 @@ export function renewalOrderDraft(source: RenewalSource): RenewalDraft {
   if (unitPrice === null) warnings.push("No price on the original at all — put one in before this goes for approval.");
   if (source.group?.incomplete) warnings.push(source.group.note);
 
-  const term = source.endDate ? nextTerm({ previousEnd: source.endDate, billingCycle: source.billingCycle }) : null;
+  const term = source.endDate ? nextTerm({ previousStart: source.startDate, previousEnd: source.endDate }) : null;
   if (!term) warnings.push("The original has no expiry date, so the new term has to be set by hand.");
 
   return {

@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import Papa from "papaparse";
 import { Prisma, type ItemType } from "@prisma/client";
 import { db } from "@/lib/db";
-import { countryFeatureAvailable, requireModuleUser } from "@/lib/modules-access";
+import { countryFeatureAvailable, moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
+import { categoryForItem, categoryListReady, itemCategories } from "@/lib/items/categories";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { desanitizeCsvCell, sanitizeCsvCell, csvFilename } from "@/lib/csv";
@@ -14,6 +15,7 @@ import {
   adjustStockSchema,
   importItemRowSchema,
   bulkUpdateItemsSchema,
+  PERPETUAL_CATEGORY,
 } from "@/lib/validation/item";
 import { parseSeqQuery, formatItemId } from "@/lib/order-id";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
@@ -34,6 +36,18 @@ const FIXED_DIRECTION: Partial<Record<string, 1 | -1>> = {
   SOLD: -1,
   DAMAGED: -1,
 };
+
+/**
+ * Whether an item may be managed as a subscription here: the Renewals module — Deskzo Subscriptions, or
+ * Deskzo One — in the plan and switched on. Without it nothing would ever renew one, so a new one is
+ * refused; an item that already is one (a workspace that has since lost Renewals) is kept as it is.
+ */
+function subscriptionsAvailable(): Promise<boolean> {
+  return moduleAvailableForTenant("renewals");
+}
+
+const NO_SUBSCRIPTIONS =
+  "Managing an item as a subscription needs Renewals, part of Deskzo Subscriptions and Deskzo One — keep it a one-time service, or add Subscriptions to your plan.";
 
 async function requireItemsModule(): Promise<string | null> {
   const enabled = await isModuleEnabled("items");
@@ -61,10 +75,14 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { openingStock, billingCycle, ...rest } = parsed.data;
+  const { openingStock, ...rest } = parsed.data;
   // In India, a real code of the kind this item takes — the GST portal's directory (src/lib/platform/hsn-directory.ts).
   const hsnError = (await countryFeatureAvailable("hsn")) ? await hsnIssue(rest.hsnCode, rest.type) : null;
   if (hsnError) return { ok: false, error: hsnError };
+  if (rest.type === "SUBSCRIPTION" && !(await subscriptionsAvailable())) return { ok: false, error: NO_SUBSCRIPTIONS };
+  // One of the workspace's categories, as the list spells it (src/lib/items/categories.ts).
+  const category = await categoryForItem(rest.category);
+  if (!category.ok) return { ok: false, error: category.error };
   // Only goods can track inventory — the "track inventory" field is hidden (not cleared) in the
   // form for other types, so the server is the authoritative place this gets enforced.
   const trackInventory = rest.type === "GOOD" && rest.trackInventory;
@@ -84,13 +102,12 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
           name: rest.name.trim(),
           sku: rest.sku.trim(),
           type: rest.type,
-          category: rest.category || null,
+          category: category.name,
           hsnCode: rest.hsnCode || null,
           vendor: rest.vendor || null,
           brandId: rest.brandId || null,
           productFamilyId: rest.productFamilyId || null,
           unit: rest.unit || null,
-          billingCycle: billingCycle || null,
           costPrice: rest.costPrice ?? null,
           sellingPrice: rest.sellingPrice,
           taxRatePercent: rest.taxRatePercent ?? null,
@@ -138,9 +155,15 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { id, billingCycle, ...rest } = parsed.data;
+  const { id, ...rest } = parsed.data;
   const hsnError = (await countryFeatureAvailable("hsn")) ? await hsnIssue(rest.hsnCode, rest.type) : null;
   if (hsnError) return { ok: false, error: hsnError };
+  const stored = await db.item.findUnique({ where: { id }, select: { type: true } });
+  if (!stored) return { ok: false, error: "That item no longer exists." };
+  // One that already renews stays as it is; making one a subscription needs Renewals.
+  if (rest.type === "SUBSCRIPTION" && stored.type !== "SUBSCRIPTION" && !(await subscriptionsAvailable())) return { ok: false, error: NO_SUBSCRIPTIONS };
+  const category = await categoryForItem(rest.category);
+  if (!category.ok) return { ok: false, error: category.error };
   // Only goods can track inventory — see the matching note in createItem.
   const trackInventory = rest.type === "GOOD" && rest.trackInventory;
   const familyError = await validateBrandFamily(rest.brandId, rest.productFamilyId);
@@ -157,13 +180,12 @@ export async function updateItem(input: unknown): Promise<ActionResult<{ id: str
         name: rest.name.trim(),
         sku: rest.sku.trim(),
         type: rest.type,
-        category: rest.category || null,
+        category: category.name,
         hsnCode: rest.hsnCode || null,
         vendor: rest.vendor || null,
         brandId: rest.brandId || null,
         productFamilyId: rest.productFamilyId || null,
         unit: rest.unit || null,
-        billingCycle: billingCycle || null,
         costPrice: rest.costPrice ?? null,
         sellingPrice: rest.sellingPrice,
         taxRatePercent: rest.taxRatePercent ?? null,
@@ -247,6 +269,8 @@ export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQ
 export async function listItems(params?: {
   type?: ItemType;
   brandId?: string;
+  /** One of the workspace's categories, by name. */
+  category?: string;
   search?: string;
   activeOnly?: boolean;
   page?: number;
@@ -277,6 +301,7 @@ export async function listItems(params?: {
   const where = {
     ...(params?.type ? { type: params.type } : {}),
     ...(params?.brandId ? { brandId: params.brandId } : {}),
+    ...(params?.category ? { category: { equals: params.category, mode: "insensitive" as const } } : {}),
     ...(params?.activeOnly ? { active: true } : {}),
     ...(params?.search
       ? {
@@ -340,6 +365,19 @@ export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ co
   const { itemIds, brandId, productFamilyId, type, category, active } = parsed.data;
   const hsnCode = normaliseHsn(parsed.data.hsnCode ?? "") || undefined;
 
+  // A category from the list, as it spells it; "clear" takes it off.
+  let nextCategory: string | null | undefined;
+  if (category === "clear") nextCategory = null;
+  else if (category) {
+    const listed = await categoryForItem(category);
+    if (!listed.ok) return { ok: false, error: listed.error };
+    nextCategory = listed.name;
+  }
+  if (type === "SUBSCRIPTION" && !(await subscriptionsAvailable())) {
+    const notYet = await db.item.count({ where: { id: { in: itemIds }, type: { not: "SUBSCRIPTION" } } });
+    if (notYet > 0) return { ok: false, error: NO_SUBSCRIPTIONS };
+  }
+
   // In India, a code given to every item picked, or a type given to them, must still fit each one: a
   // good with a SAC is filed under services. Asked of the types the picked items will have after this.
   if ((hsnCode || type) && (await countryFeatureAvailable("hsn"))) {
@@ -373,7 +411,7 @@ export async function bulkUpdateItems(input: unknown): Promise<ActionResult<{ co
     ...(clearFamilyWithBrand ? { productFamilyId: null } : {}),
     ...(productFamilyId === "clear" ? { productFamilyId: null } : {}),
     ...(type ? { type } : {}),
-    ...(category ? { category: category === "clear" ? null : category } : {}),
+    ...(nextCategory !== undefined ? { category: nextCategory } : {}),
     ...(active ? { active: active === "true" } : {}),
     ...(hsnCode ? { hsnCode } : {}),
   };
@@ -498,7 +536,6 @@ export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; file
     brand: sanitizeCsvCell(item.brand?.name ?? ""),
     productFamily: sanitizeCsvCell(item.productFamily?.name ?? ""),
     unit: sanitizeCsvCell(item.unit ?? ""),
-    billingCycle: item.billingCycle ?? "",
     costPrice: item.costPrice?.toString() ?? "",
     sellingPrice: item.sellingPrice.toString(),
     taxRatePercent: item.taxRatePercent?.toString() ?? "",
@@ -525,6 +562,8 @@ export type ImportItemsResult = {
   brandsCreated: string[];
   /** The same for product families, as "Brand → Family". */
   familiesCreated: string[];
+  /** And for item categories. */
+  categoriesCreated: string[];
 };
 
 type CatalogueBrand = { id: string; name: string; families: Map<string, string> };
@@ -605,7 +644,32 @@ async function catalogueResolver(canCreate: boolean, result: ImportItemsResult) 
     return row;
   }
 
-  return { brand, family };
+  // Categories, matched the same way. A workspace from before the list keeps the name as typed.
+  const listReady = await categoryListReady();
+  const categoryNames = new Map((listReady ? await itemCategories() : []).map((c) => [nameKey(c.name), c.name]));
+
+  async function category(name: string): Promise<{ name: string } | { error: string }> {
+    const stored = cleanName(name);
+    if (!listReady) return { name: stored };
+    const found = categoryNames.get(nameKey(stored));
+    if (found) return { name: found };
+    if (!canCreate) {
+      return { error: `Category "${stored}" isn't on your list — add it under Items & Inventory → Categories, or ask someone who manages the catalogue.` };
+    }
+    let row: { name: string } | null = null;
+    try {
+      row = await db.itemCategory.create({ data: { name: stored }, select: { name: true } });
+      result.categoriesCreated.push(row.name);
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+      row = await db.itemCategory.findFirst({ where: { name: { equals: stored, mode: "insensitive" } }, select: { name: true } });
+      if (!row) throw err;
+    }
+    categoryNames.set(nameKey(row.name), row.name);
+    return row;
+  }
+
+  return { brand, family, category };
 }
 
 /**
@@ -656,7 +720,8 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
   const hasFamily = columns.has("productFamily");
   const hasHsn = columns.has("hsnCode");
 
-  const result: ImportItemsResult = { created: 0, updated: 0, errors: [], brandsCreated: [], familiesCreated: [] };
+  const result: ImportItemsResult = { created: 0, updated: 0, errors: [], brandsCreated: [], familiesCreated: [], categoriesCreated: [] };
+  const subscriptions = await subscriptionsAvailable();
   // In India: every code the file gives, asked of the GST directory once rather than once a row.
   const india = await countryFeatureAvailable("hsn");
   const directory = india && hasHsn ? await knownHsnCodes(parsed.data.map((r) => normaliseHsn(r.hsnCode))) : null;
@@ -671,7 +736,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
     (
       await db.item.findMany({
         where: { sku: { in: skus } },
-        select: { id: true, sku: true, brandId: true, productFamilyId: true },
+        select: { id: true, sku: true, type: true, brandId: true, productFamilyId: true },
       })
     ).map((i) => [i.sku, i]),
   );
@@ -686,8 +751,24 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
       });
       continue;
     }
-    const data = validated.data;
+    // A perpetual licence, from a file made before the type was retired: a service in that category.
+    const perpetual = validated.data.type === "PERPETUAL";
+    const data = {
+      ...validated.data,
+      type: perpetual ? ("SERVICE" as const) : (validated.data.type as Exclude<typeof validated.data.type, "PERPETUAL">),
+      category: perpetual && !validated.data.category ? PERPETUAL_CATEGORY : validated.data.category,
+    };
     const existing = known.get(data.sku);
+    // Managed as a subscription only where Renewals is: a new one, or one changed to it, is refused.
+    if (data.type === "SUBSCRIPTION" && existing?.type !== "SUBSCRIPTION" && !subscriptions) {
+      result.errors.push({ row: rowNumber, message: NO_SUBSCRIPTIONS });
+      continue;
+    }
+    const category = data.category ? await catalogue.category(data.category) : { name: null };
+    if ("error" in category) {
+      result.errors.push({ row: rowNumber, message: category.error });
+      continue;
+    }
     // Only goods can track inventory — see the matching note in createItem.
     const trackInventory = data.type === "GOOD" && data.trackInventory;
 
@@ -762,14 +843,13 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
           data: {
             name: data.name,
             type: data.type,
-            category: data.category || null,
+            category: category.name,
             hsnCode,
             vendor: data.vendor || null,
             brandId,
             productFamilyId,
             unit: data.unit || null,
-            billingCycle: data.billingCycle || null,
-            costPrice: data.costPrice ?? null,
+                        costPrice: data.costPrice ?? null,
             sellingPrice: data.sellingPrice,
             taxRatePercent: data.taxRatePercent ?? null,
             description: data.description || null,
@@ -779,7 +859,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
             ...customData,
           },
         });
-        known.set(data.sku, { ...existing, brandId, productFamilyId });
+        known.set(data.sku, { ...existing, type: data.type, brandId, productFamilyId });
         result.updated++;
       } else {
         const created = await db.$transaction(async (tx) => {
@@ -788,14 +868,13 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
               name: data.name,
               sku: data.sku,
               type: data.type,
-              category: data.category || null,
+              category: category.name,
               hsnCode: hsnCode ?? null,
               vendor: data.vendor || null,
               brandId,
               productFamilyId,
               unit: data.unit || null,
-              billingCycle: data.billingCycle || null,
-              costPrice: data.costPrice ?? null,
+                            costPrice: data.costPrice ?? null,
               sellingPrice: data.sellingPrice,
               taxRatePercent: data.taxRatePercent ?? null,
               description: data.description || null,
@@ -822,7 +901,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
           return item;
         });
         // A second row for the same SKU further down updates this one, as it would a stored item.
-        known.set(data.sku, { id: created.id, sku: data.sku, brandId, productFamilyId });
+        known.set(data.sku, { id: created.id, sku: data.sku, type: data.type, brandId, productFamilyId });
         result.created++;
       }
     } catch {

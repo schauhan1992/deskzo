@@ -109,6 +109,8 @@ type NewItem = {
   hsn: string;
   brand: string;
   description: string;
+  /** One of the workspace's item categories, created on the list if it isn't there. */
+  category?: string;
   /** Goods only: what came in first, and what happened to the stock since (see `seedStock`). */
   openingStock?: number;
   reorderLevel?: number;
@@ -120,8 +122,8 @@ type NewItem = {
  * a support contract earned over its year, and the kit the IT estate below is made of.
  */
 const NEW_ITEMS: NewItem[] = [
-  { sku: `${DEMO_SKU}101`, name: "Microsoft Office LTSC Standard 2024 (perpetual)", type: "PERPETUAL", billingCycle: "ONE_TIME", revenuePattern: "POINT_IN_TIME", price: 38500, cost: 34800, hsn: "997331", brand: "Microsoft", description: "Volume licence, owned outright — no expiry, no renewal." },
-  { sku: `${DEMO_SKU}102`, name: "Windows Server 2025 Standard — 16 core (perpetual)", type: "PERPETUAL", billingCycle: "ONE_TIME", revenuePattern: "POINT_IN_TIME", price: 92000, cost: 84500, hsn: "997331", brand: "Microsoft", description: "Core-based perpetual licence. CALs sold separately." },
+  { sku: `${DEMO_SKU}101`, name: "Microsoft Office LTSC Standard 2024 (perpetual)", type: "SERVICE", category: "Perpetual licence", billingCycle: "ONE_TIME", revenuePattern: "POINT_IN_TIME", price: 38500, cost: 34800, hsn: "997331", brand: "Microsoft", description: "Volume licence, owned outright — no expiry, no renewal." },
+  { sku: `${DEMO_SKU}102`, name: "Windows Server 2025 Standard — 16 core (perpetual)", type: "SERVICE", category: "Perpetual licence", billingCycle: "ONE_TIME", revenuePattern: "POINT_IN_TIME", price: 92000, cost: 84500, hsn: "997331", brand: "Microsoft", description: "Core-based perpetual licence. CALs sold separately." },
   { sku: `${DEMO_SKU}103`, name: "Microsoft 365 Business Premium (Monthly)", type: "SUBSCRIPTION", billingCycle: "MONTHLY", revenuePattern: "RATABLE", price: 740, cost: 698, hsn: "997331", brand: "Microsoft", description: "Month-to-month commitment, billed monthly." },
   { sku: `${DEMO_SKU}104`, name: "Microsoft Teams Rooms Pro (Monthly)", type: "SUBSCRIPTION", billingCycle: "MONTHLY", revenuePattern: "RATABLE", price: 3400, cost: 3190, hsn: "997331", brand: "Microsoft", description: "Per meeting room, billed monthly." },
   { sku: `${DEMO_SKU}105`, name: "Managed SOC Monitoring (Quarterly)", type: "SUBSCRIPTION", billingCycle: "QUARTERLY", revenuePattern: "RATABLE", price: 45000, cost: 26000, hsn: "998313", brand: "Acme", description: "24×7 monitoring of the customer's firewall and endpoints, billed each quarter." },
@@ -649,6 +651,7 @@ export default async function seedOrders(db: PrismaClient, ctx: DemoContext): Pr
     for (const seed of NEW_ITEMS) {
       if (await tx.item.findUnique({ where: { sku: seed.sku }, select: { id: true } })) continue;
       const brand = await tx.brand.upsert({ where: { name: seed.brand }, create: { name: seed.brand }, update: {}, select: { id: true } });
+      if (seed.category) await tx.itemCategory.upsert({ where: { name: seed.category }, create: { name: seed.category }, update: {} });
       const createdAt = back(int(150, 300));
       const goods = seed.type === "GOOD";
       await tx.$transaction(async (t) => {
@@ -657,6 +660,7 @@ export default async function seedOrders(db: PrismaClient, ctx: DemoContext): Pr
             name: seed.name,
             sku: seed.sku,
             type: seed.type,
+            category: seed.category ?? null,
             hsnCode: seed.hsn,
             brandId: brand.id,
             unit: goods ? "Nos" : "Licence",
@@ -1254,8 +1258,8 @@ export default async function seedOrders(db: PrismaClient, ctx: DemoContext): Pr
         quantity: source.quantity,
         unitPrice: num(source.unitPrice),
         fullTermUnitPrice: num(source.fullTermUnitPrice),
+        startDate: source.startDate,
         endDate: source.endDate,
-        billingCycle: source.item.billingCycle,
         group,
       });
       if (!draft.term || draft.unitPrice === null) return null;

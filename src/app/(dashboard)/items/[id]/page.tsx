@@ -99,12 +99,6 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
                 {/* Said plainly when missing: the GST summary flags every invoice line without one. */}
                 <div className={item.hsnCode ? "font-mono text-text" : "text-danger"}>{item.hsnCode ?? "Not set"}</div>
               </div>
-              {item.billingCycle && (
-                <div>
-                  <div className="text-muted">Billing cycle</div>
-                  <div className="text-text">{item.billingCycle.replaceAll("_", " ")}</div>
-                </div>
-              )}
               {item.unit && (
                 <div>
                   <div className="text-muted">Unit</div>

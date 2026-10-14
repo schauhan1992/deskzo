@@ -60,7 +60,7 @@ export async function createProposalFromRenewal(input: {
       orderStatus: true,
       parentId: true,
       locationId: true,
-      item: { select: { id: true, name: true, unit: true, taxRatePercent: true, hsnCode: true, billingCycle: true } },
+      item: { select: { id: true, name: true, unit: true, taxRatePercent: true, hsnCode: true } },
       company: { select: { id: true, name: true } },
       renewedBy: { select: { orderSeq: true } },
       addons: {
@@ -114,8 +114,8 @@ export async function createProposalFromRenewal(input: {
     quantity: product.quantity,
     unitPrice: product.unitPrice ? Number(product.unitPrice) : null,
     fullTermUnitPrice: product.fullTermUnitPrice ? Number(product.fullTermUnitPrice) : null,
+    startDate: product.startDate,
     endDate: product.endDate,
-    billingCycle: product.item.billingCycle,
     group,
   });
 

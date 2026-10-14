@@ -27,6 +27,8 @@ export function NewItemForm({
   showRevenuePattern = false,
   customFields = { fields: [], values: {}, people: [] },
   hsnRequired = false,
+  categories = [],
+  subscriptions = false,
 }: {
   brands: BrandOption[];
   showRevenuePattern?: boolean;
@@ -34,6 +36,10 @@ export function NewItemForm({
   customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
   /** An Indian workspace: HSN/SAC is required, and checked against the GST portal's directory. */
   hsnRequired?: boolean;
+  /** The workspace's item categories, to pick from. */
+  categories?: { id: string; name: string }[];
+  /** Renewals is available, so a service may be managed as a subscription. */
+  subscriptions?: boolean;
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -51,9 +57,11 @@ export function NewItemForm({
     defaultValues: { type: "GOOD", trackInventory: true, active: true },
   });
 
-  const itemType = watch("type");
+  // Typed as the schema reads it (a retired PERPETUAL is read as SERVICE), so narrowed here.
+  const itemType = String(watch("type") ?? "GOOD");
   const brandId = watch("brandId");
   const hsnCode = watch("hsnCode");
+  const category = watch("category");
   const trackInventory = watch("trackInventory");
 
   useEffect(() => {
@@ -98,6 +106,10 @@ export function NewItemForm({
         hsnCode={typeof hsnCode === "string" ? hsnCode : ""}
         onHsnChange={(code) => setValue("hsnCode", code, { shouldDirty: true, shouldValidate: !!errors.hsnCode })}
         onTypeChange={(type) => setValue("type", type, { shouldDirty: true })}
+        categories={categories}
+        category={typeof category === "string" ? category : ""}
+        onCategoryChange={(name) => setValue("category", name, { shouldDirty: true })}
+        subscriptions={subscriptions}
         trackInventory={!!trackInventory}
         showOpeningStock
         showRevenuePattern={showRevenuePattern}

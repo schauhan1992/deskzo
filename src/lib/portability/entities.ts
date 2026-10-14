@@ -177,7 +177,8 @@ export const CANONICAL_ENTITIES: CanonicalEntity[] = [
   {
     key: "item",
     label: "Catalog items",
-    sourceModels: ["Item", "Brand", "ProductFamily", "ResellerItemPrice"],
+    // ItemCategory is the list an item's category is picked from — carried on each item by name.
+    sourceModels: ["Item", "Brand", "ProductFamily", "ResellerItemPrice", "ItemCategory"],
     naturalKey: ["itemSeq"],
     keyNote: "ITM-nnnnnn from the existing itemSeq. Brand and family travel as denormalised names.",
     area: "items",
@@ -188,7 +189,6 @@ export const CANONICAL_ENTITIES: CanonicalEntity[] = [
       { name: "type", kind: "enum", required: true, note: "GOODS, SERVICE or SUBSCRIPTION — decides what a target does with it." },
       { name: "brand", kind: "string" },
       { name: "productFamily", kind: "string" },
-      { name: "billingCycle", kind: "enum" },
       { name: "unit", kind: "string" },
       { name: "sellingPrice", kind: "number" },
       { name: "taxRatePercent", kind: "number" },

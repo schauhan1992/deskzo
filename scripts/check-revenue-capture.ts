@@ -296,23 +296,21 @@ async function main() {
   ok("  and at UTC midnight", utcOrder?.from === "2026-10-01" && utcOrder?.to === "2027-09-30", JSON.stringify(utcOrder));
   ok("an order with no term has no period", orderServicePeriod({ startDate: null, endDate: new Date() }) === null);
 
-  const annual = itemServicePeriod({ type: "SUBSCRIPTION", billingCycle: "ANNUAL" }, "2026-10-01");
-  ok("an annual subscription covers a year from the date, less a day", annual?.to === "2027-09-30", JSON.stringify(annual));
-  const monthly = itemServicePeriod({ type: "SUBSCRIPTION", billingCycle: "MONTHLY" }, "2027-01-31");
-  ok("  a month from 31 January ends on 27 February (the renewals module's month arithmetic)", monthly?.to === "2027-02-27", JSON.stringify(monthly));
-  const quarterly = itemServicePeriod({ type: "SUBSCRIPTION", billingCycle: "QUARTERLY" }, "2026-10-01");
-  ok("  a quarter from 1 October ends on 31 December", quarterly?.to === "2026-12-31", JSON.stringify(quarterly));
-  ok("a service has no period of its own", itemServicePeriod({ type: "SERVICE", billingCycle: null }, "2026-10-01") === null);
-  ok("  nor a subscription with no cycle", itemServicePeriod({ type: "SUBSCRIPTION", billingCycle: null }, "2026-10-01") === null);
+  // A subscription's term is its order's; picked straight from the catalogue, it starts as a year.
+  const annual = itemServicePeriod({ type: "SUBSCRIPTION" }, "2026-10-01");
+  ok("a subscription picked from the catalogue covers a year from the date, less a day", annual?.to === "2027-09-30", JSON.stringify(annual));
+  const leap = itemServicePeriod({ type: "SUBSCRIPTION" }, "2028-02-29");
+  ok("  a year from 29 February ends on 27 February (the renewals module's month arithmetic)", leap?.to === "2029-02-27", JSON.stringify(leap));
+  ok("a service has no period of its own", itemServicePeriod({ type: "SERVICE" }, "2026-10-01") === null);
 
   const both = defaultServicePeriod({
     order: { startDate: new Date("2026-04-01"), endDate: new Date("2027-03-31") },
-    item: { type: "SUBSCRIPTION", billingCycle: "MONTHLY" },
+    item: { type: "SUBSCRIPTION" },
     issueDate: "2026-10-01",
   });
-  ok("the order's term wins over the item's cycle", both?.source === "order" && both.from === "2026-04-01", JSON.stringify(both));
-  const itemOnly = defaultServicePeriod({ order: { startDate: null, endDate: null }, item: { type: "SUBSCRIPTION", billingCycle: "MONTHLY" }, issueDate: "2026-10-01" });
-  ok("  and the item's applies when the order has no term", itemOnly?.source === "item" && itemOnly.to === "2026-10-31", JSON.stringify(itemOnly));
+  ok("the order's term wins over the catalogue's year", both?.source === "order" && both.from === "2026-04-01", JSON.stringify(both));
+  const itemOnly = defaultServicePeriod({ order: { startDate: null, endDate: null }, item: { type: "SUBSCRIPTION" }, issueDate: "2026-10-01" });
+  ok("  and the year applies when the order has no term", itemOnly?.source === "item" && itemOnly.to === "2027-09-30", JSON.stringify(itemOnly));
 
   // The form's rule: a typed period is never replaced; a default follows its source.
   ok("a typed period survives a new default", Object.keys(nextLinePeriod({ periodSource: "typed" }, both)).length === 0);
@@ -670,7 +668,7 @@ async function main() {
       const defaults = emptyDefaults(indiaClock);
       defaults.companyId = a.id;
       defaults.lines = [
-        { ...blankLine(), name: "M365 E3", itemType: "SUBSCRIPTION", itemCycle: "ANNUAL", companyProductId: a1.id, servicePeriodFrom: "2026-10-01", servicePeriodTo: "2027-09-30", periodSource: "typed" },
+        { ...blankLine(), name: "M365 E3", itemType: "SUBSCRIPTION", companyProductId: a1.id, servicePeriodFrom: "2026-10-01", servicePeriodTo: "2027-09-30", periodSource: "typed" },
         { ...blankLine(), name: "Laptop", itemType: "GOOD" },
       ];
       return html(

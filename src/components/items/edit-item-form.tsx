@@ -27,6 +27,8 @@ export function EditItemForm({
   brands,
   showRevenuePattern = false,
   hsnRequired = false,
+  categories = [],
+  subscriptions = false,
 }: {
   item: ItemWithPlainPrices;
   brands: BrandOption[];
@@ -34,6 +36,10 @@ export function EditItemForm({
   showRevenuePattern?: boolean;
   /** An Indian workspace: HSN/SAC is required, and checked against the GST portal's directory. */
   hsnRequired?: boolean;
+  /** The workspace's item categories, to pick from. */
+  categories?: { id: string; name: string }[];
+  /** Renewals is available, so a service may be managed as a subscription. */
+  subscriptions?: boolean;
 }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -50,14 +56,13 @@ export function EditItemForm({
       id: item.id,
       name: item.name,
       sku: item.sku,
-      type: item.type,
+      type: item.type === "PERPETUAL" ? "SERVICE" : item.type,
       category: item.category ?? "",
       hsnCode: item.hsnCode ?? "",
       vendor: item.vendor ?? "",
       brandId: item.brandId ?? "",
       productFamilyId: item.productFamilyId ?? "",
       unit: item.unit ?? "",
-      billingCycle: item.billingCycle ?? "",
       costPrice: item.costPrice ? Number(item.costPrice) : undefined,
       sellingPrice: Number(item.sellingPrice),
       taxRatePercent: item.taxRatePercent ? Number(item.taxRatePercent) : undefined,
@@ -69,9 +74,11 @@ export function EditItemForm({
     },
   });
 
-  const itemType = watch("type");
+  // Typed as the schema reads it (a retired PERPETUAL is read as SERVICE), so narrowed here.
+  const itemType = String(watch("type") ?? "GOOD");
   const brandId = watch("brandId");
   const hsnCode = watch("hsnCode");
+  const category = watch("category");
   const trackInventory = watch("trackInventory");
 
   useEffect(() => {
@@ -117,6 +124,10 @@ export function EditItemForm({
         hsnCode={typeof hsnCode === "string" ? hsnCode : ""}
         onHsnChange={(code) => setValue("hsnCode", code, { shouldDirty: true, shouldValidate: !!errors.hsnCode })}
         onTypeChange={(type) => setValue("type", type, { shouldDirty: true })}
+        categories={categories}
+        category={typeof category === "string" ? category : ""}
+        onCategoryChange={(name) => setValue("category", name, { shouldDirty: true })}
+        subscriptions={subscriptions}
         trackInventory={!!trackInventory}
         showRevenuePattern={showRevenuePattern}
         hsnRequired={hsnRequired}

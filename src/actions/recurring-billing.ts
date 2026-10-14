@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache";
 import type { BillingCycle, RecurringBillingMode } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireModuleUser } from "@/lib/modules-access";
+import { moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { mayAccess } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatOrderId } from "@/lib/order-id";
 import { orderPath } from "@/lib/record-links";
-import { instalmentPeriods, isoDay } from "@/lib/recurring-billing/periods";
+import { instalmentPeriods, isoDay, type InstalmentCycle } from "@/lib/recurring-billing/periods";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -27,7 +27,7 @@ export type RecurringBillingView = {
   /** Null where that kind of billing can be switched on; otherwise why not. */
   why: { AUTO_RENEW: string | null; INSTALMENTS: string | null };
   /** The first part beginning today or later, per cycle: where instalments start unless told otherwise. */
-  suggestedFrom: { MONTHLY: string | null; QUARTERLY: string | null };
+  suggestedFrom: { MONTHLY: string | null; QUARTERLY: string | null; ANNUAL: string | null };
   term: { start: string | null; end: string | null };
   raised: { start: string; end: string; documentId: string | null; docNumber: string | null; status: string | null; renewal: { seq: number; path: string } | null }[];
   canManage: boolean;
@@ -53,13 +53,15 @@ async function loadOrder(orderId: string) {
 
 type LoadedOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
 
-function whyNot(order: LoadedOrder): RecurringBillingView["why"] {
+function whyNot(order: LoadedOrder, renewalsOn: boolean): RecurringBillingView["why"] {
   const price = Number(order.fullTermUnitPrice ?? order.unitPrice ?? 0);
-  const autoRenew = !order.endDate
-    ? "It has no expiry date, so there is no next term to renew."
-    : price <= 0
-      ? "It has no price to renew at."
-      : null;
+  const autoRenew = !renewalsOn
+    ? "Auto-renewal punches the next term's order, which needs Renewals — part of Deskzo Subscriptions and Deskzo One."
+    : !order.endDate
+      ? "It has no expiry date, so there is no next term to renew."
+      : price <= 0
+        ? "It has no price to renew at."
+        : null;
   const instalments =
     !order.startDate || !order.endDate
       ? "It needs a start and an end date to be split into parts."
@@ -71,7 +73,7 @@ function whyNot(order: LoadedOrder): RecurringBillingView["why"] {
   return { AUTO_RENEW: autoRenew, INSTALMENTS: instalments };
 }
 
-function firstPartFrom(order: LoadedOrder, cycle: "MONTHLY" | "QUARTERLY", today: Date): string | null {
+function firstPartFrom(order: LoadedOrder, cycle: InstalmentCycle, today: Date): string | null {
   if (!order.startDate || !order.endDate) return null;
   const next = instalmentPeriods(order.startDate, order.endDate, cycle).find((p) => p.start >= today);
   return next ? isoDay(next.start) : null;
@@ -102,8 +104,8 @@ export async function recurringBillingFor(orderId: string): Promise<RecurringBil
     setting: setting
       ? { mode: setting.mode, cycle: setting.cycle, billFrom: setting.billFrom ? isoDay(setting.billFrom) : null, setBy: setting.setBy.name, since: setting.createdAt.toISOString() }
       : null,
-    why: whyNot(order),
-    suggestedFrom: { MONTHLY: firstPartFrom(order, "MONTHLY", today), QUARTERLY: firstPartFrom(order, "QUARTERLY", today) },
+    why: whyNot(order, await moduleAvailableForTenant("renewals")),
+    suggestedFrom: { MONTHLY: firstPartFrom(order, "MONTHLY", today), QUARTERLY: firstPartFrom(order, "QUARTERLY", today), ANNUAL: firstPartFrom(order, "ANNUAL", today) },
     term: { start: order.startDate ? isoDay(order.startDate) : null, end: order.endDate ? isoDay(order.endDate) : null },
     raised: periods.map((p) => {
       const seq = p.renewalOrderId ? renewals.get(p.renewalOrderId) : undefined;
@@ -120,7 +122,7 @@ export async function recurringBillingFor(orderId: string): Promise<RecurringBil
   };
 }
 
-export type RecurringBillingSetting = { mode: "AUTO_RENEW" } | { mode: "INSTALMENTS"; cycle: "MONTHLY" | "QUARTERLY"; billFrom: string } | null;
+export type RecurringBillingSetting = { mode: "AUTO_RENEW" } | { mode: "INSTALMENTS"; cycle: InstalmentCycle; billFrom: string } | null;
 
 /** Switches it on, changes it, or (`null`) switches it off. What it has raised already stays raised. */
 export async function setRecurringBilling(orderId: string, setting: RecurringBillingSetting): Promise<ActionResult<null>> {
@@ -139,15 +141,15 @@ export async function setRecurringBilling(orderId: string, setting: RecurringBil
     return { ok: true, data: null };
   }
 
-  const why = whyNot(order)[setting.mode];
+  const why = whyNot(order, await moduleAvailableForTenant("renewals"))[setting.mode];
   if (why) return { ok: false, error: why };
 
   let cycle: BillingCycle | null = null;
   let billFrom: Date | null = null;
   if (setting.mode === "INSTALMENTS") {
-    if (setting.cycle !== "MONTHLY" && setting.cycle !== "QUARTERLY") return { ok: false, error: "Instalments are monthly or quarterly." };
+    if (setting.cycle !== "MONTHLY" && setting.cycle !== "QUARTERLY" && setting.cycle !== "ANNUAL") return { ok: false, error: "Instalments are monthly, quarterly or yearly." };
     if (instalmentPeriods(order.startDate!, order.endDate!, setting.cycle).length < 2) {
-      return { ok: false, error: `Its term is a ${setting.cycle === "QUARTERLY" ? "quarter" : "month"} or less — there is nothing to split.` };
+      return { ok: false, error: `Its term is a ${setting.cycle === "ANNUAL" ? "year" : setting.cycle === "QUARTERLY" ? "quarter" : "month"} or less — there is nothing to split.` };
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(setting.billFrom ?? "")) return { ok: false, error: "Pick the day billing starts from." };
     billFrom = new Date(`${setting.billFrom}T00:00:00.000Z`);
@@ -170,7 +172,7 @@ export async function setRecurringBilling(orderId: string, setting: RecurringBil
     entityLabel:
       setting.mode === "AUTO_RENEW"
         ? `${label} — set to renew itself at the end of its term`
-        : `${label} — set to be invoiced ${cycle === "QUARTERLY" ? "quarterly" : "monthly"} from ${isoDay(billFrom!)}`,
+        : `${label} — set to be invoiced ${cycle === "ANNUAL" ? "yearly" : cycle === "QUARTERLY" ? "quarterly" : "monthly"} from ${isoDay(billFrom!)}`,
   });
   revalidatePath(orderPath(order.orderSeq));
   return { ok: true, data: null };

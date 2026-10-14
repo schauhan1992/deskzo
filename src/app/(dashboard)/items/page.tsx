@@ -2,6 +2,8 @@ import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { listItems } from "@/actions/item";
+import { listItemCategories } from "@/actions/item-category";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { listBrands } from "@/actions/brand";
 import { itemTypeValues } from "@/lib/validation/item";
 import { PAGE_SIZES, resolvePage, resolvePageSize } from "@/lib/pagination";
@@ -22,7 +24,7 @@ import type { ItemType } from "@prisma/client";
 export default async function ItemsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; brandId?: string; q?: string; page?: string; pageSize?: string; hsn?: string } & CustomFilterParams>;
+  searchParams: Promise<{ type?: string; brandId?: string; category?: string; q?: string; page?: string; pageSize?: string; hsn?: string } & CustomFilterParams>;
 }) {
   const enabled = await isModuleEnabled("items");
   if (!enabled) {
@@ -30,14 +32,15 @@ export default async function ItemsPage({
   }
 
   const params = await searchParams;
-  const type = itemTypeValues.includes(params.type as ItemType) ? (params.type as ItemType) : undefined;
+  const type = (itemTypeValues as readonly string[]).includes(params.type ?? "") ? (params.type as ItemType) : undefined;
   const customFilters = parseCustomFilters(params);
   // Carried by the search form and the type chips, which rebuild the query from the page's own parameters.
   const fieldParams = customFilterParams(params);
-  const [result, brands] = await Promise.all([
+  const [result, brands, categories, subscriptions] = await Promise.all([
     listItems({
       type,
       brandId: params.brandId,
+      category: params.category,
       search: params.q,
       page: resolvePage(params.page),
       pageSize: resolvePageSize(params.pageSize),
@@ -47,6 +50,9 @@ export default async function ItemsPage({
       hsnToFix: params.hsn === "fix",
     }),
     listBrands(),
+    listItemCategories(),
+    // Subscriptions are offered only where Renewals is (Deskzo Subscriptions, or One).
+    moduleAvailableForTenant("renewals"),
   ]);
   const user = await requireUser();
   // The workspace's own fields: the ones marked "a column in the list" (this table has no column
@@ -60,8 +66,7 @@ export default async function ItemsPage({
     { label: "All" },
     { label: "Goods", value: "GOOD" },
     { label: "Services", value: "SERVICE" },
-    { label: "Subscriptions", value: "SUBSCRIPTION" },
-    { label: "Perpetual", value: "PERPETUAL" },
+    ...(subscriptions || params.type === "SUBSCRIPTION" ? [{ label: "Subscriptions", value: "SUBSCRIPTION" as const }] : []),
   ];
 
   // Changing a filter has to drop the page number, or filtering while on page 3 lands on an
@@ -72,6 +77,7 @@ export default async function ItemsPage({
       type: params.type,
       q: params.q,
       brandId: params.brandId,
+      category: params.category,
       pageSize: params.pageSize,
       hsn: params.hsn,
       ...overrides,
@@ -89,6 +95,9 @@ export default async function ItemsPage({
         <div className="flex items-center gap-2">
           <Link href="/items/brands">
             <Button variant="ghost">Brands &amp; families</Button>
+          </Link>
+          <Link href="/items/categories">
+            <Button variant="ghost">Categories</Button>
           </Link>
           <ImportItemsDialog />
           <ExportItemsButton />
@@ -114,6 +123,7 @@ export default async function ItemsPage({
         />
         {params.type && <input type="hidden" name="type" value={params.type} />}
         {params.brandId && <input type="hidden" name="brandId" value={params.brandId} />}
+        {params.category && <input type="hidden" name="category" value={params.category} />}
         {params.pageSize && <input type="hidden" name="pageSize" value={params.pageSize} />}
         {params.hsn && <input type="hidden" name="hsn" value={params.hsn} />}
         {Object.entries(fieldParams).map(([name, value]) => (
@@ -128,6 +138,13 @@ export default async function ItemsPage({
           listLabel="Brands"
           options={brands.map((b) => ({ id: b.id, name: b.name }))}
           placeholder="All brands — type to search"
+        />
+        <OptionParamFilter
+          paramName="category"
+          label="Category"
+          listLabel="Categories"
+          options={categories.map((c) => ({ id: c.name, name: c.name }))}
+          placeholder="All categories — type to search"
         />
         <CustomFieldFilters setup={fieldFilters} />
       </div>
@@ -167,7 +184,14 @@ export default async function ItemsPage({
       )}
 
       <div className="mt-6">
-        <ItemsTable items={result.items} brands={brands} customColumns={customColumns} hsnProblems={result.hsnProblems} />
+        <ItemsTable
+          items={result.items}
+          brands={brands}
+          customColumns={customColumns}
+          hsnProblems={result.hsnProblems}
+          categories={categories}
+          subscriptions={subscriptions}
+        />
         <Pagination
           page={result.page}
           pageSize={result.pageSize}

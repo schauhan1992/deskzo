@@ -9,7 +9,7 @@ import { addMonths, cycleMonths } from "@/lib/subscriptions/renewal-order";
 
 const DAY = 86_400_000;
 
-export type InstalmentCycle = "MONTHLY" | "QUARTERLY";
+export type InstalmentCycle = "MONTHLY" | "QUARTERLY" | "ANNUAL";
 export type Period = { start: Date; end: Date; index: number; count: number };
 
 /**

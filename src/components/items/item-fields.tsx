@@ -1,5 +1,5 @@
 import type { FieldErrors, FieldValues, UseFormRegister } from "react-hook-form";
-import { billingCycleValues, revenuePatternLabels, revenuePatternValues, type itemTypeValues } from "@/lib/validation/item";
+import { revenuePatternLabels, revenuePatternValues, type itemTypeValues } from "@/lib/validation/item";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
@@ -22,6 +22,10 @@ export function ItemDetailFields({
   onHsnChange,
   hsnRequired = false,
   onTypeChange,
+  categories = [],
+  category = "",
+  onCategoryChange,
+  subscriptions = false,
 }: {
   register: UseFormRegister<FieldValues>;
   errors: FieldErrors<FieldValues>;
@@ -47,6 +51,12 @@ export function ItemDetailFields({
    * here as the one value it is stored as (GOOD, SERVICE, SUBSCRIPTION, PERPETUAL).
    */
   onTypeChange: (type: (typeof itemTypeValues)[number]) => void;
+  /** The workspace's item categories (Items › Categories); the field picks one by name. */
+  categories?: { id: string; name: string }[];
+  category?: string;
+  onCategoryChange: (name: string) => void;
+  /** Renewals is in the plan and switched on, so a service may be managed as a subscription. */
+  subscriptions?: boolean;
 }) {
   const selectedBrand = brands.find((b) => b.id === brandId);
   return (
@@ -64,8 +74,8 @@ export function ItemDetailFields({
             <Input id="sku" placeholder="e.g. MS365-BSTD" {...register("sku")} />
             {errors.sku && <p className="text-xs text-danger">{String(errors.sku.message)}</p>}
           </div>
-          {/* Goods or a service decides the GST side — HSN or SAC, and whether stock is tracked. How a
-              service is sold is a second question, and optional: most services are one-time. */}
+          {/* Goods or a service decides the GST side — HSN or SAC, and whether stock is tracked. What
+              kind of goods or service it is, the category says; whether it renews, the box below. */}
           <div className="space-y-1.5">
             <Label htmlFor="type">Goods or service *</Label>
             <Select id="type" value={itemType === "GOOD" ? "GOOD" : "SERVICE"} onChange={(e) => onTypeChange(e.target.value === "GOOD" ? "GOOD" : "SERVICE")}>
@@ -73,26 +83,27 @@ export function ItemDetailFields({
               <option value="SERVICE">Service</option>
             </Select>
           </div>
-          {itemType !== "GOOD" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="subType">Sub type</Label>
-              <Select
-                id="subType"
-                value={itemType === "SUBSCRIPTION" || itemType === "PERPETUAL" ? itemType : ""}
-                onChange={(e) => onTypeChange(e.target.value === "SUBSCRIPTION" || e.target.value === "PERPETUAL" ? e.target.value : "SERVICE")}
-              >
-                <option value="">None — a one-time service</option>
-                <option value="SUBSCRIPTION">Subscription</option>
-                <option value="PERPETUAL">Perpetual licence</option>
-              </Select>
-              <p className="text-xs text-muted">
-                {itemType === "SUBSCRIPTION"
-                  ? "Renews — it comes up in Renewals before its term ends."
-                  : itemType === "PERPETUAL"
-                    ? "Owned outright — never expires, so it stays out of Renewals."
-                    : "Optional."}
+          {/* Only where Renewals is (Deskzo Subscriptions, or One) — or on an item that already renews,
+              which a workspace that has since lost Renewals keeps until somebody unticks it. */}
+          {itemType !== "GOOD" && (subscriptions || itemType === "SUBSCRIPTION") ? (
+            <div className="flex flex-col justify-end space-y-1.5">
+              <label className="flex items-center gap-2 text-sm text-text">
+                <input
+                  type="checkbox"
+                  checked={itemType === "SUBSCRIPTION"}
+                  onChange={(e) => onTypeChange(e.target.checked ? "SUBSCRIPTION" : "SERVICE")}
+                  aria-describedby="subscription-help"
+                />
+                Manage as a subscription
+              </label>
+              <p id="subscription-help" className="text-xs text-muted">
+                {itemType === "SUBSCRIPTION" && !subscriptions
+                  ? "Renewals isn't in your plan, so nothing will renew it — untick to make it a one-time service."
+                  : "It renews: it comes up in Renewals before its term ends. Each order sets its own term."}
               </p>
             </div>
+          ) : (
+            <div aria-hidden="true" />
           )}
           <div className="space-y-1.5">
             <Label htmlFor="brandId">Brand</Label>
@@ -139,7 +150,24 @@ export function ItemDetailFields({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="category">Category</Label>
-            <Input id="category" placeholder="e.g. Laptop, Productivity Suite" {...register("category")} />
+            {/* Picked from the workspace's own list, so one kind of thing isn't filed three ways. */}
+            <OptionCombobox
+              id="category"
+              listLabel="Categories"
+              // The item's own, if the list doesn't have it (a workspace from before the list), so it still shows.
+              options={[...categories, ...(category && !categories.some((c) => c.name === category) ? [{ id: category, name: category }] : [])].map((c) => ({ id: c.name, name: c.name }))}
+              value={category}
+              onSelect={(c) => onCategoryChange(c?.id ?? "")}
+              placeholder="Search categories…"
+              emptyText="No category by that name."
+            />
+            <p className="text-xs text-subtle">
+              {categories.length === 0 ? "No categories yet — add them under " : "Missing one? Add it under "}
+              <Link href="/items/categories" className="underline underline-offset-2">
+                Categories
+              </Link>
+              .
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="hsnCode">HSN / SAC code{hsnRequired ? " *" : ""}</Label>
@@ -170,19 +198,6 @@ export function ItemDetailFields({
             <Label htmlFor="unit">Unit</Label>
             <Input id="unit" placeholder="e.g. Seat, Piece, License" {...register("unit")} />
           </div>
-          {itemType === "SUBSCRIPTION" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="billingCycle">Billing cycle</Label>
-              <Select id="billingCycle" {...register("billingCycle")}>
-                <option value="">Not set</option>
-                {billingCycleValues.map((b) => (
-                  <option key={b} value={b}>
-                    {b.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
           {showRevenuePattern && (
             <div className="space-y-1.5">
               <Label htmlFor="revenuePattern">Revenue is recognised</Label>

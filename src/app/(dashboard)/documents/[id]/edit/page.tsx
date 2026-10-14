@@ -65,7 +65,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     listBranchChoices({ include: document.branchId ? [document.branchId] : [] }),
     getNumberSetting(document.docType, document.branchId),
     // What each line's item is, so the form offers a service period where the item suggests one.
-    itemIds.length ? db.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, type: true, billingCycle: true } }) : [],
+    itemIds.length ? db.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, type: true } }) : [],
     document.direction === "SALES" ? documentBankChoices(document.id) : undefined,
   ]);
   const itemOf = (id: string | null) => lineItems.find((item) => item.id === id);
@@ -166,7 +166,6 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
             // so whatever isn't round-tripped here would be deleted by the next save.
             companyProductId: line.companyProductId ?? "",
             itemType: itemOf(line.itemId)?.type ?? "",
-            itemCycle: itemOf(line.itemId)?.billingCycle ?? "",
             servicePeriodFrom: periodKey(line.servicePeriodFrom),
             servicePeriodTo: periodKey(line.servicePeriodTo),
             // A saved period is somebody's decision, not a default to be replaced.

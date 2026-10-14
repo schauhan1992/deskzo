@@ -441,8 +441,7 @@ export function DocumentForm({
       // A different item is no longer the order it was taken from.
       companyProductId: "",
       itemType: item.type,
-      itemCycle: item.billingCycle ?? "",
-      // A subscription starts with one billing cycle from the document's date — unless a period was
+      // A subscription starts with a year from the document's date — unless a period was
       // typed, or this type of document doesn't carry one (a purchase, for now).
       ...(line && periodShown ? periodDefault(line, defaultServicePeriod({ item, issueDate })) : {}),
       itemId: item.id,
@@ -470,7 +469,7 @@ export function DocumentForm({
     if (!line) return;
     const order = orders.find((o) => o.id === orderId);
     if (!order) {
-      const fromItem = defaultServicePeriod({ item: { type: line.itemType, billingCycle: line.itemCycle }, issueDate });
+      const fromItem = defaultServicePeriod({ item: { type: line.itemType }, issueDate });
       updateLine(key, { companyProductId: "", ...(line.periodSource === "order" ? periodDefault(line, fromItem) : {}) });
       return;
     }
@@ -479,7 +478,6 @@ export function DocumentForm({
       companyProductId: order.id,
       itemId: item.id,
       itemType: item.type,
-      itemCycle: item.billingCycle ?? "",
       name: item.name,
       description: line.description || item.description || "",
       hsnCode: item.hsnCode ?? "",
@@ -499,7 +497,7 @@ export function DocumentForm({
     setLines((prev) =>
       prev.map((l) =>
         l.periodSource === "item"
-          ? { ...l, ...periodDefault(l, defaultServicePeriod({ item: { type: l.itemType, billingCycle: l.itemCycle }, issueDate: next })) }
+          ? { ...l, ...periodDefault(l, defaultServicePeriod({ item: { type: l.itemType }, issueDate: next })) }
           : l,
       ),
     );

@@ -1,4 +1,5 @@
-import { BillingCycle, ItemType, type Prisma } from "@prisma/client";
+import { ItemType, type Prisma } from "@prisma/client";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { valuesFor } from "@/lib/custom-fields/server";
 import { db } from "@/lib/db";
 import {
@@ -42,7 +43,6 @@ type ResolvedItem = {
   type?: ItemType;
   brandName?: string;
   familyName?: string;
-  billingCycle?: BillingCycle;
   unit?: string;
   price?: number;
   taxRatePercent?: number;
@@ -59,8 +59,9 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
   const name = r.text("Name");
   const sku = r.text("SKU");
 
-  const type = r.enum("Type", ItemType);
-  const billingCycle = r.enum("Billing cycle", BillingCycle);
+  // PERPETUAL is a retired type: a perpetual licence is a service now (src/lib/validation/item.ts).
+  const typed = r.enum("Type", ItemType);
+  const type = typed === "PERPETUAL" ? "SERVICE" : typed;
   const price = r.number("Price");
   const taxRatePercent = r.number("Tax %");
   if (r.error) return { error: r.error };
@@ -69,6 +70,7 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
     id: true,
     itemSeq: true,
     sku: true,
+    type: true,
     brand: { select: { name: true } },
     productFamily: { select: { name: true, brand: { select: { name: true } } } },
   } as const;
@@ -86,6 +88,7 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
     id: string;
     itemSeq: number;
     sku: string;
+    type: ItemType;
     brand: { name: string } | null;
     productFamily: { name: string; brand: { name: string } } | null;
   } | null = null;
@@ -144,10 +147,15 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
     clearFamily = true;
   }
 
+  // Managed as a subscription only where Renewals is: a new one, or one changed to it.
+  if (type === "SUBSCRIPTION" && existing?.type !== "SUBSCRIPTION" && !(await moduleAvailableForTenant("renewals"))) {
+    return { error: "Managing an item as a subscription needs Renewals, part of Deskzo Subscriptions and Deskzo One." };
+  }
+
   if (!existing) {
     if (!name) return { error: "Name is required to create an item." };
     if (!sku) return { error: `SKU is required to create "${name}". It is what the next price list will be matched on.` };
-    if (!type) return { error: `Type is required to create "${name}". One of: ${Object.keys(ItemType).join(", ")}.` };
+    if (!type) return { error: `Type is required to create "${name}". One of: GOOD, SERVICE, SUBSCRIPTION.` };
     if (price === undefined) return { error: `Price is required to create "${name}".` };
   }
 
@@ -158,7 +166,6 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
       type,
       brandName,
       familyName,
-      billingCycle,
       unit: r.text("Unit") || undefined,
       price,
       taxRatePercent,
@@ -188,7 +195,6 @@ export const itemsImporter: Importer = {
         Type: i.type,
         Brand: i.brandName,
         Family: i.familyName,
-        "Billing cycle": i.billingCycle,
         Unit: i.unit,
         Price: i.price,
         "Tax %": i.taxRatePercent,
@@ -208,7 +214,6 @@ export const itemsImporter: Importer = {
       i.brandName ? diff("Brand", existing.brand?.name, i.brandName) : null,
       i.familyName ? diff("Family", existing.productFamily?.name, i.familyName) : null,
       i.clearFamily ? diff("Family", existing.productFamily?.name, "") : null,
-      i.billingCycle ? diff("Billing cycle", existing.billingCycle, i.billingCycle) : null,
       i.unit ? diff("Unit", existing.unit, i.unit) : null,
       // Through Number on both sides: a Decimal and the number read out of the cell are the same
       // price, and comparing their text would report 68000.00 → 68000 as an edit on every run.
@@ -250,7 +255,6 @@ export const itemsImporter: Importer = {
       ...(brand ? { brandId: brand.id } : {}),
       ...(family ? { productFamilyId: family.id } : {}),
       ...(i.clearFamily ? { productFamilyId: null } : {}),
-      ...(i.billingCycle ? { billingCycle: i.billingCycle } : {}),
       ...(i.unit ? { unit: i.unit } : {}),
       ...(i.price !== undefined ? { sellingPrice: i.price } : {}),
       ...(i.taxRatePercent !== undefined ? { taxRatePercent: i.taxRatePercent } : {}),

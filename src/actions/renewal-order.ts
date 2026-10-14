@@ -45,7 +45,7 @@ async function loadForRenewal(id: string, userId: string) {
     where: { id },
     include: {
       company: { select: { id: true, name: true, relationshipType: true, ownerUserId: true } },
-      item: { select: { id: true, name: true, billingCycle: true, unit: true } },
+      item: { select: { id: true, name: true, unit: true } },
       location: { select: { id: true, label: true } },
       endCustomer: { select: { id: true, name: true } },
       renewedBy: { select: { id: true, orderSeq: true, orderStatus: true } },
@@ -92,8 +92,8 @@ export async function renewalDraft(companyProductId: string) {
     quantity: product.quantity,
     unitPrice: product.unitPrice ? Number(product.unitPrice) : null,
     fullTermUnitPrice: product.fullTermUnitPrice ? Number(product.fullTermUnitPrice) : null,
+    startDate: product.startDate,
     endDate: product.endDate,
-    billingCycle: product.item.billingCycle,
     group,
   });
 
@@ -104,7 +104,6 @@ export async function renewalDraft(companyProductId: string) {
       orderSeq: product.orderSeq,
       itemName: product.item.name,
       unit: product.item.unit,
-      billingCycle: product.item.billingCycle,
       quantity: product.quantity,
       endDate: product.endDate,
       locationLabel: product.location?.label ?? null,
@@ -153,8 +152,8 @@ export async function createRenewalOrder(input: {
     quantity: product.quantity,
     unitPrice: product.unitPrice ? Number(product.unitPrice) : null,
     fullTermUnitPrice: product.fullTermUnitPrice ? Number(product.fullTermUnitPrice) : null,
+    startDate: product.startDate,
     endDate: product.endDate,
-    billingCycle: product.item.billingCycle,
     group,
   });
 

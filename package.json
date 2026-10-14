@@ -132,6 +132,7 @@
     "signatures:banners": "tsx scripts/make-signature-banners.ts",
     "check:item-import": "tsx scripts/check-item-import.ts",
     "check:hsn": "tsx scripts/check-hsn.ts",
+    "check:item-categories": "tsx scripts/check-item-categories.ts",
     "check:credit": "tsx scripts/check-credit.ts",
     "check:support-load": "tsx scripts/check-support-load.ts",
     "check:mail-log": "tsx scripts/check-mail-log.ts",

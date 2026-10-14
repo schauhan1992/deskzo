@@ -85,12 +85,11 @@ export default async function NewDocumentPage({
     defaults.salespersonId = fromLead.ownerUserId ?? "";
     if (fromLead.requirements.length > 0) {
       defaults.lines = fromLead.requirements.map((r) => {
-        // A subscription starts with one billing cycle from the document's date, as a picked item does.
+        // A subscription starts with a year from the document's date, as a picked item does.
         const period = showsServicePeriod(docType) ? defaultServicePeriod({ item: r.item, issueDate: defaults.issueDate }) : null;
         return {
           ...blankLine(),
           itemType: r.item.type,
-          itemCycle: r.item.billingCycle ?? "",
           servicePeriodFrom: period?.from ?? "",
           servicePeriodTo: period?.to ?? "",
           periodSource: period?.source ?? "",

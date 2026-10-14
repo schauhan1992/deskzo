@@ -85,7 +85,7 @@ type Billing = {
     endDate: Date | null;
     addedByUserId: string;
     company: { id: string; name: string; relationshipType: CompanyRelationshipType; ownerUserId: string | null };
-    item: { id: string; name: string; unit: string | null; hsnCode: string | null; taxRatePercent: Money; billingCycle: BillingCycle | null };
+    item: { id: string; name: string; unit: string | null; hsnCode: string | null; taxRatePercent: Money };
     location: Parameters<typeof partyDetails>[0];
     renewedBy: { id: string } | null;
     addons: { id: string; quantity: number; unitPrice: Money; fullTermUnitPrice: Money; startDate: Date | null }[];
@@ -106,7 +106,7 @@ async function loadBillings(only?: string[]): Promise<Billing[]> {
           id: true, orderSeq: true, companyId: true, locationId: true, itemId: true, vendorId: true, endCustomerId: true,
           paymentTerms: true, quantity: true, unitPrice: true, fullTermUnitPrice: true, startDate: true, endDate: true, addedByUserId: true,
           company: { select: { id: true, name: true, relationshipType: true, ownerUserId: true } },
-          item: { select: { id: true, name: true, unit: true, hsnCode: true, taxRatePercent: true, billingCycle: true } },
+          item: { select: { id: true, name: true, unit: true, hsnCode: true, taxRatePercent: true } },
           location: { select: { id: true, address: true, city: true, state: true, pincode: true, country: true, gstNumber: true, gstTreatment: true } },
           renewedBy: { select: { id: true } },
           addons: {
@@ -165,7 +165,7 @@ async function raiseInstalments(billing: Billing, today: Date, actorId: string, 
   const order = billing.order;
   const label = formatOrderId(order.orderSeq);
   const cycle = billing.cycle;
-  if (cycle !== "MONTHLY" && cycle !== "QUARTERLY") return void report.passed.push(`${label}: instalments need a monthly or quarterly cycle`);
+  if (cycle !== "MONTHLY" && cycle !== "QUARTERLY" && cycle !== "ANNUAL") return void report.passed.push(`${label}: instalments need a monthly, quarterly or yearly cycle`);
   if (!order.startDate || !order.endDate) return void report.passed.push(`${label}: no term dates`);
   const price = order.unitPrice === null ? null : Number(order.unitPrice);
   if (price === null || price <= 0) return void report.passed.push(`${label}: no price`);
@@ -232,8 +232,8 @@ async function renew(billing: Billing, today: Date, actorId: string, report: Rec
     quantity: order.quantity,
     unitPrice: order.unitPrice === null ? null : Number(order.unitPrice),
     fullTermUnitPrice: order.fullTermUnitPrice === null ? null : Number(order.fullTermUnitPrice),
+    startDate: order.startDate,
     endDate: order.endDate,
-    billingCycle: order.item.billingCycle,
     group,
   });
   if (!draft.term) return void report.passed.push(`${label}: no next term`);

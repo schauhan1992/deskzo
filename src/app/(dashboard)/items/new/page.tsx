@@ -1,5 +1,6 @@
 import { isModuleEnabled } from "@/actions/module";
-import { countryFeatureAvailable } from "@/lib/modules-access";
+import { countryFeatureAvailable, moduleAvailableForTenant } from "@/lib/modules-access";
+import { listItemCategories } from "@/actions/item-category";
 import { listBrands } from "@/actions/brand";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewItemForm } from "@/components/items/new-item-form";
@@ -15,21 +16,24 @@ export default async function NewItemPage() {
   // How revenue is recognised is asked only where Revenue & Close is available.
   const user = await requireUser();
   // HSN/SAC is required where it is the tax's classification — an Indian workspace.
-  const [brands, revenueCapture, customFields, hsnRequired] = await Promise.all([
+  // A service may be managed as a subscription only where Renewals is (Deskzo Subscriptions, or One).
+  const [brands, revenueCapture, customFields, hsnRequired, categories, subscriptions] = await Promise.all([
     listBrands(),
     isModuleEnabled("revenue_close"),
     formSetup("ITEM", user.id),
     countryFeatureAvailable("hsn"),
+    listItemCategories(),
+    moduleAvailableForTenant("renewals"),
   ]);
 
   return (
     <div>
       <h1 className="text-xl font-semibold text-text">New item</h1>
       <p className="mt-1 text-sm text-muted">
-        SKU must be unique. Goods, services, subscriptions, and perpetual licences share this catalog — only goods
-        track stock, and only subscriptions ever come up for renewal.
+        SKU must be unique. Goods and services share this catalog — only goods track stock, and only a service
+        managed as a subscription ever comes up for renewal.
       </p>
-      <NewItemForm brands={brands} showRevenuePattern={revenueCapture} customFields={customFields} hsnRequired={hsnRequired} />
+      <NewItemForm brands={brands} showRevenuePattern={revenueCapture} customFields={customFields} hsnRequired={hsnRequired} categories={categories} subscriptions={subscriptions} />
     </div>
   );
 }

@@ -116,6 +116,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "intake.ts": "public",
   "internal-feedback.ts": ["engagement"],
   "it-asset.ts": ["it_assets"],
+  "item-category.ts": ["items"],
   "item.ts": ["items"],
   "lead-assignment.ts": "core",
   "lead-capture.ts": "core",

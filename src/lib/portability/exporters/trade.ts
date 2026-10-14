@@ -24,7 +24,6 @@ export const itemsExporter: Exporter = async (scope) => {
     Type: i.type,
     Brand: i.brand?.name ?? "",
     Family: i.productFamily?.name ?? "",
-    "Billing cycle": i.billingCycle ?? "",
     Unit: i.unit ?? "",
     Price: i.sellingPrice ? Number(i.sellingPrice) : null,
     "Tax %": i.taxRatePercent ? Number(i.taxRatePercent) : null,

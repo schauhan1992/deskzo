@@ -1,5 +1,5 @@
-import type { BillingCycle, ItemType, TradeDocumentType } from "@prisma/client";
-import { addMonths, cycleMonths } from "@/lib/subscriptions/renewal-order";
+import type { ItemType, TradeDocumentType } from "@prisma/client";
+import { addMonths, DEFAULT_TERM_MONTHS } from "@/lib/subscriptions/renewal-order";
 
 /**
  * The period a document line pays for — a subscription's term, a support contract, a retainer.
@@ -85,20 +85,17 @@ export function orderServicePeriod(order: {
 }
 
 /**
- * One billing cycle of a subscription, starting on the document's date: the day it is issued through
- * the day before the next cycle would begin. Anything that is not a subscription with a cycle has no
- * period of its own. The month arithmetic is the renewals module's (`addMonths`, `cycleMonths`), so a
- * 31 January start ends on 27 February, not 2 March.
+ * A subscription picked straight from the catalogue: a year from the document's date, the day it is
+ * issued through the day before a year on. A subscription's term belongs to its order, not its product
+ * — billing the order ("Bills order") gives its exact dates — so this is only a starting point, and
+ * anything that is not a subscription has no period of its own. The month arithmetic is the renewals
+ * module's (`addMonths`), so a 29 February start ends on 27 February.
  */
-export function itemServicePeriod(
-  item: { type: ItemType | string | null | undefined; billingCycle: BillingCycle | string | null | undefined },
-  issueDate: string,
-): ServicePeriod | null {
-  if (item.type !== "SUBSCRIPTION" || !item.billingCycle) return null;
-  const months = cycleMonths[item.billingCycle as BillingCycle];
+export function itemServicePeriod(item: { type: ItemType | string | null | undefined }, issueDate: string): ServicePeriod | null {
+  if (item.type !== "SUBSCRIPTION") return null;
   const start = periodDay(issueDate);
-  if (!months || !start) return null;
-  const end = new Date(addMonths(start, months).getTime() - DAY_MS);
+  if (!start) return null;
+  const end = new Date(addMonths(start, DEFAULT_TERM_MONTHS).getTime() - DAY_MS);
   return { from: periodKey(start), to: periodKey(end) };
 }
 
@@ -109,7 +106,7 @@ export function itemServicePeriod(
  */
 export function defaultServicePeriod(input: {
   order?: { startDate: Date | string | null; endDate: Date | string | null } | null;
-  item?: { type: ItemType | string | null | undefined; billingCycle: BillingCycle | string | null | undefined } | null;
+  item?: { type: ItemType | string | null | undefined } | null;
   issueDate: string;
 }): (ServicePeriod & { source: ServicePeriodSource }) | null {
   const fromOrder = input.order ? orderServicePeriod(input.order) : null;

@@ -23,6 +23,8 @@ import {
   addMonths,
   nextTerm,
   renewalOrderDraft,
+  termEndFor,
+  termMonthsOf,
 } from "../src/lib/subscriptions/renewal-order";
 
 let failures = 0;
@@ -243,18 +245,26 @@ function sameText(label: string, actual: unknown, expected: unknown, why = "") {
 console.log("\n— The renewal order —\n");
 
 // The scenario from the addon work: 10 seats 10/08/2026–09/08/2027 at ₹6,000, plus seats added later.
-const annual = nextTerm({ previousEnd: "2027-08-09", billingCycle: "ANNUAL" });
+const annual = nextTerm({ previousStart: "2026-08-10", previousEnd: "2027-08-09" });
 sameText("A renewal starts the day after the old term ends", annual.startDate, "2027-08-10", "no gap in cover");
 sameText("  and ends the day before the next would begin", annual.endDate, "2028-08-09", "no day billed on two orders");
 eq("  which is a full year", annual.days, 366, "2028 is a leap year");
 
-const monthlyTerm = nextTerm({ previousEnd: "2026-09-30", billingCycle: "MONTHLY" });
-sameText("A monthly term rolls a month", monthlyTerm.startDate, "2026-10-01");
+const monthlyTerm = nextTerm({ previousStart: "2026-09-01", previousEnd: "2026-09-30" });
+sameText("A monthly term rolls a month — the order's own term, not the product's", monthlyTerm.startDate, "2026-10-01");
 sameText("  to the end of it", monthlyTerm.endDate, "2026-10-31");
 
-const quarterly = nextTerm({ previousEnd: "2026-03-31", billingCycle: "QUARTERLY" });
+const quarterly = nextTerm({ previousStart: "2026-01-01", previousEnd: "2026-03-31" });
 sameText("A quarter is three months", quarterly.startDate, "2026-04-01");
 sameText("  ending on the last day of the third", quarterly.endDate, "2026-06-30");
+
+const threeYears = nextTerm({ previousStart: "2026-04-01", previousEnd: "2029-03-31" });
+sameText("A three-year term renews for three years", threeYears.endDate, "2032-03-31", threeYears.startDate);
+eq("  its length read from its own dates", termMonthsOf("2026-04-01", "2029-03-31"), 36);
+eq("A co-termed or hand-typed term is its nearest number of months", termMonthsOf("2026-04-15", "2027-03-31"), 12);
+sameText("With no start to measure from, a year", nextTerm({ previousEnd: "2026-12-31" }).endDate, "2027-12-31");
+sameText("The order form's term ends the day before the next would begin", termEndFor("2026-01-31", 1), "2026-02-27");
+sameText("  three years from 1 April is 31 March three years on", termEndFor("2026-04-01", 36), "2029-03-31");
 
 // Month-end arithmetic, which naive date maths gets wrong and nobody notices for a year.
 sameText("31 January plus a month is the end of February", ro_iso(addMonths(new Date("2027-01-31T00:00:00Z"), 1)), "2027-02-28");
@@ -273,7 +283,6 @@ const withAddons = renewalOrderDraft({
   unitPrice: 6000,
   fullTermUnitPrice: 6000,
   endDate: "2027-08-09",
-  billingCycle: "ANNUAL",
   group: { totalQuantity: 20, renewalValue: 120000, incomplete: false, note: "" },
 });
 eq("The renewal covers every seat", withAddons.quantity, 20, "10 original plus 10 added mid-term");
@@ -291,7 +300,6 @@ const proRatedOnly = renewalOrderDraft({
   unitPrice: 4405.48,
   fullTermUnitPrice: 6000,
   endDate: "2027-08-09",
-  billingCycle: "ANNUAL",
   group: null,
 });
 eq(
@@ -306,7 +314,6 @@ const noFullTerm = renewalOrderDraft({
   unitPrice: 2500,
   fullTermUnitPrice: null,
   endDate: "2027-08-09",
-  billingCycle: "ANNUAL",
   group: null,
 });
 eq("With no full-term price it falls back to the last one", noFullTerm.unitPrice, 2500);
@@ -341,7 +348,6 @@ const plain = renewalOrderDraft({
   unitPrice: 6000,
   fullTermUnitPrice: 6000,
   endDate: "2027-08-09",
-  billingCycle: "ANNUAL",
   group: { totalQuantity: 10, renewalValue: 60000, incomplete: false, note: "" },
 });
 eq("A subscription with no additions renews as itself", plain.quantity, 10);

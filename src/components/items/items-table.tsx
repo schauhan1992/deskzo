@@ -12,7 +12,7 @@ import { formatCurrency } from "@/lib/utils";
 import { Badge, Card } from "@/components/ui/card";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select";
 import type { BrandOption } from "@/components/items/item-fields";
 import { OptionCombobox } from "@/components/ui/option-combobox";
@@ -47,9 +47,15 @@ export function ItemsTable({
   brands,
   customColumns = { columns: [], texts: {} },
   hsnProblems = {},
+  categories = [],
+  subscriptions = false,
 }: {
   items: ItemRow[];
   brands: BrandOption[];
+  /** The workspace's item categories, for the bulk bar's category picker. */
+  categories?: { id: string; name: string }[];
+  /** Renewals is available, so the bulk bar may make services subscriptions. */
+  subscriptions?: boolean;
   /** Why an item's HSN/SAC needs fixing, by id — an Indian workspace's (src/lib/platform/hsn-directory.ts). */
   hsnProblems?: Record<string, string>;
   /** The workspace's own fields marked "a column in the list" (src/lib/custom-fields/server.ts `listColumns`, `listedOnly`): no column picker here. */
@@ -139,19 +145,25 @@ export function ItemsTable({
             </Select>
             <Select value={type} onChange={(e) => setType(e.target.value)} className="h-9 w-44" aria-label="Type">
               <option value="">Type — no change</option>
-              {itemTypeValues.map((t) => (
-                <option key={t} value={t}>
-                  {itemTypeLabels[t]}
-                </option>
-              ))}
+              {itemTypeValues
+                .filter((t) => t !== "SUBSCRIPTION" || subscriptions)
+                .map((t) => (
+                  <option key={t} value={t}>
+                    {itemTypeLabels[t]}
+                  </option>
+                ))}
             </Select>
-            <Input
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Category — no change"
-              className="h-9 w-48"
-              aria-label="Category"
-            />
+            {/* From the workspace's list, like the item form's — "Remove category" first, as the one
+                choice that isn't a category. */}
+            <div className="w-52">
+              <OptionCombobox
+                listLabel="Categories"
+                options={[{ id: "clear", name: "Remove category" }, ...categories.map((c) => ({ id: c.name, name: c.name }))]}
+                value={category}
+                onSelect={(c) => setCategory(c?.id ?? "")}
+                placeholder="Category — no change"
+              />
+            </div>
             {/* One code for every item picked — the quick way to fix a run of them the list flagged. */}
             <div className="w-64">
               <HsnCombobox value={hsnCode} onChange={setHsnCode} placeholder="HSN/SAC — no change" aria-label="HSN/SAC code" />

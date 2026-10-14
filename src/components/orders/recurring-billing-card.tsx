@@ -20,7 +20,9 @@ export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
   const router = useRouter();
   const current: Choice = view.setting?.mode ?? "OFF";
   const [choice, setChoice] = useState<Choice>(current);
-  const [cycle, setCycle] = useState<"MONTHLY" | "QUARTERLY">(view.setting?.cycle === "QUARTERLY" ? "QUARTERLY" : "MONTHLY");
+  const [cycle, setCycle] = useState<"MONTHLY" | "QUARTERLY" | "ANNUAL">(
+    view.setting?.cycle === "QUARTERLY" || view.setting?.cycle === "ANNUAL" ? view.setting.cycle : "MONTHLY",
+  );
   const [billFrom, setBillFrom] = useState(view.setting?.billFrom ?? view.suggestedFrom.MONTHLY ?? view.term.start ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
@@ -30,7 +32,7 @@ export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
     (choice === "INSTALMENTS" && (cycle !== (view.setting?.cycle ?? null) || billFrom !== (view.setting?.billFrom ?? null)));
   const unavailable = choice === "OFF" ? null : view.why[choice];
 
-  function pickCycle(next: "MONTHLY" | "QUARTERLY") {
+  function pickCycle(next: "MONTHLY" | "QUARTERLY" | "ANNUAL") {
     setCycle(next);
     // Follow the cycle's own next part, unless a day has already been chosen and saved.
     if (!view.setting?.billFrom) setBillFrom(view.suggestedFrom[next] ?? view.term.start ?? "");
@@ -57,7 +59,7 @@ export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
             ? "Off — this subscription is invoiced by hand."
             : current === "AUTO_RENEW"
               ? "Renews itself: on the first day of the next term, the renewal order is punched for approval and its invoice raised as a draft."
-              : `Invoiced ${view.setting?.cycle === "QUARTERLY" ? "quarterly" : "monthly"} from ${view.setting?.billFrom}: each part is raised as a draft on the day it begins.`}
+              : `Invoiced ${view.setting?.cycle === "ANNUAL" ? "yearly" : view.setting?.cycle === "QUARTERLY" ? "quarterly" : "monthly"} from ${view.setting?.billFrom}: each part is raised as a draft on the day it begins.`}
           {current !== "OFF" && view.setting && <span className="text-subtle"> Set by {view.setting.setBy}.</span>}
         </p>
 
@@ -85,10 +87,11 @@ export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
                     className="h-8 rounded-base border border-line bg-surface px-2 text-sm text-text"
                     value={cycle}
                     disabled={saving}
-                    onChange={(e) => pickCycle(e.target.value as "MONTHLY" | "QUARTERLY")}
+                    onChange={(e) => pickCycle(e.target.value as "MONTHLY" | "QUARTERLY" | "ANNUAL")}
                   >
                     <option value="MONTHLY">Monthly</option>
                     <option value="QUARTERLY">Quarterly</option>
+                    <option value="ANNUAL">Yearly</option>
                   </select>
                   <label htmlFor="recurring-from" className="text-muted">
                     from

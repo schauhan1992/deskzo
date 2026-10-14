@@ -95,7 +95,7 @@ const renewalInclude = {
   // On a reseller's order this is whose subscription it actually is — renew through the
   // reseller, but the seats and expiry belong to the end customer.
   endCustomer: { select: { id: true, companySeq: true, name: true } },
-  item: { select: { id: true, name: true, sku: true, unit: true, billingCycle: true } },
+  item: { select: { id: true, name: true, sku: true, unit: true } },
   addedBy: { select: { id: true, name: true } },
   addons: {
     where: { orderStatus: { not: "CANCELLED" as const } },

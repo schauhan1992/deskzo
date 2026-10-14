@@ -120,6 +120,11 @@ export function ImportItemsDialog() {
                   Added {result.familiesCreated.length} product family(ies): {listSome(result.familiesCreated)}
                 </p>
               )}
+              {result.categoriesCreated.length > 0 && (
+                <p className="mt-1 text-muted">
+                  Added {result.categoriesCreated.length} categor{result.categoriesCreated.length === 1 ? "y" : "ies"}: {listSome(result.categoriesCreated)}
+                </p>
+              )}
               {result.errors.length > 0 && (
                 <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-danger">
                   {result.errors.map((e, idx) => (

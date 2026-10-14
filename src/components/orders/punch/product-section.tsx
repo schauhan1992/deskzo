@@ -7,6 +7,8 @@ import { formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { ItemCombobox, type ItemComboOption } from "@/components/items/item-combobox";
+import { useClock } from "@/components/time/clock-provider";
+import { TERM_CHOICES, termEndFor, termMonthsOf } from "@/lib/subscriptions/renewal-order";
 import { FieldError, Section } from "./parts";
 import { usePriceFigures } from "./use-figures";
 import { invalidProps, type PunchErrors, type PunchForm } from "./types";
@@ -41,9 +43,23 @@ export function ProductSection({
   onItemChange: (item: ItemComboOption | null) => void;
   onTypeChosen: () => void;
 }) {
-  const { control, register } = form;
+  const { control, register, setValue } = form;
   const figures = usePriceFigures(control, selectedItem);
   const businessType = useWatch({ control, name: "businessType" });
+  const clock = useClock();
+  const startDate = useWatch({ control, name: "startDate" });
+  const endDate = useWatch({ control, name: "endDate" });
+  // The term is the deal's, not the product's: picked here, kept as the start and expiry dates.
+  const termMonths = termMonthsOf(startDate || null, endDate || null);
+  const termChoice = TERM_CHOICES.some((t) => t.months === termMonths) && endDate === termEndFor(String(startDate), termMonths ?? 0) ? String(termMonths) : "";
+
+  function pickTerm(value: string) {
+    const months = Number(value);
+    if (!months) return;
+    const start = startDate ? String(startDate) : clock.today();
+    if (!startDate) setValue("startDate", start, { shouldDirty: true });
+    setValue("endDate", termEndFor(start, months), { shouldDirty: true, shouldValidate: true });
+  }
   const isSubscription = selectedItem?.type === "SUBSCRIPTION";
   const showDetected = detectedType !== null && businessType === detectedType;
   // The schema's own words for these are about number types; these say what to type instead.
@@ -128,6 +144,18 @@ export function ProductSection({
           <div className="space-y-1.5">
             <Label htmlFor="startDate">Start date</Label>
             <Input id="startDate" type="date" {...register("startDate")} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="term">Term</Label>
+            <Select id="term" value={termChoice} onChange={(e) => pickTerm(e.target.value)} aria-describedby="term-help">
+              <option value="">{endDate ? "Custom — as the dates say" : "Pick a term…"}</option>
+              {TERM_CHOICES.map((t) => (
+                <option key={t.months} value={String(t.months)}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+            <p id="term-help" className="text-xs text-subtle">Fills the expiry from the start. Renewal is for the same term.</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="endDate">Expiry date</Label>

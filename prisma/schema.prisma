@@ -205,10 +205,10 @@ enum ItemType {
   SERVICE
   SUBSCRIPTION
   /**
-   * A licence bought once and owned outright — no expiry and no renewal, unlike SUBSCRIPTION.
-   * Deliberately its own type rather than a flag on SUBSCRIPTION: everything that tracks expiry
-   * (the Renewals module, the renewal badges, the start/end dates on an order) keys off
-   * `type === "SUBSCRIPTION"`, so a perpetual licence correctly stays out of all of it.
+   * Retired: a perpetual licence is a SERVICE in the "Perpetual licence" category now — it never
+   * behaved differently from one. Migration 20261101100000_item_categories moved every row; the value
+   * stays only because Postgres can't drop an enum value without rebuilding the type, and nothing
+   * writes it.
    */
   PERPETUAL
 }
@@ -2572,6 +2572,24 @@ model RoleAccessLevel {
 }
 
 /**
+ * The workspace's list of item categories — Laptops, Software licences, AMC, Perpetual licence — kept
+ * on Items › Categories and picked on the item form, so one thing isn't filed three ways.
+ *
+ * Linked to items by name (`Item.category` holds the name, as the list spells it) rather than by a
+ * key: the column was already there and read by the reports, the export and the import, and a rename
+ * here rewrites it on every item. Names are unique ignoring case and spacing — the actions' rule, as
+ * for brands.
+ */
+model ItemCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("item_categories")
+}
+
+/**
  * Who makes the product — Microsoft, Adobe, Autodesk, Dell.
  */
 model Brand {
@@ -2615,6 +2633,7 @@ model Item {
   name            String
   sku             String         @unique
   type            ItemType
+  /// One of the workspace's item categories (`ItemCategory`), by name.
   category        String?
   /**
    * HSN (goods) or SAC (services) code — mandatory on a GST invoice line.

@@ -1,20 +1,37 @@
 import { z } from "zod";
 import { HSN_MESSAGE, HSN_PATTERN, normaliseHsn } from "@/lib/items/catalogue-import";
 
-export const itemTypeValues = ["GOOD", "SERVICE", "SUBSCRIPTION", "PERPETUAL"] as const;
+/**
+ * What an item can be made as: goods, a service, or a service managed as a subscription. A perpetual
+ * licence was a fourth type; it is a service in the "Perpetual licence" category now (it never behaved
+ * differently), and an old value of it is read as SERVICE — see `PERPETUAL_CATEGORY`.
+ */
+export const itemTypeValues = ["GOOD", "SERVICE", "SUBSCRIPTION"] as const;
 
-export const itemTypeLabels: Record<(typeof itemTypeValues)[number], string> = {
+/** Labels for every type a stored item may have, the retired one included. */
+export const itemTypeLabels: Record<(typeof itemTypeValues)[number] | "PERPETUAL", string> = {
   GOOD: "Good",
   SERVICE: "Service",
   SUBSCRIPTION: "Subscription",
   PERPETUAL: "Perpetual licence",
 };
 
-/** Only a subscription expires and needs renewing — a perpetual licence is owned outright. */
-export function itemTypeRenews(type: (typeof itemTypeValues)[number]) {
+/** The category a perpetual licence goes in, now that it isn't a type. Every workspace starts with it. */
+export const PERPETUAL_CATEGORY = "Perpetual licence";
+
+/** A type as sent: the retired PERPETUAL is a service now; anything else as it is. */
+const currentType = (v: unknown) => (v === "PERPETUAL" ? "SERVICE" : v);
+
+/** Only a subscription expires and needs renewing — anything else is sold once. */
+export function itemTypeRenews(type: string) {
   return type === "SUBSCRIPTION";
 }
 
+/**
+ * How long a subscription runs is its order's (start and expiry dates, picked as a term on the order
+ * form), not its product's: the same licence is sold monthly, yearly or for three years. Items no
+ * longer carry a billing cycle; their old column is left unread.
+ */
 export const billingCycleValues = ["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"] as const;
 
 /** How revenue from an item is recognised (Revenue & Close, Ind AS 115). Blank is "automatic". */
@@ -58,14 +75,14 @@ const hsnField = z.preprocess(
 const itemDetailShape = {
   name: z.string().trim().min(2, "Item name is required"),
   sku: z.string().trim().min(1, "SKU is required"),
-  type: z.enum(itemTypeValues),
+  type: z.preprocess(currentType, z.enum(itemTypeValues)),
+  /** One of the workspace's categories, by name — the actions check it is on the list. */
   category: z.string().trim().optional().or(z.literal("")),
   hsnCode: hsnField,
   vendor: z.string().trim().optional().or(z.literal("")),
   brandId: z.string().optional().or(z.literal("")),
   productFamilyId: z.string().optional().or(z.literal("")),
   unit: z.string().trim().optional().or(z.literal("")),
-  billingCycle: z.enum(billingCycleValues).optional().or(z.literal("")),
   costPrice: optionalNonNegativeNumber(),
   sellingPrice: requiredNonNegativeNumber,
   taxRatePercent: optionalNonNegativeNumber({ max: 100 }),
@@ -104,6 +121,7 @@ export const bulkUpdateItemsSchema = z.object({
   brandId: z.string().optional().or(z.literal("")),
   productFamilyId: z.string().optional().or(z.literal("")),
   type: z.enum(itemTypeValues).optional().or(z.literal("")),
+  /** A category from the list, by name — or "clear" to take it off. */
   category: z.string().trim().optional().or(z.literal("")),
   active: z.enum(["true", "false"]).optional().or(z.literal("")),
   /** One HSN/SAC for every item picked — blank leaves each item's own. */
@@ -129,9 +147,12 @@ const csvOptionalEnumTrimUpper = (v: unknown) => {
 export const importItemRowSchema = z.object({
   name: z.string().trim().min(2, "Name is required"),
   sku: z.string().trim().min(1, "SKU is required"),
-  type: z.preprocess(csvEnumTrimUpper, z.enum(itemTypeValues, {
-    message: "Type must be GOOD, SERVICE, SUBSCRIPTION, or PERPETUAL",
+  // PERPETUAL is still read, from files made before it was retired: the action makes the row a service
+  // in the "Perpetual licence" category.
+  type: z.preprocess(csvEnumTrimUpper, z.enum([...itemTypeValues, "PERPETUAL"], {
+    message: "Type must be GOOD, SERVICE or SUBSCRIPTION",
   })),
+  /** Matched by name against the workspace's categories, case and spacing ignored. Blank clears it. */
   category: z.string().trim().optional().or(z.literal("")),
   /** Matched by name, case and spacing ignored — see `nameKey`. Blank clears it. */
   brand: z.string().trim().optional().or(z.literal("")),
@@ -140,7 +161,6 @@ export const importItemRowSchema = z.object({
   hsnCode: hsnField,
   vendor: z.string().trim().optional().or(z.literal("")),
   unit: z.string().trim().optional().or(z.literal("")),
-  billingCycle: z.preprocess(csvOptionalEnumTrimUpper, z.enum(billingCycleValues).optional()),
   costPrice: optionalNonNegativeNumber(),
   sellingPrice: requiredNonNegativeNumber,
   taxRatePercent: optionalNonNegativeNumber({ max: 100 }),

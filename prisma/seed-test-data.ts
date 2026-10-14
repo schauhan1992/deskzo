@@ -194,16 +194,23 @@ async function main() {
 
   let skuCounter = 1;
   const itemIds: { id: string; type: ItemType; price: number }[] = [];
+  // Item categories are a list the workspace keeps (Items › Categories); these are the ones filed under.
+  for (const name of ["Hardware", "Professional Services", "Software", "Perpetual licence"]) {
+    await db.itemCategory.upsert({ where: { name }, create: { name }, update: {} });
+  }
+  // A perpetual licence is a service in the "Perpetual licence" category, not a type of its own.
+  const typeOf = (spec: ItemSpec): ItemType => (spec.type === "PERPETUAL" ? "SERVICE" : spec.type);
   for (const { brandId, familyId, familyName } of familyIds) {
     for (const spec of ITEM_TEMPLATES[familyName] ?? []) {
       const item = await db.item.create({
         data: {
           name: spec.name,
           sku: `${TEST_SKU_PREFIX}${String(skuCounter++).padStart(4, "0")}`,
-          type: spec.type,
+          type: typeOf(spec),
           brandId,
           productFamilyId: familyId,
-          category: spec.type === "GOOD" ? "Hardware" : spec.type === "SERVICE" ? "Professional Services" : "Software",
+          category:
+            spec.type === "PERPETUAL" ? "Perpetual licence" : spec.type === "GOOD" ? "Hardware" : spec.type === "SERVICE" ? "Professional Services" : "Software",
           unit: spec.unit,
           billingCycle: spec.cycle ? (spec.cycle as "ANNUAL") : null,
           costPrice: Math.round(spec.price * 0.82),
@@ -215,7 +222,7 @@ async function main() {
           createdById: admin.id,
         },
       });
-      itemIds.push({ id: item.id, type: spec.type, price: spec.price });
+      itemIds.push({ id: item.id, type: typeOf(spec), price: spec.price });
     }
   }
   for (const spec of SERVICE_ITEMS) {
