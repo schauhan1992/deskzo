@@ -51,7 +51,6 @@ export type SupportMailSetup = {
   lastReceivedAt: string | null;
   /** Gmail's latest "confirm forwarding" email, so setting up forwarding can be finished from here. */
   gmailConfirmation: { body: string; receivedAt: string } | null;
-};
   /** Where replies go out from (src/lib/support-mail/reply-from.ts), and the address the company's server sends as. */
   replyFrom: ReplyFrom;
   companyFrom: string | null;
@@ -61,6 +60,7 @@ export type SupportMailSetup = {
   companyForwards: boolean;
   /** What Deskzo's mail shows the customer: its From, and a Reply-To when that isn't the helpdesk address. Null when unknown. */
   deskzoFrom: { from: string; replyTo: string | null } | null;
+};
 
 export async function getSupportMailSetup(): Promise<SupportMailSetup | null> {
   const user = await requireModuleUser("helpdesk");
@@ -75,26 +75,26 @@ export async function getSupportMailSetup(): Promise<SupportMailSetup | null> {
       orderBy: { createdAt: "desc" },
       select: { body: true, createdAt: true },
     }),
-  ]);
     supportReplySettings(),
     emailRouteFor("TRANSACTIONAL"),
     // The platform's mail settings live in the control plane; a page that can't read them says less, not nothing.
     platformFromAddress("SUPPORT").catch(() => null),
     helpdeskFromOwnAddress(),
-  return {
+  ]);
   const deskzo = address ? deskzoAddressing(fromOwn, address) : null;
+  return {
     address,
     acknowledge: settings?.acknowledge ?? true,
     defaultAssigneeUserId: settings?.defaultAssigneeUserId ?? null,
     agents,
     lastReceivedAt: last?.createdAt.toISOString() ?? null,
     gmailConfirmation: gmail ? { body: gmail.body.slice(0, 4000), receivedAt: gmail.createdAt.toISOString() } : null,
-  };
     replyFrom: reply.replyFrom,
     companyFrom: reply.companyFrom,
     companyServer,
     companyForwards: reply.companyFrom ? await forwardsHere(reply.companyFrom) : false,
     deskzoFrom: deskzo && (deskzo.from ?? accountFrom) ? { from: (deskzo.from ?? accountFrom)!, replyTo: deskzo.replyTo } : null,
+  };
 }
 
 export async function saveSupportMailSettings(input: {
@@ -110,11 +110,11 @@ export async function saveSupportMailSettings(input: {
   if (assignee && !(await db.user.findFirst({ where: { id: assignee, ...SUPPORT_TEAM }, select: { id: true } }))) {
     return { ok: false, error: "A new ticket can only go to somebody in a support team." };
   }
-  const data = { acknowledge: input?.acknowledge !== false, defaultAssigneeUserId: assignee };
   const route = input?.replyFrom === undefined ? null : isReplyFrom(input.replyFrom) ? input.replyFrom : "invalid";
   if (route === "invalid") return { ok: false, error: "Choose where replies go out from." };
   const companyFrom = checkCompanyFrom(input?.companyFrom, inboundDomain());
   if (!companyFrom.ok) return { ok: false, error: companyFrom.error };
+  const data = { acknowledge: input?.acknowledge !== false, defaultAssigneeUserId: assignee };
   await db.supportMailSettings.upsert({ where: { id: "global" }, create: { id: "global", ...data }, update: data });
   if (route) {
     try {
