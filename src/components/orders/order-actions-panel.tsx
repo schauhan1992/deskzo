@@ -326,6 +326,8 @@ export function OrderActionsPanel({
               value={vendorId}
               onSelect={(vendor) => setVendorId(vendor?.id ?? "")}
               placeholder="Type to search vendors…"
+              // Held while saving: a change typed now would be neither in this save nor kept after it.
+              disabled={isPending}
             />
           </div>
           {/* One column in a narrow panel, two from 24rem. `min-w-0` lets a field shrink to its track —
@@ -339,11 +341,12 @@ export function OrderActionsPanel({
                 step="0.01"
                 value={purchasePrice}
                 onChange={(e) => setPurchasePrice(e.target.value)}
+                disabled={isPending}
               />
             </div>
             <div className="min-w-0 space-y-1">
               <Label htmlFor="order-our-po" className="text-xs">Our PO to vendor</Label>
-              <Input id="order-our-po" value={ourPoNumber} onChange={(e) => setOurPoNumber(e.target.value)} />
+              <Input id="order-our-po" value={ourPoNumber} onChange={(e) => setOurPoNumber(e.target.value)} disabled={isPending} />
             </div>
           </div>
           {saving !== null && (
@@ -373,6 +376,7 @@ export function OrderActionsPanel({
                 placeholder={`Why it costs more (at least ${MIN_INCREASE_REASON} characters)`}
                 value={increaseReason}
                 onChange={(e) => setIncreaseReason(e.target.value)}
+                disabled={isPending}
               />
             </div>
           )}
