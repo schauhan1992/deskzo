@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { TradeDocumentStatus } from "@prisma/client";
+import { documentPath } from "@/lib/trade-documents";
 import {
   acceptPriceIncrease,
   holdOrder,
@@ -302,12 +305,56 @@ export function OrderQuoteEditor({
   );
 }
 
-export function VendorPoSettle({ orderId }: { orderId: string }) {
+/**
+ * The purchase orders raised for the order (src/lib/orders/vendor-po.ts): cancelled with it, or left open
+ * because the vendor had billed us or another order needs it. Named, so the purchaser knows which
+ * number to quote to the vendor.
+ */
+export type SettlePurchaseOrder = { id: string; docNumber: string; status: TradeDocumentStatus };
+
+export function VendorPoSettle({
+  orderId,
+  purchaseOrders = [],
+  canOpen = false,
+}: {
+  orderId: string;
+  purchaseOrders?: SettlePurchaseOrder[];
+  /** May open documents — otherwise the numbers are named, not linked. */
+  canOpen?: boolean;
+}) {
   const { isPending, error, run } = useAction();
+  const number = (po: SettlePurchaseOrder) =>
+    canOpen ? (
+      <Link href={documentPath(po.id)} className="font-mono text-brand hover:underline">
+        {po.docNumber}
+      </Link>
+    ) : (
+      <span className="font-mono text-text">{po.docNumber}</span>
+    );
+  const cancelled = purchaseOrders.filter((po) => po.status === "CANCELLED");
+  const open = purchaseOrders.filter((po) => po.status !== "CANCELLED" && po.status !== "REJECTED" && po.status !== "EXPIRED");
   return (
     <div className="space-y-2 rounded-md border border-danger bg-danger-bg p-3">
       <p className="text-sm font-medium text-text">Vendor PO to cancel</p>
       <p className="text-xs text-muted">This order was cancelled after purchase placed it. Say what became of our PO with the vendor.</p>
+      {cancelled.length > 0 && (
+        <p className="text-xs text-muted">
+          {cancelled.length === 1 ? "Purchase order " : "Purchase orders "}
+          {cancelled.map((po, i) => (
+            <span key={po.id}>
+              {i > 0 ? ", " : ""}
+              {number(po)}
+            </span>
+          ))}{" "}
+          {cancelled.length === 1 ? "was" : "were"} cancelled with the order — cancel {cancelled.length === 1 ? "it" : "them"} with the vendor too.
+        </p>
+      )}
+      {open.map((po) => (
+        <p key={po.id} className="text-xs text-warning">
+          {number(po)} is still open — the vendor billed us against it, or it buys for another order. Settle it with them, with a vendor credit note
+          if they billed.
+        </p>
+      ))}
       {error && <p className="text-sm text-danger">{error}</p>}
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" disabled={isPending} onClick={() => run(() => settleVendorPo(orderId, "CANCELLED"))}>

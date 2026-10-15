@@ -41,7 +41,7 @@ import { orderBilling, ordersOnSamePo } from "@/lib/orders/billing";
 import { moduleAccessFor } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recurringBillingFor } from "@/actions/recurring-billing";
-import { livePurchaseOrders } from "@/lib/orders/vendor-po";
+import { livePurchaseOrders, purchaseOrdersOf } from "@/lib/orders/vendor-po";
 import type { OrderVendorPo } from "@/components/orders/order-actions-panel";
 import { orderSteps, stepHistory, stepsOfOrders } from "@/lib/pipeline/order-steps-server";
 import { stepStatusLabel, stepsOf, takesSteps } from "@/lib/pipeline/order-steps";
@@ -756,7 +756,9 @@ export async function OrderDetail({
                   canDecide={speaksForSales && order.priceReviewRequestedBy?.id !== userId}
                 />
               )}
-              {order.vendorPoCancel === "PENDING" && canProcess && <VendorPoSettle orderId={order.id} />}
+              {order.vendorPoCancel === "PENDING" && canProcess && (
+                <VendorPoSettle orderId={order.id} purchaseOrders={purchaseDocsOpen ? await purchaseOrdersOf(order.id) : []} canOpen={canSeeDocs} />
+              )}
               <OrderActionsPanel
                 order={{
                   id: order.id,

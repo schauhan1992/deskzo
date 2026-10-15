@@ -1,4 +1,4 @@
-import type { TradeDocumentStatus } from "@prisma/client";
+import type { Prisma, TradeDocumentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { formatOrderId } from "@/lib/order-id";
 import { partyDetails, type DocumentAddress } from "@/lib/proposals/party";
@@ -7,6 +7,8 @@ import { isVendorRelationshipType } from "@/lib/validation/company";
 import { createDraftDocument, resolveDocumentBranch } from "@/lib/documents/create-draft";
 import { branchIdentity } from "@/lib/branches/identity";
 import { workspaceClock } from "@/lib/time/workspace";
+import { reverseDocumentPosting } from "@/lib/ledger/journal";
+import { CANCEL_REASON_MAX } from "@/lib/documents/cancel-reason";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -227,4 +229,97 @@ export async function syncOrdersWithPurchaseOrder(documentId: string): Promise<s
     console.error("[orders] couldn't bring the order's PO number in step with its purchase order", err);
     return [];
   }
+}
+
+/** Whether any purchase order for this order has gone to the vendor — issued, not a draft, not cancelled. */
+export async function hasIssuedPurchaseOrder(orderId: string): Promise<boolean> {
+  const count = await db.tradeDocumentLine.count({
+    where: { companyProductId: orderId, document: { docType: "PURCHASE_ORDER", status: { notIn: ["DRAFT", ...DEAD_PO_STATUSES] } } },
+  });
+  return count > 0;
+}
+
+export type PoCancelledWithOrder = { id: string; docNumber: string; wasIssued: boolean; createdById: string | null };
+/** Left open: the vendor has billed us against it, or it also buys for another order still live. */
+export type PoKeptOnCancel = { id: string; docNumber: string; why: "BILLED" | "OTHER_ORDERS"; createdById: string | null };
+
+/**
+ * The customer cancelled the order, so the purchase orders raised for it are cancelled with it (owner,
+ * 15 Oct 2026) — a draft as much as an issued one, each saying in its cancel reason which order and
+ * why, so the PO itself tells anybody who opens it. Two stay open, for purchase to settle by hand: one
+ * the vendor has already billed us against (a bill was raised from it — that is a return, not a
+ * cancellation), and one that also buys for another order still live.
+ *
+ * Run inside the order's own cancellation, after the order is marked cancelled. The order keeps its
+ * "Our PO to vendor": it is the number purchase quotes when cancelling with the vendor.
+ */
+export async function cancelPurchaseOrdersWithOrder(
+  tx: Prisma.TransactionClient,
+  input: { orderId: string; orderLabel: string; reason: string; userId: string; at: Date },
+): Promise<{ cancelled: PoCancelledWithOrder[]; kept: PoKeptOnCancel[] }> {
+  const lines = await tx.tradeDocumentLine.findMany({
+    where: { companyProductId: input.orderId, document: { docType: "PURCHASE_ORDER", status: { notIn: [...DEAD_PO_STATUSES] } } },
+    select: {
+      document: {
+        select: {
+          id: true,
+          docNumber: true,
+          status: true,
+          createdById: true,
+          conversions: { select: { status: true } },
+          lines: { select: { companyProductId: true, companyProduct: { select: { orderStatus: true } } } },
+        },
+      },
+    },
+  });
+  const documents = [...new Map(lines.map((l) => [l.document.id, l.document])).values()];
+  const reason = `Customer order ${input.orderLabel} was cancelled${input.reason ? `: ${input.reason}` : "."}`.slice(0, CANCEL_REASON_MAX);
+  const cancelled: PoCancelledWithOrder[] = [];
+  const kept: PoKeptOnCancel[] = [];
+  for (const po of documents) {
+    const billed = po.conversions.some((c) => !DEAD_PO_STATUSES.includes(c.status));
+    const otherLive = po.lines.some(
+      (l) => l.companyProductId && l.companyProductId !== input.orderId && l.companyProduct && !["CANCELLED", "REJECTED"].includes(l.companyProduct.orderStatus),
+    );
+    if (billed || otherLive) {
+      kept.push({ id: po.id, docNumber: po.docNumber, why: billed ? "BILLED" : "OTHER_ORDERS", createdById: po.createdById });
+      continue;
+    }
+    await tx.tradeDocument.update({
+      where: { id: po.id },
+      data: { status: "CANCELLED", cancelReason: reason, cancelledAt: input.at, cancelledById: input.userId },
+      select: { id: true },
+    });
+    // A PO posts nothing; this is for the day one does.
+    await reverseDocumentPosting(tx, po.id, input.userId);
+    cancelled.push({ id: po.id, docNumber: po.docNumber, wasIssued: po.status !== "DRAFT", createdById: po.createdById });
+  }
+  return { cancelled, kept };
+}
+
+/** What became of an order's purchase orders when it was cancelled, in a sentence for the people told. */
+export function purchaseOrdersOnCancelNote(outcome: { cancelled: { docNumber: string }[]; kept: PoKeptOnCancel[] }): string {
+  const parts: string[] = [];
+  if (outcome.cancelled.length) {
+    const numbers = outcome.cancelled.map((p) => p.docNumber).join(", ");
+    parts.push(`${outcome.cancelled.length === 1 ? "Purchase order" : "Purchase orders"} ${numbers} ${outcome.cancelled.length === 1 ? "was" : "were"} cancelled with it.`);
+  }
+  for (const k of outcome.kept) {
+    parts.push(
+      k.why === "BILLED"
+        ? `${k.docNumber} stays open — the vendor has billed us against it, so settle it with them (a vendor credit note).`
+        : `${k.docNumber} stays open — it also buys for another order.`,
+    );
+  }
+  return parts.join(" ");
+}
+
+/** The purchase orders raised for an order, newest first, whatever became of them — for the order page. */
+export async function purchaseOrdersOf(orderId: string): Promise<{ id: string; docNumber: string; status: TradeDocumentStatus }[]> {
+  const lines = await db.tradeDocumentLine.findMany({
+    where: { companyProductId: orderId, document: { docType: "PURCHASE_ORDER" } },
+    select: { document: { select: { id: true, docNumber: true, status: true, createdAt: true } } },
+    orderBy: { document: { createdAt: "desc" } },
+  });
+  return [...new Map(lines.map((l) => [l.document.id, { id: l.document.id, docNumber: l.document.docNumber, status: l.document.status }])).values()];
 }

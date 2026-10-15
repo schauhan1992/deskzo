@@ -489,6 +489,14 @@ export function OrderActionsPanel({
               &ldquo;Vendor PO to cancel&rdquo; until they confirm.
             </li>
           )}
+          {vendorPo?.live && (
+            <li>
+              Its purchase order {vendorPo.live.docNumber} is cancelled with it, saying it was this order.
+              {vendorPo.live.status !== "DRAFT" && order.orderStatus !== "PROCESSING"
+                ? " It went to the vendor, so the order shows \u201cVendor PO to cancel\u201d until purchase confirms they cancelled it too."
+                : ""}
+            </li>
+          )}
           {purchase.pendingIncrease && <li>The higher price waiting for sales is dropped.</li>}
           {purchase.paid > 0 && (
             <li>

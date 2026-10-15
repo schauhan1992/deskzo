@@ -247,7 +247,84 @@ async function main() {
     await vpo.syncOrdersWithPurchaseOrder(poId);
     ok("a cancelled PO leaves a number someone typed alone", (await db.companyProduct.findUnique({ where: { id: good.id }, select: { ourPoNumber: true } }))?.ourPoNumber === "TYPED/1");
 
+    section("Cancelling the customer's order");
+
+    const { cancelOrder } = require("../src/actions/order") as typeof import("../src/actions/order");
+    const orderLabel = async (id: string) => `ORD-${String((await db.companyProduct.findUniqueOrThrow({ where: { id }, select: { orderSeq: true } })).orderSeq).padStart(6, "0")}`;
+    const poFor = async (orderId: string, issue: boolean) => {
+      actorId = purchaser.id;
+      const made = await createVendorPoForOrder(orderId);
+      if (!made.ok) throw new Error(`no PO for the fixture: ${made.error}`);
+      if (issue) {
+        const done = await documents.issueTradeDocument({ id: made.data.id, generateEInvoice: false });
+        if (!done.ok) throw new Error(`the fixture's PO didn't issue: ${done.error}`);
+      }
+      return made.data.id;
+    };
+    const placed = await order({});
+    await db.companyProduct.update({ where: { id: placed.id }, data: { purchasedByUserId: purchaser.id } });
+    const placedPo = await poFor(placed.id, true);
+    const drafted = await order({ status: "APPROVED" });
+    const draftedPo = await poFor(drafted.id, false);
+    const billed = await order({});
+    const billedPo = await poFor(billed.id, true);
+    actorId = accounts.id;
+    const bill = await documents.convertTradeDocument({ id: billedPo, target: "BILL" });
+    ok("(the vendor billed us against one PO)", bill.ok, bill.ok ? "" : bill.error);
+
+    actorId = seller.id;
+    const placedNumber = (await db.tradeDocument.findUniqueOrThrow({ where: { id: placedPo }, select: { docNumber: true } })).docNumber;
+    let cancelled = await cancelOrder(placed.id, "Customer went with another vendor");
+    ok("the salesperson cancels an order purchase placed with a PO", cancelled.ok, cancelled.ok ? "" : cancelled.error);
+    let doc = await db.tradeDocument.findUniqueOrThrow({ where: { id: placedPo }, select: { status: true, cancelReason: true, cancelledById: true } });
+    ok("  its PO is cancelled with it", doc.status === "CANCELLED" && doc.cancelledById === seller.id);
+    ok("  saying which customer order, and why — what anybody opening the PO reads", doc.cancelReason === `Customer order ${await orderLabel(placed.id)} was cancelled: Customer went with another vendor`, doc.cancelReason);
+    let after = await db.companyProduct.findUniqueOrThrow({ where: { id: placed.id }, select: { vendorPoCancel: true, ourPoNumber: true } });
+    ok("  the order shows \"Vendor PO to cancel\" — the vendor has it", after.vendorPoCancel === "PENDING");
+    ok("  and keeps the PO's number, to quote to the vendor", after.ourPoNumber === placedNumber);
+    const told = await db.notification.findFirst({ where: { userId: purchaser.id, title: { contains: "cancel our vendor PO" }, message: { contains: placedNumber } }, select: { message: true } });
+    ok("  the purchaser is told, with the PO's number, to cancel it with the vendor", !!told && told.message?.includes("Cancel it with the vendor") === true, told?.message);
+    ok("  and the PO's cancellation is in the audit log", (await db.auditLog.count({ where: { entityId: placedPo, entityLabel: { contains: "cancelled with customer order" } } })) === 1);
+
+    cancelled = await cancelOrder(drafted.id, "Duplicate order");
+    ok("an order whose PO was still a draft", cancelled.ok, cancelled.ok ? "" : cancelled.error);
+    doc = await db.tradeDocument.findUniqueOrThrow({ where: { id: draftedPo }, select: { status: true, cancelReason: true, cancelledById: true } });
+    ok("  takes the draft with it", doc.status === "CANCELLED" && doc.cancelReason?.startsWith("Customer order ") === true);
+    after = await db.companyProduct.findUniqueOrThrow({ where: { id: drafted.id }, select: { vendorPoCancel: true, ourPoNumber: true } });
+    ok("  with nothing to cancel with the vendor — it never went to them", after.vendorPoCancel === null);
+
+    const billedNumber = (await db.tradeDocument.findUniqueOrThrow({ where: { id: billedPo }, select: { docNumber: true } })).docNumber;
+    cancelled = await cancelOrder(billed.id, "Customer no longer needs it");
+    ok("an order whose PO the vendor has billed", cancelled.ok, cancelled.ok ? "" : cancelled.error);
+    doc = await db.tradeDocument.findUniqueOrThrow({ where: { id: billedPo }, select: { status: true, cancelReason: true, cancelledById: true } });
+    ok("  leaves that PO open — it's a return now, not a cancellation", doc.status === "ISSUED");
+    after = await db.companyProduct.findUniqueOrThrow({ where: { id: billed.id }, select: { vendorPoCancel: true, ourPoNumber: true } });
+    ok("  and asks purchase to settle it", after.vendorPoCancel === "PENDING");
+    const billedNote = await db.notification.findFirst({ where: { userId: purchaser.id, message: { contains: billedNumber } }, select: { message: true } });
+    ok("  telling them it stays, and why", billedNote?.message?.includes("vendor credit note") === true, billedNote?.message);
+    const listed = await vpo.purchaseOrdersOf(billed.id);
+    ok("the order page finds its POs, whatever became of them", listed.length === 1 && listed[0]!.id === billedPo && listed[0]!.status === "ISSUED");
+    ok(
+      "the note names both kinds",
+      vpo.purchaseOrdersOnCancelNote({ cancelled: [], kept: [{ id: "x", docNumber: "PO/9", why: "OTHER_ORDERS", createdById: null }] }).includes("another order") &&
+        vpo.purchaseOrdersOnCancelNote({ cancelled: [{ docNumber: "PO/1" }, { docNumber: "PO/2" }], kept: [] }).startsWith("Purchase orders PO/1, PO/2 were cancelled"),
+    );
+
     section("The buttons");
+
+    const { VendorPoSettle } = await import("../src/components/orders/order-handoff-controls");
+    const settle = renderToStaticMarkup(
+      createElement(VendorPoSettle, {
+        orderId: placed.id,
+        canOpen: true,
+        purchaseOrders: [
+          { id: placedPo, docNumber: placedNumber, status: "CANCELLED" as const },
+          { id: billedPo, docNumber: billedNumber, status: "ISSUED" as const },
+        ],
+      }),
+    );
+    ok("\"Vendor PO to cancel\" names the PO cancelled with the order, linked", settle.includes(`/documents/${placedPo}`) && /was cancelled with the order/.test(settle));
+    ok("  and one still open, and why", settle.includes(billedNumber) && /still open/.test(settle));
 
     const { DocumentActions } = await import("../src/components/documents/document-actions");
     const bar = (canConvert: boolean) =>

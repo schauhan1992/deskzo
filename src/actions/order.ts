@@ -43,6 +43,8 @@ import type { ActionResult } from "@/actions/company";
 import { checkTerms, recordDecision, MIN_REASON } from "@/lib/credit/guard";
 import type { CreditAssessment } from "@/lib/credit/engine";
 import { orderCreditPosition } from "@/lib/credit/order";
+import { documentListPath, documentPath } from "@/lib/trade-documents";
+import { cancelPurchaseOrdersWithOrder, hasIssuedPurchaseOrder, purchaseOrdersOnCancelNote, type PoCancelledWithOrder, type PoKeptOnCancel } from "@/lib/orders/vendor-po";
 
 /**
  * A commission's payee must be a real commission party, and the account it's paid into must belong
@@ -1119,8 +1121,16 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
     };
   }
 
+  /**
+   * A PO already sent to the vendor needs cancelling with them, as much as an order purchase placed by
+   * phone: either way the order shows "Vendor PO to cancel" until the purchaser says what became of it.
+   */
+  const issuedPo = await hasIssuedPurchaseOrder(orderId);
+  const vendorPoToCancel = processing || issuedPo;
+
   const now = new Date();
   let moved: number;
+  let purchaseOrders: { cancelled: PoCancelledWithOrder[]; kept: PoKeptOnCancel[] } = { cancelled: [], kept: [] };
   try {
     moved = await db.$transaction(async (tx) => {
       const changed = await tx.companyProduct.updateMany({
@@ -1131,7 +1141,7 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
           cancelledAt: now,
           cancelledById: user.id,
           cancelReason: why || null,
-          vendorPoCancel: processing ? "PENDING" : null,
+          vendorPoCancel: vendorPoToCancel ? "PENDING" : null,
           // The scheduled go-ahead is dropped: it never went to purchase, and now never will.
           ...(order.purchaseRelease === "SCHEDULED" ? { purchaseRelease: "HELD" as const, releaseOn: null } : {}),
           ...NO_PENDING_INCREASE,
@@ -1141,6 +1151,9 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
       const allocations = await tx.paymentAllocation.findMany({ where: { companyProductId: orderId }, select: { id: true, amount: true } });
       if (allocations.length > 0) await tx.paymentAllocation.deleteMany({ where: { id: { in: allocations.map((a) => a.id) } } });
       await tx.purchaseSaving.updateMany({ where: { companyProductId: orderId, cancelledAt: null }, data: { cancelledAt: now } });
+      // Its purchase orders go with it, saying why (src/lib/orders/vendor-po.ts) — the customer's order is
+      // gone, so nothing should still be bought for it.
+      purchaseOrders = await cancelPurchaseOrdersWithOrder(tx, { orderId, orderLabel: formatOrderId(order.orderSeq), reason: why, userId: user.id, at: now });
       return Math.round(allocations.reduce((t, a) => t + Number(a.amount), 0) * 100) / 100;
     });
   } catch (err) {
@@ -1157,15 +1170,45 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
     entityLabel: `${label} cancelled${why ? `: ${why}` : ""}${moved > 0 ? ` · ${rupees(moved)} moved on account` : ""}`,
   });
 
+  for (const po of purchaseOrders.cancelled) {
+    revalidatePath(documentPath(po.id));
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "TradeDocument", entityId: po.id, entityLabel: `${po.docNumber} → cancelled with customer order ${label}` });
+  }
+  if (purchaseOrders.cancelled.length > 0) revalidatePath(documentListPath.PURCHASE_ORDER);
   const said = why ? `: ${why}` : ".";
-  if (processing && order.purchasedByUserId && order.purchasedByUserId !== user.id) {
-    await notifyUser({
-      userId: order.purchasedByUserId,
-      type: "ORDER_STATUS_CHANGED",
-      title: `${label} was cancelled — cancel our vendor PO`,
-      message: `${order.company.name}${said} Mark on the order what became of the PO.`,
-      link: orderPath(order.orderSeq),
-    });
+  const poNote = purchaseOrdersOnCancelNote(purchaseOrders);
+  /**
+   * Who placed it with the vendor: the purchaser who processed it, and whoever raised its purchase orders.
+   * Told what became of the POs, and — when one had gone to the vendor — to cancel it with them.
+   */
+  const placedBy = new Set(
+    [processing ? order.purchasedByUserId : null, ...purchaseOrders.cancelled.map((p) => p.createdById), ...purchaseOrders.kept.map((p) => p.createdById)].filter(
+      (id): id is string => !!id && id !== user.id,
+    ),
+  );
+  if (placedBy.size > 0) {
+    await Promise.all(
+      [...placedBy].map((userId) =>
+        notifyUser({
+          userId,
+          type: "ORDER_STATUS_CHANGED",
+          title: vendorPoToCancel ? `${label} was cancelled — cancel our vendor PO` : `${label} was cancelled`,
+          message: [
+            `${order.company.name}${said}`,
+            poNote,
+            // A PO left open is settled with the vendor rather than cancelled — the note above says how.
+            vendorPoToCancel
+              ? purchaseOrders.kept.length > 0
+                ? "Then mark on the order what became of it."
+                : "Cancel it with the vendor, then mark on the order what became of the PO."
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+          link: orderPath(order.orderSeq),
+        }),
+      ),
+    );
   } else if (withPurchase && order.orderStatus === "APPROVED") {
     const holders = await peopleHolding("orders.process", [user.id]);
     await Promise.all(
