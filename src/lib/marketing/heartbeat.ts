@@ -11,6 +11,7 @@ import { runRecurringBilling } from "@/lib/recurring-billing/run";
 import { calendarChores } from "@/lib/calendar/chores";
 import { signatureChores } from "@/lib/signatures/sync";
 import { purgeExpiredChat } from "@/lib/chat/retention";
+import { purgeOldDeskzoSends } from "@/lib/documents/deskzo-mail-allowance";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -128,6 +129,8 @@ export async function runHeartbeat() {
     console.error("chat retention failed", err);
     return null;
   });
+  // The count of documents sent through Deskzo's mail only matters for today; older rows go.
+  await purgeOldDeskzoSends().catch((err) => console.error("deskzo send count purge failed", err));
   return {
     ...result,
     leadScoresRefreshed,

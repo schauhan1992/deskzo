@@ -12173,9 +12173,22 @@ model SignInRule {
 }
 
 /**
- * The words that go with a document when it is emailed — one per document type, with merge fields.
- * No row means the built-in wording in src/lib/documents/email-template.ts.
+ * A document emailed through Deskzo's own mail (src/lib/documents/mail-route.ts) — what Deskzo's daily
+ * limits count, per sender and for the workspace, in recipients (src/lib/documents/deskzo-mail-allowance.ts).
+ * Kept a few weeks: only today's rows decide anything.
  */
+model DeskzoDocumentMail {
+  id         String   @id @default(cuid())
+  userId     String
+  documentId String?
+  recipients Int
+  sentAt     DateTime @default(now())
+
+  @@index([sentAt])
+  @@index([userId, sentAt])
+  @@map("deskzo_document_mails")
+}
+
 /**
  * Where an emailed document goes out from (owner, 15 Oct 2026), one row (id "global"); no row is "OWN".
  *
@@ -12197,6 +12210,10 @@ model DocumentMailSettings {
   @@map("document_mail_settings")
 }
 
+/**
+ * The words that go with a document when it is emailed — one per document type, with merge fields.
+ * No row means the built-in wording in src/lib/documents/email-template.ts.
+ */
 model DocumentEmailTemplate {
   docType     TradeDocumentType @id
   subject     String

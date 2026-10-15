@@ -9,6 +9,7 @@ import { recordTest, removeConnection, saveConnection, saveRoutes } from "@/lib/
 import { controlDb } from "@/lib/platform/control-db";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
+import { saveDocumentMailLimits, type DocumentMailLimits } from "@/lib/platform/document-mail-limits";
 
 /**
  * Settings › Mail (src/lib/platform/mail): the accounts the platform's mail goes through and which
@@ -36,6 +37,17 @@ async function asStaff<T>(roles: readonly StaffRole[], work: (staff: Staff) => P
     if (refusal !== null) return { ok: false, error: refusal };
     throw err;
   }
+}
+
+/** Deskzo's daily limits on documents workspaces send through its mail (src/lib/platform/document-mail-limits.ts). Owners only. */
+export async function consoleSaveDocumentMailLimits(input: { personDaily: unknown; workspaceDaily: unknown }): Promise<ConsoleResult<DocumentMailLimits>> {
+  return asStaff(OWNERS, async (staff) => {
+    const saved = await saveDocumentMailLimits(input ?? { personDaily: null, workspaceDaily: null }, staff.id);
+    if (typeof saved === "string") throw new ConsoleRefused(saved);
+    await consoleAudit(staff, "mail.documentLimits", { personDaily: saved.personDaily, workspaceDaily: saved.workspaceDaily });
+    revalidateConsole();
+    return saved;
+  });
 }
 
 export async function consoleSaveMailConnection(input: unknown): Promise<ConsoleResult<{ id: string; created: boolean }>> {

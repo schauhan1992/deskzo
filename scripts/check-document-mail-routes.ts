@@ -257,6 +257,44 @@ async function main() {
     }
   }
 
+  section("Deskzo's daily limits");
+
+  {
+    const limits = require("../src/lib/platform/document-mail-limits") as typeof import("../src/lib/platform/document-mail-limits");
+    const allowance = require("../src/lib/documents/deskzo-mail-allowance") as typeof import("../src/lib/documents/deskzo-mail-allowance");
+    const probes = ["zzprobe-limit-a", "zzprobe-limit-b"];
+    await db.deskzoDocumentMail.deleteMany({ where: { userId: { in: probes } } });
+    try {
+      // Relative to whatever this workspace has already sent through Deskzo today.
+      const base = await allowance.deskzoAllowance(probes[0]!);
+      limits.setTestDocumentMailLimits({ personDaily: 3, workspaceDaily: base.workspace.used + 5 });
+      const fresh = await allowance.deskzoAllowance(probes[0]!);
+      ok("a person starts the day with their limit", fresh.left === 3 && fresh.person.used === 0);
+      await allowance.recordDeskzoSend(probes[0]!, null, 2);
+      const afterTwo = await allowance.deskzoAllowance(probes[0]!);
+      ok("  a document to two people counts two", afterTwo.person.used === 2 && afterTwo.left === 1);
+      ok("  one more fits", allowance.allowanceRefusal(afterTwo, 1) === null);
+      const tooMany = allowance.allowanceRefusal(afterTwo, 2);
+      ok("  two more don't — and it says it's their own limit", !!tooMany && tooMany.includes("your 3 a day"), tooMany);
+      await allowance.recordDeskzoSend(probes[1]!, null, 3);
+      const companyFull = await allowance.deskzoAllowance(probes[0]!);
+      ok("a colleague's sends count against the company's limit", companyFull.left === 0 && companyFull.workspace.used === base.workspace.used + 5);
+      const full = allowance.allowanceRefusal(companyFull, 1);
+      ok("  so nothing more today — and it says it's the company's limit", !!full && full.includes("company's") && full.includes("None are left"), full);
+      limits.setTestDocumentMailLimits({ personDaily: 0, workspaceDaily: 0 });
+      const closed = allowance.allowanceRefusal(await allowance.deskzoAllowance(probes[0]!), 1);
+      ok("0 closes Deskzo's mail to documents, pointing at setting up their own", !!closed && closed.includes("isn't sending documents"));
+      ok("the console refuses a person's limit above the workspace's", typeof (await limits.saveDocumentMailLimits({ personDaily: 50, workspaceDaily: 10 }, "check")) === "string");
+      ok("  and anything that isn't a whole number from 0 up", typeof (await limits.saveDocumentMailLimits({ personDaily: -1, workspaceDaily: 10 }, "check")) === "string" && typeof (await limits.saveDocumentMailLimits({ personDaily: 2.5, workspaceDaily: 10 }, "check")) === "string");
+      limits.setTestDocumentMailLimits(null);
+      const real = await limits.documentMailLimits();
+      ok("left alone, the limits are whole numbers within range", Number.isInteger(real.personDaily) && Number.isInteger(real.workspaceDaily) && real.workspaceDaily <= limits.DOCUMENT_MAIL_LIMIT_MAX, JSON.stringify(real));
+    } finally {
+      limits.setTestDocumentMailLimits(null);
+      await db.deskzoDocumentMail.deleteMany({ where: { userId: { in: probes } } });
+    }
+  }
+
   section("Who chooses");
 
   const before = await db.documentMailSettings.findUnique({ where: { id: "global" } });

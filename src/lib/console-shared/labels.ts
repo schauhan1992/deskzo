@@ -537,6 +537,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "mail.account.remove": "Mail account removed",
   "mail.routes": "Mail routing changed",
   "mail.test": "Test mail sent",
+  "mail.documentLimits": "Limits on documents sent for workspaces changed",
   "bulk.apply-standing": "Billing rules applied to a batch",
   "bulk.trial-extend": "Trials extended in bulk",
   "export.invoices": "Invoices exported",
@@ -918,6 +919,8 @@ export function auditSummary(action: string, detail: unknown, clock: Clock): str
       return join([text(d.name), list(d.changed)]);
     case "mail.routes":
       return Array.isArray(d.changed) ? d.changed.map(mailStreamText).join(", ") || null : null;
+    case "mail.documentLimits":
+      return typeof d.personDaily === "number" && typeof d.workspaceDaily === "number" ? `${d.personDaily} a person, ${d.workspaceDaily} a workspace, a day` : null;
     case "mail.test":
       return join([d.target === "account" ? "an account" : typeof d.target === "string" ? `${mailStreamText(d.target)} mail` : null, d.ok === true ? "arrived at the server" : d.ok === false ? "refused" : null]);
     case "tenant.trial":

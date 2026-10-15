@@ -24,6 +24,7 @@ import { RENDER_PARAM } from "@/lib/documents/render-token";
 import { PDF_MAX_BYTES, PdfError, renderPdf } from "@/lib/documents/pdf";
 import { mailboxState } from "@/lib/mail/mailbox";
 import { documentSender, documentSendMode, isDocumentSendMode, sendDocumentMail, type DocumentSendMode, type SenderChoice } from "@/lib/documents/mail-route";
+import { allowanceRefusal, deskzoAllowance, recordDeskzoSend } from "@/lib/documents/deskzo-mail-allowance";
 import { removeConnection } from "@/lib/mail/store";
 import { mailProviders } from "@/lib/workplace/settings";
 import { MAIL_NAMES, SIGN_IN_NAMES, sayEither } from "@/lib/workplace/providers";
@@ -181,6 +182,9 @@ export async function prepareDocumentEmail(documentId: string) {
     mergeValuesFor(doc, user.id),
     mailboxState(user.id),
   ]);
+  const sender = await documentSender(mailbox);
+  // Through Deskzo's mail, today's limits (src/lib/platform/document-mail-limits.ts) — for the dialog to say.
+  const deskzo = sender.choice === "DESKZO" ? await deskzoAllowance(user.id) : null;
   // Ticked for invoices first; with nobody ticked, the primary contact — whoever can receive it.
   const ticked = contacts.filter((c) => c.receivesDocuments && c.canReceive).map((c) => c.id);
   const preselected = ticked.length > 0 ? ticked : contacts.filter((c) => c.isPrimary && c.canReceive).map((c) => c.id);
@@ -200,7 +204,8 @@ export async function prepareDocumentEmail(documentId: string) {
     values,
     mailbox,
     // How it would go out (src/lib/documents/mail-route.ts): their mailbox, the company's server, or Deskzo.
-    sender: await documentSender(mailbox),
+    sender,
+    deskzo: deskzo ? { left: deskzo.left, personLimit: deskzo.person.limit, workspaceLimit: deskzo.workspace.limit } : null,
     viewingAs: !!(await viewAsContext()),
   });
 }
@@ -259,6 +264,12 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
     };
   }
 
+  // Deskzo's mail carries Deskzo's reputation: a day's sends are limited, per person and per company.
+  if (sender.choice === "DESKZO") {
+    const over = allowanceRefusal(await deskzoAllowance(user.id), recipients.length);
+    if (over) return { ok: false, error: over };
+  }
+
   // The PDF, from the document's own print page, printed as this person would see it.
   let pdf: Buffer;
   try {
@@ -310,6 +321,7 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
     })),
   });
   if (!outcome.ok) return { ok: false, error: outcome.error };
+  if (outcome.via === "DESKZO") await recordDeskzoSend(user.id, doc.id, recipients.length);
 
   await db.tradeDocument.update({ where: { id: doc.id }, data: { lastEmailedAt: now } });
   const to = recipients.map((r) => r.email!);

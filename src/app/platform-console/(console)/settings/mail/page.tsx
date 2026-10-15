@@ -9,6 +9,8 @@ import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { capsFor, hasRole } from "@/lib/console-shared/roles";
 import { consoleStaff } from "@/lib/platform/console-page";
 import { mailSetup } from "@/lib/platform/mail/store";
+import { DocumentMailLimitsPanel } from "@/components/console/settings/document-mail-limits";
+import { DOCUMENT_MAIL_LIMIT_DEFAULTS, DOCUMENT_MAIL_LIMIT_MAX, documentMailLimits } from "@/lib/platform/document-mail-limits";
 
 export const metadata: Metadata = { title: "Mail" };
 
@@ -24,6 +26,7 @@ export default async function ConsoleMailSettingsPage() {
   // Null until the release's migration has made the mail tables (src/lib/platform/mail).
   const setup = await mailSetup().catch(() => null);
   const seesLog = hasRole(staff.role, PAGE_ROLES.mail ?? []);
+  const documentLimits = await documentMailLimits();
 
   return (
     <>
@@ -46,7 +49,10 @@ export default async function ConsoleMailSettingsPage() {
         }
       />
       {setup ? (
-        <MailSettings setup={setup} canEdit={caps.owner} testTo={staff.email} />
+        <div className="space-y-6">
+          <MailSettings setup={setup} canEdit={caps.owner} testTo={staff.email} />
+          <DocumentMailLimitsPanel limits={documentLimits} defaults={DOCUMENT_MAIL_LIMIT_DEFAULTS} max={DOCUMENT_MAIL_LIMIT_MAX} canEdit={caps.owner} />
+        </div>
       ) : (
         <Banner tone="warning" title="Not ready yet">
           {"This release's database migrations haven't run here, so there are no mail settings to show. Run npm run tenants:migrate, then reload."}

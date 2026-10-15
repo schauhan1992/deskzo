@@ -146,6 +146,8 @@ const STATE: Record<string, Allowed> = {
   "src/lib/time/zone.ts:clocks": { reason: "a clock per time zone name — pure functions of the zone; no workspace data" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },
   "src/lib/platform/domains.ts:testResolver": { reason: "test override, set only by check scripts — no check asks real DNS" },
+  "src/lib/platform/document-mail-limits.ts:cached": { reason: "shared: Deskzo's two daily limits on documents sent through its mail, the same for every workspace — read every minute" },
+  "src/lib/platform/document-mail-limits.ts:testLimits": { reason: "test override, set only by check scripts" },
 };
 
 // ─── The scan ────────────────────────────────────────────────────────────────────────────────────

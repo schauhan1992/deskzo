@@ -69,6 +69,8 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
 
   // Whichever way it goes — their mailbox, the company's server or Deskzo's (src/lib/documents/mail-route.ts).
   const connected = !!prepared && prepared.sender.choice !== "CONNECT";
+  // Deskzo's mail has a daily limit, counted in recipients (src/lib/platform/document-mail-limits.ts).
+  const overDeskzoLimit = !!prepared?.deskzo && selected.length > prepared.deskzo.left;
 
   function send() {
     if (!prepared) return;
@@ -129,6 +131,13 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
                 <p className="text-muted">
                   <span className="text-text">From Deskzo&apos;s mail service</span>, on {prepared.values["company.name"] || "your company"}&apos;s behalf, in your name. Replies come to
                   you, and you get a copy. To send from your own address, an admin sets up mail under Settings → Messaging or Settings → Security.
+                  {prepared.deskzo && (
+                    <span className={`mt-1 block text-xs ${overDeskzoLimit ? "text-warning" : "text-subtle"}`}>
+                      {prepared.deskzo.left === 0
+                        ? "Today's limit for documents sent through Deskzo's mail is used up — send it tomorrow, or set up your own mail."
+                        : `You can send to ${prepared.deskzo.left} more ${prepared.deskzo.left === 1 ? "person" : "people"} through it today (${prepared.deskzo.personLimit} a day for you, ${prepared.deskzo.workspaceLimit} for your company).`}
+                    </span>
+                  )}
                 </p>
               ) : prepared.mailbox.state === "app-missing" ? (
                 <p className="flex items-start gap-2 text-muted">
@@ -234,7 +243,7 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
                 {sent ? "Close" : "Cancel"}
               </Button>
               {!sent && (
-                <Button onClick={send} disabled={sending || !connected || selected.length === 0 || prepared.viewingAs}>
+                <Button onClick={send} disabled={sending || !connected || selected.length === 0 || prepared.viewingAs || overDeskzoLimit}>
                   {sending ? (
                     <>
                       <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Making the PDF and sending…
