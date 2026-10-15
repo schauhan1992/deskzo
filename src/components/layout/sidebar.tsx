@@ -80,9 +80,9 @@ type NavIcon = typeof LayoutDashboard;
 
 /**
  * The menu's two text sizes, set here once: a main module's row (and the dashboard beside them) at
- * 16px, a page inside a module at 14px — in the full sidebar and in the rail's panels alike.
+ * 15px, a page inside a module at 14px — in the full sidebar and in the rail's panels alike.
  */
-const MODULE_TEXT = "text-base";
+const MODULE_TEXT = "text-[15px]";
 const PAGE_TEXT = "text-sm";
 /** The headings over the modules (CUSTOMERS, FINANCE…) and atop the rail's panels, at 12px. */
 const HEADING_TEXT = "text-xs";
