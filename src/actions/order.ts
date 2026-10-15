@@ -38,6 +38,7 @@ import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { inStepWhere, orderSteps } from "@/lib/pipeline/order-steps-server";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
+import { orderBilling } from "@/lib/orders/billing";
 import type { ActionResult } from "@/actions/company";
 import { checkTerms, recordDecision, MIN_REASON } from "@/lib/credit/guard";
 import type { CreditAssessment } from "@/lib/credit/engine";
@@ -1341,7 +1342,7 @@ export async function listOrdersPaged(params: OrderListParams & { page: number; 
   // counts against, and the badge. A scoped page with an unscoped total is a pager that walks off
   // the end of the list; a scoped page with an unscoped badge is a queue that never empties.
   const where = await orderListWhere(user.id, params);
-  const [rows, total, pendingApproval] = await Promise.all([
+  const [found, total, pendingApproval] = await Promise.all([
     db.companyProduct.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -1353,6 +1354,12 @@ export async function listOrdersPaged(params: OrderListParams & { page: number; 
     // current page would understate the queue accounts actually has to work through.
     db.companyProduct.count({ where: { ...where, orderStatus: "PENDING_APPROVAL" } }),
   ]);
+  // Each row's invoicing (src/lib/orders/billing.ts), for the Invoice column: the status, and the invoices.
+  const billing = await orderBilling(found.map((o) => o.id));
+  const rows = found.map((o) => {
+    const b = billing.get(o.id);
+    return { ...o, billing: b ? { status: b.status, invoices: b.invoices.map((i) => ({ documentId: i.documentId, docNumber: i.docNumber })) } : null };
+  });
   return { rows: toPlain(rows), total, pendingApproval };
 }
 

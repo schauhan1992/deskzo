@@ -7,7 +7,8 @@ import { listVendorOptions } from "@/actions/company";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { orderCreditPosition } from "@/lib/credit/order";
 import { isModuleEnabled } from "@/actions/module";
-import { currentUser } from "@/lib/session";
+import { currentUser, viewAsContext } from "@/lib/session";
+import { db } from "@/lib/db";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { OrderActionsPanel } from "@/components/orders/order-actions-panel";
@@ -35,6 +36,10 @@ import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields"
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 import { OrderProgress } from "@/components/orders/order-progress";
 import { RecurringBillingCard } from "@/components/orders/recurring-billing-card";
+import { OrderInvoicingCard, type PoSibling } from "@/components/orders/order-invoicing";
+import { orderBilling, ordersOnSamePo } from "@/lib/orders/billing";
+import { moduleAccessFor } from "@/lib/modules-access";
+import { can } from "@/lib/authz/resolve";
 import { recurringBillingFor } from "@/actions/recurring-billing";
 import { orderSteps, stepHistory, stepsOfOrders } from "@/lib/pipeline/order-steps-server";
 import { stepStatusLabel, stepsOf, takesSteps } from "@/lib/pipeline/order-steps";
@@ -89,6 +94,28 @@ export async function OrderDetail({
   if (!order) notFound();
   // A subscription's recurring billing (null for anything else, or with nothing to show this viewer).
   const recurring = await recurringBillingFor(order.id);
+
+  /**
+   * Its invoicing (src/lib/orders/billing.ts): what is billed and by which invoices, and the way to
+   * bill the rest. Tax invoices are Sales documents', so raising one asks for that module in the plan
+   * and "Raise and issue sales documents"; seeing which invoices asks for "View documents".
+   */
+  const [salesDocsOpen, canIssueDocs, canSeeDocs, poSiblingIds, viewAs] = await Promise.all([
+    moduleAccessFor(userId, "sales_documents").then((a) => a === "available"),
+    can(userId, "documents.issue"),
+    viewerHas("documents.view"),
+    ordersOnSamePo({ id: order.id, companyId: order.companyId, poNumber: order.poNumber }),
+    viewAsContext(),
+  ]);
+  const billingById = await orderBilling([order.id, ...poSiblingIds]);
+  const ownBilling = billingById.get(order.id)!;
+  const siblingRows = poSiblingIds.length
+    ? await db.companyProduct.findMany({ where: { id: { in: poSiblingIds } }, select: { id: true, orderSeq: true, item: { select: { name: true } } }, orderBy: { orderSeq: "asc" } })
+    : [];
+  const poSiblings: PoSibling[] = siblingRows.map((s) => {
+    const b = billingById.get(s.id)!;
+    return { id: s.id, orderSeq: s.orderSeq, itemName: s.item.name, status: b.status, remaining: b.remaining, ordered: b.ordered };
+  });
 
   /**
    * Where the order stands on credit, while it waits for approval — computed by the same function
@@ -313,6 +340,16 @@ export async function OrderDetail({
             currentId={stepOf.get(order.id)?.id ?? null}
             editable={stepEditable}
             history={moves.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() }))}
+          />
+
+          <OrderInvoicingCard
+            order={{ id: order.id, orderSeq: order.orderSeq, unit: order.item.unit ?? null }}
+            billing={ownBilling}
+            showDocuments={canSeeDocs}
+            canInvoice={salesDocsOpen && canIssueDocs && !viewAs}
+            closed={order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED"}
+            po={order.poNumber?.trim() || null}
+            siblings={poSiblings}
           />
 
           {recurring && <RecurringBillingCard view={recurring} />}

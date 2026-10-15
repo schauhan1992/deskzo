@@ -149,6 +149,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // The punch form's lookups — one call when the customer is chosen, one for the product (owner, 2 Oct 2026).
   "order-punch.ts": ["orders"],
   "order.ts": ["orders"],
+  "order-billing.ts": ["orders"],
   // Backend rebates on orders, their programmes and the report (owner, 1 Oct 2026).
   "rebate.ts": ["orders"],
   // Branches and GST registrations are the company itself, not a module: every document names one.

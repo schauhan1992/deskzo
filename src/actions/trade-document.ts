@@ -16,6 +16,7 @@ import { normaliseHsn } from "@/lib/items/catalogue-import";
 import { recordAudit } from "@/lib/audit";
 import { postDocumentToLedger, reverseDocumentPosting } from "@/lib/ledger/journal";
 import { toPlain } from "@/lib/serialize";
+import { orderBilling } from "@/lib/orders/billing";
 import { getOrganisation, eInvoiceConfigFor } from "@/lib/organisation";
 import { stateCodeFromGstin } from "@/lib/gst-engine";
 import { GST_NUMBERED_TYPES, gstNumberProblem, isDraftNumber } from "@/lib/document-numbering";
@@ -1155,7 +1156,12 @@ export async function listDocumentItems(search?: string) {
  * parties this person can see, like the locations beside it. Cancelled and rejected orders are left
  * out; everything else, newest term first.
  */
-export async function listPartyOrders(companyId: string) {
+/**
+ * The customer's orders for a line's "Bills order" picker, each with what it has been invoiced
+ * (src/lib/orders/billing.ts) — leaving out the document being edited, so its own lines don't read as a
+ * second invoice of the order they bill. The invoice form warns from it before billing an order twice.
+ */
+export async function listPartyOrders(companyId: string, documentId?: string) {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await viewerHas("documents.view"))) return [];
   if ((await moduleAccessFor(user.id, "orders")) !== "available") return [];
@@ -1176,7 +1182,23 @@ export async function listPartyOrders(companyId: string) {
       },
     },
   });
-  return toPlain(rows);
+  const billing = await orderBilling(rows.map((r) => r.id), { excludeDocumentId: documentId });
+  return toPlain(
+    rows.map((r) => {
+      const b = billing.get(r.id)!;
+      return {
+        ...r,
+        billing: {
+          status: b.status,
+          ordered: b.ordered,
+          invoiced: b.invoiced,
+          remaining: b.remaining,
+          invoices: b.invoices.map((i) => ({ docNumber: i.docNumber })),
+          drafts: b.drafts.map((i) => ({ docNumber: i.docNumber })),
+        },
+      };
+    }),
+  );
 }
 
 /** Open invoices a credit note can be raised against, for the "against" picker. */

@@ -24,6 +24,11 @@ import { listColumns } from "@/lib/custom-fields/server";
 import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 import type { OrderStatus, OrderBusinessType } from "@prisma/client";
+import { listOrdersToInvoice } from "@/actions/order-billing";
+import { OrdersToInvoice } from "@/components/orders/orders-to-invoice";
+import { moduleAccessFor } from "@/lib/modules-access";
+import { can } from "@/lib/authz/resolve";
+import { viewAsContext } from "@/lib/session";
 
 const HANDOFF_FLAGS = [
   { value: "held", label: "In hand" },
@@ -41,6 +46,8 @@ export default async function OrdersPage({
     businessType?: string;
     channel?: string;
     flag?: string;
+    /** "toInvoice": finance's view of sold orders not yet billed in full, grouped by customer PO. */
+    billing?: string;
     q?: string;
     page?: string;
     pageSize?: string;
@@ -63,6 +70,7 @@ export default async function OrdersPage({
     : undefined;
   const viaReseller = params.channel === "reseller" ? true : params.channel === "direct" ? false : undefined;
   const flag = HANDOFF_FLAGS.find((f) => f.value === params.flag)?.value;
+  const toInvoice = params.billing === "toInvoice";
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
   const customFilters = parseCustomFilters(params);
@@ -108,6 +116,7 @@ export default async function OrdersPage({
       businessType: params.businessType,
       channel: params.channel,
       flag: params.flag,
+      billing: params.billing,
       ...overrides,
     };
     return Object.fromEntries(Object.entries(next).filter(([, v]) => v)) as Record<string, string>;
@@ -160,9 +169,9 @@ export default async function OrdersPage({
         {stageFilters.map((f) => (
           <Link
             key={f.label}
-            href={{ pathname: "/orders", query: queryFor({ status: f.value, flag: undefined }) }}
+            href={{ pathname: "/orders", query: queryFor({ status: f.value, flag: undefined, billing: undefined }) }}
             className={`rounded-full px-3 py-1 text-sm ${
-              !flag && (params.status === f.value || (!params.status && !f.value))
+              !flag && !toInvoice && (params.status === f.value || (!params.status && !f.value))
                 ? "bg-brand text-brand-contrast"
                 : "bg-surface text-muted border border-line-strong"
             }`}
@@ -174,7 +183,7 @@ export default async function OrdersPage({
         {HANDOFF_FLAGS.map((f) => (
           <Link
             key={f.value}
-            href={{ pathname: "/orders", query: queryFor({ flag: f.value, status: undefined }) }}
+            href={{ pathname: "/orders", query: queryFor({ flag: f.value, status: undefined, billing: undefined }) }}
             className={`rounded-full px-3 py-1 text-sm ${
               flag === f.value ? "bg-brand text-brand-contrast" : "bg-surface text-muted border border-dashed border-line-strong"
             }`}
@@ -182,9 +191,23 @@ export default async function OrdersPage({
             {f.label}
           </Link>
         ))}
+        {/* Finance's view: sold, not yet billed in full — grouped by the customer's PO. */}
+        <Link
+          href={{ pathname: "/orders", query: queryFor({ billing: toInvoice ? undefined : "toInvoice", flag: undefined, status: undefined }) }}
+          className={`rounded-full px-3 py-1 text-sm ${toInvoice ? "bg-brand text-brand-contrast" : "bg-surface text-muted border border-dashed border-line-strong"}`}
+        >
+          To invoice
+        </Link>
       </div>
 
-      {viewMode === "split" ? (
+      {toInvoice ? (
+        <OrdersToInvoice
+          groups={await listOrdersToInvoice({ search: params.q })}
+          canInvoice={
+            !(await viewAsContext()) && (await moduleAccessFor(user.id, "sales_documents")) === "available" && (await can(user.id, "documents.issue"))
+          }
+        />
+      ) : viewMode === "split" ? (
         <SplitListShell
           countLabel={`${result.total} order${result.total === 1 ? "" : "s"}`}
           listPane={<OrderSplitList orders={result.rows} selectedId={selected} />}

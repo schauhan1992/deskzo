@@ -15,7 +15,9 @@ import { blankLine, emptyDefaults } from "@/lib/document-draft";
 import { workspaceClock } from "@/lib/time/workspace";
 import { defaultServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
 import { viewerHas } from "@/actions/permission";
-import { leadPath } from "@/lib/record-links";
+import { leadPath, orderPath } from "@/lib/record-links";
+import { invoiceStartFromOrders } from "@/lib/orders/invoice-draft";
+import { formatOrderId } from "@/lib/order-id";
 import {
   documentDirection,
   documentListPath,
@@ -26,7 +28,8 @@ import {
 export default async function NewDocumentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; companyId?: string; leadId?: string }>;
+  /** `orders`: order ids, comma-separated — a tax invoice started from them (src/lib/orders/invoice-draft.ts). */
+  searchParams: Promise<{ type?: string; companyId?: string; leadId?: string; orders?: string }>;
 }) {
   // Seeing documents isn't raising one: without "Raise and issue sales documents" the form could
   // only ever refuse to save, so it is not found (owner, 8 Oct 2026).
@@ -68,6 +71,11 @@ export default async function NewDocumentPage({
 
   // Dated today on the workspace's calendar.
   const defaults = emptyDefaults(await workspaceClock());
+
+  // Raised from orders (the order page, the "to invoice" view): their customer, site and lines.
+  const fromOrders =
+    docType === "INVOICE" && params.orders && me ? await invoiceStartFromOrders(me.id, params.orders.split(","), defaults.issueDate) : null;
+  const orderStart = fromOrders?.ok && parties.some((p) => p.id === fromOrders.orders[0]!.companyId) ? fromOrders : null;
   defaults.docNumber = nextNumber;
   defaults.branchId = startBranch?.id ?? "";
   defaults.dispatchFromAddress = startBranch?.dispatchAddress ?? "";
@@ -76,10 +84,34 @@ export default async function NewDocumentPage({
     defaults.companyId = params.companyId;
   }
 
+  if (orderStart) {
+    const first = orderStart.orders[0]!;
+    defaults.companyId = first.companyId;
+    defaults.locationId = first.locationId;
+    defaults.reference = orderStart.reference;
+    defaults.salespersonId = salespeople.some((s) => s.id === first.addedByUserId) ? first.addedByUserId : defaults.salespersonId;
+    defaults.lines = orderStart.lines.map((l) => ({
+      ...blankLine(),
+      companyProductId: l.companyProductId,
+      itemId: l.itemId,
+      itemType: l.itemType,
+      name: l.name,
+      description: l.description,
+      hsnCode: l.hsnCode,
+      unit: l.unit,
+      quantity: String(l.quantity),
+      unitPrice: String(l.unitPrice),
+      taxRatePercent: String(l.taxRatePercent),
+      servicePeriodFrom: l.servicePeriodFrom,
+      servicePeriodTo: l.servicePeriodTo,
+      periodSource: l.periodSource as (typeof defaults.lines)[number]["periodSource"],
+    }));
+  }
+
   // Raised from a lead: the deal decides the party, the salesperson and the opening set of lines.
   // The lead is only honoured if its company is one this document type can actually be raised
   // against — a sales document can't be addressed to a vendor, whatever the URL says.
-  const fromLead = lead && parties.some((p) => p.id === lead.companyId) ? lead : null;
+  const fromLead = !orderStart && lead && parties.some((p) => p.id === lead.companyId) ? lead : null;
   if (fromLead) {
     defaults.companyId = fromLead.companyId;
     defaults.leadId = fromLead.id;
@@ -114,14 +146,18 @@ export default async function NewDocumentPage({
     <div>
       <div className="mb-5">
         <Link
-          href={fromLead ? leadPath(fromLead.leadSeq) : documentListPath[docType]}
+          href={orderStart ? orderPath(orderStart.orders[0]!.orderSeq) : fromLead ? leadPath(fromLead.leadSeq) : documentListPath[docType]}
           className="text-sm text-muted hover:text-text"
         >
-          ← {fromLead ? fromLead.title : `${tradeDocumentLabels[docType]}s`}
+          ← {orderStart ? formatOrderId(orderStart.orders[0]!.orderSeq) : fromLead ? fromLead.title : `${tradeDocumentLabels[docType]}s`}
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-text">New {tradeDocumentLabels[docType].toLowerCase()}</h1>
         <p className="mt-1 text-sm text-muted">
-          {fromLead
+          {orderStart
+            ? `Started from ${orderStart.orders.length === 1 ? "order" : "orders"} ${orderStart.orders.map((o) => formatOrderId(o.orderSeq)).join(", ")} — each line bills its order for what is still to bill, at the order's price. Check it, save it, then issue it.`
+            : fromOrders && !fromOrders.ok
+              ? `Couldn't start from those orders: ${fromOrders.error}`
+            : fromLead
             ? fromLead.requirements.length > 0
               ? `Started from this lead's ${fromLead.requirements.length} required product${fromLead.requirements.length === 1 ? "" : "s"}, priced from the catalogue. Check the prices before you issue it.`
               : "Raised against this lead. It has no products listed yet, so the lines start empty."

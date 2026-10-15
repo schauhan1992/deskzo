@@ -18,6 +18,8 @@ import { handoffBadge, vendorPoLabels, type ReleaseState } from "@/lib/orders/ha
 import { useClock } from "@/components/time/clock-provider";
 import type { Clock } from "@/lib/time/zone";
 import type { StageColor } from "@/lib/pipeline/rules";
+import { BillingChip } from "@/components/orders/order-invoicing";
+import type { OrderBillingStatus } from "@/lib/orders/billing-rules";
 
 const ORDER_STATUS_TONE: Record<OrderStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   PENDING_APPROVAL: "amber",
@@ -53,6 +55,8 @@ type OrderRow = {
   releaseOn: Date | string | null;
   pendingPurchasePrice: number | null;
   vendorPoCancel: "PENDING" | "CANCELLED" | "NOT_NEEDED" | null;
+  /** Its invoicing (src/lib/orders/billing.ts); absent where the list didn't read it. */
+  billing?: { status: OrderBillingStatus; invoices: { documentId: string; docNumber: string }[] } | null;
 };
 
 /**
@@ -112,6 +116,7 @@ export function OrdersTable({
             {cols.show("product") && <th className="px-4 py-2.5">Product</th>}
             {cols.show("qty") && <th className="px-4 py-2.5">Qty</th>}
             {cols.show("total") && <th className="px-4 py-2.5">Total</th>}
+            {cols.show("invoice") && <th className="px-4 py-2.5">Invoice</th>}
             {cols.show("vendor") && <th className="px-4 py-2.5">Vendor</th>}
             {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
             {cols.show("actions") && <th className="px-4 py-2.5 text-right">Tell them</th>}
@@ -176,6 +181,15 @@ export function OrdersTable({
                 )}
                 {cols.show("total") && (
                   <td className="px-4 py-2.5 font-medium text-text">{formatCurrency(total)}</td>
+                )}
+                {cols.show("invoice") && (
+                  <td className="px-4 py-2.5">
+                    {o.billing && o.orderStatus !== "CANCELLED" && o.orderStatus !== "REJECTED" ? (
+                      <BillingChip status={o.billing.status} invoices={o.billing.invoices} />
+                    ) : (
+                      <span className="text-subtle">—</span>
+                    )}
+                  </td>
                 )}
                 {cols.show("vendor") && (
                   <td className="px-4 py-2.5 text-muted">{o.vendor?.name ?? "—"}</td>

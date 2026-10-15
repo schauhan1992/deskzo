@@ -73,6 +73,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       { key: "product", label: "Product", default: true },
       { key: "qty", label: "Qty", default: true },
       { key: "total", label: "Total", default: true, hint: "Inclusive of GST." },
+      { key: "invoice", label: "Invoice", default: true, hint: "Whether it is billed: not invoiced, part invoiced, or the invoice that billed it." },
       { key: "vendor", label: "Vendor", default: true },
       { key: "addedBy", label: "Added by", default: true },
       { key: "actions", label: "Actions", default: true, required: true, hint: "Row actions, including the fulfilment notice." },

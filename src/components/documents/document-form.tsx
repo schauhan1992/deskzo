@@ -36,6 +36,7 @@ import { GST_NUMBERED_TYPES, expandPrefix } from "@/lib/document-numbering";
 import { indiaClock } from "@/lib/time/zone";
 import { useClock } from "@/components/time/clock-provider";
 import { formatOrderId } from "@/lib/order-id";
+import { overBillingWarning } from "@/lib/orders/billing-rules";
 import { HSN_PATTERN, normaliseHsn } from "@/lib/items/catalogue-import";
 import {
   defaultServicePeriod,
@@ -288,19 +289,36 @@ export function DocumentForm({
   useEffect(() => {
     if (!isSales || !companyId) return;
     let cancelled = false;
-    listPartyOrders(companyId).then((rows) => {
+    listPartyOrders(companyId, defaults.id).then((rows) => {
       if (!cancelled) setFetchedOrders({ companyId, rows });
     });
     return () => {
       cancelled = true;
     };
-  }, [companyId, isSales]);
+  }, [companyId, isSales, defaults.id]);
 
   locationIdRef.current = locationId;
 
   const locations = fetchedLocations.companyId === companyId ? fetchedLocations.rows : EMPTY_LOCATIONS;
   const creditable = fetchedCreditable.companyId === companyId ? fetchedCreditable.rows : [];
   const orders = fetchedOrders.companyId === companyId ? fetchedOrders.rows : EMPTY_ORDERS;
+
+  /**
+   * On a tax invoice, each order its lines bill against what it has already been invoiced (owner, 15 Oct
+   * 2026): billed in full, more than is left, or already on another draft. The lines say so; saving asks.
+   */
+  const orderWarnings = useMemo(() => {
+    const out: Record<string, string> = {};
+    if (docType !== "INVOICE") return out;
+    const totals = new Map<string, number>();
+    for (const l of lines) if (l.companyProductId) totals.set(l.companyProductId, (totals.get(l.companyProductId) ?? 0) + (Number(l.quantity) || 0));
+    for (const [id, quantity] of totals) {
+      const order = orders.find((o) => o.id === id);
+      const warning = order ? overBillingWarning(order.billing, quantity) : null;
+      if (warning) out[id] = `${formatOrderId(order!.orderSeq)}: ${warning}`;
+    }
+    return out;
+  }, [docType, lines, orders]);
   /** A quote, proforma, invoice or credit note carries a service period per line; a purchase doesn't, for now. */
   const periodShown = showsServicePeriod(docType);
 
@@ -506,6 +524,9 @@ export function DocumentForm({
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    // Billing an order again, or for more than is left (owner, 15 Oct 2026): said on the line, asked here.
+    const overBilled = [...new Set(Object.values(orderWarnings))];
+    if (overBilled.length > 0 && !window.confirm(`${overBilled.join("\n\n")}\n\nSave anyway?`)) return;
 
     const payload = {
       ...(defaults.id ? { id: defaults.id } : {}),
@@ -1044,6 +1065,7 @@ export function DocumentForm({
                         orders={isSales ? orders : EMPTY_ORDERS}
                         periodShown={periodShown}
                         onOrder={(orderId) => applyOrder(line.key, orderId)}
+                        warning={line.companyProductId ? orderWarnings[line.companyProductId] ?? null : null}
                         // Anything typed here is theirs: no later default replaces it, blank included.
                         onPeriod={(patch) => updateLine(line.key, { ...patch, periodSource: "typed" })}
                         onOpenPeriod={() => updateLine(line.key, { periodOpen: true })}
@@ -1331,6 +1353,7 @@ function LineLinks({
   onOrder,
   onPeriod,
   onOpenPeriod,
+  warning = null,
 }: {
   line: LineDraft;
   lineNumber: number;
@@ -1340,6 +1363,8 @@ function LineLinks({
   onOrder: (orderId: string) => void;
   onPeriod: (patch: Pick<Partial<LineDraft>, "servicePeriodFrom" | "servicePeriodTo">) => void;
   onOpenPeriod: () => void;
+  /** This line bills its order again, or for more than is left (src/lib/orders/billing-rules.ts). */
+  warning?: string | null;
 }) {
   const showOrders = orders.length > 0 || !!line.companyProductId;
   const showPeriod =
@@ -1367,6 +1392,11 @@ function LineLinks({
             </option>
           ))}
         </Select>
+      )}
+      {warning && (
+        <p role="alert" className="text-xs text-warning">
+          {warning}
+        </p>
       )}
       {periodShown &&
         (showPeriod ? (
