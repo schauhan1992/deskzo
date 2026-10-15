@@ -866,6 +866,8 @@ model User {
   chatMemberships      ChatMember[]       @relation("ChatMemberships")
   chatMessagesSent     ChatMessage[]      @relation("ChatMessagesSent")
   chatPresence         ChatPresence?      @relation("ChatPresence")
+  chatReactions        ChatReaction[]     @relation("ChatReactions")
+  chatPinsMade         ChatPin[]          @relation("ChatPinsMade")
 
   @@index([departmentId])
   @@index([managerId])
@@ -13329,6 +13331,7 @@ model Chat {
 
   members  ChatMember[]
   messages ChatMessage[]
+  pins     ChatPin[]
 
   @@index([lastMessageAt])
   @@map("chats")
@@ -13380,6 +13383,8 @@ model ChatMessage {
   createdAt  DateTime        @default(now())
 
   attachments ChatAttachment[]
+  reactions   ChatReaction[]
+  pin         ChatPin?
 
   @@index([chatId, createdAt])
   @@map("chat_messages")
@@ -13398,6 +13403,40 @@ model ChatAttachment {
 
   @@index([messageId])
   @@map("chat_attachments")
+}
+
+/**
+ * One person's reaction to a message — one each, as WhatsApp has it: reacting again with another emoji
+ * changes it, with the same one takes it back. Its own table, so a workspace whose database hasn't
+ * reached it yet still chats (src/lib/chat/server.ts reads it apart).
+ */
+model ChatReaction {
+  id        String      @id @default(cuid())
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation("ChatReactions", fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime    @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("chat_reactions")
+}
+
+/** A message pinned to the top of its chat. Three at most per chat: a fourth unpins the oldest. */
+model ChatPin {
+  id         String      @id @default(cuid())
+  chatId     String
+  chat       Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  messageId  String      @unique
+  message    ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinnedById String?
+  pinnedBy   User?       @relation("ChatPinsMade", fields: [pinnedById], references: [id], onDelete: SetNull)
+  pinnedAt   DateTime    @default(now())
+
+  @@index([chatId])
+  @@map("chat_pins")
 }
 
 /** When a person was last in the app with chat open, for "last seen" — kept apart from User so no sign-in query reads it. */

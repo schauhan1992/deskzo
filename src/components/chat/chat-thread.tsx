@@ -16,8 +16,11 @@ import {
   MoreVertical,
   Paperclip,
   Pencil,
+  Pin,
+  PinOff,
   SendHorizontal,
   Smile,
+  SmilePlus,
   Trash2,
   Users,
   X,
@@ -29,6 +32,8 @@ import {
   leaveGroupChat,
   loadEarlierMessages,
   muteChat,
+  pinChatMessage,
+  reactToChatMessage,
   resolveChatRecordLinks,
   sendChatMessage,
   type ChatBootstrap,
@@ -47,6 +52,7 @@ import {
   MAX_FILES,
   MAX_FILES_BYTES,
   MUTE_CHOICES,
+  REACTIONS,
   chatFileType,
   fileSizeLabel,
   isMuted,
@@ -56,13 +62,15 @@ import {
   recordLinksIn,
   tickFor,
 } from "@/lib/chat/rules";
-import type { ChatMemberView, ChatMessageView, ChatSummary } from "@/lib/chat/types";
+import type { ChatMemberView, ChatMessageView, ChatPinView, ChatReactionView, ChatSummary } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
 export type ThreadState = {
   members: ChatMemberView[];
   messages: ChatMessageView[];
   hasMore: boolean;
+  /** Pinned to the top, newest first — the part this person may read. */
+  pins: ChatPinView[];
   /** A search result being shown: scrolled to and lit up once. */
   highlight: string | null;
 };
@@ -93,6 +101,7 @@ export function ChatThread({
   onThread,
   onSent,
   onLeft,
+  onJump,
 }: {
   boot: ChatBootstrap;
   chat: ChatSummary;
@@ -103,6 +112,8 @@ export function ChatThread({
   onThread: (update: (t: ThreadState) => ThreadState) => void;
   onSent: (message: ChatMessageView) => void;
   onLeft: () => void;
+  /** Show a message that isn't loaded yet: the chat is read again around it. */
+  onJump: (messageId: string) => void;
 }) {
   const clock = useClock();
   const live = useChatLive();
@@ -243,6 +254,22 @@ export function ChatThread({
         </Menu>
       </div>
 
+      <PinnedBar
+        pins={thread.pins}
+        canUnpin={canWrite}
+        onShow={(messageId) => {
+          if (!thread.messages.some((x) => x.id === messageId)) return onJump(messageId);
+          onThread((t) => ({ ...t, highlight: messageId }));
+          setTimeout(() => onThread((t) => (t.highlight === messageId ? { ...t, highlight: null } : t)), 2500);
+        }}
+        onUnpin={(messageId) =>
+          void pinChatMessage(messageId, false).then((res) => {
+            if (res.ok) onThread((t) => ({ ...t, pins: res.data }));
+            else window.alert(res.error);
+          })
+        }
+      />
+
       <div
         ref={scroller}
         onScroll={(e) => {
@@ -286,6 +313,19 @@ export function ChatThread({
                   viewOnly={boot.attachmentsViewOnly}
                   highlighted={thread.highlight === m.id}
                   canAct={canWrite}
+                  pinned={thread.pins.some((p) => p.messageId === m.id)}
+                  onReact={(emoji) =>
+                    void reactToChatMessage(m.id, emoji).then((res) => {
+                      if (res.ok) onThread((t) => ({ ...t, messages: t.messages.map((x) => (x.id === m.id ? { ...x, reactions: res.data } : x)) }));
+                      else window.alert(res.error);
+                    })
+                  }
+                  onPin={(pin) =>
+                    void pinChatMessage(m.id, pin).then((res) => {
+                      if (res.ok) onThread((t) => ({ ...t, pins: res.data }));
+                      else window.alert(res.error);
+                    })
+                  }
                   onReply={() => {
                     setEditing(null);
                     setReplyTo(m);
@@ -360,6 +400,9 @@ function MessageBubble({
   viewOnly,
   highlighted,
   canAct,
+  pinned,
+  onReact,
+  onPin,
   onReply,
   onEdit,
   onDelete,
@@ -376,6 +419,10 @@ function MessageBubble({
   viewOnly: boolean;
   highlighted: boolean;
   canAct: boolean;
+  pinned: boolean;
+  /** One of REACTIONS; the same one again takes it back. */
+  onReact: (emoji: string) => void;
+  onPin: (pin: boolean) => void;
   onReply: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -387,9 +434,14 @@ function MessageBubble({
   const readers = mine && group && !deleted ? readBy(m, members).map((id) => names.get(id) ?? "Someone") : [];
   const links = deleted ? [] : recordLinksIn(m.body);
   const mentionsMe = m.mentionIds.includes(meId);
+  const [picking, setPicking] = useState(false);
 
   return (
-    <div id={`chat-msg-${m.id}`} className={cn("group flex", mine ? "justify-end" : "justify-start", showName ? "mt-2" : "mt-0.5")}>
+    <div
+      id={`chat-msg-${m.id}`}
+      onMouseLeave={() => setPicking(false)}
+      className={cn("group flex", mine ? "justify-end" : "justify-start", showName ? "mt-2" : "mt-0.5")}
+    >
       <div className={cn("relative max-w-[85%] md:max-w-[70%]", mine ? "items-end" : "items-start")}>
         <div
           className={cn(
@@ -400,6 +452,11 @@ function MessageBubble({
           )}
         >
           {group && !mine && showName && <p className="mb-0.5 text-[11px] font-semibold text-brand">{m.senderName ?? "Former colleague"}</p>}
+          {pinned && (
+            <span className="float-right ml-2 mt-0.5 text-subtle" title="Pinned">
+              <Pin className="h-3 w-3" aria-label="Pinned" />
+            </span>
+          )}
           {m.replyTo && (
             <a href={`#chat-msg-${m.replyTo.id}`} className="mb-1 block rounded-base border-l-2 border-brand bg-black/5 px-2 py-1 text-xs text-muted dark:bg-white/5">
               <span className="block font-medium text-text">{m.replyTo.senderName ?? "A message"}</span>
@@ -444,14 +501,120 @@ function MessageBubble({
             )}
           </span>
         </div>
+        {!deleted && m.reactions.length > 0 && (
+          <Reactions reactions={m.reactions} meId={meId} names={names} mine={mine} canAct={canAct} onReact={onReact} />
+        )}
+        {picking && !deleted && canAct && (
+          <div
+            role="group"
+            aria-label="React"
+            className={cn("absolute -top-9 z-10 flex gap-0.5 rounded-full border border-line bg-surface px-1 py-0.5 shadow-lg", mine ? "right-0" : "left-0")}
+          >
+            {REACTIONS.map((emoji) => {
+              const chosen = m.reactions.some((r) => r.emoji === emoji && r.userIds.includes(meId));
+              return (
+                <button
+                  key={emoji}
+                  type="button"
+                  aria-pressed={chosen}
+                  aria-label={`React ${emoji}`}
+                  onClick={() => {
+                    setPicking(false);
+                    onReact(emoji);
+                  }}
+                  className={cn("grid h-8 w-8 place-items-center rounded-full text-lg transition-transform hover:scale-125", chosen && "bg-brand-subtle")}
+                >
+                  {emoji}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {!deleted && canAct && (
           <div className={cn("absolute top-0 hidden gap-0.5 rounded-base bg-surface p-0.5 shadow-sm group-focus-within:flex group-hover:flex", mine ? "right-full mr-1" : "left-full ml-1")}>
+            <IconButton icon={SmilePlus} label="React" onClick={() => setPicking((v) => !v)} />
             <IconButton icon={CornerUpLeft} label="Reply" onClick={onReply} />
+            <IconButton icon={pinned ? PinOff : Pin} label={pinned ? "Unpin" : "Pin to the top"} onClick={() => onPin(!pinned)} />
             {mine && age < EDIT_WINDOW_MS && m.body && <IconButton icon={Pencil} label="Edit" onClick={onEdit} />}
             {mine && age < DELETE_WINDOW_MS && <IconButton icon={Trash2} label="Delete for everyone" tone="danger" onClick={onDelete} />}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The reactions under a message: each emoji with how many, who in its tooltip; tapping mine takes it back. */
+function Reactions({
+  reactions,
+  meId,
+  names,
+  mine,
+  canAct,
+  onReact,
+}: {
+  reactions: ChatReactionView[];
+  meId: string;
+  names: Map<string, string>;
+  mine: boolean;
+  canAct: boolean;
+  onReact: (emoji: string) => void;
+}) {
+  return (
+    <div className={cn("-mt-1 flex flex-wrap gap-1 px-1", mine ? "justify-end" : "justify-start")}>
+      {reactions.map((r) => {
+        const own = r.userIds.includes(meId);
+        const who = r.userIds.map((id) => (id === meId ? "You" : names.get(id) ?? "Someone")).join(", ");
+        return (
+          <button
+            key={r.emoji}
+            type="button"
+            disabled={!canAct}
+            title={who}
+            aria-label={`${r.emoji} from ${who}`}
+            aria-pressed={own}
+            onClick={() => onReact(r.emoji)}
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-full border bg-surface px-1.5 text-xs shadow-sm",
+              own ? "border-brand text-brand" : "border-line text-muted",
+            )}
+          >
+            <span className="text-sm leading-none">{r.emoji}</span>
+            {r.userIds.length > 1 && <span>{r.userIds.length}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The chat's pins along its top: one at a time, the next on each click, which also shows that message. */
+function PinnedBar({ pins, canUnpin, onShow, onUnpin }: { pins: ChatPinView[]; canUnpin: boolean; onShow: (messageId: string) => void; onUnpin: (messageId: string) => void }) {
+  const [index, setIndex] = useState(0);
+  if (pins.length === 0) return null;
+  const at = index % pins.length;
+  const pin = pins[at]!;
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
+      <Pin className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden="true" />
+      <button
+        type="button"
+        className="min-w-0 flex-1 text-left"
+        title="Show the pinned message"
+        onClick={() => {
+          onShow(pin.messageId);
+          setIndex(at + 1);
+        }}
+      >
+        <span className="block text-[10px] uppercase tracking-wide text-subtle">
+          Pinned{pins.length > 1 ? ` · ${at + 1} of ${pins.length}` : ""}
+        </span>
+        <span className="block truncate text-xs text-text">
+          {pin.senderName ? `${pin.senderName.split(" ")[0]}: ` : ""}
+          {pin.body || (pin.attachmentCount ? "A file" : "")}
+        </span>
+      </button>
+      {canUnpin && <IconButton icon={X} label="Unpin" onClick={() => onUnpin(pin.messageId)} />}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { notMigratedYet } from "@/lib/not-migrated";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { isListening, publish } from "@/lib/chat/bus";
 import { isMuted, previewOf } from "@/lib/chat/rules";
-import type { ChatMemberView, ChatMessageView, ChatSummary } from "@/lib/chat/types";
+import type { ChatMemberView, ChatMessageView, ChatPinView, ChatReactionView, ChatSummary } from "@/lib/chat/types";
 
 /**
  * Team chat's reads and writes that the actions, the live stream and the files route share. Server
@@ -84,6 +84,7 @@ export function toMessageView(row: MessageRow): ChatMessageView {
       : null,
     attachments: deleted ? [] : row.attachments,
     mentionIds: row.mentionIds,
+    reactions: [],
     editedAt: row.editedAt?.toISOString() ?? null,
     deletedAt: row.deletedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -92,7 +93,64 @@ export function toMessageView(row: MessageRow): ChatMessageView {
 
 export async function messageView(id: string): Promise<ChatMessageView | null> {
   const row = await db.chatMessage.findUnique({ where: { id }, include: messageInclude });
-  return row ? toMessageView(row) : null;
+  return row ? (await withReactions([toMessageView(row)]))[0]! : null;
+}
+
+// ─── Reactions and pins ───────────────────────────────────────────────────────────────────────────
+// Read apart from the messages, in their own tables: a workspace whose database hasn't reached them
+// yet (Coolify migrates after a deploy) still chats, just without them.
+
+/** Each message's reactions, grouped by emoji in the order first chosen. */
+export async function reactionsOf(messageIds: string[]): Promise<Map<string, ChatReactionView[]>> {
+  const out = new Map<string, ChatReactionView[]>();
+  if (messageIds.length === 0) return out;
+  try {
+    const rows = await db.chatReaction.findMany({ where: { messageId: { in: messageIds } }, orderBy: { createdAt: "asc" }, select: { messageId: true, userId: true, emoji: true } });
+    for (const r of rows) {
+      const list = out.get(r.messageId) ?? [];
+      const group = list.find((g) => g.emoji === r.emoji);
+      if (group) group.userIds.push(r.userId);
+      else list.push({ emoji: r.emoji, userIds: [r.userId] });
+      out.set(r.messageId, list);
+    }
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+  }
+  return out;
+}
+
+/** These messages, with their reactions. */
+export async function withReactions(views: ChatMessageView[]): Promise<ChatMessageView[]> {
+  const byMessage = await reactionsOf(views.filter((v) => !v.deletedAt).map((v) => v.id));
+  return views.map((v) => ({ ...v, reactions: byMessage.get(v.id) ?? [] }));
+}
+
+/** A chat's pins that this member can read — newest pinned first. */
+export async function pinsOf(chatId: string, member: { joinedAt: Date; leftAt: Date | null }): Promise<ChatPinView[]> {
+  try {
+    const rows = await db.chatPin.findMany({
+      where: { chatId, message: { deletedAt: null, ...visibleTo(member) } },
+      orderBy: { pinnedAt: "desc" },
+      select: {
+        messageId: true,
+        pinnedAt: true,
+        pinnedBy: { select: { name: true } },
+        message: { select: { body: true, createdAt: true, sender: { select: { name: true } }, _count: { select: { attachments: true } } } },
+      },
+    });
+    return rows.map((r) => ({
+      messageId: r.messageId,
+      pinnedAt: r.pinnedAt.toISOString(),
+      pinnedByName: r.pinnedBy?.name ?? null,
+      senderName: r.message.sender?.name ?? null,
+      body: r.message.body.slice(0, 200),
+      attachmentCount: r.message._count.attachments,
+      createdAt: r.message.createdAt.toISOString(),
+    }));
+  } catch (err) {
+    if (notMigratedYet(err)) return [];
+    throw err;
+  }
 }
 
 /** Everyone who is or was in a chat, with their reading positions — what the ticks are worked out from. */

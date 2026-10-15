@@ -10,6 +10,7 @@ export const SOUND_KINDS = [
   { key: "tasks", label: "A task is due or overdue", hint: "On the day it falls due." },
   { key: "notes", label: "A note or to-do reminder", hint: "When a sticky note's reminder comes round." },
   { key: "callbacks", label: "A callback is due", hint: "At the time you promised to ring back." },
+  { key: "chat", label: "A new chat message", hint: "When a chat you aren't looking at gets a message. Muted chats stay quiet unless you're @mentioned." },
 ] as const;
 
 export type SoundKind = (typeof SOUND_KINDS)[number]["key"];
@@ -35,6 +36,14 @@ export function parseReminderSounds(value: unknown): ReminderSounds {
   for (const { key } of SOUND_KINDS) if (raw[key] === false) out[key] = false;
   return out;
 }
+
+/** Whether chat's messages chime for somebody with these settings (src/components/chat/chat-live.tsx). */
+export function chatChimes(settings: ReminderSounds): boolean {
+  return !settings.off && settings.chat !== false;
+}
+
+/** Fired by the sounds card when it saves, so chat's chime follows at once rather than on the next page load. */
+export const SOUNDS_CHANGED_EVENT = "deskzo.sounds-changed";
 
 /** Whether a notification of this type chimes for somebody with these settings. */
 export function chimes(settings: ReminderSounds, type: string): boolean {

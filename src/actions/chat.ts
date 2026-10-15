@@ -8,6 +8,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { notifyUser } from "@/lib/notify";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { parseRecordRef } from "@/lib/record-url";
 import { companyAccess, leadAccess, orderAccess, ticketAccess } from "@/lib/authz/access";
 import { formatCompanyId, formatLeadId, formatOrderId } from "@/lib/order-id";
@@ -21,11 +22,13 @@ import {
   MAX_FILES_BYTES,
   MAX_GROUP_MEMBERS,
   MAX_GROUP_NAME,
+  MAX_PINS,
   PAGE_SIZE,
   RECORD_LINK_KINDS,
   chatFileType,
   directKeyFor,
   isMuted,
+  isReaction,
   mentionsIn,
   type RecordLinkKind,
 } from "@/lib/chat/rules";
@@ -40,11 +43,14 @@ import {
   messageInclude,
   postSystemLine,
   summariesFor,
+  pinsOf,
+  reactionsOf,
+  withReactions,
   toMessageView,
   unreadTotal,
   visibleTo,
 } from "@/lib/chat/server";
-import type { ChatMemberView, ChatMessageView, ChatPerson, ChatSummary } from "@/lib/chat/types";
+import type { ChatMemberView, ChatMessageView, ChatPerson, ChatPinView, ChatReactionView, ChatSummary } from "@/lib/chat/types";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -129,7 +135,7 @@ export async function listChatSummaries(chatIds?: string[]): Promise<ChatSummary
   return summariesFor(user.id, chatIds?.slice(0, 50));
 }
 
-export type OpenedChat = { summary: ChatSummary; members: ChatMemberView[]; messages: ChatMessageView[]; hasMore: boolean };
+export type OpenedChat = { summary: ChatSummary; members: ChatMemberView[]; messages: ChatMessageView[]; hasMore: boolean; pins: ChatPinView[] };
 
 /**
  * A conversation's newest page — or, given one of its messages (a search result), the page around it.
@@ -159,7 +165,8 @@ export async function openChat(chatId: string, around?: string): Promise<OpenedC
   return {
     summary: summary ?? (await summaryFallback(chatId, user.id)),
     members: await membersView(chatId),
-    messages: rows.map(toMessageView),
+    messages: await withReactions(rows.map(toMessageView)),
+    pins: await pinsOf(chatId, member),
     hasMore,
   };
 }
@@ -198,7 +205,7 @@ export async function loadEarlierMessages(chatId: string, before: string): Promi
     orderBy: { createdAt: "desc" },
     take: PAGE_SIZE + 1,
   });
-  return { messages: rows.slice(0, PAGE_SIZE).reverse().map(toMessageView), hasMore: rows.length > PAGE_SIZE };
+  return { messages: await withReactions(rows.slice(0, PAGE_SIZE).reverse().map(toMessageView)), hasMore: rows.length > PAGE_SIZE };
 }
 
 // ─── Sending ──────────────────────────────────────────────────────────────────────────────────────
@@ -270,7 +277,13 @@ export async function sendChatMessage(form: FormData): Promise<ActionResult<Chat
   const mutedBy = new Map(members.map((m) => [m.userId, isMuted(m.mutedUntil)]));
   await publish(
     members.map((m) => m.userId),
-    (userId) => ({ type: "message", message, muted: userId === user.id || !!mutedBy.get(userId), mentioned: mentionIds.includes(userId) }),
+    (userId) => ({
+      type: "message",
+      message,
+      muted: userId === user.id || !!mutedBy.get(userId),
+      mentioned: mentionIds.includes(userId),
+      chatTitle: member.chat.kind === "GROUP" ? member.chat.name : user.name,
+    }),
   );
   await deliverToListening(chatId, members.map((m) => m.userId), user.id);
 
@@ -319,14 +332,90 @@ export async function deleteChatMessage(messageId: string): Promise<ActionResult
     await tx.chatAttachment.deleteMany({ where: { messageId } });
     await tx.chatMessage.update({ where: { id: messageId }, data: { body: "", mentionIds: [], deletedAt: new Date() } });
   });
+  // Its reactions and its pin go with its text — apart from the transaction, so a workspace without
+  // those tables yet still deletes.
+  let unpinned = false;
+  try {
+    await db.chatReaction.deleteMany({ where: { messageId } });
+    unpinned = (await db.chatPin.deleteMany({ where: { messageId } })).count > 0;
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+  }
   const message = (await messageViewOf(messageId))!;
-  await publish(await currentMemberIds(row.chatId), { type: "message-updated", message });
+  const members = await currentMemberIds(row.chatId);
+  await publish(members, { type: "message-updated", message });
+  if (unpinned) await publish(members, { type: "pins-changed", chatId: row.chatId });
   return { ok: true, data: message };
 }
 
 async function messageViewOf(id: string): Promise<ChatMessageView | null> {
   const row = await db.chatMessage.findUnique({ where: { id }, include: messageInclude });
-  return row ? toMessageView(row) : null;
+  return row ? (await withReactions([toMessageView(row)]))[0]! : null;
+}
+
+// ─── Reactions and pins ───────────────────────────────────────────────────────────────────────────
+
+/** The message, if this person may act on it now: in a chat they are still in, from a part they can read. */
+async function actableMessage(messageId: string, userId: string) {
+  const row = await db.chatMessage.findUnique({ where: { id: messageId }, select: { id: true, chatId: true, kind: true, createdAt: true, deletedAt: true, body: true } });
+  if (!row || row.kind !== "TEXT" || row.deletedAt) return null;
+  const member = await membershipOf(row.chatId, userId);
+  if (!member || member.leftAt || row.createdAt < member.joinedAt) return null;
+  return { row, member };
+}
+
+/**
+ * Reacts to a message with one of the six (src/lib/chat/rules.ts REACTIONS): one reaction each —
+ * another emoji replaces mine, the same one again, or null, takes it back.
+ */
+export async function reactToChatMessage(messageId: string, emoji: string | null): Promise<ActionResult<ChatReactionView[]>> {
+  const auth = await chatUserOrError();
+  if ("error" in auth) return fail(auth.error);
+  const { user } = auth;
+  const found = await actableMessage(messageId, user.id);
+  if (!found) return fail("That message isn't one you can react to.");
+  if (emoji !== null && !isReaction(emoji)) return fail("Pick one of the reactions offered.");
+  const key = { messageId_userId: { messageId, userId: user.id } };
+  const mine = await db.chatReaction.findUnique({ where: key, select: { emoji: true } });
+  if (emoji === null || mine?.emoji === emoji) {
+    if (mine) await db.chatReaction.delete({ where: key });
+  } else {
+    await db.chatReaction.upsert({ where: key, create: { messageId, userId: user.id, emoji }, update: { emoji, createdAt: new Date() } });
+  }
+  const reactions = (await reactionsOf([messageId])).get(messageId) ?? [];
+  await publish(await currentMemberIds(found.row.chatId), { type: "reactions", chatId: found.row.chatId, messageId, reactions });
+  return { ok: true, data: reactions };
+}
+
+/** Pins a message to the top of its chat, or unpins it. Any member may; three at most — a fourth unpins the oldest. */
+export async function pinChatMessage(messageId: string, pinned: boolean): Promise<ActionResult<ChatPinView[]>> {
+  const auth = await chatUserOrError();
+  if ("error" in auth) return fail(auth.error);
+  const { user } = auth;
+  const found = await actableMessage(messageId, user.id);
+  if (!found) return fail("That message can't be pinned.");
+  const { row, member } = found;
+  const existing = await db.chatPin.findUnique({ where: { messageId }, select: { id: true } });
+  if (pinned && !existing) {
+    await db.$transaction(async (tx) => {
+      await tx.chatPin.create({ data: { chatId: row.chatId, messageId, pinnedById: user.id } });
+      const pins = await tx.chatPin.findMany({ where: { chatId: row.chatId }, orderBy: { pinnedAt: "desc" }, select: { id: true } });
+      const surplus = pins.slice(MAX_PINS).map((p) => p.id);
+      if (surplus.length) await tx.chatPin.deleteMany({ where: { id: { in: surplus } } });
+    });
+    await postSystemLine(row.chatId, `${user.name} pinned a message`);
+  } else if (!pinned && existing) {
+    await db.chatPin.delete({ where: { messageId } });
+  }
+  await publish(await currentMemberIds(row.chatId), { type: "pins-changed", chatId: row.chatId });
+  return { ok: true, data: await pinsOf(row.chatId, member) };
+}
+
+/** A chat's pins, as this member may see them — asked again whenever they change. */
+export async function chatPins(chatId: string): Promise<ChatPinView[]> {
+  const user = await chatUser();
+  const member = await membershipOf(chatId, user.id);
+  return member ? pinsOf(chatId, member) : [];
 }
 
 // ─── Reading, typing ──────────────────────────────────────────────────────────────────────────────

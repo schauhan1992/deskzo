@@ -16,12 +16,14 @@
  */
 import "dotenv/config";
 import Module from "node:module";
+import { chatChimes } from "../src/lib/reminder-sounds";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import {
   DELETE_WINDOW_MS,
   EDIT_WINDOW_MS,
   chatFileType,
   directKeyFor,
+  isReaction,
   isRetentionChoice,
   mentionsIn,
   previewOf,
@@ -126,6 +128,8 @@ async function main() {
   ok("  web pages, SVG and programs are not", !chatFileType("text/html", "x.html") && !chatFileType("image/svg+xml", "x.svg") && !chatFileType("application/octet-stream", "x.exe"));
   ok("  nor a picture that is really something else", !chatFileType("image/png", "x.html"));
   ok("retention: forever, 90 days, a year, three years — nothing else", [null, 90, 365, 1095].every(isRetentionChoice) && !isRetentionChoice(30));
+  ok("reactions are the six offered, never free text", isReaction("👍") && isReaction("🙏") && !isReaction("lol") && !isReaction("🍕"));
+  ok("chat chimes unless switched off", chatChimes({}) && !chatChimes({ chat: false }) && !chatChimes({ off: true }) && chatChimes({ tasks: false }));
 
   /* eslint-disable @typescript-eslint/no-require-imports */
   const chat = require("../src/actions/chat") as typeof import("../src/actions/chat");
@@ -294,6 +298,54 @@ async function main() {
       }
     }
 
+    section("Reactions and pins");
+
+    {
+      as(alice);
+      const target = await send(directId, "React to this");
+      const targetId = target.ok ? target.data.id : "";
+      as(bob);
+      const liked = await chat.reactToChatMessage(targetId, "👍");
+      ok("Bob reacts with a thumbs up", liked.ok && liked.data.length === 1 && liked.data[0]!.emoji === "👍" && liked.data[0]!.userIds.join() === bob.id);
+      const changed = await chat.reactToChatMessage(targetId, "❤️");
+      ok("  another emoji replaces his — one reaction each", changed.ok && changed.data.length === 1 && changed.data[0]!.emoji === "❤️");
+      as(alice);
+      await chat.reactToChatMessage(targetId, "❤️");
+      as(bob);
+      const opened = await chat.openChat(directId);
+      const seen = opened?.messages.find((m) => m.id === targetId);
+      ok("  Alice's heart joins his, and the conversation shows both", seen?.reactions.length === 1 && seen.reactions[0]!.userIds.length === 2, JSON.stringify(seen?.reactions));
+      const undone = await chat.reactToChatMessage(targetId, "❤️");
+      ok("  the same one again takes his back", undone.ok && undone.data[0]!.userIds.join() === alice.id);
+      ok("  and only the six are taken", !(await chat.reactToChatMessage(targetId, "lol")).ok);
+      as(carol);
+      ok("Carol, not in the chat, can't react", !(await chat.reactToChatMessage(targetId, "👍")).ok);
+
+      as(alice);
+      const ids: string[] = [];
+      for (const text of ["pin one", "pin two", "pin three", "pin four"]) {
+        const sent = await send(directId, text);
+        if (sent.ok) {
+          ids.push(sent.data.id);
+          await chat.pinChatMessage(sent.data.id, true);
+        }
+      }
+      const pins = await chat.chatPins(directId);
+      ok("three pins at most: a fourth unpins the oldest", pins.length === 3 && !pins.some((p) => p.messageId === ids[0]) && pins[0]!.messageId === ids[3], pins.map((p) => p.body).join(", "));
+      ok("  pinning says so in the chat", (await chat.openChat(directId))?.messages.some((m) => m.kind === "SYSTEM" && m.body.includes("pinned a message")) === true);
+      as(bob);
+      const unpinned = await chat.pinChatMessage(ids[3]!, false);
+      ok("Bob unpins one", unpinned.ok && unpinned.data.length === 2);
+      as(alice);
+      await chat.deleteChatMessage(ids[2]!);
+      ok("  a message deleted for everyone leaves the pins", !(await chat.chatPins(directId)).some((p) => p.messageId === ids[2]));
+      as(carol);
+      ok("Carol sees no pins of a chat she isn't in", (await chat.chatPins(directId)).length === 0);
+      // The counts below start from nothing unread.
+      as(bob);
+      await chat.markChatRead(directId);
+    }
+
     section("Groups");
 
     as(alice);
@@ -367,13 +419,14 @@ async function main() {
               createElement(ChatThread, {
                 boot,
                 chat: thread.summary,
-                thread: { members: thread.members, messages: thread.messages, hasMore: thread.hasMore, highlight: null },
+                thread: { members: thread.members, messages: thread.messages, hasMore: thread.hasMore, pins: thread.pins, highlight: null },
                 typing: [],
                 compact: false,
                 onBack: () => {},
                 onThread: () => {},
                 onSent: () => {},
                 onLeft: () => {},
+                onJump: () => {},
               }),
             )
           : "";

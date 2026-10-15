@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Volume2 } from "lucide-react";
 import { saveReminderSounds } from "@/actions/notification";
-import { SOUND_KINDS, type ReminderSounds } from "@/lib/reminder-sounds";
+import { SOUNDS_CHANGED_EVENT, SOUND_KINDS, type ReminderSounds } from "@/lib/reminder-sounds";
 import { playChime } from "@/components/notifications/chime";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -26,13 +26,14 @@ export function ReminderSoundsCard({ sounds }: { sounds: ReminderSounds }) {
       const result = await saveReminderSounds(next);
       if (!result.ok) return setError(result.error);
       setNotice("Saved.");
+      window.dispatchEvent(new CustomEvent(SOUNDS_CHANGED_EVENT, { detail: next }));
     });
   }
 
   const allOff = settings.off === true;
   return (
     <Card>
-      <CardHeader className="text-sm font-medium text-text">Reminder sounds</CardHeader>
+      <CardHeader className="text-sm font-medium text-text">Sounds</CardHeader>
       <CardContent className="space-y-3 text-sm">
         <label className="flex items-start gap-2.5">
           <input
@@ -43,7 +44,7 @@ export function ReminderSoundsCard({ sounds }: { sounds: ReminderSounds }) {
             className="mt-0.5 h-4 w-4"
           />
           <span>
-            Play a sound when a reminder arrives
+            Play a sound when a reminder or a chat message arrives
             <span className="block text-xs text-subtle">While Deskzo is open in a tab — after you&apos;ve clicked anywhere on it once.</span>
           </span>
         </label>

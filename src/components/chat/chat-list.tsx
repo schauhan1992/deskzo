@@ -1,16 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AtSign, BellOff, MessageCirclePlus, Search, Users, UsersRound } from "lucide-react";
+import { AtSign, Bell, BellOff, BellRing, MessageCirclePlus, Search, Users, UsersRound } from "lucide-react";
 import { searchChatMessages, type ChatBootstrap, type ChatSearchHit } from "@/actions/chat";
 import { Avatar } from "@/components/ui/avatar";
 import { IconButton } from "@/components/ui/icon-button";
 import { useClock } from "@/components/time/clock-provider";
-import { useChatLive } from "@/components/chat/chat-live";
+import { useChatLive, useDesktopAlerts, type DesktopAlerts } from "@/components/chat/chat-live";
 import { NewChatDialog, NewGroupDialog } from "@/components/chat/chat-dialogs";
 import { isMuted } from "@/lib/chat/rules";
 import type { ChatSummary } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
+
+const ALERT_LABELS: Record<Exclude<DesktopAlerts, "unsupported">, string> = {
+  ask: "Turn on desktop alerts — see new messages while Deskzo is in the background",
+  on: "Desktop alerts are on in this browser — click to turn them off here",
+  off: "Desktop alerts are off in this browser — click to turn them on",
+  blocked: "Desktop alerts are blocked for this site — allow notifications in your browser's site settings",
+};
+
+/**
+ * Desktop alerts for this browser: asks the browser the first time, then switches them on and off here.
+ * They say who and where, never what (src/components/chat/chat-live.tsx).
+ */
+function AlertsSwitch() {
+  const { state, toggle } = useDesktopAlerts();
+  if (state === "unsupported") return null;
+  const icon = state === "on" ? BellRing : state === "ask" ? Bell : BellOff;
+  return <IconButton icon={icon} label={ALERT_LABELS[state]} onClick={toggle} disabled={state === "blocked"} className={state === "ask" ? "text-brand" : undefined} />;
+}
 
 /** Keeps an empty preview line its height. */
 const NBSP = String.fromCharCode(160);
@@ -61,6 +79,7 @@ export function ChatList({
       <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line px-3">
         <h2 className="text-sm font-semibold text-text">Chats</h2>
         <div className="flex items-center gap-0.5">
+          <AlertsSwitch />
           <IconButton icon={MessageCirclePlus} label="New chat" onClick={() => setDialog("chat")} />
           <IconButton icon={UsersRound} label="New group" onClick={() => setDialog("group")} />
         </div>

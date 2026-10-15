@@ -27,6 +27,20 @@ export type ChatMemberView = {
 
 export type ChatAttachmentView = { id: string; fileName: string; mimeType: string; size: number };
 
+/** One emoji on a message and who chose it. */
+export type ChatReactionView = { emoji: string; userIds: string[] };
+
+/** A message pinned to the top of its chat, as the bar there shows it. */
+export type ChatPinView = {
+  messageId: string;
+  pinnedAt: string;
+  pinnedByName: string | null;
+  senderName: string | null;
+  body: string;
+  attachmentCount: number;
+  createdAt: string;
+};
+
 export type ChatMessageView = {
   id: string;
   chatId: string;
@@ -38,6 +52,7 @@ export type ChatMessageView = {
   replyTo: { id: string; senderName: string | null; body: string; deleted: boolean; attachmentCount: number } | null;
   attachments: ChatAttachmentView[];
   mentionIds: string[];
+  reactions: ChatReactionView[];
   editedAt: string | null;
   deletedAt: string | null;
   createdAt: string;
@@ -68,8 +83,15 @@ export type ChatSummary = {
 /** Everything the live stream sends, to the people it concerns. */
 export type ChatEvent =
   | { type: "ready"; online: string[] }
-  /** A new message. `muted`/`mentioned` are the recipient's own, so each is sent per person. */
-  | { type: "message"; message: ChatMessageView; muted: boolean; mentioned: boolean }
+  /**
+   * A new message. `muted`/`mentioned` are the recipient's own, so each is sent per person;
+   * `chatTitle` is the chat as they know it (the group, or the sender), for a desktop alert.
+   */
+  | { type: "message"; message: ChatMessageView; muted: boolean; mentioned: boolean; chatTitle?: string | null }
+  /** A message's reactions changed. */
+  | { type: "reactions"; chatId: string; messageId: string; reactions: ChatReactionView[] }
+  /** Something was pinned or unpinned: ask for the chat's pins again (each member sees only their part). */
+  | { type: "pins-changed"; chatId: string }
   /** Edited, or deleted for everyone. */
   | { type: "message-updated"; message: ChatMessageView }
   /** Someone's reading position in a chat moved. */

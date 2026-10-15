@@ -24,6 +24,16 @@ export const PAGE_SIZE = 50;
 /** How long "is typing…" shows after the last keystroke was reported. */
 export const TYPING_SHOWN_MS = 5000;
 
+/** The reactions offered, WhatsApp's six. Nothing else is taken, so a reaction is never free text. */
+export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+
+export function isReaction(emoji: string): boolean {
+  return (REACTIONS as readonly string[]).includes(emoji);
+}
+
+/** Messages pinned in one chat at a time; pinning another unpins the oldest. */
+export const MAX_PINS = 3;
+
 /** Settings → Chat's retention choices, in days; null keeps everything. */
 export const RETENTION_CHOICES: readonly { days: number | null; label: string }[] = [
   { days: null, label: "Keep messages for good" },

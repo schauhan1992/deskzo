@@ -61,12 +61,13 @@ import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { ChatLiveProvider } from "@/components/chat/chat-live";
 import { ChatButton } from "@/components/chat/chat-button";
 import { unreadTotal } from "@/lib/chat/server";
+import { chatChimes, parseReminderSounds } from "@/lib/reminder-sounds";
 import { wizardAutoOpens, wizardMounted } from "@/lib/help/onboarding";
 
 /** Chat's live connection around the app, or nothing at all where chat isn't open to this person. */
-function ChatGate({ on, meId, unread, children }: { on: boolean; meId: string; unread: number; children: React.ReactNode }) {
+function ChatGate({ on, meId, unread, sound, children }: { on: boolean; meId: string; unread: number; sound: boolean; children: React.ReactNode }) {
   return on ? (
-    <ChatLiveProvider meId={meId} initialUnread={unread}>
+    <ChatLiveProvider meId={meId} initialUnread={unread} sound={sound}>
       {children}
     </ChatLiveProvider>
   ) : (
@@ -196,6 +197,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // but lead only to a note that chats are private; nothing of theirs is read.
   const chatShown = !!shownUser && openModules.includes("chat");
   const chatUnread = chatOn ? await unreadTotal(session!.user.id).catch(() => 0) : 0;
+  // Its chime follows the person's sounds (Notifications → Sounds); on unless they turned it off.
+  const chatSound = chatOn
+    ? chatChimes(
+        parseReminderSounds(
+          (await db.user.findUnique({ where: { id: session!.user.id }, select: { reminderSounds: true } }).catch(() => null))?.reminderSounds,
+        ),
+      )
+    : false;
 
   // The Getting Started wizard (src/lib/help/onboarding.ts): for a person still being onboarded, signed in as
   // themselves; never while viewing as somebody (then `viewer` is them). It opens by itself once per sign-in — the
@@ -224,7 +233,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <TableColumnsProvider initial={tablePreferences}>
     <WordingProvider initial={wording}>
     <ClockProvider zone={zone}>
-    <ChatGate on={chatOn} meId={session?.user?.id ?? ""} unread={chatUnread}>
+    <ChatGate on={chatOn} meId={session?.user?.id ?? ""} unread={chatUnread} sound={chatSound}>
     <div className="flex min-h-screen bg-bg">
       {/* Not while impersonating: the heartbeat accrues "time spent on the CRM" against whoever the
           request resolves as, and an admin reading somebody's screen is not that person working. */}

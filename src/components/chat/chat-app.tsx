@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { chatBootstrap, listChatSummaries, markChatRead, openChat, type ChatBootstrap } from "@/actions/chat";
-import { useChatEvents, useChatLive } from "@/components/chat/chat-live";
+import { chatBootstrap, chatPins, listChatSummaries, markChatRead, openChat, type ChatBootstrap } from "@/actions/chat";
+import { CHAT_OPEN_EVENT, useChatEvents, useChatLive } from "@/components/chat/chat-live";
 import { ChatList } from "@/components/chat/chat-list";
 import { ChatThread, type ThreadState } from "@/components/chat/chat-thread";
 import { TYPING_SHOWN_MS, previewOf } from "@/lib/chat/rules";
@@ -51,7 +51,7 @@ export function ChatApp({ initialChatId = null, initialMessageId = null, compact
       setActiveId((id) => (id === chatId ? null : id));
       return;
     }
-    setThreads((t) => ({ ...t, [chatId]: { members: opened.members, messages: opened.messages, hasMore: opened.hasMore, highlight: around ?? null } }));
+    setThreads((t) => ({ ...t, [chatId]: { members: opened.members, messages: opened.messages, hasMore: opened.hasMore, pins: opened.pins, highlight: around ?? null } }));
     setChats((list) => mergeRows(list, [opened.summary]));
   }, []);
 
@@ -156,6 +156,24 @@ export function ChatApp({ initialChatId = null, initialMessageId = null, compact
         void refreshRows([m.chatId]);
         return;
       }
+      case "reactions": {
+        setThreads((t) => {
+          const thread = t[event.chatId];
+          if (!thread) return t;
+          return {
+            ...t,
+            [event.chatId]: { ...thread, messages: thread.messages.map((x) => (x.id === event.messageId ? { ...x, reactions: event.reactions } : x)) },
+          };
+        });
+        return;
+      }
+      case "pins-changed": {
+        if (!threadsRef.current[event.chatId]) return;
+        void chatPins(event.chatId).then((pins) =>
+          setThreads((t) => (t[event.chatId] ? { ...t, [event.chatId]: { ...t[event.chatId]!, pins } } : t)),
+        );
+        return;
+      }
       case "receipt": {
         setThreads((t) => {
           const thread = t[event.chatId];
@@ -199,6 +217,16 @@ export function ChatApp({ initialChatId = null, initialMessageId = null, compact
     },
     [compact, loadThread],
   );
+
+  // A desktop alert clicked while this screen is already open: straight to its chat.
+  useEffect(() => {
+    if (compact) return;
+    const onOpen = (e: Event) => {
+      if (e instanceof CustomEvent && typeof e.detail === "string") open(e.detail);
+    };
+    window.addEventListener(CHAT_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(CHAT_OPEN_EVENT, onOpen);
+  }, [compact, open]);
 
   if (!live) {
     // No live connection: an admin viewing as somebody, whose chats are theirs alone.
@@ -254,6 +282,7 @@ export function ChatApp({ initialChatId = null, initialMessageId = null, compact
                 void refreshRows([active.id]);
                 void loadThread(active.id);
               }}
+              onJump={(messageId) => void loadThread(active.id, messageId)}
             />
           ) : (
             <div className="grid flex-1 place-items-center text-muted">
