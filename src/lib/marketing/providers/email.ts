@@ -1,7 +1,9 @@
 import nodemailer from "nodemailer";
 import {
+  allRecipients,
   asError,
   fromHeader,
+  replyToFor,
   networkFailure,
   requireSecret,
   retryableStatus,
@@ -42,13 +44,17 @@ export const resendProvider: MessageProvider = {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: fromHeader(config),
-          to: [message.to],
-          reply_to: config.replyTo ?? undefined,
+          from: fromHeader(config, message),
+          to: allRecipients(message).map((r) => r.email),
+          ...(message.bcc?.length ? { bcc: message.bcc } : {}),
+          reply_to: replyToFor(message, config),
           subject: message.subject,
           html: message.html,
           text: textFallback(message),
           headers: standardHeaders(message),
+          ...(message.attachments?.length
+            ? { attachments: message.attachments.map((a) => ({ filename: a.filename, content: a.content.toString("base64"), content_type: a.contentType })) }
+            : {}),
         }),
       });
       const body = (await response.json().catch(() => ({}))) as { id?: string; message?: string };
@@ -98,10 +104,13 @@ export const elasticProvider: MessageProvider = {
         method: "POST",
         headers: { "X-ElasticEmail-ApiKey": key, "Content-Type": "application/json" },
         body: JSON.stringify({
-          Recipients: { To: [message.to] },
+          Recipients: { To: allRecipients(message).map((r) => r.email), ...(message.bcc?.length ? { BCC: message.bcc } : {}) },
           Content: {
-            From: fromHeader(config),
-            ReplyTo: config.replyTo ?? undefined,
+            From: fromHeader(config, message),
+            ReplyTo: replyToFor(message, config),
+            ...(message.attachments?.length
+              ? { Attachments: message.attachments.map((a) => ({ BinaryContent: a.content.toString("base64"), Name: a.filename, ContentType: a.contentType })) }
+              : {}),
             Subject: message.subject,
             Body: [
               { ContentType: "HTML", Content: message.html },
@@ -221,13 +230,17 @@ async function smtpSend(
 
   try {
     const info = await smtpTransport(settings, password).sendMail({
-      from: fromHeader(config),
-      to: message.toName ? `${message.toName} <${message.to}>` : message.to,
-      replyTo: config.replyTo ?? undefined,
+      from: fromHeader(config, message),
+      to: allRecipients(message).map((r) => (r.name ? { name: r.name, address: r.email } : r.email)),
+      ...(message.bcc?.length ? { bcc: message.bcc } : {}),
+      replyTo: replyToFor(message, config),
       subject: message.subject,
       html: message.html,
       text: textFallback(message),
       headers: standardHeaders(message),
+      ...(message.attachments?.length
+        ? { attachments: message.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) }
+        : {}),
     });
     return { ok: true, providerMessageId: info.messageId ?? null };
   } catch (err) {
@@ -320,7 +333,8 @@ export const mockProvider: MessageProvider = {
   kind: "EMAIL",
   needs: [],
   async send(message) {
-    console.log(`[mock] would send "${message.subject}" to ${message.to}`);
+    const files = message.attachments?.length ? ` with ${message.attachments.map((a) => a.filename).join(", ")}` : "";
+    console.log(`[mock] would send "${message.subject}" to ${allRecipients(message).map((r) => r.email).join(", ")}${files}`);
     return { ok: true, providerMessageId: `mock_${Date.now()}_${Math.random().toString(36).slice(2, 10)}` };
   },
   async verify() {

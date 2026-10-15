@@ -15,6 +15,7 @@ import { getMyConnection } from "@/actions/workplace-connection";
 import { getMyCalendar } from "@/actions/calendar";
 import { isModuleEnabled } from "@/actions/module";
 import { MailboxConnection } from "@/components/profile/mailbox-connection";
+import { documentSendMode } from "@/lib/documents/mail-route";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { myLinkedWorkspaces } from "@/actions/linked-sign-in";
 import { LinkedWorkspacesCard } from "@/components/linked/linked-workspaces-card";
@@ -28,8 +29,11 @@ export default async function ProfilePage({
   searchParams: Promise<{ mailbox?: string; via?: string; outlook?: string; link?: string }>;
 }) {
   // A connection is for emailing documents, and for the calendar — either is reason enough for the card.
+  // Not for documents where the company sends them from its own mail server (Settings → Document emails).
   const [mailUse, calendarOn] = await Promise.all([
-    isModuleEntitled("sales_documents").then(async (has) => has || (await isModuleEntitled("purchase_documents"))),
+    isModuleEntitled("sales_documents").then(async (has) =>
+      (has || (await isModuleEntitled("purchase_documents"))) && (await documentSendMode()) !== "COMPANY",
+    ),
     isModuleEnabled("calendar"),
   ]);
   const [profile, security, access, mail, calendar, linked, { mailbox, via, outlook, link }, clock] = await Promise.all([

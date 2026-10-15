@@ -7,8 +7,8 @@
 
 export type MailProviderKey = "MICROSOFT_365" | "AWS_SES" | "ELASTIC_EMAIL" | "SENDGRID" | "BREVO" | "MAILGUN" | "POSTMARK" | "SMTP";
 export type MailSecurityKey = "TLS" | "STARTTLS";
-export type MailStreamKey = "DEFAULT" | "ACCOUNT" | "BILLING" | "SUPPORT" | "ALERTS";
-/** The four a mail is sent as — every platform mail names one (src/lib/platform/mailer.ts). */
+export type MailStreamKey = "DEFAULT" | "ACCOUNT" | "BILLING" | "SUPPORT" | "ALERTS" | "DOCUMENTS";
+/** The types a mail is sent as — every platform mail names one (src/lib/platform/mailer.ts). */
 export type MailType = Exclude<MailStreamKey, "DEFAULT">;
 
 export type ServerChoice = { label: string; host: string };
@@ -180,6 +180,13 @@ export const MAIL_STREAMS: readonly MailStreamDef[] = [
     label: "Alerts",
     description: "Notices for your team, and warnings to workspace owners.",
     examples: "Website contact-form leads, partner applications, custom-domain warnings",
+  },
+  {
+    key: "DOCUMENTS",
+    label: "Workspace documents",
+    description: "Documents a workspace emails its customers through Deskzo, when it has no mail of its own.",
+    examples:
+      "Tax invoices, proformas, proposals and credit notes from workspaces without Microsoft 365, Google Workspace, Zoho or a mail server set up — sent in the sender's name, replies going to them",
   },
 ];
 

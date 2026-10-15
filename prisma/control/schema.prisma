@@ -2299,13 +2299,15 @@ enum MailSecurity {
   STARTTLS
 }
 
-/// The four types of platform mail, and the default every type falls back to.
+/// The types of platform mail, and the default every type falls back to. DOCUMENTS: documents a
+/// workspace emails its customers through Deskzo when it has no mail of its own.
 enum MailStream {
   DEFAULT
   ACCOUNT
   BILLING
   SUPPORT
   ALERTS
+  DOCUMENTS
 }
 
 /// SENT through an account; FAILED with why; OUTBOX: no account and no PLATFORM_SMTP_URL, written to platform-outbox/.

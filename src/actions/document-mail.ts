@@ -22,7 +22,8 @@ import { canSend } from "@/lib/marketing/suppression";
 import { mintRenderGrant } from "@/lib/documents/render-grant";
 import { RENDER_PARAM } from "@/lib/documents/render-token";
 import { PDF_MAX_BYTES, PdfError, renderPdf } from "@/lib/documents/pdf";
-import { mailboxState, sendAsUser } from "@/lib/mail/mailbox";
+import { mailboxState } from "@/lib/mail/mailbox";
+import { documentSender, documentSendMode, isDocumentSendMode, sendDocumentMail, type DocumentSendMode, type SenderChoice } from "@/lib/documents/mail-route";
 import { removeConnection } from "@/lib/mail/store";
 import { mailProviders } from "@/lib/workplace/settings";
 import { MAIL_NAMES, SIGN_IN_NAMES, sayEither } from "@/lib/workplace/providers";
@@ -198,13 +199,15 @@ export async function prepareDocumentEmail(documentId: string) {
     template,
     values,
     mailbox,
+    // How it would go out (src/lib/documents/mail-route.ts): their mailbox, the company's server, or Deskzo.
+    sender: await documentSender(mailbox),
     viewingAs: !!(await viewAsContext()),
   });
 }
 
 export type SendDocumentInput = { documentId: string; contactIds: string[]; subject: string; body: string };
 
-export async function sendDocumentEmail(input: SendDocumentInput): Promise<ActionResult<{ sentTo: string[]; from: string; mailName: string }>> {
+export async function sendDocumentEmail(input: SendDocumentInput): Promise<ActionResult<{ sentTo: string[]; from: string; mailName: string; via: SenderChoice }>> {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const blockedWhileViewing = await refuseWhileViewingAs();
   if (blockedWhileViewing) return { ok: false, error: blockedWhileViewing };
@@ -239,17 +242,20 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
   if (!body.ok) return { ok: false, error: body.error };
   if (/[\r\n]/.test(subject.text)) return { ok: false, error: "The subject has to be one line." };
 
-  // A connection before the PDF: no point making one to find there's nothing to send it with.
+  // A way to send it before the PDF: no point making one to find there's nothing to send it with.
+  // Their own mailbox, the company's mail server, or Deskzo's — as the company chose (Settings → Document emails).
   const mailbox = await mailboxState(user.id);
-  if (mailbox.state !== "connected") {
+  const sender = await documentSender(mailbox);
+  if (sender.choice === "CONNECT") {
     return {
       ok: false,
+      // Only a mailbox the company offers but this person hasn't connected (or that broke) is CONNECT.
       error:
-        mailbox.state === "app-missing"
-          ? "Your company hasn't set up Microsoft 365, Google Workspace or Zoho for mail yet (Settings → Security). Ask an admin."
-          : mailbox.state === "broken"
-            ? `${SIGN_IN_NAMES[mailbox.provider]} stopped accepting your ${MAIL_NAMES[mailbox.provider]} connection. Connect it again from My profile.`
-            : `Connect your ${sayEither(mailbox.providers.map((p) => MAIL_NAMES[p]))} first — it's what the email is sent from.`,
+        mailbox.state === "broken"
+          ? `${SIGN_IN_NAMES[mailbox.provider]} stopped accepting your ${MAIL_NAMES[mailbox.provider]} connection. Connect it again from My profile.`
+          : mailbox.state === "not-connected"
+            ? `Connect your ${sayEither(mailbox.providers.map((p) => MAIL_NAMES[p]))} first — it's what the email is sent from.`
+            : "Connect your mailbox first — it's what the email is sent from.",
     };
   }
 
@@ -265,12 +271,19 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
   if (pdf.length > PDF_MAX_BYTES) return { ok: false, error: "The PDF is over 3 MB — too big to send this way. Nothing was sent." };
 
   const html = toEmailHtml(body.text);
-  const outcome = await sendAsUser(user.id, {
+  const me = await db.user.findUnique({ where: { id: user.id }, select: { name: true, email: true } });
+  const outcome = await sendDocumentMail(sender.choice, {
+    senderUserId: user.id,
+    senderName: me?.name ?? user.name ?? "",
+    senderEmail: me?.email ?? user.email ?? "",
+    companyName: values["company.name"] ?? "",
+    to: recipients.map((r) => ({ name: r.name, email: r.email! })),
     subject: subject.text,
     html,
-    to: recipients.map((r) => ({ name: r.name, email: r.email! })),
-    attachments: [{ name: attachmentName(tradeDocumentLabels[doc.docType], doc.docNumber), contentType: "application/pdf", bytes: pdf }],
+    text: body.text,
+    attachment: { filename: attachmentName(tradeDocumentLabels[doc.docType], doc.docNumber), contentType: "application/pdf", content: pdf },
   });
+  const triedFrom = sender.choice === "OWN" && mailbox.state === "connected" ? mailbox.mailbox : (sender.company?.fromEmail ?? null);
 
   // Logged either way, one row per person, so the document's history and the mail log both say
   // exactly who it went to — or who it did not reach, and why.
@@ -293,7 +306,7 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
       attempts: 1,
       sentByUserId: user.id,
       tradeDocumentId: doc.id,
-      fromEmail: outcome.ok ? outcome.mailbox : mailbox.mailbox,
+      fromEmail: outcome.ok ? outcome.from : triedFrom,
     })),
   });
   if (!outcome.ok) return { ok: false, error: outcome.error };
@@ -305,10 +318,31 @@ export async function sendDocumentEmail(input: SendDocumentInput): Promise<Actio
     action: "UPDATE",
     entityType: "TradeDocument",
     entityId: doc.id,
-    entityLabel: `${tradeDocumentLabels[doc.docType]} ${doc.docNumber ?? ""} emailed to ${to.join(", ")} from ${outcome.mailbox}`.slice(0, 500),
+    entityLabel: `${tradeDocumentLabels[doc.docType]} ${doc.docNumber ?? ""} emailed to ${to.join(", ")} from ${outcome.from} (${outcome.label})`.slice(0, 500),
   });
   revalidatePath(`/documents/${doc.id}`);
-  return { ok: true, data: { sentTo: to, from: outcome.mailbox, mailName: MAIL_NAMES[outcome.provider] } };
+  return { ok: true, data: { sentTo: to, from: outcome.from, mailName: outcome.label, via: outcome.via } };
+}
+
+// ─── Where documents go out from ─────────────────────────────────────────────────────────────────
+
+/** The company's choice of where emailed documents go out from (Settings → Document emails). */
+export async function getDocumentSendMode(): Promise<DocumentSendMode | null> {
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
+  if (!(await can(user.id, "settings.manage"))) return null;
+  return documentSendMode();
+}
+
+export async function saveDocumentSendMode(mode: string): Promise<ActionResult<null>> {
+  const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
+  const viewingAs = await refuseWhileViewingAs();
+  if (viewingAs) return { ok: false, error: viewingAs };
+  if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "Only somebody who can change organisation settings can change this." };
+  if (!isDocumentSendMode(mode)) return { ok: false, error: "Pick one of the options offered." };
+  await db.documentMailSettings.upsert({ where: { id: "global" }, create: { id: "global", sendFrom: mode, updatedById: user.id }, update: { sendFrom: mode, updatedById: user.id } });
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "DocumentMailSettings", entityId: "global", entityLabel: `Documents are emailed from: ${mode}` });
+  revalidatePath("/settings/document-emails");
+  return { ok: true, data: null };
 }
 
 

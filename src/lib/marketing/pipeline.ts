@@ -526,11 +526,22 @@ async function providerCredentials(id: string) {
  * Straight through the provider chain, now — for a test send, which has no row to queue. The same
  * routing and failover as the queue, so a test that arrives proves the real thing can.
  */
+/**
+ * The mail route a class of mail would go out by now, without sending anything: the first provider in
+ * its chain that really delivers, and the address it sends from. Null when none is set up — for the
+ * document mail's choice of sender (src/lib/documents/mail-route.ts).
+ */
+export async function emailRouteFor(messageClass: MessageClass): Promise<{ label: string; fromEmail: string | null } | null> {
+  const chain = routeFor(await loadProviders(), { kind: "EMAIL", messageClass }).filter((p) => p.key !== "mock" && providerByKey[p.key]);
+  const first = chain[0];
+  return first ? { label: first.label, fromEmail: first.fromEmail } : null;
+}
+
 export async function deliverNow(
   message: OutboundMessage,
   messageClass: MessageClass,
   options: { delivering?: boolean } = {},
-): Promise<{ ok: true; provider: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; provider: string; fromEmail: string | null } | { ok: false; error: string }> {
   // `delivering`: only a provider that puts mail on the wire. Mock "sends" by recording, which is
   // right for a test send and wrong for mail somebody has to receive.
   const chain = routeFor(await loadProviders(), { kind: "EMAIL", messageClass }).filter((p) => !options.delivering || p.key !== "mock");
@@ -539,8 +550,9 @@ export async function deliverNow(
   for (const candidate of chain) {
     const implementation = providerByKey[candidate.key];
     if (!implementation) continue;
-    const result = await implementation.send(message, await providerCredentials(candidate.id));
-    if (result.ok) return { ok: true, provider: candidate.label };
+    const credentials = await providerCredentials(candidate.id);
+    const result = await implementation.send(message, credentials);
+    if (result.ok) return { ok: true, provider: candidate.label, fromEmail: credentials.fromEmail };
     last = result.error;
     if (!result.retryable) break;
   }

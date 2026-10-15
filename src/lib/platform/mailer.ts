@@ -40,6 +40,11 @@ export type PlatformMail = {
   replyTo?: string;
   fromName?: string;
   cc?: string[];
+  /** A workspace's document (type DOCUMENTS): the others it goes to, a copy to the sender, its HTML and its PDF. */
+  moreTo?: string[];
+  bcc?: string[];
+  html?: string;
+  attachments?: { filename: string; contentType: string; content: Buffer }[];
   messageId?: string;
   inReplyTo?: string;
   references?: string[];
@@ -60,16 +65,20 @@ function fromHeader(from: MailFrom): string {
   return name ? `"${name}" <${from.address}>` : from.address;
 }
 
-export async function sendPlatformMail(mail: PlatformMail): Promise<void> {
-  if (testSender) return testSender(mail);
-  await deliverMail(mail);
+/** Sends it as its type says. Gives back the address it went from — null from a check's stand-in. */
+export async function sendPlatformMail(mail: PlatformMail): Promise<string | null> {
+  if (testSender) {
+    await testSender(mail);
+    return null;
+  }
+  return (await deliverMail(mail)).fromAddress;
 }
 
 /**
  * Sends one mail as its type says, or — `connectionId` — through that account as its own sender (a
  * console test, `test` marks it in the log). Logs it either way; throws what the server said.
  */
-export async function deliverMail(mail: PlatformMail, options: { connectionId?: string; test?: boolean } = {}): Promise<{ via: string; messageId: string | null }> {
+export async function deliverMail(mail: PlatformMail, options: { connectionId?: string; test?: boolean } = {}): Promise<{ via: string; messageId: string | null; fromAddress: string }> {
   const route = await resolveMail(mail.type, { connectionId: options.connectionId });
   const from: MailFrom = { name: mail.fromName ?? route.from.name, address: route.from.address };
   const replyTo = mail.replyTo ?? route.replyTo ?? undefined;
@@ -77,7 +86,7 @@ export async function deliverMail(mail: PlatformMail, options: { connectionId?: 
     stream: options.connectionId && options.test ? ("DEFAULT" as const) : mail.type,
     connectionId: route.kind === "connection" ? route.connection.id : null,
     via: route.via,
-    to: [mail.to],
+    to: [mail.to, ...(mail.moreTo ?? [])],
     cc: mail.cc ?? [],
     fromAddress: from.address,
     subject: mail.logSubject ?? mail.subject,
@@ -87,7 +96,7 @@ export async function deliverMail(mail: PlatformMail, options: { connectionId?: 
   if (route.kind === "outbox") {
     await writeOutbox(mail, fromHeader(from), replyTo);
     await recordDelivery({ ...log, status: "OUTBOX" });
-    return { via: route.via, messageId: null };
+    return { via: route.via, messageId: null, fromAddress: from.address };
   }
 
   const started = Date.now();
@@ -96,18 +105,22 @@ export async function deliverMail(mail: PlatformMail, options: { connectionId?: 
     const transport = route.kind === "connection" ? await transportFor(route.connection, { fresh: options.test === true }) : serverTransport(route.url);
     const info = (await transport.sendMail({
       from: fromHeader(from),
-      to: mail.to,
+      // One address as it always was; a list only when a workspace's document goes to several.
+      to: mail.moreTo?.length ? [mail.to, ...mail.moreTo] : mail.to,
       subject: mail.subject,
       text: mail.text,
+      ...(mail.html ? { html: mail.html } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(mail.cc?.length ? { cc: mail.cc } : {}),
+      ...(mail.bcc?.length ? { bcc: mail.bcc } : {}),
+      ...(mail.attachments?.length ? { attachments: mail.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) } : {}),
       ...(mail.messageId ? { messageId: mail.messageId } : {}),
       ...(mail.inReplyTo ? { inReplyTo: mail.inReplyTo } : {}),
       ...(mail.references?.length ? { references: mail.references } : {}),
     })) as { messageId?: unknown };
     const messageId = typeof info?.messageId === "string" ? info.messageId : null;
     await recordDelivery({ ...log, status: "SENT", messageId, ms: Date.now() - started });
-    return { via: route.via, messageId };
+    return { via: route.via, messageId, fromAddress: from.address };
   } catch (err) {
     await recordDelivery({ ...log, status: "FAILED", error: route.kind === "connection" ? connectionSendError(route.connection, err) : sendError(err), ms: Date.now() - started });
     // A refused sign-in may be a token from before a fix (consent, a permission): the next send asks for a new one.
@@ -124,6 +137,9 @@ async function writeOutbox(mail: PlatformMail, from: string, replyTo: string | u
   const headers = [
     replyTo ? `Reply-To: ${replyTo}` : "",
     mail.cc?.length ? `Cc: ${mail.cc.join(", ")}` : "",
+    mail.bcc?.length ? `Bcc: ${mail.bcc.join(", ")}` : "",
+    // The outbox is for reading what would have gone; the files are named, not written.
+    mail.attachments?.length ? `X-Attachments: ${mail.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`).join(", ")}` : "",
     mail.messageId ? `Message-ID: ${mail.messageId}` : "",
     mail.inReplyTo ? `In-Reply-To: ${mail.inReplyTo}` : "",
     mail.references?.length ? `References: ${mail.references.join(" ")}` : "",
@@ -131,7 +147,7 @@ async function writeOutbox(mail: PlatformMail, from: string, replyTo: string | u
     .filter(Boolean)
     .map((line) => `${line}\n`)
     .join("");
-  await writeFile(file, `From: ${from}\nTo: ${mail.to}\n${headers}Subject: ${mail.subject}\n\n${mail.text}\n`, "utf8");
+  await writeFile(file, `From: ${from}\nTo: ${[mail.to, ...(mail.moreTo ?? [])].join(", ")}\n${headers}Subject: ${mail.subject}\n\n${mail.text}\n`, "utf8");
   console.log(`[platform mail] no mail account and no PLATFORM_SMTP_URL — written to ${path.relative(process.cwd(), file)}`);
 }
 

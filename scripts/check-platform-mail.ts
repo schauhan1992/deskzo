@@ -162,7 +162,10 @@ async function main() {
   ok("  each preset names its server(s), a port, its sign-in and where to find it", presets.every((p) => p.servers.length > 0 && p.servers.every((s) => catalogue.HOST_PATTERN.test(s.host)) && p.port > 0 && p.steps.length > 0));
   ok("  Microsoft 365 signs in by OAuth only; every other by a login and secret", catalogue.MAIL_PROVIDERS.every((p) => (p.key === "MICROSOFT_365") === (p.signIn === "oauth")));
   ok("  SES has its regions (Mumbai first); Mailgun its US and EU", catalogue.providerDef("AWS_SES")!.servers[0]!.host === "email-smtp.ap-south-1.amazonaws.com" && catalogue.providerDef("MAILGUN")!.servers.length === 2);
-  ok("the default and four types", JSON.stringify(catalogue.MAIL_STREAMS.map((s) => s.key)) === JSON.stringify(["DEFAULT", "ACCOUNT", "BILLING", "SUPPORT", "ALERTS"]));
+  ok(
+    "the default and five types — workspace documents the fifth",
+    JSON.stringify(catalogue.MAIL_STREAMS.map((s) => s.key)) === JSON.stringify(["DEFAULT", "ACCOUNT", "BILLING", "SUPPORT", "ALERTS", "DOCUMENTS"]),
+  );
 
   section("A scratch control plane");
   ok("the database server is a local one", local);

@@ -12176,6 +12176,27 @@ model SignInRule {
  * The words that go with a document when it is emailed — one per document type, with merge fields.
  * No row means the built-in wording in src/lib/documents/email-template.ts.
  */
+/**
+ * Where an emailed document goes out from (owner, 15 Oct 2026), one row (id "global"); no row is "OWN".
+ *
+ * - OWN: the sender's own Outlook, Gmail or Zoho Mail — as before.
+ * - COMPANY: the company's mail server — Settings › Messaging's route for transactional mail (SMTP,
+ *   Microsoft 365 SMTP, SES, Resend, Elastic Email), from its address, with the sender's name, replies
+ *   to the sender and a copy to them.
+ * - OWN_THEN_COMPANY: their own mailbox when they have connected one, otherwise the company's.
+ *
+ * Whatever is chosen, when nothing it names is set up, the document goes through Deskzo's own mail
+ * (the platform's "Workspace documents" mail) on the company's behalf (src/lib/documents/mail-route.ts).
+ */
+model DocumentMailSettings {
+  id          String   @id @default("global")
+  sendFrom    String   @default("OWN")
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("document_mail_settings")
+}
+
 model DocumentEmailTemplate {
   docType     TradeDocumentType @id
   subject     String

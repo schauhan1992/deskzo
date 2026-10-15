@@ -67,7 +67,8 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
   const shownBody = body ?? (mergedBody?.ok ? mergedBody.text : (prepared?.template.body ?? ""));
   const mergeProblem = (subject === null && mergedSubject && !mergedSubject.ok ? mergedSubject.error : null) ?? (body === null && mergedBody && !mergedBody.ok ? mergedBody.error : null);
 
-  const connected = prepared?.mailbox.state === "connected";
+  // Whichever way it goes — their mailbox, the company's server or Deskzo's (src/lib/documents/mail-route.ts).
+  const connected = !!prepared && prepared.sender.choice !== "CONNECT";
 
   function send() {
     if (!prepared) return;
@@ -78,7 +79,13 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
         setNotice({ tone: "error", text: r.error });
         return;
       }
-      setNotice({ tone: "success", text: `Sent to ${r.data.sentTo.join(", ")} from ${r.data.from}. It's in your ${r.data.mailName} Sent folder.` });
+      setNotice({
+        tone: "success",
+        text:
+          r.data.via === "OWN"
+            ? `Sent to ${r.data.sentTo.join(", ")} from ${r.data.from}. It's in ${r.data.mailName} Sent folder.`
+            : `Sent to ${r.data.sentTo.join(", ")} through ${r.data.mailName}, in your name. Replies come to you, and a copy went to you.`,
+      });
       router.refresh();
     });
   }
@@ -104,20 +111,31 @@ export function DocumentMailButton({ documentId }: { documentId: string }) {
           <div className="space-y-4">
             {/* From */}
             <div className="rounded-lg border border-line bg-surface-sunken px-3 py-2.5 text-sm">
-              {prepared.mailbox.state === "connected" ? (
+              {prepared.viewingAs ? (
+                <p className="text-muted">You&apos;re viewing as somebody else — mail can only be sent from your own account.</p>
+              ) : prepared.sender.choice === "OWN" && prepared.mailbox.state === "connected" ? (
                 <p className="text-text">
                   <span className="text-muted">From </span>
                   <span className="font-medium">{prepared.mailbox.mailbox}</span>
                   <span className="text-muted"> — your {MAIL_NAMES[prepared.mailbox.provider]}. A copy lands in your Sent folder.</span>
+                </p>
+              ) : prepared.sender.choice === "COMPANY" ? (
+                <p className="text-text">
+                  <span className="text-muted">From </span>
+                  <span className="font-medium">{prepared.sender.company?.fromEmail ?? prepared.sender.company?.label}</span>
+                  <span className="text-muted"> — the company&apos;s mail server, in your name. Replies come to you, and you get a copy.</span>
+                </p>
+              ) : prepared.sender.choice === "DESKZO" ? (
+                <p className="text-muted">
+                  <span className="text-text">From Deskzo&apos;s mail service</span>, on {prepared.values["company.name"] || "your company"}&apos;s behalf, in your name. Replies come to
+                  you, and you get a copy. To send from your own address, an admin sets up mail under Settings → Messaging or Settings → Security.
                 </p>
               ) : prepared.mailbox.state === "app-missing" ? (
                 <p className="flex items-start gap-2 text-muted">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
                   Your company hasn&apos;t set up Microsoft 365, Google Workspace or Zoho for mail yet. An admin does it under Settings → Security.
                 </p>
-              ) : prepared.viewingAs ? (
-                <p className="text-muted">You&apos;re viewing as somebody else — mail can only be sent from your own account.</p>
-              ) : (
+              ) : prepared.mailbox.state === "connected" ? null : (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-muted">
                     {prepared.mailbox.state === "broken"

@@ -20,6 +20,16 @@ export type OutboundMessage = {
   listUnsubscribe?: string | null;
   listUnsubscribePost?: boolean;
   headers?: Record<string, string>;
+  /**
+   * For a document emailed through the company's mail (src/lib/documents/mail-route.ts): the other
+   * people it goes to, alongside `to`; a copy to the sender (`bcc`); the sender's own name over the
+   * account's address, and their address for replies; and the PDF.
+   */
+  moreTo?: { email: string; name?: string | null }[];
+  bcc?: string[];
+  fromName?: string | null;
+  replyTo?: string | null;
+  attachments?: { filename: string; contentType: string; content: Buffer }[];
 };
 
 export type SendResult =
@@ -73,10 +83,21 @@ export function requireSecret(config: ProviderConfig): string | null {
   return secret && secret.length > 0 ? secret : null;
 }
 
-export function fromHeader(config: ProviderConfig): string {
+export function fromHeader(config: ProviderConfig, message?: Pick<OutboundMessage, "fromName">): string {
   const email = config.fromEmail?.trim() ?? "";
-  const name = config.fromName?.trim();
-  return name ? `${name} <${email}>` : email;
+  // A name typed by a person can't be trusted to keep to its header: no quotes, brackets or line breaks.
+  const name = (message?.fromName ?? config.fromName)?.replace(/["\\<>\r\n]/g, " ").replace(/\s+/g, " ").trim();
+  return name ? `"${name}" <${email}>` : email;
+}
+
+/** Everybody a message goes to, as addresses: `to` first, then `moreTo`. */
+export function allRecipients(message: Pick<OutboundMessage, "to" | "toName" | "moreTo">): { email: string; name: string | null }[] {
+  return [{ email: message.to, name: message.toName ?? null }, ...(message.moreTo ?? []).map((r) => ({ email: r.email, name: r.name ?? null }))];
+}
+
+/** A reply-to: the message's own (the sender of a document), else the account's. */
+export function replyToFor(message: Pick<OutboundMessage, "replyTo">, config: ProviderConfig): string | undefined {
+  return message.replyTo ?? config.replyTo ?? undefined;
 }
 
 /** Headers every outbound message carries, whichever backend puts them on the wire. */
